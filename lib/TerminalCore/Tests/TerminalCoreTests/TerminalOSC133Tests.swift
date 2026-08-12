@@ -107,6 +107,22 @@ struct TerminalOSC133Tests {
         #expect(alternate.screenText.contains("> prompt") == false)
     }
 
+    @Test("primary prompt state survives an alternate-screen round trip until resize")
+    func primaryPromptStateSurvivesAlternateRoundTrip() throws {
+        // Intent: returning from the alternate screen restores the primary prompt state that a
+        //   later width resize consumes.
+        // Why it exists: screen-state storage must round-trip semantic prompt ownership, not only
+        //   the primary grid, when switching screens.
+        // Scenario: a shell marks its prompt, a full-screen application enters and exits the
+        //   alternate screen, then the pane width changes before the shell repaints.
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        terminal.feed(Array("\u{1B}]133;A\u{7}> prompt\u{1B}]133;B\u{7}\u{1B}[?1049halt\u{1B}[?1049l".utf8))
+
+        terminal.resize(columns: 10, rows: 3)
+
+        #expect(terminal.screenText.contains("> prompt") == false)
+    }
+
     @Test("OSC 133 streams are chunk invariant and RIS restores prompt redraw defaults")
     func chunkAndResetLifecycle() throws {
         let bytes = Array("x\u{1B}]133;A;redraw=0;k=i;future=x\u{7}> \u{1B}]133;B\u{7}cmd\r\n\u{1B}]133;C;k=s\u{7}out".utf8)

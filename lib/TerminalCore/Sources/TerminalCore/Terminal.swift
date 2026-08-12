@@ -588,15 +588,15 @@ public struct Terminal: Equatable, Sendable {
     /// Owns every piece of terminal state whose meaning is scoped to one screen buffer.
     private struct ScreenState: Equatable, Sendable {
         var rows: [GridRow]
-        var cursor: CellPosition
-        var isPendingWrap: Bool
-        var savedCursor: SavedCursorState
-        var semanticContent: SemanticContent
-        var semanticContentClearsAtEndOfLine: Bool
-        var kittyKeyboardStack: [UInt16]
+        var cursor = CellPosition(row: 0, column: 0)
+        var isPendingWrap = false
+        var savedCursor = SavedCursorState()
+        var semanticContent = SemanticContent.output
+        var semanticContentClearsAtEndOfLine = false
+        var kittyKeyboardStack: [UInt16] = []
     }
 
-    /// Identifies which retained screen is installed in the terminal's live fields.
+    /// Identifies which retained screen is installed in the terminal's live state.
     private enum ActiveScreen: Equatable, Sendable {
         case primary
         case alternate
@@ -659,25 +659,19 @@ public struct Terminal: Equatable, Sendable {
     /// is what `syncHistoryEvictions` hands `handleEviction`, so admission's own eviction and an
     /// explicit budget pass are reported through exactly one path.
     private var historyEvictionsObserved = 0
-    private var rows: [GridRow]
+    private var screen: ScreenState
     private var inactiveScreen: ScreenState?
     private var activeScreen = ActiveScreen.primary
     private var scrollRegion: Range<Int>?
-    private var cursor = CellPosition(row: 0, column: 0)
-    private var isPendingWrap = false
-    private var semanticContent = SemanticContent.output
-    private var semanticContentClearsAtEndOfLine = false
     private var promptRedrawMode = PromptRedrawMode.full
     private var modes = TerminalModes()
     private var tabStops: Set<Int>
-    private var savedCursor = SavedCursorState()
     private var lastPrintedCluster: LastPrintedCluster?
     private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
     private var replyBytes: [UInt8] = []
     private var programVersion: String
     private var defaultColors: TerminalDefaultColors
-    private var kittyKeyboardStack: [UInt16] = []
     private var evictedRowCount = 0
     private var rowNumberingEpoch = RowNumberingEpoch()
     // The three content-derived inspection fields below are read together, per printed
@@ -872,33 +866,9 @@ public struct Terminal: Equatable, Sendable {
         activeScreen == .alternate
     }
 
-    /// Extracts and installs the screen-scoped fields that are live on `Terminal`.
-    private var liveScreenState: ScreenState {
-        get {
-            ScreenState(
-                rows: rows,
-                cursor: cursor,
-                isPendingWrap: isPendingWrap,
-                savedCursor: savedCursor,
-                semanticContent: semanticContent,
-                semanticContentClearsAtEndOfLine: semanticContentClearsAtEndOfLine,
-                kittyKeyboardStack: kittyKeyboardStack
-            )
-        }
-        set {
-            rows = newValue.rows
-            cursor = newValue.cursor
-            isPendingWrap = newValue.isPendingWrap
-            savedCursor = newValue.savedCursor
-            semanticContent = newValue.semanticContent
-            semanticContentClearsAtEndOfLine = newValue.semanticContentClearsAtEndOfLine
-            kittyKeyboardStack = newValue.kittyKeyboardStack
-        }
-    }
-
     /// Selects the primary grid regardless of which screen is currently live.
     private var primaryScreenRows: [GridRow] {
-        if activeScreen == .primary { return rows }
+        if activeScreen == .primary { return screen.rows }
         guard let inactiveScreen else {
             preconditionFailure("the primary screen must be retained while the alternate is live")
         }
@@ -915,7 +885,7 @@ public struct Terminal: Equatable, Sendable {
             bracketedPaste: modes.isBracketedPasteMode,
             mouseTracking: modes.mouseTrackingMode,
             sgrMouseEncoding: modes.isSGRMouseEncodingMode,
-            kittyKeyboardFlags: kittyKeyboardStack.last ?? 0
+            kittyKeyboardFlags: screen.kittyKeyboardStack.last ?? 0
         )
     }
 
@@ -965,15 +935,15 @@ public struct Terminal: Equatable, Sendable {
     private var damageActionSnapshot: DamageActionSnapshot {
         let projection = scrollProjection
         let cursorStreamRow = isAlternateScreenActive
-            ? cursor.row
-            : historyRowCount + cursor.row
+            ? screen.cursor.row
+            : historyRowCount + screen.cursor.row
         let cursorWindowRow = cursorStreamRow - projection.topRow
         return DamageActionSnapshot(
             cursor: (0..<rowCount).contains(cursorWindowRow)
                 ? TerminalCursor(
                     row: cursorWindowRow,
-                    column: cursor.column,
-                    isPendingWrap: isPendingWrap
+                    column: screen.cursor.column,
+                    isPendingWrap: screen.isPendingWrap
                 )
                 : nil,
             selection: selectionRange,
@@ -1187,7 +1157,7 @@ public struct Terminal: Equatable, Sendable {
             }
         }
         history.forEachStyleId { live.insert($0) }
-        collect(rows, into: &live)
+        collect(screen.rows, into: &live)
         if let inactiveScreen { collect(inactiveScreen.rows, into: &live) }
         return live
     }
@@ -1253,9 +1223,11 @@ public struct Terminal: Equatable, Sendable {
         self.defaultColors = defaultColors
         tabStops = Self.defaultTabStops(columns: columns)
         damage = TerminalDamageAccumulator(rowCount: rows, isFull: true)
-        self.rows = (0..<rows).map { _ in
-            GridRow(cells: (0..<columns).map { _ in GridCell() })
-        }
+        screen = ScreenState(
+            rows: (0..<rows).map { _ in
+                GridRow(cells: (0..<columns).map { _ in GridCell() })
+            }
+        )
     }
 
     /// Updates protocol-visible defaults without treating configuration as grid damage.
@@ -1411,21 +1383,21 @@ public struct Terminal: Equatable, Sendable {
         case 0x50: // P
             setSemanticPrompt(kind: semanticPromptKind(in: options))
         case 0x42: // B
-            semanticContent = .input
-            semanticContentClearsAtEndOfLine = false
+            screen.semanticContent = .input
+            screen.semanticContentClearsAtEndOfLine = false
         case 0x49: // I
-            semanticContent = .input
-            semanticContentClearsAtEndOfLine = true
+            screen.semanticContent = .input
+            screen.semanticContentClearsAtEndOfLine = true
         case 0x43: // C
-            semanticContent = .output
-            semanticContentClearsAtEndOfLine = false
+            screen.semanticContent = .output
+            screen.semanticContentClearsAtEndOfLine = false
             // Stamp even when output starts partway through the prompt row: the row now
             // holds output and must stop every later prompt-block search.
             // Kitty marks it the same way (`references/kitty/kitty/screen.c#shell_prompt_marking`).
-            rows[cursor.row].semanticPrompt = .output
+            screen.rows[screen.cursor.row].semanticPrompt = .output
         case 0x44: // D
-            semanticContent = .output
-            semanticContentClearsAtEndOfLine = false
+            screen.semanticContent = .output
+            screen.semanticContentClearsAtEndOfLine = false
         case 0x4C: // L
             semanticPromptFreshLine()
         default:
@@ -1434,21 +1406,21 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func semanticPromptFreshLine() {
-        guard cursor.column != 0 else { return }
-        cursor.column = 0
+        guard screen.cursor.column != 0 else { return }
+        screen.cursor.column = 0
         clearPendingMotionState()
         lineFeed()
     }
 
     private mutating func setSemanticPrompt(kind: SemanticPromptRow) {
-        semanticContent = .prompt
-        semanticContentClearsAtEndOfLine = false
-        rows[cursor.row].semanticPrompt = kind
+        screen.semanticContent = .prompt
+        screen.semanticContentClearsAtEndOfLine = false
+        screen.rows[screen.cursor.row].semanticPrompt = kind
         reclaimStalePromptHeads(for: kind)
         // A column-zero head starts a logical line. Clear the claim only after reclaim,
         // which needs that claim to recognize a stranded soft-wrapped head.
-        if kind == .prompt, cursor.column == 0, cursor.row > 0 {
-            rows[cursor.row - 1].isSoftWrapped = false
+        if kind == .prompt, screen.cursor.column == 0, screen.cursor.row > 0 {
+            screen.rows[screen.cursor.row - 1].isSoftWrapped = false
         }
     }
 
@@ -1460,23 +1432,23 @@ public struct Terminal: Equatable, Sendable {
         // Row deletion and cursor movement are coherent only in one primary-screen
         // scroll region.
         guard isAlternateScreenActive == false,
-              activeScrollRegion.contains(cursor.row)
+              activeScrollRegion.contains(screen.cursor.row)
         else { return }
-        var top = topOfStalePromptHeads(above: cursor.row)
+        var top = topOfStalePromptHeads(above: screen.cursor.row)
         // `.vacated` establishes ownership; emptiness establishes that deletion is free.
         // Reflow can preserve the stamp on a packed row with content, which must remain.
         while top > 0,
-              rows[top - 1].semanticPrompt == .vacated,
-              Self.retainedContentEnd(in: rows[top - 1]) == 0
+              screen.rows[top - 1].semanticPrompt == .vacated,
+              Self.retainedContentEnd(in: screen.rows[top - 1]) == 0
         {
             top -= 1
         }
-        guard top < cursor.row, activeScrollRegion.contains(top) else { return }
+        guard top < screen.cursor.row, activeScrollRegion.contains(top) else { return }
         // Delete instead of re-blanking so the vacated rows do not become a permanent gap.
         // Move the cursor by the same count to preserve relative cursor arithmetic.
-        let removed = cursor.row - top
+        let removed = screen.cursor.row - top
         moveAndFillRows(in: top..<activeScrollRegion.upperBound, by: -removed, pushesToScrollback: false)
-        cursor.row -= removed
+        screen.cursor.row -= removed
     }
 
     private func semanticPromptKind(in options: [UInt8]) -> SemanticPromptRow {
@@ -1915,7 +1887,7 @@ public struct Terminal: Equatable, Sendable {
             }
         }
         history.forEachHyperlinkId { live.insert($0) }
-        collect(rows, into: &live)
+        collect(screen.rows, into: &live)
         if let inactiveScreen { collect(inactiveScreen.rows, into: &live) }
         if let hyperlinkPen { live.insert(hyperlinkPen) }
         return live
@@ -2044,42 +2016,37 @@ public struct Terminal: Equatable, Sendable {
             resizeTabStops(from: oldColumnCount, to: columns)
         }
 
-        if activeScreen == .alternate, let primary = inactiveScreen {
-            let alternate = liveScreenState
-            liveScreenState = primary
-            if columns != oldColumnCount {
-                clearPromptForResizeIfNeeded()
+        if activeScreen == .alternate {
+            guard var primary = inactiveScreen else {
+                preconditionFailure("the primary screen must be retained while the alternate is live")
             }
-            resizePrimaryScreen(columns: columns, rows: rows)
-            clampCursorStateToActiveGrid()
-            let resizedPrimary = liveScreenState
+            swap(&screen, &primary)
+            inactiveScreen = primary
+        }
 
-            liveScreenState = alternate
-            self.rows = resizedRectangle(
-                self.rows,
+        if columns != oldColumnCount {
+            clearPromptForResizeIfNeeded()
+        }
+        resizePrimaryScreen(columns: columns, rows: rows)
+        clampScreenCursorState(&screen)
+
+        if var alternate = inactiveScreen {
+            alternate.rows = resizedRectangle(
+                alternate.rows,
                 columns: columns,
                 rows: rows,
                 clearsSoftWrap: columns != oldColumnCount
             )
-            clampCursorStateToActiveGrid()
-            inactiveScreen = resizedPrimary
-        } else {
-            if columns != oldColumnCount {
-                clearPromptForResizeIfNeeded()
-            }
-            resizePrimaryScreen(columns: columns, rows: rows)
-            clampCursorStateToActiveGrid()
+            clampScreenCursorState(&alternate)
+            inactiveScreen = alternate
+        }
 
-            if var alternate = inactiveScreen {
-                alternate.rows = resizedRectangle(
-                    alternate.rows,
-                    columns: columns,
-                    rows: rows,
-                    clearsSoftWrap: columns != oldColumnCount
-                )
-                clampScreenCursorState(&alternate)
-                inactiveScreen = alternate
+        if activeScreen == .alternate {
+            guard var alternate = inactiveScreen else {
+                preconditionFailure("the alternate screen must remain retained during resize")
             }
+            swap(&screen, &alternate)
+            inactiveScreen = alternate
         }
 
         clampSelectionToRetainedStream()
@@ -2092,15 +2059,15 @@ public struct Terminal: Equatable, Sendable {
     /// shrink can move the prompt head into history, after which this upward walk could no longer
     /// find the ownership boundary needed to vacate the whole block.
     private mutating func clearPromptForResizeIfNeeded() {
-        guard promptRedrawMode != .disabled, semanticContent != .output else { return }
+        guard promptRedrawMode != .disabled, screen.semanticContent != .output else { return }
         if promptRedrawMode == .last {
-            clearPromptCells(in: cursor.row)
+            clearPromptCells(in: screen.cursor.row)
             return
         }
 
-        var start = cursor.row
+        var start = screen.cursor.row
         while start >= 0 {
-            switch rows[start].semanticPrompt {
+            switch screen.rows[start].semanticPrompt {
             case .prompt, .vacated:
                 // A vacated head is still the current block's ownership boundary.
                 start = topOfStalePromptHeads(above: start)
@@ -2121,8 +2088,8 @@ public struct Terminal: Equatable, Sendable {
     private func topOfStalePromptHeads(above row: Int) -> Int {
         var top = row
         while top > 0,
-              rows[top - 1].semanticPrompt == .prompt,
-              rows[top - 1].isSoftWrapped
+              screen.rows[top - 1].semanticPrompt == .prompt,
+              screen.rows[top - 1].isSoftWrapped
         {
             top -= 1
         }
@@ -2134,10 +2101,10 @@ public struct Terminal: Equatable, Sendable {
         invalidateInspection(inViewportRows: row..<(row + 1))
         let styleId = backgroundEraseStyleId()
         for column in 0..<columnCount {
-            rows[row].cells[column] = GridCell(styleId: styleId)
+            screen.rows[row].cells[column] = GridCell(styleId: styleId)
         }
-        rows[row].semanticPrompt = .vacated
-        rows[row].isSoftWrapped = false
+        screen.rows[row].semanticPrompt = .vacated
+        screen.rows[row].isSoftWrapped = false
         clusterContext = nil
     }
 
@@ -2177,7 +2144,7 @@ public struct Terminal: Equatable, Sendable {
                 isFollowing: true
             )
         }
-        let totalRows = historyRowCount + rows.count
+        let totalRows = historyRowCount + screen.rows.count
         let maximumTop = max(0, totalRows - rowCount)
         let topRow: Int
         let isFollowing: Bool
@@ -2221,7 +2188,7 @@ public struct Terminal: Equatable, Sendable {
     public mutating func scroll(toTopRow requestedRow: Int) {
         guard isAlternateScreenActive == false else { return }
         let previous = viewportState
-        let maximumTop = max(0, historyRowCount + rows.count - rowCount)
+        let maximumTop = max(0, historyRowCount + screen.rows.count - rowCount)
         let topRow = min(max(requestedRow, 0), maximumTop)
         if topRow == maximumTop {
             viewportState = .following
@@ -2256,7 +2223,7 @@ public struct Terminal: Equatable, Sendable {
            let spacer = Self.seamSpacer(
                inHistory: history,
                row: folded,
-               live: rows,
+               live: screen.rows,
                columns: columnCount
            )
         {
@@ -2375,7 +2342,7 @@ public struct Terminal: Equatable, Sendable {
         // The inactive screen counts as resident: after the first alternate-screen entry the
         // process holds both grids, and a census that reported only the visible one would
         // understate a full-screen TUI by an entire screen.
-        let screens = [rows, inactiveScreen?.rows].compactMap { $0 }
+        let screens = [screen.rows, inactiveScreen?.rows].compactMap { $0 }
         census.screenRowCount = screens.reduce(0) { $0 + $1.count }
 
         // Only live rows have a per-row allocation left to count: history's cells all live in the
@@ -2431,7 +2398,7 @@ public struct Terminal: Equatable, Sendable {
     /// the fold, so a terminal tall enough to hold its whole transcript answers "what does a
     /// pane of this width display" without asking the thing under test.
     func liveRowForTesting(at index: Int) -> GridRow? {
-        rows.indices.contains(index) ? rows[index] : nil
+        screen.rows.indices.contains(index) ? screen.rows[index] : nil
     }
 
     /// Exposes one retained line's record-level shape -- open, split, trimmed, filled -- so the
@@ -2509,7 +2476,7 @@ public struct Terminal: Equatable, Sendable {
     /// Exposes private row stamps to the shared snapshot oracle without changing public geometry.
     /// Computed only when a test asks; production never calls it.
     var semanticPromptRowsForTesting: [TerminalSemanticPromptRowSnapshot] {
-        rows.map { row in
+        screen.rows.map { row in
             let stamp: TerminalSemanticPromptStamp = switch row.semanticPrompt {
             case .none: .none
             case .prompt: .prompt
@@ -2537,7 +2504,7 @@ public struct Terminal: Equatable, Sendable {
         if let last = stream.indices.last {
             stream[last].isSoftWrapped = false
         }
-        stream.append(contentsOf: rows.map(\.withGatedContinuation))
+        stream.append(contentsOf: screen.rows.map(\.withGatedContinuation))
         return projectedHistoryText(from: stream)
     }
 
@@ -2548,7 +2515,7 @@ public struct Terminal: Equatable, Sendable {
     /// is exactly when the row is leaving the window a viewport projection would show.
     public var rowStructure: [TerminalRowStructure] {
         var retained = history.allPaintedDisplayRows()
-        let liveRows = rows
+        let liveRows = screen.rows
         // The projection's seam rules, so the dump reports what a reader would see: the open
         // tail's final display row gets back the `.spacerHead` admission dropped, and an
         // active alternate screen severs the wrap into the rows appended after history.
@@ -2558,7 +2525,7 @@ public struct Terminal: Equatable, Sendable {
             } else if let spacer = Self.seamSpacer(
                 inHistory: history,
                 row: retained[last],
-                live: rows,
+                live: screen.rows,
                 columns: columnCount
             ) {
                 retained[last].cells.append(spacer)
@@ -3357,7 +3324,7 @@ public struct Terminal: Equatable, Sendable {
                 // The seam's re-derived spacer, so geometry and the cell readers agree about
                 // what the last retained row's final column is.
                 if cursor == nil, stored == columnCount - 1,
-                   history.hasOpenTailRecord, rows.first?.cells.first?.kind == .wideHead
+                   history.hasOpenTailRecord, screen.rows.first?.cells.first?.kind == .wideHead
                 {
                     kinds[stored] = TerminalCellGeometry(kind: .spacerHead)
                 }
@@ -3389,14 +3356,14 @@ public struct Terminal: Equatable, Sendable {
     private func viewportStreamRow(at index: Int) -> GridRow? {
         guard index >= 0 else { return nil }
         if isAlternateScreenActive {
-            return rows.indices.contains(index) ? rows[index] : nil
+            return screen.rows.indices.contains(index) ? screen.rows[index] : nil
         }
         if var row = history.paintedDisplayRow(at: index) {
             if index == historyRowCount - 1,
                let spacer = Self.seamSpacer(
                    inHistory: history,
                    row: row,
-                   live: rows,
+                   live: screen.rows,
                    columns: columnCount
                )
             {
@@ -3405,7 +3372,7 @@ public struct Terminal: Equatable, Sendable {
             return row
         }
         let liveIndex = index - historyRowCount
-        return rows.indices.contains(liveIndex) ? rows[liveIndex] : nil
+        return screen.rows.indices.contains(liveIndex) ? screen.rows[liveIndex] : nil
     }
 
     /// Whether the last retained display row's final column is the seam's derived spacer.
@@ -3473,7 +3440,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Rows the active text projection spans, for the clamps that need only its extent.
-    private var projectionRowCount: Int { historyRowCount + rows.count }
+    private var projectionRowCount: Int { historyRowCount + screen.rows.count }
 
     /// Builds the non-retained grid view one search operation reads.
     private var searchContext: Search.Context {
@@ -3491,7 +3458,7 @@ public struct Terminal: Equatable, Sendable {
     private func activeProjection() -> ProjectionRows {
         ProjectionRows(
             history: history,
-            live: rows,
+            live: screen.rows,
             columns: columnCount,
             isAlternateScreenActive: isAlternateScreenActive
         )
@@ -3513,13 +3480,13 @@ public struct Terminal: Equatable, Sendable {
             } else if let spacer = Self.seamSpacer(
                 inHistory: history,
                 row: stream[last],
-                live: rows,
+                live: screen.rows,
                 columns: columnCount
             ) {
                 stream[last].cells.append(spacer)
             }
         }
-        stream.append(contentsOf: rows.map(\.withGatedContinuation))
+        stream.append(contentsOf: screen.rows.map(\.withGatedContinuation))
         return stream
     }
 
@@ -3718,7 +3685,7 @@ public struct Terminal: Equatable, Sendable {
 
     private func publicRange(_ range: TextAnchorRange) -> TerminalTextRange? {
         let base = evictedRowCount
-        let streamCount = historyRowCount + rows.count
+        let streamCount = historyRowCount + screen.rows.count
         guard range.start.row >= base,
               range.end.row >= base,
               range.start.row < base + streamCount,
@@ -4014,10 +3981,10 @@ public struct Terminal: Equatable, Sendable {
         guard var selection else { return }
         selection.range.start.column = min(max(selection.range.start.column, 0), columnCount)
         selection.range.end.column = min(max(selection.range.end.column, 0), columnCount)
-        let lastRow = evictedRowCount + historyRowCount + rows.count - 1
+        let lastRow = evictedRowCount + historyRowCount + screen.rows.count - 1
         let lastAnchor = TextAnchor(
             row: lastRow,
-            column: Self.projectedCellEnd(in: rows.last!, columns: columnCount)
+            column: Self.projectedCellEnd(in: screen.rows.last!, columns: columnCount)
         )
         if selection.range.start > lastAnchor {
             selection.range.start = lastAnchor
@@ -4054,7 +4021,7 @@ public struct Terminal: Equatable, Sendable {
         previousTopBeforeReflow: TextAnchor? = nil
     ) {
         guard case let .browsing(anchor) = viewportState else { return }
-        let maximumTop = evictedRowCount + max(0, historyRowCount + rows.count - rowCount)
+        let maximumTop = evictedRowCount + max(0, historyRowCount + screen.rows.count - rowCount)
         let clamped = TextAnchor(
             row: min(max(anchor.row, evictedRowCount), maximumTop),
             column: 0
@@ -4114,8 +4081,8 @@ public struct Terminal: Equatable, Sendable {
         let projection = scrollProjection
         let windowRows = presentedRowGeometry
         let cursorStreamRow = isAlternateScreenActive
-            ? cursor.row
-            : historyRowCount + cursor.row
+            ? screen.cursor.row
+            : historyRowCount + screen.cursor.row
         let cursorWindowRow = cursorStreamRow - projection.topRow
         return TerminalGeometry(
             columns: columnCount,
@@ -4123,8 +4090,8 @@ public struct Terminal: Equatable, Sendable {
             cursor: windowRows.indices.contains(cursorWindowRow)
                 ? TerminalCursor(
                     row: cursorWindowRow,
-                    column: cursor.column,
-                    isPendingWrap: isPendingWrap
+                    column: screen.cursor.column,
+                    isPendingWrap: screen.isPendingWrap
                 )
                 : nil
         )
@@ -4139,27 +4106,27 @@ public struct Terminal: Equatable, Sendable {
     public var cursorPlacement: TerminalCursorPlacement? {
         let projection = scrollProjection
         let cursorStreamRow = isAlternateScreenActive
-            ? cursor.row
-            : historyRowCount + cursor.row
+            ? screen.cursor.row
+            : historyRowCount + screen.cursor.row
         let cursorWindowRow = cursorStreamRow - projection.topRow
         guard (0..<rowCount).contains(cursorWindowRow),
               let row = viewportStreamRow(at: cursorStreamRow)
         else { return nil }
 
-        let kind = row.cell(at: cursor.column).kind
-        if kind == .wideTail, cursor.column > 0,
-           row.cell(at: cursor.column - 1).kind == .wideHead
+        let kind = row.cell(at: screen.cursor.column).kind
+        if kind == .wideTail, screen.cursor.column > 0,
+           row.cell(at: screen.cursor.column - 1).kind == .wideHead
         {
             return TerminalCursorPlacement(
                 row: cursorWindowRow,
-                column: cursor.column - 1,
+                column: screen.cursor.column - 1,
                 columnWidth: 2
             )
         }
         return TerminalCursorPlacement(
             row: cursorWindowRow,
-            column: cursor.column,
-            columnWidth: kind == .wideHead && cursor.column + 1 < columnCount ? 2 : 1
+            column: screen.cursor.column,
+            columnWidth: kind == .wideHead && screen.cursor.column + 1 < columnCount ? 2 : 1
         )
     }
 
@@ -4315,7 +4282,7 @@ public struct Terminal: Equatable, Sendable {
                         // The segment visitor hands the borrowed packed-cell accessor down one
                         // more non-escaping level; nothing here outlives this row traversal.
                         withoutActuallyEscaping(storedCell) { forwardStoredCell in
-                            let head = rows.first?.cells.first
+                            let head = screen.rows.first?.cells.first
                             let hasOpenTailSpacer = cursor == nil
                                 && storedCount == columnCount - 1
                                 && history.hasOpenTailRecord
@@ -4400,22 +4367,22 @@ public struct Terminal: Equatable, Sendable {
 
     /// Positions future parser actions while preserving the same cursor validity rules.
     mutating func moveCursor(row: Int, column: Int) {
-        cursor.row = min(max(row, 0), rowCount - 1)
-        cursor.column = min(max(column, 0), columnCount - 1)
-        isPendingWrap = false
+        screen.cursor.row = min(max(row, 0), rowCount - 1)
+        screen.cursor.column = min(max(column, 0), columnCount - 1)
+        screen.isPendingWrap = false
         clusterContext = nil
     }
 
     /// Erases a row range with pen colors after expanding across intersected wide pairs.
     mutating func eraseCells(row: Int, columns: Range<Int>) {
-        guard rows.indices.contains(row), columns.isEmpty == false else { return }
+        guard screen.rows.indices.contains(row), columns.isEmpty == false else { return }
         var lower = max(0, columns.lowerBound)
         var upper = min(columnCount, columns.upperBound)
         guard lower < upper else { return }
-        if self.rows[row].cells[lower].kind == .wideTail {
+        if self.screen.rows[row].cells[lower].kind == .wideTail {
             lower -= 1
         }
-        if self.rows[row].cells[upper - 1].kind == .wideHead {
+        if self.screen.rows[row].cells[upper - 1].kind == .wideHead {
             upper += 1
         }
         lower = max(0, lower)
@@ -4431,7 +4398,7 @@ public struct Terminal: Equatable, Sendable {
         // uniqueness check on the row array and another on the cell array for
         // every single cell erased.
         let blank = GridCell(styleId: styleId)
-        rows[row].cells.withUnsafeMutableBufferPointer { cells in
+        screen.rows[row].cells.withUnsafeMutableBufferPointer { cells in
             for column in lower..<upper {
                 cells[column] = blank
             }
@@ -4439,7 +4406,7 @@ public struct Terminal: Equatable, Sendable {
         // The margin cell's last writer is now an erase, so a surviving wrap claim on this
         // row is unwitnessed until a print reaches the margin again (`GridRow.marginErased`).
         if upper == columnCount {
-            rows[row].marginErased = true
+            screen.rows[row].marginErased = true
         }
         // Loop-invariant: the repair is a no-op above column 1, so it runs once
         // for the range rather than once per erased cell. It is idempotent, so
@@ -4530,7 +4497,7 @@ public struct Terminal: Equatable, Sendable {
         guard var last = pulled.last,
               last.isSoftWrapped,
               last.cells.count == columnCount - 1,
-              let head = (follower ?? rows.first)?.cells.first,
+              let head = (follower ?? screen.rows.first)?.cells.first,
               head.kind == .wideHead
         else { return }
         last.cells.append(GridCell(
@@ -4548,30 +4515,30 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func resizeHeight(to newRowCount: Int) {
         if newRowCount < rowCount {
-            while rows.count > newRowCount,
-                  rows.indices.last.map({ $0 > cursor.row }) == true,
-                  let last = rows.last,
+            while screen.rows.count > newRowCount,
+                  screen.rows.indices.last.map({ $0 > screen.cursor.row }) == true,
+                  let last = screen.rows.last,
                   last.isSoftWrapped == false,
                   last.cells.allSatisfy({ $0.kind == .padding })
             {
-                rows.removeLast()
+                screen.rows.removeLast()
             }
 
-            let displacedCount = rows.count - newRowCount
+            let displacedCount = screen.rows.count - newRowCount
             if displacedCount > 0 {
-                appendToScrollback(rows.prefix(displacedCount))
-                rows.removeFirst(displacedCount)
-                if cursor.row < displacedCount {
-                    cursor.row = 0
+                appendToScrollback(screen.rows.prefix(displacedCount))
+                screen.rows.removeFirst(displacedCount)
+                if screen.cursor.row < displacedCount {
+                    screen.cursor.row = 0
                 } else {
-                    cursor.row -= displacedCount
+                    screen.cursor.row -= displacedCount
                 }
                 enforceScrollbackBudget()
             }
         } else {
             let addedCount = newRowCount - rowCount
             var pulledCount = 0
-            if cursor.row == rowCount - 1 {
+            if screen.cursor.row == rowCount - 1 {
                 pulledCount = min(addedCount, historyRowCount)
                 if pulledCount > 0 {
                     // `research/31/D2` operation 4: the only write that shrinks the arena from the back.
@@ -4582,14 +4549,14 @@ public struct Terminal: Equatable, Sendable {
                     synchronizeSearchIndexPrefix()
                     pulledCount = pulled.count
                     restoreSeamSpacer(in: &pulled)
-                    rows.insert(
+                    screen.rows.insert(
                         contentsOf: pulled.map { $0.materialized(to: columnCount) },
                         at: 0
                     )
-                    cursor.row += pulledCount
+                    screen.cursor.row += pulledCount
                 }
             }
-            rows.append(contentsOf: (pulledCount..<addedCount).map { _ in
+            screen.rows.append(contentsOf: (pulledCount..<addedCount).map { _ in
                 makeBlankRow(columns: columnCount)
             })
         }
@@ -4610,7 +4577,7 @@ public struct Terminal: Equatable, Sendable {
         // must not.
         renumberRows()
         let oldColumnCount = columnCount
-        let oldBottomDistance = rowCount - 1 - cursor.row
+        let oldBottomDistance = rowCount - 1 - screen.cursor.row
         let historyRowsBefore = historyRowCount
         let viewportTopBeforeReflow: TextAnchor?
         if case let .browsing(top) = viewportState {
@@ -4632,13 +4599,13 @@ public struct Terminal: Equatable, Sendable {
         let historyRowsAfter = historyRowCount
         let captured = rebasedAcrossSeam(capturedBeforeSeam, seamPrefixLength: seamPrefix.count)
 
-        let lastLiveContentRow = rows.lastIndex(where: Self.rowContainsContent) ?? 0
-        let sourceRows = Array(rows[...max(cursor.row, lastLiveContentRow)])
+        let lastLiveContentRow = screen.rows.lastIndex(where: Self.rowContainsContent) ?? 0
+        let sourceRows = Array(screen.rows[...max(screen.cursor.row, lastLiveContentRow)])
         let reconstruction = reconstructLogicalLines(
             from: sourceRows,
             leadingCells: seamPrefix,
             leadingSemanticPrompt: seamPrompt,
-            cursorRow: cursor.row,
+            cursorRow: screen.cursor.row,
             oldColumnCount: oldColumnCount
         )
 
@@ -4712,7 +4679,7 @@ public struct Terminal: Equatable, Sendable {
 
         var destination = cursorDestination ?? ReflowDestination(
             row: 0,
-            column: min(cursor.column, newColumnCount - 1),
+            column: min(screen.cursor.column, newColumnCount - 1),
             isPendingWrap: false
         )
 
@@ -4744,7 +4711,7 @@ public struct Terminal: Equatable, Sendable {
             destination.row += pulled.count
         }
 
-        let continuationIncrease = max(0, destination.row - cursor.row)
+        let continuationIncrease = max(0, destination.row - screen.cursor.row)
         let desiredBottomDistance = max(0, oldBottomDistance - continuationIncrease)
         let requiredRowCount = max(rowCount, destination.row + desiredBottomDistance + 1)
         while rebuiltRows.count < requiredRowCount {
@@ -4753,12 +4720,12 @@ public struct Terminal: Equatable, Sendable {
 
         let viewportStart = rebuiltRows.count - rowCount
         columnCount = newColumnCount
-        rows = Array(rebuiltRows[viewportStart...])
-        cursor = CellPosition(
+        screen.rows = Array(rebuiltRows[viewportStart...])
+        screen.cursor = CellPosition(
             row: max(0, destination.row - viewportStart),
             column: destination.column
         )
-        isPendingWrap = destination.isPendingWrap
+        screen.isPendingWrap = destination.isPendingWrap
 
         // Whatever the refold pushed above the viewport scrolled off, so it is admitted exactly
         // as it would have been had it scrolled off one row at a time.
@@ -4861,7 +4828,7 @@ public struct Terminal: Equatable, Sendable {
             ) else { return nil }
             return .history(recordIndex: address.recordIndex, cellOffset: address.cellOffset)
         }
-        let liveRow = min(streamRow - historyRows, rows.count - 1)
+        let liveRow = min(streamRow - historyRows, screen.rows.count - 1)
         guard liveRow >= 0 else { return nil }
         return .live(
             line: liveReflowLine(ofRow: liveRow),
@@ -4943,7 +4910,7 @@ public struct Terminal: Equatable, Sendable {
     /// above it, which is the same walk `reconstructLogicalLines` performs.
     private func liveReflowLine(ofRow row: Int) -> Int {
         var line = 0
-        for index in 0..<row where rows[index].logicallyContinues == false {
+        for index in 0..<row where screen.rows[index].logicallyContinues == false {
             line += 1
         }
         return line
@@ -4954,11 +4921,11 @@ public struct Terminal: Equatable, Sendable {
     private func liveReflowOffset(inRow row: Int, upTo column: Int) -> Int {
         var offset = 0
         var start = row
-        while start > 0, rows[start - 1].logicallyContinues { start -= 1 }
+        while start > 0, screen.rows[start - 1].logicallyContinues { start -= 1 }
         for index in start..<row {
-            offset += logicalCellCount(in: rows[index], upTo: columnCount)
+            offset += logicalCellCount(in: screen.rows[index], upTo: columnCount)
         }
-        return offset + logicalCellCount(in: rows[row], upTo: column)
+        return offset + logicalCellCount(in: screen.rows[row], upTo: column)
     }
 
     /// Counts the cells `reconstructLogicalLines` would emit for one row's leading columns.
@@ -5119,11 +5086,11 @@ public struct Terminal: Equatable, Sendable {
         let cursorMetadata = metadata[min(cursorRow, metadata.count - 1)]
         let cursorKey = sourceKey(
             row: min(cursorRow, sourceRows.count - 1),
-            column: cursor.column,
+            column: screen.cursor.column,
             columns: oldColumnCount
         )
         let anchor: ReflowCursorAnchor
-        if isPendingWrap {
+        if screen.isPendingWrap {
             anchor = .boundary(
                 line: cursorMetadata.line,
                 offset: cursorMetadata.boundaryOffset
@@ -5134,12 +5101,12 @@ public struct Terminal: Equatable, Sendable {
             anchor = .trailingPadding(
                 line: cursorMetadata.line,
                 distance: 0,
-                allPaddingColumn: cursor.column
+                allPaddingColumn: screen.cursor.column
             )
         } else {
             anchor = .trailingPadding(
                 line: cursorMetadata.line,
-                distance: max(0, cursor.column - cursorMetadata.retainedEnd),
+                distance: max(0, screen.cursor.column - cursorMetadata.retainedEnd),
                 allPaddingColumn: nil
             )
         }
@@ -5252,7 +5219,7 @@ public struct Terminal: Equatable, Sendable {
                 replyToStatusQuery(sequence.parameters, isDECPrivate: true)
             case 0x75:
                 guard sequence.parameters.isEmpty else { return }
-                appendReply("\u{1B}[?\(kittyKeyboardStack.last ?? 0)u")
+                appendReply("\u{1B}[?\(screen.kittyKeyboardStack.last ?? 0)u")
             default:
                 break
             }
@@ -5307,33 +5274,33 @@ public struct Terminal: Equatable, Sendable {
             replyToStatusQuery(sequence.parameters, isDECPrivate: false)
         case 0x41, 0x6B:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            movePositionedCursor(row: cursor.row - amount, column: cursor.column)
+            movePositionedCursor(row: screen.cursor.row - amount, column: screen.cursor.column)
         case 0x42, 0x65:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            movePositionedCursor(row: cursor.row + amount, column: cursor.column)
+            movePositionedCursor(row: screen.cursor.row + amount, column: screen.cursor.column)
         case 0x43, 0x61:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            movePositionedCursor(row: cursor.row, column: cursor.column + amount)
+            movePositionedCursor(row: screen.cursor.row, column: screen.cursor.column + amount)
         case 0x44, 0x6A:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            movePositionedCursor(row: cursor.row, column: cursor.column - amount)
+            movePositionedCursor(row: screen.cursor.row, column: screen.cursor.column - amount)
         case 0x45:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            movePositionedCursor(row: cursor.row + amount, column: 0)
+            movePositionedCursor(row: screen.cursor.row + amount, column: 0)
         case 0x46:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            movePositionedCursor(row: cursor.row - amount, column: 0)
+            movePositionedCursor(row: screen.cursor.row - amount, column: 0)
         case 0x47, 0x60:
             guard sequence.parameters.count <= 1 else { return }
             movePositionedCursor(
-                row: cursor.row,
+                row: screen.cursor.row,
                 column: absolutePosition(sequence.parameters.first)
             )
         case 0x64:
             guard sequence.parameters.count <= 1 else { return }
             movePositionedCursor(
                 row: positioningOriginRow + absolutePosition(sequence.parameters.first),
-                column: cursor.column
+                column: screen.cursor.column
             )
         case 0x48, 0x66:
             guard sequence.parameters.count <= 2 else { return }
@@ -5408,9 +5375,9 @@ public struct Terminal: Equatable, Sendable {
         case 5:
             appendReply(isDECPrivate ? "\u{1B}[?0n" : "\u{1B}[0n")
         case 6:
-            let row = modes.isOriginMode ? cursor.row - positioningOriginRow + 1 : cursor.row + 1
+            let row = modes.isOriginMode ? screen.cursor.row - positioningOriginRow + 1 : screen.cursor.row + 1
             let prefix = isDECPrivate ? "?" : ""
-            appendReply("\u{1B}[\(prefix)\(row);\(cursor.column + 1)R")
+            appendReply("\u{1B}[\(prefix)\(row);\(screen.cursor.column + 1)R")
         default:
             break
         }
@@ -5496,7 +5463,7 @@ public struct Terminal: Equatable, Sendable {
             }
             switch parameter {
             case 6:
-                cursor = CellPosition(row: positioningOriginRow, column: 0)
+                screen.cursor = CellPosition(row: positioningOriginRow, column: 0)
                 shouldClearPendingMotion = true
             case 7:
                 shouldClearPendingMotion = true
@@ -5775,12 +5742,12 @@ public struct Terminal: Equatable, Sendable {
     private mutating func eraseLine(mode: UInt16) {
         switch mode {
         case 0:
-            eraseCells(row: cursor.row, columns: cursor.column..<columnCount)
-            rows[cursor.row].isSoftWrapped = false
+            eraseCells(row: screen.cursor.row, columns: screen.cursor.column..<columnCount)
+            screen.rows[screen.cursor.row].isSoftWrapped = false
         case 1:
-            eraseCells(row: cursor.row, columns: 0..<(cursor.column + 1))
+            eraseCells(row: screen.cursor.row, columns: 0..<(screen.cursor.column + 1))
         case 2:
-            eraseCells(row: cursor.row, columns: 0..<columnCount)
+            eraseCells(row: screen.cursor.row, columns: 0..<columnCount)
         default:
             return
         }
@@ -5792,26 +5759,26 @@ public struct Terminal: Equatable, Sendable {
         case 0:
             // Only from home does mode 0 blank the whole of row 0; past column 0 the cells to
             // the cursor's left survive and genuinely continue history's line.
-            if cursor.row == 0, cursor.column == 0 {
+            if screen.cursor.row == 0, screen.cursor.column == 0 {
                 severHistoryWrapClaimForRowZeroErase()
             }
             eraseLine(mode: 0)
-            if cursor.row + 1 < rowCount {
-                for row in (cursor.row + 1)..<rowCount {
+            if screen.cursor.row + 1 < rowCount {
+                for row in (screen.cursor.row + 1)..<rowCount {
                     eraseEntireRow(row)
                 }
             }
         case 1:
-            if cursor.row > 0 {
+            if screen.cursor.row > 0 {
                 severHistoryWrapClaimForRowZeroErase()
-                for row in 0..<cursor.row {
+                for row in 0..<screen.cursor.row {
                     eraseEntireRow(row)
                 }
             }
             eraseLine(mode: 1)
         case 2:
             severHistoryWrapClaimForRowZeroErase()
-            for row in rows.indices {
+            for row in screen.rows.indices {
                 eraseEntireRow(row)
             }
             clearPendingMotionState()
@@ -5826,9 +5793,9 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func eraseCharacters(amount: Int) {
-        let upper = min(cursor.column + amount, columnCount)
-        eraseCells(row: cursor.row, columns: cursor.column..<upper)
-        rows[cursor.row].isSoftWrapped = false
+        let upper = min(screen.cursor.column + amount, columnCount)
+        eraseCells(row: screen.cursor.row, columns: screen.cursor.column..<upper)
+        screen.rows[screen.cursor.row].isSoftWrapped = false
         clearPendingMotionState()
     }
 
@@ -5849,8 +5816,8 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func eraseEntireRow(_ row: Int) {
         eraseCells(row: row, columns: 0..<columnCount)
-        rows[row].isSoftWrapped = false
-        rows[row].semanticPrompt = .none
+        screen.rows[row].isSoftWrapped = false
+        screen.rows[row].semanticPrompt = .none
     }
 
     private func movementAmount(_ parameters: CSIParameters) -> Int? {
@@ -5872,20 +5839,20 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func movePositionedCursor(row: Int, column: Int) {
         let rowRange = positioningRowRange
-        cursor.row = min(max(row, rowRange.lowerBound), rowRange.upperBound - 1)
-        cursor.column = min(max(column, 0), columnCount - 1)
+        screen.cursor.row = min(max(row, rowRange.lowerBound), rowRange.upperBound - 1)
+        screen.cursor.column = min(max(column, 0), columnCount - 1)
         clearPendingMotionState()
     }
 
     private mutating func moveCursorAcrossTabStops(amount: Int, forward: Bool) {
         let candidates = tabStops
-            .filter { forward ? $0 > cursor.column : $0 < cursor.column }
+            .filter { forward ? $0 > screen.cursor.column : $0 < screen.cursor.column }
             .sorted(by: forward ? (<) : (>))
         let targetIndex = amount - 1
         let column = candidates.indices.contains(targetIndex)
             ? candidates[targetIndex]
             : (forward ? columnCount - 1 : 0)
-        movePositionedCursor(row: cursor.row, column: column)
+        movePositionedCursor(row: screen.cursor.row, column: column)
     }
 
     private mutating func dispatchEscape(_ final: UInt8) {
@@ -5904,12 +5871,12 @@ public struct Terminal: Equatable, Sendable {
         case 0x45:
             clearPendingMotionState()
             lineFeed()
-            cursor.column = 0
+            screen.cursor.column = 0
         case 0x4D:
             clearPendingMotionState()
             reverseIndex()
         case 0x48:
-            tabStops.insert(cursor.column)
+            tabStops.insert(screen.cursor.column)
             clearPendingMotionState()
         case 0x63:
             hardReset()
@@ -5920,12 +5887,12 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func dispatchEscape(_ sequence: EscapeSequence) {
         guard sequence.intermediates.key == 0x23, sequence.final == 0x38 else { return }
-        invalidateInspection(inViewportRows: rows.indices)
+        invalidateInspection(inViewportRows: screen.rows.indices)
         // DECALN replaces every row, row 0 included, so history's claim on it must end first.
         severHistoryWrapClaimForRowZeroErase()
         let styleId = currentStyleId()
-        for row in rows.indices {
-            rows[row] = GridRow(cells: (0..<columnCount).map { _ in
+        for row in screen.rows.indices {
+            screen.rows[row] = GridRow(cells: (0..<columnCount).map { _ in
                 GridCell(scalars: .single("E"), kind: .narrow, styleId: styleId)
             })
         }
@@ -5935,23 +5902,23 @@ public struct Terminal: Equatable, Sendable {
     private mutating func execute(_ control: UInt8) {
         switch control {
         case 0x08:
-            cursor.column = max(0, cursor.column - 1)
+            screen.cursor.column = max(0, screen.cursor.column - 1)
             clearPendingMotionState()
         case 0x09:
-            let previousColumn = cursor.column
-            cursor.column = tabStops.filter { $0 > cursor.column }.min()
+            let previousColumn = screen.cursor.column
+            screen.cursor.column = tabStops.filter { $0 > screen.cursor.column }.min()
                 ?? columnCount - 1
-            if cursor.column != previousColumn {
+            if screen.cursor.column != previousColumn {
                 clusterContext = nil
             }
         case 0x0A, 0x0B, 0x0C:
             clearPendingMotionState()
             lineFeed()
             if modes.isLineFeedNewLineMode {
-                cursor.column = 0
+                screen.cursor.column = 0
             }
         case 0x0D:
-            cursor.column = 0
+            screen.cursor.column = 0
             clearPendingMotionState()
         default:
             break
@@ -5959,7 +5926,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func clearPendingMotionState() {
-        isPendingWrap = false
+        screen.isPendingWrap = false
         clusterContext = nil
     }
 
@@ -5979,7 +5946,7 @@ public struct Terminal: Equatable, Sendable {
         guard parameters.count <= 1 else { return }
         switch parameters.first ?? 0 {
         case 0:
-            tabStops.remove(cursor.column)
+            tabStops.remove(screen.cursor.column)
         case 3:
             tabStops.removeAll(keepingCapacity: true)
         default:
@@ -5989,10 +5956,10 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func saveCursor() {
-        savedCursor = SavedCursorState(
-            position: cursor,
+        screen.savedCursor = SavedCursorState(
+            position: screen.cursor,
             style: currentStyle,
-            isPendingWrap: isPendingWrap,
+            isPendingWrap: screen.isPendingWrap,
             isOriginMode: modes.isOriginMode,
             isCursorVisible: modes.isCursorVisible,
             cursorShape: modes.cursorShape,
@@ -6001,21 +5968,21 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func restoreCursor() {
-        modes.isOriginMode = savedCursor.isOriginMode
+        modes.isOriginMode = screen.savedCursor.isOriginMode
         let rowRange = positioningRowRange
-        cursor = CellPosition(
-            row: min(max(savedCursor.position.row, rowRange.lowerBound), rowRange.upperBound - 1),
-            column: min(max(savedCursor.position.column, 0), columnCount - 1)
+        screen.cursor = CellPosition(
+            row: min(max(screen.savedCursor.position.row, rowRange.lowerBound), rowRange.upperBound - 1),
+            column: min(max(screen.savedCursor.position.column, 0), columnCount - 1)
         )
-        movePositionOffWideTail(&cursor, in: rows)
-        currentStyle = savedCursor.style
-        modes.isCursorVisible = savedCursor.isCursorVisible
-        modes.cursorShape = savedCursor.cursorShape
-        modes.isCursorBlinking = savedCursor.isCursorBlinking
+        movePositionOffWideTail(&screen.cursor, in: screen.rows)
+        currentStyle = screen.savedCursor.style
+        modes.isCursorVisible = screen.savedCursor.isCursorVisible
+        modes.cursorShape = screen.savedCursor.cursorShape
+        modes.isCursorBlinking = screen.savedCursor.isCursorBlinking
         clusterContext = nil
-        isPendingWrap = savedCursor.isPendingWrap
+        screen.isPendingWrap = screen.savedCursor.isPendingWrap
             && modes.isAutoWrapMode
-            && cursor.column == columnCount - 1
+            && screen.cursor.column == columnCount - 1
     }
 
     private mutating func switchAlternateScreen(enabled: Bool) {
@@ -6028,11 +5995,11 @@ public struct Terminal: Equatable, Sendable {
             if isAlternateScreenActive == false {
                 swapActiveScreen()
             }
-            rows = (0..<rowCount).map { _ in
+            screen.rows = (0..<rowCount).map { _ in
                 makeBlankRow(columns: columnCount, styleId: backgroundEraseStyleId())
             }
-            semanticContent = .output
-            semanticContentClearsAtEndOfLine = false
+            screen.semanticContent = .output
+            screen.semanticContentClearsAtEndOfLine = false
         } else if isAlternateScreenActive {
             clearInspection()
             renumberRows()
@@ -6054,33 +6021,18 @@ public struct Terminal: Equatable, Sendable {
 
     /// Symmetrically exchanges the live and inactive screen while carrying the live cursor.
     private mutating func swapActiveScreen() {
-        let carriedCursor = cursor
-        let outgoing = liveScreenState
+        let carriedCursor = screen.cursor
         var incoming = inactiveScreen ?? ScreenState(
-            rows: (0..<rowCount).map { _ in makeBlankRow(columns: columnCount) },
-            cursor: carriedCursor,
-            isPendingWrap: false,
-            savedCursor: SavedCursorState(),
-            semanticContent: .output,
-            semanticContentClearsAtEndOfLine: false,
-            kittyKeyboardStack: []
+            rows: (0..<rowCount).map { _ in makeBlankRow(columns: columnCount) }
         )
         incoming.cursor = carriedCursor
         incoming.isPendingWrap = false
-        liveScreenState = incoming
-        inactiveScreen = outgoing
+        swap(&screen, &incoming)
+        inactiveScreen = incoming
         activeScreen = activeScreen == .primary ? .alternate : .primary
     }
 
-    private mutating func clampCursorStateToActiveGrid() {
-        clampPosition(&cursor, in: rows)
-        clampPosition(&savedCursor.position, in: rows)
-        isPendingWrap = isPendingWrap
-            && modes.isAutoWrapMode
-            && cursor.column == columnCount - 1
-    }
-
-    private mutating func clampScreenCursorState(_ screen: inout ScreenState) {
+    private func clampScreenCursorState(_ screen: inout ScreenState) {
         clampPosition(&screen.cursor, in: screen.rows)
         clampPosition(&screen.savedCursor.position, in: screen.rows)
         screen.isPendingWrap = screen.isPendingWrap
@@ -6105,11 +6057,11 @@ public struct Terminal: Equatable, Sendable {
     private mutating func repeatLastPrintedCluster(_ parameters: CSIParameters) {
         guard parameters.count <= 1,
               let cluster = lastPrintedCluster,
-              isPendingWrap == false
+              screen.isPendingWrap == false
         else { return }
 
         let requestedCount = max(Int(parameters.first ?? 1), 1)
-        let availableColumns = columnCount - cursor.column
+        let availableColumns = columnCount - screen.cursor.column
         let repeatCount = min(requestedCount, availableColumns / cluster.cellWidth)
         guard repeatCount > 0 else { return }
 
@@ -6144,16 +6096,16 @@ public struct Terminal: Equatable, Sendable {
         hyperlinkTargets.removeAll(keepingCapacity: true)
         nextHyperlinkId = 1
         nextContentIdentity = 1
-        cursor = CellPosition(row: 0, column: 0)
+        screen.cursor = CellPosition(row: 0, column: 0)
         clearPendingMotionState()
         lastPrintedCluster = nil
-        semanticContent = .output
-        semanticContentClearsAtEndOfLine = false
+        screen.semanticContent = .output
+        screen.semanticContentClearsAtEndOfLine = false
         promptRedrawMode = .full
 
         let styleId = backgroundEraseStyleId()
         severWrapClaim(before: 0, replacementStyleId: styleId)
-        for row in rows.indices {
+        for row in screen.rows.indices {
             eraseEntireRow(row)
         }
     }
@@ -6161,32 +6113,29 @@ public struct Terminal: Equatable, Sendable {
     private mutating func resetControlState() {
         scrollRegion = nil
         modes = TerminalModes()
-        kittyKeyboardStack.removeAll(keepingCapacity: true)
-        if var inactive = inactiveScreen {
-            inactive.kittyKeyboardStack.removeAll(keepingCapacity: true)
-            inactiveScreen = inactive
-        }
+        screen.kittyKeyboardStack.removeAll(keepingCapacity: true)
+        inactiveScreen?.kittyKeyboardStack.removeAll(keepingCapacity: true)
         tabStops = Self.defaultTabStops(columns: columnCount)
         currentStyle = TerminalStyle()
     }
 
     private mutating func pushKittyKeyboardFlags(_ flags: UInt16) {
-        var stack = kittyKeyboardStack
+        var stack = screen.kittyKeyboardStack
         if stack.count == Self.kittyKeyboardStackDepth {
             stack.removeFirst()
         }
         stack.append(flags & 1)
-        kittyKeyboardStack = stack
+        screen.kittyKeyboardStack = stack
     }
 
     private mutating func popKittyKeyboardFlags(_ count: UInt16) {
-        var stack = kittyKeyboardStack
+        var stack = screen.kittyKeyboardStack
         stack.removeLast(min(Int(count), stack.count))
-        kittyKeyboardStack = stack
+        screen.kittyKeyboardStack = stack
     }
 
     private mutating func setKittyKeyboardFlags(_ flags: UInt16, mode: UInt16) {
-        var stack = kittyKeyboardStack
+        var stack = screen.kittyKeyboardStack
         let previous = stack.last ?? 0
         let masked = flags & 1
         let updated: UInt16
@@ -6201,7 +6150,7 @@ public struct Terminal: Equatable, Sendable {
         } else {
             stack[stack.count - 1] = updated
         }
-        kittyKeyboardStack = stack
+        screen.kittyKeyboardStack = stack
     }
 
     /// Prints a run of printable ASCII, taking as much of it in bulk as the grid state allows.
@@ -6247,10 +6196,10 @@ public struct Terminal: Equatable, Sendable {
         from start: Int,
         limit: Int
     ) -> Int {
-        guard isPendingWrap == false, modes.isInsertMode == false else { return 0 }
-        let row = cursor.row
-        let column = cursor.column
-        guard rows.indices.contains(row), rows[row].cells.count == columnCount,
+        guard screen.isPendingWrap == false, modes.isInsertMode == false else { return 0 }
+        let row = screen.cursor.row
+        let column = screen.cursor.column
+        guard screen.rows.indices.contains(row), screen.rows[row].cells.count == columnCount,
               column >= 0, column < columnCount
         else { return 0 }
         if let context = clusterContext, context.previousClass == .prepend { return 0 }
@@ -6261,7 +6210,7 @@ public struct Terminal: Equatable, Sendable {
         var count = 0
         let available = min(limit - start, columnCount - column)
         while count < available {
-            let kind = rows[row].cells[column + count].kind
+            let kind = screen.rows[row].cells[column + count].kind
             guard kind == .narrow || kind == .padding else { break }
             count += 1
         }
@@ -6323,7 +6272,7 @@ public struct Terminal: Equatable, Sendable {
         let styleId = currentStyleId()
         let hyperlinkId = hyperlinkPen
         for offset in 0..<count {
-            rows[row].cells[column + offset] = GridCell(
+            screen.rows[row].cells[column + offset] = GridCell(
                 scalars: .single(scalar(offset)),
                 kind: .narrow,
                 styleId: styleId,
@@ -6337,11 +6286,11 @@ public struct Terminal: Equatable, Sendable {
             previousClass: breakClass
         )
         if column + count == columnCount {
-            rows[row].marginErased = false
-            cursor.column = columnCount - 1
-            isPendingWrap = modes.isAutoWrapMode
+            screen.rows[row].marginErased = false
+            screen.cursor.column = columnCount - 1
+            screen.isPendingWrap = modes.isAutoWrapMode
         } else {
-            cursor.column = column + count
+            screen.cursor.column = column + count
         }
     }
 
@@ -6355,8 +6304,8 @@ public struct Terminal: Equatable, Sendable {
         let properties = classification.properties
         guard properties.cellWidth != .zero else { return }
 
-        if isPendingWrap {
-            invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
+        if screen.isPendingWrap {
+            invalidateInspection(inViewportRows: screen.cursor.row..<(screen.cursor.row + 1))
             softWrap()
         }
 
@@ -6376,7 +6325,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func rememberOpenCluster() {
         guard let context = clusterContext else { return }
-        let cell = rows[context.target.row].cells[context.target.column]
+        let cell = screen.rows[context.target.row].cells[context.target.column]
         lastPrintedCluster = LastPrintedCluster(
             scalars: cell.scalars,
             cellWidth: cell.kind == .wideHead ? 2 : 1
@@ -6389,12 +6338,12 @@ public struct Terminal: Equatable, Sendable {
     ) -> Bool {
         guard var context = clusterContext else { return false }
         var target = context.target
-        guard rows.indices.contains(target.row), rows[target.row].cells.indices.contains(target.column) else {
+        guard screen.rows.indices.contains(target.row), screen.rows[target.row].cells.indices.contains(target.column) else {
             clusterContext = nil
             return false
         }
-        guard rows[target.row].cells[target.column].kind == .narrow
-            || rows[target.row].cells[target.column].kind == .wideHead
+        guard screen.rows[target.row].cells[target.column].kind == .narrow
+            || screen.rows[target.row].cells[target.column].kind == .wideHead
         else {
             clusterContext = nil
             return false
@@ -6409,7 +6358,7 @@ public struct Terminal: Equatable, Sendable {
             return false
         }
 
-        guard let baseScalar = rows[target.row].cells[target.column].scalars.first else {
+        guard let baseScalar = screen.rows[target.row].cells[target.column].scalars.first else {
             clusterContext = nil
             return false
         }
@@ -6419,15 +6368,15 @@ public struct Terminal: Equatable, Sendable {
             classification: classification,
             baseScalar: baseScalar
         ) {
-        case .wide where rows[target.row].cells[target.column].kind == .narrow:
+        case .wide where screen.rows[target.row].cells[target.column].kind == .narrow:
             target = upgradeClusterToWide(at: target)
-        case .narrow where rows[target.row].cells[target.column].kind == .wideHead:
+        case .narrow where screen.rows[target.row].cells[target.column].kind == .wideHead:
             downgradeClusterToNarrow(at: target)
         case .zero, .narrow, .wide, nil:
             break
         }
 
-        rows[target.row].cells[target.column].scalars.append(scalar)
+        screen.rows[target.row].cells[target.column].scalars.append(scalar)
         context.target = target
         context.previousClass = classification.graphemeBreakClass
         context.breakState = nextBreakState
@@ -6460,27 +6409,27 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func upgradeClusterToWide(at target: CellPosition) -> CellPosition {
-        let scalars = rows[target.row].cells[target.column].scalars
-        let styleId = rows[target.row].cells[target.column].styleId
-        let hyperlinkId = rows[target.row].cells[target.column].hyperlinkId
-        let contentIdentity = rows[target.row].cells[target.column].contentIdentity
+        let scalars = screen.rows[target.row].cells[target.column].scalars
+        let styleId = screen.rows[target.row].cells[target.column].styleId
+        let hyperlinkId = screen.rows[target.row].cells[target.column].hyperlinkId
+        let contentIdentity = screen.rows[target.row].cells[target.column].contentIdentity
         var destination = target
 
         if target.column == columnCount - 1 {
             if modes.isAutoWrapMode {
                 clearCellAndPair(row: target.row, column: target.column)
-                rows[target.row].cells[target.column] = GridCell(
+                screen.rows[target.row].cells[target.column] = GridCell(
                     kind: .spacerHead,
                     styleId: styleId,
                     hyperlinkId: hyperlinkId,
                     contentIdentity: contentIdentity
                 )
-                rows[target.row].isSoftWrapped = true
-                rows[target.row].marginErased = false
-                cursor = target
+                screen.rows[target.row].isSoftWrapped = true
+                screen.rows[target.row].marginErased = false
+                screen.cursor = target
                 advanceToNextRow(preservingWrapClaim: true)
-                cursor.column = 0
-                destination = cursor
+                screen.cursor.column = 0
+                destination = screen.cursor
                 invalidateInspection(inViewportRows: destination.row..<(destination.row + 1))
                 clearCellAndPair(row: destination.row, column: 0, clearsPreviousSpacer: false)
                 clearCellAndPair(row: destination.row, column: 1, clearsPreviousSpacer: false)
@@ -6494,38 +6443,38 @@ public struct Terminal: Equatable, Sendable {
             clearCellAndPair(row: target.row, column: target.column + 1)
         }
 
-        rows[destination.row].cells[destination.column] = GridCell(
+        screen.rows[destination.row].cells[destination.column] = GridCell(
             scalars: scalars,
             kind: .wideHead,
             styleId: styleId,
             hyperlinkId: hyperlinkId,
             contentIdentity: contentIdentity
         )
-        rows[destination.row].cells[destination.column + 1] = GridCell(
+        screen.rows[destination.row].cells[destination.column + 1] = GridCell(
             kind: .wideTail,
             styleId: styleId,
             hyperlinkId: hyperlinkId,
             contentIdentity: contentIdentity
         )
         if destination.column + 2 == columnCount {
-            rows[destination.row].marginErased = false
+            screen.rows[destination.row].marginErased = false
         }
         advanceCursorPastWideCell(at: destination)
         return destination
     }
 
     private mutating func downgradeClusterToNarrow(at target: CellPosition) {
-        rows[target.row].cells[target.column].kind = .narrow
-        rows[target.row].cells[target.column + 1] = GridCell()
+        screen.rows[target.row].cells[target.column].kind = .narrow
+        screen.rows[target.row].cells[target.column + 1] = GridCell()
 
         if target.column == 0 {
             clearPreviousSpacer(beforeRow: target.row, column: target.column)
         }
 
-        if cursor.column == columnCount - 1 {
-            isPendingWrap = false
+        if screen.cursor.column == columnCount - 1 {
+            screen.isPendingWrap = false
         } else {
-            cursor.column -= 1
+            screen.cursor.column -= 1
         }
     }
 
@@ -6554,18 +6503,18 @@ public struct Terminal: Equatable, Sendable {
         breakClass: GraphemeBreakClass
     ) {
         let contentIdentity = allocateContentIdentity()
-        invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
+        invalidateInspection(inViewportRows: screen.cursor.row..<(screen.cursor.row + 1))
         if modes.isInsertMode {
             moveAndFillCells(
-                in: cursor.column..<columnCount,
-                row: cursor.row,
+                in: screen.cursor.column..<columnCount,
+                row: screen.cursor.row,
                 by: 1
             )
         }
-        clearCellAndPair(row: cursor.row, column: cursor.column)
+        clearCellAndPair(row: screen.cursor.row, column: screen.cursor.column)
         writeNarrowCells(
-            row: cursor.row,
-            column: cursor.column,
+            row: screen.cursor.row,
+            column: screen.cursor.column,
             count: 1,
             baseIdentity: contentIdentity,
             breakClass: breakClass
@@ -6577,89 +6526,89 @@ public struct Terminal: Equatable, Sendable {
         breakClass: GraphemeBreakClass
     ) {
         let contentIdentity = allocateContentIdentity()
-        invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
+        invalidateInspection(inViewportRows: screen.cursor.row..<(screen.cursor.row + 1))
         var preservesWrappedSpacer = false
-        if cursor.column == columnCount - 1 {
+        if screen.cursor.column == columnCount - 1 {
             if modes.isAutoWrapMode {
-                clearCellAndPair(row: cursor.row, column: cursor.column)
-                rows[cursor.row].cells[cursor.column] = GridCell(
+                clearCellAndPair(row: screen.cursor.row, column: screen.cursor.column)
+                screen.rows[screen.cursor.row].cells[screen.cursor.column] = GridCell(
                     kind: .spacerHead,
                     styleId: currentStyleId(),
                     hyperlinkId: hyperlinkPen,
                     contentIdentity: contentIdentity
                 )
-                rows[cursor.row].isSoftWrapped = true
-                rows[cursor.row].marginErased = false
+                screen.rows[screen.cursor.row].isSoftWrapped = true
+                screen.rows[screen.cursor.row].marginErased = false
                 advanceToNextRow(preservingWrapClaim: true)
-                cursor.column = 0
+                screen.cursor.column = 0
                 preservesWrappedSpacer = true
             } else {
-                cursor.column = columnCount - 2
+                screen.cursor.column = columnCount - 2
             }
         }
 
-        invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
+        invalidateInspection(inViewportRows: screen.cursor.row..<(screen.cursor.row + 1))
 
         if modes.isInsertMode {
             moveAndFillCells(
-                in: cursor.column..<columnCount,
-                row: cursor.row,
+                in: screen.cursor.column..<columnCount,
+                row: screen.cursor.row,
                 by: 2
             )
         }
 
         clearCellAndPair(
-            row: cursor.row,
-            column: cursor.column,
+            row: screen.cursor.row,
+            column: screen.cursor.column,
             clearsPreviousSpacer: preservesWrappedSpacer == false
         )
         clearCellAndPair(
-            row: cursor.row,
-            column: cursor.column + 1,
+            row: screen.cursor.row,
+            column: screen.cursor.column + 1,
             clearsPreviousSpacer: preservesWrappedSpacer == false
         )
         let styleId = currentStyleId()
-        rows[cursor.row].cells[cursor.column] = GridCell(
+        screen.rows[screen.cursor.row].cells[screen.cursor.column] = GridCell(
             scalars: .single(scalar),
             kind: .wideHead,
             styleId: styleId,
             hyperlinkId: hyperlinkPen,
             contentIdentity: contentIdentity
         )
-        rows[cursor.row].cells[cursor.column + 1] = GridCell(
+        screen.rows[screen.cursor.row].cells[screen.cursor.column + 1] = GridCell(
             kind: .wideTail,
             styleId: styleId,
             hyperlinkId: hyperlinkPen,
             contentIdentity: contentIdentity
         )
-        if cursor.column + 2 == columnCount {
-            rows[cursor.row].marginErased = false
+        if screen.cursor.column + 2 == columnCount {
+            screen.rows[screen.cursor.row].marginErased = false
         }
-        clusterContext = ClusterContext(target: cursor, previousClass: breakClass)
-        advanceCursorPastWideCell(at: cursor)
+        clusterContext = ClusterContext(target: screen.cursor, previousClass: breakClass)
+        advanceCursorPastWideCell(at: screen.cursor)
     }
 
     private mutating func advanceCursorPastWideCell(at head: CellPosition) {
         if modes.isAutoWrapMode == false, head.column + 1 == columnCount - 1 {
-            cursor = head
-            isPendingWrap = false
+            screen.cursor = head
+            screen.isPendingWrap = false
             return
         }
-        cursor = CellPosition(row: head.row, column: head.column + 1)
-        if cursor.column == columnCount - 1 {
-            isPendingWrap = true
+        screen.cursor = CellPosition(row: head.row, column: head.column + 1)
+        if screen.cursor.column == columnCount - 1 {
+            screen.isPendingWrap = true
         } else {
-            cursor.column += 1
-            isPendingWrap = false
+            screen.cursor.column += 1
+            screen.isPendingWrap = false
         }
     }
 
     private mutating func softWrap() {
-        rows[cursor.row].isSoftWrapped = true
+        screen.rows[screen.cursor.row].isSoftWrapped = true
         advanceToNextRow(preservingWrapClaim: true)
-        cursor.column = 0
+        screen.cursor.column = 0
         stampSemanticContinuationAfterLineAdvance()
-        isPendingWrap = false
+        screen.isPendingWrap = false
         clusterContext = nil
     }
 
@@ -6669,11 +6618,11 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func stampSemanticContinuationAfterLineAdvance() {
-        if semanticContentClearsAtEndOfLine {
-            semanticContent = .output
-            semanticContentClearsAtEndOfLine = false
-        } else if semanticContent == .prompt || semanticContent == .input {
-            rows[cursor.row].semanticPrompt = .continuation
+        if screen.semanticContentClearsAtEndOfLine {
+            screen.semanticContent = .output
+            screen.semanticContentClearsAtEndOfLine = false
+        } else if screen.semanticContent == .prompt || screen.semanticContent == .input {
+            screen.rows[screen.cursor.row].semanticPrompt = .continuation
         }
     }
 
@@ -6685,7 +6634,7 @@ public struct Terminal: Equatable, Sendable {
         // restore runs only when the advance actually scrolled or moved. Reachable by
         // inline-viewport TUIs that pin a footer with `CSI 1;N r` and print below it.
         let advanced: Bool
-        if cursor.row == region.upperBound - 1 {
+        if screen.cursor.row == region.upperBound - 1 {
             moveAndFillRows(
                 in: region,
                 by: -1,
@@ -6694,8 +6643,8 @@ public struct Terminal: Equatable, Sendable {
                 invalidatesInspection: false
             )
             advanced = true
-        } else if cursor.row < rowCount - 1 {
-            cursor.row += 1
+        } else if screen.cursor.row < rowCount - 1 {
+            screen.cursor.row += 1
             advanced = true
         } else {
             advanced = false
@@ -6756,20 +6705,20 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func insertCharacters(amount: Int) {
         clearPendingMotionState()
-        guard activeScrollRegion.contains(cursor.row) else { return }
+        guard activeScrollRegion.contains(screen.cursor.row) else { return }
         moveAndFillCells(
-            in: cursor.column..<columnCount,
-            row: cursor.row,
+            in: screen.cursor.column..<columnCount,
+            row: screen.cursor.row,
             by: amount
         )
     }
 
     private mutating func deleteCharacters(amount: Int) {
         clearPendingMotionState()
-        guard activeScrollRegion.contains(cursor.row) else { return }
+        guard activeScrollRegion.contains(screen.cursor.row) else { return }
         moveAndFillCells(
-            in: cursor.column..<columnCount,
-            row: cursor.row,
+            in: screen.cursor.column..<columnCount,
+            row: screen.cursor.row,
             by: -amount
         )
     }
@@ -6777,9 +6726,9 @@ public struct Terminal: Equatable, Sendable {
     private mutating func insertLines(amount: Int) {
         clearPendingMotionState()
         let region = activeScrollRegion
-        guard region.contains(cursor.row) else { return }
+        guard region.contains(screen.cursor.row) else { return }
         moveAndFillRows(
-            in: cursor.row..<region.upperBound,
+            in: screen.cursor.row..<region.upperBound,
             by: amount,
             pushesToScrollback: false
         )
@@ -6788,9 +6737,9 @@ public struct Terminal: Equatable, Sendable {
     private mutating func deleteLines(amount: Int) {
         clearPendingMotionState()
         let region = activeScrollRegion
-        guard region.contains(cursor.row) else { return }
+        guard region.contains(screen.cursor.row) else { return }
         moveAndFillRows(
-            in: cursor.row..<region.upperBound,
+            in: screen.cursor.row..<region.upperBound,
             by: -amount,
             pushesToScrollback: false
         )
@@ -6798,10 +6747,10 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func reverseIndex() {
         let region = activeScrollRegion
-        if cursor.row == region.lowerBound {
+        if screen.cursor.row == region.lowerBound {
             moveAndFillRows(in: region, by: 1, pushesToScrollback: false)
         } else {
-            cursor.row = max(0, cursor.row - 1)
+            screen.cursor.row = max(0, screen.cursor.row - 1)
         }
     }
 
@@ -6908,9 +6857,9 @@ public struct Terminal: Equatable, Sendable {
         // the previous frame's cursor image rides the translation to
         // `cursor.row + delta` and the cursor's own row needs a fresh bake.
         // These two rows are D7's "at most two cursor rows above the ideal".
-        if range.contains(cursor.row) {
-            recordPresentationDamage(row: cursor.row)
-            let translated = cursor.row + signedAmount
+        if range.contains(screen.cursor.row) {
+            recordPresentationDamage(row: screen.cursor.row)
+            let translated = screen.cursor.row + signedAmount
             if range.contains(translated) {
                 recordPresentationDamage(row: translated)
             }
@@ -6941,17 +6890,17 @@ public struct Terminal: Equatable, Sendable {
             // rather than the whole region. It must be materialized rather than passed as a
             // slice of `rows`: `appendToScrollback` is mutating, and handing it a slice of
             // `self.rows` would be an overlapping access to `self`.
-            appendToScrollback(Array(rows[range.lowerBound..<(range.lowerBound + amount)]))
+            appendToScrollback(Array(screen.rows[range.lowerBound..<(range.lowerBound + amount)]))
         } else {
             severWrapClaim(before: range.lowerBound, replacementStyleId: styleId)
         }
 
         Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
             if let source {
-                let moved = rows[source]
-                rows[destination] = moved
+                let moved = screen.rows[source]
+                screen.rows[destination] = moved
             } else {
-                rows[destination] = makeBlankRow(columns: columnCount, styleId: styleId)
+                screen.rows[destination] = makeBlankRow(columns: columnCount, styleId: styleId)
             }
         }
 
@@ -6981,10 +6930,10 @@ public struct Terminal: Equatable, Sendable {
 
         Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
             if let source {
-                let moved = rows[row].cells[source]
-                rows[row].cells[destination] = moved
+                let moved = screen.rows[row].cells[source]
+                screen.rows[row].cells[destination] = moved
             } else {
-                rows[row].cells[destination] = GridCell(styleId: styleId)
+                screen.rows[row].cells[destination] = GridCell(styleId: styleId)
             }
         }
 
@@ -7001,7 +6950,7 @@ public struct Terminal: Equatable, Sendable {
         in row: Int,
         replacementStyleId: StyleId
     ) {
-        let cells = rows[row].cells
+        let cells = screen.rows[row].cells
         var invalidColumns: [Int] = []
         for column in cells.indices {
             switch cells[column].kind {
@@ -7021,7 +6970,7 @@ public struct Terminal: Equatable, Sendable {
         }
 
         for column in invalidColumns {
-            rows[row].cells[column] = GridCell(styleId: replacementStyleId)
+            screen.rows[row].cells[column] = GridCell(styleId: replacementStyleId)
         }
     }
 
@@ -7040,14 +6989,14 @@ public struct Terminal: Equatable, Sendable {
         at row: Int,
         replacementStyleId: StyleId
     ) {
-        guard rows.indices.contains(row) else { return }
-        guard rows[row].isSoftWrapped
-            || rows[row].cells[columnCount - 1].kind == .spacerHead
+        guard screen.rows.indices.contains(row) else { return }
+        guard screen.rows[row].isSoftWrapped
+            || screen.rows[row].cells[columnCount - 1].kind == .spacerHead
         else { return }
         invalidateInspection(inViewportRows: row..<(row + 1))
-        rows[row].isSoftWrapped = false
-        if rows[row].cells[columnCount - 1].kind == .spacerHead {
-            rows[row].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
+        screen.rows[row].isSoftWrapped = false
+        if screen.rows[row].cells[columnCount - 1].kind == .spacerHead {
+            screen.rows[row].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
         }
     }
 
@@ -7066,10 +7015,10 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func restoreWrapClaimBeforeCursor() {
-        if cursor.row > 0 {
-            guard rows[cursor.row - 1].isSoftWrapped == false else { return }
-            invalidateInspection(inViewportRows: (cursor.row - 1)..<cursor.row)
-            rows[cursor.row - 1].isSoftWrapped = true
+        if screen.cursor.row > 0 {
+            guard screen.rows[screen.cursor.row - 1].isSoftWrapped == false else { return }
+            invalidateInspection(inViewportRows: (screen.cursor.row - 1)..<screen.cursor.row)
+            screen.rows[screen.cursor.row - 1].isSoftWrapped = true
         } else if isAlternateScreenActive == false, historyRowCount > 0 {
             guard history.hasOpenTailRecord == false else { return }
             invalidateInspection(inScrollbackRow: historyRowCount - 1)
@@ -7090,20 +7039,20 @@ public struct Terminal: Equatable, Sendable {
         clearsPreviousSpacer: Bool = true,
         replacementStyleId: StyleId = Terminal.defaultStyleId
     ) {
-        guard rows.indices.contains(row), rows[row].cells.indices.contains(column) else { return }
-        switch rows[row].cells[column].kind {
+        guard screen.rows.indices.contains(row), screen.rows[row].cells.indices.contains(column) else { return }
+        switch screen.rows[row].cells[column].kind {
         case .wideHead:
-            rows[row].cells[column] = GridCell(styleId: replacementStyleId)
+            screen.rows[row].cells[column] = GridCell(styleId: replacementStyleId)
             if column + 1 < columnCount {
-                rows[row].cells[column + 1] = GridCell(styleId: replacementStyleId)
+                screen.rows[row].cells[column + 1] = GridCell(styleId: replacementStyleId)
             }
         case .wideTail:
-            rows[row].cells[column] = GridCell(styleId: replacementStyleId)
+            screen.rows[row].cells[column] = GridCell(styleId: replacementStyleId)
             if column > 0 {
-                rows[row].cells[column - 1] = GridCell(styleId: replacementStyleId)
+                screen.rows[row].cells[column - 1] = GridCell(styleId: replacementStyleId)
             }
         case .padding, .narrow, .spacerHead:
-            rows[row].cells[column] = GridCell(styleId: replacementStyleId)
+            screen.rows[row].cells[column] = GridCell(styleId: replacementStyleId)
         }
 
         if clearsPreviousSpacer {
@@ -7121,9 +7070,9 @@ public struct Terminal: Equatable, Sendable {
         replacementStyleId: StyleId = Terminal.defaultStyleId
     ) {
         guard column <= 1 else { return }
-        if row > 0, rows[row - 1].cells[columnCount - 1].kind == .spacerHead {
+        if row > 0, screen.rows[row - 1].cells[columnCount - 1].kind == .spacerHead {
             invalidateInspection(inViewportRows: (row - 1)..<row)
-            rows[row - 1].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
+            screen.rows[row - 1].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
         } else if row == 0, isAlternateScreenActive == false, historyRowCount > 0 {
             // The store never held the spacer -- where one sits is a function of the width, which
             // `31/I1` forbids storing -- so the column the clear vacated shows up as the open
