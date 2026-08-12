@@ -28,12 +28,14 @@ final class CheckpointWriter: Sendable {
 
     /// Encode and atomically write, as one work item. `async: false` also fences every write
     /// already queued, which is what the quit checkpoint stands on: it must leave nothing in
-    /// flight, because the process exits as soon as it returns.
+    /// flight, because the process exits as soon as it returns. Both closures are `@Sendable`
+    /// because both genuinely change threads: `encode` runs on the writer's queue, and
+    /// `completion` on `completionQueue`, never on the thread that called `write`.
     func write(
         to url: URL,
         async: Bool,
         encode: @escaping @Sendable () throws -> Data,
-        completion: ((Bool) -> Void)? = nil
+        completion: (@Sendable (Bool) -> Void)? = nil
     ) {
         let completionQueue = completionQueue
         let work = DispatchWorkItem {

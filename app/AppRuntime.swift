@@ -1404,15 +1404,23 @@ class AppRuntime {
                 cancel: {}
             ) else { return }
             performEnrichedCheckpoint(async: true) { [weak self] succeeded in
-                guard let self else { return }
-                self.schedulingLifecycle.run(callbackToken) {
-                    self.applyRecoveryAction(
-                        self.recoveryPolicy.writeCompleted(
-                            revision: revision,
-                            succeeded: succeeded,
-                            at: DispatchTime.now().uptimeNanoseconds
-                        )
-                    )
+                // The writer delivers this on its own completion queue, so the finish time is
+                // read here, where the write actually ended, and only the policy update hops
+                // to the main actor that owns the recovery state.
+                let finishedAt = DispatchTime.now().uptimeNanoseconds
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    MainActor.assumeIsolated { () -> Void in
+                        self.schedulingLifecycle.run(callbackToken) {
+                            self.applyRecoveryAction(
+                                self.recoveryPolicy.writeCompleted(
+                                    revision: revision,
+                                    succeeded: succeeded,
+                                    at: finishedAt
+                                )
+                            )
+                        }
+                    }
                 }
             }
         case .cancel:
@@ -1482,9 +1490,10 @@ class AppRuntime {
     /// Write an enriched checkpoint: model snapshot + each pane's primary history. Expensive but
     /// gives full restore fidelity, so only the capture happens here — the cost rides the
     /// checkpoint queue. Called by the mutation-driven policy and once at clean termination.
+    /// `completion` is `@Sendable` because the writer delivers it on its completion queue.
     func performEnrichedCheckpoint(
         async: Bool,
-        completion: ((Bool) -> Void)? = nil
+        completion: (@Sendable (Bool) -> Void)? = nil
     ) {
         guard schedulingLifecycle.isActive else { return }
         let capture = captureEnrichedCheckpoint()
