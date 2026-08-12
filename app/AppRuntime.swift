@@ -605,8 +605,11 @@ class AppRuntime {
         guard let noticeRegistration = session.addPaneTapeFollowNotice(
             id: subscriptionId,
             cursor: start.cursor,
+            // This hop is real, unlike the ones the write completions used to need: the notice
+            // fires on the PTY host's owner queue, and that queue has no business learning
+            // about the main actor just to save the crossing.
             notify: { [weak self] in
-                DispatchQueue.main.async { [weak self] in
+                DispatchQueue.main.async {
                     guard let self else { return }
                     MainActor.assumeIsolated {
                         self.paneTapeFollowEventsAvailable(subscriptionId)
