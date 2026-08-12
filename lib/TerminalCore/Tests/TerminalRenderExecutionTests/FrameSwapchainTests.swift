@@ -126,7 +126,7 @@ struct FrameSwapchainTests {
             #expect(presented !== previous, "step \(step): attached buffer was re-rendered")
             let blitted = try blitBitmap(presented, plan: plan, metrics: metrics)
             let direct = try renderBitmap(plan: plan, metrics: metrics)
-            #expect(blitted.bytes == direct.bytes, "step \(step) diverged")
+            expectBitmap(blitted, matches: direct, "step \(step) diverged")
             previous = presented
         }
         #expect(swapchain.hasPendingPresentation == false)
@@ -156,7 +156,7 @@ struct FrameSwapchainTests {
         let presented = try #require(swapchain.publish(plan: plan, damage: .full))
         let blitted = try blitBitmap(presented, plan: plan, metrics: metrics)
         let direct = try renderBitmap(plan: plan, metrics: metrics)
-        #expect(blitted.bytes == direct.bytes)
+        expectBitmap(blitted, matches: direct)
     }
 
     @Test("an in-use buffer is never the render target; the publish coalesces")
@@ -191,7 +191,7 @@ struct FrameSwapchainTests {
 
         let attachedBits = try blitBitmap(attached, plan: firstPlan, metrics: metrics)
         let firstDirect = try renderBitmap(plan: firstPlan, metrics: metrics)
-        #expect(attachedBits.bytes == firstDirect.bytes, "attached buffer was written while displayed")
+        expectBitmap(attachedBits, matches: firstDirect, "attached buffer was written while displayed")
     }
 
     @Test("a coalesced presentation renders in full on a later retry")
@@ -229,7 +229,7 @@ struct FrameSwapchainTests {
         #expect(presented !== attached)
         let blitted = try blitBitmap(presented, plan: latestPlan, metrics: metrics)
         let direct = try renderBitmap(plan: latestPlan, metrics: metrics)
-        #expect(blitted.bytes == direct.bytes)
+        expectBitmap(blitted, matches: direct)
         #expect(swapchain.hasPendingPresentation == false)
         #expect(swapchain.retryPendingPresentation() == nil)
     }

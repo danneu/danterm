@@ -139,7 +139,7 @@ struct BlockElementSpriteExecutionTests {
             metrics: metrics
         )
 
-        #expect(damaged.bytes == full.bytes)
-        #expect(dirty.bytes == full.bytes)
+        expectBitmap(damaged, matches: full)
+        expectBitmap(dirty, matches: full)
     }
 }

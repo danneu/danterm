@@ -36,7 +36,7 @@ struct ExecutorContractTests {
         let full = try renderBitmap(plan: current, metrics: metrics)
 
         #expect(damage == TerminalDamage(rows: [1, 2]))
-        #expect(incremental.bytes == full.bytes)
+        expectBitmap(incremental, matches: full)
     }
 
     @Test("Shift-damage redraw of a scrolled screen is pixel-identical to a fresh full frame")
@@ -84,7 +84,7 @@ struct ExecutorContractTests {
                 metrics: metrics
             )
             let full = try renderBitmap(plan: current, metrics: metrics)
-            #expect(incremental.bytes == full.bytes, "\(script.name)")
+            expectBitmap(incremental, matches: full, "\(script.name)")
         }
     }
 
@@ -117,7 +117,7 @@ struct ExecutorContractTests {
         )
         let full = try renderBitmap(plan: current, metrics: metrics)
 
-        #expect(incremental.bytes == full.bytes)
+        expectBitmap(incremental, matches: full)
     }
 
     @Test("Full-grid dirty rect uses the complete frame plan")
@@ -144,7 +144,7 @@ struct ExecutorContractTests {
         )
         let full = try renderBitmap(plan: current, metrics: metrics)
 
-        #expect(incremental.bytes == full.bytes)
+        expectBitmap(incremental, matches: full)
     }
 
     @Test("Rendering styled fallback content cannot alter regular-face metrics")
@@ -338,8 +338,8 @@ struct ExecutorContractTests {
             let hiddenFull = try renderBitmap(plan: hidden, metrics: metrics)
             let visibleFull = try renderBitmap(plan: visible, metrics: metrics)
 
-            #expect(hiddenIncremental.bytes == hiddenFull.bytes)
-            #expect(visibleIncremental.bytes == visibleFull.bytes)
+            expectBitmap(hiddenIncremental, matches: hiddenFull)
+            expectBitmap(visibleIncremental, matches: visibleFull)
         }
     }
 
@@ -356,7 +356,7 @@ struct ExecutorContractTests {
         let first = try renderBitmap(plan: plan, metrics: metrics)
         let second = try renderBitmap(plan: plan, metrics: metrics)
 
-        #expect(first.bytes == second.bytes)
+        expectBitmap(first, matches: second)
     }
 
     @Test("Drawing restores CTM, text matrix, and a nonrectangular caller clip")
@@ -400,7 +400,7 @@ struct ExecutorContractTests {
 
         try drawSentinel(in: subjectContext, size: size.pointSize)
         try drawSentinel(in: controlContext, size: size.pointSize)
-        #expect(subject.bitmap().bytes == control.bitmap().bytes)
+        expectBitmap(subject.bitmap(), matches: control.bitmap())
     }
 }
 

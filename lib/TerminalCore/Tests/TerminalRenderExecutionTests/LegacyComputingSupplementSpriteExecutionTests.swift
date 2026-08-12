@@ -94,8 +94,8 @@ struct LegacyComputingSupplementSpriteExecutionTests {
         let dirty = try renderDirtyRectBitmap(
             previous: previous, current: current, dirtyRect: dirtyRect, metrics: metrics
         )
-        #expect(damaged.bytes == full.bytes)
-        #expect(dirty.bytes == full.bytes)
+        expectBitmap(damaged, matches: full)
+        expectBitmap(dirty, matches: full)
     }
 
     private func pattern(_ value: UInt32) -> LegacySupplementPattern? {

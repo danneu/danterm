@@ -68,6 +68,52 @@ struct Bitmap {
     }
 }
 
+/// Compares two rendered surfaces and reports a mismatch without diffing them.
+///
+/// Never write `#expect(a.bytes == b.bytes)` here. Swift Testing renders a failed
+/// comparison of two collections by computing
+/// `BidirectionalCollection.difference(from:)`, whose cost grows about
+/// quadratically -- four seconds at 32 KiB. A 60x20 grid at `displayScale: 2` is
+/// about 2.4 million bytes per side, and a diff that size does not finish: the
+/// test process spins at full CPU, no `.timeLimit` can unwind it because the diff
+/// never yields, and the run has to be killed from outside. That is how the
+/// TerminalPTY lane was wedging before its own megabyte comparison was replaced.
+///
+/// The first differing pixel is also a better answer than an edit script, since
+/// these surfaces differ by a region rather than by an insertion.
+func expectBitmap(
+    _ actual: Bitmap,
+    matches expected: Bitmap,
+    _ label: Comment? = nil,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    guard
+        actual.width != expected.width
+            || actual.height != expected.height
+            || actual.bytes != expected.bytes
+    else { return }
+
+    let prefix = label.map { "\($0): " } ?? ""
+    guard actual.width == expected.width, actual.height == expected.height else {
+        let sizes = "\(actual.width)x\(actual.height) != \(expected.width)x\(expected.height)"
+        Issue.record("\(prefix)surfaces differ in size: \(sizes)", sourceLocation: sourceLocation)
+        return
+    }
+
+    var index = 0
+    while index < min(actual.bytes.count, expected.bytes.count),
+        actual.bytes[index] == expected.bytes[index]
+    {
+        index += 1
+    }
+    let pixelIndex = index / 4
+    let x = pixelIndex % max(actual.width, 1)
+    let y = pixelIndex / max(actual.width, 1)
+    let where_ = "pixel (\(x), \(y)) of \(actual.width)x\(actual.height)"
+    let values = "\(actual.pixel(x: x, yFromTop: y)) != \(expected.pixel(x: x, yFromTop: y))"
+    Issue.record("\(prefix)first differs at \(where_): \(values)", sourceLocation: sourceLocation)
+}
+
 final class BitmapSurface {
     let width: Int
     let height: Int

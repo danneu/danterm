@@ -113,7 +113,7 @@ struct FrameBackingStoreTests {
         store.renderFull(plan)
         let blitted = try blitBitmap(store, plan: plan, metrics: metrics)
         let direct = try renderBitmap(plan: plan, metrics: metrics)
-        #expect(blitted.bytes == direct.bytes)
+        expectBitmap(blitted, matches: direct)
     }
 
     @Test("below-budget streaming stays byte-identical through applied shifts")
@@ -354,7 +354,7 @@ struct FrameBackingStoreTests {
 
         let blitted = try blitBitmap(store, plan: plan, metrics: metrics)
         let direct = try renderBitmap(plan: plan, metrics: metrics)
-        #expect(blitted.bytes == direct.bytes)
+        expectBitmap(blitted, matches: direct)
     }
 
     @Test("the surface memory itself holds the rendered frame")
@@ -439,7 +439,7 @@ struct FrameBackingStoreTests {
             #expect(store.apply(plan: plan, damage: damage), "step \(step) refused")
             let blitted = try blitBitmap(store, plan: plan, metrics: metrics)
             let direct = try renderBitmap(plan: plan, metrics: metrics)
-            #expect(blitted.bytes == direct.bytes, "step \(step) diverged")
+            expectBitmap(blitted, matches: direct, "step \(step) diverged")
         }
     }
 
@@ -475,7 +475,7 @@ struct FrameBackingStoreTests {
         #expect(store.apply(plan: plan, damage: damage))
         let blitted = try blitBitmap(store, plan: plan, metrics: metrics)
         let direct = try renderBitmap(plan: plan, metrics: metrics)
-        #expect(blitted.bytes == direct.bytes)
+        expectBitmap(blitted, matches: direct)
     }
 
     @Test("a clipped blit repaints only the requested rect")

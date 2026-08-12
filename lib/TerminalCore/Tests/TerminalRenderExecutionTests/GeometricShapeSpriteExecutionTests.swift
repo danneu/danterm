@@ -141,7 +141,7 @@ struct GeometricShapeSpriteExecutionTests {
                 damage: TerminalDamage(rows: [0]),
                 metrics: metrics
             )
-            #expect(damaged.bytes == full.bytes)
+            expectBitmap(damaged, matches: full)
         }
     }
 
@@ -168,8 +168,8 @@ struct GeometricShapeSpriteExecutionTests {
             metrics: metrics
         )
 
-        #expect(damaged.bytes == full.bytes)
-        #expect(dirty.bytes == full.bytes)
+        expectBitmap(damaged, matches: full)
+        expectBitmap(dirty, matches: full)
     }
 }
 

@@ -120,7 +120,7 @@ struct NerdFontSymbolsExecutionTests {
                 plan: makePlan(input: scalar + "X", columns: 3, rows: 1),
                 metrics: withoutSymbols
             )
-            #expect(routed.bytes == control.bytes, Comment(rawValue: scalar))
+            expectBitmap(routed, matches: control, Comment(rawValue: scalar))
         }
     }
 

@@ -96,8 +96,8 @@ struct PowerlineSpriteExecutionTests {
                 dirtyRect: CGRect(x: 0, y: 0, width: metrics.cellSize.width * 4, height: metrics.cellSize.height),
                 metrics: metrics
             )
-            #expect(damaged.bytes == full.bytes)
-            #expect(dirty.bytes == full.bytes)
+            expectBitmap(damaged, matches: full)
+            expectBitmap(dirty, matches: full)
         }
     }
 }
