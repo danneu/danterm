@@ -1,7 +1,7 @@
 ---
 name: danterm
 description: >-
-  Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, inspect live key focus, read output or dump or follow a flight recording from another pane, send keys into another pane, switch the theme, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
+  Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, inspect live key focus, read output or dump or follow a flight recording from another pane, send keys into another pane, switch the theme, quit a development instance it launched, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
 allowed-tools: Bash(danterm *)
 ---
 
@@ -21,12 +21,17 @@ Every IPC command accepts `--socket <path>` before the command name. This
 explicit instance target overrides `DANTERM_SOCK` and identity-derived socket
 lookup.
 
+`quit` inverts that rule: it *requires* `--socket <path>` and refuses both
+`DANTERM_SOCK` and identity lookup, so it can never mean "whatever instance I
+happen to be running inside".
+
 The local `skill` and `doctor` commands do not accept `--socket` or inspect pane
 targeting. `doctor` queries the matching running app for macOS permission state
 and skips those rows when the app is unavailable.
 
     danterm ls
     danterm focus
+    danterm quit
     danterm group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm group rename --group <group-id> <name>
     danterm group close --group <group-id> [--move-tabs]
@@ -119,6 +124,10 @@ For agent commands:
   `--pane <pane-id>`. The bundled hooks pass `$DANTERM_PANE` explicitly.
 - `pane focus`, `pane info`, `pane read`, `pane rows`, `pane zoom`, and
   `pane tape`: always name the pane explicitly.
+- `quit`: always pass `--socket <path>` naming the slot you launched. It takes
+  no other target, and the CLI refuses it without an explicit socket. Never aim
+  it at the user's DanTerm; the app refuses that anyway, but the rule is yours
+  to keep, not the guard's.
 
 ## Context env vars
 
@@ -171,6 +180,11 @@ separate worktrees launch beside each other and must give their slots back. Run
     just slots                 # every slot as JSON, with the checkout holding it
     just stop-slot 3           # kill slot 3's app and return it to the pool
     just stop-slots            # the user's broom: empties the pool, other agents included
+
+`danterm --socket "$SLOT_SOCKET" quit` is the graceful alternative to
+`just stop-slot <n>`: it exits the app through the normal shutdown path instead
+of killing it, and the slot frees itself because occupancy comes from the lock
+the dead process held.
 
 A busy slot reports `state`, `checkout`, `pid`, `bundleId`, and `socketPath`; a
 slot still building reports only `state` and `checkout`, and refuses to be
@@ -248,6 +262,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "which tab/group contains this pane?" | `pane info --pane <pane-id>` |
 | "switch the theme to X" | `theme set --pane <pane-id>` |
 | "add/check off/edit a todo" | `todo ... --pane <pane-id>` or `todo ... --tab <tab-id>` |
+| "quit the dev app I launched" / "shut down slot 3" | `--socket <slot-socket> quit` |
 | "check DanTerm integration health" | `doctor` |
 | "show DanTerm's agent instructions" | `skill` |
 
@@ -275,9 +290,32 @@ Find the group id in `danterm ls`, which lists every group as
     danterm group close --group "$GROUP_ID" --move-tabs
 
 The default closes the group's tabs with it. `--move-tabs` moves them into the
-adjacent group first. Two closes are refused so the CLI does not quit DanTerm as
-a side effect: the last group, and the group holding every tab when
-`--move-tabs` is absent.
+adjacent group first. Two closes are refused: the last group, and the group
+holding every tab when `--move-tabs` is absent. Quitting is `quit`'s job, never
+a side effect of a close.
+
+### Quit an instance you launched
+
+    danterm --socket "$SLOT_SOCKET" quit
+
+This is the graceful exit for a slot app you started with `just launch-slot`.
+It ends the app the way Cmd-Q does, so the final recovery checkpoint is written
+and the session lock file is removed -- unlike `just stop-slot <n>`, which sends
+`SIGKILL` and skips all of it. Keep `stop-slot` for a slot that is wedged or
+still building, where nothing can answer a request.
+
+Two rules make the verb safe, and both are enforced:
+
+- The CLI refuses `quit` without an explicit `--socket`, so it never resolves a
+  target from `DANTERM_SOCK` or from identity lookup.
+- The app refuses `quit` unless it holds a launcher pool slot, 1 through 8. The
+  user's `DanTerm.app`, `DanTerm Dev.app`, and anything outside the scheme all
+  answer with an error and keep running.
+
+Quit is not confirmed. Passing the instance's socket is the authorization, so it
+ignores any open confirmation panel and any uncompleted todos. A quit the app
+honored exits 0 -- the closed socket is the proof it worked -- and a refused one
+exits non-zero and prints the refusal.
 
 ### Rename or clear a tab
 
@@ -288,8 +326,8 @@ a side effect: the last group, and the group holding every tab when
 
     danterm tab close --tab "$TAB_ID"
 
-Closing the only remaining tab is refused so the CLI does not quit DanTerm as a
-side effect.
+Closing the only remaining tab is refused. Quitting is `quit`'s job, never a
+side effect of a close.
 
 ### Open a new tab and optionally run a command in it
 
@@ -368,9 +406,9 @@ To navigate to a new pane that was split in another tab:
     danterm pane close --pane "$PANE_ID"
 
 Closing a pane in a split promotes its sibling. Closing a tab's only pane also
-closes that tab. Closing the only pane of the only tab is refused, so the CLI
-does not quit DanTerm as a side effect. The command does not show the GUI's todo
-confirmation because the explicit pane id authorizes the close.
+closes that tab. Closing the only pane of the only tab is refused; quitting is
+`quit`'s job, never a side effect of a close. The command does not show the
+GUI's todo confirmation because the explicit pane id authorizes the close.
 
 ### Read another pane's output
 

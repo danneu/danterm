@@ -24,6 +24,24 @@ struct InstanceIdentityTests {
         #expect(DanTermInstanceIdentity(developmentSlot: 9) == nil)
     }
 
+    @Test("only launcher-claimed slots count as pool instances")
+    func onlyLauncherClaimedSlotsCountAsPoolInstances() throws {
+        // Intent: `isLauncherPoolSlot` admits slots 1 through 8 and nothing else.
+        // Why it exists: it is the allowlist that decides whether an instance may
+        //   be quit over IPC, so production, the canonical dev app, and any
+        //   identifier outside the scheme must all fall outside it.
+        // Scenario: the production bundle identifier by name, slot 0, every
+        //   claimable slot, and two identifiers the scheme does not recognize.
+        let production = DanTermInstanceIdentity(bundleIdentifier: "com.danneu.danterm")
+        #expect(production.isLauncherPoolSlot == false)
+        #expect(try #require(DanTermInstanceIdentity(developmentSlot: 0)).isLauncherPoolSlot == false)
+        for slot in 1...8 {
+            #expect(try #require(DanTermInstanceIdentity(developmentSlot: slot)).isLauncherPoolSlot)
+        }
+        #expect(DanTermInstanceIdentity(bundleIdentifier: "com.example.harness").isLauncherPoolSlot == false)
+        #expect(DanTermInstanceIdentity(bundleIdentifier: "com.danneu.danterm-dev.9").isLauncherPoolSlot == false)
+    }
+
     @Test("bundle identity preserves unrecognized identifiers")
     func bundleIdentityPreservesUnrecognizedIdentifiers() {
         let identity = DanTermInstanceIdentity(bundleIdentifier: "com.example.characterization")

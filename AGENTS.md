@@ -92,10 +92,14 @@ socket lifecycle in `DanTermSupport.IpcConnection`, accept loop in
 resolution + file IO + session lock in `DanTermSupport.RecoveryStore`,
 checkpoint scheduling and on-disk write in `app`.
 
-The core seams its three ambient inputs -- home directory, fresh ids,
-wall-clock time -- behind `CoreEnv`. Inject an explicit value when the result is
-SAVED, SENT, or ASSERTED; leave it ambient when it is only SHOWN live and
-discarded. `scripts/core-purity-lint.sh` enforces this; the worked example is in
+The core seams its four ambient inputs -- home directory, fresh ids,
+wall-clock time, and the process instance identity -- behind `CoreEnv`. Inject
+an explicit value when the result is SAVED, SENT, or ASSERTED; leave it ambient
+when it is only SHOWN live and discarded. Identity is the odd one out: it is an
+authorization input, read by IPC dispatch to decide whether the caller may end
+this instance, so it is never re-derived at a leaf, and a test that does not
+inject one gets no privilege. `scripts/core-purity-lint.sh` enforces this; the
+worked example is in
 [docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md).
 
 All entity IDs are phantom-typed wrappers (`TabId = TypedId<TabTag>`, and the
@@ -221,6 +225,10 @@ prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
   abandon is one another agent cannot have. `just slots` prints the pool as JSON,
   naming the checkout holding each busy slot. `just stop-slots` empties the whole
   pool, so it belongs to the user, not to an agent working beside others.
+  `danterm --socket <slot-socket> quit` is the graceful sibling: it exits the app
+  the way Cmd-Q does, so the final recovery checkpoint is written and the session
+  lock is released. Prefer it when you care about shutdown behavior, and keep
+  `just stop-slot <n>` for a slot that is wedged or still building.
 - `just build` / `just replace-dev` -- **the user's commands; do not run them
   unless asked.** Both overwrite `~/Applications/DanTerm Dev.app`, and
   `replace-dev` also quits the running instance the user may be working in.

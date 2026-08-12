@@ -73,6 +73,8 @@ struct DanTermCLI {
                                       Report explicit root-agent activity
           agent detach --pane <pane-id> --kind <kind> --id <session-id>
                                       Detach the matching root agent session
+          quit                        Quit the instance named by --socket, the
+                                      way Cmd-Q does. Development slots only.
           skill                       Print DanTerm's agent skill instructions
           doctor                      Check DanTerm integration health
           todo list (--pane <pane-id> | --tab <tab-id>)
@@ -101,6 +103,9 @@ struct DanTermCLI {
           holding every tab unless --move-tabs keeps those tabs.
           pane split opens in the background by default; --foreground focuses
           the new pane within its tab. App UI shortcuts are unaffected.
+          quit requires --socket: it never takes its target from DANTERM_SOCK
+          or from identity lookup, and the app refuses it unless the named
+          instance holds a launcher slot (1 through 8).
 
         Environment:
           DANTERM        Marks a process launched inside DanTerm. Without a
@@ -137,7 +142,8 @@ struct DanTermCLI {
             let socketPath = try selectControlSocketPath(
                 explicit: invocation.socketPath,
                 environment: environment,
-                fallback: controlSocketPath().path
+                fallback: controlSocketPath().path,
+                method: command.request.method
             )
             if command.method == IpcRequestMethod.paneTape.rawValue, command.params["follow"] == .bool(true) {
                 signal(SIGPIPE, SIG_IGN)
@@ -148,11 +154,14 @@ struct DanTermCLI {
                 )
                 exit(0)
             }
-            let response = try request(command, socketPath: socketPath, environment: environment)
-            if let error = response.error {
-                throw CLIError(error.message)
+            // A nil reply means the app closed the connection and the method
+            // expected that -- a quit it honored exits before it can answer.
+            if let response = try request(command, socketPath: socketPath, environment: environment) {
+                if let error = response.error {
+                    throw CLIError(error.message)
+                }
+                try printResult(response.result ?? .null, mode: command.outputMode)
             }
-            try printResult(response.result ?? .null, mode: command.outputMode)
             exit(0)
         } catch let error as CLIError {
             fputs("danterm: \(error.message)\n", stderr)
@@ -166,11 +175,13 @@ struct DanTermCLI {
         }
     }
 
+    /// Sends one command and resolves its reply, or nil when the app exited
+    /// under the request because that is what the request asked for.
     private static func request(
         _ command: CLICommand,
         socketPath: String,
         environment: [String: String]
-    ) throws -> JsonRpcResponse {
+    ) throws -> JsonRpcResponse? {
         let fd = try connectSocket(path: socketPath, receiveTimeout: true)
         defer { Darwin.close(fd) }
 
@@ -182,14 +193,9 @@ struct DanTermCLI {
         let (requestId, request) = makeRequest(command)
         try writeJSON(request, to: fd)
 
-        while let line = try readLine(from: fd) {
-            let data = Data(line.utf8)
-            let response = try JSONDecoder().decode(JsonRpcResponse.self, from: data)
-            if response.id == .string(requestId) {
-                return response
-            }
+        return try awaitReply(requestId: requestId, method: command.request.method) {
+            try readLine(from: fd)
         }
-        throw CLIError("DanTerm closed the connection")
     }
 
     private static func requestPaneTapeFollow(
@@ -243,10 +249,12 @@ struct DanTermCLI {
         guard let socketPath = try? selectControlSocketPath(
             explicit: nil,
             environment: environment,
-            fallback: controlSocketPath().path
+            fallback: controlSocketPath().path,
+            method: .doctorPermissions
         ) else { return .unavailable }
         let command = CLICommand(request: .doctorPermissions, outputMode: .none)
-        guard let response = try? request(command, socketPath: socketPath, environment: environment),
+        let reply = try? request(command, socketPath: socketPath, environment: environment)
+        guard let response = reply ?? nil,
               response.error == nil,
               let result = response.result,
               let permissions = DoctorFacts.Permissions(jsonValue: result)
@@ -435,17 +443,52 @@ struct DanTermCLI {
 
 }
 
+/// Reads replies until the one matching this request arrives.
+///
+/// Returns nil when the app closed the stream first. That is a failure for an
+/// ordinary method, and the expected success for a method that ends the
+/// instance: a quit that worked takes the socket down with the app, so only an
+/// explicit error reply means it did not happen.
+func awaitReply(
+    requestId: String,
+    method: IpcRequestMethod,
+    nextLine: () throws -> String?
+) throws -> JsonRpcResponse? {
+    while let line = try nextLine() {
+        let response = try JSONDecoder().decode(JsonRpcResponse.self, from: Data(line.utf8))
+        if response.id == .string(requestId) {
+            return response
+        }
+    }
+    guard method.terminatesInstance else {
+        throw CLIError("DanTerm closed the connection")
+    }
+    return nil
+}
+
 /// Selects an explicit owner or the external-process fallback without crossing instances.
+///
+/// A method that ends the instance it reaches resolves only from `--socket`.
+/// Naming the target is the authorization, and the identity-derived fallback of
+/// the shipped binary is production's socket -- the one instance this verb must
+/// never reach by accident.
 func selectControlSocketPath(
     explicit: String?,
     environment: [String: String],
-    fallback: String
+    fallback: String,
+    method: IpcRequestMethod
 ) throws -> String {
     func nonEmptyValue(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    if method.terminatesInstance {
+        guard let explicit = nonEmptyValue(explicit) else {
+            throw CLIError("\(method.rawValue) requires an explicit --socket <path>")
+        }
+        return explicit
+    }
     if let explicit = nonEmptyValue(explicit) {
         return explicit
     }

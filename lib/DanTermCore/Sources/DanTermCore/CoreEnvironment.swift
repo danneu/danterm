@@ -1,7 +1,15 @@
-// Injectable environment for DanTermCore's nondeterministic edges: fresh IDs,
-// wall-clock time, and the home directory. Production callers use `.live`; tests
-// pass deterministic closures where saved/sent/asserted output must reproduce.
+// Injectable environment for DanTermCore's ambient edges: fresh IDs, wall-clock
+// time, the home directory, and the running process's instance identity.
+// Production callers use `.live`; tests pass deterministic closures where
+// saved/sent/asserted output must reproduce.
+//
+// Identity is unlike the other three. They are nondeterministic inputs that only
+// have to reproduce; identity is an AUTHORIZATION input -- IPC dispatch reads it
+// to decide whether the caller may end this instance. A test that leaves it
+// ambient gets the harness bundle, which holds no privilege, so the default
+// fails closed.
 import Foundation
+import DanTermProtocol
 
 /// Carries the pure core's ambient dependencies through explicit call-site seams.
 ///
@@ -22,10 +30,18 @@ struct CoreEnv: Sendable {
     /// passes `env.homeDirectory()` into the snapshot/IPC builders for exactly this
     /// reason; render helpers read the ambient default.
     var homeDirectory: @Sendable () -> String
+    /// The identity of the process this core is running inside.
+    ///
+    /// Authorization, not reproducibility: `quit` is admitted only for an
+    /// instance holding a launcher pool slot, and this seam is how pure dispatch
+    /// learns which instance it is. The live value is the app's own bundle, so a
+    /// caller cannot claim an identity it does not have.
+    var instanceIdentity: @Sendable () -> DanTermInstanceIdentity
 
     static let live = CoreEnv(
         newId: { UUID() },  // core-purity: ambient-seam
         now: { Date() },  // core-purity: ambient-seam
-        homeDirectory: { NSHomeDirectory() }  // core-purity: ambient-seam
+        homeDirectory: { NSHomeDirectory() },  // core-purity: ambient-seam
+        instanceIdentity: { DanTermInstanceIdentity(bundle: .main) }  // core-purity: ambient-seam
     )
 }
