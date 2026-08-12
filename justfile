@@ -31,7 +31,9 @@ build-icons:
     ./icon/build-icns.sh AppIcon-dev
 
 # Run all tests. Steps run as a bounded parallel pool; the step list lives in
-# scripts/run-test-suite.sh. Pass a job count to override (default: half the cores).
+# scripts/run-test-suite.sh. The pool leaves two cores and normal scheduling priority
+# to the desktop, so the machine stays usable during a run. Pass a job count to
+# override the worker count; the per-worker SwiftPM cap shrinks to match.
 test jobs="":
     ./scripts/run-test-suite.sh {{jobs}}
 

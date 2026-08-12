@@ -24,6 +24,13 @@ run_with_steps() {
     RUN_TEST_SUITE_STEPS_FILE="$steps_file" "$RUNNER" 4 >"$TEST_ROOT/output" 2>&1 && echo 0 || echo $?
 }
 
+# Same, but without an explicit worker count, so the runner picks its own defaults.
+run_with_default_jobs() {
+    local steps_file="$TEST_ROOT/steps"
+    printf '%s\n' "$@" >"$steps_file"
+    RUN_TEST_SUITE_STEPS_FILE="$steps_file" "$RUNNER" >"$TEST_ROOT/output" 2>&1 && echo 0 || echo $?
+}
+
 # An all-passing list exits clean.
 rc="$(run_with_steps 'true' 'true' 'true')"
 [[ "$rc" == "0" ]] || fail "all-passing run exited $rc; expected 0"
@@ -55,5 +62,67 @@ grep -q 'second-marker' "$TEST_ROOT/output" \
     || fail "queue aborted before the trailing passing step ran: $(cat "$TEST_ROOT/output")"
 grep -q '2 of 3 steps FAILED' "$TEST_ROOT/output" \
     || fail "failure count was not reported: $(cat "$TEST_ROOT/output")"
+
+# The pool nests: each worker can be a whole `swift build`, and SwiftPM defaults to one
+# compile job per core. Uncapped, N workers ask for N x ncpu compile jobs on an ncpu
+# machine, which saturates the desktop and makes the OS UI lag. These cases pin the two
+# halves of the bound -- the arithmetic, and the shim that carries it to every child.
+
+# With defaults the runner leaves the machine some headroom: workers x per-worker
+# compile jobs must not exceed the cores it says it is budgeting for.
+rc="$(run_with_default_jobs 'true')"
+[[ "$rc" == "0" ]] || fail "default-jobs run exited $rc; expected 0"
+header="$(grep '^run-test-suite: .*workers' "$TEST_ROOT/output")"
+workers="$(sed -E 's/.*, ([0-9]+) parallel workers.*/\1/' <<<"$header")"
+per_worker="$(sed -E 's/.*swift -j ([0-9]+).*/\1/' <<<"$header")"
+budget="$(sed -E 's/.*<= ([0-9]+) of [0-9]+ cores.*/\1/' <<<"$header")"
+ncpu="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+[[ "$workers" =~ ^[0-9]+$ ]] || fail "header did not report a worker count: $header"
+[[ "$per_worker" =~ ^[0-9]+$ ]] || fail "header did not report a per-worker swift job cap: $header"
+[[ "$budget" =~ ^[0-9]+$ ]] || fail "header did not report a core budget: $header"
+(( per_worker >= 1 )) || fail "per-worker swift job cap was $per_worker; expected at least 1"
+(( workers * per_worker <= budget )) \
+    || fail "budget overshot: $workers workers x $per_worker jobs > $budget"
+(( budget < ncpu )) || fail "budget $budget left no headroom on a $ncpu-core machine"
+
+# A larger worker count must shrink the per-worker cap rather than multiply through it.
+# This is the case that actually bites: `just test 8` on an uncapped pool is 8 x ncpu.
+# The step string stays single-quoted so the worker, not this test, expands it.
+# shellcheck disable=SC2016
+rc="$(run_with_steps 'test "$DANTERM_SWIFT_JOBS" -ge 1')"
+[[ "$rc" == "0" ]] || fail "workers did not inherit a per-worker swift job cap"
+header="$(grep '^run-test-suite: .*workers' "$TEST_ROOT/output")"
+explicit_per_worker="$(sed -E 's/.*swift -j ([0-9]+).*/\1/' <<<"$header")"
+(( explicit_per_worker * 4 <= budget || explicit_per_worker == 1 )) \
+    || fail "8-worker-style override kept a per-worker cap of $explicit_per_worker"
+
+# The cap has to reach every descendant, not just the `swift` calls written in the step
+# list: steps call scripts, and those scripts call SwiftPM too. A shim first on PATH is
+# the only placement a new call site cannot forget, so pin that `swift` resolves to it
+# and that it injects -j into a build. DANTERM_SWIFT is the project's existing override
+# for which swift to run, so pointing it at `echo` reveals the command line.
+run_shim_step() {
+    printf '%s\n' "$1" >"$TEST_ROOT/steps"
+    DANTERM_SWIFT=/bin/echo RUN_TEST_SUITE_STEPS_FILE="$TEST_ROOT/steps" "$RUNNER" 4 \
+        >"$TEST_ROOT/shim-output" 2>&1 \
+        || fail "shim run failed: $(cat "$TEST_ROOT/shim-output")"
+}
+
+run_shim_step 'swift build --package-path lib/TerminalCore >"'"$TEST_ROOT"'/shim-cmd"'
+grep -qE '^build -j [0-9]+ --package-path lib/TerminalCore$' "$TEST_ROOT/shim-cmd" \
+    || fail "shim did not inject a job cap into swift build: $(cat "$TEST_ROOT/shim-cmd")"
+
+# Non-build subcommands take no -j; injecting one would break them.
+run_shim_step 'swift --version >"'"$TEST_ROOT"'/shim-version"'
+if grep -q -- '-j' "$TEST_ROOT/shim-version"; then
+    fail "shim injected a job cap into a non-build subcommand: $(cat "$TEST_ROOT/shim-version")"
+fi
+
+# The gate runs below normal scheduling priority, so the foreground UI wins the CPU it
+# needs even while the pool is packed. Without this the desktop stalls for the whole run.
+# The step carries no quotes on purpose: xargs -I strips them out of the step line.
+# shellcheck disable=SC2016
+rc="$(run_with_steps 'test $(ps -o nice= -p $$) -gt 0')"
+[[ "$rc" == "0" ]] || fail "gate steps did not run at reduced scheduling priority"
 
 echo "run-test-suite_test: ok"
