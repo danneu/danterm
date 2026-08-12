@@ -32,6 +32,14 @@ if [[ "${1:-}" == "test" && -e "$DANTERM_TEST_SWIFT_FAIL" ]]; then
     exit 17
 fi
 if [[ "${1:-}" == "test" && -e "$DANTERM_TEST_SWIFT_HANG" ]]; then
+    # Stands in for swiftpm-testing-helper, which runs in a session of its own
+    # and therefore survives a signal aimed at this process's group.
+    python3 -c 'import os, sys, time
+os.setsid()
+with open(sys.argv[1], "w") as handle:
+    handle.write(str(os.getpid()))
+while True:
+    time.sleep(1)' "$DANTERM_TEST_SWIFT_ESCAPEE_PID" &
     printf '%s\n' "$$" > "$DANTERM_TEST_SWIFT_HANG_PID"
     while true; do sleep 1; done
 fi
@@ -42,12 +50,14 @@ swift_log="$TMP/swift.log"
 swift_fail="$TMP/swift-fail"
 swift_hang="$TMP/swift-hang"
 swift_hang_pid="$TMP/swift-hang.pid"
+swift_escapee_pid="$TMP/swift-escapee.pid"
 export DANTERM_REPO_ROOT="$fixture"
 export DANTERM_SWIFT="$fake_swift"
 export DANTERM_TEST_SWIFT_LOG="$swift_log"
 export DANTERM_TEST_SWIFT_FAIL="$swift_fail"
 export DANTERM_TEST_SWIFT_HANG="$swift_hang"
 export DANTERM_TEST_SWIFT_HANG_PID="$swift_hang_pid"
+export DANTERM_TEST_SWIFT_ESCAPEE_PID="$swift_escapee_pid"
 
 run_wrapper() {
     "$WRAPPER" "$@"
@@ -138,6 +148,14 @@ grep -q 'TerminalPTY test lane exceeded 1s' "$TMP/timeout.out" \
 hang_pid="$(cat "$swift_hang_pid")"
 if kill -0 "$hang_pid" 2>/dev/null; then
     fail "timed-out test left its Swift process running"
+fi
+# The real lane's test binary runs in a session of its own, so a group-only kill
+# leaves it spinning at full CPU with pid 1 for a parent -- one was found 44
+# minutes after the deadline that was supposed to have ended it.
+escapee_pid="$(cat "$swift_escapee_pid")"
+if kill -0 "$escapee_pid" 2>/dev/null; then
+    kill -9 "$escapee_pid" 2>/dev/null || true
+    fail "timed-out test left a descendant outside its process group running"
 fi
 assert_counts 9 10 8 "timed-out run: parallel-lane timeout must stop before the census lane"
 [[ "$(cat "$stamp")" == "$old_stamp" ]] || fail "timed-out run published a fingerprint"
