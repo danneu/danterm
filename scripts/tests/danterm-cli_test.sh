@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Smoke-test the bundled danterm CLI against an isolated development slot.
-set -euo pipefail
+set -Eeuo pipefail
+
+# Name the failing line. Nearly every assertion here is a bare `[[ ... ]]`, which
+# prints nothing at all when it fails, so without this the only symptom of a broken
+# assertion is the script's exit status -- and finding which of four hundred lines
+# produced it means re-running the whole slot-claiming script under `bash -x`.
+# `-E` above is what carries this trap into the functions below.
+trap 'echo "danterm-cli_test.sh: failed at line $LINENO" >&2' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 CLI_PATH="$SCRIPT_DIR/.build/DanTerm Dev.app/Contents/Helpers/danterm"
@@ -8,54 +15,59 @@ launch_output="$(mktemp)"
 launch_error="$(mktemp)"
 smoke_output="$(mktemp)"
 smoke_error="$(mktemp)"
-launcher_pid=""
+# Holds socket paths that must never resolve, for the cases asserting the CLI
+# ignores an ambient DANTERM_SOCK.
+unusable_dir="$(mktemp -d)"
+slot=""
 
-# `reap_pid` bounds the waits on the launcher below. A bare `wait` parks for good on
-# a child that blocks SIGTERM, and one of those waits is in the EXIT trap -- so the
-# hang would outlive the Ctrl-C meant to end it, holding a dev slot that every other
-# checkout on this machine shares.
-# shellcheck source=../lib/bounded-wait.sh
-source "$SCRIPT_DIR/scripts/lib/bounded-wait.sh"
+# Returns this run's slot to the pool that every checkout on the machine shares.
+#
+# The launcher exits as soon as it prints its handle, so the app outlives it and no
+# launcher death can free the slot -- only `--stop <slot>` can. Idempotent, because
+# the normal path releases the slot mid-script to prove the app went away, and the
+# EXIT trap then runs anyway.
+release_slot() {
+    [[ "$slot" =~ ^[0-9]+$ ]] || return 0
+    local released="$slot"
+    slot=""
+    python3 "$SCRIPT_DIR/scripts/dev-slot-launcher.py" --stop "$released" >/dev/null 2>&1 || true
+}
 
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
-    if [[ "$launcher_pid" =~ ^[0-9]+$ ]]; then
-        kill -TERM "$launcher_pid" 2>/dev/null || true
-        reap_pid "$launcher_pid"
-    fi
+    release_slot
     rm -f "$launch_output" "$launch_error" "$smoke_output" "$smoke_error"
+    rm -rf "$unusable_dir"
     exit "$status"
 }
 trap cleanup EXIT INT TERM
 
-python3 "$SCRIPT_DIR/scripts/dev-slot-launcher.py" >"$launch_output" 2>"$launch_error" &
-launcher_pid=$!
-handle=""
-for _ in $(seq 1 180); do
-    if [[ -s "$launch_output" ]]; then
-        handle="$(tail -1 "$launch_output")"
-        printf '%s\n' "$handle" | jq -e . >/dev/null 2>&1 && break
-    fi
-    kill -0 "$launcher_pid" 2>/dev/null || {
-        echo "DanTerm slot launcher exited before emitting a handle" >&2
-        cat "$launch_error" >&2
-        exit 1
-    }
-    sleep 1
-done
+# Run the launcher in the foreground. It stages the bundle, spawns the app, and waits
+# for the control socket to accept a connection before it prints one JSON handle and
+# exits -- so by the time it returns, the app behind the handle is already reachable
+# and no poll loop here can improve on that.
+if ! python3 "$SCRIPT_DIR/scripts/dev-slot-launcher.py" >"$launch_output" 2>"$launch_error"; then
+    echo "DanTerm slot launcher failed" >&2
+    cat "$launch_error" >&2
+    exit 1
+fi
+handle="$(tail -1 "$launch_output")"
 printf '%s\n' "$handle" | jq -e . >/dev/null 2>&1 || {
     echo "DanTerm slot launcher did not emit a handle" >&2
     cat "$launch_error" >&2
     exit 1
 }
+# Read the slot first: from here on a failure owns a slot that the trap must release.
+slot="$(printf '%s\n' "$handle" | jq -er '.slot')"
 socket="$(printf '%s\n' "$handle" | jq -er '.socketPath')"
 bundle_id="$(printf '%s\n' "$handle" | jq -er '.bundleId')"
 reported_pid="$(printf '%s\n' "$handle" | jq -er '.pid')"
-slot="$(printf '%s\n' "$handle" | jq -er '.slot')"
 [[ "$slot" -ge 1 && "$slot" -le 8 ]]
 [[ "$bundle_id" == "com.danneu.danterm-dev.$slot" ]]
-[[ "$reported_pid" == "$launcher_pid" ]]
+# The handle names the app, not the launcher, so the one thing to check is that the
+# pid is live. Comparing it to the launcher's own pid could never hold.
+kill -0 "$reported_pid"
 [[ "$socket" == "$HOME/Library/Caches/$bundle_id/control.sock" ]]
 
 # Asserts a string is absent from the given files.
@@ -156,7 +168,7 @@ done
 # `skill` is local-only and emits the canonical bundled skill bytes without
 # consulting pane targeting or the control socket. Exercise the helper directly
 # and through the shape installed on PATH.
-export DANTERM_SOCK="$launch_output/unusable.sock"
+export DANTERM_SOCK="$unusable_dir/unusable.sock"
 run_cli skill
 [[ $status -eq 0 ]]
 [[ ! -s "$err" ]]
@@ -240,20 +252,8 @@ grep -qx 'danterm: unknown flag: --bogus' "$err"
 refute 'DanTerm is not running' "$out" "$err"
 rm -rf "$doctor_home"
 
-for _ in $(seq 1 30); do
-    if [[ -S "$socket" ]]; then
-        break
-    fi
-    sleep 1
-done
-
-if [[ -z "$socket" ]]; then
-    echo "DanTerm control socket did not appear" >&2
-    exit 1
-fi
-
 export DANTERM=1
-export DANTERM_SOCK="$launch_output/wrong.sock"
+export DANTERM_SOCK="$unusable_dir/wrong.sock"
 
 slot_cli() {
     "$CLI_PATH" --socket "$socket" "$@"
@@ -414,11 +414,15 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         raise SystemExit("no response for unknown method")
 PY
 
-kill -TERM "$launcher_pid"
-reap_pid "$launcher_pid"
-launcher_pid=""
+release_slot
+# `--stop` waits for the slot lock to release, but the socket file can outlive the
+# app that bound it. Written as an `if` because a bare `[[ ... ]] && break` whose test
+# fails on the final pass is the loop body's last command, and errexit would end the
+# run there rather than fall through to the assertion below.
 for _ in $(seq 1 10); do
-    [[ ! -S "$socket" ]] && break
+    if [[ ! -S "$socket" ]]; then
+        break
+    fi
     sleep 0.5
 done
 if env -u DANTERM_PANE "$CLI_PATH" --socket "$socket" ls >"$smoke_output" 2>"$smoke_error"; then
