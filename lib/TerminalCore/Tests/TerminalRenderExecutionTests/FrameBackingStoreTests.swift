@@ -85,8 +85,11 @@ struct FrameBackingStoreTests {
             }
             let blitted = try blitBitmap(store, plan: plan, metrics: metrics)
             let direct = try renderBitmap(plan: plan, metrics: metrics)
-            if blitted.bytes != direct.bytes {
-                Issue.record("\(context) diverged at step \(index), damage: \(damage)")
+            guard expectBitmap(
+                blitted,
+                matches: direct,
+                "\(context) diverged at step \(index), damage: \(damage)"
+            ) else {
                 return (shifted, applied)
             }
         }

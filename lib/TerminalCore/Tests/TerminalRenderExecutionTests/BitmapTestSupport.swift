@@ -81,23 +81,27 @@ struct Bitmap {
 ///
 /// The first differing pixel is also a better answer than an edit script, since
 /// these surfaces differ by a region rather than by an insertion.
+///
+/// Returns whether the surfaces matched, for the callers that stop at the first
+/// divergence rather than reporting every one.
+@discardableResult
 func expectBitmap(
     _ actual: Bitmap,
     matches expected: Bitmap,
     _ label: Comment? = nil,
     sourceLocation: SourceLocation = #_sourceLocation
-) {
+) -> Bool {
     guard
         actual.width != expected.width
             || actual.height != expected.height
             || actual.bytes != expected.bytes
-    else { return }
+    else { return true }
 
     let prefix = label.map { "\($0): " } ?? ""
     guard actual.width == expected.width, actual.height == expected.height else {
         let sizes = "\(actual.width)x\(actual.height) != \(expected.width)x\(expected.height)"
         Issue.record("\(prefix)surfaces differ in size: \(sizes)", sourceLocation: sourceLocation)
-        return
+        return false
     }
 
     var index = 0
@@ -112,6 +116,7 @@ func expectBitmap(
     let where_ = "pixel (\(x), \(y)) of \(actual.width)x\(actual.height)"
     let values = "\(actual.pixel(x: x, yFromTop: y)) != \(expected.pixel(x: x, yFromTop: y))"
     Issue.record("\(prefix)first differs at \(where_): \(values)", sourceLocation: sourceLocation)
+    return false
 }
 
 final class BitmapSurface {
