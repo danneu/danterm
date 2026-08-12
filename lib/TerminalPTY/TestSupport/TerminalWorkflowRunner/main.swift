@@ -199,7 +199,9 @@ private enum TerminalWorkflowRunner {
         while ContinuousClock.now < deadline {
             controller.synchronizeState()
             if controller.readFullHistoryText().contains(marker) { return }
-            await Task.yield()
+            // Sleeping, not yielding: this wait shares a machine with the pane it is
+            // waiting on, and a spin competes with the very work that ends it.
+            try? await Task.sleep(for: .milliseconds(5))
         }
         throw RunnerError.timeout(marker)
     }
@@ -216,7 +218,7 @@ private enum TerminalWorkflowRunner {
             let history = controller.readFullHistoryText()
             if let anchorRange = history.range(of: anchor, options: .backwards),
                history[anchorRange.upperBound...].contains(marker) { return }
-            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(5))
         }
         throw RunnerError.timeout("\(marker) after \(anchor)")
     }

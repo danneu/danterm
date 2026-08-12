@@ -129,7 +129,10 @@ private final class EndSignal {
     func finish() { finished = true }
 
     func wait(until deadline: ContinuousClock.Instant) async -> Bool {
-        while finished == false && ContinuousClock.now < deadline { await Task.yield() }
+        while finished == false && ContinuousClock.now < deadline {
+            // Sleeping, not yielding: a spin here competes with the probe it awaits.
+            try? await Task.sleep(for: .milliseconds(5))
+        }
         return finished
     }
 }

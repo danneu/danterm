@@ -869,11 +869,7 @@ struct TerminalPaneSessionControllerTests {
         controller.sendText("continue\n")
         #expect(await host.waitForOutput(containing: Array("\u{1B}]52;c;aGVsbG8=\u{7}".utf8)))
         controller.synchronizeState()
-        var yields = 0
-        while events.isEmpty, yields < 10_000 {
-            yields += 1
-            await Task.yield()
-        }
+        await settles { events.isEmpty == false }
 
         #expect(events == ["clipboard:hello"])
         controller.synchronizeState()
@@ -902,21 +898,13 @@ struct TerminalPaneSessionControllerTests {
         controller.sendText("first\n")
         #expect(await host.waitForOutput(containing: Array("\u{1B}]52;c;aGVsbG8=\u{7}".utf8)))
         controller.synchronizeState()
-        var yields = 0
-        while events.isEmpty, yields < 10_000 {
-            yields += 1
-            await Task.yield()
-        }
+        await settles { events.isEmpty == false }
         #expect(events == ["clipboard:hello"])
 
         controller.sendText("second\n")
         #expect(await host.waitForOutput(containing: Array("\u{1B}[?2026l".utf8)))
         controller.synchronizeState()
-        yields = 0
-        while events.count < 2, yields < 10_000 {
-            yields += 1
-            await Task.yield()
-        }
+        await settles { events.count >= 2 }
         #expect(events == ["clipboard:hello", "frame"])
         controller.tearDown()
         await host.close()
@@ -2231,5 +2219,23 @@ private extension TerminalPaneSessionController {
         }
         synchronizeState()
         return predicate(self)
+    }
+}
+
+/// Polls `predicate` until it holds or the bound elapses, for waits on evidence
+/// a callback delivers rather than on state a controller can be asked for.
+///
+/// Sleeps rather than spinning on `Task.yield()`, and bounds the wait in time
+/// rather than in iterations. A yield count is not a bound a reader can reason
+/// about: yields are cheap, so ten thousand of them can pass in far less time
+/// than the callback needs on a loaded machine, which turns a wait that is
+/// merely slow into an assertion that fails for no reason the test names.
+@MainActor
+private func settles(within limit: Duration = .seconds(10), _ predicate: () -> Bool) async {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: limit)
+    while clock.now < deadline {
+        if predicate() { return }
+        try? await Task.sleep(for: .milliseconds(5))
     }
 }
