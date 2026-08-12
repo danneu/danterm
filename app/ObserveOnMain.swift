@@ -28,15 +28,26 @@ import Foundation
 /// extend this function to read what it needs, rather than reopen the question
 /// for every other site.
 ///
+/// `center` defaults to `NotificationCenter.default` and is named only by the
+/// sites that cannot use it: `NSWorkspace` posts to its own center, and one
+/// observer takes an injected center so a test can post to it. Those are the
+/// reasons this function takes a center at all -- without it they would each
+/// hand-roll the registration and re-decide the delivery queue, which is the
+/// one thing this file exists to prevent.
+///
+/// Callers that pass a center must keep it to remove the token with, because a
+/// token is only valid at the center that issued it.
+///
 /// Returns the observer token. Callers own it and must remove it on teardown,
 /// per rule 2 of docs/design/2026-06-09-appkit-lifetime-safety.md.
 @MainActor
 func observeOnMain(
     _ name: Notification.Name,
     object: Any? = nil,
+    center: NotificationCenter = .default,
     using body: @escaping @MainActor () -> Void
 ) -> NSObjectProtocol {
-    NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { _ in
+    center.addObserver(forName: name, object: object, queue: .main) { _ in
         // `assumeIsolated` reads back the guarantee `queue: .main` just made,
         // rather than hopping and giving up the same pass.
         MainActor.assumeIsolated {

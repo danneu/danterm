@@ -17,23 +17,17 @@ final class WorkspaceLifecycleObserver {
         self.notificationCenter = notificationCenter
 
         notificationTokens = [
-            notificationCenter.addObserver(
-                forName: NSWorkspace.willSleepNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.runtime?.setRenderingAvailable(false)
-                }
+            observeOnMain(
+                NSWorkspace.willSleepNotification,
+                center: notificationCenter
+            ) { [weak self] in
+                self?.runtime?.setRenderingAvailable(false)
             },
-            notificationCenter.addObserver(
-                forName: NSWorkspace.didWakeNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.runtime?.setRenderingAvailable(true)
-                }
+            observeOnMain(
+                NSWorkspace.didWakeNotification,
+                center: notificationCenter
+            ) { [weak self] in
+                self?.runtime?.setRenderingAvailable(true)
             },
         ]
     }

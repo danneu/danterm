@@ -31,26 +31,21 @@ final class TerminalBenchmarkStateRecorder {
             ProcessInfo.thermalStateDidChangeNotification,
             Notification.Name.NSProcessInfoPowerStateDidChange,
         ] {
-            let token = center.addObserver(
-                forName: name,
+            let token = observeOnMain(
+                name,
                 object: ProcessInfo.processInfo,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.record(reason: "machine-state-change")
-                }
+                center: center
+            ) { [weak self] in
+                self?.record(reason: "machine-state-change")
             }
             notificationTokens.append((center, token))
         }
         let workspaceCenter = NSWorkspace.shared.notificationCenter
-        let workspaceToken = workspaceCenter.addObserver(
-            forName: NSWorkspace.activeSpaceDidChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.record(reason: "active-space-change", activeSpaceChanged: true)
-            }
+        let workspaceToken = observeOnMain(
+            NSWorkspace.activeSpaceDidChangeNotification,
+            center: workspaceCenter
+        ) { [weak self] in
+            self?.record(reason: "active-space-change", activeSpaceChanged: true)
         }
         notificationTokens.append((workspaceCenter, workspaceToken))
     }
