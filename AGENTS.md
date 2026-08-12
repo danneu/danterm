@@ -216,6 +216,11 @@ prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
   notification permission (it launches the same way and activates the app).
   Drive the slot with an explicit `danterm --socket` argument every time; do not
   rely on ambient `DANTERM_SOCK`.
+- `just stop-slot <n>` -- **run this when you are done with your slot.** The pool
+  holds eight slots and every checkout on the machine shares them, so a slot you
+  abandon is one another agent cannot have. `just slots` prints the pool as JSON,
+  naming the checkout holding each busy slot. `just stop-slots` empties the whole
+  pool, so it belongs to the user, not to an agent working beside others.
 - `just build` / `just replace-dev` -- **the user's commands; do not run them
   unless asked.** Both overwrite `~/Applications/DanTerm Dev.app`, and
   `replace-dev` also quits the running instance the user may be working in.

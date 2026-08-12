@@ -54,6 +54,29 @@ Use `just launch-slot-optimized` for an optimized isolated build. Use
 the first time; it launches the same way and only lets the app activate and
 prompt.
 
+## Share the pool with the other worktrees
+
+The eight slots live in one user-global pool, not in the worktree, so every
+checkout and every agent on the machine draws from the same eight. Each launcher
+claims one slot for itself and stages its own signed clone of that checkout's
+build, so parallel agents test their own changes without seeing each other.
+
+Give the slot back when you are done with it, or the next agent finds the pool
+full:
+
+```sh
+just slots            # every slot as JSON, with the checkout holding each busy one
+just stop-slot 3      # kill slot 3's app and return that slot to the pool
+```
+
+`just stop-slots` empties the pool, which takes the slots other agents are
+working in. It is the user's command, not an agent's.
+
+A slot stays claimed for its launcher's whole build, so `just slots` reports one
+as `"state": "building"` with its checkout and no pid. That slot is not stuck; it
+is compiling. Occupancy comes from the slot's lock file, so a killed app frees
+its slot without leaving anything to clean up.
+
 ## Pass an allowed environment value
 
 The launcher does not inherit the launching shell's environment wholesale. To

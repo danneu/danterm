@@ -51,6 +51,12 @@ class PoolExhaustedError(Exception):
     exit_status = POOL_EXHAUSTED_STATUS
 
 
+class SlotStopError(Exception):
+    """Reports a slot that killing an app cannot free, such as one still building."""
+
+    exit_status = 1
+
+
 @dataclass
 class SlotClaim:
     """Owns a kernel-released slot lock the launched app inherits and keeps."""
@@ -64,15 +70,26 @@ class SlotClaim:
             self.descriptor = -1
 
 
-def claim_development_slot(root: Path, slots: Iterable[int] = DEVELOPMENT_SLOTS) -> SlotClaim:
-    """Claims the first free nonzero slot without any stale-state cleanup."""
+def slot_lock_path(root: Path, slot: int) -> Path:
+    """Holds both facts about a slot in one file: the flock says busy, the body says who.
+
+    Agents in separate checkouts share this one pool, so every launcher must be
+    able to read an occupancy another launcher wrote. A second file recording the
+    owner could disagree with the lock; the same file cannot.
+    """
 
     locks = root / "locks"
     locks.mkdir(parents=True, exist_ok=True)
+    return locks / f"slot-{slot}.lock"
+
+
+def claim_development_slot(root: Path, slots: Iterable[int] = DEVELOPMENT_SLOTS) -> SlotClaim:
+    """Claims the first free nonzero slot without any stale-state cleanup."""
+
     for slot in slots:
         if slot == 0:
             continue
-        descriptor = os.open(locks / f"slot-{slot}.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        descriptor = os.open(slot_lock_path(root, slot), os.O_RDWR | os.O_CREAT, 0o600)
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -80,7 +97,98 @@ def claim_development_slot(root: Path, slots: Iterable[int] = DEVELOPMENT_SLOTS)
             continue
         os.set_inheritable(descriptor, True)
         return SlotClaim(slot=slot, descriptor=descriptor)
-    raise PoolExhaustedError("all DanTerm development slots are in use")
+    raise PoolExhaustedError(
+        "all DanTerm development slots are in use; "
+        "`./scripts/dev-slot-launcher.py --list` names the occupants"
+    )
+
+
+def describe_occupant(claim: SlotClaim, description: Mapping[str, object]) -> None:
+    """Names the occupant while the slot is held, so a busy slot is never anonymous.
+
+    The launcher writes twice: once at the claim, when only the checkout is known,
+    and again at launch, when the app has a pid and a socket. Whoever finds the
+    slot busy in between still learns which checkout is holding it.
+    """
+
+    payload = json.dumps(dict(description), separators=(",", ":")).encode("utf-8")
+    os.ftruncate(claim.descriptor, 0)
+    os.pwrite(claim.descriptor, payload, 0)
+
+
+def read_occupant(lock_path: Path) -> dict[str, object] | None:
+    """Reads an occupancy record without taking the lock that would prove it stale."""
+
+    try:
+        contents = lock_path.read_bytes()
+    except OSError:
+        return None
+    try:
+        record = json.loads(contents)
+    except ValueError:
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def slot_is_claimed(lock_path: Path) -> bool:
+    """Asks the kernel who owns a slot, since only the lock survives an unclean death.
+
+    A record left behind by a killed app proves nothing on its own. Taking the
+    lock and dropping it again is the one test that cannot go stale.
+    """
+
+    if not lock_path.exists():
+        return False
+    descriptor = os.open(lock_path, os.O_RDWR)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return False
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(descriptor)
+
+
+def survey_slots(root: Path, slots: Iterable[int] = DEVELOPMENT_SLOTS) -> list[dict[str, object]]:
+    """Reports the whole shared pool, because no one checkout knows what it holds."""
+
+    rows: list[dict[str, object]] = []
+    for slot in slots:
+        lock_path = root / "locks" / f"slot-{slot}.lock"
+        if not slot_is_claimed(lock_path):
+            rows.append({"slot": slot, "free": True})
+            continue
+        row: dict[str, object] = dict(read_occupant(lock_path) or {})
+        row.update({"slot": slot, "free": False})
+        rows.append(row)
+    return rows
+
+
+def stop_slot(root: Path, slot: int, timeout: float = 5.0) -> dict[str, object]:
+    """Returns one agent's slot to the shared pool without disturbing the others.
+
+    Killing the app's whole session is the only stop available: the app has no
+    quit command, and it forks shells that inherit the slot lock. A slot still
+    building is refused instead, because the launcher holding it is not a session
+    leader, so killing its group would reach the caller's own shell.
+    """
+
+    lock_path = root / "locks" / f"slot-{slot}.lock"
+    if not slot_is_claimed(lock_path):
+        raise SlotStopError(f"slot {slot} is already free")
+    # The lock is held, so the recorded pid names a process that is still alive
+    # and cannot have been reused by an unrelated one.
+    occupant = read_occupant(lock_path) or {}
+    pid = occupant.get("pid")
+    if not isinstance(pid, int):
+        raise SlotStopError(f"slot {slot} holds no running app to stop")
+    terminate_session(pid)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not slot_is_claimed(lock_path):
+            return dict(occupant)
+        time.sleep(0.02)
+    raise SlotStopError(f"slot {slot} was still held {timeout:g}s after its app was killed")
 
 
 @contextmanager
@@ -384,7 +492,54 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
         metavar="NAME",
         help="forward one allowlisted DanTerm launch variable; may be repeated",
     )
+    pool = parser.add_mutually_exclusive_group()
+    pool.add_argument(
+        "--list",
+        action="store_true",
+        help="print every slot in the shared pool as JSON and exit, building nothing",
+    )
+    pool.add_argument(
+        "--stop",
+        type=int,
+        choices=DEVELOPMENT_SLOTS,
+        metavar="SLOT",
+        help="kill the app holding one slot and exit; this is how you release your own",
+    )
+    pool.add_argument(
+        "--stop-all",
+        action="store_true",
+        help="kill every slot app, including ones other agents and checkouts launched",
+    )
     return parser.parse_args(arguments)
+
+
+def run_pool_command(options: argparse.Namespace, slot_root: Path) -> int:
+    """Answers the pool questions that need no build, so they stay instant and safe.
+
+    Kept out of main()'s launch path because none of it may claim a slot, build,
+    or stage a bundle: an agent asks what the pool holds exactly when the pool is
+    the problem.
+    """
+
+    if options.list:
+        print(json.dumps(survey_slots(slot_root), separators=(",", ":")), flush=True)
+        return 0
+    targets = (
+        [row["slot"] for row in survey_slots(slot_root) if not row["free"]]
+        if options.stop_all
+        else [options.stop]
+    )
+    stopped: list[dict[str, object]] = []
+    failures: list[SlotStopError] = []
+    for slot in targets:
+        try:
+            stopped.append(stop_slot(slot_root, int(slot)))
+        except SlotStopError as error:
+            failures.append(error)
+    print(json.dumps(stopped, separators=(",", ":")), flush=True)
+    for error in failures:
+        print(f"dev-slot-launcher: {error}", file=sys.stderr)
+    return failures[0].exit_status if failures else 0
 
 
 def main(arguments: list[str]) -> int:
@@ -393,11 +548,16 @@ def main(arguments: list[str]) -> int:
     account = pwd.getpwuid(os.getuid())
     home = Path(account.pw_dir)
     slot_root = home / "Library" / "Caches" / "com.danneu.danterm-dev-slots"
+    if options.list or options.stop or options.stop_all:
+        return run_pool_command(options, slot_root)
     try:
         claim = claim_development_slot(slot_root)
     except PoolExhaustedError as error:
         print(f"dev-slot-launcher: {error}", file=sys.stderr)
         return error.exit_status
+    # The claim is held across the build, so name the checkout now: until the app
+    # exists, that is all another agent finding this slot busy can be told.
+    describe_occupant(claim, {"state": "building", "checkout": str(repository_root)})
 
     build_arguments = [str(repository_root / "dev-build.sh"), "--no-install"]
     if options.release:
@@ -436,13 +596,15 @@ def main(arguments: list[str]) -> int:
         environment,
         slot_log_path(slot_root, slot),
     )
+    handle = launch_handle(identity, pid)
+    describe_occupant(claim, {"state": "running", "checkout": str(repository_root), **handle})
     claim.close()
     try:
         await_control_socket(Path(str(identity["socketPath"])), pid)
     except LaunchFailedError as error:
         print(f"dev-slot-launcher: {error}", file=sys.stderr)
         return error.exit_status
-    print(json.dumps(launch_handle(identity, pid), separators=(",", ":")), flush=True)
+    print(json.dumps(handle, separators=(",", ":")), flush=True)
     return 0
 
 

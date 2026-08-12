@@ -153,6 +153,20 @@ and only lets the app activate and prompt. Use
 `just launch-slot-optimized` for an optimized build. Pool exhaustion exits with
 status 75 and starts no process.
 
+The eight slots are shared by every checkout on the machine, so agents in
+separate worktrees launch beside each other and must give their slots back. Run
+`just stop-slot <n>` on the slot from your handle when you are done with it:
+
+    just slots                 # every slot as JSON, with the checkout holding it
+    just stop-slot 3           # kill slot 3's app and return it to the pool
+    just stop-slots            # the user's broom: empties the pool, other agents included
+
+A busy slot reports `state`, `checkout`, `pid`, `bundleId`, and `socketPath`; a
+slot still building reports only `state` and `checkout`, and refuses to be
+stopped, because the process holding it is the launcher, not an app. Occupancy
+comes from the slot's lock, so an app that died leaves its slot free however it
+went.
+
 ## Shell integration capability
 
 DanTerm ships opt-in zsh, Bash, and fish integrations at

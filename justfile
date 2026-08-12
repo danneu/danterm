@@ -282,6 +282,18 @@ launch-slot-optimized:
 launch-slot-prime:
     ./scripts/dev-slot-launcher.py --foreground
 
+# Show every development slot and the checkout holding it
+slots:
+    @./scripts/dev-slot-launcher.py --list
+
+# Release one development slot back to the shared pool
+stop-slot slot:
+    @./scripts/dev-slot-launcher.py --stop {{slot}}
+
+# Release every development slot, including ones other agents launched
+stop-slots:
+    @./scripts/dev-slot-launcher.py --stop-all
+
 # Show current version
 version:
     @echo "v{{_current_version}}"

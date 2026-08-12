@@ -120,6 +120,95 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             "--development-slot-lock-fd=7",
         ])
 
+    def test_survey_names_the_checkout_holding_each_busy_slot(self) -> None:
+        # Intent: a busy slot reports which checkout holds it and what it is doing.
+        # Why it exists: agents in separate worktrees share one eight-slot pool, so
+        #   "all slots are in use" is unactionable unless the occupants can be named.
+        # Scenario: an agent hits pool exhaustion and asks what is holding the pool.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            claim = launcher.claim_development_slot(root, range(1, 3))
+            self.addCleanup(claim.close)
+            launcher.describe_occupant(claim, {
+                "state": "running",
+                "checkout": "/Users/test/worktrees/feature",
+                "pid": 4242,
+            })
+
+            rows = launcher.survey_slots(root, range(1, 3))
+
+            self.assertEqual(rows[0], {
+                "slot": 1,
+                "free": False,
+                "state": "running",
+                "checkout": "/Users/test/worktrees/feature",
+                "pid": 4242,
+            })
+            self.assertEqual(rows[1], {"slot": 2, "free": True})
+
+    def test_survey_ignores_the_record_of_a_slot_the_kernel_has_released(self) -> None:
+        # Intent: only the lock decides occupancy; a leftover record never does.
+        # Why it exists: an app killed uncleanly leaves its record on disk, and
+        #   trusting that record would hide a free slot from every other checkout.
+        # Scenario: an agent's machine sleeps or its slot app is force-quit.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            claim = launcher.claim_development_slot(root, range(1, 2))
+            launcher.describe_occupant(claim, {"state": "running", "pid": 4242})
+            claim.close()
+
+            self.assertEqual(launcher.survey_slots(root, range(1, 2)), [{"slot": 1, "free": True}])
+
+    def test_stopping_a_slot_kills_its_app_and_leaves_the_others_alone(self) -> None:
+        # Intent: --stop frees exactly the named slot and returns it to the pool.
+        # Why it exists: with no way to release a slot, abandoned apps fill all eight
+        #   and the next agent cannot launch; a broad kill would take working slots too.
+        # Scenario: an agent finishes testing its change and releases the slot it holds.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pids = []
+            for expected_slot in (1, 2):
+                # One claim open at a time, as in a launcher process: an app started
+                # while a second claim is open would inherit that slot's lock too.
+                claim = launcher.claim_development_slot(root, range(1, 3))
+                self.assertEqual(claim.slot, expected_slot)
+                pid = launcher.spawn_detached(
+                    Path("/bin/sh"),
+                    ["sh", "-c", "sleep 300"],
+                    {"PATH": "/usr/bin:/bin"},
+                    root / f"slot-{claim.slot}.log",
+                )
+                pids.append(pid)
+                launcher.describe_occupant(claim, {"state": "running", "pid": pid})
+                claim.close()
+            self.addCleanup(launcher.terminate_session, pids[1])
+
+            stopped = launcher.stop_slot(root, 1)
+
+            self.assertEqual(stopped["pid"], pids[0])
+            self.assertEqual(
+                [row["free"] for row in launcher.survey_slots(root, range(1, 3))],
+                [True, False],
+            )
+
+    def test_stopping_refuses_a_slot_that_is_free_or_still_building(self) -> None:
+        # Intent: a stop that cannot name a running app kills nothing.
+        # Why it exists: a launcher holding a slot through its build is not a session
+        #   leader, so killing its process group would reach the caller's own shell,
+        #   and a stale pid from a freed slot may belong to an unrelated process.
+        # Scenario: an agent stops a slot number it read from an out-of-date handle.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaises(launcher.SlotStopError):
+                launcher.stop_slot(root, 1)
+
+            claim = launcher.claim_development_slot(root, range(1, 2))
+            self.addCleanup(claim.close)
+            launcher.describe_occupant(claim, {"state": "building", "checkout": "/checkout"})
+
+            with self.assertRaises(launcher.SlotStopError):
+                launcher.stop_slot(root, 1)
+
     def test_launched_app_releases_the_caller_pipe_and_keeps_the_claim(self) -> None:
         # Intent: the launcher hands the app off instead of becoming it, so a caller's
         #   `just launch-slot | tail -2` reaches end-of-file while the app keeps running.
