@@ -264,7 +264,7 @@ recording schema audit.
 ## Commit progress
 
 - [x] 1. delete the flight-tape build capability so every pane records
-- [ ] 2. add an input-direction byte event to the neutral recording vocabulary
+- [x] 2. add an input-direction byte event to the neutral recording vocabulary
 - [ ] 3. record input bytes at the PTY write boundary with origin stamps
 - [ ] 4. stamp pane input with its originating system event time
 
@@ -283,3 +283,24 @@ recording schema audit.
   need a real spawned child to observe a tape, and the host initializer is the
   narrowest layer that owns the claim. The stronger half of the proof is that the
   suppressing parameter no longer exists in any signature on that path.
+- **Commit 2.** The event is `write`, named for the boundary operation the way
+  `feed` is, and it shares `feed`'s payload grammar exactly: base64 or readable
+  text on the way in, base64 on the way out. The intent-shaped `input` case keeps
+  its name and its meaning; the two are different kinds of fact.
+- **Commit 2.** The origin stamp is `originElapsedNanoseconds`, inert at decode
+  like `elapsedNanoseconds`, and the schema admits it on `write` alone -- child
+  output has no origin earlier than its own transfer. In the snapshot document it
+  sits inside the event object, beside the elapsed stamp already there. The
+  follow record shape hoists elapsed above the event, so where the origin sits
+  there is decided with the emitter in commit 3.
+- **Commit 2.** Retention charges the new event's payload here rather than with
+  commit 3's record sites, so no revision of the tree exists in which a
+  payload-bearing event is retained for free.
+
+## Follow Up
+
+- `scripts/tests/terminal_tape_to_fixture_test.py`, in
+  `test_truncated_capture_is_refused_without_an_override`: the second half passes
+  `--allow-truncated`, a flag `scripts/terminal-tape-to-fixture.py` does not
+  define, so the conversion fails in argparse rather than at the truncation
+  check. The test asserts less than its name claims. Pre-existing, untouched here.

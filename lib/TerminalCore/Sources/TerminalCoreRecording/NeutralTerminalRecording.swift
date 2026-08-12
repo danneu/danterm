@@ -215,6 +215,9 @@ public struct NeutralTerminalMouseEvent: Equatable, Sendable {
 /// One owner-ordered terminal transition; checkpoints retain corpus expectation positions.
 public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
     case feed([UInt8])
+    /// Bytes that crossed the pane boundary toward the child, recorded as transmitted. Replay
+    /// ignores them: only `feed` drives the terminal, and echoing these would double the input.
+    case write([UInt8])
     case input(key: TerminalInputKey, modifiers: TerminalKeyModifiers)
     case paste(String)
     case focus(Bool)
@@ -228,6 +231,7 @@ extension NeutralTerminalRecordingEvent: Codable {
     private enum CodingKeys: String, CodingKey {
         case type, text, base64, columns, rows, action, key, scalar, modifiers, focused
         case button, column, row, offsetX, clickCount, expect, elapsedNanoseconds
+        case originElapsedNanoseconds
     }
 
     public init(from decoder: any Decoder) throws {
@@ -240,26 +244,24 @@ extension NeutralTerminalRecordingEvent: Codable {
         }
         switch type {
         case "feed":
-            let encodings = Set(["base64", "text"]).intersection(keys)
-            guard encodings.count == 1, let encoding = encodings.first else {
-                throw NeutralTerminalRecordingError.invalidEvent(type)
-            }
-            try Self.validateKeys(
+            self = .feed(try Self.decodeBytes(
                 keys,
-                required: ["type", encoding],
+                values: values,
                 optional: ["elapsedNanoseconds"],
                 type: type
-            )
-            if encoding == "text" {
-                let text = try values.decode(String.self, forKey: .text)
-                self = .feed(Array(text.utf8))
-            } else {
-                let base64 = try values.decode(String.self, forKey: .base64)
-                guard let data = Data(base64Encoded: base64) else {
-                    throw NeutralTerminalRecordingError.invalidBase64(base64)
-                }
-                self = .feed(Array(data))
+            ))
+        case "write":
+            // Bytes travelling toward the child are the only ones with an origin earlier than
+            // their own transfer, so this second inert stamp is admitted here and nowhere else.
+            if values.contains(.originElapsedNanoseconds) {
+                _ = try values.decode(UInt64.self, forKey: .originElapsedNanoseconds)
             }
+            self = .write(try Self.decodeBytes(
+                keys,
+                values: values,
+                optional: ["elapsedNanoseconds", "originElapsedNanoseconds"],
+                type: type
+            ))
         case "resize":
             try Self.validateKeys(
                 keys,
@@ -380,6 +382,9 @@ extension NeutralTerminalRecordingEvent: Codable {
         case .feed(let bytes):
             try values.encode("feed", forKey: .type)
             try values.encode(Data(bytes).base64EncodedString(), forKey: .base64)
+        case .write(let bytes):
+            try values.encode("write", forKey: .type)
+            try values.encode(Data(bytes).base64EncodedString(), forKey: .base64)
         case .input(let key, let modifiers):
             try values.encode("input", forKey: .type)
             let encoded = Self.encodeKey(key)
@@ -420,6 +425,29 @@ extension NeutralTerminalRecordingEvent: Codable {
         case .checkpoint:
             try values.encode("expect", forKey: .type)
         }
+    }
+
+    /// Decodes the one byte payload both directions share, in either encoding, so a readable
+    /// text event and a binary base64 one stay interchangeable for every byte transfer.
+    private static func decodeBytes(
+        _ keys: Set<String>,
+        values: KeyedDecodingContainer<CodingKeys>,
+        optional: Set<String>,
+        type: String
+    ) throws -> [UInt8] {
+        let encodings = Set(["base64", "text"]).intersection(keys)
+        guard encodings.count == 1, let encoding = encodings.first else {
+            throw NeutralTerminalRecordingError.invalidEvent(type)
+        }
+        try validateKeys(keys, required: ["type", encoding], optional: optional, type: type)
+        if encoding == "text" {
+            return Array(try values.decode(String.self, forKey: .text).utf8)
+        }
+        let base64 = try values.decode(String.self, forKey: .base64)
+        guard let data = Data(base64Encoded: base64) else {
+            throw NeutralTerminalRecordingError.invalidBase64(base64)
+        }
+        return Array(data)
     }
 
     private static func validateKeys(
@@ -653,7 +681,7 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
                 terminal.feed(bytes)
                 _ = terminal.drainReplyBytes()
                 _ = terminal.drainPendingClipboardWrite()
-            case .input, .paste, .focus:
+            case .write, .input, .paste, .focus:
                 break
             case .mouse(let mouse):
                 _ = applyNeutralTerminalMouse(

@@ -69,7 +69,7 @@ struct TerminalShellDialectTests {
             terminal.resize(columns: columns, rows: rows)
         case .feed(let bytes):
             terminal.feed(overriding(redrawOverride, in: bytes))
-        case .input, .paste, .focus, .mouse, .viewport, .checkpoint:
+        case .write, .input, .paste, .focus, .mouse, .viewport, .checkpoint:
             throw ShellDialectFixtureError.unsupportedEvent(context)
         }
     }

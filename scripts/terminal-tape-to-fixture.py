@@ -3,9 +3,10 @@
 
 A tape is normally the JSON document printed by `danterm pane tape --pane ID`.
 It already uses the neutral recording schema, including real PTY chunk boundaries
-and resize ordering, so this script only scrubs feed bytes, verifies that local
-identifiers are gone, and marks the result as fixture-ready DanTerm evidence.
-The two accepted inputs are a complete snapshot JSON document from `pane tape`
+and resize ordering, so this script only scrubs the byte payloads it carries in
+either direction, verifies that local identifiers are gone, and marks the result
+as fixture-ready DanTerm evidence. The two accepted inputs are a complete
+snapshot JSON document from `pane tape`
 and an incremental, unwrapped JSONL stream from `pane tape --follow`. The stream
 may end at EOF without an `end` record after an app crash. JSON-RPC envelopes,
 legacy bare-event JSONL, gaps, and snapshots that report dropped events are not
@@ -18,9 +19,10 @@ The summary this prints (event count, resize count, resize geometries) helps
 confirm that the dump contains the interaction that exposed the artifact.
 
 Scrubbing is on by default and is not cosmetic: a tape is verbatim terminal
-output, so it carries the recording machine's hostname and home directory in
-every OSC 7 report, and usually in the prompt itself. Fixtures are committed, so
-they must be neutral. After scrubbing, the script checks the result against this
+traffic, so it carries the recording machine's hostname and home directory in
+every OSC 7 report, usually in the prompt itself, and again in any path the
+operator typed at that prompt. Fixtures are committed, so they must be neutral.
+After scrubbing, the script checks the result against this
 machine's own hostname, username and home path and refuses to write a fixture
 that still contains any of them -- a prompt framework can render an identifier
 somewhere the OSC 7 rules never look. `--keep-identifiers` skips both steps for
@@ -42,8 +44,9 @@ import socket
 import sys
 
 # OSC 7 reports the cwd as a file URL, so the host and the home path arrive as
-# ASCII in the feed bytes; a prompt that shows `user@host` or `~/...` puts them
-# there a second time. Replacements need not preserve length: chunk boundaries
+# ASCII in the recorded bytes; a prompt that shows `user@host` or `~/...` puts
+# them there a second time, and so does a path the operator typed. Replacements
+# need not preserve length: chunk boundaries
 # are the event split points, which are untouched either way.
 SCRUBS = [
     (re.compile(rb"(?<=file://)[A-Za-z0-9._-]+"), b"host"),
@@ -169,20 +172,20 @@ def load_follow_stream(records: list):
     }
 
 
-def decode_feed(event: dict):
+def decode_payload(event: dict):
     encodings = [key for key in ("base64", "text") if key in event]
     if len(encodings) != 1:
-        raise ValueError("feed event must contain exactly one byte encoding")
+        raise ValueError("byte event must contain exactly one byte encoding")
     encoding = encodings[0]
     try:
         if encoding == "base64":
             return encoding, base64.b64decode(event[encoding], validate=True)
         return encoding, event[encoding].encode("utf-8")
     except (binascii.Error, ValueError, AttributeError) as error:
-        raise ValueError(f"invalid {encoding} feed event") from error
+        raise ValueError(f"invalid {encoding} byte event") from error
 
 
-def encode_feed(event: dict, encoding: str, raw: bytes):
+def encode_payload(event: dict, encoding: str, raw: bytes):
     if encoding == "base64":
         event[encoding] = base64.b64encode(raw).decode("ascii")
     else:
@@ -198,14 +201,22 @@ def validate_event(event: dict):
     if "elapsedNanoseconds" in event and not nonnegative_integer(elapsed):
         raise ValueError(f"invalid {event_type} event")
 
-    if event_type == "feed":
+    if event_type in ("feed", "write"):
         encodings = [key for key in ("base64", "text") if key in event]
         if len(encodings) != 1:
-            raise ValueError("invalid feed event")
+            raise ValueError(f"invalid {event_type} event")
         encoding = encodings[0]
-        require_shape(event, {"type", encoding}, {"elapsedNanoseconds"})
+        # Only bytes travelling toward the child have an origin earlier than their transfer.
+        optional = {"elapsedNanoseconds"}
+        if event_type == "write":
+            optional.add("originElapsedNanoseconds")
+            if "originElapsedNanoseconds" in event and not nonnegative_integer(
+                event["originElapsedNanoseconds"]
+            ):
+                raise ValueError("invalid write event")
+        require_shape(event, {"type", encoding}, optional)
         if not isinstance(event[encoding], str):
-            raise ValueError("invalid feed event")
+            raise ValueError(f"invalid {event_type} event")
         return
     if event_type == "resize":
         require_shape(event, {"type", "columns", "rows"}, {"elapsedNanoseconds"})
@@ -340,10 +351,10 @@ def main() -> int:
     identifiers = [] if args.keep_identifiers else local_identifiers()
     leftovers = set()
     for event in events:
-        if event.get("type") != "feed":
+        if event.get("type") not in ("feed", "write"):
             continue
         try:
-            encoding, raw = decode_feed(event)
+            encoding, raw = decode_payload(event)
         except ValueError as error:
             print(f"{args.tape}: {error}", file=sys.stderr)
             return 1
@@ -353,9 +364,9 @@ def main() -> int:
         for old, new in swaps:
             raw = raw.replace(old, new)
         try:
-            encode_feed(event, encoding, raw)
+            encode_payload(event, encoding, raw)
         except UnicodeDecodeError:
-            print(f"{args.tape}: replacement made a text feed invalid UTF-8", file=sys.stderr)
+            print(f"{args.tape}: replacement made a text payload invalid UTF-8", file=sys.stderr)
             return 1
 
     if leftovers:

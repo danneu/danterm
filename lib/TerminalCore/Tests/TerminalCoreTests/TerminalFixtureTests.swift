@@ -106,7 +106,7 @@ struct TerminalFixtureTests {
                         terminal: &terminal,
                         interactionState: &interactionState
                     )
-                case .input, .paste, .focus, .checkpoint:
+                case .write, .input, .paste, .focus, .checkpoint:
                     break
                 }
 
@@ -592,6 +592,11 @@ struct TerminalFixtureTests {
                 case .split:
                     feed(bytes)
                 }
+            case .write:
+                // Bytes a live capture already transmitted toward its child. The arms below
+                // assert what this build's encoders produce, which a recorded transfer cannot
+                // stand in for, so it drives nothing.
+                break
             case .input(let key, let modifiers):
                 inputBytes.append(contentsOf: encodeTerminalKey(
                     key,

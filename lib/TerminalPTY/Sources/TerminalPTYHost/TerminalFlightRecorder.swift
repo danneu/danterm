@@ -317,8 +317,12 @@ package final class TerminalFlightRecorder {
         }
     }
 
+    /// Charges every event that carries bytes, in either direction, so the retained suffix
+    /// stays inside the per-pane budget the IPC line ceiling was chosen against.
     private static func payloadBytes(of event: NeutralTerminalRecordingEvent) -> Int {
-        if case .feed(let bytes) = event { return bytes.count }
-        return 0
+        switch event {
+        case .feed(let bytes), .write(let bytes): return bytes.count
+        default: return 0
+        }
     }
 }

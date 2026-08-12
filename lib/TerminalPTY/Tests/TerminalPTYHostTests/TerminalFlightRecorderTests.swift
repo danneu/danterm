@@ -111,6 +111,28 @@ struct TerminalFlightRecorderTests {
         #expect(snapshot.isTruncated)
     }
 
+    @Test("bytes written toward the child are charged to the retention budget")
+    func writePayloadIsChargedToTheBudget() {
+        // Intent: a write event costs its payload plus the per-event overhead, exactly as a
+        //   feed of the same size does, and evicts against the same budget.
+        // Why it exists: retention charges payload bytes per event, so an event type that
+        //   carried bytes for free would let a paste-heavy pane hold far more than its budget.
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 134, eventLimit: 8, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+
+        recorder.record(.write([1, 2, 3]))
+        recorder.record(.write([4, 5, 6, 7]))
+
+        let snapshot = recorder.snapshot()
+        #expect(snapshot.events.map(\.event) == [.write([4, 5, 6, 7])])
+        #expect(snapshot.accountedBytes == 68)
+        #expect(snapshot.droppedEventCount == 1)
+        #expect(snapshot.droppedPayloadBytes == 3)
+    }
+
     @Test("per-event overhead bounds many tiny chunks")
     func eventOverheadBoundsTinyChunks() {
         let recorder = TerminalFlightRecorder(

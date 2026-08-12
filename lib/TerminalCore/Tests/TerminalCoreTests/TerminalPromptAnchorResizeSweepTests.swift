@@ -452,7 +452,7 @@ private func replayPromptAnchorSweepCase(
             terminal.resize(columns: columns, rows: rows)
         case .checkpoint:
             break
-        case .input, .paste, .focus, .mouse, .viewport:
+        case .write, .input, .paste, .focus, .mouse, .viewport:
             throw PromptAnchorSweepError.unsupportedEvent(injection.diagnostic)
         }
         expectSemanticPromptInvariants(

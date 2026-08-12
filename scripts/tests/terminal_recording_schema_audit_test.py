@@ -27,20 +27,21 @@ class TerminalRecordingSchemaAuditTests(unittest.TestCase):
         self.assertEqual(set(counts), {"neutral", "ghostty", "benchmark"})
         self.assertTrue(all(count > 0 for count in counts.values()))
 
-    def test_feed_audit_accepts_binary_base64_and_readable_text(self):
+    def test_payload_audit_accepts_binary_base64_and_readable_text_in_both_directions(self):
         audit = load_script()
         arbitrary = bytes(range(256))
         events = [
             {"type": "feed", "base64": base64.b64encode(arbitrary).decode("ascii")},
             {"type": "feed", "text": "readable café"},
+            {"type": "write", "base64": "AQ=="},
             {"type": "family-specific", "payload": "ignored"},
         ]
 
-        count = audit.audit_feed_events(events, "synthetic")
+        count = audit.audit_payload_events(events, "synthetic")
 
-        self.assertEqual(count, 2)
+        self.assertEqual(count, 3)
 
-    def test_feed_audit_rejects_missing_duplicate_hex_and_malformed_payloads(self):
+    def test_payload_audit_rejects_missing_duplicate_hex_and_malformed_payloads(self):
         audit = load_script()
         cases = {
             "missing": {"type": "feed"},
@@ -48,12 +49,14 @@ class TerminalRecordingSchemaAuditTests(unittest.TestCase):
             "hex": {"type": "feed", "hex": "61"},
             "malformed base64": {"type": "feed", "base64": "not base64!"},
             "non-string text": {"type": "feed", "text": 42},
+            "malformed written base64": {"type": "write", "base64": "not base64!"},
+            "written hex": {"type": "write", "hex": "61"},
         }
 
         for name, event in cases.items():
             with self.subTest(name=name):
                 with self.assertRaises(ValueError):
-                    audit.audit_feed_events([event], name)
+                    audit.audit_payload_events([event], name)
 
 
 if __name__ == "__main__":

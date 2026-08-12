@@ -4,6 +4,7 @@
 import base64
 import json
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -96,6 +97,92 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                 scrubbed,
                 b"\x1b]7;file://host/home/user/project\x07prompt\r\n",
             )
+
+    def test_written_input_is_scrubbed_and_its_identifiers_still_refuse_conversion(self):
+        # Intent: a write event's payload is scrubbed and identifier-checked exactly as a
+        #   feed's is, and its inert origin stamp survives conversion untouched.
+        # Why it exists: a tape records both directions, and a typed command line carries the
+        #   same home path and hostname the prompt does. A converter that only scrubbed output
+        #   would commit them anyway.
+        # Scenario: a developer converts a tape in which they typed `cd /Users/alice/project`.
+        typed = b"cd /Users/alice/project\r"
+        capture = live_capture()
+        capture["events"] = [
+            {
+                "type": "write",
+                "base64": base64.b64encode(typed).decode("ascii"),
+                "elapsedNanoseconds": 30,
+                "originElapsedNanoseconds": 28,
+            }
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "capture.json"
+            destination = root / "fixture.json"
+            source.write_text(json.dumps(capture), encoding="utf-8")
+
+            result = self.run_converter(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fixture = json.loads(destination.read_text(encoding="utf-8"))
+            self.assertEqual(
+                base64.b64decode(fixture["events"][0]["base64"]),
+                b"cd /home/user/project\r",
+            )
+            self.assertEqual(fixture["events"][0]["elapsedNanoseconds"], 30)
+            self.assertEqual(fixture["events"][0]["originElapsedNanoseconds"], 28)
+
+        leaked = live_capture()
+        leaked["events"] = [
+            {
+                "type": "write",
+                "base64": base64.b64encode(
+                    b"echo " + local_identifier().encode()
+                ).decode("ascii"),
+            }
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "capture.json"
+            destination = root / "fixture.json"
+            source.write_text(json.dumps(leaked), encoding="utf-8")
+
+            refused = self.run_converter(source, destination)
+
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("identifiers survived scrubbing", refused.stderr)
+            self.assertFalse(destination.exists())
+
+    def test_write_events_reject_shapes_the_feed_vocabulary_rejects(self):
+        invalid_events = {
+            "missing payload": {"type": "write"},
+            "multiple payloads": {"type": "write", "base64": "YQ==", "text": "a"},
+            "hex payload": {"type": "write", "hex": "61"},
+            "unknown field": {"type": "write", "base64": "YQ==", "note": "x"},
+            "negative origin": {
+                "type": "write",
+                "base64": "YQ==",
+                "originElapsedNanoseconds": -1,
+            },
+            "origin on output": {
+                "type": "feed",
+                "base64": "YQ==",
+                "originElapsedNanoseconds": 1,
+            },
+        }
+        for name, event in invalid_events.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "capture.json"
+                destination = root / "fixture.json"
+                capture = live_capture()
+                capture["events"] = [event]
+                source.write_text(json.dumps(capture), encoding="utf-8")
+
+                result = self.run_converter(source, destination, "--keep-identifiers")
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(destination.exists())
 
     def test_truncated_capture_is_refused_without_an_override(self):
         # Intent: truncation is always a blocking conversion error with no escape hatch.
@@ -343,6 +430,11 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                 fixture["events"][0],
                 {"type": "feed", "base64": "SGk=", "elapsedNanoseconds": 2},
             )
+
+
+def local_identifier():
+    """This machine's hostname, which the scrub rules only reach inside an OSC 7 URL."""
+    return socket.gethostname()
 
 
 def follow_start():

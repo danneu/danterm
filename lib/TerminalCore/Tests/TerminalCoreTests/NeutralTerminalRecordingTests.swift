@@ -76,6 +76,9 @@ struct NeutralTerminalRecordingTests {
             #"{"type":"feed","base64":"YQ==","note":"ignored"}"#,
             #"{"type":"resize","columns":8,"rows":2,"note":"ignored"}"#,
             #"{"type":"expect","expect":{},"note":"ignored"}"#,
+            #"{"type":"write"}"#,
+            #"{"type":"write","base64":"YQ==","text":"a"}"#,
+            #"{"type":"write","base64":"YQ==","note":"ignored"}"#,
         ]
     )
     func invalidEventFieldsAreRejected(_ json: String) {
@@ -87,14 +90,79 @@ struct NeutralTerminalRecordingTests {
         }
     }
 
-    @Test("elapsed timing is the only inert event metadata and must be nonnegative integer")
+    @Test("inert event timing must be a nonnegative integer wherever the schema admits it")
     func invalidElapsedTimingIsRejected() {
         for json in [
             #"{"type":"feed","base64":"YQ==","elapsedNanoseconds":-1}"#,
             #"{"type":"resize","columns":8,"rows":2,"elapsedNanoseconds":"later"}"#,
             #"{"type":"expect","elapsedNanoseconds":null}"#,
+            #"{"type":"write","base64":"Aw==","originElapsedNanoseconds":-1}"#,
+            #"{"type":"write","base64":"Aw==","originElapsedNanoseconds":"earlier"}"#,
         ] {
             #expect(throws: (any Error).self) {
+                try JSONDecoder().decode(
+                    NeutralTerminalRecordingEvent.self,
+                    from: Data(json.utf8)
+                )
+            }
+        }
+    }
+
+    @Test("bytes written toward the child round-trip and leave replay untouched")
+    func writeBytesRoundTripAndReplayIgnoresThem() throws {
+        // Intent: the vocabulary carries a byte transfer travelling toward the child, encoded
+        //   like a feed, and replay reaches the same terminal it would have without it.
+        // Why it exists: a tape is a two-directional boundary ledger, but only child output
+        //   drives the replayed terminal. A write event that fed the terminal would replay the
+        //   user's keystrokes as if the child had echoed them twice.
+        let bytes = Array(UInt8.min...UInt8.max)
+        let encoded = try JSONEncoder().encode(NeutralTerminalRecordingEvent.write(bytes))
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+
+        #expect(object["type"] as? String == "write")
+        #expect(object["base64"] as? String == Data(bytes).base64EncodedString())
+        #expect(
+            try JSONDecoder().decode(NeutralTerminalRecordingEvent.self, from: encoded)
+                == .write(bytes)
+        )
+
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "write-replay"),
+            initial: NeutralTerminalDimensions(columns: 8, rows: 2),
+            events: [
+                .feed(Array("hi".utf8)),
+                .write(Array("\u{03}".utf8)),
+                .feed(Array("!".utf8)),
+            ]
+        )
+        var expected = try #require(Terminal(columns: 8, rows: 2))
+        expected.feed(Array("hi".utf8))
+        expected.feed(Array("!".utf8))
+
+        #expect(try recording.replay() == expected)
+    }
+
+    @Test("a write event carries an optional origin stamp that no other event may")
+    func writeOriginStampIsInertAndExclusive() throws {
+        // Intent: only a write event admits the second inert timing key, and decoding ignores
+        //   it exactly as it ignores elapsed timing.
+        // Why it exists: the origin stamp answers "when did the app first hold these bytes",
+        //   which is meaningless for child output -- the read and the record share one turn.
+        let stamped = try JSONDecoder().decode(
+            NeutralTerminalRecordingEvent.self,
+            from: Data(
+                #"{"type":"write","text":"ls\n","elapsedNanoseconds":9,"originElapsedNanoseconds":4}"#
+                    .utf8
+            )
+        )
+
+        #expect(stamped == .write(Array("ls\n".utf8)))
+
+        for json in [
+            #"{"type":"feed","base64":"YQ==","originElapsedNanoseconds":4}"#,
+            #"{"type":"resize","columns":8,"rows":2,"originElapsedNanoseconds":4}"#,
+        ] {
+            #expect(throws: NeutralTerminalRecordingError.self) {
                 try JSONDecoder().decode(
                     NeutralTerminalRecordingEvent.self,
                     from: Data(json.utf8)

@@ -179,7 +179,7 @@ struct RenderCorpusPlanningTests {
             case .toTopRow(let row): terminal.scroll(toTopRow: row)
             case .toBottom: terminal.scrollToBottom()
             }
-        case .input, .paste, .focus, .checkpoint:
+        case .write, .input, .paste, .focus, .checkpoint:
             break
         }
     }
