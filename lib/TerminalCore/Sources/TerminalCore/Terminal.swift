@@ -801,8 +801,9 @@ public struct Terminal: Equatable, Sendable {
     /// Exposes aggregate retained link cost to structural bound tests.
     var retainedHyperlinkMetadataBytes: Int {
         hyperlinkTargets.values.reduce(0) { $0 + hyperlinkByteCost($1) }
-            + (hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
-            + (armedLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
+            + InteractionLinkSlot.allCases.reduce(0) { cost, slot in
+                cost + (self[slot].map { hyperlinkByteCost($0.hyperlink) } ?? 0)
+            }
     }
 
     /// Exposes the shared hyperlink, interaction, and semantic retention cost to bound tests.
@@ -1841,9 +1842,24 @@ public struct Terminal: Equatable, Sendable {
 
     /// Names the interaction slot a caller is about to overwrite, whose current occupant
     /// therefore does not count against the admission sum.
-    private enum InteractionLinkSlot {
+    private enum InteractionLinkSlot: CaseIterable {
         case hover
         case arm
+    }
+
+    private subscript(slot: InteractionLinkSlot) -> InteractionLinkState? {
+        get {
+            switch slot {
+            case .hover: hoveredLinkState
+            case .arm: armedLinkState
+            }
+        }
+        set {
+            switch slot {
+            case .hover: hoveredLinkState = newValue
+            case .arm: armedLinkState = newValue
+            }
+        }
     }
 
     /// Prices one more hyperlink against the pane-wide metadata cap, reclaiming dead targets
@@ -1859,9 +1875,10 @@ public struct Terminal: Equatable, Sendable {
         adding target: TerminalHyperlink,
         replacing slot: InteractionLinkSlot?
     ) -> [HyperlinkId: TerminalHyperlink]? {
-        let interactionCost =
-            (slot == .hover ? 0 : hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
-            + (slot == .arm ? 0 : armedLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
+        let interactionCost = InteractionLinkSlot.allCases.reduce(0) { cost, candidateSlot in
+            guard candidateSlot != slot else { return cost }
+            return cost + (self[candidateSlot].map { hyperlinkByteCost($0.hyperlink) } ?? 0)
+        }
         let fixedCost = interactionCost + retainedSemanticEventBytes + hyperlinkByteCost(target)
 
         var candidateTargets = hyperlinkTargets
@@ -1875,6 +1892,50 @@ public struct Terminal: Equatable, Sendable {
             <= Self.maximumTerminalMetadataBytes
         else { return nil }
         return candidateTargets
+    }
+
+    private func admittedInteractionLink(
+        _ link: TerminalResolvedLink,
+        for slot: InteractionLinkSlot
+    ) -> (targets: [HyperlinkId: TerminalHyperlink], state: InteractionLinkState)? {
+        guard isActivatableWebURI(link.hyperlink.uri),
+              hyperlinkByteCost(link.hyperlink) <= Self.maximumHyperlinkTargetBytes,
+              let targets = admittedHyperlinkTargets(adding: link.hyperlink, replacing: slot)
+        else { return nil }
+        let ordered = textPositionPrecedes(link.range.start, link.range.end)
+            ? (link.range.start, link.range.end)
+            : (link.range.end, link.range.start)
+        return (
+            targets,
+            InteractionLinkState(
+                hyperlink: link.hyperlink,
+                range: TextAnchorRange(
+                    start: normalizedSelectionBoundary(ordered.0, isEnd: false),
+                    end: normalizedSelectionBoundary(ordered.1, isEnd: true)
+                ),
+                activationIdentity: link.activationIdentity
+            )
+        )
+    }
+
+    @discardableResult
+    private mutating func setInteractionLink(
+        _ link: TerminalResolvedLink,
+        for slot: InteractionLinkSlot
+    ) -> Bool {
+        guard let admitted = admittedInteractionLink(link, for: slot) else { return false }
+        hyperlinkTargets = admitted.targets
+        self[slot] = admitted.state
+        return true
+    }
+
+    private func resolvedInteractionLink(for slot: InteractionLinkSlot) -> TerminalResolvedLink? {
+        guard let state = self[slot], let range = publicRange(state.range) else { return nil }
+        return TerminalResolvedLink(
+            hyperlink: state.hyperlink,
+            range: range,
+            activationIdentity: state.activationIdentity
+        )
     }
 
     private func liveHyperlinkIds() -> Set<HyperlinkId> {
@@ -2654,100 +2715,44 @@ public struct Terminal: Equatable, Sendable {
 
     /// Returns the currently indicated HTTP(S) run in current retained-stream coordinates.
     public var hoveredLink: TerminalResolvedLink? {
-        guard let hoveredLinkState, let range = publicRange(hoveredLinkState.range) else {
-            return nil
-        }
-        return TerminalResolvedLink(
-            hyperlink: hoveredLinkState.hyperlink,
-            range: range,
-            activationIdentity: hoveredLinkState.activationIdentity
-        )
+        resolvedInteractionLink(for: .hover)
     }
 
     /// Admits and anchors one resolved link for hover presentation within the shared metadata cap.
     @discardableResult
     public mutating func setHoveredLink(_ link: TerminalResolvedLink) -> Bool {
-        guard isActivatableWebURI(link.hyperlink.uri),
-              hyperlinkByteCost(link.hyperlink) <= Self.maximumHyperlinkTargetBytes
-        else { return false }
-
         let before = damageActionSnapshot
-        guard let candidateTargets = admittedHyperlinkTargets(
-            adding: link.hyperlink,
-            replacing: .hover
-        ) else { return false }
-
-        let ordered = textPositionPrecedes(link.range.start, link.range.end)
-            ? (link.range.start, link.range.end)
-            : (link.range.end, link.range.start)
-        hyperlinkTargets = candidateTargets
-        hoveredLinkState = InteractionLinkState(
-            hyperlink: link.hyperlink,
-            range: TextAnchorRange(
-                start: normalizedSelectionBoundary(ordered.0, isEnd: false),
-                end: normalizedSelectionBoundary(ordered.1, isEnd: true)
-            ),
-            activationIdentity: link.activationIdentity
-        )
+        guard setInteractionLink(link, for: .hover) else { return false }
         recordDamage(since: before)
         return true
     }
 
     /// Reports whether the current table can atomically reserve one click target.
     func canAdmitArmedLink(_ link: TerminalResolvedLink) -> Bool {
-        guard isActivatableWebURI(link.hyperlink.uri),
-              hyperlinkByteCost(link.hyperlink) <= Self.maximumHyperlinkTargetBytes
-        else { return false }
-        return admittedHyperlinkTargets(adding: link.hyperlink, replacing: .arm) != nil
+        admittedInteractionLink(link, for: .arm) != nil
     }
 
     /// Atomically reserves a validated originating run for click-time revalidation.
     @discardableResult
     public mutating func setArmedLink(_ link: TerminalResolvedLink) -> Bool {
-        guard isActivatableWebURI(link.hyperlink.uri),
-              hyperlinkByteCost(link.hyperlink) <= Self.maximumHyperlinkTargetBytes,
-              let candidateTargets = admittedHyperlinkTargets(
-                  adding: link.hyperlink,
-                  replacing: .arm
-              )
-        else { return false }
-        let ordered = textPositionPrecedes(link.range.start, link.range.end)
-            ? (link.range.start, link.range.end)
-            : (link.range.end, link.range.start)
-        hyperlinkTargets = candidateTargets
-        armedLinkState = InteractionLinkState(
-            hyperlink: link.hyperlink,
-            range: TextAnchorRange(
-                start: normalizedSelectionBoundary(ordered.0, isEnd: false),
-                end: normalizedSelectionBoundary(ordered.1, isEnd: true)
-            ),
-            activationIdentity: link.activationIdentity
-        )
-        return true
+        setInteractionLink(link, for: .arm)
     }
 
     /// Clears the retained click reservation without affecting hover presentation.
     public mutating func clearArmedLink() {
-        armedLinkState = nil
+        self[.arm] = nil
     }
 
     /// Reconstructs the current click reservation for release-time identity comparison.
     var armedLink: TerminalResolvedLink? {
-        guard let armedLinkState, let range = publicRange(armedLinkState.range) else {
-            return nil
-        }
-        return TerminalResolvedLink(
-            hyperlink: armedLinkState.hyperlink,
-            range: range,
-            activationIdentity: armedLinkState.activationIdentity
-        )
+        resolvedInteractionLink(for: .arm)
     }
 
     /// Clears hyperlink presentation without changing terminal text or selection.
     public mutating func clearHoveredLink() {
-        guard hoveredLinkState != nil else { return }
+        guard self[.hover] != nil else { return }
         let before = damageActionSnapshot
-        hoveredLinkState = nil
+        self[.hover] = nil
         recordDamage(since: before)
     }
 
@@ -3908,15 +3913,13 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func refreshHasContentInspectionState() {
         hasContentInspectionState = search != nil
-            || hoveredLinkState != nil
-            || armedLinkState != nil
+            || InteractionLinkSlot.allCases.contains { self[$0] != nil }
     }
 
     private mutating func clearInspection() {
         selection = nil
         search = nil
-        hoveredLinkState = nil
-        armedLinkState = nil
+        for slot in InteractionLinkSlot.allCases { self[slot] = nil }
         viewportState = .following
     }
 
@@ -3954,11 +3957,10 @@ public struct Terminal: Equatable, Sendable {
     private mutating func invalidateInspection(inAbsoluteRows rows: ClosedRange<Int>) {
         // Link state asserts facts about cell content, so an overwrite retires it. Search
         // keeps a position rather than a content assertion and resolves against live matches.
-        if let hoveredLinkState, range(hoveredLinkState.range, intersects: rows) {
-            self.hoveredLinkState = nil
-        }
-        if let armedLinkState, range(armedLinkState.range, intersects: rows) {
-            self.armedLinkState = nil
+        for slot in InteractionLinkSlot.allCases {
+            if let state = self[slot], range(state.range, intersects: rows) {
+                self[slot] = nil
+            }
         }
     }
 
@@ -4007,11 +4009,10 @@ public struct Terminal: Equatable, Sendable {
                 self.selection = selection
             }
         }
-        if let hoveredLinkState, hoveredLinkState.range.start < firstRetained {
-            self.hoveredLinkState = nil
-        }
-        if let armedLinkState, armedLinkState.range.start < firstRetained {
-            self.armedLinkState = nil
+        for slot in InteractionLinkSlot.allCases {
+            if let state = self[slot], state.range.start < firstRetained {
+                self[slot] = nil
+            }
         }
         clampViewportAnchorToRetainedStream()
     }
@@ -6078,8 +6079,7 @@ public struct Terminal: Equatable, Sendable {
         selectPrimaryScreen()
         resetControlState()
         hyperlinkPen = nil
-        hoveredLinkState = nil
-        armedLinkState = nil
+        for slot in InteractionLinkSlot.allCases { self[slot] = nil }
         clearPendingMotionState()
     }
 
@@ -6832,8 +6832,7 @@ public struct Terminal: Equatable, Sendable {
             return
         }
         let overlayActive = selection != nil
-            || hoveredLinkState != nil
-            || armedLinkState != nil
+            || InteractionLinkSlot.allCases.contains { self[$0] != nil }
         let wholeViewport = range == 0..<rowCount
         if overlayActive, pushesToScrollback == false {
             recordPresentationDamage(rows: range)

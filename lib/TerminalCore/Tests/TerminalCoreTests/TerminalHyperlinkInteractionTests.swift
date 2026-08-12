@@ -22,6 +22,46 @@ struct TerminalHyperlinkInteractionTests {
         #expect(terminal.drainDamage() == TerminalDamage(rows: [0]))
     }
 
+    @Test("arming and disarming a link records no damage")
+    func armRecordsNoDamage() throws {
+        // Intent: reserving and releasing a click target never schedules presentation work.
+        // Why it exists: hover and arm share link storage policy but only hover is visible, so a
+        //   shared writer must not accidentally give arm mutations hover's damage behavior.
+        // Scenario: the user presses and releases Cmd over a URL without changing its hover.
+        var terminal = try #require(Terminal(columns: 12, rows: 3))
+        terminal.feed(Array("https://a.co".utf8))
+        _ = terminal.drainDamage()
+        let link = try #require(terminal.activatableLink(at: .init(row: 0, column: 3)))
+
+        let admitted = terminal.setArmedLink(link)
+        #expect(admitted)
+        #expect(terminal.armedLink == link)
+        #expect(terminal.drainDamage() == .none)
+
+        terminal.clearArmedLink()
+        #expect(terminal.armedLink == nil)
+        #expect(terminal.drainDamage() == .none)
+    }
+
+    @Test("re-hovering the identical link still damages its rows")
+    func identicalRehoverDamages() throws {
+        // Intent: every accepted hover write schedules repaint, even when the value is unchanged.
+        // Why it exists: the damage snapshot deliberately detects writes rather than inequality;
+        //   an equality early-out in shared slot machinery would weaken that contract.
+        // Scenario: pointer motion resolves the same URL run twice without an intervening clear.
+        var terminal = try #require(Terminal(columns: 12, rows: 3))
+        terminal.feed(Array("https://a.co".utf8))
+        let link = try #require(terminal.activatableLink(at: .init(row: 0, column: 3)))
+        let admitted = terminal.setHoveredLink(link)
+        #expect(admitted)
+        _ = terminal.drainDamage()
+
+        let readmitted = terminal.setHoveredLink(link)
+        #expect(readmitted)
+        #expect(terminal.hoveredLink == link)
+        #expect(terminal.drainDamage() == TerminalDamage(rows: [0]))
+    }
+
     @Test("re-hovering a different target over the same range still damages the run")
     func hoverTargetChangeAtIdenticalRangeDamages() throws {
         // Intent: replacing the hovered link's target damages the run even when the
@@ -194,5 +234,49 @@ struct TerminalHyperlinkInteractionTests {
         terminal.feed(Array("\r\nthird\r\nfourth".utf8))
 
         #expect(terminal.hoveredLink == nil)
+    }
+
+    @Test("scrollback eviction drops an armed link rather than attaching it to unrelated text")
+    func evictionClearsArm() throws {
+        // Intent: eviction retires an arm whose range begins before the first retained row.
+        // Why it exists: hover and arm must share the eviction predicate; omitting arm leaves a
+        //   stale click reservation attached to the row that inherits its old coordinate.
+        // Scenario: output fills a tiny history budget while the user holds Cmd over an old URL.
+        var terminal = try #require(Terminal(
+            columns: 16,
+            rows: 2,
+            scrollbackBudgetBytes: historyBudget(lineCells: [12])
+        ))
+        terminal.feed(Array("https://a.co\r\nnext\r\nthird".utf8))
+        let link = try #require(terminal.activatableLink(at: .init(row: 0, column: 2)))
+        let admitted = terminal.setArmedLink(link)
+        #expect(admitted)
+
+        terminal.feed(Array("\r\nfourth".utf8))
+
+        #expect(terminal.armedLink == nil)
+        #expect(terminal.retainedHyperlinkMetadataBytes == 0)
+    }
+
+    @Test("content-identity wrap drops arm while preserving live hover")
+    func contentIdentityWrapSeparatesArmFromHover() throws {
+        // Intent: identity reuse cancels click validation without clearing visible hover state.
+        // Why it exists: the wrap rule is intentionally arm-only; iterating every interaction
+        //   slot at that site would silently discard a hover whose text remains live.
+        // Scenario: the identity counter wraps on another row while one URL is hovered and armed.
+        var terminal = try #require(Terminal(columns: 16, rows: 2))
+        terminal.feed(Array("https://a.co".utf8))
+        let link = try #require(terminal.activatableLink(at: .init(row: 0, column: 3)))
+        let hovered = terminal.setHoveredLink(link)
+        let armed = terminal.setArmedLink(link)
+        #expect(hovered)
+        #expect(armed)
+
+        terminal.moveCursor(row: 1, column: 0)
+        terminal.primeContentIdentityWrapForTesting()
+        terminal.feed(Array("x".utf8))
+
+        #expect(terminal.armedLink == nil)
+        #expect(terminal.hoveredLink == link)
     }
 }
