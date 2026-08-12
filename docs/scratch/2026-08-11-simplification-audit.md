@@ -192,7 +192,7 @@ in itself.
 | 5a296702 | [S50](#s50) | 10    | 2   | 5   | core-reducer   | small  | Move the IPC dispatcher out of Update.swift; the file is two subsystems                                               |
 |        | [S51](#s51) | 10    | 2   | 5   | ipc-cli        | small  | Give todo ids the same phantom-typed treatment as every other entity id                                                 |
 |        | [S52](#s52) | 10    | 2   | 5   | ipc-cli        | medium | Derive the CLI help text from the parser instead of hand-syncing three copies                                           |
-|        | [S53](#s53) | 10    | 2   | 5   | terminal-core  | small  | Move the pure OSC byte helpers off Terminal and split the file at its seams                                             |
+| b0e2a7f6 | [S53](#s53) | 10    | 2   | 5   | terminal-core  | small  | Move the pure OSC byte helpers off Terminal and split the file at its seams                                           |
 |        | [S54](#s54) | 10    | 2   | 5   | terminal-views | small  | Return the clamp state from terminalCell so the view stops re-deriving grid extents                                     |
 |        | [S55](#s55) | 10    | 2   | 5   | tests          | small  | Split ModelOperationsTests along the boundary its name claims                                                           |
 |        | [S56](#s56) | 8     | 2   | 4   | core-model     | small  | Unify the three divergent "the selected tab died" fixups                                                                |
