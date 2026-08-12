@@ -73,11 +73,10 @@ class TodoInputView: NSView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setupViews()
-        textChangeObserver = NotificationCenter.default.addObserver(
-            forName: NSText.didChangeNotification,
-            object: textView,
-            queue: .main
-        ) { [weak self] _ in
+        textChangeObserver = observeOnMain(
+            NSText.didChangeNotification,
+            object: textView
+        ) { [weak self] in
             self?.updatePlaceholder()
         }
     }

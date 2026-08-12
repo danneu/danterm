@@ -16,6 +16,7 @@ struct UITestRunner {
         paneSplitViewTests()
         linkPreviewViewTests()
         paneWrapperViewTests()
+        observeOnMainTests()
         scrollableTerminalViewTests()
         chipViewTests()
         paneStripViewTests()

@@ -75,55 +75,45 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
 
         // Listen for clip view bounds changes to keep the session view pinned to visible rect
         scrollView.contentView.postsBoundsChangedNotifications = true
-        observers.append(NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView,
-            queue: .main
-        ) { [weak self] _ in
+        observers.append(observeOnMain(
+            NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        ) { [weak self] in
             self?.synchronizeSessionView()
         })
 
         // Live scroll tracking
-        observers.append(NotificationCenter.default.addObserver(
-            forName: NSScrollView.willStartLiveScrollNotification,
-            object: scrollView,
-            queue: .main
-        ) { [weak self] _ in
+        observers.append(observeOnMain(
+            NSScrollView.willStartLiveScrollNotification,
+            object: scrollView
+        ) { [weak self] in
             self?.isLiveScrolling = true
         })
 
-        observers.append(NotificationCenter.default.addObserver(
-            forName: NSScrollView.didEndLiveScrollNotification,
-            object: scrollView,
-            queue: .main
-        ) { [weak self] _ in
+        observers.append(observeOnMain(
+            NSScrollView.didEndLiveScrollNotification,
+            object: scrollView
+        ) { [weak self] in
             self?.isLiveScrolling = false
         })
 
-        observers.append(NotificationCenter.default.addObserver(
-            forName: NSScrollView.didLiveScrollNotification,
-            object: scrollView,
-            queue: .main
-        ) { [weak self] _ in
+        observers.append(observeOnMain(
+            NSScrollView.didLiveScrollNotification,
+            object: scrollView
+        ) { [weak self] in
             self?.handleLiveScroll()
         })
 
         // Force overlay style even if system preference changes. AppKit documents
         // this notification's object as private, so this observer filters on the
-        // name alone. It is the one registration here that cannot rely on the
-        // poster's thread, so `queue: .main` makes NotificationCenter deliver on
-        // the main thread. The override must land in the same pass that produced
-        // the notification, so the body stays synchronous: `assumeIsolated` reads
-        // the guarantee `queue: .main` already made, rather than hopping and
-        // leaving a turn where the legacy scrollers can draw.
-        observers.append(NotificationCenter.default.addObserver(
-            forName: NSScroller.preferredScrollerStyleDidChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.scrollView.scrollerStyle = .overlay
-            }
+        // name alone, and unlike the four above it cannot rely on the poster's
+        // thread. `observeOnMain` covers both: it delivers on the main thread
+        // and runs the body in the same pass as the post, which this override
+        // needs so no turn passes where the legacy scrollers can draw.
+        observers.append(observeOnMain(
+            NSScroller.preferredScrollerStyleDidChangeNotification
+        ) { [weak self] in
+            self?.scrollView.scrollerStyle = .overlay
         })
     }
 
