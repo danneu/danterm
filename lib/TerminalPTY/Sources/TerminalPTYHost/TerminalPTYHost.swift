@@ -264,7 +264,9 @@ public actor TerminalPTYHost {
     private var interactionState = TerminalInteractionState()
     private var capturedOutput: [UInt8] = []
     private var appliedTransitions: [TerminalPTYAppliedTransition] = []
-    private var flightTape: TerminalFlightRecorder?
+    /// Every pane records from birth: there is no seam that creates or destroys this after
+    /// construction, so "a pane that kept no evidence of itself" is unreachable.
+    private let flightTape: TerminalFlightRecorder
     private var capturedSubmittedTransitions: [TerminalPTYSubmittedTransition] = []
     private var capturedInputWrites: [[UInt8]] = []
     private var capturedReplyWrites: [[UInt8]] = []
@@ -299,8 +301,7 @@ public actor TerminalPTYHost {
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
         programVersion: String = "dev",
-        defaultColors: TerminalDefaultColors = .baked,
-        recordsFlightTape: Bool = false
+        defaultColors: TerminalDefaultColors = .baked
     ) throws {
         try self.init(
             initialDimensions: initialDimensions,
@@ -308,8 +309,7 @@ public actor TerminalPTYHost {
             machineHostname: machineHostname,
             programVersion: programVersion,
             defaultColors: defaultColors,
-            captureTransitions: false,
-            recordsFlightTape: recordsFlightTape
+            captureTransitions: false
         )
     }
 
@@ -322,7 +322,6 @@ public actor TerminalPTYHost {
         programVersion: String = "dev",
         defaultColors: TerminalDefaultColors = .baked,
         captureTransitions: Bool,
-        recordsFlightTape: Bool = false,
         flightTapeConfiguration: TerminalFlightRecorderConfiguration = .production,
         flightTapeClock: @escaping @Sendable () -> UInt64 = {
             DispatchTime.now().uptimeNanoseconds
@@ -344,13 +343,11 @@ public actor TerminalPTYHost {
         self.bootstrapExecutable = bootstrapExecutable
         self.captureTransitions = captureTransitions
         self.applicationExitBound = applicationExitBound
-        if recordsFlightTape {
-            flightTape = TerminalFlightRecorder(
-                initialDimensions: initialDimensions,
-                configuration: flightTapeConfiguration,
-                now: flightTapeClock
-            )
-        }
+        flightTape = TerminalFlightRecorder(
+            initialDimensions: initialDimensions,
+            configuration: flightTapeConfiguration,
+            now: flightTapeClock
+        )
     }
 
     /// Starts the pure launch plan and returns after scheduling its system spawn.
@@ -794,16 +791,16 @@ public actor TerminalPTYHost {
     }
 
     /// Copies retained event values on the owner queue so dump encoding stays off-actor.
-    package nonisolated func fencedFlightRecording() -> TerminalFlightRecordingSnapshot? {
-        fence(countsAsProduction: false) { owner in owner.flightTape?.snapshot() }.value
+    package nonisolated func fencedFlightRecording() -> TerminalFlightRecordingSnapshot {
+        fence(countsAsProduction: false) { owner in owner.flightTape.snapshot() }.value
     }
 
     /// Copies the retained suffix and exact cursor gap in one owner-queue fence.
     package nonisolated func fencedFlightRecording(
         from cursor: TerminalFlightRecordingCursor
-    ) -> TerminalFlightRecordingCursorSnapshot? {
+    ) -> TerminalFlightRecordingCursorSnapshot {
         fence(countsAsProduction: false) { owner in
-            owner.flightTape?.cursorSnapshot(from: cursor)
+            owner.flightTape.cursorSnapshot(from: cursor)
         }.value
     }
 
@@ -812,28 +809,27 @@ public actor TerminalPTYHost {
         id: UUID,
         from cursor: TerminalFlightRecordingCursor,
         notify: @escaping @Sendable () -> Void
-    ) -> Bool {
-        fence(countsAsProduction: false) { owner in
-            guard let recorder = owner.flightTape else { return false }
-            recorder.addFollowNotice(id: id, from: cursor, notify: notify)
-            return true
-        }.value
+    ) {
+        _ = fence(countsAsProduction: false) { owner in
+            owner.flightTape.addFollowNotice(id: id, from: cursor, notify: notify)
+        }
     }
 
     /// Removes one recorder notice on the same owner queue that may invoke it.
     package nonisolated func removeFlightRecordingFollowNotice(id: UUID) {
         _ = fence(countsAsProduction: false) { owner in
-            owner.flightTape?.removeFollowNotice(id: id)
+            owner.flightTape.removeFollowNotice(id: id)
         }
     }
 
     /// Copies one followed suffix and rearms its append edge in the same owner transaction.
+    /// nil only when this subscription is no longer registered.
     package nonisolated func fencedFlightRecordingFollowSnapshot(
         subscriptionId: UUID,
         from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingCursorSnapshot? {
         fence(countsAsProduction: false) { owner in
-            owner.flightTape?.followCursorSnapshot(
+            owner.flightTape.followCursorSnapshot(
                 subscriptionId: subscriptionId,
                 from: cursor
             )
@@ -842,16 +838,16 @@ public actor TerminalPTYHost {
 
     /// Reads live geometry and the tail cursor together so resize cannot interleave them.
     package nonisolated func fencedFlightRecordingOriginFromNow()
-        -> TerminalFlightRecordingOrigin?
+        -> TerminalFlightRecordingOrigin
     {
-        fence(countsAsProduction: false) { owner in owner.flightTape?.fromNowOrigin() }.value
+        fence(countsAsProduction: false) { owner in owner.flightTape.fromNowOrigin() }.value
     }
 
     /// Reads birth geometry with the lifetime beginning cursor for a backlog stream.
     package nonisolated func fencedFlightRecordingBacklogOrigin()
-        -> TerminalFlightRecordingOrigin?
+        -> TerminalFlightRecordingOrigin
     {
-        fence(countsAsProduction: false) { owner in owner.flightTape?.backlogOrigin() }.value
+        fence(countsAsProduction: false) { owner in owner.flightTape.backlogOrigin() }.value
     }
 
     /// Fences test work and drains exactly the damage accumulated through that fence.
@@ -1743,7 +1739,7 @@ public actor TerminalPTYHost {
 
     private func applyOutput(_ bytes: [UInt8]) {
         let previousConsumerWorkGeneration = terminal.pendingConsumerWorkGeneration
-        flightTape?.record(.feed(bytes))
+        flightTape.record(.feed(bytes))
         terminal.feed(bytes)
         let replies = terminal.drainReplyBytes()
         if replies.isEmpty == false {
@@ -1777,7 +1773,7 @@ public actor TerminalPTYHost {
         )
         guard ioctl(masterFD, TIOCSWINSZ, &size) == 0 else { return }
         let previousTerminal = terminal
-        flightTape?.record(.resize(columns: dimensions.columns, rows: dimensions.rows))
+        flightTape.record(.resize(columns: dimensions.columns, rows: dimensions.rows))
         terminal.resize(columns: dimensions.columns, rows: dimensions.rows)
         if terminal != previousTerminal { markUpdatePending() }
         if captureTransitions {

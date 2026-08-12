@@ -373,7 +373,7 @@ stream that made it.
 
 ### Dump a pane flight recording
 
-`pane tape` prints the dev pane's bounded, raw recording as one complete
+`pane tape` prints the pane's bounded, raw recording as one complete
 snapshot JSON document. This is the replay artifact format: it carries the
 initial geometry, ordered neutral events, live-capture provenance, and
 truncation metadata. Feed payloads emitted by the app use lossless base64.
@@ -381,9 +381,8 @@ truncation metadata. Feed payloads emitted by the app use lossless base64.
 The output is unscrubbed; redirect it to a file, then run the repository's
 fixture converter before committing it. The converter refuses every snapshot
 that reports dropped events because its surviving geometry and event sequence
-cannot be trusted. There is no truncation override. Only a bundle built with
-recording enabled has a tape; production panes return an unsupported-backend
-error.
+cannot be trusted. There is no truncation override. Every pane records, in
+production as well as in a dev build, so this always answers for a live pane.
 
     danterm pane tape --pane "$PANE_ID" > tape.json
     scripts/terminal-tape-to-fixture.py tape.json \\

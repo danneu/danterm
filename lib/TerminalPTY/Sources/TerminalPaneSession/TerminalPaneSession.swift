@@ -363,8 +363,7 @@ public final class TerminalPaneSessionController {
         bootstrapExecutable: String,
         machineHostname: String?,
         theme: RenderTheme,
-        captureTransitions: Bool,
-        recordsFlightTape: Bool
+        captureTransitions: Bool
     ) throws -> TerminalPTYHost {
         try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
@@ -372,8 +371,7 @@ public final class TerminalPaneSessionController {
             machineHostname: machineHostname,
             programVersion: configuration.terminalProgramVersion,
             defaultColors: theme.defaultColors,
-            captureTransitions: captureTransitions,
-            recordsFlightTape: recordsFlightTape
+            captureTransitions: captureTransitions
         )
     }
 
@@ -383,8 +381,7 @@ public final class TerminalPaneSessionController {
         bootstrapExecutable: String,
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
-        theme: RenderTheme = .dark,
-        recordsFlightTape: Bool = false
+        theme: RenderTheme = .dark
     ) throws {
         self.init(
             host: try Self.makeHost(
@@ -392,8 +389,7 @@ public final class TerminalPaneSessionController {
                 bootstrapExecutable: bootstrapExecutable,
                 machineHostname: machineHostname,
                 theme: theme,
-                captureTransitions: false,
-                recordsFlightTape: recordsFlightTape
+                captureTransitions: false
             ),
             launchInput: configuration.launchInput,
             isVisible: isVisible,
@@ -409,8 +405,7 @@ public final class TerminalPaneSessionController {
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
         theme: RenderTheme = .dark,
-        captureTransitions: Bool,
-        recordsFlightTape: Bool = false
+        captureTransitions: Bool
     ) throws {
         self.init(
             host: try Self.makeHost(
@@ -418,8 +413,7 @@ public final class TerminalPaneSessionController {
                 bootstrapExecutable: bootstrapExecutable,
                 machineHostname: machineHostname,
                 theme: theme,
-                captureTransitions: captureTransitions,
-                recordsFlightTape: recordsFlightTape
+                captureTransitions: captureTransitions
             ),
             launchInput: configuration.launchInput,
             isVisible: isVisible,
@@ -433,8 +427,7 @@ public final class TerminalPaneSessionController {
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
         theme: RenderTheme = .dark,
-        captureTransitions: Bool,
-        recordsFlightTape: Bool = false
+        captureTransitions: Bool
     ) throws {
         self.init(
             host: try Self.makeHost(
@@ -442,8 +435,7 @@ public final class TerminalPaneSessionController {
                 bootstrapExecutable: bootstrapExecutable,
                 machineHostname: machineHostname,
                 theme: theme,
-                captureTransitions: captureTransitions,
-                recordsFlightTape: recordsFlightTape
+                captureTransitions: captureTransitions
             ),
             launchInput: configuration.launchInput,
             isVisible: isVisible,
@@ -899,14 +891,14 @@ public final class TerminalPaneSessionController {
     }
 
     /// Fences and copies the live recorder state without serializing on the PTY owner queue.
-    public func flightRecordingSnapshot() -> TerminalFlightRecordingSnapshot? {
+    public func flightRecordingSnapshot() -> TerminalFlightRecordingSnapshot {
         host.fencedFlightRecording()
     }
 
     /// Fences the recorder suffix and exact loss after a previously delivered cursor.
     public func flightRecordingSnapshot(
         from cursor: TerminalFlightRecordingCursor
-    ) -> TerminalFlightRecordingCursorSnapshot? {
+    ) -> TerminalFlightRecordingCursorSnapshot {
         host.fencedFlightRecording(from: cursor)
     }
 
@@ -914,7 +906,7 @@ public final class TerminalPaneSessionController {
     public func flightRecordingSnapshot(
         nextSequence: UInt64,
         payloadBytesBeforeNextSequence: Int
-    ) -> TerminalFlightRecordingCursorSnapshot? {
+    ) -> TerminalFlightRecordingCursorSnapshot {
         flightRecordingSnapshot(from: .init(
             nextSequence: nextSequence,
             payloadBytesBeforeNextSequence: payloadBytesBeforeNextSequence
@@ -927,7 +919,7 @@ public final class TerminalPaneSessionController {
         nextSequence: UInt64,
         payloadBytesBeforeNextSequence: Int,
         notify: @escaping @Sendable () -> Void
-    ) -> Bool {
+    ) {
         host.addFlightRecordingFollowNotice(
             id: id,
             from: .init(
@@ -959,12 +951,12 @@ public final class TerminalPaneSessionController {
     }
 
     /// Fences current geometry with the first cursor for a tail-only follow stream.
-    public func flightRecordingOriginFromNow() -> TerminalFlightRecordingOrigin? {
+    public func flightRecordingOriginFromNow() -> TerminalFlightRecordingOrigin {
         host.fencedFlightRecordingOriginFromNow()
     }
 
     /// Fences recorder birth geometry with the cursor that requests retained backlog.
-    public func flightRecordingBacklogOrigin() -> TerminalFlightRecordingOrigin? {
+    public func flightRecordingBacklogOrigin() -> TerminalFlightRecordingOrigin {
         host.fencedFlightRecordingBacklogOrigin()
     }
 

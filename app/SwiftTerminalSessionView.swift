@@ -892,7 +892,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
 
     #if !DANTERM_UI_TEST
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)? {
-        guard let snapshot = controller.flightRecordingSnapshot() else { return nil }
+        let snapshot = controller.flightRecordingSnapshot()
         return { try snapshot.encodedRecording() }
     }
 
@@ -902,7 +902,6 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         let origin = fromNow
             ? controller.flightRecordingOriginFromNow()
             : controller.flightRecordingBacklogOrigin()
-        guard let origin else { return nil }
         return {
             let provenanceData = try JSONEncoder().encode(NeutralTerminalProvenance.liveCapture())
             let provenance = try JSONDecoder().decode(JSONValue.self, from: provenanceData)
@@ -954,12 +953,12 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         cursor: PaneTapeFollowCursor,
         notify: @escaping @Sendable () -> Void
     ) -> PaneTapeFollowNoticeRegistration? {
-        guard controller.addFlightRecordingFollowNotice(
+        controller.addFlightRecordingFollowNotice(
             id: id,
             nextSequence: cursor.nextSequence,
             payloadBytesBeforeNextSequence: cursor.payloadBytesBeforeNextSequence,
             notify: notify
-        ) else { return nil }
+        )
         let controller = controller
         return PaneTapeFollowNoticeRegistration {
             controller.removeFlightRecordingFollowNotice(id: id)

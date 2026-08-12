@@ -35,21 +35,4 @@ struct InstanceIdentityTests {
         #expect(identity.developmentSlot == nil)
         #expect(noncanonicalSlot.developmentSlot == nil)
     }
-
-    @Test("flight tape capability requires explicit true declaration")
-    func flightTapeCapabilityRequiresExplicitTrueDeclaration() {
-        // Intent: flight-tape recording follows the bundle capability instead of
-        //   recognizing one hard-coded development bundle identifier.
-        // Why it exists: every pooled development identity must retain `pane tape`,
-        //   while production and bundles without the declaration remain opted out.
-        // Scenario: canonical and slot clones carry true; production declares false;
-        //   an older or purpose-built bundle omits the key entirely.
-        #expect(DanTermBundleCapabilities.recordsFlightTape(
-            infoDictionary: [DanTermBundleCapabilities.recordsFlightTapeKey: true]
-        ))
-        #expect(DanTermBundleCapabilities.recordsFlightTape(
-            infoDictionary: [DanTermBundleCapabilities.recordsFlightTapeKey: false]
-        ) == false)
-        #expect(DanTermBundleCapabilities.recordsFlightTape(infoDictionary: nil) == false)
-    }
 }

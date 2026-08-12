@@ -4,16 +4,20 @@ import Testing
 @testable import DanTermSupport
 
 struct PaneTapeDumpPreparationTests {
-    @Test("missing pane recorder prepares the unsupported-backend RPC error")
-    func missingRecorderPreparesUnsupportedError() {
+    // Intent: the only tape failure names the one condition that can produce it.
+    // Why it exists: every terminal pane now records, so the former
+    //   unsupported-backend wording described a configuration that cannot occur and
+    //   sent an incident investigation after the terminal backend instead of the app.
+    @Test("a session without a terminal prepares the no-terminal RPC error")
+    func sessionWithoutTerminalPreparesNoTerminalError() {
         let preparation = preparePaneTapeDump(encoder: nil)
 
         guard case .error(let code, let message) = preparation else {
-            Issue.record("expected unsupported-backend error preparation")
+            Issue.record("expected no-terminal error preparation")
             return
         }
         #expect(code == -32603)
-        #expect(message == "pane tape unavailable for this terminal backend")
+        #expect(message == "pane has no terminal to read a tape from")
     }
 
     @Test("available pane recorder preserves deferred encoding work")

@@ -15,7 +15,6 @@ import xlocale
 final class SwiftTerminalBackend {
     private let bundle: Bundle
     private let bootstrapExecutable: String
-    private let recordsFlightTape: Bool
     #if DANTERM_TERMINAL_CHARACTERIZATION
     private let recordingDirectory: URL?
     #endif
@@ -31,9 +30,6 @@ final class SwiftTerminalBackend {
         bootstrapExecutable = bundle.bundleURL
             .appendingPathComponent("Contents/Helpers/PTYSessionBootstrap")
             .path
-        recordsFlightTape = DanTermBundleCapabilities.recordsFlightTape(
-            infoDictionary: bundle.infoDictionary
-        )
         #if DANTERM_TERMINAL_CHARACTERIZATION
         if let path = ProcessInfo.processInfo.environment["DANTERM_PTY_RECORDING_DIR"],
            path.isEmpty == false {
@@ -68,15 +64,13 @@ final class SwiftTerminalBackend {
                 configuration: configuration,
                 bootstrapExecutable: bootstrapExecutable,
                 theme: theme,
-                captureTransitions: recordingDirectory != nil,
-                recordsFlightTape: recordsFlightTape
+                captureTransitions: recordingDirectory != nil
             )
             #else
             controller = try TerminalPaneSessionController(
                 configuration: configuration,
                 bootstrapExecutable: bootstrapExecutable,
-                theme: theme,
-                recordsFlightTape: recordsFlightTape
+                theme: theme
             )
             #endif
         } catch {

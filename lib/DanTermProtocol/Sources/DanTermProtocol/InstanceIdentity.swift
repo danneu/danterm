@@ -1,4 +1,4 @@
-// Stable process identities and bundle-declared capabilities shared by app and tooling.
+// Stable process identities shared by app and tooling.
 import Foundation
 
 /// Names one DanTerm process so every identity-derived resource follows the same fixed scheme.
@@ -56,15 +56,4 @@ public struct DanTermInstanceIdentity: Equatable, Sendable {
 
     private static let productionBundleIdentifier = "com.danneu.danterm"
     private static let developmentBundleIdentifier = "com.danneu.danterm-dev"
-}
-
-/// Reads opt-in runtime features from bundle metadata so cloned identities retain capabilities.
-public enum DanTermBundleCapabilities {
-    /// Info.plist key whose true value enables the Swift terminal's pane flight tape.
-    public static let recordsFlightTapeKey = "DanTermRecordsFlightTape"
-
-    /// Treats true as opted in and false, missing, or ill-typed values as opted out.
-    public static func recordsFlightTape(infoDictionary: [String: Any]?) -> Bool {
-        infoDictionary?[recordsFlightTapeKey] as? Bool == true
-    }
 }

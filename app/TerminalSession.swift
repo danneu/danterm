@@ -175,21 +175,18 @@ protocol TerminalSession: AnyObject {
     func tearDown()
 }
 
+/// Every terminal pane records, so these defaults exist only for a session with no terminal
+/// behind it -- the UI-test shim. A live terminal pane always overrides them with a real tape.
 extension TerminalSession {
-    /// Only a bundle built with recording enabled has a tape to encode; the default keeps
-    /// every other bundle out of the recorder's implementation entirely.
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)? { nil }
-    /// A bundle without a recorded tape has no follow origin to fence.
     func paneTapeFollowStart(
         fromNow: Bool
     ) -> (@Sendable () throws -> PaneTapeFollowStart)? { nil }
-    /// A backend without a tape cannot install an append edge.
     func addPaneTapeFollowNotice(
         id: UUID,
         cursor: PaneTapeFollowCursor,
         notify: @escaping @Sendable () -> Void
     ) -> PaneTapeFollowNoticeRegistration? { nil }
-    /// Without a follow origin there can never be a later cursor batch.
     func paneTapeFollowBatch(
         subscriptionId: UUID,
         from cursor: PaneTapeFollowCursor

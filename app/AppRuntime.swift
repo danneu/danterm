@@ -557,7 +557,7 @@ class AppRuntime {
             connection.writeError(
                 reqId: reqId,
                 code: -32603,
-                message: "pane tape unavailable for this terminal backend"
+                message: "pane has no terminal to read a tape from"
             )
             return
         }

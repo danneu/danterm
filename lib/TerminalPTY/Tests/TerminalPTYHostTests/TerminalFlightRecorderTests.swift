@@ -351,17 +351,24 @@ struct TerminalFlightRecorderTests {
         #expect(origin.cursor == .beginning)
     }
 
-    @Test("disabled host configuration retains no flight recording")
-    func disabledHostRetainsNothing() throws {
+    // Intent: a host built the way the shipping app builds one records from birth.
+    // Why it exists: the recorder used to be gated on a bundle capability the
+    //   notarized bundle could never set, so a production pane kept no evidence of
+    //   itself. This replaces the coverage for that recorder-less configuration,
+    //   which no longer exists: the initializer takes no input that suppresses a tape.
+    @Test("a host built through the shipping initializer retains a flight recording")
+    func shippingHostRetainsFlightRecording() throws {
         let host = try TerminalPTYHost(
             initialDimensions: .init(columns: 80, rows: 24),
-            bootstrapExecutable: "/unused",
-            recordsFlightTape: false
+            bootstrapExecutable: "/unused"
         )
 
-        host.deliverOutputForTesting(Array("not retained".utf8))
+        host.deliverOutputForTesting(Array("retained".utf8))
 
-        #expect(host.fencedFlightRecording() == nil)
+        #expect(
+            host.fencedFlightRecording().events.map(\.event)
+                == [.feed(Array("retained".utf8))]
+        )
     }
 
     @Test("dump encoding produces one replayable raw recording document")

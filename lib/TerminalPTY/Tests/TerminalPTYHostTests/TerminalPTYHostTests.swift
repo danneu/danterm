@@ -655,8 +655,7 @@ struct TerminalPTYHostTests {
         let host = try TerminalPTYHost(
             initialDimensions: .init(columns: 80, rows: 24),
             bootstrapExecutable: bootstrapExecutable(),
-            machineHostname: MachineHostname.posix,
-            recordsFlightTape: true
+            machineHostname: MachineHostname.posix
         )
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) recording \"$0\""
@@ -666,9 +665,9 @@ struct TerminalPTYHostTests {
         host.send(Array("continue\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(0)))
 
-        let snapshot = try #require(host.fencedFlightRecording())
-        let fromNow = try #require(host.fencedFlightRecordingOriginFromNow())
-        let liveSuffix = try #require(host.fencedFlightRecording(from: fromNow.cursor))
+        let snapshot = host.fencedFlightRecording()
+        let fromNow = host.fencedFlightRecordingOriginFromNow()
+        let liveSuffix = host.fencedFlightRecording(from: fromNow.cursor)
         let recording = try JSONDecoder().decode(
             NeutralTerminalRecording.self,
             from: snapshot.encodedRecording()
