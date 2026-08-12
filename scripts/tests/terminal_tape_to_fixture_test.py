@@ -201,6 +201,10 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
             self.assertIn("truncated", refused.stderr)
             self.assertFalse(destination.exists())
 
+            # The escape hatch is absent rather than merely unused: the converter defines no
+            # flag that admits a truncated tape, so asking for one is an argument error. Assert
+            # that specific rejection -- a bare "it failed" would also pass if the flag existed
+            # and wrote the fixture while failing for some later reason.
             override = self.run_converter(
                 source,
                 destination,
@@ -208,7 +212,8 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                 "--allow-truncated",
             )
 
-            self.assertNotEqual(override.returncode, 0)
+            self.assertEqual(override.returncode, 2)
+            self.assertIn("unrecognized arguments: --allow-truncated", override.stderr)
             self.assertFalse(destination.exists())
 
     def test_legacy_bare_jsonl_and_hex_feeds_are_rejected(self):
