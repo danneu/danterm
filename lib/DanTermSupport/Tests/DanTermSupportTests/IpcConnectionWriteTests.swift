@@ -183,6 +183,29 @@ struct IpcConnectionWriteTests {
         #expect(onMainThread, "every completion path must report on the main thread")
     }
 
+    @Test("a peer that never answers fails the read instead of parking it")
+    func silentPeerFailsTheRead() throws {
+        // Intent: both socket reads this suite makes give up on a deadline.
+        // Why it exists: `Darwin.read` on a socket nobody writes to and nobody closes
+        //   parks the thread for good. It is a synchronous syscall, so a `.timeLimit`
+        //   cannot unwind it either -- the lane keeps the process alive until an
+        //   outside deadline kills it, and reports nothing about which test stopped.
+        // Scenario: the connection under test writes a short frame or drops a reply,
+        //   which is what every assertion below the read is there to catch.
+        let descriptors = try socketPair()
+        defer {
+            Darwin.close(descriptors.connection)
+            Darwin.close(descriptors.peer)
+        }
+
+        let started = ContinuousClock().now
+        #expect(throws: (any Error).self) { try readIpcLine(from: descriptors.peer) }
+        #expect(readByte(from: descriptors.peer) < 0)
+        let elapsed = ContinuousClock().now - started
+
+        #expect(elapsed < .seconds(30), "the silent reads took \(elapsed)")
+    }
+
     private func socketPair() throws -> (connection: Int32, peer: Int32) {
         var descriptors: [Int32] = [-1, -1]
         guard Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0 else {
@@ -195,6 +218,7 @@ struct IpcConnectionWriteTests {
         var bytes: [UInt8] = []
         var byte: UInt8 = 0
         while true {
+            guard waitForReadable(descriptor) else { throw POSIXError(.ETIMEDOUT) }
             let count = Darwin.read(descriptor, &byte, 1)
             guard count == 1 else {
                 throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
@@ -226,9 +250,31 @@ struct IpcConnectionWriteTests {
         }
     }
 
+    /// Reads one byte, or reports -1 when the peer neither writes nor closes in time.
+    ///
+    /// Callers assert on EOF (a zero-length read), so the case this guards against --
+    /// a peer that stays open and silent -- is the one they exist to catch.
     private func readByte(from descriptor: Int32) -> Int {
+        guard waitForReadable(descriptor) else { return -1 }
         var byte: UInt8 = 0
         return Darwin.read(descriptor, &byte, 1)
+    }
+
+    /// Blocks until the descriptor has a byte or a close pending, and reports whether
+    /// one arrived before the deadline.
+    ///
+    /// Every read in this suite goes through here. A bare `Darwin.read` on a socket
+    /// the connection under test never answers parks the thread for good, and no
+    /// `.timeLimit` can unwind a synchronous syscall -- the whole lane then dies to an
+    /// outside deadline, naming no test. The bound matches the close probe below, so a
+    /// stalled test fails in seconds and says which read stalled.
+    private func waitForReadable(_ descriptor: Int32, timeout: Int32 = 2_000) -> Bool {
+        while true {
+            var readiness = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            let ready = Darwin.poll(&readiness, 1, timeout)
+            if ready < 0 && errno == EINTR { continue }
+            return ready > 0
+        }
     }
 }
 
