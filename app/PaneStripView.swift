@@ -19,8 +19,9 @@ import AppKit
 /// thing it may never elide.
 ///
 /// Each chip may carry one state dot on its corner: red for a pane that wants
-/// you, a smaller unringed amber for one whose agent is mid-turn. Which of
-/// those a pane gets is decided in the core by `paneChipState`, not here.
+/// you, amber for one whose agent is mid-turn. The two are the same ringed dot
+/// and differ only in hue. Which of them a pane gets is decided in the core by
+/// `paneChipState`, not here.
 final class PaneStripView: NSView {
     var chips: [TabPaneChip] = [] {
         didSet {
@@ -139,11 +140,12 @@ final class PaneStripView: NSView {
             ])
     }
 
-    private func dotSize(for state: PaneChipState) -> ChipStateDotSize? {
+    private func dotColor(for state: PaneChipState, appearance: ChipAppearance) -> CGColor? {
+        let palette = appearance == .light ? ChipArtwork.paneListLight : ChipArtwork.paneListDark
         switch state {
         case .quiet: return nil
-        case .attention: return ChipArtwork.attentionDotSize
-        case .busy: return ChipArtwork.busyDotSize
+        case .attention: return palette.attentionDot
+        case .busy: return palette.busyDot
         }
     }
 
@@ -155,9 +157,9 @@ final class PaneStripView: NSView {
     /// what `clipsToBounds = false` is for, so it has to stay bounded --
     /// internal so the harness can hold this to the budget.
     func stateDotRect(_ state: PaneChipState, on chip: NSRect) -> NSRect? {
-        guard let size = dotSize(for: state) else { return nil }
+        guard state != .quiet else { return nil }
         let scale = edge / ChipArtwork.paneRowSize
-        let diameter = size.diameter * scale
+        let diameter = ChipArtwork.stateDotGeometry.diameter * scale
         let bleed = ChipArtwork.stateDotBleed * scale
         return NSRect(
             x: chip.maxX + bleed - diameter,
@@ -167,28 +169,28 @@ final class PaneStripView: NSView {
     }
 
     /// Paints one chip's state dot, ringed so it reads against the mark, the
-    /// chip, and the row it overhangs alike. Only the attention dot is ringed:
-    /// at busy's size the ring would be most of the dot.
+    /// chip, and the row it overhangs alike. Both states get the same dot and
+    /// the same ring, and are told apart by hue alone.
     private func drawStateDot(
         _ state: PaneChipState,
         on chip: NSRect,
         in context: CGContext,
         appearance: ChipAppearance
     ) {
-        guard let size = dotSize(for: state), let dot = stateDotRect(state, on: chip) else { return }
+        guard
+            let color = dotColor(for: state, appearance: appearance),
+            let dot = stateDotRect(state, on: chip)
+        else { return }
         let palette = appearance == .light ? ChipArtwork.paneListLight : ChipArtwork.paneListDark
 
         context.saveGState()
-        if size.ringWidth > 0 {
-            let ring = size.ringWidth * (edge / ChipArtwork.paneRowSize)
-            // The ring matches the row it sits on, so it reads as a gap around
-            // the dot rather than as a halo of its own. Over the chip it does
-            // the separating; over the row it disappears.
-            context.setFillColor(rowBackground?.cgColor ?? palette.stateDotRing)
-            context.fillEllipse(in: dot.insetBy(dx: -ring, dy: -ring))
-        }
-        context.setAlpha(size.alpha)
-        context.setFillColor(state == .attention ? palette.attentionDot : palette.busyDot)
+        let ring = ChipArtwork.stateDotGeometry.ringWidth * (edge / ChipArtwork.paneRowSize)
+        // The ring matches the row it sits on, so it reads as a gap around
+        // the dot rather than as a halo of its own. Over the chip it does
+        // the separating; over the row it disappears.
+        context.setFillColor(rowBackground?.cgColor ?? palette.stateDotRing)
+        context.fillEllipse(in: dot.insetBy(dx: -ring, dy: -ring))
+        context.setFillColor(color)
         context.fillEllipse(in: dot)
         context.restoreGState()
     }

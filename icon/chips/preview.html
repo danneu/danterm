@@ -216,8 +216,8 @@ function opaque(hex) {
 // hooks have not claimed -- neither earns a mark.
 const DOT_STATES = ["alert", "waiting", "working", "idle", "none"];
 
-// Each variant maps a state to {d, color, alpha} or null for no dot. `d` is the
-// diameter in points at the 12pt pane-row chip.
+// Each variant maps a state to {d, color, ringWidth, ring} or null for no dot.
+// `d` is the diameter in points at the 12pt pane-row chip.
 const DOT_VARIANTS = [
   // The literal proposal: one slot, hue carries everything, both weights equal.
   ["sym-yellow", "red / yellow, equal weight", (s, mode) =>
@@ -231,21 +231,19 @@ const DOT_VARIANTS = [
     : s === "working"                  ? {d: 4, color: mode === "light" ? "#C77700" : "#FF9F0A"}
     : null],
   // What ships, read from the manifest rather than restated, so tuning a color
-  // or a diameter there shows up here and in the app together. Busy is ambient
-  // and wants-you is an interrupt, so they are separated by weight as well as
-  // hue -- which is also what keeps them apart without hue at all, for a
-  // protanope who sees red darken toward amber.
-  ["asym", "red full / amber small, muted (ships)", (s, mode, M, surface) => {
+  // or the diameter there shows up here and in the app together. One dot in two
+  // hues: the ring is what lets either of them hold an edge against the mark,
+  // the chip, and the row, so neither state goes without it.
+  ["shipped", "red / amber, one ringed dot (ships)", (s, mode, M, surface) => {
       const P = M.paneList[mode].stateDot, G = M.stateDot;
-      const spec = s === "alert" || s === "waiting" ? G.attention
-                 : s === "working"                  ? G.busy
-                 : null;
-      if (!spec) return null;
+      const color = s === "alert" || s === "waiting" ? P.attention
+                  : s === "working"                  ? P.busy
+                  : null;
+      if (!color) return null;
       // The ring matches the row, so it reads as a gap around the dot rather
       // than a halo. On a selected row that is the accent, which the app gets
       // from SidebarRowView; the fixed neutral covers every other row.
-      return {d: spec.diameter, color: spec === G.attention ? P.attention : P.busy,
-              alpha: spec.alpha, ringWidth: spec.ringWidth,
+      return {d: G.diameter, color: color, ringWidth: G.ringWidth,
               ring: surface === "sel" ? undefined : P.ring};
   }],
   // The control: attention only, busy shown nowhere in the strip. Worth seeing
@@ -256,7 +254,7 @@ const DOT_VARIANTS = [
     : null]
 ];
 
-const SHIPPED_DOT = DOT_VARIANTS.find(v => v[0] === "asym")[2];
+const SHIPPED_DOT = DOT_VARIANTS.find(v => v[0] === "shipped")[2];
 
 // Mirrors PaneStripView.drawStateDot. The dot bleeds past the chip's corner --
 // held fully inside a 12pt chip it would cover a third of the mark that
@@ -274,7 +272,6 @@ function stateDot(spec, size, M, mode, surfaceBg) {
          `top:${(-M.stateDot.bleed * k).toFixed(2)}px;` +
          `right:${(-M.stateDot.bleed * k).toFixed(2)}px;` +
          `background:${spec.color};` +
-         `opacity:${spec.alpha === undefined ? 1 : spec.alpha};` +
          (rw > 0 ? `box-shadow:0 0 0 ${rw.toFixed(2)}px ${ring}` : "") + `"></span>`;
 }
 

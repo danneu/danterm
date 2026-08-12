@@ -39,22 +39,21 @@ struct ChipPaneListPalette {
     let active: ChipPalette
     /// A pane that wants you: an unread alert, or an agent blocked on a prompt.
     let attentionDot: CGColor
-    /// A pane whose agent is mid-turn. Ambient, so it is drawn smaller and
-    /// unringed next to `attentionDot` -- but never faded, since a dim chip
-    /// already swallows it. See the stateDot note in chips.json.
+    /// A pane whose agent is mid-turn. The same dot as `attentionDot` in a
+    /// different hue -- see the stateDot note in chips.json.
     let busyDot: CGColor
     /// Separates a dot from the mark, the chip, and the row it overhangs.
-    /// Fixed per appearance, not taken from the row: sidebar selection never
-    /// reaches the cell, so nothing drawn here may depend on it.
+    /// The unselected row, which is every row the manifest can speak for: a
+    /// selected row is painted in a color only SidebarRowView knows, and it
+    /// pushes that one down to the strip instead.
     let stateDotRing: CGColor
 }
 
-/// How one state dot is drawn, in points at `ChipArtwork.paneRowSize`.
-struct ChipStateDotSize {
+/// How a state dot is drawn, in points at `ChipArtwork.paneRowSize`. One
+/// value for both states, so neither can lose the ring the other keeps.
+struct ChipStateDotGeometry {
     let diameter: CGFloat
-    let alpha: CGFloat
-    /// Width of the `stateDotRing` band outside the dot; 0 for no ring. Only
-    /// the attention dot is ringed -- see the stateDot note in chips.json.
+    /// Width of the `stateDotRing` band outside the dot.
     let ringWidth: CGFloat
 }
 
@@ -167,14 +166,11 @@ enum ChipArtwork {
         stateDotRing: CGColor(srgbRed: 0.1373, green: 0.1373, blue: 0.149, alpha: 1)
     )
 
-    /// State-dot geometry, in points at `paneRowSize` and scaled with it. The
-    /// two sizes are deliberately unequal: busy is ambient and attention is an
-    /// interrupt, so they must not read as equally loud on a strip where most
-    /// panes are busy. Both are drawn at full opacity, though -- the ordering
-    /// is carried by size, hue, and the ring, and translucency only made busy
-    /// unreadable over a dim chip. See the stateDot note in chips.json.
-    static let attentionDotSize = ChipStateDotSize(diameter: 4.5, alpha: 1, ringWidth: 1)
-    static let busyDotSize = ChipStateDotSize(diameter: 3.5, alpha: 1, ringWidth: 0)
+    /// State-dot geometry, in points at `paneRowSize` and scaled with it.
+    /// Attention and busy share it and differ only in hue, so the ring is a
+    /// property of the dot rather than of one state. See the stateDot note
+    /// in chips.json.
+    static let stateDotGeometry = ChipStateDotGeometry(diameter: 4.5, ringWidth: 1)
     /// How far the dot overhangs its chip's top-right corner. Lands in margins
     /// the strip already has, so it stays out of the strip's fitting math.
     static let stateDotBleed: CGFloat = 1
