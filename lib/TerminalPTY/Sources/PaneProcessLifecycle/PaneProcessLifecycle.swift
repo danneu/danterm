@@ -49,7 +49,10 @@ public enum PaneProcessLifecycleEvent: Equatable, Sendable {
     case start(LaunchPolicyInput)
     case spawnSucceeded
     case spawnFailed(SpawnFailure)
-    case sendInput([UInt8])
+    /// `origin` is when the event that produced these bytes occurred, on the owner's monotonic
+    /// clock, and travels with them so the eventual write can be attributed to it. Nil for
+    /// bytes the pane owner produced itself, such as a terminal reply.
+    case sendInput([UInt8], origin: UInt64?)
     case resize(TerminalDimensions)
     case output([UInt8])
     case outputEOF
@@ -63,7 +66,9 @@ public enum PaneProcessLifecycleEvent: Equatable, Sendable {
 public enum PaneProcessLifecycleCommand: Equatable, Sendable {
     case spawn(PTYLaunchSpec)
     case activateIO
-    case writeInput([UInt8])
+    /// Carries the submission's `origin` unchanged, so the host can keep it attached to these
+    /// bytes for as long as backpressure holds them short of the PTY.
+    case writeInput([UInt8], origin: UInt64?)
     case resize(TerminalDimensions)
     case deliverOutput([UInt8])
     case drainOutput
@@ -147,7 +152,7 @@ public struct PaneProcessLifecycleReducer: Sendable {
                 commands.append(.resize(dimensions))
             }
             if let initialInput = context.plan.initialInput {
-                commands.append(.writeInput(initialInput))
+                commands.append(.writeInput(initialInput, origin: nil))
             }
             return commands
         case .spawnFailed(.workingDirectoryUnavailable):
@@ -202,8 +207,8 @@ public struct PaneProcessLifecycleReducer: Sendable {
         outputEOF: Bool
     ) -> [PaneProcessLifecycleCommand] {
         switch event {
-        case .sendInput(let bytes):
-            return [.writeInput(bytes)]
+        case .sendInput(let bytes, let origin):
+            return [.writeInput(bytes, origin: origin)]
         case .resize(let dimensions) where dimensions.isValid:
             return [.resize(dimensions)]
         case .output(let bytes) where !outputEOF:

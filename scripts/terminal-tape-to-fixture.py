@@ -137,9 +137,10 @@ def load_follow_stream(records: list):
                 raise ValueError("invalid follow end record")
             ended = True
             continue
-        if kind != "event" or set(record) != {
-            "kind", "sequence", "elapsedNanoseconds", "event"
-        }:
+        required = {"kind", "sequence", "elapsedNanoseconds", "event"}
+        if kind != "event" or not required <= set(record) <= (
+            required | {"originElapsedNanoseconds"}
+        ):
             raise ValueError("invalid follow stream order")
 
         sequence = record["sequence"]
@@ -149,18 +150,24 @@ def load_follow_stream(records: list):
             isinstance(sequence, bool)
             or not isinstance(sequence, int)
             or sequence < 0
-            or isinstance(elapsed, bool)
-            or not isinstance(elapsed, int)
-            or elapsed < 0
+            or not nonnegative_integer(elapsed)
             or not isinstance(event, dict)
             or not isinstance(event.get("type"), str)
             or "elapsedNanoseconds" in event
+            or "originElapsedNanoseconds" in event
         ):
             raise ValueError("invalid follow event record")
         if previous_sequence is not None and sequence != previous_sequence + 1:
             raise ValueError("follow stream event sequence is not contiguous")
         previous_sequence = sequence
+        # The stream hoists both stamps above the event; the snapshot shape carries them
+        # inside it, and validate_event admits an origin on write events alone.
         flattened = {**event, "elapsedNanoseconds": elapsed}
+        if "originElapsedNanoseconds" in record:
+            origin = record["originElapsedNanoseconds"]
+            if not nonnegative_integer(origin):
+                raise ValueError("invalid follow event record")
+            flattened["originElapsedNanoseconds"] = origin
         validate_event(flattened)
         events.append(flattened)
 

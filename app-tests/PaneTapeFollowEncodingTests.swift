@@ -13,13 +13,19 @@ struct PaneTapeFollowEncodingTests {
         // Scenario: one followed pane emits output bytes and then changes character geometry.
         for event in [
             NeutralTerminalRecordingEvent.feed(Array("Hi".utf8)),
+            .write(Array("ls".utf8)),
             .resize(columns: 100, rows: 30),
         ] {
             let directData = try JSONEncoder().encode(event)
             let direct = try JSONDecoder().decode(JSONValue.self, from: directData)
             let adapted = try paneTapeFollowEventJSON(event)
             let batch = makePaneTapeFollowBatch(from: .init(
-                events: [.init(sequence: 1, elapsedNanoseconds: 2, event: adapted)],
+                events: [.init(
+                    sequence: 1,
+                    elapsedNanoseconds: 2,
+                    originElapsedNanoseconds: nil,
+                    event: adapted
+                )],
                 droppedEventCount: 0,
                 droppedPayloadBytes: 0,
                 nextCursor: .init(nextSequence: 2, payloadBytesBeforeNextSequence: 2)

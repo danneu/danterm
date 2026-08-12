@@ -20,6 +20,9 @@ struct PaneTapeFollowDimensions: Equatable, Sendable {
 struct PaneTapeFollowEvent: Equatable, Sendable {
     let sequence: UInt64
     let elapsedNanoseconds: UInt64
+    /// When the event that produced these bytes occurred, on the same scale as
+    /// `elapsedNanoseconds`; nil for bytes with no origin earlier than their own transfer.
+    let originElapsedNanoseconds: UInt64?
     let event: JSONValue
 }
 
@@ -97,12 +100,19 @@ func makePaneTapeFollowBatch(from snapshot: PaneTapeFollowSnapshot) -> PaneTapeF
         ]))
     }
     records.append(contentsOf: snapshot.events.map { event in
-        .object([
+        // The origin sits beside the transfer stamp rather than inside the event, because this
+        // shape already hoists timing out of the event object. An absent origin omits the key:
+        // a number there would read as a measurement of an event that had none.
+        var record: [String: JSONValue] = [
             "kind": .string("event"),
             "sequence": .number(Double(event.sequence)),
             "elapsedNanoseconds": .number(Double(event.elapsedNanoseconds)),
             "event": event.event,
-        ])
+        ]
+        if let origin = event.originElapsedNanoseconds {
+            record["originElapsedNanoseconds"] = .number(Double(origin))
+        }
+        return .object(record)
     })
     return PaneTapeFollowBatch(records: records, nextCursor: snapshot.nextCursor)
 }

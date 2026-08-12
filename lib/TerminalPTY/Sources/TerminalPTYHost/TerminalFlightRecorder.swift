@@ -35,16 +35,23 @@ public struct TerminalFlightRecordingEvent: Equatable, Sendable {
     public let event: NeutralTerminalRecordingEvent
     /// Monotonic time since this pane's recorder was constructed.
     public let elapsedNanoseconds: UInt64
+    /// When the event that produced these bytes occurred, on the same scale as
+    /// `elapsedNanoseconds`. Nil means the bytes originated at the pane owner itself and had
+    /// no earlier origin -- never zero, which is a real position on the scale. The distance
+    /// between the two stamps is time the app held the bytes before they crossed.
+    public let originElapsedNanoseconds: UInt64?
 
     /// Keeps timing metadata beside, but behaviorally independent from, the replay event.
     public init(
         sequence: UInt64,
         event: NeutralTerminalRecordingEvent,
-        elapsedNanoseconds: UInt64
+        elapsedNanoseconds: UInt64,
+        originElapsedNanoseconds: UInt64? = nil
     ) {
         self.sequence = sequence
         self.event = event
         self.elapsedNanoseconds = elapsedNanoseconds
+        self.originElapsedNanoseconds = originElapsedNanoseconds
     }
 }
 
@@ -127,6 +134,9 @@ public struct TerminalFlightRecordingSnapshot: Equatable, Sendable {
 
         for index in encodedEvents.indices {
             encodedEvents[index]["elapsedNanoseconds"] = events[index].elapsedNanoseconds
+            if let origin = events[index].originElapsedNanoseconds {
+                encodedEvents[index]["originElapsedNanoseconds"] = origin
+            }
         }
         document["events"] = encodedEvents
         document["truncation"] = [
@@ -191,14 +201,24 @@ package final class TerminalFlightRecorder {
         startedNanoseconds = now()
     }
 
-    package func record(_ event: NeutralTerminalRecordingEvent) {
+    /// `origin` is when the event that produced these bytes occurred, on this recorder's own
+    /// clock, and belongs only to bytes travelling toward the child. Callers pass nil for
+    /// anything that originated at the pane owner. Unlike the transfer stamp, origins are not
+    /// forced monotonic along the sequence: they describe their own event, not this one.
+    package func record(_ event: NeutralTerminalRecordingEvent, origin: UInt64? = nil) {
         let current = now()
         let measured = current >= startedNanoseconds ? current - startedNanoseconds : 0
         let elapsed = max(lastElapsedNanoseconds, measured)
         lastElapsedNanoseconds = elapsed
+        let originElapsed = origin.map { $0 >= startedNanoseconds ? $0 - startedNanoseconds : 0 }
         let payloadBytes = Self.payloadBytes(of: event)
         let slot = Slot(
-            event: .init(sequence: nextSequence, event: event, elapsedNanoseconds: elapsed),
+            event: .init(
+                sequence: nextSequence,
+                event: event,
+                elapsedNanoseconds: elapsed,
+                originElapsedNanoseconds: originElapsed
+            ),
             payloadBytes: payloadBytes,
             payloadBytesBeforeEvent: totalPayloadBytes
         )

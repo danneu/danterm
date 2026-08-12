@@ -378,6 +378,15 @@ snapshot JSON document. This is the replay artifact format: it carries the
 initial geometry, ordered neutral events, live-capture provenance, and
 truncation metadata. Feed payloads emitted by the app use lossless base64.
 
+The tape records both directions: `feed` events are bytes the child produced,
+`write` events are bytes that reached the child. A `write` also carries
+`originElapsedNanoseconds` when its bytes came from an event outside the pane
+owner, so the gap between that stamp and `elapsedNanoseconds` is time the app
+held the input; bytes the owner produced itself, such as terminal replies,
+carry no origin. Because input is recorded, a tape can contain what was typed,
+including a password a `sudo` or `ssh` prompt never echoed -- treat one as
+sensitive before sharing or committing it.
+
 The output is unscrubbed; redirect it to a file, then run the repository's
 fixture converter before committing it. The converter refuses every snapshot
 that reports dropped events because its surviving geometry and event sequence
@@ -392,7 +401,9 @@ production as well as in a dev build, so this always answers for a live pane.
 ### Follow a pane flight recording
 
 `--follow` is the incremental capture format: it writes unwrapped `start`,
-`event`, optional `gap`, and `end` records as JSON Lines. `--from-now` skips the
+`event`, optional `gap`, and `end` records as JSON Lines. An `event` record
+hoists `elapsedNanoseconds`, and `originElapsedNanoseconds` when the event has
+an origin, above the event object itself. `--from-now` skips the
 backlog and waits for the next live event. Redirect the stream when evidence
 must survive an app crash:
 

@@ -678,6 +678,9 @@ struct TerminalPTYHostTests {
 
         #expect(try recording.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
         #expect(recording.events == snapshot.events.map(\.event))
+        // The tape carries the bytes this test typed as well as the child's output, and the
+        // replay above is what proves replay ignores them rather than echoing them back in.
+        #expect(snapshot.events.contains { writtenBytes($0) != nil })
         #expect(snapshot.events[..<resizeIndex].contains {
             if case .feed = $0.event { true } else { false }
         })
@@ -690,6 +693,99 @@ struct TerminalPTYHostTests {
         #expect(fromNow.initial == .init(columns: 96, rows: 28))
         #expect(fromNow.cursor.nextSequence == snapshot.events.last.map { $0.sequence + 1 })
         #expect(liveSuffix.events.isEmpty)
+    }
+
+    @Test("input the child has not accepted stays out of the tape", .timeLimit(.minutes(1)))
+    func backpressuredInputIsRecordedOnlyOnceItCrosses() async throws {
+        // Intent: the tape holds the bytes the PTY accepted and no others, so input still
+        //   waiting in the owner's own buffer leaves no event behind.
+        // Why it exists: an event written when bytes are queued charges the app's own
+        //   backpressure to the child, which is the attribution this facility exists to make.
+        // Scenario: megabytes are submitted to a child that never reads its terminal.
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(
+            command: "stty raw -echo; exec \(try probeExecutable()) stalled \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        let submission = host.fencedFlightRecordingOriginFromNow().cursor
+        let payload = [UInt8](repeating: UInt8(ascii: "A"), count: 4 * 1024 * 1024)
+        host.send(payload, origin: 1)
+        let pending = await host.settledPendingInputByteCount()
+
+        let recorded = host.fencedFlightRecording(from: submission)
+            .events
+            .compactMap(writtenBytes)
+        #expect(pending > 0)
+        #expect(recorded.reduce(0) { $0 + $1.count } == payload.count - pending)
+        #expect(recorded.allSatisfy { $0.allSatisfy { $0 == UInt8(ascii: "A") } })
+
+        await host.close()
+    }
+
+    @Test("accepted input is recorded as transmitted, under the origin it was submitted with", .timeLimit(.minutes(1)))
+    func acceptedInputCarriesItsSubmissionOrigin() async throws {
+        // Intent: every byte the child accepted appears in the tape in transmission order,
+        //   and each event reports the time its bytes originated as well as the time they
+        //   crossed -- including for the bytes a backpressured write deferred to a later turn.
+        // Why it exists: PO2. An owner that sampled its own clock at the write would report
+        //   an origin equal to the transfer time and hide exactly the delay worth seeing.
+        // Scenario: a megabyte is submitted well after its originating event occurred, to a
+        //   child that drains it over many owner turns.
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(command: "stty raw -echo; printf '__DRAINING__\\n'; exec cat > /dev/null"))
+        #expect(await host.waitForOutput(containing: Array("__DRAINING__".utf8)))
+
+        let submission = host.fencedFlightRecordingOriginFromNow().cursor
+        let origin = DispatchTime.now().uptimeNanoseconds
+        let stallNanoseconds: UInt64 = 50_000_000
+        try await Task.sleep(for: .nanoseconds(stallNanoseconds))
+        let payload = (0..<(1024 * 1024)).map { UInt8($0 % 251) }
+        host.send(payload, origin: origin)
+        #expect(await host.settledPendingInputByteCount() == 0)
+
+        let events = host.fencedFlightRecording(from: submission)
+            .events
+            .filter { writtenBytes($0) != nil }
+        #expect(events.compactMap(writtenBytes).flatMap { $0 } == payload)
+        #expect(events.count > 1)
+        #expect(Set(events.map(\.originElapsedNanoseconds)).count == 1)
+        #expect(events.allSatisfy { event in
+            guard let originElapsed = event.originElapsedNanoseconds else { return false }
+            return event.elapsedNanoseconds - originElapsed >= stallNanoseconds
+        })
+
+        await host.close()
+    }
+
+    @Test("owner-originated bytes cross without an origin stamp", .timeLimit(.minutes(1)))
+    func ownerOriginatedBytesCarryNoOrigin() async throws {
+        // Intent: a terminal reply has no origin earlier than its own transfer, so its event
+        //   carries one stamp, while input submitted with an origin beside it carries two.
+        // Why it exists: I3. An origin defaulted to the transfer time, or to zero, would read
+        //   as a measurement rather than as the absence of one.
+        // Scenario: a child asks for the cursor position and the user types straight after.
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(command: "stty raw -echo; printf '__DRAINING__\\n'; exec cat > /dev/null"))
+        #expect(await host.waitForOutput(containing: Array("__DRAINING__".utf8)))
+
+        let submission = host.fencedFlightRecordingOriginFromNow().cursor
+        host.deliverOutputForTesting(Array("\u{1B}[6n".utf8))
+        let typedOrigin = DispatchTime.now().uptimeNanoseconds
+        host.send(Array("hi".utf8), origin: typedOrigin)
+        #expect(await host.settledPendingInputByteCount() == 0)
+
+        let events = host.fencedFlightRecording(from: submission)
+            .events
+            .filter { writtenBytes($0) != nil }
+        #expect(events.compactMap(writtenBytes) == [
+            Array("\u{1B}[2;1R".utf8),
+            Array("hi".utf8),
+        ])
+        #expect(events.first?.originElapsedNanoseconds == nil)
+        #expect(events.last?.originElapsedNanoseconds != nil)
+
+        await host.close()
     }
 
     @Test("teardown reaches every job in the owned session without touching a sibling", .timeLimit(.minutes(1)))
@@ -2056,6 +2152,29 @@ private func topViewportLine(_ terminal: Terminal) -> String {
 private func scrollbackCommand(disableEcho: Bool = false) throws -> String {
     let echoPolicy = disableEcho ? "stty -echo; " : ""
     return "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; \(echoPolicy)exec \(try probeExecutable()) hold \"$0\""
+}
+
+/// The transmitted payload of one recorded input-direction transfer; nil for every other event.
+private func writtenBytes(_ recorded: TerminalFlightRecordingEvent) -> [UInt8]? {
+    guard case .write(let bytes) = recorded.event else { return nil }
+    return bytes
+}
+
+private extension TerminalPTYHost {
+    /// Polls until the pending-input buffer stops changing, so a later tape read describes the
+    /// same settled state. Sampling the two independently would race a write still in progress.
+    func settledPendingInputByteCount(within limit: Duration = .seconds(10)) async -> Int {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: limit)
+        var previous = -1
+        while clock.now < deadline {
+            let sample = resourceSnapshot().pendingInputByteCount
+            if sample == previous { return sample }
+            previous = sample
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return resourceSnapshot().pendingInputByteCount
+    }
 }
 
 private func makeHost(

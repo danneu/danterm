@@ -345,6 +345,60 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                 ],
             )
 
+    def test_follow_stream_carries_an_input_events_origin_into_the_fixture(self):
+        # Intent: a stream record's hoisted origin stamp lands inside the converted event,
+        #   beside the transfer stamp, and a record without one converts unchanged.
+        # Why it exists: the origin is what separates time the app owned from time the child
+        #   owned, so a converter that dropped it would turn evidence into a plain byte log.
+        # Scenario: a developer follows a pane while typing, then converts the capture.
+        records = [
+            follow_start(),
+            follow_event(3, {"type": "write", "text": "ls"}, elapsed=90, origin_elapsed=12),
+            follow_event(4, {"type": "feed", "text": "ls"}, elapsed=95),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "capture.jsonl"
+            destination = root / "fixture.json"
+            source.write_text(json_lines(records), encoding="utf-8")
+
+            result = self.run_converter(source, destination, "--keep-identifiers")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fixture = json.loads(destination.read_text(encoding="utf-8"))
+            self.assertEqual(
+                fixture["events"],
+                [
+                    {
+                        "type": "write",
+                        "text": "ls",
+                        "elapsedNanoseconds": 90,
+                        "originElapsedNanoseconds": 12,
+                    },
+                    {"type": "feed", "text": "ls", "elapsedNanoseconds": 95},
+                ],
+            )
+
+    def test_follow_stream_rejects_an_origin_stamp_on_child_output(self):
+        # Intent: only bytes travelling toward the child may carry an origin, in the stream
+        #   grammar as well as in the event schema.
+        # Why it exists: child output is read and recorded in one turn, so a second stamp on
+        #   it would restate the first and invite a reader to compare two identical numbers.
+        records = [
+            follow_start(),
+            follow_event(3, {"type": "feed", "text": "hi"}, elapsed=90, origin_elapsed=12),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "capture.jsonl"
+            destination = root / "fixture.json"
+            source.write_text(json_lines(records), encoding="utf-8")
+
+            result = self.run_converter(source, destination, "--keep-identifiers")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(destination.exists())
+
     def test_follow_stream_without_end_remains_convertible(self):
         records = [
             follow_start(),
@@ -446,13 +500,16 @@ def follow_start():
     }
 
 
-def follow_event(sequence, event, elapsed=0):
-    return {
+def follow_event(sequence, event, elapsed=0, origin_elapsed=None):
+    record = {
         "kind": "event",
         "sequence": sequence,
         "elapsedNanoseconds": elapsed,
         "event": event,
     }
+    if origin_elapsed is not None:
+        record["originElapsedNanoseconds"] = origin_elapsed
+    return record
 
 
 def follow_gap():

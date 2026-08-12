@@ -92,6 +92,46 @@ struct TerminalFlightRecorderTests {
         #expect(snapshot.isTruncated == false)
     }
 
+    @Test("an origin stamp is retained on the recorder's own elapsed scale")
+    func originStampsShareTheElapsedScale() {
+        // Intent: an origin submitted on the recorder's clock is retained as elapsed time
+        //   since the recorder started, comparable with the transfer stamp beside it, and an
+        //   event with no earlier origin retains none.
+        // Why it exists: I3. Two stamps on different bases, or an absent origin recorded as
+        //   zero, would both read as a measurement the tape never made.
+        let clock = TestFlightClock([100, 140, 150])
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+            now: clock.now
+        )
+
+        recorder.record(.write([1, 2]), origin: 120)
+        recorder.record(.feed([3]))
+
+        let snapshot = recorder.snapshot()
+        #expect(snapshot.events.map(\.elapsedNanoseconds) == [40, 50])
+        #expect(snapshot.events.map(\.originElapsedNanoseconds) == [20, nil])
+    }
+
+    @Test("an origin older than the recorder is retained at its start")
+    func originBeforeRecorderStartClampsToZero() {
+        // Intent: an origin from before this recorder existed is retained as its start rather
+        //   than wrapping around the unsigned subtraction beneath it.
+        // Why it exists: a pane's first keystroke can be encoded from an event the system
+        //   created before the pane's recorder was constructed.
+        let clock = TestFlightClock([100, 140])
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+            now: clock.now
+        )
+
+        recorder.record(.write([1]), origin: 40)
+
+        #expect(recorder.snapshot().events.map(\.originElapsedNanoseconds) == [0])
+    }
+
     @Test("payload budget evicts the minimal oldest whole-event prefix")
     func payloadBudgetEvictsMinimalPrefix() {
         let recorder = TerminalFlightRecorder(
@@ -422,6 +462,32 @@ struct TerminalFlightRecorderTests {
         _ = try recording.replay()
     }
 
+    @Test("dump encoding carries an origin stamp beside the transfer stamp")
+    func dumpEncodingCarriesOriginStamps() throws {
+        // Intent: the snapshot document reports both stamps for a transfer that had an
+        //   earlier origin, and omits the key entirely for one that did not.
+        // Why it exists: the origin is inert metadata, so nothing but the document itself
+        //   proves it survived encoding, and an omitted key is how absence is stated.
+        let clock = TestFlightClock([0, 30, 40])
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 4, rows: 2),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+            now: clock.now
+        )
+        recorder.record(.write([0x41]), origin: 10)
+        recorder.record(.feed([0x42]))
+
+        let data = try recorder.snapshot().encodedRecording()
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let events = try #require(json["events"] as? [[String: Any]])
+        let recording = try JSONDecoder().decode(NeutralTerminalRecording.self, from: data)
+
+        #expect(events.map { ($0["originElapsedNanoseconds"] as? NSNumber)?.uint64Value } == [10, nil])
+        #expect(events.map { ($0["elapsedNanoseconds"] as? NSNumber)?.uint64Value } == [30, 40])
+        #expect(recording.events == [.write([0x41]), .feed([0x42])])
+        _ = try recording.replay()
+    }
+
     @Test("production recorder bounds fit complete JSON-RPC lines")
     func productionBoundsFitIPCLine() throws {
         let bulkRecorder = TerminalFlightRecorder(
@@ -431,13 +497,16 @@ struct TerminalFlightRecorderTests {
         )
         bulkRecorder.record(.feed(Array(repeating: 0xFF, count: 8 * 1_024 * 1_024 - 128)))
 
+        // A full ring of input-direction events, each with the widest origin stamp the clock
+        // can produce. That is the costliest per-event encoding the schema admits, so a ring
+        // of output events of the same size fits wherever this one does.
         let tinyRecorder = TerminalFlightRecorder(
             initialDimensions: .init(columns: 80, rows: 24),
             configuration: .production,
             now: { 0 }
         )
         for _ in 0..<32_768 {
-            tinyRecorder.record(.feed([0xFF]))
+            tinyRecorder.record(.write([0xFF]), origin: .max)
         }
 
         for snapshot in [bulkRecorder.snapshot(), tinyRecorder.snapshot()] {

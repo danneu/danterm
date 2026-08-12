@@ -932,6 +932,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 return PaneTapeFollowEvent(
                     sequence: recorded.sequence,
                     elapsedNanoseconds: recorded.elapsedNanoseconds,
+                    originElapsedNanoseconds: recorded.originElapsedNanoseconds,
                     event: try paneTapeFollowEventJSON(recorded.event)
                 )
             }

@@ -13,10 +13,13 @@ import Testing
         #expect(reducer.handle(.start(input)) == [.spawn(firstSpec)])
         #expect(reducer.handle(.spawnSucceeded) == [
             .activateIO,
-            .writeInput(Array("printf ready\n".utf8)),
+            .writeInput(Array("printf ready\n".utf8), origin: nil),
         ])
         #expect(reducer.handle(.spawnSucceeded).isEmpty)
-        #expect(reducer.handle(.sendInput([0x61, 0x62])) == [.writeInput([0x61, 0x62])])
+        #expect(
+            reducer.handle(.sendInput([0x61, 0x62], origin: 7))
+                == [.writeInput([0x61, 0x62], origin: 7)]
+        )
         #expect(reducer.handle(.resize(TerminalDimensions(columns: 120, rows: 50))) == [
             .resize(TerminalDimensions(columns: 120, rows: 50)),
         ])
@@ -160,7 +163,7 @@ import Testing
 
         let events: [PaneProcessLifecycleEvent] = [
             .start(lifecycleInput()), .spawnSucceeded,
-            .spawnFailed(.systemError(1)), .sendInput([1]),
+            .spawnFailed(.systemError(1)), .sendInput([1], origin: nil),
             .resize(TerminalDimensions(columns: 1, rows: 1)), .output([2]),
             .outputEOF, .childExited(.exited(0)), .requestClose,
             .graceElapsed(.hangup), .sessionDrained,

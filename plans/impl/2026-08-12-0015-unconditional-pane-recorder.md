@@ -265,7 +265,7 @@ recording schema audit.
 
 - [x] 1. delete the flight-tape build capability so every pane records
 - [x] 2. add an input-direction byte event to the neutral recording vocabulary
-- [ ] 3. record input bytes at the PTY write boundary with origin stamps
+- [x] 3. record input bytes at the PTY write boundary with origin stamps
 - [ ] 4. stamp pane input with its originating system event time
 
 ## Implementation notes
@@ -296,6 +296,25 @@ recording schema audit.
 - **Commit 2.** Retention charges the new event's payload here rather than with
   commit 3's record sites, so no revision of the tree exists in which a
   payload-bearing event is retained for free.
+
+- **Commit 3.** The origin travels with its bytes through the lifecycle enums --
+  `sendInput` and `writeInput` both gained an inert `origin` -- rather than through a
+  host field read at the write. A side channel would let the two separate, which is
+  the one failure this stamp exists to rule out.
+- **Commit 3.** Pending input keeps one span per submission, and a successful write is
+  split at span boundaries, so an event never mixes bytes from two origins and bytes
+  deferred by backpressure keep their origin across turns. Input discarded without
+  crossing -- a write error, or master close -- records nothing.
+- **Commit 3.** `origin` is a parameter on every public entry that submits bytes,
+  including wheel, pointer, and focus, although nothing in the tree passes one until
+  commit 4. Omitting it on those paths would have made bytes that came from a system
+  event report the absence that means "originated at the owner".
+- **Commit 3.** In the follow record the origin sits beside the hoisted elapsed stamp,
+  the placement commit 2 deferred to the emitter, and the fixture converter flattens
+  both back into the event, where the snapshot shape already carries them.
+- **Commit 3.** PO4's minimal-event ring is now input-direction events carrying the
+  widest origin the clock admits: that is the costliest per-event encoding in the
+  schema, so a ring of output events fits wherever this one does.
 
 ## Follow Up
 

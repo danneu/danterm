@@ -65,8 +65,8 @@ struct PaneTapeFollowTests {
         let nextCursor = PaneTapeFollowCursor(nextSequence: 9, payloadBytesBeforeNextSequence: 99)
         let batch = makePaneTapeFollowBatch(from: .init(
             events: [
-                .init(sequence: 7, elapsedNanoseconds: 10, event: feed),
-                .init(sequence: 8, elapsedNanoseconds: 20, event: resize),
+                .init(sequence: 7, elapsedNanoseconds: 10, originElapsedNanoseconds: nil, event: feed),
+                .init(sequence: 8, elapsedNanoseconds: 20, originElapsedNanoseconds: nil, event: resize),
             ],
             droppedEventCount: 7,
             droppedPayloadBytes: 42,
@@ -80,6 +80,40 @@ struct PaneTapeFollowTests {
         ]))
         #expect(batch.records.dropFirst().map { $0["event"] } == [feed, resize])
         #expect(batch.nextCursor == nextCursor)
+    }
+
+    @Test("an event's origin stamp is carried beside its transfer stamp")
+    func originStampIsCarriedBesideTheTransferStamp() {
+        // Intent: a stream record reports the origin of the bytes it carries, next to the
+        //   stamp for the transfer itself, and omits the key for an event that has no origin.
+        // Why it exists: the follow stream hoists timing above the event object, so an origin
+        //   left inside the event -- or emitted as zero -- would reach readers as a different
+        //   fact from the one the recorder holds.
+        let write: JSONValue = .object(["type": .string("write"), "base64": .string("SGk=")])
+        let feed: JSONValue = .object(["type": .string("feed"), "base64": .string("SGk=")])
+        let batch = makePaneTapeFollowBatch(from: .init(
+            events: [
+                .init(sequence: 0, elapsedNanoseconds: 30, originElapsedNanoseconds: 10, event: write),
+                .init(sequence: 1, elapsedNanoseconds: 40, originElapsedNanoseconds: nil, event: feed),
+            ],
+            droppedEventCount: 0,
+            droppedPayloadBytes: 0,
+            nextCursor: .init(nextSequence: 2, payloadBytesBeforeNextSequence: 4)
+        ))
+
+        #expect(batch.records.first == .object([
+            "kind": .string("event"),
+            "sequence": .number(0),
+            "elapsedNanoseconds": .number(30),
+            "originElapsedNanoseconds": .number(10),
+            "event": write,
+        ]))
+        #expect(batch.records.last == .object([
+            "kind": .string("event"),
+            "sequence": .number(1),
+            "elapsedNanoseconds": .number(40),
+            "event": feed,
+        ]))
     }
 
     @Test("consecutive cursor batches neither duplicate nor skip a sequence")
@@ -179,6 +213,7 @@ struct PaneTapeFollowTests {
                 .init(
                     sequence: $0,
                     elapsedNanoseconds: $0 * 10,
+                    originElapsedNanoseconds: nil,
                     event: .object(["type": .string("feed"), "base64": .string("")])
                 )
             },
