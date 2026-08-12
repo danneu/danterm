@@ -276,7 +276,7 @@ Per-site direction:
   concurrent-close test from PO3.
 - [x] 4. `refactor(app): state observer-token and associated-key isolation`
   -- `TodoInputView` token type, `SidebarView` key addresses.
-- [ ] 5. `refactor(app): compile the app target in Swift 6 language mode`
+- [x] 5. `refactor(app): compile the app target in Swift 6 language mode`
   -- isolated `NSTextInputClient` conformance, `DanTerm` and
   `DanTermAppTests` to `.v6`, design doc amended.
 
@@ -347,8 +347,48 @@ at `.v5`; only 5 flips it.
   pane, `theme set`, `pane input`/`pane read` round trip, and a clean quit that
   unlinked the control socket.
 
+- Commit 5: the two `app/IpcServer.swift:59` sending errors are fixed by
+  declaring `JsonRpcRequest: Sendable`, not by annotating the call site. Both
+  have one root: the struct holds a `String` and two `JSONValue?`s, `JSONValue`
+  is already `Sendable`, and a public type gets no implicit `Sendable` across a
+  module boundary -- so `IpcConnection.startReading`'s `@Sendable` callback
+  could not carry it and neither could the `Task` inside. Stating the
+  conformance is I2's "making the type honestly safe": the envelope is an
+  immutable value of `Sendable` parts. `JsonRpcResponse` and `JsonRpcError` are
+  left alone because nothing sends them across an isolation boundary.
+- Commit 5: the `NSTextInputClient` fix is `@MainActor` on the conformance in
+  the inheritance clause, which the compiler accepts on a class that is already
+  main-actor by inference. No annotation was added to the class itself.
+- Commit 5: flipping `DanTerm` and `DanTermAppTests` turns previously-invisible
+  AppKit isolation problems into **warnings** at 35 distinct lines across seven
+  files -- `TodoShortcutHelpView` (17), `PaneDragCoordinator` (7),
+  `ScrollableTerminalView` (5), `BadgeLabel` (3), and one each in
+  `ThemeBrowserView`, `TodoInputView`, and the symlinked
+  `DanTermSupport/CheckpointWriter`. They do not block I1, which asks only that
+  every target compile at `.v6`, and fixing them is a behavioral isolation
+  refactor rather than part of a language-mode flip, so they are carried to
+  Follow Up rather than folded in.
+- Commit 5: the plan's step-3 smoke ran on slot 1 over an explicit
+  `--socket`: `ls`, `tab new`, `pane split`, `theme set`, and a
+  `pane input`/`pane read` round trip that echoed back correctly. A clean quit
+  (`osascript ... to quit`, not `SIGTERM` -- a signal skips the app's terminate
+  path entirely and leaves the socket on disk) unlinked the control socket.
+  Sidebar group rename is still unreachable over the CLI, as commit 4 recorded.
+
 ## Follow Up
 
+- The `.v6` flip leaves 35 distinct concurrency **warnings** across
+  `app/TodoShortcutHelpView.swift`, `app/PaneDragCoordinator.swift`,
+  `app/ScrollableTerminalView.swift`, `app/BadgeLabel.swift`,
+  `app/ThemeBrowserView.swift:309`, `app/TodoInputView.swift`, and
+  `lib/DanTermSupport/Sources/DanTermSupport/CheckpointWriter.swift`. Two shapes:
+  a nonisolated type whose every member drives main-actor AppKit
+  (`PaneDragCoordinator`, `BadgeLabel`, and the `TodoShortcutHelpView` builders
+  want `@MainActor`), and `@Sendable` notification/dispatch closures mutating
+  main-actor state or capturing a non-`Sendable` value
+  (`ScrollableTerminalView`'s observers, `ThemeBrowserView`'s `NSMenu`,
+  `CheckpointWriter`'s `(Bool) -> Void` completion). Each is a real isolation
+  claim to make, not noise to silence.
 - `lib/TerminalPTY/Tests/TerminalPTYHostTests/TerminalPTYHostTests.swift:781`
   ("owner-originated bytes cross without an origin stamp") flaked once
   during this commit's gate run: the observed writes were

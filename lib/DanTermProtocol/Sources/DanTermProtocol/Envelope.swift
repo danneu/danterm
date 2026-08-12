@@ -1,7 +1,7 @@
 // JSON-RPC 2.0 envelopes shared by the DanTerm app and CLI.
 import Foundation
 
-public struct JsonRpcRequest: Codable, Equatable {
+public struct JsonRpcRequest: Codable, Equatable, Sendable {
     public var jsonrpc: String
     public var id: JSONValue?
     public var method: String

@@ -50,7 +50,7 @@ let package = Package(
             path: "app",
             exclude: ["Info.plist"],
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v6),
             ],
             linkerSettings: [
                 .linkedFramework("Cocoa"),
@@ -93,7 +93,7 @@ let package = Package(
             ],
             path: "app-tests",
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v6),
             ]
         ),
         .testTarget(

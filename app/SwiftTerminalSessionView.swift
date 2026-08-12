@@ -60,7 +60,7 @@ func sessionReport(for event: TerminalSemanticEvent) -> SessionReport? {
 }
 
 /// Adapts one headless Swift terminal controller into DanTerm's AppKit pane contract.
-final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValidation, TerminalSession {
+final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMenuItemValidation, TerminalSession {
     private let controller: TerminalPaneSessionController
     private let resolveTheme: (String) -> RenderTheme?
     private let callbackGate = TerminalSessionCallbackGate()
