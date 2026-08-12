@@ -1,5 +1,6 @@
-// CLI argument parser for `danterm group new`. Holds only the grammar; the
-// background default and the cwd fallback are CLI policy and live in CLIParser.
+// CLI argument parser for `danterm group new`. Holds only the flag unique to this
+// command -- `--name`; the launch and focus flags come from `NewCommandFlags`.
+// The background default and the cwd fallback are CLI policy and live in CLIParser.
 import Foundation
 
 /// Carries the parsed flags of `group new`. Separate from `ParsedTabNew` because
@@ -18,64 +19,27 @@ public struct ParsedGroupNew: Equatable {
     }
 }
 
-public enum GroupNewParseError: Error, Equatable {
-    case missingValue(String)
-    case unknownFlag(String)
-    case unexpectedArgument(String)
-    case conflictingFocusFlags
-}
-
 public func parseGroupNewArgs(_ args: [String]) throws -> ParsedGroupNew {
+    var flags = NewCommandFlags()
     var name: String?
-    var cmd: String?
-    var cwd: String?
-    var title: String?
-    var background = false
-    var foreground = false
     var index = 0
 
     while index < args.count {
         let arg = args[index]
         switch arg {
         case "--name":
-            name = try groupNewValue(after: arg, in: args, at: index)
+            name = try newCommandFlagValue(after: arg, in: args, at: index)
             index += 2
-        case "--cmd":
-            cmd = try groupNewValue(after: arg, in: args, at: index)
-            index += 2
-        case "--cwd":
-            cwd = try groupNewValue(after: arg, in: args, at: index)
-            index += 2
-        case "--title":
-            title = try groupNewValue(after: arg, in: args, at: index)
-            index += 2
-        case "--background":
-            guard foreground == false else { throw GroupNewParseError.conflictingFocusFlags }
-            background = true
-            index += 1
-        case "--foreground":
-            guard background == false else { throw GroupNewParseError.conflictingFocusFlags }
-            foreground = true
-            index += 1
         default:
-            if arg.hasPrefix("-") {
-                throw GroupNewParseError.unknownFlag(arg)
-            }
-            throw GroupNewParseError.unexpectedArgument(arg)
+            index = try flags.consume(args, at: index)
         }
     }
 
-    let spec = LaunchSpec(cmd: cmd, cwd: cwd, title: title)
+    // `--background` is parsed but dropped: it only feeds the focus conflict
+    // guard, and the CLI derives the background from `foreground == false`.
     return ParsedGroupNew(
         name: name,
-        launch: spec.isEmpty ? nil : spec,
-        foreground: foreground
+        launch: flags.launch,
+        foreground: flags.foreground
     )
-}
-
-private func groupNewValue(after flag: String, in args: [String], at index: Int) throws -> String {
-    guard index + 1 < args.count else {
-        throw GroupNewParseError.missingValue(flag)
-    }
-    return args[index + 1]
 }
