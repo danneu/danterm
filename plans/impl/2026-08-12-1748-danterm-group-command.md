@@ -231,7 +231,7 @@ existing help assertions.
 
 - [x] `feat(cli): add danterm group rename` -- protocol case, parser, dispatch
   with the name guard, `usageText` + SKILL.md, and the rename tests.
-- [ ] `test(sidebar): cover committing an inline group rename` -- the UI-harness
+- [x] `test(sidebar): cover committing an inline group rename` -- the UI-harness
   test and the `CustomTitleTests` translation case.
 - [ ] `feat(cli): add danterm group new and close` -- the remaining two methods,
   the creation background parameter, their refusal contracts, docs, and tests.
@@ -258,6 +258,11 @@ existing help assertions.
   in the gate, so it rotted unnoticed; the new `group` steps in that script are
   therefore unverified by the harness (they were verified by hand against a live
   slot instead).
+- `just test-ui` has one failure unrelated to this change:
+  `tests-ui/IOSurfaceLayerContentsTests.swift:61`, "contents swaps attach no
+  animation and release the old surface", reports "swapped-out surface still in
+  use after the swap committed". It reproduces on two consecutive runs and runs
+  before any sidebar test in the suite, so it is not caused by the new test.
 - `shellcheck` reports 11 pre-existing SC2251 findings in
   `scripts/tests/danterm-cli_test.sh` (every `! grep -qF ...` line). They skip
   errexit, so those negative assertions cannot fail the script.
