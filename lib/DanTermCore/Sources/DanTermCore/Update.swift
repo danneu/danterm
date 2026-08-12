@@ -63,16 +63,15 @@ func update(
         let tabId = TabId(rawValue: env.newId())
         let cwd = launch?.cwd ?? currentCwd(in: model)
 
+        let launchTitle = launch?.title?.singleLineName
         let pane = PaneModel(
             id: paneId,
-            session: SessionModel(id: sessionId, title: launch?.title ?? "Terminal")
+            session: SessionModel(id: sessionId, title: launchTitle ?? "Terminal")
         )
 
         // The leaf owns the pane content directly -- no separate dict write.
         var tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(pane))
-        if let title = launch?.title {
-            tab.customTitle = title
-        }
+        tab.customTitle = launchTitle
 
         // .atGroupEnd always appends. .afterSelected and .afterTab insert
         // after their reference tab when it lives in the target group,
@@ -188,7 +187,8 @@ func update(
 
         var newPane = PaneModel(
             id: newPaneId,
-            session: SessionModel(id: newSessionId, title: launch?.title ?? "Terminal")
+            session: SessionModel(
+                id: newSessionId, title: launch?.title?.singleLineName ?? "Terminal")
         )
         newPane.theme = theme
         newPane.fontSizeSteps = fontSizeSteps
@@ -486,8 +486,7 @@ func update(
         return []
 
     case .renameTab(let id, let name):
-        let trimmed = name?.trimmingCharacters(in: .whitespaces)
-        let customTitle: String? = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        let customTitle = name?.singleLineName
         updateTab(id, in: &model) { t in t.customTitle = customTitle }
         // The renamed row updates via reconcileSidebar (displayTitle is in the projection)
         // and the selected tab's window chrome via reconcileWindowChrome.
@@ -970,10 +969,9 @@ func update(
         return []
 
     case .renameGroup(let id, let name):
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty,
+        guard let newName = name.singleLineName,
               let idx = model.groups.firstIndex(where: { $0.id == id }) else { return [] }
-        model.groups[idx].name = trimmed
+        model.groups[idx].name = newName
         return []
 
     case .moveTabs(let tabIds, let toGroupId, let atIndex):
