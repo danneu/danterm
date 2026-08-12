@@ -1,4 +1,6 @@
-// CLI argument parser for `danterm tab new`.
+// CLI argument parser for `danterm tab new`. Holds only the flags unique to this
+// command -- `--group` and the position flags; the launch and focus flags come
+// from `NewCommandFlags`.
 import Foundation
 
 public enum ParsedTabPosition: Equatable {
@@ -31,21 +33,9 @@ public struct ParsedTabNew: Equatable {
     }
 }
 
-public enum TabNewParseError: Error, Equatable {
-    case missingValue(String)
-    case unknownFlag(String)
-    case unexpectedArgument(String)
-    case conflictingPositionFlags
-    case conflictingFocusFlags
-}
-
 public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
+    var flags = NewCommandFlags()
     var group: String?
-    var cmd: String?
-    var cwd: String?
-    var title: String?
-    var background = false
-    var foreground = false
     var position: ParsedTabPosition?
     var i = 0
 
@@ -53,29 +43,8 @@ public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
         let arg = args[i]
         switch arg {
         case "--group":
-            group = try value(after: arg, in: args, at: i)
+            group = try newCommandFlagValue(after: arg, in: args, at: i)
             i += 2
-        case "--cmd":
-            cmd = try value(after: arg, in: args, at: i)
-            i += 2
-        case "--cwd":
-            cwd = try value(after: arg, in: args, at: i)
-            i += 2
-        case "--title":
-            title = try value(after: arg, in: args, at: i)
-            i += 2
-        case "--background":
-            guard !foreground else {
-                throw TabNewParseError.conflictingFocusFlags
-            }
-            background = true
-            i += 1
-        case "--foreground":
-            guard !background else {
-                throw TabNewParseError.conflictingFocusFlags
-            }
-            foreground = true
-            i += 1
         case "--after-selected":
             try setPosition(.afterSelected, into: &position)
             i += 1
@@ -83,37 +52,30 @@ public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
             try setPosition(.atGroupEnd, into: &position)
             i += 1
         case "--after-tab":
-            let id = try value(after: arg, in: args, at: i)
+            // Read the id before the conflict check, so a bare trailing
+            // `--after-tab` names the value it is missing.
+            let id = try newCommandFlagValue(after: arg, in: args, at: i)
             try setPosition(.afterTab(id), into: &position)
             i += 2
         default:
-            if arg.hasPrefix("-") {
-                throw TabNewParseError.unknownFlag(arg)
-            }
-            throw TabNewParseError.unexpectedArgument(arg)
+            i = try flags.consume(args, at: i)
         }
     }
 
-    let spec = LaunchSpec(cmd: cmd, cwd: cwd, title: title)
     return ParsedTabNew(
         group: group,
-        launch: spec.isEmpty ? nil : spec,
-        background: background,
-        foreground: foreground,
+        launch: flags.launch,
+        background: flags.background,
+        foreground: flags.foreground,
         position: position
     )
 }
 
-private func value(after flag: String, in args: [String], at index: Int) throws -> String {
-    guard index + 1 < args.count else {
-        throw TabNewParseError.missingValue(flag)
-    }
-    return args[index + 1]
-}
-
+/// Fills the single position slot, rejecting a second position flag even when it
+/// repeats the first. Unlike the focus flags, position tolerates no repetition.
 private func setPosition(_ newPosition: ParsedTabPosition, into position: inout ParsedTabPosition?) throws {
     guard position == nil else {
-        throw TabNewParseError.conflictingPositionFlags
+        throw NewCommandParseError.conflictingPositionFlags
     }
     position = newPosition
 }
