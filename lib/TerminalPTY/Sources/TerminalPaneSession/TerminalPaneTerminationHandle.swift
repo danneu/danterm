@@ -27,14 +27,16 @@ public struct TerminalPaneTerminationHandle: Sendable {
     ///
     /// Sleeps between samples rather than spinning: the pane being waited on shares
     /// the machine, and `Task.yield()` does not throw on cancellation, so a yield
-    /// loop cannot be unwound by a deadline outside it either.
+    /// loop cannot be unwound by a deadline outside it either. A cancelled sleep
+    /// ends the wait for the same reason -- sampling on without it would rebuild
+    /// that spin exactly when something asked for the wait to stop.
     public func quiesced(within limit: Duration) async -> Bool {
         let quiescent = Mutex(false)
         whenQuiescent { quiescent.withLock { $0 = true } }
         let deadline = ContinuousClock.now + limit
         while ContinuousClock.now < deadline {
             if quiescent.withLock({ $0 }) { return true }
-            try? await Task.sleep(for: .milliseconds(5))
+            do { try await Task.sleep(for: .milliseconds(5)) } catch { break }
         }
         return quiescent.withLock { $0 }
     }

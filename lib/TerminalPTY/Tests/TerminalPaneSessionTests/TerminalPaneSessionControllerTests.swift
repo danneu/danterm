@@ -2244,7 +2244,10 @@ private extension TerminalPaneSessionController {
         while clock.now < deadline {
             synchronizeState()
             if predicate(self) { return true }
-            try? await Task.sleep(for: .milliseconds(5))
+            // Stops on a cancelled sleep instead of sampling on with nothing left to
+            // pace the loop, which would rebuild the spin above at the moment a time
+            // limit fired to end it.
+            do { try await Task.sleep(for: .milliseconds(5)) } catch { break }
         }
         synchronizeState()
         return predicate(self)
@@ -2265,6 +2268,6 @@ private func settles(within limit: Duration = .seconds(10), _ predicate: () -> B
     let deadline = clock.now.advanced(by: limit)
     while clock.now < deadline {
         if predicate() { return }
-        try? await Task.sleep(for: .milliseconds(5))
+        do { try await Task.sleep(for: .milliseconds(5)) } catch { return }
     }
 }

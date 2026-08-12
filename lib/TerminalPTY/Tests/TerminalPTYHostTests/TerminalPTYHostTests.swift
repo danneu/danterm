@@ -2267,7 +2267,10 @@ private extension TerminalPTYHost {
             let sample = resourceSnapshot().pendingInputByteCount
             if sample == previous { return sample }
             previous = sample
-            try? await Task.sleep(for: .milliseconds(50))
+            // Stops on a cancelled sleep rather than sampling on with nothing left
+            // to pace the loop. See `pollUntil`, which this cannot use: it reports
+            // a count, and the count is what the caller asserts on.
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
         return resourceSnapshot().pendingInputByteCount
     }
@@ -2287,7 +2290,7 @@ private extension TerminalPTYHost {
         while clock.now < deadline {
             let sample = resourceSnapshot().pendingInputByteCount
             if sample == 0 { return 0 }
-            try? await Task.sleep(for: .milliseconds(50))
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
         return resourceSnapshot().pendingInputByteCount
     }
@@ -2450,12 +2453,7 @@ private func waitForProcessExit(
     _ processID: Int,
     within limit: Duration = .seconds(10)
 ) async -> Bool {
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: limit)
-    while processExists(processID), clock.now < deadline {
-        try? await Task.sleep(for: .milliseconds(20))
-    }
-    return processExists(processID) == false
+    await pollUntil({ processExists(processID) == false }, within: limit)
 }
 
 /// Waits for `processID` to stop being a direct child of this process.
@@ -2467,12 +2465,7 @@ private func waitForDirectChildExit(
     _ processID: pid_t,
     within limit: Duration = .seconds(10)
 ) async -> Bool {
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: limit)
-    while directChildProcessIDs().contains(processID), clock.now < deadline {
-        try? await Task.sleep(for: .milliseconds(20))
-    }
-    return directChildProcessIDs().contains(processID) == false
+    await pollUntil({ directChildProcessIDs().contains(processID) == false }, within: limit)
 }
 
 private func openFileDescriptorCount() throws -> Int {

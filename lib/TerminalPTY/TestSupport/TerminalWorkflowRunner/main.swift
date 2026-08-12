@@ -200,8 +200,10 @@ private enum TerminalWorkflowRunner {
             controller.synchronizeState()
             if controller.readFullHistoryText().contains(marker) { return }
             // Sleeping, not yielding: this wait shares a machine with the pane it is
-            // waiting on, and a spin competes with the very work that ends it.
-            try? await Task.sleep(for: .milliseconds(5))
+            // waiting on, and a spin competes with the very work that ends it. A
+            // cancelled sleep ends the wait rather than leaving the loop to sample on
+            // with nothing pacing it.
+            do { try await Task.sleep(for: .milliseconds(5)) } catch { break }
         }
         throw RunnerError.timeout(marker)
     }
@@ -218,7 +220,7 @@ private enum TerminalWorkflowRunner {
             let history = controller.readFullHistoryText()
             if let anchorRange = history.range(of: anchor, options: .backwards),
                history[anchorRange.upperBound...].contains(marker) { return }
-            try? await Task.sleep(for: .milliseconds(5))
+            do { try await Task.sleep(for: .milliseconds(5)) } catch { break }
         }
         throw RunnerError.timeout("\(marker) after \(anchor)")
     }

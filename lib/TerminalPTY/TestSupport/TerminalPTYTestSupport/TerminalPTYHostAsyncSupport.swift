@@ -206,7 +206,7 @@ public extension TerminalPTYHost {
 /// And when the sleep is itself cancelled, this stops. Swallowing that error would spin
 /// through the rest of the deadline with no sleep left in the loop -- rebuilding the hot
 /// loop the sleep was there to prevent, at the exact moment a time limit fired to end it.
-func pollUntil(_ condition: @Sendable () -> Bool, within limit: Duration) async -> Bool {
+public func pollUntil(_ condition: @Sendable () -> Bool, within limit: Duration) async -> Bool {
     let deadline = ContinuousClock.now + limit
     while true {
         if condition() { return true }
