@@ -174,34 +174,139 @@ struct PaneTapeFollowTests {
         #expect(subscriptions.completeDelivery(subscriptionId: subscriptionId) == nil)
     }
 
-    @Test("pane close ends each matching stream once and connection close removes ownership")
-    func paneAndConnectionClosureRemoveSubscriptions() {
-        let paneId = UUID()
-        let firstConnection = UUID()
-        let secondConnection = UUID()
-        let remainingSubscriptionId = UUID()
+    @Test("pane close ends every stream on that pane, one terminator per subscription")
+    func paneClosureEndsEveryStreamOnThatPane() {
+        // Intent: closing a pane produces exactly one `end` per stream watching it, and
+        //   leaves streams on other panes alone.
+        // Why it exists: the terminators used to be routed by connection, so two streams
+        //   sharing a socket cost one of them its promised `end` record.
+        // Scenario: two agents follow the same pane -- one of them over the socket it also
+        //   uses to follow a second pane -- and the watched pane closes.
+        let closingPane = UUID()
+        let sharedConnection = UUID()
+        let otherPaneSubscriptionId = UUID()
+        let firstSubscriptionId = UUID()
+        let secondSubscriptionId = UUID()
         var subscriptions = PaneTapeFollowSubscriptions()
-        subscriptions.add(id: UUID(), connectionId: firstConnection, paneId: paneId, cursor: .beginning)
-        subscriptions.add(id: UUID(), connectionId: secondConnection, paneId: paneId, cursor: .beginning)
         subscriptions.add(
-            id: remainingSubscriptionId,
-            connectionId: firstConnection,
+            id: firstSubscriptionId,
+            connectionId: sharedConnection,
+            paneId: closingPane,
+            cursor: .beginning
+        )
+        subscriptions.add(
+            id: secondSubscriptionId,
+            connectionId: UUID(),
+            paneId: closingPane,
+            cursor: .beginning
+        )
+        subscriptions.add(
+            id: otherPaneSubscriptionId,
+            connectionId: sharedConnection,
             paneId: UUID(),
             cursor: .beginning
         )
 
-        let ends = subscriptions.paneClosed(paneId)
-        #expect(ends.count == 2)
+        let ends = subscriptions.paneClosed(closingPane)
+        #expect(Set(ends.map(\.subscriptionId)) == [firstSubscriptionId, secondSubscriptionId])
         #expect(ends.allSatisfy { $0.record == .object([
             "kind": .string("end"),
             "reason": .string("pane-closed"),
         ]) })
-        #expect(subscriptions.paneClosed(paneId).isEmpty)
+        #expect(subscriptions.paneClosed(closingPane).isEmpty)
+        #expect(subscriptions.count == 1)
+        #expect(subscriptions.eventsAvailable(otherPaneSubscriptionId)?.subscriptionId
+                == otherPaneSubscriptionId)
+    }
 
-        let removals = subscriptions.connectionClosed(firstConnection)
-        #expect(removals.map(\.subscriptionId) == [remainingSubscriptionId])
+    @Test("retiring one stream on a socket leaves its sibling claiming at its own cursor")
+    func retiringOneStreamLeavesTheSiblingOnThatSocketIntact() {
+        // Intent: ending one subscription never disturbs another on the same connection.
+        // Why it exists: the runtime's follow resources used to be keyed by connection and
+        //   shared by every stream on that socket, so retiring one silently dropped the rest.
+        // Scenario: one agent follows two panes over a single socket and stops one follow.
+        let connectionId = UUID()
+        let retiredId = UUID()
+        let siblingId = UUID()
+        var subscriptions = PaneTapeFollowSubscriptions()
+        subscriptions.add(
+            id: retiredId,
+            connectionId: connectionId,
+            paneId: UUID(),
+            cursor: .beginning
+        )
+        let siblingCursor = PaneTapeFollowCursor(
+            nextSequence: 12,
+            payloadBytesBeforeNextSequence: 480
+        )
+        subscriptions.add(
+            id: siblingId,
+            connectionId: connectionId,
+            paneId: UUID(),
+            cursor: siblingCursor
+        )
+
+        let end = subscriptions.end(retiredId, reason: "stream-failed")
+        #expect(end?.subscriptionId == retiredId)
+        #expect(end?.record == .object([
+            "kind": .string("end"),
+            "reason": .string("stream-failed"),
+        ]))
+        #expect(subscriptions.end(retiredId, reason: "stream-failed") == nil)
+        #expect(subscriptions.eventsAvailable(retiredId) == nil)
+
+        let siblingFetch = subscriptions.eventsAvailable(siblingId)
+        #expect(siblingFetch?.subscriptionId == siblingId)
+        #expect(siblingFetch?.cursor == siblingCursor)
+        #expect(subscriptions.count == 1)
+    }
+
+    @Test("removing a stream with a dead transport reports it without a terminator")
+    func removingAStreamWithADeadTransportYieldsNoTerminator() {
+        // Intent: `remove` retires a stream whose socket already failed, so no record is
+        //   produced, and it reports whether there was a stream to retire.
+        // Why it exists: the delivery-failure path must not try to write to a socket the
+        //   transport just closed, while still disposing exactly that stream's resources.
+        let subscriptionId = UUID()
+        var subscriptions = PaneTapeFollowSubscriptions()
+        subscriptions.add(
+            id: subscriptionId,
+            connectionId: UUID(),
+            paneId: UUID(),
+            cursor: .beginning
+        )
+
+        let removed = subscriptions.remove(subscriptionId)
+        let removedAgain = subscriptions.remove(subscriptionId)
+        #expect(removed)
+        #expect(removedAgain == false)
         #expect(subscriptions.count == 0)
-        #expect(subscriptions.eventsAvailable(remainingSubscriptionId) == nil)
+    }
+
+    @Test("connection close and remove-all report every subscription the runtime must dispose")
+    func bulkRemovalsReportEverySubscriptionId() {
+        // Intent: both bulk removals name each retired subscription, and connection close
+        //   leaves streams on other sockets claimable.
+        // Why it exists: the runtime disposes transport resources per subscription, so a
+        //   removal that reported fewer ids than it dropped would leak a recorder notice
+        //   and a shutdown census entry.
+        let closingConnection = UUID()
+        let firstId = UUID()
+        let secondId = UUID()
+        let survivorId = UUID()
+        var subscriptions = PaneTapeFollowSubscriptions()
+        subscriptions.add(id: firstId, connectionId: closingConnection, paneId: UUID(), cursor: .beginning)
+        subscriptions.add(id: secondId, connectionId: closingConnection, paneId: UUID(), cursor: .beginning)
+        subscriptions.add(id: survivorId, connectionId: UUID(), paneId: UUID(), cursor: .beginning)
+
+        #expect(Set(subscriptions.connectionClosed(closingConnection)) == [firstId, secondId])
+        #expect(subscriptions.connectionClosed(closingConnection).isEmpty)
+        #expect(subscriptions.eventsAvailable(firstId) == nil)
+        #expect(subscriptions.eventsAvailable(survivorId)?.subscriptionId == survivorId)
+
+        #expect(subscriptions.removeAll() == [survivorId])
+        #expect(subscriptions.count == 0)
+        #expect(subscriptions.removeAll().isEmpty)
     }
 
     private func snapshot(

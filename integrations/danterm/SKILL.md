@@ -436,8 +436,14 @@ must survive an app crash:
 
 The stream is raw and unscrubbed. A slow reader may receive a `gap` record when
 it falls behind the bounded recorder; the fixture converter rejects any such
-stream. A pane close writes an `end` record, while an abrupt app exit can leave
-a valid stream ending at EOF without one.
+stream.
+
+An `end` record carries a `reason`: `pane-closed` when the followed pane goes
+away, and `stream-failed` when DanTerm cannot keep the stream going. Either way
+the record ends that stream only -- other follows and requests on the same
+connection keep working, and the connection stays open until you close it. An
+abrupt app exit can still leave a valid stream ending at EOF without an `end`
+record.
 
 The fixture converter accepts either complete snapshot JSON or follow JSONL:
 
