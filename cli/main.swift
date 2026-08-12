@@ -126,7 +126,7 @@ struct DanTermCLI {
                 environment: environment,
                 fallback: controlSocketPath().path
             )
-            if command.method == Methods.paneTape, command.params["follow"] == .bool(true) {
+            if command.method == IpcRequestMethod.paneTape.rawValue, command.params["follow"] == .bool(true) {
                 signal(SIGPIPE, SIG_IGN)
                 try requestPaneTapeFollow(
                     command,
@@ -233,7 +233,7 @@ struct DanTermCLI {
             environment: environment,
             fallback: controlSocketPath().path
         ) else { return .unavailable }
-        let command = CLICommand(method: Methods.doctorPermissions, params: [:], outputMode: .none)
+        let command = CLICommand(request: .doctorPermissions, outputMode: .none)
         guard let response = try? request(command, socketPath: socketPath, environment: environment),
               response.error == nil,
               let result = response.result,

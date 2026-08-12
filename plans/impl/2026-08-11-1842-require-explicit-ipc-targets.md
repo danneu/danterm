@@ -210,7 +210,7 @@ to focus-based targeting is visible.
   explicit-target forms; source `tab new`'s cwd per I4; unify the error
   vocabulary; rewrite SKILL.md's targeting section and the CLI usage text.
   Covers I1-I7, PO1-PO7, PO9. Tests first.
-- [ ] **2. One exhaustive request catalog.** Move the phantom id types to the
+- [x] **2. One exhaustive request catalog.** Move the phantom id types to the
   protocol module so the CLI and the daemon share them, replace raw-params
   dispatch with one catalog of decoded requests covering every method, and map
   decode failures to the I7 vocabulary. The catalog lands whole -- a

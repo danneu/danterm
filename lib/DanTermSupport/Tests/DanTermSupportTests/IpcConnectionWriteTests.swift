@@ -62,7 +62,7 @@ struct IpcConnectionWriteTests {
         )
         #expect(hello.method == Methods.hello)
         try writeIpcLine(
-            JsonRpcRequest(id: .string("R1"), method: Methods.paneTape),
+            JsonRpcRequest(id: .string("R1"), method: IpcRequestMethod.paneTape.rawValue),
             to: descriptors.peer
         )
 

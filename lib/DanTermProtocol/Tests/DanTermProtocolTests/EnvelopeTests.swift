@@ -8,7 +8,7 @@ struct EnvelopeTests {
     func objectParamsRoundTrip() throws {
         let request = JsonRpcRequest(
             id: .number(1),
-            method: Methods.tabRename,
+            method: IpcRequestMethod.tabRename.rawValue,
             params: .object([
                 "b": .array([.number(2), .number(3)]),
                 "a": .number(1),
@@ -50,8 +50,11 @@ struct EnvelopeTests {
     func requestRoundTripCarriesOnlyExplicitMethodParams() throws {
         let request = makeCLIRequest(
             CLICommand(
-                method: Methods.todoList,
-                params: ["pane": .string("11111111-1111-4111-8111-111111111111")],
+                request: .todoList(
+                    pane: PaneId(
+                        rawValue: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+                    )
+                ),
                 outputMode: .json
             ),
             id: .string("1")

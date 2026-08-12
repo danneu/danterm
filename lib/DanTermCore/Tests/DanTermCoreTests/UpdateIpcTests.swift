@@ -28,33 +28,33 @@ import DanTermProtocol
     func everyTargetingMethodRejectsAbsentTarget() throws {
         let todoId = UUID().uuidString
         let cases: [(method: String, params: [String: JSONValue], entity: String)] = [
-            (Methods.tabNew, [:], "group"),
-            (Methods.tabRename, ["title": .string("work")], "tab"),
-            (Methods.tabClose, [:], "tab"),
-            (Methods.paneFocus, [:], "pane"),
-            (Methods.paneInfo, [:], "pane"),
-            (Methods.paneSplit, ["direction": .string("horizontal")], "pane"),
-            (Methods.paneClose, [:], "pane"),
-            (Methods.paneInput, ["input": .array([.object(["text": .string("x")])])], "pane"),
-            (Methods.paneRead, [:], "pane"),
-            (Methods.paneRows, [:], "pane"),
-            (Methods.paneZoom, ["state": .string("on")], "pane"),
-            (Methods.paneTape, [:], "pane"),
-            (Methods.themeSet, ["themeName": .null], "pane"),
-            (Methods.agentAttach, ["kind": .string("codex"), "id": .string("thread")], "pane"),
-            (Methods.agentActivity, [
+            (IpcRequestMethod.tabNew.rawValue, [:], "group"),
+            (IpcRequestMethod.tabRename.rawValue, ["title": .string("work")], "tab"),
+            (IpcRequestMethod.tabClose.rawValue, [:], "tab"),
+            (IpcRequestMethod.paneFocus.rawValue, [:], "pane"),
+            (IpcRequestMethod.paneInfo.rawValue, [:], "pane"),
+            (IpcRequestMethod.paneSplit.rawValue, ["direction": .string("horizontal")], "pane"),
+            (IpcRequestMethod.paneClose.rawValue, [:], "pane"),
+            (IpcRequestMethod.paneInput.rawValue, ["input": .array([.object(["text": .string("x")])])], "pane"),
+            (IpcRequestMethod.paneRead.rawValue, [:], "pane"),
+            (IpcRequestMethod.paneRows.rawValue, [:], "pane"),
+            (IpcRequestMethod.paneZoom.rawValue, ["state": .string("on")], "pane"),
+            (IpcRequestMethod.paneTape.rawValue, [:], "pane"),
+            (IpcRequestMethod.themeSet.rawValue, ["themeName": .null], "pane"),
+            (IpcRequestMethod.agentAttach.rawValue, ["kind": .string("codex"), "id": .string("thread")], "pane"),
+            (IpcRequestMethod.agentActivity.rawValue, [
                 "kind": .string("codex"),
                 "id": .string("thread"),
                 "state": .string("working"),
             ], "pane"),
-            (Methods.agentDetach, ["kind": .string("codex"), "id": .string("thread")], "pane"),
-            (Methods.todoList, [:], "pane"),
-            (Methods.todoAdd, ["text": .string("work")], "pane"),
-            (Methods.todoEdit, ["todoId": .string(todoId), "text": .string("work")], "pane"),
-            (Methods.todoDone, ["todoId": .string(todoId)], "pane"),
-            (Methods.todoOpen, ["todoId": .string(todoId)], "pane"),
-            (Methods.todoDelete, ["todoId": .string(todoId)], "pane"),
-            (Methods.todoClearCompleted, [:], "pane"),
+            (IpcRequestMethod.agentDetach.rawValue, ["kind": .string("codex"), "id": .string("thread")], "pane"),
+            (IpcRequestMethod.todoList.rawValue, [:], "pane"),
+            (IpcRequestMethod.todoAdd.rawValue, ["text": .string("work")], "pane"),
+            (IpcRequestMethod.todoEdit.rawValue, ["todoId": .string(todoId), "text": .string("work")], "pane"),
+            (IpcRequestMethod.todoDone.rawValue, ["todoId": .string(todoId)], "pane"),
+            (IpcRequestMethod.todoOpen.rawValue, ["todoId": .string(todoId)], "pane"),
+            (IpcRequestMethod.todoDelete.rawValue, ["todoId": .string(todoId)], "pane"),
+            (IpcRequestMethod.todoClearCompleted.rawValue, [:], "pane"),
         ]
 
         for testCase in cases {
@@ -75,7 +75,7 @@ import DanTermProtocol
     @Test("doctor permissions delegates probing to the runtime")
     func doctorPermissionsDelegatesProbingToRuntime() throws {
         var model = makeModel()
-        let commands = sendIpc(&model, method: Methods.doctorPermissions)
+        let commands = sendIpc(&model, method: IpcRequestMethod.doctorPermissions.rawValue)
         let command = try #require(commands.first)
         guard case .readDoctorPermissions = command else {
             Issue.record("expected readDoctorPermissions")
@@ -103,7 +103,7 @@ import DanTermProtocol
         createTab(&model)
         let commands = sendIpc(
             &model,
-            method: Methods.tabRename,
+            method: IpcRequestMethod.tabRename.rawValue,
             params: .object(["tab": .string("not-a-uuid"), "title": .string("work")])
         )
         let error = try requireIpcError(commands)
@@ -174,7 +174,7 @@ import DanTermProtocol
         )
         let commands = sendIpc(
             &model,
-            method: Methods.ls,
+            method: IpcRequestMethod.ls.rawValue,
             env: makeTestEnv(homeDirectory: "/Users/testhome")
         )
 
@@ -291,7 +291,7 @@ import DanTermProtocol
         )
         let result = try requireIpcReply(sendIpc(
             &model,
-            method: Methods.ls
+            method: IpcRequestMethod.ls.rawValue
         ))
         let group = try #require(result["groups"]?.asArray?.first)
         let encodedTab = try #require(group["tabs"]?.asArray?.first)
@@ -318,7 +318,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.agentAttach,
+            method: IpcRequestMethod.agentAttach.rawValue,
             params: .object([
                 "kind": .string("Claude"),
                 "id": .string("4f3a2b1c-0000-4000-9000-abcdef123456"),
@@ -343,7 +343,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneInfo,
+            method: IpcRequestMethod.paneInfo.rawValue,
             pane: paneId
         )
 
@@ -386,7 +386,7 @@ import DanTermProtocol
 
         let activity = sendIpc(
             &model,
-            method: Methods.agentActivity,
+            method: IpcRequestMethod.agentActivity.rawValue,
             params: .object([
                 "kind": .string("codex"),
                 "id": .string("thread-1"),
@@ -396,7 +396,7 @@ import DanTermProtocol
         )
         let detach = sendIpc(
             &model,
-            method: Methods.agentDetach,
+            method: IpcRequestMethod.agentDetach.rawValue,
             params: .object(["kind": .string("codex"), "id": .string("thread-1")]),
             pane: context
         )
@@ -416,7 +416,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.agentActivity,
+            method: IpcRequestMethod.agentActivity.rawValue,
             params: .object([
                 "kind": .string("codex"),
                 "id": .string("thread-1"),
@@ -442,7 +442,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.agentAttach,
+            method: IpcRequestMethod.agentAttach.rawValue,
             params: .object([
                 "kind": .string("claude"),
                 "id": .string("--dangerously-skip-permissions"),
@@ -472,7 +472,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneInfo,
+            method: IpcRequestMethod.paneInfo.rawValue,
             params: .object(["pane": .string(backgroundPaneId.rawValue.uuidString)]),
             pane: contextPaneId
         )
@@ -494,7 +494,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneInfo,
+            method: IpcRequestMethod.paneInfo.rawValue,
             params: .object(["pane": .string(paneId.rawValue.uuidString)])
         )
 
@@ -513,12 +513,12 @@ import DanTermProtocol
         createTab(&model)
         let contextPaneId = selectedTab(in: model)!.focusedPaneId
 
-        let missing = sendIpc(&model, method: Methods.paneInfo, pane: nil)
+        let missing = sendIpc(&model, method: IpcRequestMethod.paneInfo.rawValue, pane: nil)
         #expect(try requireIpcError(missing).code == -32602)
 
         let invalid = sendIpc(
             &model,
-            method: Methods.paneInfo,
+            method: IpcRequestMethod.paneInfo.rawValue,
             params: .object(["pane": .string("not-a-uuid")]),
             pane: contextPaneId
         )
@@ -526,7 +526,7 @@ import DanTermProtocol
 
         let unknown = sendIpc(
             &model,
-            method: Methods.paneInfo,
+            method: IpcRequestMethod.paneInfo.rawValue,
             params: .object(["pane": .string(UUID().uuidString)]),
             pane: contextPaneId
         )
@@ -544,7 +544,7 @@ import DanTermProtocol
         let ctx = selectedPaneId(in: model)
         let tabId = selectedTab(in: model)!.id
 
-        let setEffects = sendIpc(&model, method: Methods.tabRename, params: .object([
+        let setEffects = sendIpc(&model, method: IpcRequestMethod.tabRename.rawValue, params: .object([
             "tab": .string(tabId.rawValue.uuidString),
             "title": .string("hello"),
         ]), pane: ctx)
@@ -553,7 +553,7 @@ import DanTermProtocol
         #expect(setReply["tab"]?["customTitle"]?.asString == "hello")
         #expect(tabById(tabId, in: model)?.customTitle == "hello")
 
-        let clearEffects = sendIpc(&model, method: Methods.tabRename, params: .object([
+        let clearEffects = sendIpc(&model, method: IpcRequestMethod.tabRename.rawValue, params: .object([
             "tab": .string(tabId.rawValue.uuidString),
             "title": .null,
         ]), pane: ctx)
@@ -578,7 +578,7 @@ import DanTermProtocol
 
         _ = sendIpc(
             &model,
-            method: Methods.tabRename,
+            method: IpcRequestMethod.tabRename.rawValue,
             params: .object([
                 "tab": .string(targetTabId.rawValue.uuidString),
                 "title": .string("current"),
@@ -607,7 +607,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabRename,
+            method: IpcRequestMethod.tabRename.rawValue,
             params: .object([
                 "tab": .string(backgroundTabId.rawValue.uuidString),
                 "title": .string("build"),
@@ -636,7 +636,7 @@ import DanTermProtocol
 
             let commands = sendIpc(
                 &model,
-                method: Methods.tabRename,
+                method: IpcRequestMethod.tabRename.rawValue,
                 params: .object([
                     "tab": tabValue,
                     "title": .string("should-not-apply"),
@@ -661,7 +661,7 @@ import DanTermProtocol
         let tabId = selectedTab(in: model)!.id
         let commands = sendIpc(
             &model,
-            method: Methods.tabRename,
+            method: IpcRequestMethod.tabRename.rawValue,
             params: .object(["title": .string("missing-context")]),
             pane: nil
         )
@@ -686,7 +686,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabClose,
+            method: IpcRequestMethod.tabClose.rawValue,
             params: .object(["tab": .string(closedTabId.rawValue.uuidString)])
         )
 
@@ -713,7 +713,7 @@ import DanTermProtocol
 
         _ = sendIpc(
             &model,
-            method: Methods.tabClose,
+            method: IpcRequestMethod.tabClose.rawValue,
             params: .object(["tab": .string(targetTabId.rawValue.uuidString)]),
             pane: paneId
         )
@@ -737,7 +737,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabClose,
+            method: IpcRequestMethod.tabClose.rawValue,
             params: .object(["tab": .string(closedTabId.rawValue.uuidString)])
         )
 
@@ -763,7 +763,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabClose,
+            method: IpcRequestMethod.tabClose.rawValue,
             params: .object(["tab": .string(closedTabId.rawValue.uuidString)])
         )
 
@@ -789,7 +789,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabClose,
+            method: IpcRequestMethod.tabClose.rawValue,
             params: .object(["tab": .string(tabId.rawValue.uuidString)])
         )
 
@@ -815,7 +815,7 @@ import DanTermProtocol
 
             let commands = sendIpc(
                 &model,
-                method: Methods.tabClose,
+                method: IpcRequestMethod.tabClose.rawValue,
                 params: .object(["tab": tabValue]),
                 pane: contextPaneId
             )
@@ -837,7 +837,7 @@ import DanTermProtocol
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
 
-        let commands = sendIpc(&model, method: Methods.tabClose, pane: nil)
+        let commands = sendIpc(&model, method: IpcRequestMethod.tabClose.rawValue, pane: nil)
 
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -860,7 +860,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneClose,
+            method: IpcRequestMethod.paneClose.rawValue,
             params: .object(["pane": .string(closedPaneId.rawValue.uuidString)])
         )
 
@@ -891,7 +891,7 @@ import DanTermProtocol
 
         _ = try requireIpcReply(sendIpc(
             &model,
-            method: Methods.paneClose,
+            method: IpcRequestMethod.paneClose.rawValue,
             params: .object(["pane": .string(closedPaneId.rawValue.uuidString)])
         ))
 
@@ -913,7 +913,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneClose,
+            method: IpcRequestMethod.paneClose.rawValue,
             params: .object(["pane": .string(paneId.rawValue.uuidString)])
         )
 
@@ -943,7 +943,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneClose,
+            method: IpcRequestMethod.paneClose.rawValue,
             params: .object(["pane": .string(closedPaneId.rawValue.uuidString)])
         )
 
@@ -965,7 +965,7 @@ import DanTermProtocol
 
         let tabCommands = sendIpc(
             &tabModel,
-            method: Methods.paneClose,
+            method: IpcRequestMethod.paneClose.rawValue,
             params: .object(["pane": .string(solePaneId.rawValue.uuidString)])
         )
 
@@ -1000,7 +1000,7 @@ import DanTermProtocol
         for params in cases {
             let commands = sendIpc(
                 &model,
-                method: Methods.paneClose,
+                method: IpcRequestMethod.paneClose.rawValue,
                 params: params,
                 pane: context
             )
@@ -1022,7 +1022,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneSplit,
+            method: IpcRequestMethod.paneSplit.rawValue,
             params: .object([
                 "pane": .string(backgroundPaneId.rawValue.uuidString),
                 "direction": .string("horizontal"),
@@ -1052,7 +1052,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneSplit,
+            method: IpcRequestMethod.paneSplit.rawValue,
             params: .object([
                 "pane": .string(siblingPaneId.rawValue.uuidString),
                 "direction": .string("vertical"),
@@ -1088,7 +1088,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneSplit,
+            method: IpcRequestMethod.paneSplit.rawValue,
             params: .object([
                 "pane": .string("not-a-uuid"),
                 "direction": .string("horizontal"),
@@ -1114,7 +1114,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneSplit,
+            method: IpcRequestMethod.paneSplit.rawValue,
             params: .object([
                 "pane": .number(42),
                 "direction": .string("horizontal"),
@@ -1142,7 +1142,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneSplit,
+            method: IpcRequestMethod.paneSplit.rawValue,
             params: .object([
                 "pane": .string(UUID().uuidString),
                 "direction": .string("horizontal"),
@@ -1167,7 +1167,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneSplit,
+            method: IpcRequestMethod.paneSplit.rawValue,
             params: .object(["direction": .string("horizontal")]),
             pane: nil
         )
@@ -1191,7 +1191,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneSplit,
+            method: IpcRequestMethod.paneSplit.rawValue,
             params: .object(["direction": .string("horizontal")]),
             pane: unknownPaneId
         )
@@ -1215,7 +1215,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneFocus,
+            method: IpcRequestMethod.paneFocus.rawValue,
             params: .object(["pane": .string(targetPaneId.rawValue.uuidString)])
         )
 
@@ -1245,7 +1245,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneFocus,
+            method: IpcRequestMethod.paneFocus.rawValue,
             params: .object(["pane": .string(secondPaneId.rawValue.uuidString)])
         )
 
@@ -1272,7 +1272,7 @@ import DanTermProtocol
 
         _ = sendIpc(
             &model,
-            method: Methods.paneFocus,
+            method: IpcRequestMethod.paneFocus.rawValue,
             params: .object(["pane": .string(secondPaneId.rawValue.uuidString)]),
             pane: selectedPaneId(in: model)
         )
@@ -1307,7 +1307,7 @@ import DanTermProtocol
 
         _ = sendIpc(
             &model,
-            method: Methods.paneFocus,
+            method: IpcRequestMethod.paneFocus.rawValue,
             params: .object(["pane": .string(secondPaneId.rawValue.uuidString)])
         )
 
@@ -1322,7 +1322,7 @@ import DanTermProtocol
         // Scenario: spec-first no explicit focus target.
         var model = makeModel()
         createTab(&model)
-        let commands = sendIpc(&model, method: Methods.paneFocus)
+        let commands = sendIpc(&model, method: IpcRequestMethod.paneFocus.rawValue)
 
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -1342,7 +1342,7 @@ import DanTermProtocol
 
             let commands = sendIpc(
                 &model,
-                method: Methods.paneFocus,
+                method: IpcRequestMethod.paneFocus.rawValue,
                 params: .object(["pane": paneValue])
             )
 
@@ -1365,7 +1365,7 @@ import DanTermProtocol
 
             let commands = sendIpc(
                 &model,
-                method: Methods.paneFocus,
+                method: IpcRequestMethod.paneFocus.rawValue,
                 params: .object(["pane": .string(rawPane)])
             )
 
@@ -1388,7 +1388,7 @@ import DanTermProtocol
         let countBefore = model.groups.last!.tabs.count
         let commands = sendIpc(
             &model,
-            method: Methods.tabNew,
+            method: IpcRequestMethod.tabNew.rawValue,
             params: .object(["group": .string(groupId.rawValue.uuidString)])
         )
         let group = model.groups.first(where: { $0.id == groupId })
@@ -1411,7 +1411,7 @@ import DanTermProtocol
 
         let result = try requireIpcReply(sendIpc(
             &model,
-            method: Methods.tabNew,
+            method: IpcRequestMethod.tabNew.rawValue,
             params: .object([
                 "group": .string(groupId.rawValue.uuidString),
                 "launch": .object([
@@ -1456,7 +1456,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabNew,
+            method: IpcRequestMethod.tabNew.rawValue,
             params: .object(["group": .string(explicitGroupId.rawValue.uuidString)]),
             pane: callerPaneId
         )
@@ -1481,7 +1481,7 @@ import DanTermProtocol
 
             let commands = sendIpc(
                 &model,
-                method: Methods.tabNew,
+                method: IpcRequestMethod.tabNew.rawValue,
                 params: .object(["group": groupValue]),
                 pane: contextPaneId
             )
@@ -1503,7 +1503,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabNew,
+            method: IpcRequestMethod.tabNew.rawValue,
             params: .object([:]),
             pane: callerPaneId
         )
@@ -1521,7 +1521,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let tabsBefore = model.groups.flatMap(\.tabs).count
-        let commands = sendIpc(&model, method: Methods.tabNew, params: .object([:]), pane: nil)
+        let commands = sendIpc(&model, method: IpcRequestMethod.tabNew.rawValue, params: .object([:]), pane: nil)
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
         #expect(model.groups.flatMap(\.tabs).count == tabsBefore)
@@ -1545,13 +1545,13 @@ import DanTermProtocol
         let targetCases = [
             TargetCase(
                 entity: "tab",
-                method: Methods.tabRename,
+                method: IpcRequestMethod.tabRename.rawValue,
                 explicitParams: { .object(["tab": $0, "title": .string("build")]) },
                 absentParams: .object(["title": .string("build")])
             ),
             TargetCase(
                 entity: "group",
-                method: Methods.tabNew,
+                method: IpcRequestMethod.tabNew.rawValue,
                 explicitParams: { .object(["group": $0]) },
                 absentParams: .object([:])
             ),
@@ -1609,7 +1609,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabNew,
+            method: IpcRequestMethod.tabNew.rawValue,
             params: .object([
                 "group": .string(groupId.rawValue.uuidString),
                 "background": .bool(true),
@@ -1636,7 +1636,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabNew,
+            method: IpcRequestMethod.tabNew.rawValue,
             params: .object([
                 "group": .string(groupId.rawValue.uuidString),
                 "background": .string("true"),
@@ -1670,7 +1670,7 @@ import DanTermProtocol
 
             let commands = sendIpc(
                 &model,
-                method: Methods.tabNew,
+                method: IpcRequestMethod.tabNew.rawValue,
                 params: .object([
                     "group": .string(groupId.rawValue.uuidString),
                     "background": .bool(background),
@@ -1703,7 +1703,7 @@ import DanTermProtocol
         let groupId = model.groups[0].id
         let commands = sendIpc(
             &model,
-            method: Methods.tabNew,
+            method: IpcRequestMethod.tabNew.rawValue,
             params: .object([
                 "group": .string(groupId.rawValue.uuidString),
                 "launch": .object([
@@ -1748,7 +1748,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabNew,
+            method: IpcRequestMethod.tabNew.rawValue,
             params: .object([
                 "group": .string(groupId.rawValue.uuidString),
                 "launch": .object(["cmd": .string("make test")]),
@@ -1783,7 +1783,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabNew,
+            method: IpcRequestMethod.tabNew.rawValue,
             params: .object([
                 "position": .string("afterTab"),
                 "afterTabId": .string(refTabId.rawValue.uuidString),
@@ -1812,7 +1812,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabNew,
+            method: IpcRequestMethod.tabNew.rawValue,
             params: .object([
                 "group": .string(targetGroupId.rawValue.uuidString),
                 "position": .string("afterTab"),
@@ -1839,7 +1839,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.tabNew,
+            method: IpcRequestMethod.tabNew.rawValue,
             params: .object([
                 "group": .string(otherGroupId.rawValue.uuidString),
                 "position": .string("afterTab"),
@@ -1895,7 +1895,7 @@ import DanTermProtocol
             createTab(&model)
             let before = model
 
-            let commands = sendIpc(&model, method: Methods.tabNew, params: .object(params))
+            let commands = sendIpc(&model, method: IpcRequestMethod.tabNew.rawValue, params: .object(params))
 
             let error = try requireIpcError(commands)
             #expect(error.code == -32602)
@@ -1916,7 +1916,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneSplit,
+            method: IpcRequestMethod.paneSplit.rawValue,
             params: .object([
                 "direction": .string("horizontal"),
                 "launch": .object([
@@ -1956,7 +1956,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneSplit,
+            method: IpcRequestMethod.paneSplit.rawValue,
             params: .object([
                 "direction": .string("horizontal"),
                 "background": .bool(true),
@@ -1988,7 +1988,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneSplit,
+            method: IpcRequestMethod.paneSplit.rawValue,
             params: .object([
                 "direction": .string("horizontal"),
                 "background": .bool(true),
@@ -2017,7 +2017,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneSplit,
+            method: IpcRequestMethod.paneSplit.rawValue,
             params: .object([
                 "direction": .string("horizontal"),
                 "background": .string("true"),
@@ -2048,7 +2048,7 @@ import DanTermProtocol
             let paneIdsBefore = Set(model.allPaneIds)
             let tabEffects = sendIpc(
                 &model,
-                method: Methods.tabNew,
+                method: IpcRequestMethod.tabNew.rawValue,
                 params: .object(["launch": launchValue])
             )
             #expect(try requireIpcError(tabEffects).code == -32602)
@@ -2060,7 +2060,7 @@ import DanTermProtocol
 
             let splitEffects = sendIpc(
                 &model,
-                method: Methods.paneSplit,
+                method: IpcRequestMethod.paneSplit.rawValue,
                 params: .object([
                     "direction": .string("horizontal"),
                     "launch": launchValue,
@@ -2086,11 +2086,11 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let ctx = paneId
 
-        let setEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .string("Tokyo Night")]), pane: ctx)
+        let setEffects = sendIpc(&model, method: IpcRequestMethod.themeSet.rawValue, params: .object(["themeName": .string("Tokyo Night")]), pane: ctx)
         #expect(model.pane(paneId)?.theme == "Tokyo Night")
         #expect(try requireIpcReply(setEffects)["pane"]?["theme"]?.asString == "Tokyo Night")
 
-        let clearEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .null]), pane: ctx)
+        let clearEffects = sendIpc(&model, method: IpcRequestMethod.themeSet.rawValue, params: .object(["themeName": .null]), pane: ctx)
         #expect(model.pane(paneId)?.theme == nil)
         #expect(try requireIpcReply(clearEffects)["pane"]?["theme"] == .null)
     }
@@ -2108,7 +2108,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.themeSet,
+            method: IpcRequestMethod.themeSet.rawValue,
             params: .object([
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "themeName": .string("Tokyo Night"),
@@ -2134,7 +2134,7 @@ import DanTermProtocol
 
             let commands = sendIpc(
                 &model,
-                method: Methods.themeSet,
+                method: IpcRequestMethod.themeSet.rawValue,
                 params: .object([
                     "pane": paneValue,
                     "themeName": .string("Tokyo Night"),
@@ -2159,7 +2159,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.themeSet,
+            method: IpcRequestMethod.themeSet.rawValue,
             params: .object(["themeName": .string("Tokyo Night")]),
             pane: nil
         )
@@ -2184,7 +2184,7 @@ import DanTermProtocol
 
         let addEffects = sendIpc(
             &model,
-            method: Methods.todoAdd,
+            method: IpcRequestMethod.todoAdd.rawValue,
             params: .object(["text": .string(" ship cli ")]),
             pane: ctx
         )
@@ -2192,34 +2192,34 @@ import DanTermProtocol
         let todoId = try requireString(added["todo"]?["id"], "todo add should return id")
         #expect(model.pane(paneId)?.todos.first?.text == "ship cli")
 
-        let editReply = try requireIpcReply(sendIpc(&model, method: Methods.todoEdit, params: .object(["todoId": .string(todoId), "text": .string("ship cli v2")]), pane: ctx))
+        let editReply = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.todoEdit.rawValue, params: .object(["todoId": .string(todoId), "text": .string("ship cli v2")]), pane: ctx))
         #expect(model.pane(paneId)?.todos.first?.text == "ship cli v2")
         #expect(editReply["todo"]?["text"]?.asString == "ship cli v2")
 
-        let doneReply = try requireIpcReply(sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), pane: ctx))
+        let doneReply = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.todoDone.rawValue, params: .object(["todoId": .string(todoId)]), pane: ctx))
         #expect(model.pane(paneId)?.todos.first?.isDone == true)
         #expect(doneReply["todo"]?["isDone"]?.asBool == true)
 
-        let openReply = try requireIpcReply(sendIpc(&model, method: Methods.todoOpen, params: .object(["todoId": .string(todoId)]), pane: ctx))
+        let openReply = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.todoOpen.rawValue, params: .object(["todoId": .string(todoId)]), pane: ctx))
         #expect(model.pane(paneId)?.todos.first?.isDone == false)
         #expect(openReply["todo"]?["isDone"]?.asBool == false)
 
-        let list = try requireIpcReply(sendIpc(&model, method: Methods.todoList, pane: ctx))
+        let list = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.todoList.rawValue, pane: ctx))
         #expect(list["todos"]?.asArray?.count == 1)
 
-        _ = sendIpc(&model, method: Methods.todoDelete, params: .object(["todoId": .string(todoId)]), pane: ctx)
+        _ = sendIpc(&model, method: IpcRequestMethod.todoDelete.rawValue, params: .object(["todoId": .string(todoId)]), pane: ctx)
         #expect(model.pane(paneId)?.todos.count == 0)
 
         let secondAdd = try requireIpcReply(sendIpc(
             &model,
-            method: Methods.todoAdd,
+            method: IpcRequestMethod.todoAdd.rawValue,
             params: .object(["text": .string("done later")]),
             pane: ctx
         ))
         let secondTodoId = try requireString(secondAdd["todo"]?["id"], "todo add should return second id")
-        _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(secondTodoId)]), pane: ctx)
-        _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), pane: ctx)
-        _ = sendIpc(&model, method: Methods.todoClearCompleted, pane: ctx)
+        _ = sendIpc(&model, method: IpcRequestMethod.todoDone.rawValue, params: .object(["todoId": .string(secondTodoId)]), pane: ctx)
+        _ = sendIpc(&model, method: IpcRequestMethod.todoDone.rawValue, params: .object(["todoId": .string(todoId)]), pane: ctx)
+        _ = sendIpc(&model, method: IpcRequestMethod.todoClearCompleted.rawValue, pane: ctx)
         #expect(model.pane(paneId)?.todos.count == 0)
     }
 
@@ -2238,7 +2238,7 @@ import DanTermProtocol
 
         let addReply = try requireIpcReply(sendIpc(
             &model,
-            method: Methods.todoAdd,
+            method: IpcRequestMethod.todoAdd.rawValue,
             params: .object([
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "text": .string("ship cli"),
@@ -2251,7 +2251,7 @@ import DanTermProtocol
 
         let listReply = try requireIpcReply(sendIpc(
             &model,
-            method: Methods.todoList,
+            method: IpcRequestMethod.todoList.rawValue,
             params: .object(["pane": .string(targetPaneId.rawValue.uuidString)]),
             pane: ctx
         ))
@@ -2259,7 +2259,7 @@ import DanTermProtocol
 
         _ = sendIpc(
             &model,
-            method: Methods.todoEdit,
+            method: IpcRequestMethod.todoEdit.rawValue,
             params: .object([
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "todoId": .string(todoId),
@@ -2271,7 +2271,7 @@ import DanTermProtocol
 
         _ = sendIpc(
             &model,
-            method: Methods.todoDone,
+            method: IpcRequestMethod.todoDone.rawValue,
             params: .object([
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "todoId": .string(todoId),
@@ -2282,7 +2282,7 @@ import DanTermProtocol
 
         _ = sendIpc(
             &model,
-            method: Methods.todoOpen,
+            method: IpcRequestMethod.todoOpen.rawValue,
             params: .object([
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "todoId": .string(todoId),
@@ -2293,7 +2293,7 @@ import DanTermProtocol
 
         _ = sendIpc(
             &model,
-            method: Methods.todoDone,
+            method: IpcRequestMethod.todoDone.rawValue,
             params: .object([
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "todoId": .string(todoId),
@@ -2302,7 +2302,7 @@ import DanTermProtocol
         )
         _ = sendIpc(
             &model,
-            method: Methods.todoClearCompleted,
+            method: IpcRequestMethod.todoClearCompleted.rawValue,
             params: .object(["pane": .string(targetPaneId.rawValue.uuidString)]),
             pane: ctx
         )
@@ -2310,7 +2310,7 @@ import DanTermProtocol
 
         let deleteReply = try requireIpcReply(sendIpc(
             &model,
-            method: Methods.todoAdd,
+            method: IpcRequestMethod.todoAdd.rawValue,
             params: .object([
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "text": .string("delete me"),
@@ -2320,7 +2320,7 @@ import DanTermProtocol
         let deleteId = try requireString(deleteReply["todo"]?["id"], "todo add should return delete id")
         _ = sendIpc(
             &model,
-            method: Methods.todoDelete,
+            method: IpcRequestMethod.todoDelete.rawValue,
             params: .object([
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "todoId": .string(deleteId),
@@ -2339,13 +2339,13 @@ import DanTermProtocol
         // Scenario: spec-first todo no-fallback sweep.
         for paneValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
             let commands: [(String, [String: JSONValue])] = [
-                (Methods.todoList, [:]),
-                (Methods.todoAdd, ["text": .string("should-not-apply")]),
-                (Methods.todoEdit, ["todoId": .string("TODO_ID"), "text": .string("changed")]),
-                (Methods.todoDone, ["todoId": .string("TODO_ID")]),
-                (Methods.todoOpen, ["todoId": .string("TODO_ID")]),
-                (Methods.todoDelete, ["todoId": .string("TODO_ID")]),
-                (Methods.todoClearCompleted, [:]),
+                (IpcRequestMethod.todoList.rawValue, [:]),
+                (IpcRequestMethod.todoAdd.rawValue, ["text": .string("should-not-apply")]),
+                (IpcRequestMethod.todoEdit.rawValue, ["todoId": .string("TODO_ID"), "text": .string("changed")]),
+                (IpcRequestMethod.todoDone.rawValue, ["todoId": .string("TODO_ID")]),
+                (IpcRequestMethod.todoOpen.rawValue, ["todoId": .string("TODO_ID")]),
+                (IpcRequestMethod.todoDelete.rawValue, ["todoId": .string("TODO_ID")]),
+                (IpcRequestMethod.todoClearCompleted.rawValue, [:]),
             ]
 
             for (method, baseParams) in commands {
@@ -2353,7 +2353,7 @@ import DanTermProtocol
                 createTab(&model)
                 let contextPaneId = selectedTab(in: model)!.focusedPaneId
                 let item = appendTodoForTest(&model, paneId: contextPaneId, text: "context")
-                if method == Methods.todoClearCompleted || method == Methods.todoOpen {
+                if method == IpcRequestMethod.todoClearCompleted.rawValue || method == IpcRequestMethod.todoOpen.rawValue {
                     model.updatePane(contextPaneId) { $0.todos[0].isDone = true }
                 }
 
@@ -2386,13 +2386,13 @@ import DanTermProtocol
         //   command surface.
         // Scenario: spec-first todo no-pane sweep.
         let commands: [(String, [String: JSONValue])] = [
-            (Methods.todoList, [:]),
-            (Methods.todoAdd, ["text": .string("should-not-apply")]),
-            (Methods.todoEdit, ["todoId": .string(UUID().uuidString), "text": .string("changed")]),
-            (Methods.todoDone, ["todoId": .string(UUID().uuidString)]),
-            (Methods.todoOpen, ["todoId": .string(UUID().uuidString)]),
-            (Methods.todoDelete, ["todoId": .string(UUID().uuidString)]),
-            (Methods.todoClearCompleted, [:]),
+            (IpcRequestMethod.todoList.rawValue, [:]),
+            (IpcRequestMethod.todoAdd.rawValue, ["text": .string("should-not-apply")]),
+            (IpcRequestMethod.todoEdit.rawValue, ["todoId": .string(UUID().uuidString), "text": .string("changed")]),
+            (IpcRequestMethod.todoDone.rawValue, ["todoId": .string(UUID().uuidString)]),
+            (IpcRequestMethod.todoOpen.rawValue, ["todoId": .string(UUID().uuidString)]),
+            (IpcRequestMethod.todoDelete.rawValue, ["todoId": .string(UUID().uuidString)]),
+            (IpcRequestMethod.todoClearCompleted.rawValue, [:]),
         ]
 
         for (method, params) in commands {
@@ -2424,7 +2424,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.todoDelete,
+            method: IpcRequestMethod.todoDelete.rawValue,
             params: .object(["todoId": .string(UUID().uuidString)]),
             pane: paneId
         )
@@ -2443,7 +2443,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object(["text": .string("echo hi")]),
             pane: paneId
         )
@@ -2465,7 +2465,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "input": .array([
                     .object(["text": .string("ls")]),
@@ -2508,7 +2508,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "input": .array([
                     .object([
@@ -2538,7 +2538,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "input": .array([
                     .object([
@@ -2565,7 +2565,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "input": .array([
                     .object([
@@ -2595,7 +2595,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "text": .string("hi"),
                 "input": .array([.object(["text": .string("hi")])]),
@@ -2616,7 +2616,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([:]),
             pane: paneId
         )
@@ -2634,7 +2634,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "input": .array([.object([:])])
             ]),
@@ -2654,7 +2654,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "input": .array([
                     .object([
@@ -2681,7 +2681,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "input": .array([
                     .object(["key": .string("Bogus")])
@@ -2709,7 +2709,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "input": .array([
                     .object(["key": .number(5)])
@@ -2732,7 +2732,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "input": .array([
                     .object([
@@ -2756,7 +2756,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "input": .array([
                     .object([
@@ -2787,7 +2787,7 @@ import DanTermProtocol
         let foregroundPaneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "pane": .string(backgroundPaneId.rawValue.uuidString),
                 "input": .array([.object(["text": .string("hi")])]),
@@ -2813,7 +2813,7 @@ import DanTermProtocol
         let realPaneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "pane": .string(UUID().uuidString),
                 "input": .array([.object(["text": .string("hi")])]),
@@ -2841,7 +2841,7 @@ import DanTermProtocol
         let realPaneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object([
                 "pane": .number(5),
                 "input": .array([.object(["text": .string("hi")])]),
@@ -2864,7 +2864,7 @@ import DanTermProtocol
         createTab(&model)
         let commands = sendIpc(
             &model,
-            method: Methods.paneInput,
+            method: IpcRequestMethod.paneInput.rawValue,
             params: .object(["input": .array([.object(["text": .string("hi")])])]),
             pane: nil
         )
@@ -2884,7 +2884,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneRead,
+            method: IpcRequestMethod.paneRead.rawValue,
             params: .object(["pane": .string(paneId.rawValue.uuidString)])
         )
 
@@ -2912,7 +2912,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let commands = sendIpc(
             &model,
-            method: Methods.paneRead,
+            method: IpcRequestMethod.paneRead.rawValue,
             params: .object([
                 "pane": .string(paneId.rawValue.uuidString),
                 "lines": .number(200),
@@ -2936,7 +2936,7 @@ import DanTermProtocol
         // Scenario: spec-first missing pane.
         var model = makeModel()
         createTab(&model)
-        let commands = sendIpc(&model, method: Methods.paneRead, params: .object([:]))
+        let commands = sendIpc(&model, method: IpcRequestMethod.paneRead.rawValue, params: .object([:]))
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
         #expect(error.message == "pane required")
@@ -2953,7 +2953,7 @@ import DanTermProtocol
             createTab(&model)
             let commands = sendIpc(
                 &model,
-                method: Methods.paneRead,
+                method: IpcRequestMethod.paneRead.rawValue,
                 params: .object(["pane": paneValue])
             )
             let error = try requireIpcError(commands)
@@ -2972,7 +2972,7 @@ import DanTermProtocol
             createTab(&model)
             let commands = sendIpc(
                 &model,
-                method: Methods.paneRead,
+                method: IpcRequestMethod.paneRead.rawValue,
                 params: .object(["pane": .string(rawPane)])
             )
             let error = try requireIpcError(commands)
@@ -2995,7 +2995,7 @@ import DanTermProtocol
             let paneId = selectedTab(in: model)!.focusedPaneId
             let commands = sendIpc(
                 &model,
-                method: Methods.paneRead,
+                method: IpcRequestMethod.paneRead.rawValue,
                 params: .object([
                     "pane": .string(paneId.rawValue.uuidString),
                     "lines": linesValue,
@@ -3020,7 +3020,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneTape,
+            method: IpcRequestMethod.paneTape.rawValue,
             params: .object(["pane": .string(paneId.rawValue.uuidString)])
         )
 
@@ -3043,7 +3043,7 @@ import DanTermProtocol
 
         let commands = sendIpc(
             &model,
-            method: Methods.paneTape,
+            method: IpcRequestMethod.paneTape.rawValue,
             params: .object([
                 "pane": .string(paneId.rawValue.uuidString),
                 "follow": .bool(true),
@@ -3066,7 +3066,7 @@ import DanTermProtocol
         createTab(&missingModel)
         let missing = sendIpc(
             &missingModel,
-            method: Methods.paneTape,
+            method: IpcRequestMethod.paneTape.rawValue,
             params: .object([:]),
             pane: nil
         )
@@ -3076,7 +3076,7 @@ import DanTermProtocol
         createTab(&unknownModel)
         let unknown = sendIpc(
             &unknownModel,
-            method: Methods.paneTape,
+            method: IpcRequestMethod.paneTape.rawValue,
             params: .object(["pane": .string(UUID().uuidString)])
         )
         #expect(try requireIpcError(unknown) == .init(code: -32602, message: "pane not found"))
@@ -3086,7 +3086,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: invalidModel)!.focusedPaneId
         let invalid = sendIpc(
             &invalidModel,
-            method: Methods.paneTape,
+            method: IpcRequestMethod.paneTape.rawValue,
             params: .object([
                 "pane": .string(paneId.rawValue.uuidString),
                 "fromNow": .bool(true),
@@ -3118,11 +3118,25 @@ private func sendIpc(
         object["pane"] = .string(pane.rawValue.uuidString)
         effectiveParams = .object(object)
     }
-    return update(
-        &model,
-        .ipcRequest(reqId: UUID(), method: method, params: effectiveParams),
-        env: env
-    )
+    let reqId = UUID()
+    do {
+        return update(
+            &model,
+            .ipcRequest(
+                reqId: reqId,
+                request: try IpcRequest.decode(method: method, params: effectiveParams)
+            ),
+            env: env
+        )
+    } catch let error as IpcRequestDecodeError {
+        return update(&model, .ipcRequestDecodeFailed(reqId: reqId, error: error), env: env)
+    } catch {
+        return update(
+            &model,
+            .ipcRequestDecodeFailed(reqId: reqId, error: .internalError),
+            env: env
+        )
+    }
 }
 
 private func selectedPaneId(in model: AppModel) -> PaneId {
@@ -3245,7 +3259,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         ])
 
         for _ in 0..<2 {
-            let reply = try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: params))
+            let reply = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.paneZoom.rawValue, params: params))
             #expect(reply["tab"]?["isZoomed"]?.asBool == true)
             #expect(selectedTab(in: model)!.isZoomed)
         }
@@ -3255,7 +3269,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
             "state": .string("off"),
         ])
         for _ in 0..<2 {
-            let reply = try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: off))
+            let reply = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.paneZoom.rawValue, params: off))
             #expect(reply["tab"]?["isZoomed"]?.asBool == false)
             #expect(selectedTab(in: model)!.isZoomed == false)
         }
@@ -3272,8 +3286,8 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
             "state": .string("toggle"),
         ])
 
-        #expect(try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: params))["tab"]?["isZoomed"]?.asBool == true)
-        #expect(try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: params))["tab"]?["isZoomed"]?.asBool == false)
+        #expect(try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.paneZoom.rawValue, params: params))["tab"]?["isZoomed"]?.asBool == true)
+        #expect(try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.paneZoom.rawValue, params: params))["tab"]?["isZoomed"]?.asBool == false)
     }
 
     @Test("pane.zoom on an unsplit tab reports not zoomed instead of failing")
@@ -3288,7 +3302,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
 
         let reply = try requireIpcReply(sendIpc(
             &model,
-            method: Methods.paneZoom,
+            method: IpcRequestMethod.paneZoom.rawValue,
             params: .object([
                 "pane": .string(paneId.rawValue.uuidString),
                 "state": .string("on"),
@@ -3304,13 +3318,13 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         _ = update(&model, .splitFocusedPane(direction: .horizontal))
         let paneId = selectedTab(in: model)!.focusedPaneId
 
-        let badState = sendIpc(&model, method: Methods.paneZoom, params: .object([
+        let badState = sendIpc(&model, method: IpcRequestMethod.paneZoom.rawValue, params: .object([
             "pane": .string(paneId.rawValue.uuidString),
             "state": .string("sideways"),
         ]))
         #expect(try requireIpcError(badState).code == -32602)
 
-        let unknownPane = sendIpc(&model, method: Methods.paneZoom, params: .object([
+        let unknownPane = sendIpc(&model, method: IpcRequestMethod.paneZoom.rawValue, params: .object([
             "pane": .string(UUID().uuidString),
             "state": .string("on"),
         ]))
@@ -3331,12 +3345,12 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         let paneId = selectedTab(in: model)!.focusedPaneId
         let context = paneId
 
-        let before = try requireIpcReply(sendIpc(&model, method: Methods.paneInfo, pane: context))
+        let before = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.paneInfo.rawValue, pane: context))
         #expect(before["tab"]?["isZoomed"]?.asBool == false)
 
         _ = update(&model, .toggleZoomPane(paneId: paneId))
 
-        let after = try requireIpcReply(sendIpc(&model, method: Methods.paneInfo, pane: context))
+        let after = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.paneInfo.rawValue, pane: context))
         #expect(after["tab"]?["isZoomed"]?.asBool == true)
     }
 }

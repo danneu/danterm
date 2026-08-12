@@ -8,15 +8,21 @@ public enum CLIOutputMode: Equatable {
 }
 
 public struct CLICommand: Equatable {
-    public let method: String
-    public let params: [String: JSONValue]
+    /// Holds the only request representation the CLI is allowed to send.
+    public let request: IpcRequest
     public let outputMode: CLIOutputMode
 
-    public init(method: String, params: [String: JSONValue], outputMode: CLIOutputMode) {
-        self.method = method
-        self.params = params
+    /// Couples CLI rendering policy to a request that already satisfies the wire contract.
+    public init(request: IpcRequest, outputMode: CLIOutputMode) {
+        self.request = request
         self.outputMode = outputMode
     }
+
+    /// Exposes the catalog's wire method to the transport layer.
+    public var method: String { request.method.rawValue }
+
+    /// Exposes the catalog's encoded params to the transport layer.
+    public var params: [String: JSONValue] { request.params }
 }
 
 /// Keeps process-local targeting separate from the JSON-RPC command so an
@@ -81,7 +87,7 @@ public func parseCLI(
         guard args.count == 1 else {
             throw CLIParseError("usage: danterm ls")
         }
-        return CLICommand(method: Methods.ls, params: [:], outputMode: .json)
+        return CLICommand(request: .ls, outputMode: .json)
 
     case "tab":
         guard args.count >= 2 else { throw CLIParseError("usage: danterm tab <new|rename|close>") }
@@ -106,8 +112,7 @@ public func parseCLI(
         switch args[1] {
         case "focus":
             guard args.count == 3 else { throw CLIParseError("usage: danterm pane focus <pane-id>") }
-            try validateTargetId(args[2], entity: "pane")
-            return CLICommand(method: Methods.paneFocus, params: ["pane": .string(args[2])], outputMode: .none)
+            return CLICommand(request: .paneFocus(pane: try paneId(args[2])), outputMode: .none)
         case "info":
             return try parsePaneInfoCommand(Array(args.dropFirst(2)))
         case "split":
@@ -143,7 +148,7 @@ public func parseCLI(
             return try parseAgentSessionCommand(
                 Array(args.dropFirst(2)),
                 action: "attach",
-                method: Methods.agentAttach
+                attach: true
             )
         case "activity":
             return try parseAgentActivityCommand(Array(args.dropFirst(2)))
@@ -151,7 +156,7 @@ public func parseCLI(
             return try parseAgentSessionCommand(
                 Array(args.dropFirst(2)),
                 action: "detach",
-                method: Methods.agentDetach
+                attach: false
             )
         default:
             throw CLIParseError("usage: danterm agent <attach|activity|detach>")
@@ -191,39 +196,36 @@ private func parseTabNewCommand(_ args: [String], currentDirectory: String) thro
         throw CLIParseError(usage)
     }
 
-    var params: [String: JSONValue] = [:]
-    if let group = parsed.group {
-        try validateTargetId(group, entity: "group")
-        params["group"] = .string(group)
-    }
     let launch = LaunchSpec(
         cmd: parsed.launch?.cmd,
         cwd: parsed.launch?.cwd ?? currentDirectory,
         title: parsed.launch?.title
     )
-    params["launch"] = launch.jsonValue
-    params["background"] = .bool(parsed.foreground ? false : true)
+    let target: IpcTabTarget
     switch parsed.position {
     case .none:
-        params["position"] = .string("atGroupEnd")
+        guard let group = parsed.group else { throw CLIParseError(usage) }
+        target = .group(try groupId(group), position: .atGroupEnd)
     case .afterSelected:
-        params["position"] = .string("afterSelected")
+        guard let group = parsed.group else { throw CLIParseError(usage) }
+        target = .group(try groupId(group), position: .afterSelected)
     case .atGroupEnd:
-        params["position"] = .string("atGroupEnd")
+        guard let group = parsed.group else { throw CLIParseError(usage) }
+        target = .group(try groupId(group), position: .atGroupEnd)
     case .afterTab(let id):
-        try validateTargetId(id, entity: "tab")
-        params["position"] = .string("afterTab")
-        params["afterTabId"] = .string(id)
+        target = .afterTab(try tabId(id))
     }
-    return CLICommand(method: Methods.tabNew, params: params, outputMode: .json)
+    return CLICommand(
+        request: .tabNew(target: target, launch: launch, background: parsed.foreground == false),
+        outputMode: .json
+    )
 }
 
 private func parseTabRenameCommand(_ args: [String]) throws -> CLICommand {
     var remaining = args
     let usage = "usage: danterm tab rename --tab <tab-id> <name>|--clear"
     guard remaining.count >= 2, remaining.first == "--tab" else { throw CLIParseError(usage) }
-    try validateTargetId(remaining[1], entity: "tab")
-    var params: [String: JSONValue] = ["tab": .string(remaining[1])]
+    let tab = try tabId(remaining[1])
     remaining.removeFirst(2)
     guard !remaining.isEmpty else {
         throw CLIParseError(usage)
@@ -232,8 +234,7 @@ private func parseTabRenameCommand(_ args: [String]) throws -> CLICommand {
         guard remaining.count == 1 else {
             throw CLIParseError(usage)
         }
-        params["title"] = .null
-        return CLICommand(method: Methods.tabRename, params: params, outputMode: .none)
+        return CLICommand(request: .tabRename(tab: tab, title: nil), outputMode: .none)
     }
     if remaining[0].hasPrefix("--") {
         throw CLIParseError("unknown flag: \(remaining[0])")
@@ -242,23 +243,19 @@ private func parseTabRenameCommand(_ args: [String]) throws -> CLICommand {
     guard !name.isEmpty else {
         throw CLIParseError(usage)
     }
-    params["title"] = .string(name)
-    return CLICommand(method: Methods.tabRename, params: params, outputMode: .none)
+    return CLICommand(request: .tabRename(tab: tab, title: name), outputMode: .none)
 }
 
 private func parseTabCloseCommand(_ args: [String]) throws -> CLICommand {
     let usage = "usage: danterm tab close --tab <tab-id>"
     guard args.count == 2, args[0] == "--tab" else { throw CLIParseError(usage) }
-    try validateTargetId(args[1], entity: "tab")
-    let params: [String: JSONValue] = ["tab": .string(args[1])]
-    return CLICommand(method: Methods.tabClose, params: params, outputMode: .none)
+    return CLICommand(request: .tabClose(tab: try tabId(args[1])), outputMode: .none)
 }
 
 private func parsePaneInfoCommand(_ args: [String]) throws -> CLICommand {
     let usage = "usage: danterm pane info --pane <pane-id>"
     guard args.count == 2, args[0] == "--pane" else { throw CLIParseError(usage) }
-    try validateTargetId(args[1], entity: "pane")
-    return CLICommand(method: Methods.paneInfo, params: ["pane": .string(args[1])], outputMode: .json)
+    return CLICommand(request: .paneInfo(pane: try paneId(args[1])), outputMode: .json)
 }
 
 private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
@@ -279,17 +276,16 @@ private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
         }
     }
 
-    var params: [String: JSONValue] = [
-        "direction": .string(parsed.direction == .horizontal ? "horizontal" : "vertical")
-    ]
     guard let pane = parsed.pane else { throw CLIParseError(usage) }
-    try validateTargetId(pane, entity: "pane")
-    params["pane"] = .string(pane)
-    if let launch = parsed.launch {
-        params["launch"] = launch.jsonValue
-    }
-    params["background"] = .bool(parsed.foreground ? false : true)
-    return CLICommand(method: Methods.paneSplit, params: params, outputMode: .json)
+    return CLICommand(
+        request: .paneSplit(
+            pane: try paneId(pane),
+            direction: parsed.direction,
+            launch: parsed.launch,
+            background: parsed.foreground == false
+        ),
+        outputMode: .json
+    )
 }
 
 /// Keeps destructive pane closure explicit at parse time before any request is sent.
@@ -308,10 +304,8 @@ private func parsePaneCloseCommand(_ args: [String]) throws -> CLICommand {
         }
         throw CLIParseError("unexpected argument: \(argument)")
     }
-    try validateTargetId(args[1], entity: "pane")
     return CLICommand(
-        method: Methods.paneClose,
-        params: ["pane": .string(args[1])],
+        request: .paneClose(pane: try paneId(args[1])),
         outputMode: .none
     )
 }
@@ -335,18 +329,17 @@ private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
     guard let pane = parsed.pane else {
         throw CLIParseError("usage: danterm pane input --pane <pane-id> [--literal] -- <token>...")
     }
-    try validateTargetId(pane, entity: "pane")
-    var params: [String: JSONValue] = ["pane": .string(pane)]
-    params["input"] = .array(parsed.events.map(inputEventToJSON))
-    return CLICommand(method: Methods.paneInput, params: params, outputMode: .none)
+    return CLICommand(
+        request: .paneInput(pane: try paneId(pane), input: .events(parsed.events)),
+        outputMode: .none
+    )
 }
 
 private func parseThemeSetCommand(_ args: [String]) throws -> CLICommand {
     var remaining = args
     let usage = "usage: danterm theme set --pane <pane-id> <name>|--clear"
     guard remaining.count >= 2, remaining.first == "--pane" else { throw CLIParseError(usage) }
-    try validateTargetId(remaining[1], entity: "pane")
-    var params: [String: JSONValue] = ["pane": .string(remaining[1])]
+    let pane = try paneId(remaining[1])
     remaining.removeFirst(2)
     guard !remaining.isEmpty else {
         throw CLIParseError(usage)
@@ -355,8 +348,7 @@ private func parseThemeSetCommand(_ args: [String]) throws -> CLICommand {
         guard remaining.count == 1 else {
             throw CLIParseError(usage)
         }
-        params["themeName"] = .null
-        return CLICommand(method: Methods.themeSet, params: params, outputMode: .none)
+        return CLICommand(request: .themeSet(pane: pane, themeName: nil), outputMode: .none)
     }
     if remaining[0].hasPrefix("--") {
         throw CLIParseError("unknown flag: \(remaining[0])")
@@ -365,8 +357,7 @@ private func parseThemeSetCommand(_ args: [String]) throws -> CLICommand {
     guard !name.isEmpty else {
         throw CLIParseError(usage)
     }
-    params["themeName"] = .string(name)
-    return CLICommand(method: Methods.themeSet, params: params, outputMode: .none)
+    return CLICommand(request: .themeSet(pane: pane, themeName: name), outputMode: .none)
 }
 
 private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
@@ -386,12 +377,10 @@ private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
         }
     }
 
-    var params: [String: JSONValue] = ["pane": .string(parsed.pane)]
-    try validateTargetId(parsed.pane, entity: "pane")
-    if let lineLimit = parsed.lineLimit {
-        params["lines"] = .number(Double(lineLimit))
-    }
-    return CLICommand(method: Methods.paneRead, params: params, outputMode: .text)
+    return CLICommand(
+        request: .paneRead(pane: try paneId(parsed.pane), lineLimit: parsed.lineLimit),
+        outputMode: .text
+    )
 }
 
 // The state is a positional word rather than a flag, and `toggle` is opt-in rather than the
@@ -419,10 +408,13 @@ private func parsePaneZoomCommand(_ args: [String]) throws -> CLICommand {
             throw CLIParseError(usage)
         }
     }
-    guard let pane, let state else { throw CLIParseError(usage) }
-    try validateTargetId(pane, entity: "pane")
-    let params: [String: JSONValue] = ["pane": .string(pane), "state": .string(state)]
-    return CLICommand(method: Methods.paneZoom, params: params, outputMode: .json)
+    guard let pane, let state, let requestedState = IpcPaneZoomState(rawValue: state) else {
+        throw CLIParseError(usage)
+    }
+    return CLICommand(
+        request: .paneZoom(pane: try paneId(pane), state: requestedState),
+        outputMode: .json
+    )
 }
 
 // `pane rows` reuses `pane read`'s argument grammar minus `--lines`: the projection is the
@@ -446,8 +438,7 @@ private func parsePaneRowsCommand(_ args: [String]) throws -> CLICommand {
         }
     }
     guard let pane, pane.isEmpty == false else { throw CLIParseError(usage) }
-    try validateTargetId(pane, entity: "pane")
-    return CLICommand(method: Methods.paneRows, params: ["pane": .string(pane)], outputMode: .json)
+    return CLICommand(request: .paneRows(pane: try paneId(pane)), outputMode: .json)
 }
 
 private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
@@ -467,17 +458,12 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
             throw CLIParseError("unexpected argument: \(argument)")
         }
     }
-    var params: [String: JSONValue] = ["pane": .string(parsed.pane)]
-    try validateTargetId(parsed.pane, entity: "pane")
-    if parsed.follow {
-        params["follow"] = .bool(true)
-    }
-    if parsed.fromNow {
-        params["fromNow"] = .bool(true)
-    }
     return CLICommand(
-        method: Methods.paneTape,
-        params: params,
+        request: .paneTape(
+            pane: try paneId(parsed.pane),
+            follow: parsed.follow,
+            fromNow: parsed.fromNow
+        ),
         outputMode: .json
     )
 }
@@ -485,7 +471,7 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
 private func parseAgentSessionCommand(
     _ args: [String],
     action: String,
-    method: String
+    attach: Bool
 ) throws -> CLICommand {
     let usage = "usage: danterm agent \(action) --pane <pane-id> --kind <kind> --id <session-id>"
     var remaining = args
@@ -519,10 +505,12 @@ private func parseAgentSessionCommand(
     guard let pane, let kind, let sessionId else {
         throw CLIParseError(usage)
     }
-    try validateTargetId(pane, entity: "pane")
+    let requestPane = try paneId(pane)
+    let session = IpcAgentSession(kind: kind, id: sessionId)
     return CLICommand(
-        method: method,
-        params: ["pane": .string(pane), "kind": .string(kind), "id": .string(sessionId)],
+        request: attach
+            ? .agentAttach(pane: requestPane, session: session)
+            : .agentDetach(pane: requestPane, session: session),
         outputMode: .none
     )
 }
@@ -551,13 +539,15 @@ private func parseAgentActivityCommand(_ args: [String]) throws -> CLICommand {
     }
 
     guard let pane, let kind, let sessionId, let state else { throw CLIParseError(usage) }
-    try validateTargetId(pane, entity: "pane")
-    guard ["working", "waiting", "idle"].contains(state) else {
+    guard let activity = IpcAgentActivity(rawValue: state) else {
         throw CLIParseError("agent activity state must be working, waiting, or idle")
     }
     return CLICommand(
-        method: Methods.agentActivity,
-        params: ["pane": .string(pane), "kind": .string(kind), "id": .string(sessionId), "state": .string(state)],
+        request: .agentActivity(
+            pane: try paneId(pane),
+            session: IpcAgentSession(kind: kind, id: sessionId),
+            activity: activity
+        ),
         outputMode: .none
     )
 }
@@ -568,76 +558,65 @@ private func parseTodo(_ args: [String]) throws -> CLICommand {
     case "list":
         let (pane, rest) = try parseTodoPanePrefix(Array(args.dropFirst()), usage: "usage: danterm todo list --pane <pane-id>")
         guard rest.isEmpty else { throw CLIParseError("usage: danterm todo list --pane <pane-id>") }
-        return CLICommand(method: Methods.todoList, params: todoParams(pane: pane), outputMode: .json)
+        return CLICommand(request: .todoList(pane: pane), outputMode: .json)
     case "add":
         let (pane, rest) = try parseTodoPanePrefix(Array(args.dropFirst()), usage: "usage: danterm todo add --pane <pane-id> <text>")
         let text = rest.joined(separator: " ")
         guard !text.isEmpty else { throw CLIParseError("usage: danterm todo add --pane <pane-id> <text>") }
-        var params = todoParams(pane: pane)
-        params["text"] = .string(text)
-        return CLICommand(method: Methods.todoAdd, params: params, outputMode: .json)
+        return CLICommand(request: .todoAdd(pane: pane, text: text), outputMode: .json)
     case "edit":
         let (pane, rest) = try parseTodoPanePrefix(Array(args.dropFirst()), usage: "usage: danterm todo edit --pane <pane-id> <todo-id> <text>")
         guard rest.count >= 2 else { throw CLIParseError("usage: danterm todo edit --pane <pane-id> <todo-id> <text>") }
         let text = rest.dropFirst().joined(separator: " ")
-        var params = todoParams(pane: pane)
-        params["todoId"] = .string(rest[0])
-        params["text"] = .string(text)
-        return CLICommand(method: Methods.todoEdit, params: params, outputMode: .none)
+        return CLICommand(
+            request: .todoEdit(pane: pane, todoId: rest[0], text: text),
+            outputMode: .none
+        )
     case "done":
-        return try parseTodoIdCommand(method: Methods.todoDone, args: Array(args.dropFirst()), usage: "usage: danterm todo done --pane <pane-id> <todo-id>")
+        return try parseTodoIdCommand(method: .todoDone, args: Array(args.dropFirst()), usage: "usage: danterm todo done --pane <pane-id> <todo-id>")
     case "open":
-        return try parseTodoIdCommand(method: Methods.todoOpen, args: Array(args.dropFirst()), usage: "usage: danterm todo open --pane <pane-id> <todo-id>")
+        return try parseTodoIdCommand(method: .todoOpen, args: Array(args.dropFirst()), usage: "usage: danterm todo open --pane <pane-id> <todo-id>")
     case "delete":
-        return try parseTodoIdCommand(method: Methods.todoDelete, args: Array(args.dropFirst()), usage: "usage: danterm todo delete --pane <pane-id> <todo-id>")
+        return try parseTodoIdCommand(method: .todoDelete, args: Array(args.dropFirst()), usage: "usage: danterm todo delete --pane <pane-id> <todo-id>")
     case "clear-completed":
         let (pane, rest) = try parseTodoPanePrefix(Array(args.dropFirst()), usage: "usage: danterm todo clear-completed --pane <pane-id>")
         guard rest.isEmpty else { throw CLIParseError("usage: danterm todo clear-completed --pane <pane-id>") }
-        return CLICommand(method: Methods.todoClearCompleted, params: todoParams(pane: pane), outputMode: .none)
+        return CLICommand(request: .todoClearCompleted(pane: pane), outputMode: .none)
     default:
         throw CLIParseError("unknown todo command")
     }
 }
 
-private func parseTodoPanePrefix(_ args: [String], usage: String) throws -> (String?, [String]) {
+private func parseTodoPanePrefix(_ args: [String], usage: String) throws -> (PaneId, [String]) {
     guard args.first == "--pane" else { throw CLIParseError(usage) }
     guard args.count >= 2 else { throw CLIParseError(usage) }
-    try validateTargetId(args[1], entity: "pane")
-    return (args[1], Array(args.dropFirst(2)))
+    return (try paneId(args[1]), Array(args.dropFirst(2)))
 }
 
-private func parseTodoIdCommand(method: String, args: [String], usage: String) throws -> CLICommand {
+private func parseTodoIdCommand(method: IpcRequestMethod, args: [String], usage: String) throws -> CLICommand {
     let (pane, rest) = try parseTodoPanePrefix(args, usage: usage)
     guard rest.count == 1 else { throw CLIParseError(usage) }
-    var params = todoParams(pane: pane)
-    params["todoId"] = .string(rest[0])
-    return CLICommand(method: method, params: params, outputMode: .none)
-}
-
-private func todoParams(pane: String?) -> [String: JSONValue] {
-    guard let pane else { return [:] }
-    return ["pane": .string(pane)]
-}
-
-private func validateTargetId(_ raw: String, entity: String) throws {
-    guard UUID(uuidString: raw) != nil else {
-        throw CLIParseError("invalid \(entity) id: \(raw)")
+    let request: IpcRequest
+    switch method {
+    case .todoDone: request = .todoDone(pane: pane, todoId: rest[0])
+    case .todoOpen: request = .todoOpen(pane: pane, todoId: rest[0])
+    case .todoDelete: request = .todoDelete(pane: pane, todoId: rest[0])
+    default: preconditionFailure("todo id parser requires a todo mutation method")
     }
+    return CLICommand(request: request, outputMode: .none)
 }
 
-private func inputEventToJSON(_ event: InputEvent) -> JSONValue {
-    switch event {
-    case .text(let text):
-        return .object(["text": .string(text)])
-    case .key(let key, let mods):
-        var object: [String: JSONValue] = ["key": .string(key.wireName)]
-        if !mods.isEmpty {
-            var modNames: [JSONValue] = []
-            if mods.contains(.ctrl) { modNames.append(.string("ctrl")) }
-            if mods.contains(.alt)  { modNames.append(.string("alt")) }
-            if mods.contains(.shift) { modNames.append(.string("shift")) }
-            object["mods"] = .array(modNames)
-        }
-        return .object(object)
-    }
+private func paneId(_ raw: String) throws -> PaneId {
+    guard let uuid = UUID(uuidString: raw) else { throw CLIParseError("invalid pane id: \(raw)") }
+    return PaneId(rawValue: uuid)
+}
+
+private func tabId(_ raw: String) throws -> TabId {
+    guard let uuid = UUID(uuidString: raw) else { throw CLIParseError("invalid tab id: \(raw)") }
+    return TabId(rawValue: uuid)
+}
+
+private func groupId(_ raw: String) throws -> GroupId {
+    guard let uuid = UUID(uuidString: raw) else { throw CLIParseError("invalid group id: \(raw)") }
+    return GroupId(rawValue: uuid)
 }

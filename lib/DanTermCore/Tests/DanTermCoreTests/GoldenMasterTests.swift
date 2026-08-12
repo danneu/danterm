@@ -40,17 +40,17 @@ import DanTermProtocol
         let secondGroupPane = model.groups[1].tabs[0].focusedPaneId
         _ = update(&model, .ipcRequest(
             reqId: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
-            method: Methods.paneSplit,
-            params: .object([
-                "pane": .string(secondGroupPane.rawValue.uuidString),
-                "direction": .string("vertical"),
-            ])
+            request: .paneSplit(
+                pane: secondGroupPane,
+                direction: .vertical,
+                launch: nil,
+                background: false
+            )
         ), env: env)
 
         _ = update(&model, .ipcRequest(
             reqId: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
-            method: Methods.paneFocus,
-            params: .object(["pane": .string(firstPane.rawValue.uuidString)])
+            request: .paneFocus(pane: firstPane)
         ), env: env)
 
         _ = update(&model, .appResignedActive, env: env)

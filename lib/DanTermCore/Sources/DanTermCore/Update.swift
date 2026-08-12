@@ -24,14 +24,16 @@ func update(
 
     // MARK: - IPC
 
-    case .ipcRequest(let reqId, let method, let params):
+    case .ipcRequest(let reqId, let request):
         return handleIpcRequest(
             &model,
             reqId: reqId,
-            method: method,
-            params: params,
+            request: request,
             env: env
         )
+
+    case .ipcRequestDecodeFailed(let reqId, let error):
+        return [.ipcError(reqId: reqId, code: error.code, message: error.message)]
 
     // MARK: - Tab Management
 
@@ -1423,22 +1425,18 @@ func reorderedTodos(_ todos: [TodoItem], moving todoId: UUID, to toIndex: Int) -
 private func handleIpcRequest(
     _ model: inout AppModel,
     reqId: UUID,
-    method: String,
-    params: JSONValue,
+    request: IpcRequest,
     env: CoreEnv
 ) -> [Command] {
     do {
         return try dispatchIpc(
             &model,
             reqId: reqId,
-            method: method,
-            params: params,
+            request: request,
             env: env
         )
     } catch let error as IpcParamsError {
         return ipcInvalidParams(reqId, error.message)
-    } catch let error as LaunchSpecParseError {
-        return ipcInvalidParams(reqId, launchSpecErrorMessage(error))
     } catch {
         return [.ipcError(reqId: reqId, code: -32603, message: "internal error")]
     }
@@ -1449,20 +1447,19 @@ private func handleIpcRequest(
 private func dispatchIpc(
     _ model: inout AppModel,
     reqId: UUID,
-    method: String,
-    params: JSONValue,
+    request: IpcRequest,
     env: CoreEnv
 ) throws -> [Command] {
-    switch method {
-    case Methods.doctorPermissions:
+    switch request {
+    case .doctorPermissions:
         return [.readDoctorPermissions(reqId: reqId)]
 
-    case Methods.ls:
+    case .ls:
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
         return [.ipcReply(reqId: reqId, result: encoder.list(model))]
 
-    case Methods.paneInfo:
-        let paneId = try resolvePane(params: params, in: model)
+    case .paneInfo(let paneId):
+        try requirePane(paneId, in: model)
         guard let pane = model.pane(paneId),
               let tab = tabForPane(paneId, in: model),
               let group = groupForTab(tab.id, in: model)
@@ -1475,9 +1472,9 @@ private func dispatchIpc(
             result: encoder.paneInfo(pane: pane, tab: tab, group: group, in: model)
         )]
 
-    case Methods.agentAttach:
-        let session = try agentSession(from: params)
-        let paneId = try resolvePane(params: params, in: model)
+    case .agentAttach(let paneId, let requestSession):
+        let session = try agentSession(from: requestSession)
+        try requirePane(paneId, in: model)
         guard let sessionId = model.pane(paneId)?.session?.id else {
             throw IpcParamsError("pane not found")
         }
@@ -1488,15 +1485,10 @@ private func dispatchIpc(
         )
         return commands + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
 
-    case Methods.agentActivity:
-        let session = try agentSession(from: params)
-        guard case .object(let object) = params,
-              case .string(let rawActivity)? = object["state"],
-              let activity = AgentActivity(rawIpcValue: rawActivity)
-        else {
-            throw IpcParamsError("invalid agent activity")
-        }
-        let paneId = try resolvePane(params: params, in: model)
+    case .agentActivity(let paneId, let requestSession, let requestActivity):
+        let session = try agentSession(from: requestSession)
+        let activity = agentActivity(from: requestActivity)
+        try requirePane(paneId, in: model)
         guard let sessionId = model.pane(paneId)?.session?.id else {
             throw IpcParamsError("pane not found")
         }
@@ -1510,9 +1502,9 @@ private func dispatchIpc(
         )
         return commands + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
 
-    case Methods.agentDetach:
-        let session = try agentSession(from: params)
-        let paneId = try resolvePane(params: params, in: model)
+    case .agentDetach(let paneId, let requestSession):
+        let session = try agentSession(from: requestSession)
+        try requirePane(paneId, in: model)
         guard let sessionId = model.pane(paneId)?.session?.id else {
             throw IpcParamsError("pane not found")
         }
@@ -1523,28 +1515,13 @@ private func dispatchIpc(
         )
         return commands + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
 
-    case Methods.tabRename:
-        guard case .object(let object) = params else {
-            throw IpcParamsError("invalid params")
-        }
-        let tabId = try resolveTab(params: params, in: model)
-        guard let titleValue = object["title"] else {
-            throw IpcParamsError("invalid title")
-        }
-        let title: String?
-        switch titleValue {
-        case .string(let value):
-            title = value
-        case .null:
-            title = nil
-        default:
-            throw IpcParamsError("invalid title")
-        }
+    case .tabRename(let tabId, let title):
+        try requireTab(tabId, in: model)
         let commands = update(&model, .renameTab(id: tabId, name: title), env: env)
         return commands + [.ipcReply(reqId: reqId, result: tabRenameResult(tabById(tabId, in: model)))]
 
-    case Methods.tabClose:
-        let tabId = try resolveTab(params: params, in: model)
+    case .tabClose(let tabId):
+        try requireTab(tabId, in: model)
         // Refuse the last tab: routing it through .closeTab would set a terminate
         // confirmation, leave the tab open, and strand pendingConfirmation. The CLI
         // never quits the app as a side effect of closing a tab.
@@ -1556,16 +1533,11 @@ private func dispatchIpc(
             "tab": .object(["id": .string(tabId.rawValue.uuidString)])
         ]))]
 
-    case Methods.paneSplit:
-        guard case .object(let object) = params,
-              case .string(let rawDirection)? = object["direction"],
-              let direction = ipcSplitDirection(rawDirection)
-        else {
-            throw IpcParamsError("invalid pane split params")
-        }
-        let launch = try parseLaunchSpec(object["launch"])
-        let background = try parseOptionalBool(object["background"], name: "background")
-        let paneId = try resolvePane(params: params, in: model)
+    case .paneSplit(let paneId, let requestDirection, let launch, let background):
+        try requirePane(paneId, in: model)
+        let direction: SplitNodeModel.Direction = requestDirection == .horizontal
+            ? .horizontal
+            : .vertical
         let before = Set(model.allPaneIds)
         let commands = update(
             &model,
@@ -1576,8 +1548,8 @@ private func dispatchIpc(
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
         return commands + [.ipcReply(reqId: reqId, result: encoder.paneReference(newPaneId.flatMap(model.pane)))]
 
-    case Methods.paneClose:
-        let paneId = try resolvePane(params: params, in: model)
+    case .paneClose(let paneId):
+        try requirePane(paneId, in: model)
         guard let tab = tabForPane(paneId, in: model) else {
             throw IpcParamsError("pane not found")
         }
@@ -1589,27 +1561,37 @@ private func dispatchIpc(
             "pane": .object(["id": .string(paneId.rawValue.uuidString)])
         ]))]
 
-    case Methods.tabNew:
-        guard case .object(let object) = params else {
-            throw IpcParamsError("invalid params")
+    case .tabNew(let target, let launch, let background):
+        let groupId: GroupId
+        let position: TabInsertPosition
+        switch target {
+        case .group(let requestedGroupId, let requestedPosition):
+            try requireGroup(requestedGroupId, in: model)
+            groupId = requestedGroupId
+            position = requestedPosition == .afterSelected ? .afterSelected : .atGroupEnd
+        case .afterTab(let referenceTabId):
+            guard let group = groupForTab(referenceTabId, in: model) else {
+                throw IpcParamsError("position.afterTabId not found")
+            }
+            groupId = group.id
+            position = .afterTab(referenceTabId)
         }
-        let launch = try parseLaunchSpec(object["launch"])
-        let background = try parseOptionalBool(object["background"], name: "background")
-        let position = try parseTabInsertPosition(object)
-        let groupId = try resolveTabNewTargetGroup(position: position, params: params, in: model)
         let effectiveLaunch = LaunchSpec(
             cmd: launch?.cmd,
             cwd: launch?.cwd ?? env.homeDirectory(),
             title: launch?.title
         )
         let before = liveTabIds(in: model)
-        let createTabMsg: Msg
-        if let position {
-            createTabMsg = .createTab(inGroupId: groupId, position: position, launch: effectiveLaunch, background: background)
-        } else {
-            createTabMsg = .createTab(inGroupId: groupId, launch: effectiveLaunch, background: background)
-        }
-        let commands = update(&model, createTabMsg, env: env)
+        let commands = update(
+            &model,
+            .createTab(
+                inGroupId: groupId,
+                position: position,
+                launch: effectiveLaunch,
+                background: background
+            ),
+            env: env
+        )
         let tabId = newestTabId(excluding: before, in: model)
         let tab = tabId.flatMap { tabById($0, in: model) }
         let group = model.groups.first(where: { $0.id == groupId })
@@ -1619,60 +1601,29 @@ private func dispatchIpc(
             result: encoder.tabNew(tab: tab, group: group, in: model)
         )]
 
-    case Methods.paneFocus:
-        let paneId = try resolvePane(params: params, in: model)
+    case .paneFocus(let paneId):
+        try requirePane(paneId, in: model)
         let commands = navigateToPane(paneId, in: &model, env: env)
         return commands + [.ipcReply(reqId: reqId, result: tabFocusResult(tabForPane(paneId, in: model)))]
 
-    case Methods.themeSet:
-        guard case .object(let object) = params,
-              let themeValue = object["themeName"]
-        else {
-            throw IpcParamsError("invalid theme params")
-        }
-        let paneId = try resolvePane(params: params, in: model)
-        let themeName: String?
-        switch themeValue {
-        case .null:
-            themeName = nil
-        case .string(let name):
-            themeName = name
-        default:
-            throw IpcParamsError("invalid theme name")
-        }
+    case .themeSet(let paneId, let themeName):
+        try requirePane(paneId, in: model)
         let commands = update(&model, .setPaneTheme(paneId: paneId, themeName: themeName), env: env)
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
         return commands + [.ipcReply(reqId: reqId, result: encoder.paneTheme(model.pane(paneId)))]
 
-    case Methods.paneInput:
-        let paneId = try resolvePane(params: params, in: model)
-        guard case .object(let object) = params else {
-            throw IpcParamsError("text or input required")
-        }
-        let textValue = object["text"]
-        let inputValue = object["input"]
-        switch (textValue, inputValue) {
-        case (.some, .some):
-            throw IpcParamsError("text or input required, not both")
-        case (.none, .none):
-            throw IpcParamsError("text or input required")
-        case (.some(let t), .none):
-            // Top-level IPC text keeps paste-path semantics.
-            guard case .string(let text) = t, !text.isEmpty else {
-                throw IpcParamsError("invalid text")
-            }
+    case .paneInput(let paneId, let input):
+        try requirePane(paneId, in: model)
+        switch input {
+        case .text(let text):
             return [
                 .sendText(paneId: paneId, text: text),
                 .ipcReply(reqId: reqId, result: okResult()),
             ]
-        case (.none, .some(let i)):
-            guard case .array(let arr) = i else {
-                throw IpcParamsError("input must be an array")
-            }
+        case .events(let events):
             var commands: [Command] = []
-            commands.reserveCapacity(arr.count + 1)
-            for value in arr {
-                let event = try parseInputEvent(value)
+            commands.reserveCapacity(events.count + 1)
+            for event in events {
                 switch event {
                 case .text(let text):
                     commands.append(.sendInputText(paneId: paneId, text: text))
@@ -1684,41 +1635,20 @@ private func dispatchIpc(
             return commands
         }
 
-    case Methods.paneRead:
-        guard case .object(let object) = params else {
-            throw IpcParamsError("invalid params")
-        }
-        let paneId = try resolvePane(params: params, in: model)
-
-        let lineLimit: Int?
-        switch object["lines"] {
-        case .none, .some(.null):
-            lineLimit = nil
-        case .some(.number(let n)):
-            guard let i = Int(exactly: n), i > 0 else {
-                throw IpcParamsError("lines must be a positive integer")
-            }
-            lineLimit = i
-        default:
-            throw IpcParamsError("lines must be a positive integer")
-        }
+    case .paneRead(let paneId, let lineLimit):
+        try requirePane(paneId, in: model)
         return [.readPaneText(reqId: reqId, paneId: paneId, lineLimit: lineLimit)]
 
-    case Methods.paneZoom:
-        let paneId = try resolvePane(params: params, in: model)
-        guard case .string(let requested)? = params["state"] else {
-            throw IpcParamsError("state must be one of on, off, toggle")
-        }
+    case .paneZoom(let paneId, let requested):
+        try requirePane(paneId, in: model)
         guard let tab = tabForPane(paneId, in: model) else {
             throw IpcParamsError("pane not found")
         }
         let target: Bool
         switch requested {
-        case "on": target = true
-        case "off": target = false
-        case "toggle": target = tab.isZoomed == false
-        default:
-            throw IpcParamsError("state must be one of on, off, toggle")
+        case .on: target = true
+        case .off: target = false
+        case .toggle: target = tab.isZoomed == false
         }
         // Route through `.toggleZoomPane` rather than writing `isZoomed` here, so the
         // scripted path and the menubar/context-menu paths cannot drift: the guard that
@@ -1739,65 +1669,32 @@ private func dispatchIpc(
             result: encoder.paneInfo(pane: pane, tab: currentTab, group: group, in: model)
         )]
 
-    case Methods.paneRows:
-        let paneId = try resolvePane(params: params, in: model)
+    case .paneRows(let paneId):
+        try requirePane(paneId, in: model)
         return [.readPaneRowStructure(reqId: reqId, paneId: paneId)]
 
-    case Methods.paneTape:
-        let paneId = try resolvePane(params: params, in: model)
-        let follow: Bool
-        switch params["follow"] {
-        case nil:
-            follow = false
-        case .some(.bool(let value)):
-            follow = value
-        default:
-            throw IpcParamsError("follow must be boolean")
-        }
-        let fromNow: Bool
-        switch params["fromNow"] {
-        case nil:
-            fromNow = false
-        case .some(.bool(let value)):
-            fromNow = value
-        default:
-            throw IpcParamsError("fromNow must be boolean")
-        }
-        guard fromNow == false || follow else {
-            throw IpcParamsError("fromNow requires follow")
-        }
+    case .paneTape(let paneId, let follow, let fromNow):
+        try requirePane(paneId, in: model)
         return follow
             ? [.followPaneTape(reqId: reqId, paneId: paneId, fromNow: fromNow)]
             : [.dumpPaneTape(reqId: reqId, paneId: paneId)]
 
-    case Methods.todoList:
-        let paneId = try resolvePane(params: params, in: model)
+    case .todoList(let paneId):
+        try requirePane(paneId, in: model)
         let todos = model.pane(paneId)?.todos ?? []
         return [.ipcReply(reqId: reqId, result: todoListResult(todos))]
 
-    case Methods.todoAdd:
-        guard case .object(let object) = params,
-              case .string(let text)? = object["text"]
-        else {
-            throw IpcParamsError("invalid todo text")
-        }
-        let paneId = try resolvePane(params: params, in: model)
+    case .todoAdd(let paneId, let text):
+        try requirePane(paneId, in: model)
         guard let item = appendTodo(&model, paneId: paneId, text: text, id: env.newId()) else {
             throw IpcParamsError("invalid todo text")
         }
         // Pane toolbar (incl. todo counts) reconciles from the model change above.
         return [.ipcReply(reqId: reqId, result: todoResult(item))]
 
-    case Methods.todoEdit:
-        guard case .object(let object) = params,
-              case .string(let rawTodoId)? = object["todoId"],
-              case .string(let text)? = object["text"],
-              let todoId = parseTodoId(rawTodoId),
-              !text.trimmingCharacters(in: .whitespaces).isEmpty
-        else {
-            throw IpcParamsError("invalid todo")
-        }
-        let paneId = try resolvePane(params: params, in: model)
+    case .todoEdit(let paneId, let rawTodoId, let text):
+        try requirePane(paneId, in: model)
+        guard let todoId = UUID(uuidString: rawTodoId) else { throw IpcParamsError("invalid todo") }
         guard todoExists(todoId, paneId: paneId, in: model) else {
             throw IpcParamsError("invalid todo")
         }
@@ -1807,32 +1704,27 @@ private func dispatchIpc(
             .ipcReply(reqId: reqId, result: todoResult(updated)),
         ]
 
-    case Methods.todoDone, Methods.todoOpen:
-        guard case .object(let object) = params,
-              case .string(let rawTodoId)? = object["todoId"],
-              let todoId = parseTodoId(rawTodoId)
-        else {
-            throw IpcParamsError("invalid todo")
-        }
-        let paneId = try resolvePane(params: params, in: model)
+    case .todoDone(let paneId, let rawTodoId), .todoOpen(let paneId, let rawTodoId):
+        try requirePane(paneId, in: model)
+        guard let todoId = UUID(uuidString: rawTodoId) else { throw IpcParamsError("invalid todo") }
         guard todoExists(todoId, paneId: paneId, in: model) else {
             throw IpcParamsError("invalid todo")
         }
-        let shouldBeDone = method == Methods.todoDone
+        let shouldBeDone: Bool
+        switch request {
+        case .todoDone: shouldBeDone = true
+        case .todoOpen: shouldBeDone = false
+        default: preconditionFailure("exhaustive todo state request")
+        }
         let commands = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: shouldBeDone), env: env)
         let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
         return commands + [
             .ipcReply(reqId: reqId, result: todoResult(updated)),
         ]
 
-    case Methods.todoDelete:
-        guard case .object(let object) = params,
-              case .string(let rawTodoId)? = object["todoId"],
-              let todoId = parseTodoId(rawTodoId)
-        else {
-            throw IpcParamsError("invalid todo")
-        }
-        let paneId = try resolvePane(params: params, in: model)
+    case .todoDelete(let paneId, let rawTodoId):
+        try requirePane(paneId, in: model)
+        guard let todoId = UUID(uuidString: rawTodoId) else { throw IpcParamsError("invalid todo") }
         guard todoExists(todoId, paneId: paneId, in: model) else {
             throw IpcParamsError("invalid todo")
         }
@@ -1841,40 +1733,18 @@ private func dispatchIpc(
             .ipcReply(reqId: reqId, result: okResult()),
         ]
 
-    case Methods.todoClearCompleted:
-        let paneId = try resolvePane(params: params, in: model)
+    case .todoClearCompleted(let paneId):
+        try requirePane(paneId, in: model)
         let commands = update(&model, .clearCompletedTodos(paneId: paneId), env: env)
         return commands + [
             .ipcReply(reqId: reqId, result: okResult()),
         ]
 
-    default:
-        return [.ipcError(reqId: reqId, code: -32601, message: "method not found")]
     }
 }
 
 private func ipcInvalidParams(_ reqId: UUID, _ message: String) -> [Command] {
     [.ipcError(reqId: reqId, code: -32602, message: message)]
-}
-
-private func parsePaneId(_ raw: String?) -> PaneId? {
-    guard let raw, let uuid = UUID(uuidString: raw) else { return nil }
-    return PaneId(rawValue: uuid)
-}
-
-private func parseTabId(_ raw: String?) -> TabId? {
-    guard let raw, let uuid = UUID(uuidString: raw) else { return nil }
-    return TabId(rawValue: uuid)
-}
-
-private func parseGroupId(_ raw: String?) -> GroupId? {
-    guard let raw, let uuid = UUID(uuidString: raw) else { return nil }
-    return GroupId(rawValue: uuid)
-}
-
-private func parseTodoId(_ raw: String?) -> UUID? {
-    guard let raw else { return nil }
-    return UUID(uuidString: raw)
 }
 
 private struct IpcParamsError: Error {
@@ -1883,193 +1753,32 @@ private struct IpcParamsError: Error {
 }
 
 /// Validates the session identity shared by every pane-scoped agent mutation.
-private func agentSession(from params: JSONValue) throws -> AgentSession {
-    guard case .object(let object) = params,
-          case .string(let kind)? = object["kind"],
-          case .string(let sessionId)? = object["id"],
-          let session = AgentSession(kind: kind, sessionId: sessionId)
-    else {
+private func agentSession(from request: IpcAgentSession) throws -> AgentSession {
+    guard let session = AgentSession(kind: request.kind, sessionId: request.id) else {
         throw IpcParamsError("invalid agent session")
     }
     return session
 }
 
-private func parseOptionalBool(_ value: JSONValue?, name: String) throws -> Bool {
-    switch value {
-    case .none, .some(.null):
-        return false
-    case .some(.bool(let value)):
-        return value
-    default:
-        throw IpcParamsError("\(name) must be a boolean")
+private func agentActivity(from request: IpcAgentActivity) -> AgentActivity {
+    switch request {
+    case .working: return .working
+    case .waiting: return .waiting
+    case .idle: return .idle
     }
 }
 
-private func parseTabInsertPosition(_ object: [String: JSONValue]) throws -> TabInsertPosition? {
-    let positionValue = object["position"]
-    let afterTabIdValue = object["afterTabId"]
-
-    if positionValue == nil && afterTabIdValue == nil {
-        return nil
-    }
-    if afterTabIdValue != nil {
-        switch positionValue {
-        case .none:
-            throw IpcParamsError("afterTabId is only valid when position == \"afterTab\"")
-        case .some(.string(let rawPosition)) where rawPosition != "afterTab":
-            throw IpcParamsError("afterTabId is only valid when position == \"afterTab\"")
-        default:
-            break
-        }
-    }
-
-    guard let positionValue else { return nil }
-    guard case .string(let rawPosition) = positionValue else {
-        throw IpcParamsError("position must be a string")
-    }
-
-    switch rawPosition {
-    case "afterSelected":
-        return .afterSelected
-    case "atGroupEnd":
-        return .atGroupEnd
-    case "afterTab":
-        guard let afterTabIdValue else {
-            throw IpcParamsError("position=afterTab requires afterTabId")
-        }
-        guard case .string(let rawTabId) = afterTabIdValue else {
-            throw IpcParamsError("afterTabId must be a string")
-        }
-        guard let tabId = parseTabId(rawTabId) else {
-            throw IpcParamsError("afterTabId is not a valid tab id")
-        }
-        return .afterTab(tabId)
-    default:
-        throw IpcParamsError("position must be one of: afterSelected, atGroupEnd, afterTab")
-    }
+private func requirePane(_ paneId: PaneId, in model: AppModel) throws {
+    guard model.pane(paneId) != nil else { throw IpcParamsError("pane not found") }
 }
 
-/// Centralizes the absent, malformed, and unknown target vocabulary across all entities.
-private func resolveTarget<ID>(
-    entity: String,
-    params: JSONValue,
-    parse: (String) -> ID?,
-    exists: (ID) -> Bool
-) throws -> ID {
-    guard case .object(let object) = params, let raw = object[entity] else {
-        throw IpcParamsError("\(entity) required")
-    }
-    guard case .string(let str) = raw else {
-        throw IpcParamsError("\(entity) must be a string")
-    }
-    guard let id = parse(str), exists(id) else {
-        throw IpcParamsError("\(entity) not found")
-    }
-    return id
+private func requireTab(_ tabId: TabId, in model: AppModel) throws {
+    guard tabById(tabId, in: model) != nil else { throw IpcParamsError("tab not found") }
 }
 
-/// Resolves the pane named directly by an IPC request.
-private func resolvePane(params: JSONValue, in model: AppModel) throws -> PaneId {
-    try resolveTarget(
-        entity: "pane",
-        params: params,
-        parse: { parsePaneId($0) },
-        exists: { model.pane($0) != nil }
-    )
-}
-
-// Parses a single `input[i]` JSON object into an InputEvent. All structural
-// validation happens here so by the time the runtime handles
-// `.sendInputKey(...)`, the KeyName has already been confirmed against the
-// closed enum.
-private func parseInputEvent(_ value: JSONValue) throws -> InputEvent {
-    guard case .object(let object) = value else {
-        throw IpcParamsError("input event must be an object")
-    }
-    let textPresent = object["text"] != nil
-    let keyPresent = object["key"] != nil
-    if textPresent == keyPresent {
-        throw IpcParamsError("input event must have text xor key")
-    }
-    if textPresent {
-        guard case .string(let text)? = object["text"] else {
-            throw IpcParamsError("input event text must be a string")
-        }
-        return .text(text)
-    }
-    guard case .string(let keyName)? = object["key"] else {
-        throw IpcParamsError("input event key must be a string")
-    }
-    guard let key = KeyName(wireName: keyName) else {
-        throw IpcParamsError("unknown key \(keyName)")
-    }
-    var mods: KeyMods = []
-    if let modsValue = object["mods"] {
-        guard case .array(let arr) = modsValue else {
-            throw IpcParamsError("mods must be an array")
-        }
-        var modNames: [String] = []
-        modNames.reserveCapacity(arr.count)
-        for entry in arr {
-            guard case .string(let name) = entry else {
-                throw IpcParamsError("mods entries must be strings")
-            }
-            modNames.append(name)
-        }
-        do {
-            mods = try KeyMods.decode(wire: modNames)
-        } catch KeyModsDecodeError.unknown(let name) {
-            throw IpcParamsError("unknown mod \(name)")
-        }
-    }
-    return .key(key, mods)
-}
-
-/// Resolves the tab named directly by an IPC request.
-private func resolveTab(params: JSONValue, in model: AppModel) throws -> TabId {
-    try resolveTarget(
-        entity: "tab",
-        params: params,
-        parse: { parseTabId($0) },
-        exists: { tabById($0, in: model) != nil }
-    )
-}
-
-/// Resolves the group named directly by an IPC request.
-private func resolveGroup(params: JSONValue, in model: AppModel) throws -> GroupId {
-    try resolveTarget(
-        entity: "group",
-        params: params,
-        parse: { parseGroupId($0) },
-        exists: { id in model.groups.contains { $0.id == id } }
-    )
-}
-
-private func resolveTabNewTargetGroup(
-    position: TabInsertPosition?,
-    params: JSONValue,
-    in model: AppModel
-) throws -> GroupId {
-    guard case .afterTab(let refTabId) = position else {
-        return try resolveGroup(params: params, in: model)
-    }
-    guard tabById(refTabId, in: model) != nil else {
-        throw IpcParamsError("position.afterTabId not found")
-    }
-    guard let refGroup = groupForTab(refTabId, in: model) else {
-        throw IpcParamsError("position.afterTabId not found")
-    }
-    if case .object(let object) = params, object["group"] != nil {
-        throw IpcParamsError("tab.new requires exactly one of group or afterTabId")
-    }
-    return refGroup.id
-}
-
-private func ipcSplitDirection(_ raw: String) -> SplitNodeModel.Direction? {
-    switch raw {
-    case "horizontal": return .horizontal
-    case "vertical": return .vertical
-    default: return nil
+private func requireGroup(_ groupId: GroupId, in model: AppModel) throws {
+    guard model.groups.contains(where: { $0.id == groupId }) else {
+        throw IpcParamsError("group not found")
     }
 }
 
@@ -2111,15 +1820,6 @@ private func todoListResult(_ todos: [TodoItem]) -> JSONValue {
 
 private func okResult() -> JSONValue {
     .object(["ok": .bool(true)])
-}
-
-private func launchSpecErrorMessage(_ error: LaunchSpecParseError) -> String {
-    switch error {
-    case .notObject:
-        return "launch must be an object"
-    case .fieldNotString(let field):
-        return "launch.\(field) must be a string"
-    }
 }
 
 private func appendTodo(_ model: inout AppModel, paneId: PaneId, text: String, id: UUID) -> TodoItem? {

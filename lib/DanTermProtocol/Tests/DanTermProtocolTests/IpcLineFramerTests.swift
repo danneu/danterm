@@ -23,7 +23,7 @@ struct IpcLineFramerTests {
             return
         }
         let request = try JSONDecoder().decode(JsonRpcRequest.self, from: line)
-        #expect(request.method == Methods.ls)
+        #expect(request.method == IpcRequestMethod.ls.rawValue)
     }
 
     @Test("two full lines in one read emit two frames")
@@ -54,7 +54,7 @@ struct IpcLineFramerTests {
             return
         }
         let request = try JSONDecoder().decode(JsonRpcRequest.self, from: line)
-        #expect(request.method == Methods.ls)
+        #expect(request.method == IpcRequestMethod.ls.rawValue)
     }
 
     @Test("oversized line emits rejection event")

@@ -1,7 +1,7 @@
 // CLI argument parser for `danterm pane split`.
 import Foundation
 
-public enum PaneSplitDirection: Equatable {
+public enum PaneSplitDirection: Equatable, Sendable {
     case horizontal
     case vertical
 }

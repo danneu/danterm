@@ -1,7 +1,7 @@
 // Shared launch specification for IPC-created DanTerm panes.
 import Foundation
 
-public struct LaunchSpec: Equatable {
+public struct LaunchSpec: Equatable, Sendable {
     public let cmd: String?
     public let cwd: String?
     public let title: String?

@@ -1,26 +1,21 @@
 // Core value types for the DanTerm Elm-style application model.
 import Foundation
+import DanTermProtocol
 
-// MARK: - Typed ID Wrappers
+// MARK: - Core-only Typed IDs
 
-enum TabTag {}
-enum PaneTag {}
+typealias TypedId<Tag> = DanTermProtocol.TypedId<Tag>
+typealias TabId = DanTermProtocol.TabId
+typealias PaneId = DanTermProtocol.PaneId
+typealias GroupId = DanTermProtocol.GroupId
+
 /// Keeps terminal-session identity distinct from its owning pane identity.
 enum SessionTag {}
-enum GroupTag {}
 enum SplitTag {}
 enum AlertTag {}
 
-struct TypedId<Tag>: Hashable, RawRepresentable, Codable {
-    let rawValue: UUID
-    init(rawValue: UUID) { self.rawValue = rawValue }
-}
-
-typealias TabId = TypedId<TabTag>
-typealias PaneId = TypedId<PaneTag>
 /// Identifies one terminal lifetime so late reports cannot target its replacement.
 typealias SessionId = TypedId<SessionTag>
-typealias GroupId = TypedId<GroupTag>
 typealias SplitId = TypedId<SplitTag>
 typealias AlertId = TypedId<AlertTag>
 

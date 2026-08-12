@@ -75,14 +75,27 @@ actor IpcServer {
         }
         let reqId = UUID()
         connection.rememberRequest(reqId: reqId, rpcId: rpcId)
+        let message: Msg
+        do {
+            message = .ipcRequest(
+                reqId: reqId,
+                request: try IpcRequest.decode(
+                    method: request.method,
+                    params: request.params ?? .object([:])
+                )
+            )
+        } catch let error as IpcRequestDecodeError {
+            message = .ipcRequestDecodeFailed(reqId: reqId, error: error)
+        } catch {
+            message = .ipcRequestDecodeFailed(
+                reqId: reqId,
+                error: .internalError
+            )
+        }
         let runtime = self.runtime
         await MainActor.run {
             runtime?.registerIpcConnection(connection, for: reqId)
-            runtime?.send(.ipcRequest(
-                reqId: reqId,
-                method: request.method,
-                params: request.params ?? .object([:])
-            ))
+            runtime?.send(message)
         }
     }
 }

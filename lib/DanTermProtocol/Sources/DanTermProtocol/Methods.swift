@@ -1,32 +1,7 @@
-// Canonical JSON-RPC method names for the DanTerm command surface.
+// JSON-RPC method names for server messages outside the client request catalog.
 import Foundation
 
 public enum Methods {
     public static let hello = "hello"
-    public static let doctorPermissions = "doctor.permissions"
-    public static let ls = "ls"
-    public static let tabNew = "tab.new"
-    public static let tabRename = "tab.rename"
-    public static let tabClose = "tab.close"
-    public static let paneFocus = "pane.focus"
-    public static let paneInfo = "pane.info"
-    public static let paneSplit = "pane.split"
-    public static let paneClose = "pane.close"
-    public static let paneInput = "pane.input"
-    public static let paneRead = "pane.read"
-    public static let paneRows = "pane.rows"
-    public static let paneZoom = "pane.zoom"
-    public static let paneTape = "pane.tape"
     public static let paneTapeEvent = "pane.tape.event"
-    public static let themeSet = "theme.set"
-    public static let agentAttach = "agent.attach"
-    public static let agentActivity = "agent.activity"
-    public static let agentDetach = "agent.detach"
-    public static let todoList = "todo.list"
-    public static let todoAdd = "todo.add"
-    public static let todoEdit = "todo.edit"
-    public static let todoDone = "todo.done"
-    public static let todoOpen = "todo.open"
-    public static let todoDelete = "todo.delete"
-    public static let todoClearCompleted = "todo.clearCompleted"
 }

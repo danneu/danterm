@@ -4,13 +4,13 @@
 // via `KeyName(wireName:)`, an inverse pinned by protocol tests.
 import Foundation
 
-public enum InputEvent: Equatable {
+public enum InputEvent: Equatable, Sendable {
     case text(String)
     case key(KeyName, KeyMods)
 }
 
 // One of the closed set of key names danterm understands.
-public enum KeyName: Equatable {
+public enum KeyName: Equatable, Sendable {
     case named(NamedKey)
     // Single lowercase ASCII letter, used for modifier-letter combos (e.g. C-c).
     case letter(Character)
@@ -49,7 +49,7 @@ public enum KeyName: Equatable {
     }()
 }
 
-public enum NamedKey: Equatable, CaseIterable {
+public enum NamedKey: Equatable, CaseIterable, Sendable {
     case enter
     case tab
     case bspace
@@ -98,7 +98,7 @@ public enum NamedKey: Equatable, CaseIterable {
     }
 }
 
-public struct KeyMods: OptionSet, Equatable {
+public struct KeyMods: OptionSet, Equatable, Sendable {
     public let rawValue: Int
     public init(rawValue: Int) { self.rawValue = rawValue }
 
