@@ -19,7 +19,7 @@ let package = Package(
             name: "DanTermProtocol",
             path: "lib/DanTermProtocol/Sources/DanTermProtocol",
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v6),
             ]
         ),
         .target(
@@ -27,7 +27,7 @@ let package = Package(
             dependencies: ["DanTermProtocol"],
             path: "lib/DanTermSupport/Sources/DanTermSupport",
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v6),
             ],
             linkerSettings: [
                 .linkedFramework("CoreText"),
@@ -64,7 +64,7 @@ let package = Package(
             dependencies: ["DanTermProtocol", "DanTermSupport"],
             path: "cli",
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v6),
             ]
         ),
         .executableTarget(
@@ -72,7 +72,7 @@ let package = Package(
             dependencies: ["DanTermProtocol"],
             path: "tools/DanTermInstanceIdentityTool",
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v6),
             ]
         ),
         .testTarget(
@@ -80,7 +80,7 @@ let package = Package(
             dependencies: ["DanTermProtocol"],
             path: "lib/DanTermProtocol/Tests/DanTermProtocolTests",
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v6),
             ]
         ),
         .testTarget(
@@ -101,7 +101,7 @@ let package = Package(
             dependencies: ["DanTermCLI", "DanTermProtocol"],
             path: "cli-tests",
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v6),
             ]
         ),
     ]
