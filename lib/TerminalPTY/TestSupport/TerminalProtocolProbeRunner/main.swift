@@ -69,16 +69,29 @@ private enum TerminalProtocolProbeRunner {
         controller.synchronizeState()
         let capture = controller.diagnosticCapture(test: probe.captureName)
         controller.tearDown()
-        await waitForQuiescence(termination)
+        // The record below is a claim that the pane released everything and reaped
+        // its child, and only quiescence supports it. Awaiting quiescence through a
+        // continuation would park here for good when it never comes, and the wrapper
+        // script imposes no timeout that would end the run from outside.
+        let quiesced = await termination.quiesced(within: .seconds(30))
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(capture.recording).write(to: runDirectory.appending(path: "recording.json"))
-        try "pane_session=released\nchild=reaped\npty_owner=released\ndescriptors=released\nsources=released\n".write(
+        let state = quiesced ? "released" : "live"
+        try "pane_session=\(state)\nchild=\(quiesced ? "reaped" : "live")\npty_owner=\(state)\ndescriptors=\(state)\nsources=\(state)\n".write(
             to: runDirectory.appending(path: "ownership.txt"), atomically: true, encoding: .utf8
         )
+        // The probe's own verdict first: a probe that never ended explains a pane that
+        // never quiesced, so reporting the other way round would name the symptom.
         guard didEnd else {
             try "status=failed\nerror=timeout\n".write(
+                to: runDirectory.appending(path: "summary.txt"), atomically: true, encoding: .utf8
+            )
+            throw ProbeError.timeout
+        }
+        guard quiesced else {
+            try "status=failed\nerror=quiescence timeout\n".write(
                 to: runDirectory.appending(path: "summary.txt"), atomically: true, encoding: .utf8
             )
             throw ProbeError.timeout
@@ -112,13 +125,6 @@ private enum TerminalProtocolProbeRunner {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    private static func waitForQuiescence(
-        _ handle: TerminalPaneTerminationHandle
-    ) async {
-        await withCheckedContinuation { continuation in
-            handle.whenQuiescent { continuation.resume() }
-        }
-    }
 }
 
 /// Bridges the callback-only session end signal into one bounded async wait.

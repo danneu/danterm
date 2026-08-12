@@ -17,6 +17,28 @@ public struct TerminalPaneTerminationHandle: Sendable {
         host.whenQuiescent(observer)
     }
 
+    /// Waits for quiescence and reports whether it arrived before the deadline.
+    ///
+    /// The callback above cannot be awaited without a continuation that a pane which
+    /// never quiesces never resumes. Every caller here is winding down and has a
+    /// verdict to record -- an opt-in runner writes an ownership file that claims
+    /// each resource was released, and only quiescence supports that claim -- so this
+    /// hands back an answer rather than suspending on a question with no reply.
+    ///
+    /// Sleeps between samples rather than spinning: the pane being waited on shares
+    /// the machine, and `Task.yield()` does not throw on cancellation, so a yield
+    /// loop cannot be unwound by a deadline outside it either.
+    public func quiesced(within limit: Duration) async -> Bool {
+        let quiescent = Mutex(false)
+        whenQuiescent { quiescent.withLock { $0 = true } }
+        let deadline = ContinuousClock.now + limit
+        while ContinuousClock.now < deadline {
+            if quiescent.withLock({ $0 }) { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return quiescent.withLock { $0 }
+    }
+
     /// Requests the host's idempotent shutdown transaction from any process-lifetime owner.
     public func requestShutdown(
         completion: (@Sendable () -> Void)? = nil
