@@ -359,6 +359,34 @@ struct TerminalSearchTests {
         #expect(terminal.activeSearchMatchRange == nil)
     }
 
+    @Test("entering the alternate screen clears primary search state")
+    func alternateScreenClearsPrimarySearch() throws {
+        // Intent: an alternate-screen transition drops every part of a primary-screen search.
+        // Why it exists: lifting search into one durable subsystem must not leave its match index
+        //   alive after the query and visible selection have been cleared.
+        // Scenario: the primary screen has multiple matches and an active search, then an
+        //   alternate-screen application opens and closes before navigation is attempted again.
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        terminal.feed(Array("hit\r\nhit".utf8))
+        var moved = terminal.beginSearch("hit")
+        #expect(moved)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
+
+        terminal.feed(Array("\u{1B}[?1049h".utf8))
+        #expect(terminal.searchStatus == nil)
+        moved = terminal.searchNext()
+        #expect(moved == false)
+        moved = terminal.searchPrevious()
+        #expect(moved == false)
+
+        terminal.feed(Array("\u{1B}[?1049l".utf8))
+        #expect(terminal.searchStatus == nil)
+        moved = terminal.searchNext()
+        #expect(moved == false)
+        moved = terminal.searchPrevious()
+        #expect(moved == false)
+    }
+
     @Test("every search mutation damages the whole viewport")
     func searchMutationsRecordFullDamage() throws {
         // Intent: begin, next, previous, clear, and needle replacement repaint every

@@ -221,4 +221,4 @@ gate.
 ## Commit progress
 
 - [x] 1. Unify search scans on one generic needle window
-- [ ] 2. Lift search state and logic into Terminal.Search
+- [x] 2. Lift search state and logic into Terminal.Search
