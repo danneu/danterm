@@ -1515,6 +1515,14 @@ struct TerminalPTYHostTests {
             let output = String(decoding: await host.outputBytes(), as: UTF8.self)
             #expect(output.components(separatedBy: "__INITIAL_EXECUTED__=").count - 1 == 1)
             #expect(output.contains("__INITIAL_EXECUTED__=\(testCase.name)"))
+
+            // The census claims teardown returned, so it needs the fact that says so.
+            // A reported result is not that fact: the host publishes the result in the
+            // same queue turn that cancels its remaining sources, and each source is
+            // only released when its cancel handler runs in a later turn. Censusing
+            // straight off the result reads one to two sources still retained a few
+            // milliseconds after a busy child exits.
+            await host.close()
             #expect((await host.resourceSnapshot()).isReleased)
         }
     }
