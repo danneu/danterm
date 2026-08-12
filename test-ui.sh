@@ -42,6 +42,7 @@ echo "Compiling UI tests..."
         -I "$PROTO_BUILD" \
         -L "$PROTO_BUILD" \
         -lDanTermProtocol \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DisplayLine.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/AgentSession.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ChipKind.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Model.swift" \

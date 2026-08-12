@@ -128,7 +128,7 @@ AppModel(
       id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000E)),
       kind: .bell,
       paneId: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000001)),
-      title: "DanTerm",
+      title: DisplayLine(text: "DanTerm"),
       body: "Terminal",
       createdAt: Date(2023-11-14T22:13:20.000Z),
       isUnread: true

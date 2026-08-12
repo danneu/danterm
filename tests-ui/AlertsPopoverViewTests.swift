@@ -254,7 +254,7 @@ private func makeAlert(
         id: AlertId(),
         kind: .bell,
         paneId: paneId,
-        title: title,
+        title: DisplayLine(title),
         body: body,
         createdAt: Date(timeIntervalSinceNow: -ageSeconds),
         isUnread: isUnread)

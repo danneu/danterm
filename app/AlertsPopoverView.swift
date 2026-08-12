@@ -154,7 +154,7 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
         row.addSubview(icon)
 
         // Title
-        let titleField = NSTextField(labelWithString: alert.title)
+        let titleField = NSTextField(labelWithString: alert.title.text)
         titleField.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
         titleField.lineBreakMode = .byTruncatingTail
         titleField.translatesAutoresizingMaskIntoConstraints = false

@@ -826,16 +826,16 @@ import Testing
 // MARK: - Sidebar projection test builders + op model-apply
 
 private func sbTab(_ name: String) -> SidebarTabProjection {
-    SidebarTabProjection(id: TabId(), displayTitle: name, subtitle: nil, unreadAlertCount: 0, jumpKey: nil, color: nil)
+    SidebarTabProjection(id: TabId(), displayTitle: DisplayLine(name), subtitle: nil, unreadAlertCount: 0, jumpKey: nil, color: nil)
 }
 private func sbTab2(_ id: TabId) -> SidebarTabProjection {
     SidebarTabProjection(id: id, displayTitle: "t", subtitle: nil, unreadAlertCount: 0, jumpKey: nil, color: nil)
 }
 private func sbTabFull(_ id: TabId, _ title: String, bell: Int) -> SidebarTabProjection {
-    SidebarTabProjection(id: id, displayTitle: title, subtitle: nil, unreadAlertCount: bell, jumpKey: nil, color: nil)
+    SidebarTabProjection(id: id, displayTitle: DisplayLine(title), subtitle: nil, unreadAlertCount: bell, jumpKey: nil, color: nil)
 }
 private func sbGroup(_ id: GroupId, _ name: String, collapsed: Bool = false, first: Bool = false, _ tabs: [SidebarTabProjection]) -> SidebarGroupProjection {
-    SidebarGroupProjection(id: id, isCollapsed: collapsed, name: name,
+    SidebarGroupProjection(id: id, isCollapsed: collapsed, name: DisplayLine(name),
         unreadAlertCount: tabs.reduce(0) { $0 + $1.unreadAlertCount }, tabCount: tabs.count, isFirst: first, tabs: tabs)
 }
 private func sbProj(_ single: Bool, _ groups: [SidebarGroupProjection]) -> SidebarProjection {

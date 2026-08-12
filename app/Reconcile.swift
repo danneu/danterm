@@ -268,8 +268,8 @@ extension AppRuntime {
     func reconcileWindowChrome(tally: UnreadAlertTally) {
         let new = desiredWindowChrome(in: model, tally: tally)
         guard caches.windowChrome != new else { return }
-        window?.title = new.windowTitle
-        chromeView?.updateTitle(new.contentTitle)
+        window?.title = new.windowTitle.text
+        chromeView?.updateTitle(new.contentTitle.text)
         chromeView?.updateBellBadge(count: new.unreadCount)
         NSApp.dockTile.badgeLabel = new.unreadCount > 0 ? "\(new.unreadCount)" : nil
         NSApp.dockTile.display()

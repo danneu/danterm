@@ -189,7 +189,7 @@ final class SwitcherRowView: NSView {
     }
 
     func apply(row: SwitcherRow, isCursor: Bool) {
-        nameLabel.stringValue = row.name
+        nameLabel.stringValue = row.name.text
         if row.alertCount > 0 {
             badgeLabel.stringValue = "\u{2022} \(row.alertCount)"
             badgeLabel.isHidden = false

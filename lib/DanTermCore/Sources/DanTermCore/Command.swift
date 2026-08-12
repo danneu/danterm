@@ -54,10 +54,12 @@ enum Command {
     // `paneId` is carried for grouping alone: it becomes the banner's thread
     // identifier so a chatty pane stacks into one Notification Center entry
     // instead of one per alert. Click routing still keys off `alertId`.
-    case sendNotification(alertId: AlertId, paneId: PaneId, title: String, subtitle: String?, body: String)
+    // The title and subtitle are DanTerm's own derived presentation and land in
+    // one-line notification slots; the body is the sender's text, kept verbatim.
+    case sendNotification(alertId: AlertId, paneId: PaneId, title: DisplayLine, subtitle: DisplayLine?, body: String)
     // `uncompletedTodoCount` rolls up the tab's own todos plus every pane's
     // todos in that tab (the same number the chrome's tab-todo badge shows).
-    case showCloseTabConfirmation(tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool, uncompletedTodoCount: Int)
+    case showCloseTabConfirmation(tabId: TabId, tabTitle: DisplayLine, paneCount: Int, isLastTab: Bool, uncompletedTodoCount: Int)
     case showCloseTabsConfirmation(tabIds: [TabId], tabCount: Int, totalPaneCount: Int, totalUncompletedTodos: Int, isQuit: Bool)
     case terminate
     case activateApp

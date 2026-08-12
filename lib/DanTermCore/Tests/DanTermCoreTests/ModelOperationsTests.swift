@@ -2028,9 +2028,9 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(rows == [
             .tabSectionHeader,
             .tabEmptyPlaceholder,
-            .paneSectionHeader(paneId: paneA, title: model.pane(paneA)!.session?.title ?? "Terminal"),
+            .paneSectionHeader(paneId: paneA, title: DisplayLine(model.pane(paneA)!.session?.title ?? "Terminal")),
             .paneEmptyPlaceholder(paneId: paneA),
-            .paneSectionHeader(paneId: paneB, title: model.pane(paneB)!.session?.title ?? "Terminal"),
+            .paneSectionHeader(paneId: paneB, title: DisplayLine(model.pane(paneB)!.session?.title ?? "Terminal")),
             .paneEmptyPlaceholder(paneId: paneB),
         ])
     }
@@ -3090,7 +3090,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
         #expect(populated?.label == "swift test")
         #expect(populated?.isRemote == true)
-        #expect(populated?.remoteLabel == remote.displayString)
+        #expect(populated?.remoteLabel == DisplayLine(remote.displayString))
         #expect(populated?.chipTooltip == "claude session session-1")
         #expect(absent?.label == "Terminal")
         #expect(absent?.isRemote == false)

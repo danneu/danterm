@@ -295,11 +295,11 @@ class PaneWrapperView: NSView {
     /// Every string arrives composed by `desiredPaneToolbar`; this method only
     /// reads values out into labels. Composing text here would put untrusted
     /// terminal-reported values back together inside the view.
-    func updateToolbar(label: String, progress: ProgressState? = nil, isRemote: Bool = false, remoteLabel: String? = nil, agentLabel: String? = nil, chipTooltip: String? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0, isZoomed: Bool? = nil, hasSplits: Bool? = nil) {
-        toolbarLabel.stringValue = label
+    func updateToolbar(label: DisplayLine, progress: ProgressState? = nil, isRemote: Bool = false, remoteLabel: DisplayLine? = nil, agentLabel: DisplayLine? = nil, chipTooltip: DisplayLine? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0, isZoomed: Bool? = nil, hasSplits: Bool? = nil) {
+        toolbarLabel.stringValue = label.text
         applyProgressState(progress)
         remoteAccessory.isHidden = !isRemote
-        remoteSessionLabel.stringValue = remoteLabel ?? ""
+        remoteSessionLabel.stringValue = remoteLabel?.text ?? ""
         remoteSessionLabel.isHidden = remoteLabel == nil
         let expanded = remoteLabel != nil
         if expanded != remoteExpanded {
@@ -315,9 +315,9 @@ class PaneWrapperView: NSView {
         paneChip.kind = chipKind
         // The chip's tooltip carries the session id, so it survives the pill
         // being hidden for an agent the chip can name on its own.
-        paneChip.toolTip = chipTooltip
+        paneChip.toolTip = chipTooltip?.text
         agentAccessory.isHidden = agentLabel == nil
-        agentSessionLabel.stringValue = agentLabel ?? ""
+        agentSessionLabel.stringValue = agentLabel?.text ?? ""
         alertBadge.updateBadge(count: unreadAlertCount)
         todoButton.update(totalCount: totalTodoCount, uncompletedCount: uncompletedTodoCount)
         if let isZoomed {

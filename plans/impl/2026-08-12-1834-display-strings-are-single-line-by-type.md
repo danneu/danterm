@@ -254,7 +254,7 @@ shows one line and keeps its subtitle and pane strip.
       agent pill, and chip tooltip, all still `String`. Stands on its own -- the
       view stops receiving raw `cwd` and raw remote identities -- and isolates
       the mechanical UI-test call-site churn. Obligation 8.
-- [ ] 3. Type every render-ready value as `DisplayLine` (I1) while the shared
+- [x] 3. Type every render-ready value as `DisplayLine` (I1) while the shared
       model and IPC helpers stay `String` (I2), with the AppKit readouts.
       Obligations 3-7, plus the design-doc decision and the SKILL.md note.
 - [ ] 4. Harden the single-line labels. Obligations 9-10. Separate because it is
@@ -273,3 +273,14 @@ shows one line and keeps its subtitle and pane strip.
   visibility now follows its value being nil, so `agentLabel` is nil for every
   agent whose chip already names it -- the `chipKind == .agent` rule the view
   used to apply moved into the projection with it.
+- `AlertPresentation`'s own `title` and `subtitle` are typed, not just the two
+  places the plan names (`AlertModel.title` and `.sendNotification`). Both of
+  those read from it, so typing the stored alert and the command separately
+  would have meant wrapping the same value twice and letting them drift.
+- The sweep drives a remote identity as a `RemoteSession` on a
+  `.connectionDeclared` report rather than as a `DanTermShell=3` sequence: the
+  base64 decode lives in `TerminalCore.Terminal`, a different module, so the
+  report is the value that decode produces.
+- `SidebarRenameRecycleTests` used a long title ending in a space. That trailing
+  space no longer survives the projection, so the title gained a final word --
+  the test is about row recycling, not about trimming.

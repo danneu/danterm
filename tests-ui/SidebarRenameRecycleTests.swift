@@ -101,7 +101,10 @@ func sidebarRenameRecycleTests() {
             scroll: scroll, label: "short display title")
 
         sidebar.beginRenamingTab(tab)
-        let longTitle = String(repeating: "long title ", count: 12)
+        // No trailing space: a display title is normalized on its way out of the
+        // projection, so one would not survive the commit and the assertion below
+        // would be about trimming rather than about row recycling.
+        let longTitle = String(repeating: "long title ", count: 12) + "end"
         titleField.stringValue = longTitle
         window.contentView?.layoutSubtreeIfNeeded()
         try expectTabTitlePrecedesAccessory(in: cell)

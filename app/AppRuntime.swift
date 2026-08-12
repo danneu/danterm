@@ -860,8 +860,8 @@ class AppRuntime {
 
         case .sendNotification(let alertId, let paneId, let title, let subtitle, let body):
             let content = UNMutableNotificationContent()
-            content.title = title
-            if let subtitle { content.subtitle = subtitle }
+            content.title = title.text
+            if let subtitle { content.subtitle = subtitle.text }
             content.body = body
             // Stack a chatty pane's banners into one Notification Center entry.
             content.threadIdentifier = paneId.rawValue.uuidString
