@@ -69,8 +69,8 @@ func ioSurfaceLayerContentsTests() {
 
     // Intent: a surface detached by a committed transaction and never
     // reattached goes free once later frames present, and from the moment
-    // IOSurfaceIsInUse reports it free it stays free -- through a second of
-    // continued swaps and across a rewrite of its pixels.
+    // IOSurfaceIsInUse reports it free it stays free -- through many further
+    // swaps and across a rewrite of its pixels.
     // Why it exists: this is the owned-surface route's viability gate. The
     // swapchain writes a buffer only when it is detached and reported free;
     // if the render server could re-acquire such a surface, that write could
@@ -99,24 +99,32 @@ func ioSurfaceLayerContentsTests() {
             flushAndPump(deadline: 5.0) { candidate.isInUse },
             "render server never acquired the attached surface; is the probe window composited?")
 
+        // Both waits below count presented frames rather than elapsed seconds.
+        // The gate is about ordering, and a busy machine spends longer on a
+        // frame without needing more of them, so a frame count keeps the bound
+        // independent of load. On this machine the detached surface frees after
+        // 3 frames; 60 is headroom over that measurement, not a threshold tuned
+        // to sit just above it.
+        let frameBudget = 60
+
         // Detach; candidate is never reattached below. Freeing is driven by
         // later presentations, so keep swapping the other two surfaces while
         // waiting for it.
         var attached = second
         var idle = third
-        let freeDeadline = Date().addingTimeInterval(5.0)
-        while candidate.isInUse && Date() < freeDeadline {
+        var frames = 0
+        while candidate.isInUse && frames < frameBudget {
             swap(&attached, &idle)
             layer.contents = attached
             CATransaction.flush()
             RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            frames += 1
         }
         try uiExpect(
             !candidate.isInUse,
             "detached surface never reported free while later frames kept presenting")
 
-        let end = Date().addingTimeInterval(1.0)
-        while Date() < end {
+        for _ in 0 ..< frameBudget {
             swap(&attached, &idle)
             layer.contents = attached
             CATransaction.flush()
