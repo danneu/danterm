@@ -5,6 +5,7 @@ import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording
 import TerminalPaneSession
+import TerminalPTYWaitSupport
 import TerminalWorkflowSupport
 
 /// Defines one independently captured application contract and its owning login shell.

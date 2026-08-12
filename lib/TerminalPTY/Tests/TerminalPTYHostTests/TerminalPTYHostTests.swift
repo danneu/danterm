@@ -4,6 +4,7 @@ import Foundation
 import Testing
 @testable import TerminalPTYHost
 import TerminalPTYTestSupport
+import TerminalPTYWaitSupport
 import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording

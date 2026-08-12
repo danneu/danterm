@@ -5,6 +5,7 @@ import PaneProcessLifecycle
 import TerminalCoreRecording
 import TerminalPaneSession
 import TerminalProtocolProbeSupport
+import TerminalPTYWaitSupport
 
 /// Runs external protocol probes without exposing their orchestration as product API.
 @main

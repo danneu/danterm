@@ -7,6 +7,7 @@ import TerminalRenderPlanning
 import Testing
 @testable import TerminalPTYHost
 import TerminalPTYTestSupport
+import TerminalPTYWaitSupport
 @testable import TerminalPaneSession
 
 /// Exercises the headless pane controller through one real native PTY per scenario.

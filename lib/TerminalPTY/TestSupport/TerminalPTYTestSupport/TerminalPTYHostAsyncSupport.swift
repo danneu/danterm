@@ -10,6 +10,7 @@ import PaneProcessLifecycle
 import Synchronization
 import Testing
 import TerminalPTYHost
+import TerminalPTYWaitSupport
 
 public extension TerminalPTYHost {
     /// Recreates the former conflated update stream outside production ownership code.
@@ -192,29 +193,6 @@ public extension TerminalPTYHost {
                 sourceLocation: sourceLocation
             )
             return
-        }
-    }
-}
-
-/// Samples a condition on a deadline and reports whether it ever held.
-///
-/// The sleep between samples earns its place twice. A `Task.yield()` spin competes with
-/// the very work it waits for, and nothing can unwind it -- `Task.yield()` does not throw
-/// on cancellation, so a test's time limit has no purchase and a condition that never
-/// arrives becomes a process at full CPU for something outside the run to kill.
-///
-/// And when the sleep is itself cancelled, this stops. Swallowing that error would spin
-/// through the rest of the deadline with no sleep left in the loop -- rebuilding the hot
-/// loop the sleep was there to prevent, at the exact moment a time limit fired to end it.
-public func pollUntil(_ condition: @Sendable () -> Bool, within limit: Duration) async -> Bool {
-    let deadline = ContinuousClock.now + limit
-    while true {
-        if condition() { return true }
-        guard ContinuousClock.now < deadline else { return false }
-        do {
-            try await Task.sleep(for: .milliseconds(5))
-        } catch {
-            return condition()
         }
     }
 }

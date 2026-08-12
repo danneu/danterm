@@ -1,7 +1,7 @@
 // Guards the sampling loop every bounded wait in TerminalPTYTestSupport is built on.
 import Testing
 
-@testable import TerminalPTYTestSupport
+import TerminalPTYWaitSupport
 
 @Suite("Bounded polling")
 struct PollUntilTests {
