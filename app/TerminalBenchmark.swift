@@ -19,7 +19,7 @@ final class TerminalBenchmarkStateRecorder {
     private let stateResultPath: String?
     private var recording = false
     private(set) var samples: [[String: Any]] = []
-    nonisolated(unsafe) private var notificationTokens: [(NotificationCenter, NSObjectProtocol)] = []
+    private var notificationTokens: [(NotificationCenter, NSObjectProtocol)] = []
 
     init(window: NSWindow, environment: [String: String]) {
         self.window = window
@@ -50,7 +50,9 @@ final class TerminalBenchmarkStateRecorder {
         notificationTokens.append((workspaceCenter, workspaceToken))
     }
 
-    deinit {
+    // `isolated deinit` because the tokens are main-actor state on a main-actor recorder;
+    // a nonisolated deinit cannot touch them.
+    isolated deinit {
         for (center, token) in notificationTokens {
             center.removeObserver(token)
         }
@@ -201,7 +203,9 @@ final class TerminalBenchmarkGeometryController {
         self.session = session
     }
 
-    deinit {
+    // `isolated deinit` because the timer is main-actor state, and `Timer.invalidate()` must
+    // run on the thread that scheduled it -- which a nonisolated deinit cannot promise.
+    isolated deinit {
         timer?.invalidate()
     }
 
@@ -411,7 +415,9 @@ final class TerminalBenchmarkObserver {
         self.startAcknowledgmentPathBytes = startAcknowledgmentPath.utf8CString.map { $0 }
     }
 
-    deinit {
+    // `isolated deinit` for the same reason as the geometry controller's: the timer is
+    // main-actor state, and `invalidate()` belongs on the thread that scheduled it.
+    isolated deinit {
         presentationSamplingTimer?.invalidate()
     }
 
