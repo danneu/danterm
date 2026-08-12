@@ -29,6 +29,8 @@ struct DanTermCLI {
         Commands:
           ls                          Print the full app snapshot as JSON
           focus                       Print the main window's live focus owner as JSON
+          group rename --group <group-id> <name>
+                                      Rename a group
           tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>]
                   [--background] [--foreground] [--after-selected | --at-group-end]
                                       Open a new tab, optionally launching a command

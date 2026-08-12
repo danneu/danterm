@@ -27,6 +27,7 @@ and skips those rows when the app is unavailable.
 
     danterm ls
     danterm focus
+    danterm group rename --group <group-id> <name>
     danterm tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end]
     danterm tab rename --tab <tab-id> <name>|--clear
     danterm tab close --tab <tab-id>
@@ -95,6 +96,8 @@ For agent commands:
   target group end. Pass `--foreground` only when the user asked to switch to
   the new tab. Pass `--after-tab <tab-id>` or `--after-selected` only when the
   user gave that placement anchor.
+- `group rename`: always pass `--group <group-id>`. There is no `--clear`: a
+  group always has a name. A name that is only whitespace is refused.
 - `tab rename`: always pass `--tab <tab-id>`.
 - `tab close`: always pass `--tab <tab-id>`.
 - `pane split`: always pass `--pane <pane-id>`. The default opens in the
@@ -218,6 +221,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 
 | User says | Command |
 |---|---|
+| "rename group X to Y" | `group rename --group <group-id>` |
 | "rename this tab to X" / "label this tab" | `tab rename --tab <tab-id>` |
 | "close this tab" / "close tab X" | `tab close --tab <tab-id>` |
 | "open a new tab" / "...and run X in it" | `tab new --group <group-id>` with optional `--cmd` / position flags |
@@ -238,6 +242,13 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "show DanTerm's agent instructions" | `skill` |
 
 ## Recipes
+
+### Rename a group
+
+    danterm group rename --group "$GROUP_ID" "release work"
+
+Find the group id in `danterm ls`, which lists every group as
+`{id, name, isCollapsed, tabs}`. There is no `group list`.
 
 ### Rename or clear a tab
 

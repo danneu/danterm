@@ -95,6 +95,15 @@ public func parseCLI(
         }
         return CLICommand(request: .focusInfo, outputMode: .json)
 
+    case "group":
+        guard args.count >= 2 else { throw CLIParseError("usage: danterm group <rename>") }
+        switch args[1] {
+        case "rename":
+            return try parseGroupRenameCommand(Array(args.dropFirst(2)))
+        default:
+            throw CLIParseError("unknown group command")
+        }
+
     case "tab":
         guard args.count >= 2 else { throw CLIParseError("usage: danterm tab <new|rename|close>") }
         switch args[1] {
@@ -225,6 +234,23 @@ private func parseTabNewCommand(_ args: [String], currentDirectory: String) thro
         request: .tabNew(target: target, launch: launch, background: parsed.foreground == false),
         outputMode: .json
     )
+}
+
+// Sibling of `parseTabRenameCommand` minus `--clear`: a group always has a name,
+// so there is nothing to clear it to.
+private func parseGroupRenameCommand(_ args: [String]) throws -> CLICommand {
+    var remaining = args
+    let usage = "usage: danterm group rename --group <group-id> <name>"
+    guard remaining.count >= 2, remaining.first == "--group" else { throw CLIParseError(usage) }
+    let group = try groupId(remaining[1])
+    remaining.removeFirst(2)
+    guard remaining.isEmpty == false else { throw CLIParseError(usage) }
+    if remaining[0].hasPrefix("--") {
+        throw CLIParseError("unknown flag: \(remaining[0])")
+    }
+    let name = remaining.joined(separator: " ")
+    guard name.isEmpty == false else { throw CLIParseError(usage) }
+    return CLICommand(request: .groupRename(group: group, name: name), outputMode: .none)
 }
 
 private func parseTabRenameCommand(_ args: [String]) throws -> CLICommand {

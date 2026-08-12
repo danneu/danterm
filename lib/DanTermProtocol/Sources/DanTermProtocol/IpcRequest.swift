@@ -9,6 +9,8 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     case ls
     /// Requests the main window's live key focus owner.
     case focusInfo = "focus.info"
+    /// Changes one explicitly named group's name.
+    case groupRename = "group.rename"
     /// Creates a tab from an explicit group or tab anchor.
     case tabNew = "tab.new"
     /// Changes one explicitly named tab's custom title.
@@ -61,7 +63,8 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
         switch self {
         case .doctorPermissions, .ls, .focusInfo:
             return false
-        case .tabNew, .tabRename, .tabClose,
+        case .groupRename,
+             .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
              .paneRead, .paneRows, .paneZoom, .paneTape, .themeSet,
              .agentAttach, .agentActivity, .agentDetach,
@@ -166,6 +169,9 @@ public enum IpcRequest: Equatable, Sendable {
     case ls
     /// Requests the main window's live key focus owner without a target.
     case focusInfo
+    /// Renames a structurally required group. A group always has a name, so
+    /// unlike `tabRename` there is no clear-to-nil form.
+    case groupRename(group: GroupId, name: String)
     /// Creates a tab from a structurally required anchor.
     case tabNew(target: IpcTabTarget, launch: LaunchSpec?, background: Bool)
     /// Renames or clears the title of a structurally required tab.
@@ -219,6 +225,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .doctorPermissions: return .doctorPermissions
         case .ls: return .ls
         case .focusInfo: return .focusInfo
+        case .groupRename: return .groupRename
         case .tabNew: return .tabNew
         case .tabRename: return .tabRename
         case .tabClose: return .tabClose
@@ -250,6 +257,8 @@ public enum IpcRequest: Equatable, Sendable {
         switch self {
         case .doctorPermissions, .ls, .focusInfo:
             return []
+        case .groupRename:
+            return ["group"]
         case .tabNew(let target, _, _):
             switch target {
             case .group: return ["group"]
@@ -272,6 +281,8 @@ public enum IpcRequest: Equatable, Sendable {
         switch self {
         case .doctorPermissions, .ls, .focusInfo:
             return [:]
+        case .groupRename(let group, let name):
+            return ["group": idValue(group), "name": .string(name)]
         case .tabNew(let target, let launch, let background):
             var object = launchParams(launch, background: background)
             switch target {
@@ -346,6 +357,10 @@ public enum IpcRequest: Equatable, Sendable {
         case .doctorPermissions: return .doctorPermissions
         case .ls: return .ls
         case .focusInfo: return .focusInfo
+        case .groupRename:
+            let group: GroupId = try target("group", object: object)
+            guard case .string(let name)? = object?["name"] else { throw invalid("invalid name") }
+            return .groupRename(group: group, name: name)
         case .tabNew:
             guard let object else { throw invalid("invalid params") }
             let launch = try decodedLaunch(object["launch"])

@@ -32,6 +32,7 @@ import DanTermProtocol
             (IpcRequestMethod.tabNew.rawValue, [:], "group"),
             (IpcRequestMethod.tabRename.rawValue, ["title": .string("work")], "tab"),
             (IpcRequestMethod.tabClose.rawValue, [:], "tab"),
+            (IpcRequestMethod.groupRename.rawValue, ["name": .string("Notes")], "group"),
             (IpcRequestMethod.paneFocus.rawValue, [:], "pane"),
             (IpcRequestMethod.paneInfo.rawValue, [:], "pane"),
             (IpcRequestMethod.paneSplit.rawValue, ["direction": .string("horizontal")], "pane"),
@@ -685,6 +686,93 @@ import DanTermProtocol
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
         #expect(tabById(tabId, in: model)?.customTitle == nil)
+    }
+
+    @Test("group.rename sets the group name and replies with it")
+    func groupRenameSetsGroupName() throws {
+        // Intent: group.rename renames the named group and returns the
+        //   resulting name.
+        // Why it exists: pins the reply shape a caller asserts against.
+        // Scenario: spec-first rename of a second group.
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .createGroup(name: "Builds"))
+        let groupId = model.groups[1].id
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupRename.rawValue, params: .object([
+            "group": .string(groupId.rawValue.uuidString),
+            "name": .string("Notes"),
+        ]))
+
+        let reply = try requireIpcReply(commands)
+        #expect(reply["group"]?["id"]?.asString == groupId.rawValue.uuidString)
+        #expect(reply["group"]?["name"]?.asString == "Notes")
+        #expect(model.groups[1].name == "Notes")
+    }
+
+    @Test("group.rename of an absent group is refused")
+    func groupRenameAbsentGroupIsRefused() throws {
+        // Intent: an unknown group id fails with `group not found`.
+        // Why it exists: pins the existence check to the same error
+        //   vocabulary `tab new --group` already uses.
+        // Scenario: spec-first unknown id.
+        var model = makeModel()
+        createTab(&model)
+        let before = model
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupRename.rawValue, params: .object([
+            "group": .string(UUID().uuidString),
+            "name": .string("Notes"),
+        ]))
+
+        let error = try requireIpcError(commands)
+        #expect(error.code == -32602)
+        #expect(error.message == "group not found")
+        #expect(model == before)
+    }
+
+    // Without the dispatch guard this would exit 0 for a rename that never
+    // happened: `.renameGroup` silently returns [] when the name normalizes away.
+    @Test("group.rename rejects a whitespace-only name and leaves the name intact")
+    func groupRenameRejectsWhitespaceOnlyName() throws {
+        // Intent: a name that normalizes to nothing is refused with
+        //   `invalid name` and the group keeps its old name.
+        // Why it exists: a silent no-op would report success to a script.
+        // Scenario: spec-first blank rename.
+        var model = makeModel()
+        createTab(&model)
+        let groupId = model.groups[0].id
+        let nameBefore = model.groups[0].name
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupRename.rawValue, params: .object([
+            "group": .string(groupId.rawValue.uuidString),
+            "name": .string("   "),
+        ]))
+
+        let error = try requireIpcError(commands)
+        #expect(error.code == -32602)
+        #expect(error.message == "invalid name")
+        #expect(model.groups[0].name == nameBefore)
+    }
+
+    @Test("group.rename collapses a multiline name to one line")
+    func groupRenameCollapsesMultilineName() throws {
+        // Intent: a name carrying newlines is accepted and stored as one line.
+        // Why it exists: every surface showing a group name lays it out as a
+        //   single line, so the CLI must not admit a multiline one.
+        // Scenario: spec-first pasted two-line name.
+        var model = makeModel()
+        createTab(&model)
+        let groupId = model.groups[0].id
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupRename.rawValue, params: .object([
+            "group": .string(groupId.rawValue.uuidString),
+            "name": .string("work\n  logs"),
+        ]))
+
+        let reply = try requireIpcReply(commands)
+        #expect(reply["group"]?["name"]?.asString == "work logs")
+        #expect(model.groups[0].name == "work logs")
     }
 
     @Test("tab.close removes explicit tab")

@@ -67,6 +67,33 @@ struct IpcRequestTests {
         #expect(ambiguous?.message == "exactly one of pane or tab required")
     }
 
+    @Test("group.rename requires a string name", arguments: [
+        JSONValue.null, .number(7), .object([:]),
+    ])
+    func groupRenameRequiresStringName(_ name: JSONValue) throws {
+        // Intent: a `name` that is absent or not a string is rejected at decode.
+        // Why it exists: `group.rename` has no clear-to-null form, so a null
+        //   name must fail rather than decode to one.
+        // Scenario: spec-first non-string names, plus the absent case below.
+        let group = "33333333-3333-4333-8333-333333333333"
+
+        let wrongType = #expect(throws: IpcRequestDecodeError.self) {
+            try IpcRequest.decode(
+                method: IpcRequestMethod.groupRename.rawValue,
+                params: .object(["group": .string(group), "name": name])
+            )
+        }
+        #expect(wrongType?.message == "invalid name")
+
+        let absent = #expect(throws: IpcRequestDecodeError.self) {
+            try IpcRequest.decode(
+                method: IpcRequestMethod.groupRename.rawValue,
+                params: .object(["group": .string(group)])
+            )
+        }
+        #expect(absent?.message == "invalid name")
+    }
+
     private func representativeCLICommands() throws -> [CLICommand] {
         let pane = "11111111-1111-4111-8111-111111111111"
         let tab = "22222222-2222-4222-8222-222222222222"
@@ -80,6 +107,7 @@ struct IpcRequestTests {
             try parseCLI(["tab", "new", "--group", group], currentDirectory: "/caller"),
             try parseCLI(["tab", "rename", "--tab", tab, "work"]),
             try parseCLI(["tab", "close", "--tab", tab]),
+            try parseCLI(["group", "rename", "--group", group, "notes"]),
             try parseCLI(["pane", "focus", pane]),
             try parseCLI(["pane", "info", "--pane", pane]),
             try parseCLI(["pane", "split", "--pane", pane, "-h"]),

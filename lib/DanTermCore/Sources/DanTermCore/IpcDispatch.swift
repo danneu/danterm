@@ -104,6 +104,17 @@ private func dispatchIpc(
         )
         return commands + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
 
+    case .groupRename(let groupId, let requestedName):
+        try requireGroup(groupId, in: model)
+        let name = try groupName(requestedName)
+        let commands = update(&model, .renameGroup(id: groupId, name: name), env: env)
+        let group = model.groups.first(where: { $0.id == groupId })
+        let encoder = IpcEntityEncoder(home: env.homeDirectory())
+        return commands + [.ipcReply(
+            reqId: reqId,
+            result: .object(["group": group.map(encoder.groupReference) ?? .null])
+        )]
+
     case .tabRename(let tabId, let title):
         try requireTab(tabId, in: model)
         let commands = update(&model, .renameTab(id: tabId, name: title), env: env)
@@ -367,6 +378,14 @@ private func requireGroup(_ groupId: GroupId, in model: AppModel) throws {
     guard model.groups.contains(where: { $0.id == groupId }) else {
         throw IpcParamsError("group not found")
     }
+}
+
+/// Rejects a group name the reducer would silently drop, so a caller never sees
+/// exit 0 for a rename that did not happen. `.renameGroup` returns [] when the
+/// name normalizes away, and `.createGroup` normalizes nothing at all.
+private func groupName(_ requested: String) throws -> String {
+    guard let name = requested.singleLineName else { throw IpcParamsError("invalid name") }
+    return name
 }
 
 private func newestTabId(excluding before: Set<TabId>, in model: AppModel) -> TabId? {

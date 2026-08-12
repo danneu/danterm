@@ -80,6 +80,7 @@ grep -qF 'Usage:' "$err"
 grep -qF 'ls' "$err"
 grep -qE '^ *focus +Print the main window' "$err"
 grep -qF 'pane info --pane <pane-id>' "$err"
+grep -qF 'group rename --group <group-id> <name>' "$err"
 grep -qF 'tab new (--group <group-id> | --after-tab <tab-id>)' "$err"
 grep -qF 'tab close --tab <tab-id>' "$err"
 grep -qF 'pane split --pane <pane-id> -h|-v' "$err"
@@ -108,6 +109,7 @@ for help_arg in help --help -h; do
     grep -qF 'ls' "$out"
     grep -qE '^ *focus +Print the main window' "$out"
     grep -qF 'pane info --pane <pane-id>' "$out"
+    grep -qF 'group rename --group <group-id> <name>' "$out"
     grep -qF 'tab new (--group <group-id> | --after-tab <tab-id>)' "$out"
     grep -qF 'tab close --tab <tab-id>' "$out"
     grep -qF 'pane split --pane <pane-id> -h|-v' "$out"
@@ -262,6 +264,18 @@ printf '%s\n' "$info" | jq -e \
     --arg tab "$tab_id" \
     --arg group "$group_id" \
     '.pane.id == $pane and .tab.id == $tab and .group.id == $group' >/dev/null
+
+slot_cli group rename --group "$group_id" smoke group
+slot_cli ls | jq -e \
+    --arg group "$group_id" \
+    '.groups[] | select(.id == $group and .name == "smoke group")' >/dev/null
+
+run_cli --socket "$socket" group rename --group "$group_id" '   '
+[[ $status -ne 0 ]]
+grep -qx 'danterm: invalid name' "$err"
+slot_cli ls | jq -e \
+    --arg group "$group_id" \
+    '.groups[] | select(.id == $group and .name == "smoke group")' >/dev/null
 
 slot_cli tab rename --tab "$tab_id" test123
 slot_cli ls | jq -e \
