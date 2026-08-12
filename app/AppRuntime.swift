@@ -88,27 +88,25 @@ private func appendTerminalCharacterizationEvent(_ description: String) {
 }
 #endif
 
-/// Encodes and queues one complete follow batch off the main actor, completing after its last line.
-private func writePaneTapeFollowRecords(
-    _ records: [JSONValue],
-    connection: IpcConnection,
-    subscriptionId: UUID,
-    completion: @escaping @MainActor @Sendable (Bool) -> Void
-) {
-    precondition(records.isEmpty == false)
-    DispatchQueue.global(qos: .utility).async {
-        for (index, record) in records.enumerated() {
-            let isLast = index == records.index(before: records.endIndex)
-            connection.writeNotification(
-                method: Methods.paneTapeEvent,
-                params: .object([
-                    "subscription": .string(subscriptionId.uuidString),
-                    "record": record,
-                ]),
-                completion: isLast ? completion : nil
-            )
-        }
-    }
+/// Names the reason an `end` record carries when a stream is retired by an internal failure
+/// rather than by its pane closing. The client is owed a terminator either way; only a dead
+/// transport leaves it with a bare EOF.
+private let paneTapeFollowFailureReason = "stream-failed"
+
+/// Holds one follow stream's transport resources, so ending that stream retires exactly its
+/// own socket handle, shutdown census entry, and recorder notice -- never a sibling's.
+///
+/// Deliberately separate from `PaneTapeFollowSubscriptions`: subscriber state and transport
+/// have different lifetimes, and the tape broker will keep a cursor across a dropped
+/// connection while replacing everything here.
+@MainActor
+private struct PaneTapeFollowTransport {
+    let connection: IpcConnection
+    /// Registers the stream in the shutdown census. Its cancel closure closes the socket,
+    /// which is right for app teardown and wrong for one stream ending, so every teardown
+    /// short of shutdown retires this token with `run` instead of `cancel`.
+    let shutdownToken: AppRuntimeSchedulingToken?
+    var noticeRegistration: PaneTapeFollowNoticeRegistration?
 }
 
 // App runtime owns the mutable app model, performs the commands emitted by the
@@ -187,11 +185,9 @@ class AppRuntime {
     private var ipcConnections: [UUID: IpcConnection] = [:]
     private var ipcConnectionTokens: [UUID: AppRuntimeSchedulingToken] = [:]
     private var paneTapeFollowSubscriptions = PaneTapeFollowSubscriptions()
-    private var paneTapeFollowConnections: [UUID: IpcConnection] = [:]
-    private var paneTapeFollowSubscriptionTokens: [UUID: AppRuntimeSchedulingToken] = [:]
-    private var paneTapeFollowNoticeRegistrations: [
-        UUID: PaneTapeFollowNoticeRegistration
-    ] = [:]
+    // Keyed by subscription id, like the subscriptions themselves. Anything coarser is shared
+    // by sibling streams and cannot be retired one stream at a time.
+    private var paneTapeFollowTransports: [UUID: PaneTapeFollowTransport] = [:]
     private var ipcServer: IpcServer?
     private var ipcServerToken: AppRuntimeSchedulingToken?
     private var sessionSubscriptionTokens: [ObjectIdentifier: AppRuntimeSchedulingToken] = [:]
@@ -512,13 +508,9 @@ class AppRuntime {
             ipcConnections.removeValue(forKey: reqId)
             schedulingLifecycle.cancel(ipcConnectionTokens.removeValue(forKey: reqId))
         }
-        for removal in paneTapeFollowSubscriptions.connectionClosed(connectionId) {
-            removePaneTapeFollowNotice(removal)
-            schedulingLifecycle.cancel(
-                paneTapeFollowSubscriptionTokens.removeValue(forKey: removal.subscriptionId)
-            )
+        for subscriptionId in paneTapeFollowSubscriptions.connectionClosed(connectionId) {
+            retirePaneTapeFollowTransport(subscriptionId)
         }
-        paneTapeFollowConnections.removeValue(forKey: connectionId)
     }
 
     private func beginPaneTapeFollow(
@@ -583,25 +575,28 @@ class AppRuntime {
     ) {
         guard schedulingLifecycle.isActive else { return }
         guard succeeded else { return }
+        // The pane went away between the start reply and this callback. The client is owed the
+        // same terminator a pane close writes; its socket stays open for its other work.
         guard let session = sessions[paneId] else {
-            writePaneTapeFollowNotification(
+            writePaneTapeFollowRecords(
+                [makePaneTapeFollowEndRecord()],
                 connection: connection,
-                subscriptionId: subscriptionId,
-                record: makePaneTapeFollowEndRecord(),
-                closeAfterWrite: true
+                subscriptionId: subscriptionId
             )
             return
         }
-        paneTapeFollowConnections[connection.id] = connection
         paneTapeFollowSubscriptions.add(
             id: subscriptionId,
             connectionId: connection.id,
             paneId: paneId.rawValue,
             cursor: start.cursor
         )
-        paneTapeFollowSubscriptionTokens[subscriptionId] = schedulingLifecycle.arm(
-            .subscription,
-            cancel: { connection.close() }
+        paneTapeFollowTransports[subscriptionId] = PaneTapeFollowTransport(
+            connection: connection,
+            shutdownToken: schedulingLifecycle.arm(
+                .subscription,
+                cancel: { connection.close() }
+            )
         )
         guard let noticeRegistration = session.addPaneTapeFollowNotice(
             id: subscriptionId,
@@ -618,10 +613,10 @@ class AppRuntime {
                 }
             }
         ) else {
-            discardPaneTapeFollow(subscriptionId, closeConnection: true)
+            failPaneTapeFollow(subscriptionId)
             return
         }
-        paneTapeFollowNoticeRegistrations[subscriptionId] = noticeRegistration
+        paneTapeFollowTransports[subscriptionId]?.noticeRegistration = noticeRegistration
     }
 
     private func paneTapeFollowEventsAvailable(_ subscriptionId: UUID) {
@@ -633,8 +628,8 @@ class AppRuntime {
     }
 
     private func fetchPaneTapeFollow(_ fetch: PaneTapeFollowFetch) {
-        guard let connection = paneTapeFollowConnections[fetch.connectionId] else {
-            discardPaneTapeFollow(fetch.subscriptionId, closeConnection: false)
+        guard let connection = paneTapeFollowTransports[fetch.subscriptionId]?.connection else {
+            dropPaneTapeFollow(fetch.subscriptionId)
             return
         }
         let paneId = PaneId(rawValue: fetch.paneId)
@@ -646,7 +641,7 @@ class AppRuntime {
             subscriptionId: fetch.subscriptionId,
             from: fetch.cursor
         ) else {
-            discardPaneTapeFollow(fetch.subscriptionId, closeConnection: true)
+            failPaneTapeFollow(fetch.subscriptionId)
             return
         }
         guard let callbackToken = schedulingLifecycle.arm(
@@ -671,10 +666,7 @@ class AppRuntime {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.schedulingLifecycle.run(callbackToken) {
-                        self.discardPaneTapeFollow(
-                            fetch.subscriptionId,
-                            closeConnection: true
-                        )
+                        self.failPaneTapeFollow(fetch.subscriptionId)
                     }
                 }
             }
@@ -710,11 +702,10 @@ class AppRuntime {
         ) { [weak self] succeeded in
             guard let self else { return }
             self.schedulingLifecycle.run(callbackToken) {
+                // The transport closed the socket itself on a failed write, so this stream
+                // ends at EOF rather than with a record nothing can carry.
                 guard succeeded else {
-                    self.discardPaneTapeFollow(
-                        subscriptionId,
-                        closeConnection: false
-                    )
+                    self.dropPaneTapeFollow(subscriptionId)
                     return
                 }
                 if let fetch = self.paneTapeFollowSubscriptions.completeDelivery(
@@ -726,67 +717,55 @@ class AppRuntime {
         }
     }
 
-    private func discardPaneTapeFollow(
-        _ subscriptionId: UUID,
-        closeConnection: Bool
-    ) {
-        guard let removal = paneTapeFollowSubscriptions.remove(subscriptionId) else { return }
-        removePaneTapeFollowNotice(removal)
-        schedulingLifecycle.cancel(
-            paneTapeFollowSubscriptionTokens.removeValue(forKey: subscriptionId)
-        )
-        guard let connection = paneTapeFollowConnections.removeValue(
-            forKey: removal.connectionId
+    /// Ends one stream whose socket is still writable, on an internal failure the client
+    /// would otherwise only see as silence.
+    private func failPaneTapeFollow(_ subscriptionId: UUID) {
+        guard let end = paneTapeFollowSubscriptions.end(
+            subscriptionId,
+            reason: paneTapeFollowFailureReason
         ) else { return }
-        if closeConnection {
-            connection.close()
-        }
+        writePaneTapeFollowEnd(end)
     }
 
-    private func removePaneTapeFollowNotice(_ removal: PaneTapeFollowRemoval) {
-        paneTapeFollowNoticeRegistrations.removeValue(
-            forKey: removal.subscriptionId
-        )?.cancel()
+    /// Retires one stream whose transport is already gone. The peer sees EOF, not an `end`.
+    private func dropPaneTapeFollow(_ subscriptionId: UUID) {
+        paneTapeFollowSubscriptions.remove(subscriptionId)
+        retirePaneTapeFollowTransport(subscriptionId)
     }
 
     private func endPaneTapeFollowers(for paneId: PaneId) {
         for end in paneTapeFollowSubscriptions.paneClosed(paneId.rawValue) {
-            paneTapeFollowNoticeRegistrations.removeValue(
-                forKey: end.subscriptionId
-            )?.cancel()
-            if let token = paneTapeFollowSubscriptionTokens.removeValue(
-                forKey: end.subscriptionId
-            ) {
-                schedulingLifecycle.run(token, action: {})
-            }
-            guard let connection = paneTapeFollowConnections.removeValue(
-                forKey: end.connectionId
-            ) else { continue }
-            writePaneTapeFollowNotification(
-                connection: connection,
-                subscriptionId: end.subscriptionId,
-                record: end.record,
-                closeAfterWrite: true
-            )
+            writePaneTapeFollowEnd(end)
         }
     }
 
-    private func writePaneTapeFollowNotification(
-        connection: IpcConnection,
-        subscriptionId: UUID,
-        record: JSONValue,
-        closeAfterWrite: Bool
-    ) {
-        DispatchQueue.global(qos: .utility).async {
-            connection.writeNotification(
-                method: Methods.paneTapeEvent,
-                params: .object([
-                    "subscription": .string(subscriptionId.uuidString),
-                    "record": record,
-                ]),
-                closeAfterWrite: closeAfterWrite
-            )
+    /// Retires one ended stream's transport and writes its terminator on the way out, so the
+    /// record goes to that subscription's own socket and lands after every batch already
+    /// accepted for it.
+    private func writePaneTapeFollowEnd(_ end: PaneTapeFollowEnd) {
+        guard let connection = retirePaneTapeFollowTransport(end.subscriptionId) else { return }
+        writePaneTapeFollowRecords(
+            [end.record],
+            connection: connection,
+            subscriptionId: end.subscriptionId
+        )
+    }
+
+    /// Releases exactly one stream's transport resources and hands back its connection, so a
+    /// sibling on the same socket or pane keeps its notice, its census entry, and its writes.
+    ///
+    /// The census token is retired with `run`, not `cancel`: cancelling fires the closure that
+    /// closes the socket, and the socket belongs to the client, not to this one stream.
+    @discardableResult
+    private func retirePaneTapeFollowTransport(_ subscriptionId: UUID) -> IpcConnection? {
+        guard let transport = paneTapeFollowTransports.removeValue(
+            forKey: subscriptionId
+        ) else { return nil }
+        transport.noticeRegistration?.cancel()
+        if let token = transport.shutdownToken {
+            schedulingLifecycle.run(token, action: {})
         }
+        return transport.connection
     }
 
     func stopIpcServer() {
@@ -808,12 +787,11 @@ class AppRuntime {
     func shutdown() {
         guard schedulingLifecycle.isActive else { return }
 
-        for removal in paneTapeFollowSubscriptions.removeAll() {
-            removePaneTapeFollowNotice(removal)
+        // App teardown, not a stream ending: closing the socket is what gives a follower the
+        // EOF the CLI contract documents for an abrupt exit.
+        for subscriptionId in paneTapeFollowSubscriptions.removeAll() {
+            retirePaneTapeFollowTransport(subscriptionId)?.close()
         }
-        paneTapeFollowConnections.removeAll()
-        paneTapeFollowSubscriptionTokens.removeAll()
-        paneTapeFollowNoticeRegistrations.removeAll()
         ipcConnections.removeAll()
         ipcConnectionTokens.removeAll()
         for session in sessions.values {
@@ -1078,16 +1056,9 @@ class AppRuntime {
             send(.fontFamilyResolved(resolveConfiguredFontFamily(config)))
 
         case .terminate:
+            // Follow teardown is not repeated here: `NSApp.terminate` reaches
+            // `applicationWillTerminate`, and `shutdown()` is its single owner.
             cancelCoalescedReconcile()
-            for removal in paneTapeFollowSubscriptions.removeAll() {
-                removePaneTapeFollowNotice(removal)
-            }
-            paneTapeFollowConnections.removeAll()
-            for token in paneTapeFollowSubscriptionTokens.values {
-                schedulingLifecycle.cancel(token)
-            }
-            paneTapeFollowSubscriptionTokens.removeAll()
-            paneTapeFollowNoticeRegistrations.removeAll()
             schedulingLifecycle.cancel(lightCheckpointTimerToken)
             lightCheckpointTimerToken = nil
             lightCheckpointTimer = nil

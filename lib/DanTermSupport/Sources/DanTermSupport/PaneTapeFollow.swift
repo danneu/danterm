@@ -1,4 +1,5 @@
-// Portable pane-tape stream values, record construction, and bounded subscription lifecycle.
+// Portable pane-tape stream values, record construction, the bounded subscription lifecycle,
+// and the one enqueue site every follow write goes through.
 import Foundation
 import DanTermProtocol
 
@@ -46,26 +47,21 @@ struct PaneTapeFollowStart: Equatable, Sendable {
     let cursor: PaneTapeFollowCursor
 }
 
-/// Identifies the exact owner-fenced suffix an append edge may fetch.
+/// Identifies the exact owner-fenced suffix an append edge may fetch. It names no
+/// connection: the fetch resolves its transport under the subscription id, and a coarser
+/// coordinate here is what let one stream's teardown reroute a sibling's delivery.
 struct PaneTapeFollowFetch: Equatable, Sendable {
     let subscriptionId: UUID
-    let connectionId: UUID
     let paneId: UUID
     let cursor: PaneTapeFollowCursor
 }
 
-/// Routes one terminal record before the runtime closes its owning connection.
+/// Names the one stream a terminal record belongs to. It carries no transport coordinate:
+/// the runtime holds each stream's transport under this same subscription id, so routing an
+/// `end` by anything coarser is what let one stream's teardown swallow a sibling's.
 struct PaneTapeFollowEnd: Equatable, Sendable {
     let subscriptionId: UUID
-    let connectionId: UUID
     let record: JSONValue
-}
-
-/// Carries the owner coordinates needed to remove a disconnected recorder notice.
-struct PaneTapeFollowRemoval: Equatable, Sendable {
-    let subscriptionId: UUID
-    let connectionId: UUID
-    let paneId: UUID
 }
 
 /// Builds the result record that establishes a stream before notifications begin.
@@ -123,6 +119,32 @@ func makePaneTapeFollowEndRecord(reason: String = "pane-closed") -> JSONValue {
         "kind": .string("end"),
         "reason": .string(reason),
     ])
+}
+
+/// The single site that puts a follow record on the wire, for batches and terminators alike.
+///
+/// Each call enqueues straight onto the connection's serial write queue, so records reach the
+/// socket in the order they were handed over. Routing one write kind through a concurrent queue
+/// instead would let a terminator overtake a batch prepared before it, and a stream's last
+/// record would not be its last. The optional completion reports the flush of the final record.
+func writePaneTapeFollowRecords(
+    _ records: [JSONValue],
+    connection: IpcConnection,
+    subscriptionId: UUID,
+    completion: (@MainActor @Sendable (Bool) -> Void)? = nil
+) {
+    precondition(records.isEmpty == false)
+    let lastIndex = records.index(before: records.endIndex)
+    for (index, record) in records.enumerated() {
+        connection.writeNotification(
+            method: Methods.paneTapeEvent,
+            params: .object([
+                "subscription": .string(subscriptionId.uuidString),
+                "record": record,
+            ]),
+            completion: index == lastIndex ? completion : nil
+        )
+    }
 }
 
 /// Enforces one fetch-and-delivery batch in flight per stream and drops dead owners eagerly.
@@ -183,15 +205,20 @@ struct PaneTapeFollowSubscriptions {
         return claimPendingFetch(subscriptionId)
     }
 
-    /// Removes one failed stream while preserving the coordinates needed to disarm its recorder.
-    mutating func remove(_ subscriptionId: UUID) -> PaneTapeFollowRemoval? {
-        guard let subscription = subscriptions.removeValue(forKey: subscriptionId) else {
-            return nil
-        }
-        return PaneTapeFollowRemoval(
+    /// Drops one stream whose transport is already gone, so nothing more is owed on it.
+    /// Reports whether there was a stream to drop, so a repeated teardown is a no-op.
+    @discardableResult
+    mutating func remove(_ subscriptionId: UUID) -> Bool {
+        subscriptions.removeValue(forKey: subscriptionId) != nil
+    }
+
+    /// Drops one stream that ends while its socket is still writable, and returns the
+    /// terminator that stream is owed under `reason`.
+    mutating func end(_ subscriptionId: UUID, reason: String) -> PaneTapeFollowEnd? {
+        guard subscriptions.removeValue(forKey: subscriptionId) != nil else { return nil }
+        return PaneTapeFollowEnd(
             subscriptionId: subscriptionId,
-            connectionId: subscription.connectionId,
-            paneId: subscription.paneId
+            record: makePaneTapeFollowEndRecord(reason: reason)
         )
     }
 
@@ -200,41 +227,28 @@ struct PaneTapeFollowSubscriptions {
         let ids = subscriptions.compactMap { id, subscription in
             subscription.paneId == paneId ? id : nil
         }
-        return ids.compactMap { id in
-            guard let subscription = subscriptions.removeValue(forKey: id) else { return nil }
-            return PaneTapeFollowEnd(
-                subscriptionId: id,
-                connectionId: subscription.connectionId,
-                record: makePaneTapeFollowEndRecord()
-            )
+        for id in ids {
+            subscriptions.removeValue(forKey: id)
+        }
+        return ids.map { id in
+            PaneTapeFollowEnd(subscriptionId: id, record: makePaneTapeFollowEndRecord())
         }
     }
 
     /// Ensures a disconnected socket can never trigger another owner-queue fence.
-    mutating func connectionClosed(_ connectionId: UUID) -> [PaneTapeFollowRemoval] {
-        let removed = subscriptions.compactMap { id, subscription -> PaneTapeFollowRemoval? in
-            guard subscription.connectionId == connectionId else { return nil }
-            return PaneTapeFollowRemoval(
-                subscriptionId: id,
-                connectionId: connectionId,
-                paneId: subscription.paneId
-            )
+    mutating func connectionClosed(_ connectionId: UUID) -> [UUID] {
+        let removed = subscriptions.compactMap { id, subscription in
+            subscription.connectionId == connectionId ? id : nil
         }
         subscriptions = subscriptions.filter { $0.value.connectionId != connectionId }
         return removed
     }
 
-    /// Drops process-ending streams and returns the recorder notices teardown must disarm.
-    mutating func removeAll() -> [PaneTapeFollowRemoval] {
-        let removals = subscriptions.map { id, subscription in
-            PaneTapeFollowRemoval(
-                subscriptionId: id,
-                connectionId: subscription.connectionId,
-                paneId: subscription.paneId
-            )
-        }
+    /// Drops process-ending streams and returns the resources teardown must dispose.
+    mutating func removeAll() -> [UUID] {
+        let ids = Array(subscriptions.keys)
         subscriptions.removeAll()
-        return removals
+        return ids
     }
 
     private mutating func claimPendingFetch(
@@ -249,7 +263,6 @@ struct PaneTapeFollowSubscriptions {
         subscriptions[subscriptionId] = subscription
         return PaneTapeFollowFetch(
             subscriptionId: subscriptionId,
-            connectionId: subscription.connectionId,
             paneId: subscription.paneId,
             cursor: subscription.cursor
         )

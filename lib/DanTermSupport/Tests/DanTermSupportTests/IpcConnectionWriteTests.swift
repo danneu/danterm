@@ -150,6 +150,12 @@ struct IpcConnectionWriteTests {
         #expect(succeeded == false)
     }
 
+    // Runs on the main actor, like every production caller of these completions. That is also
+    // what makes the ordering assertion below decidable: the completion is delivered by a
+    // `DispatchQueue.main.async`, so it cannot run until this body reaches its first
+    // suspension. Off the main actor the two observations race, and a loaded machine sees
+    // the completion first even though nothing is wrong.
+    @MainActor
     @Test("a completion on the already-closed path still lands on main, after the call returns")
     func closedPathCompletionIsAsynchronousAndOnMain() async throws {
         // Intent: writing to a closed connection reports `false` on the main thread, and only
@@ -181,6 +187,67 @@ struct IpcConnectionWriteTests {
         #expect(order.recorded == [.returned, .completed],
                 "the completion must not run before the write call returns")
         #expect(onMainThread, "every completion path must report on the main thread")
+    }
+
+    @Test("a terminator never overtakes a batch already enqueued for the same stream")
+    func terminatorFollowsTheBatchEnqueuedBeforeIt() throws {
+        // Intent: records handed to the follow write helper reach the socket in the order
+        //   they were handed over, and ending a stream leaves the socket writable.
+        // Why it exists: the follow writes used to hop through the concurrent global queue,
+        //   one dispatch per batch, so a pane-close terminator could reach the socket ahead
+        //   of a batch prepared before it -- making the terminal record non-terminal. Ending
+        //   the stream also used to close the socket, cutting off every other stream and
+        //   request the client had on it.
+        // Scenario: a pane closes in the same runloop turn that a prepared batch is delivered.
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        let subscriptionId = UUID()
+        defer {
+            connection.close()
+            Darwin.close(descriptors.peer)
+        }
+
+        writePaneTapeFollowRecords(
+            [
+                .object(["kind": .string("event"), "sequence": .number(0)]),
+                .object(["kind": .string("event"), "sequence": .number(1)]),
+            ],
+            connection: connection,
+            subscriptionId: subscriptionId
+        )
+        writePaneTapeFollowRecords(
+            [makePaneTapeFollowEndRecord()],
+            connection: connection,
+            subscriptionId: subscriptionId
+        )
+        // A sibling stream on the same socket must still be served after the `end`.
+        let siblingId = UUID()
+        writePaneTapeFollowRecords(
+            [.object(["kind": .string("event"), "sequence": .number(7)])],
+            connection: connection,
+            subscriptionId: siblingId
+        )
+
+        var received: [(subscription: String, kind: String)] = []
+        for _ in 0..<4 {
+            let notification = try JSONDecoder().decode(
+                JsonRpcRequest.self,
+                from: readIpcLine(from: descriptors.peer)
+            )
+            #expect(notification.method == Methods.paneTapeEvent)
+            received.append((
+                notification.params?["subscription"]?.asString ?? "",
+                notification.params?["record"]?["kind"]?.asString ?? ""
+            ))
+        }
+
+        #expect(received.map(\.kind) == ["event", "event", "end", "event"])
+        #expect(received.map(\.subscription) == [
+            subscriptionId.uuidString,
+            subscriptionId.uuidString,
+            subscriptionId.uuidString,
+            siblingId.uuidString,
+        ])
     }
 
     @Test("a peer that never answers fails the read instead of parking it")
