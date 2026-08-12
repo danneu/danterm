@@ -31,15 +31,23 @@ printf '\n' >> "$DANTERM_TEST_SWIFT_LOG"
 if [[ "${1:-}" == "test" && -e "$DANTERM_TEST_SWIFT_FAIL" ]]; then
     exit 17
 fi
+if [[ "${1:-}" == "test" && -e "$DANTERM_TEST_SWIFT_HANG" ]]; then
+    printf '%s\n' "$$" > "$DANTERM_TEST_SWIFT_HANG_PID"
+    while true; do sleep 1; done
+fi
 EOF
 chmod +x "$fake_swift"
 
 swift_log="$TMP/swift.log"
 swift_fail="$TMP/swift-fail"
+swift_hang="$TMP/swift-hang"
+swift_hang_pid="$TMP/swift-hang.pid"
 export DANTERM_REPO_ROOT="$fixture"
 export DANTERM_SWIFT="$fake_swift"
 export DANTERM_TEST_SWIFT_LOG="$swift_log"
 export DANTERM_TEST_SWIFT_FAIL="$swift_fail"
+export DANTERM_TEST_SWIFT_HANG="$swift_hang"
+export DANTERM_TEST_SWIFT_HANG_PID="$swift_hang_pid"
 
 run_wrapper() {
     "$WRAPPER" "$@"
@@ -115,6 +123,29 @@ assert_counts 7 8 7 "failed run: parallel-lane failure must stop before the cens
 rm "$swift_fail"
 run_wrapper
 assert_counts 8 9 8 "run after failure"
+
+old_stamp="$(cat "$stamp")"
+printf '// hanging input\n' >> "$fixture/lib/TerminalCore/Sources/TerminalCore/A.swift"
+touch "$swift_hang"
+export DANTERM_PTY_TEST_TIMEOUT_SECONDS=1
+set +e
+run_wrapper >"$TMP/timeout.out" 2>&1
+status=$?
+set -e
+[[ "$status" == 124 ]] || fail "timed-out test returned $status instead of 124"
+grep -q 'TerminalPTY test lane exceeded 1s' "$TMP/timeout.out" \
+    || fail "timed-out test did not explain its deadline"
+hang_pid="$(cat "$swift_hang_pid")"
+if kill -0 "$hang_pid" 2>/dev/null; then
+    fail "timed-out test left its Swift process running"
+fi
+assert_counts 9 10 8 "timed-out run: parallel-lane timeout must stop before the census lane"
+[[ "$(cat "$stamp")" == "$old_stamp" ]] || fail "timed-out run published a fingerprint"
+unset DANTERM_PTY_TEST_TIMEOUT_SECONDS
+rm "$swift_hang"
+
+run_wrapper
+assert_counts 10 11 9 "run after timeout"
 
 clean_fixture="$TMP/clean-repo"
 mkdir -p "$clean_fixture/scripts"

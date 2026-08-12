@@ -6,6 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="${DANTERM_REPO_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 SWIFT="${DANTERM_SWIFT:-swift}"
+TEST_TIMEOUT_SECONDS="${DANTERM_PTY_TEST_TIMEOUT_SECONDS:-180}"
 CORE_PACKAGE="$REPO_ROOT/lib/TerminalCore"
 PTY_PACKAGE="$REPO_ROOT/lib/TerminalPTY"
 STAMP_DIR="$REPO_ROOT/.build/test-terminal-pty"
@@ -31,11 +32,15 @@ if [[ "$fingerprint" != "$recorded_fingerprint" ]]; then
     "$SWIFT" package --package-path "$PTY_PACKAGE" clean
 fi
 
-"$SWIFT" test --package-path "$PTY_PACKAGE" \
+python3 "$SCRIPT_DIR/run-with-deadline.py" \
+    "$TEST_TIMEOUT_SECONDS" "TerminalPTY test lane" \
+    "$SWIFT" test --package-path "$PTY_PACKAGE" \
     --skip rapidCloseStressLeavesNoResources "$@"
 # Process-wide fd census: needs a process to itself, since parallel suites
 # legitimately hold /dev/ptmx descriptors across its baseline.
-"$SWIFT" test --package-path "$PTY_PACKAGE" \
+python3 "$SCRIPT_DIR/run-with-deadline.py" \
+    "$TEST_TIMEOUT_SECONDS" "TerminalPTY fd-census lane" \
+    "$SWIFT" test --package-path "$PTY_PACKAGE" \
     --filter rapidCloseStressLeavesNoResources
 
 mkdir -p "$STAMP_DIR"
