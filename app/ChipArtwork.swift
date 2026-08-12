@@ -40,7 +40,8 @@ struct ChipPaneListPalette {
     /// A pane that wants you: an unread alert, or an agent blocked on a prompt.
     let attentionDot: CGColor
     /// A pane whose agent is mid-turn. Ambient, so it is drawn smaller and
-    /// dimmer than `attentionDot` -- see the stateDot note in chips.json.
+    /// unringed next to `attentionDot` -- but never faded, since a dim chip
+    /// already swallows it. See the stateDot note in chips.json.
     let busyDot: CGColor
     /// Separates a dot from the mark, the chip, and the row it overhangs.
     /// Fixed per appearance, not taken from the row: sidebar selection never
@@ -169,9 +170,11 @@ enum ChipArtwork {
     /// State-dot geometry, in points at `paneRowSize` and scaled with it. The
     /// two sizes are deliberately unequal: busy is ambient and attention is an
     /// interrupt, so they must not read as equally loud on a strip where most
-    /// panes are busy. See the stateDot note in chips.json.
+    /// panes are busy. Both are drawn at full opacity, though -- the ordering
+    /// is carried by size, hue, and the ring, and translucency only made busy
+    /// unreadable over a dim chip. See the stateDot note in chips.json.
     static let attentionDotSize = ChipStateDotSize(diameter: 4.5, alpha: 1, ringWidth: 1)
-    static let busyDotSize = ChipStateDotSize(diameter: 3, alpha: 0.6, ringWidth: 0)
+    static let busyDotSize = ChipStateDotSize(diameter: 3.5, alpha: 1, ringWidth: 0)
     /// How far the dot overhangs its chip's top-right corner. Lands in margins
     /// the strip already has, so it stays out of the strip's fitting math.
     static let stateDotBleed: CGFloat = 1

@@ -19,7 +19,7 @@ import AppKit
 /// thing it may never elide.
 ///
 /// Each chip may carry one state dot on its corner: red for a pane that wants
-/// you, a smaller and dimmer amber for one whose agent is mid-turn. Which of
+/// you, a smaller unringed amber for one whose agent is mid-turn. Which of
 /// those a pane gets is decided in the core by `paneChipState`, not here.
 final class PaneStripView: NSView {
     var chips: [TabPaneChip] = [] {
@@ -167,8 +167,8 @@ final class PaneStripView: NSView {
     }
 
     /// Paints one chip's state dot, ringed so it reads against the mark, the
-    /// chip, and the row it overhangs alike. Only the attention dot is ringed;
-    /// busy is muted on purpose and a ring would undo that.
+    /// chip, and the row it overhangs alike. Only the attention dot is ringed:
+    /// at busy's size the ring would be most of the dot.
     private func drawStateDot(
         _ state: PaneChipState,
         on chip: NSRect,
