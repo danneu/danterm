@@ -78,6 +78,7 @@ if grep -q '^danterm:' "$err"; then
 fi
 grep -qF 'Usage:' "$err"
 grep -qF 'ls' "$err"
+grep -qE '^ *focus +Print the main window' "$err"
 grep -qF 'pane info --pane <pane-id>' "$err"
 grep -qF 'tab new (--group <group-id> | --after-tab <tab-id>)' "$err"
 grep -qF 'tab close --tab <tab-id>' "$err"
@@ -105,6 +106,7 @@ for help_arg in help --help -h; do
     [[ -s "$out" ]]
     grep -qF 'Usage:' "$out"
     grep -qF 'ls' "$out"
+    grep -qE '^ *focus +Print the main window' "$out"
     grep -qF 'pane info --pane <pane-id>' "$out"
     grep -qF 'tab new (--group <group-id> | --after-tab <tab-id>)' "$out"
     grep -qF 'tab close --tab <tab-id>' "$out"
@@ -251,6 +253,8 @@ fi
 printf '%s\n' "$model" | jq .groups >/dev/null
 export DANTERM_PANE="$pane_id"
 slot_cli pane tape --pane "$pane_id" | jq -e '.events' >/dev/null
+slot_cli focus | jq -e --arg pane "$pane_id" \
+    '. == {"focus": {"type": "terminal", "paneId": $pane}}' >/dev/null
 
 info="$(slot_cli pane info --pane "$pane_id")"
 printf '%s\n' "$info" | jq -e \
@@ -265,6 +269,22 @@ slot_cli ls | jq -e \
     '.groups[].tabs[] | select(.id == $tab and .customTitle == "test123")' >/dev/null
 
 other_pane_id="$(slot_cli tab new --group "$group_id" --title smoke-tab | jq -er '.panes[0].id')"
+focused_split_id="$(slot_cli pane split --pane "$pane_id" -h --foreground --title focus-foreground | jq -er '.pane.id')"
+slot_cli focus | jq -e --arg pane "$focused_split_id" \
+    '. == {"focus": {"type": "terminal", "paneId": $pane}}' >/dev/null
+slot_cli pane zoom --pane "$focused_split_id" on | jq -e '.tab.isZoomed == true' >/dev/null
+slot_cli focus | jq -e --arg pane "$focused_split_id" \
+    '. == {"focus": {"type": "terminal", "paneId": $pane}}' >/dev/null
+slot_cli pane zoom --pane "$focused_split_id" off | jq -e '.tab.isZoomed == false' >/dev/null
+slot_cli focus | jq -e --arg pane "$focused_split_id" \
+    '. == {"focus": {"type": "terminal", "paneId": $pane}}' >/dev/null
+background_split_id="$(slot_cli pane split --pane "$other_pane_id" -v --foreground --title focus-background | jq -er '.pane.id')"
+slot_cli focus | jq -e --arg pane "$focused_split_id" \
+    '. == {"focus": {"type": "terminal", "paneId": $pane}}' >/dev/null
+slot_cli pane close --pane "$background_split_id"
+slot_cli pane close --pane "$focused_split_id"
+slot_cli focus | jq -e --arg pane "$pane_id" \
+    '. == {"focus": {"type": "terminal", "paneId": $pane}}' >/dev/null
 slot_cli tab new --group "$group_id" --at-group-end --title smoke-tab-end | jq -e '.tab.id and .panes[0].id' >/dev/null
 close_id="$(slot_cli tab new --group "$group_id" --title close-test | jq -r '.tab.id')"
 slot_cli tab close --tab "$close_id"

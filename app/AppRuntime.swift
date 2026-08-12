@@ -960,6 +960,13 @@ class AppRuntime {
                 connection.writeSuccess(reqId: reqId, result: permissions.jsonValue)
             }
 
+        case .readFocusInfo(let reqId):
+            guard let connection = takeIpcConnection(for: reqId) else { break }
+            connection.writeSuccess(
+                reqId: reqId,
+                result: paneFocusInfoResult(paneFocusClaimant())
+            )
+
         case .readPaneText(let reqId, let paneId, let lineLimit):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = sessions[paneId] else {

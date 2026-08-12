@@ -50,6 +50,7 @@ struct IpcRequestTests {
         return [
             CLICommand(request: .doctorPermissions, outputMode: .none),
             try parseCLI(["ls"]),
+            try parseCLI(["focus"]),
             try parseCLI(["tab", "new", "--group", group], currentDirectory: "/caller"),
             try parseCLI(["tab", "rename", "--tab", tab, "work"]),
             try parseCLI(["tab", "close", "--tab", tab]),

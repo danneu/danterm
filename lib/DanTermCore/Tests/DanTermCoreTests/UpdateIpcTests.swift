@@ -1,6 +1,7 @@
 // Swift Testing migration of the legacy `tests/UpdateIpcTests.swift` harness
 // suite. Pins the pure `update()` handling of DanTerm IPC requests across
-// the protocol surface: ls (full snapshot), pane.info (explicit + implicit
+// the protocol surface: ls (full snapshot), focus.info (live runtime read),
+// pane.info (explicit + implicit
 // pane targeting and missing/invalid targets), tab.rename (set/clear,
 // explicit targeting, malformed
 // inputs), pane.close (required explicit targeting, sibling promotion, tab
@@ -79,6 +80,18 @@ import DanTermProtocol
         let command = try #require(commands.first)
         guard case .readDoctorPermissions = command else {
             Issue.record("expected readDoctorPermissions")
+            return
+        }
+        #expect(commands.count == 1)
+    }
+
+    @Test("focus.info delegates live claimant inspection to the runtime")
+    func focusInfoDelegatesInspectionToRuntime() throws {
+        var model = makeModel()
+        let commands = sendIpc(&model, method: IpcRequestMethod.focusInfo.rawValue)
+        let command = try #require(commands.first)
+        guard case .readFocusInfo = command else {
+            Issue.record("expected readFocusInfo")
             return
         }
         #expect(commands.count == 1)

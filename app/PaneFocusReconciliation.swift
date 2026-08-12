@@ -1,12 +1,35 @@
 // Declarative AppKit pane-focus classification and application. The ordered
 // reconcile pipeline calls this only after pane chrome has created search fields.
 import Cocoa
+import DanTermProtocol
 
 /// Classifies the main window's current responder by pane ownership.
 enum PaneFocusClaimant: Equatable {
     case pane(PaneFocusTarget)
     case nonPane
     case none
+}
+
+/// Keeps `focus.info` tied to live AppKit classification instead of model intent.
+func paneFocusInfoResult(_ claimant: PaneFocusClaimant) -> JSONValue {
+    let focus: [String: JSONValue]
+    switch claimant {
+    case .pane(.terminal(let paneId)):
+        focus = [
+            "type": .string("terminal"),
+            "paneId": .string(paneId.rawValue.uuidString),
+        ]
+    case .pane(.searchField(let paneId)):
+        focus = [
+            "type": .string("searchField"),
+            "paneId": .string(paneId.rawValue.uuidString),
+        ]
+    case .nonPane:
+        focus = ["type": .string("nonPane")]
+    case .none:
+        focus = ["type": .string("none")]
+    }
+    return .object(["focus": .object(focus)])
 }
 
 @MainActor

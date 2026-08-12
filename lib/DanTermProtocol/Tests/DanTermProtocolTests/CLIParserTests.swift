@@ -58,6 +58,16 @@ struct CLIParserTests {
         #expect(invocation.command == command)
     }
 
+    @Test("focus parses as a target-free JSON query")
+    func focusParsesAsTargetFreeJSONQuery() throws {
+        let command = try parseCLI(["focus"])
+
+        #expect(command.request == .focusInfo)
+        #expect(command.method == IpcRequestMethod.focusInfo.rawValue)
+        #expect(command.params.isEmpty)
+        #expect(command.outputMode == .json)
+    }
+
     @Test("global socket target rejects unusable forms", arguments: [
         (["--socket"], "usage: danterm --socket <path> <command> [args]"),
         (["--socket", "", "ls"], "--socket requires a non-empty path"),

@@ -45,6 +45,7 @@ enum Command {
     case ipcReply(reqId: UUID, result: JSONValue)
     case ipcError(reqId: UUID, code: Int, message: String)
     case readDoctorPermissions(reqId: UUID)
+    case readFocusInfo(reqId: UUID)
     case readPaneText(reqId: UUID, paneId: PaneId, lineLimit: Int?)
     case readPaneRowStructure(reqId: UUID, paneId: PaneId)
     case dumpPaneTape(reqId: UUID, paneId: PaneId)

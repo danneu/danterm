@@ -7,6 +7,8 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     case doctorPermissions = "doctor.permissions"
     /// Requests the complete inspectable application snapshot.
     case ls
+    /// Requests the main window's live key focus owner.
+    case focusInfo = "focus.info"
     /// Creates a tab from an explicit group or tab anchor.
     case tabNew = "tab.new"
     /// Changes one explicitly named tab's custom title.
@@ -57,7 +59,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     /// Makes target classification exhaustive when a method joins the catalog.
     public var isTargeting: Bool {
         switch self {
-        case .doctorPermissions, .ls:
+        case .doctorPermissions, .ls, .focusInfo:
             return false
         case .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
@@ -162,6 +164,8 @@ public enum IpcRequest: Equatable, Sendable {
     case doctorPermissions
     /// Requests the complete application snapshot without a target.
     case ls
+    /// Requests the main window's live key focus owner without a target.
+    case focusInfo
     /// Creates a tab from a structurally required anchor.
     case tabNew(target: IpcTabTarget, launch: LaunchSpec?, background: Bool)
     /// Renames or clears the title of a structurally required tab.
@@ -214,6 +218,7 @@ public enum IpcRequest: Equatable, Sendable {
         switch self {
         case .doctorPermissions: return .doctorPermissions
         case .ls: return .ls
+        case .focusInfo: return .focusInfo
         case .tabNew: return .tabNew
         case .tabRename: return .tabRename
         case .tabClose: return .tabClose
@@ -243,7 +248,7 @@ public enum IpcRequest: Equatable, Sendable {
     /// Names the concrete target key carried by this request, if any.
     public var targetParameterKey: String? {
         switch self {
-        case .doctorPermissions, .ls:
+        case .doctorPermissions, .ls, .focusInfo:
             return nil
         case .tabNew(let target, _, _):
             switch target {
@@ -264,7 +269,7 @@ public enum IpcRequest: Equatable, Sendable {
     /// Encodes this typed request into its JSON-RPC parameter object.
     public var params: [String: JSONValue] {
         switch self {
-        case .doctorPermissions, .ls:
+        case .doctorPermissions, .ls, .focusInfo:
             return [:]
         case .tabNew(let target, let launch, let background):
             var object = launchParams(launch, background: background)
@@ -335,6 +340,7 @@ public enum IpcRequest: Equatable, Sendable {
         switch method {
         case .doctorPermissions: return .doctorPermissions
         case .ls: return .ls
+        case .focusInfo: return .focusInfo
         case .tabNew:
             guard let object else { throw invalid("invalid params") }
             let launch = try decodedLaunch(object["launch"])

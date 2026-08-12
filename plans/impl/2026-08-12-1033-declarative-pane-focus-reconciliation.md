@@ -119,4 +119,11 @@ the same change.
 ## Commit progress
 
 - [x] 1. fix(focus): reconcile pane responders from model state
-- [ ] 2. feat(cli): expose the live pane focus owner
+- [x] 2. feat(cli): expose the live pane focus owner
+
+## Implementation notes
+
+- The isolated source-tree CLI smoke test proves the live responder after
+  foreground split, background-tab split, zoom, unzoom, and close. The AppKit
+  harness dispatches the first key through `NSWindow`; `pane input` deliberately
+  bypasses first responder and therefore cannot prove first-key routing.

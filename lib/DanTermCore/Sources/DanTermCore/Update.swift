@@ -1460,6 +1460,9 @@ private func dispatchIpc(
     case .doctorPermissions:
         return [.readDoctorPermissions(reqId: reqId)]
 
+    case .focusInfo:
+        return [.readFocusInfo(reqId: reqId)]
+
     case .ls:
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
         return [.ipcReply(reqId: reqId, result: encoder.list(model))]

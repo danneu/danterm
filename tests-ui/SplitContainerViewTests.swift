@@ -246,6 +246,15 @@ func splitContainerViewTests() {
 
         try uiExpect(window.firstResponder === terminalB,
             "declarative focus pass did not repair the new pane")
+        guard let keyEvent = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil,
+            characters: "x", charactersIgnoringModifiers: "x",
+            isARepeat: false, keyCode: 7
+        ) else { throw UITestFailure(message: "could not create key event") }
+        window.sendEvent(keyEvent)
+        try uiExpect(terminalB.receivedCharacters == ["x"],
+            "the first key event did not reach the repaired pane")
     }
 
     uiTest("pane focus reconciliation repairs a reparented search field") {
@@ -348,6 +357,29 @@ func splitContainerViewTests() {
         runtime.reconcilePaneFocus()
         try uiExpect(window.firstResponder === savedResponder,
             "reconciliation stole a deliberate non-pane claimant")
+    }
+
+    uiTest("pane focus query encodes every live claimant shape") {
+        let paneId = PaneId(rawValue: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!)
+
+        try uiExpect(paneFocusInfoResult(.pane(.terminal(paneId))) == .object([
+            "focus": .object([
+                "type": .string("terminal"),
+                "paneId": .string("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"),
+            ]),
+        ]), "terminal focus JSON changed")
+        try uiExpect(paneFocusInfoResult(.pane(.searchField(paneId))) == .object([
+            "focus": .object([
+                "type": .string("searchField"),
+                "paneId": .string("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"),
+            ]),
+        ]), "search-field focus JSON changed")
+        try uiExpect(paneFocusInfoResult(.nonPane) == .object([
+            "focus": .object(["type": .string("nonPane")]),
+        ]), "non-pane focus JSON changed")
+        try uiExpect(paneFocusInfoResult(.none) == .object([
+            "focus": .object(["type": .string("none")]),
+        ]), "unclaimed focus JSON changed")
     }
 
     uiTest("nested zoom fills the container and unzoom restores every pane") {
@@ -479,7 +511,13 @@ private func focusTestWindow(content: NSView) -> NSWindow {
 }
 
 private final class FocusableTerminalView: TerminalView {
+    private(set) var receivedCharacters: [String] = []
+
     override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        receivedCharacters.append(event.characters ?? "")
+    }
 }
 
 /// Unwraps one runtime-owned pane wrapper for identity assertions.

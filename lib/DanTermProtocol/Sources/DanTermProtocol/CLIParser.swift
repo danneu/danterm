@@ -89,6 +89,12 @@ public func parseCLI(
         }
         return CLICommand(request: .ls, outputMode: .json)
 
+    case "focus":
+        guard args.count == 1 else {
+            throw CLIParseError("usage: danterm focus")
+        }
+        return CLICommand(request: .focusInfo, outputMode: .json)
+
     case "tab":
         guard args.count >= 2 else { throw CLIParseError("usage: danterm tab <new|rename|close>") }
         switch args[1] {

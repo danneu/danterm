@@ -1,7 +1,7 @@
 ---
 name: danterm
 description: >-
-  Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, read output or dump or follow a flight recording from another pane, send keys into another pane, switch the theme, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
+  Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, inspect live key focus, read output or dump or follow a flight recording from another pane, send keys into another pane, switch the theme, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
 allowed-tools: Bash(danterm *)
 ---
 
@@ -26,6 +26,7 @@ targeting. `doctor` queries the matching running app for macOS permission state
 and skips those rows when the app is unavailable.
 
     danterm ls
+    danterm focus
     danterm tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end]
     danterm tab rename --tab <tab-id> <name>|--clear
     danterm tab close --tab <tab-id>
@@ -207,6 +208,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "watch the pane's flight recording live" | `pane tape --pane <pane-id> --follow` |
 | "type X into pane <id>" / "send Ctrl-C to..." | `pane input --pane <pane-id>` |
 | "what tabs/panes are open?" | `ls` |
+| "which control owns key focus?" | `focus` |
 | "which tab/group contains this pane?" | `pane info --pane <pane-id>` |
 | "switch the theme to X" | `theme set --pane <pane-id>` |
 | "add/check off/edit a todo" | `todo ... --pane <pane-id>` |
@@ -451,6 +453,18 @@ the same typed encoding as `pane info`, so agent lookup uses
 `.agent.session.sessionId`. The `jq` above recurses the tree to list every pane.
 Treat `selectedTabId` as display state, not as a targeting source.
 
+### Inspect live key focus
+
+`focus` reports the main window's actual first-responder owner. Pane-owned
+controls include their pane id; deliberate controls outside the pane tree and
+an unclaimed window do not:
+
+    danterm focus
+    {"focus":{"type":"terminal","paneId":"..."}}
+
+The `type` is `terminal`, `searchField`, `nonPane`, or `none`. Use this query to
+verify focus behavior, not to select a target for mutation.
+
 ### Check integration health
 
 `doctor` does not require the app to be running. Use it when
@@ -531,6 +545,7 @@ else prints nothing on success and exits 0.
 |---|---|
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
 | `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with current `command`, `connection`, `agent`, and `integration` objects in the same encoding as `pane info`) |
+| `focus` | JSON: `{focus: {type: "terminal"|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"|"none"}}` |
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, command, connection, agent, integration}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |
