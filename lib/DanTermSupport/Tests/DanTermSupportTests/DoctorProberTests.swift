@@ -364,7 +364,6 @@ private struct DoctorFixture {
             destinationURL: destinationURL,
             sourceURL: { sourceURL },
             bundleURL: { bundleURL },
-            fileManager: .default,
             privilegedRunner: { _ in }
         )
     }

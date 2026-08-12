@@ -2,7 +2,7 @@
 import Foundation
 import DanTermProtocol
 
-final class CLIPathInstaller {
+final class CLIPathInstaller: Sendable {
     struct InstallOutcome {
         let usedAdministratorPrivileges: Bool
         let destinationURL: URL
@@ -15,12 +15,11 @@ final class CLIPathInstaller {
         let removedExistingEntry: Bool
     }
 
-    struct Dependencies {
+    struct Dependencies: Sendable {
         var destinationURL: URL
-        var sourceURL: () -> URL
-        var bundleURL: () -> URL
-        var fileManager: FileManager
-        var privilegedRunner: (String) throws -> Void
+        var sourceURL: @Sendable () -> URL
+        var bundleURL: @Sendable () -> URL
+        var privilegedRunner: @Sendable (String) throws -> Void
 
         static var `default`: Dependencies {
             Dependencies(
@@ -30,7 +29,6 @@ final class CLIPathInstaller {
                         .appendingPathComponent("Contents/Helpers/danterm", isDirectory: false)
                 },
                 bundleURL: { Bundle.main.bundleURL },
-                fileManager: .default,
                 privilegedRunner: Self.runPrivilegedShellCommand(_:)
             )
         }
@@ -162,7 +160,7 @@ final class CLIPathInstaller {
     private func resolveSourceURL() throws -> URL {
         let sourceURL = deps.sourceURL().standardizedFileURL
         var isDirectory: ObjCBool = false
-        guard deps.fileManager.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory),
+        guard FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory),
               !isDirectory.boolValue
         else {
             throw InstallerError.bundledCLIMissing(expectedPath: sourceURL.path)
@@ -174,9 +172,9 @@ final class CLIPathInstaller {
         try ensureDestinationParentDirectoryExists()
         try ensureDestinationCanBeReplaced()
         if destinationEntryExists() {
-            try deps.fileManager.removeItem(at: deps.destinationURL)
+            try FileManager.default.removeItem(at: deps.destinationURL)
         }
-        try deps.fileManager.createSymbolicLink(at: deps.destinationURL, withDestinationURL: sourceURL)
+        try FileManager.default.createSymbolicLink(at: deps.destinationURL, withDestinationURL: sourceURL)
         try verifyInstalledSymlinkTarget(sourceURL: sourceURL)
     }
 
@@ -185,7 +183,7 @@ final class CLIPathInstaller {
         try ensureDestinationCanBeReplaced()
         let existed = destinationEntryExists()
         if existed {
-            try deps.fileManager.removeItem(at: deps.destinationURL)
+            try FileManager.default.removeItem(at: deps.destinationURL)
         }
         if destinationEntryExists() {
             throw InstallerError.uninstallVerificationFailed(path: deps.destinationURL.path)
@@ -196,13 +194,13 @@ final class CLIPathInstaller {
     private func ensureDestinationParentDirectoryExists() throws {
         let parentURL = deps.destinationURL.deletingLastPathComponent()
         var isDirectory: ObjCBool = false
-        if deps.fileManager.fileExists(atPath: parentURL.path, isDirectory: &isDirectory) {
+        if FileManager.default.fileExists(atPath: parentURL.path, isDirectory: &isDirectory) {
             guard isDirectory.boolValue else {
                 throw InstallerError.destinationParentNotDirectory(path: parentURL.path)
             }
             return
         }
-        try deps.fileManager.createDirectory(at: parentURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: parentURL, withIntermediateDirectories: true)
     }
 
     private func ensureDestinationCanBeReplaced() throws {
@@ -228,12 +226,12 @@ final class CLIPathInstaller {
 
     /// Check for any filesystem entry, including dangling symlinks.
     private func destinationEntryExists() -> Bool {
-        (try? deps.fileManager.attributesOfItem(atPath: deps.destinationURL.path)) != nil
+        (try? FileManager.default.attributesOfItem(atPath: deps.destinationURL.path)) != nil
     }
 
     private func symlinkDestinationURL() -> URL? {
         guard destinationEntryExists(),
-              let destinationPath = try? deps.fileManager.destinationOfSymbolicLink(atPath: deps.destinationURL.path)
+              let destinationPath = try? FileManager.default.destinationOfSymbolicLink(atPath: deps.destinationURL.path)
         else {
             return nil
         }
@@ -247,7 +245,7 @@ final class CLIPathInstaller {
         if let targetURL = symlinkDestinationURL() {
             return .symlink(
                 target: targetURL.path,
-                targetExists: deps.fileManager.fileExists(atPath: targetURL.path)
+                targetExists: FileManager.default.fileExists(atPath: targetURL.path)
             )
         }
         guard destinationEntryExists() else {

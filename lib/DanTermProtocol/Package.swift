@@ -12,7 +12,7 @@ let package = Package(
             name: "DanTermProtocol",
             path: "Sources/DanTermProtocol",
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v6),
             ]
         ),
         .testTarget(
@@ -20,7 +20,7 @@ let package = Package(
             dependencies: ["DanTermProtocol"],
             path: "Tests/DanTermProtocolTests",
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v6),
             ]
         ),
     ]

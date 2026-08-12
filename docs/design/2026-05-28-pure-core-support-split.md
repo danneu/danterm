@@ -156,6 +156,15 @@ Purity is proven *structurally* and guarded *heuristically*:
   `import GhosttyKit`, or takes a `DanTermSupport` dependency fails to resolve
   under `swift test --package-path lib/DanTermCore`. Support proves the mirror:
   it compiles and tests with no AppKit/GhosttyKit and no dependency on core.
+- **Strict concurrency (a second structural proof).** The nested packages --
+  core, support, and `lib/DanTermProtocol` -- build at
+  `.swiftLanguageMode(.v6)`, so a new global mutable value or an unsafe capture
+  in these layers fails the gate. The app target compiles the same files
+  same-module at `.v5`, because `app/` still carries AppKit-shaped concurrency
+  errors (main-actor conformance isolation, nonisolated `deinit`) that the pure
+  layers do not. Do not lower a nested package to `.v5` to silence a new error:
+  the error is the point, and the value it names belongs in `app/`. Raising the
+  app target to `.v6` remains the target state.
 - **Heuristic regression guard (`scripts/core-purity-lint.sh`, two profiles).**
   A separate module would *not* catch Foundation/Darwin IO -- the compiler
   enforces IO-freeness in no design -- so the lint closes that gap with a token

@@ -141,7 +141,7 @@ indirect enum SplitNodeModel: Equatable {
     }
 }
 
-enum TabColor: String, Codable, CaseIterable, Equatable {
+enum TabColor: String, Codable, CaseIterable, Equatable, Sendable {
     case red, orange, yellow, green, blue, purple, gray
 }
 
@@ -344,19 +344,19 @@ struct AppInitFile: Codable {
     let model: AppModelSnapshot
 }
 
-struct AppModelSnapshot: Codable, Equatable {
+struct AppModelSnapshot: Codable, Equatable, Sendable {
     let groups: [GroupSnapshot]
     let selectedTabId: String?
 }
 
-struct GroupSnapshot: Codable, Equatable {
+struct GroupSnapshot: Codable, Equatable, Sendable {
     let id: String?
     let name: String
     let isCollapsed: Bool?
     let tabs: [TabSnapshot]
 }
 
-struct TabSnapshot: Codable, Equatable {
+struct TabSnapshot: Codable, Equatable, Sendable {
     let id: String?
     let customTitle: String?
     let focusedPaneId: String?
@@ -365,7 +365,7 @@ struct TabSnapshot: Codable, Equatable {
     var todos: [TodoSnapshot]? = nil  // nil for backward compat
 }
 
-indirect enum SplitNodeSnapshot: Codable, Equatable {
+indirect enum SplitNodeSnapshot: Codable, Equatable, Sendable {
     // A leaf owns its full PaneSnapshot inline.
     case leaf(PaneSnapshot)
     case split(id: String?, direction: String, first: SplitNodeSnapshot, second: SplitNodeSnapshot, ratio: Double?)
@@ -413,14 +413,14 @@ indirect enum SplitNodeSnapshot: Codable, Equatable {
     }
 }
 
-struct TodoSnapshot: Codable, Equatable {
+struct TodoSnapshot: Codable, Equatable, Sendable {
     let id: String
     let text: String
     let isDone: Bool
 }
 
 /// Strictly decoded checkpoint DTO validated through `AgentSession` during load.
-struct AgentSessionSnapshot: Codable, Equatable {
+struct AgentSessionSnapshot: Codable, Equatable, Sendable {
     let kind: String
     let sessionId: String
 
@@ -430,7 +430,7 @@ struct AgentSessionSnapshot: Codable, Equatable {
     }
 }
 
-struct PaneSnapshot: Codable, Equatable {
+struct PaneSnapshot: Codable, Equatable, Sendable {
     let id: String?
     let title: String?
     let cwd: String?

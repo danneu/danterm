@@ -28,7 +28,7 @@ let package = Package(
             name: "DanTermSupport",
             dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
             path: "Sources/DanTermSupport",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "DanTermSupportTests",
@@ -37,7 +37,7 @@ let package = Package(
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
             ],
             path: "Tests/DanTermSupportTests",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
 )

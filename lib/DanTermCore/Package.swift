@@ -44,7 +44,7 @@ let package = Package(
             name: "DanTermCore",
             dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
             path: "Sources/DanTermCore",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "DanTermCoreTests",
@@ -57,7 +57,7 @@ let package = Package(
             ],
             path: "Tests/DanTermCoreTests",
             exclude: ["__Snapshots__"],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
 )

@@ -10,6 +10,7 @@
 // replace them with framework-native diffs, source-location capture, and
 // parallel-safe reporting.
 import Foundation
+import Synchronization
 import Testing
 
 @testable import DanTermCore
@@ -33,15 +34,21 @@ func makeTestEnv(
     idSequence: [UUID] = [],
     homeDirectory: String = "/Users/testhome"
 ) -> CoreEnv {
-    var index = 0
+    // CoreEnv's seams are @Sendable, so the cursor into idSequence cannot be a
+    // captured `var`. Tests drive it from one thread; the mutex is what lets the
+    // closure carry state at all.
+    let index = Mutex(0)
     return CoreEnv(
         newId: {
-            defer { index += 1 }
-            guard index < idSequence.count else {
-                Issue.record("makeTestEnv idSequence exhausted at index \(index); add more ids")
+            let next = index.withLock { current -> Int in
+                defer { current += 1 }
+                return current
+            }
+            guard next < idSequence.count else {
+                Issue.record("makeTestEnv idSequence exhausted at index \(next); add more ids")
                 return UUID(uuidString: "ffffffff-ffff-ffff-ffff-ffffffffffff")!
             }
-            return idSequence[index]
+            return idSequence[next]
         },
         now: { now },
         homeDirectory: { homeDirectory }

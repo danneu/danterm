@@ -4,9 +4,14 @@
 import Foundation
 
 /// Carries the pure core's ambient dependencies through explicit call-site seams.
-struct CoreEnv {
-    var newId: () -> UUID
-    var now: () -> Date
+///
+/// The seams are `@Sendable` because an env is a bag of pure functions that any
+/// caller may share. A generator that needs to remember what it already handed
+/// out -- a test's id sequence -- owns its own synchronization rather than
+/// capturing a bare `var`.
+struct CoreEnv: Sendable {
+    var newId: @Sendable () -> UUID
+    var now: @Sendable () -> Date
     /// The user's home directory, injected so save/send/assert paths reproduce.
     ///
     /// Inject-vs-ambient rule: thread an explicit home when the result is SAVED
@@ -16,7 +21,7 @@ struct CoreEnv {
     /// SHOWN live and discarded (tab/toolbar chrome, alert text). `update()`
     /// passes `env.homeDirectory()` into the snapshot/IPC builders for exactly this
     /// reason; render helpers read the ambient default.
-    var homeDirectory: () -> String
+    var homeDirectory: @Sendable () -> String
 
     static let live = CoreEnv(
         newId: { UUID() },  // core-purity: ambient-seam

@@ -1,13 +1,13 @@
 // Typed settings shared by the app and CLI through DanTerm's versioned JSON config.
 
 /// Defines whether pane alerts clear on focus or require an explicit command.
-public enum AlertClearMode: String, Equatable {
+public enum AlertClearMode: String, Equatable, Sendable {
     case focus   // auto-clear alerts when pane gains focus (default)
     case manual  // require explicit Cmd+. (tab) or Cmd+Shift+. (pane) to clear
 }
 
 /// Projects the modeled settings shared by every reader of DanTerm's config file.
-public struct DanTermConfig: Equatable {
+public struct DanTermConfig: Equatable, Sendable {
     /// Explicit local theme, or nil when the catalog-backed default applies.
     public var defaultTheme: String? = nil
     /// Theme applied to panes during SSH/remote sessions.

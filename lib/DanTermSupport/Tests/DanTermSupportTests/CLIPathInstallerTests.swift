@@ -9,6 +9,7 @@
 // convert to `Issue.record + return` so the failure-site count stays exact.
 import Foundation
 import Darwin
+import Synchronization
 import Testing
 
 @testable import DanTermSupport
@@ -93,17 +94,17 @@ import Testing
         chmod(fixture.destinationURL.deletingLastPathComponent().path, 0o500)
         defer { chmod(fixture.destinationURL.deletingLastPathComponent().path, 0o700) }
 
-        var calls: [String] = []
+        let calls = Mutex<[String]>([])
         var deps = fixture.deps
         deps.privilegedRunner = { command in
-            calls.append(command)
+            calls.withLock { $0.append(command) }
             chmod(fixture.destinationURL.deletingLastPathComponent().path, 0o700)
             try FileManager.default.createSymbolicLink(at: fixture.destinationURL, withDestinationURL: fixture.sourceURL)
         }
 
         let outcome = try CLIPathInstaller(deps).install()
         #expect(outcome.usedAdministratorPrivileges == true)
-        #expect(calls.count == 1)
+        #expect(calls.withLock { $0.count } == 1)
         #expect(fixture.symlinkTarget() == fixture.sourceURL.standardizedFileURL)
     }
 
@@ -170,7 +171,6 @@ private func makeInstallerFixture(bundlePath: String? = nil) throws -> Installer
         destinationURL: destinationURL,
         sourceURL: { sourceURL },
         bundleURL: { URL(fileURLWithPath: bundlePath ?? root.appendingPathComponent("DanTerm.app").path) },
-        fileManager: .default,
         privilegedRunner: { _ in }
     )
     return InstallerFixture(root: root, sourceURL: sourceURL, destinationURL: destinationURL, deps: deps)
