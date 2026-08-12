@@ -742,12 +742,12 @@ struct TerminalPTYHostTests {
         try await Task.sleep(for: .nanoseconds(stallNanoseconds))
         let payload = (0..<(1024 * 1024)).map { UInt8($0 % 251) }
         host.send(payload, origin: origin)
-        #expect(await host.settledPendingInputByteCount() == 0)
+        #expect(await host.drainedPendingInputByteCount() == 0)
 
         let events = host.fencedFlightRecording(from: submission)
             .events
             .filter { writtenBytes($0) != nil }
-        #expect(events.compactMap(writtenBytes).flatMap { $0 } == payload)
+        expectBytes(events.compactMap(writtenBytes).flatMap { $0 }, equal: payload, "transmitted bytes")
         #expect(events.count > 1)
         #expect(Set(events.map(\.originElapsedNanoseconds)).count == 1)
         #expect(events.allSatisfy { event in
@@ -756,6 +756,31 @@ struct TerminalPTYHostTests {
         })
 
         await host.close()
+    }
+
+    @Test("a mismatched megabyte is reported, not diffed", .timeLimit(.minutes(1)))
+    func mismatchedPayloadIsReportedWithoutDiffing() {
+        // Intent: comparing megabyte payloads costs one pass whether they match or not.
+        // Why it exists: the incident. `#expect(recorded == payload)` on a 1 MiB array
+        //   failed under load, and Swift Testing rendered that failure by computing
+        //   `BidirectionalCollection.difference(from:)` -- about quadratic, four seconds
+        //   at 32 KiB, and never finishing at a megabyte. The lane died on its deadline
+        //   and left the test binary spinning at full CPU with no parent, which is how
+        //   this was found. A `.timeLimit` cannot catch it, because the diff is
+        //   synchronous and does not yield, so the guard has to be the comparison itself.
+        // Scenario: the shape of a partial drain -- a payload against its own prefix.
+        let payload = (0..<(1024 * 1024)).map { UInt8($0 % 251) }
+        let truncated = Array(payload.prefix(payload.count - 1024))
+
+        let started = ContinuousClock().now
+        withKnownIssue("the payloads are deliberately unequal") {
+            expectBytes(truncated, equal: payload, "deliberate mismatch")
+        }
+        let elapsed = ContinuousClock().now - started
+
+        // Generous on purpose: the failure mode is hours, not milliseconds, so this
+        // separates the two without pinning the comparison to a machine's speed.
+        #expect(elapsed < .seconds(5), "reporting the mismatch took \(elapsed)")
     }
 
     @Test("owner-originated bytes cross without an origin stamp", .timeLimit(.minutes(1)))
@@ -2154,6 +2179,44 @@ private func scrollbackCommand(disableEcho: Bool = false) throws -> String {
     return "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; \(echoPolicy)exec \(try probeExecutable()) hold \"$0\""
 }
 
+/// Compares two byte payloads and reports a mismatch without diffing them.
+///
+/// `#expect(a == b)` renders a failed comparison by calling
+/// `BidirectionalCollection.difference(from:)`, whose cost grows about
+/// quadratically: 32 KiB against 16 KiB takes four seconds, and the megabyte
+/// payloads these tests submit never finish at all. That is not a slow test but
+/// a wedged one -- the diff is synchronous, so no `.timeLimit` can unwind it,
+/// and one such process was found still holding a core 44 minutes later. This
+/// reports the same mismatch in a single pass, naming the first byte that
+/// differs, which is more useful than an edit script over a megabyte anyway.
+private func expectBytes(
+    _ actual: [UInt8],
+    equal expected: [UInt8],
+    _ label: Comment,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    guard actual != expected else { return }
+    let shared = min(actual.count, expected.count)
+    var index = 0
+    while index < shared, actual[index] == expected[index] { index += 1 }
+
+    let detail: String
+    if index < shared {
+        let window = max(0, index - 4)
+        detail = "first differs at byte \(index): "
+            + "\(hexBytes(actual[window...].prefix(9))) != \(hexBytes(expected[window...].prefix(9)))"
+    } else {
+        detail = "the first \(shared) bytes match, so one payload is a prefix of the other"
+    }
+    Issue.record(
+        "\(label): \(actual.count) bytes != \(expected.count) bytes; \(detail)",
+        sourceLocation: sourceLocation)
+}
+
+private func hexBytes(_ bytes: some Sequence<UInt8>) -> String {
+    bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
+}
+
 /// The transmitted payload of one recorded input-direction transfer; nil for every other event.
 private func writtenBytes(_ recorded: TerminalFlightRecordingEvent) -> [UInt8]? {
     guard case .write(let bytes) = recorded.event else { return nil }
@@ -2171,6 +2234,26 @@ private extension TerminalPTYHost {
             let sample = resourceSnapshot().pendingInputByteCount
             if sample == previous { return sample }
             previous = sample
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return resourceSnapshot().pendingInputByteCount
+    }
+
+    /// Polls until the pending-input buffer is empty, and returns what is left if
+    /// the bound elapses first.
+    ///
+    /// Deliberately not `settledPendingInputByteCount`: a buffer that reads the
+    /// same twice has stopped changing, which is not the same as drained. On a
+    /// loaded machine the child can be descheduled for longer than one sampling
+    /// interval mid-drain, and the settled reading then reports bytes that were
+    /// still in flight -- an intermittent failure that says nothing about the
+    /// behavior under test.
+    func drainedPendingInputByteCount(within limit: Duration = .seconds(30)) async -> Int {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: limit)
+        while clock.now < deadline {
+            let sample = resourceSnapshot().pendingInputByteCount
+            if sample == 0 { return 0 }
             try? await Task.sleep(for: .milliseconds(50))
         }
         return resourceSnapshot().pendingInputByteCount
