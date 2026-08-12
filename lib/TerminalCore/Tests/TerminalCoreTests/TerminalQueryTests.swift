@@ -103,17 +103,18 @@ struct TerminalQueryTests {
 
     @Test("DECRQM reports every implemented mode and zero for unknown modes")
     func modeQueries() throws {
-        let decModes: [(mode: Int, initial: Int, setup: String, updated: Int)] = [
-            (1, 2, "\u{1B}[?1h", 1),
-            (6, 2, "\u{1B}[?6h", 1),
-            (7, 1, "\u{1B}[?7l", 2),
-            (25, 1, "\u{1B}[?25l", 2),
-            (1004, 2, "\u{1B}[?1004h", 1),
-            (1047, 2, "\u{1B}[?1047h", 1),
-            (1049, 2, "\u{1B}[?1049h", 1),
-            (2026, 2, "\u{1B}[?2026h", 1),
-            (1048, 0, "\u{1B}[?1048h", 0),
-            (2004, 2, "\u{1B}[?2004h", 1),
+        let decModes: [(mode: Int, initial: Int, enabled: Int, disabled: Int)] = [
+            (1, 2, 1, 2),
+            (6, 2, 1, 2),
+            (7, 1, 1, 2),
+            (25, 1, 1, 2),
+            (1004, 2, 1, 2),
+            (1006, 2, 1, 2),
+            (1047, 2, 1, 2),
+            (1049, 2, 1, 2),
+            (2026, 2, 1, 2),
+            (1048, 0, 0, 0),
+            (2004, 2, 1, 2),
         ]
         for item in decModes {
             var terminal = try #require(Terminal(columns: 8, rows: 4))
@@ -123,18 +124,24 @@ struct TerminalQueryTests {
                     == Array("\u{1B}[?\(item.mode);\(item.initial)$y".utf8),
                 "initial DEC mode \(item.mode)"
             )
-            terminal.feed(Array("\(item.setup)\u{1B}[?\(item.mode)$p".utf8))
+            terminal.feed(Array("\u{1B}[?\(item.mode)h\u{1B}[?\(item.mode)$p".utf8))
             #expect(
                 terminal.drainReplyBytes()
-                    == Array("\u{1B}[?\(item.mode);\(item.updated)$y".utf8),
-                "updated DEC mode \(item.mode)"
+                    == Array("\u{1B}[?\(item.mode);\(item.enabled)$y".utf8),
+                "enabled DEC mode \(item.mode)"
+            )
+            terminal.feed(Array("\u{1B}[?\(item.mode)l\u{1B}[?\(item.mode)$p".utf8))
+            #expect(
+                terminal.drainReplyBytes()
+                    == Array("\u{1B}[?\(item.mode);\(item.disabled)$y".utf8),
+                "disabled DEC mode \(item.mode)"
             )
         }
 
-        let ansiModes: [(mode: Int, initial: Int, setup: String, updated: Int)] = [
-            (4, 2, "\u{1B}[4h", 1),
-            (20, 2, "\u{1B}[20h", 1),
-            (12, 0, "\u{1B}[12h", 0),
+        let ansiModes: [(mode: Int, initial: Int, enabled: Int, disabled: Int)] = [
+            (4, 2, 1, 2),
+            (20, 2, 1, 2),
+            (12, 0, 0, 0),
         ]
         for item in ansiModes {
             var terminal = try #require(Terminal(columns: 8, rows: 4))
@@ -144,20 +151,18 @@ struct TerminalQueryTests {
                     == Array("\u{1B}[\(item.mode);\(item.initial)$y".utf8),
                 "initial ANSI mode \(item.mode)"
             )
-            terminal.feed(Array("\(item.setup)\u{1B}[\(item.mode)$p".utf8))
+            terminal.feed(Array("\u{1B}[\(item.mode)h\u{1B}[\(item.mode)$p".utf8))
             #expect(
                 terminal.drainReplyBytes()
-                    == Array("\u{1B}[\(item.mode);\(item.updated)$y".utf8),
-                "updated ANSI mode \(item.mode)"
+                    == Array("\u{1B}[\(item.mode);\(item.enabled)$y".utf8),
+                "enabled ANSI mode \(item.mode)"
             )
-        }
-
-        for mode in [1047, 1049] {
-            var terminal = try #require(Terminal(columns: 8, rows: 4))
-            terminal.feed(Array("\u{1B}[?\(mode)h\u{1B}[?\(mode)$p".utf8))
-            #expect(terminal.drainReplyBytes() == Array("\u{1B}[?\(mode);1$y".utf8))
-            terminal.feed(Array("\u{1B}[?\(mode)l\u{1B}[?\(mode)$p".utf8))
-            #expect(terminal.drainReplyBytes() == Array("\u{1B}[?\(mode);2$y".utf8))
+            terminal.feed(Array("\u{1B}[\(item.mode)l\u{1B}[\(item.mode)$p".utf8))
+            #expect(
+                terminal.drainReplyBytes()
+                    == Array("\u{1B}[\(item.mode);\(item.disabled)$y".utf8),
+                "disabled ANSI mode \(item.mode)"
+            )
         }
     }
 

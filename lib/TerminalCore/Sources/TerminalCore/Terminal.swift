@@ -548,6 +548,30 @@ public struct Terminal: Equatable, Sendable {
         var isCursorBlinking = false
     }
 
+    /// Owns terminal-scoped mode state so reset has one complete default value.
+    private struct TerminalModes: Equatable, Sendable {
+        var isInsertMode = false
+        var isLineFeedNewLineMode = false
+        var isApplicationCursorKeysMode = false
+        var isApplicationKeypadMode = false
+        var isFocusReportingMode = false
+        var isBracketedPasteMode = false
+        var mouseTrackingMode = TerminalMouseTrackingMode.off
+        var isSGRMouseEncodingMode = false
+        var isOriginMode = false
+        var isAutoWrapMode = true
+        var isCursorVisible = true
+        var cursorShape = TerminalCursorShape.block
+        var isCursorBlinking = false
+        var isSynchronizedOutputActive = false
+    }
+
+    /// Separates ANSI modes from DEC-private modes that reuse the same numeric namespace.
+    private enum ModeNamespace {
+        case ansi
+        case decPrivate
+    }
+
     /// Keeps REP independent from later cursor movement and grid replacement.
     private struct LastPrintedCluster: Equatable, Sendable {
         var scalars: TerminalScalars
@@ -644,20 +668,7 @@ public struct Terminal: Equatable, Sendable {
     private var semanticContent = SemanticContent.output
     private var semanticContentClearsAtEndOfLine = false
     private var promptRedrawMode = PromptRedrawMode.full
-    private var isInsertMode = false
-    private var isLineFeedNewLineMode = false
-    private var isApplicationCursorKeysMode = false
-    private var isApplicationKeypadMode = false
-    private var isFocusReportingMode = false
-    private var isBracketedPasteMode = false
-    private var mouseTrackingMode = TerminalMouseTrackingMode.off
-    private var isSGRMouseEncodingMode = false
-    private var isOriginMode = false
-    private var isAutoWrapMode = true
-    private var isCursorVisible = true
-    private var cursorShape = TerminalCursorShape.block
-    private var isCursorBlinking = false
-    private var isSynchronizedOutputActive = false
+    private var modes = TerminalModes()
     private var tabStops: Set<Int>
     private var savedCursor = SavedCursorState()
     private var lastPrintedCluster: LastPrintedCluster?
@@ -849,10 +860,10 @@ public struct Terminal: Equatable, Sendable {
     /// Projects application-controlled presentation state for render scheduling and drawing.
     public var presentation: TerminalPresentation {
         TerminalPresentation(
-            isCursorVisible: isCursorVisible,
-            cursorShape: cursorShape,
-            isCursorBlinking: isCursorBlinking,
-            isSynchronizedOutputActive: isSynchronizedOutputActive
+            isCursorVisible: modes.isCursorVisible,
+            cursorShape: modes.cursorShape,
+            isCursorBlinking: modes.isCursorBlinking,
+            isSynchronizedOutputActive: modes.isSynchronizedOutputActive
         )
     }
 
@@ -897,13 +908,13 @@ public struct Terminal: Equatable, Sendable {
     /// Projects all child-controlled modes that affect deterministic user-input bytes.
     public var inputModes: TerminalInputModes {
         TerminalInputModes(
-            applicationCursorKeys: isApplicationCursorKeysMode,
-            applicationKeypad: isApplicationKeypadMode,
-            lineFeedNewLine: isLineFeedNewLineMode,
-            focusReporting: isFocusReportingMode,
-            bracketedPaste: isBracketedPasteMode,
-            mouseTracking: mouseTrackingMode,
-            sgrMouseEncoding: isSGRMouseEncodingMode,
+            applicationCursorKeys: modes.isApplicationCursorKeysMode,
+            applicationKeypad: modes.isApplicationKeypadMode,
+            lineFeedNewLine: modes.isLineFeedNewLineMode,
+            focusReporting: modes.isFocusReportingMode,
+            bracketedPaste: modes.isBracketedPasteMode,
+            mouseTracking: modes.mouseTrackingMode,
+            sgrMouseEncoding: modes.isSGRMouseEncodingMode,
             kittyKeyboardFlags: kittyKeyboardStack.last ?? 0
         )
     }
@@ -5397,7 +5408,7 @@ public struct Terminal: Equatable, Sendable {
         case 5:
             appendReply(isDECPrivate ? "\u{1B}[?0n" : "\u{1B}[0n")
         case 6:
-            let row = isOriginMode ? cursor.row - positioningOriginRow + 1 : cursor.row + 1
+            let row = modes.isOriginMode ? cursor.row - positioningOriginRow + 1 : cursor.row + 1
             let prefix = isDECPrivate ? "?" : ""
             appendReply("\u{1B}[\(prefix)\(row);\(cursor.column + 1)R")
         default:
@@ -5417,44 +5428,44 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func decPrivateModeStatus(_ mode: UInt16) -> Int {
-        switch mode {
-        case 1:
-            isApplicationCursorKeysMode ? 1 : 2
-        case 6:
-            isOriginMode ? 1 : 2
-        case 7:
-            isAutoWrapMode ? 1 : 2
-        case 25:
-            isCursorVisible ? 1 : 2
-        case 1004:
-            isFocusReportingMode ? 1 : 2
+        if let keyPath = Self.modeKeyPath(mode, namespace: .decPrivate) {
+            return modes[keyPath: keyPath] ? 1 : 2
+        }
+        return switch mode {
         case 1000:
-            mouseTrackingMode == .click ? 1 : 2
+            modes.mouseTrackingMode == .click ? 1 : 2
         case 1002:
-            mouseTrackingMode == .drag ? 1 : 2
+            modes.mouseTrackingMode == .drag ? 1 : 2
         case 1003:
-            mouseTrackingMode == .anyMotion ? 1 : 2
-        case 1006:
-            isSGRMouseEncodingMode ? 1 : 2
+            modes.mouseTrackingMode == .anyMotion ? 1 : 2
         case 1047, 1049:
             isAlternateScreenActive ? 1 : 2
-        case 2026:
-            isSynchronizedOutputActive ? 1 : 2
-        case 2004:
-            isBracketedPasteMode ? 1 : 2
         default:
             0
         }
     }
 
     private func ansiModeStatus(_ mode: UInt16) -> Int {
-        switch mode {
-        case 4:
-            isInsertMode ? 1 : 2
-        case 20:
-            isLineFeedNewLineMode ? 1 : 2
-        default:
-            0
+        guard let keyPath = Self.modeKeyPath(mode, namespace: .ansi) else { return 0 }
+        return modes[keyPath: keyPath] ? 1 : 2
+    }
+
+    private static func modeKeyPath(
+        _ mode: UInt16,
+        namespace: ModeNamespace
+    ) -> WritableKeyPath<TerminalModes, Bool>? {
+        switch (namespace, mode) {
+        case (.ansi, 4): \.isInsertMode
+        case (.ansi, 20): \.isLineFeedNewLineMode
+        case (.decPrivate, 1): \.isApplicationCursorKeysMode
+        case (.decPrivate, 6): \.isOriginMode
+        case (.decPrivate, 7): \.isAutoWrapMode
+        case (.decPrivate, 25): \.isCursorVisible
+        case (.decPrivate, 1004): \.isFocusReportingMode
+        case (.decPrivate, 1006): \.isSGRMouseEncodingMode
+        case (.decPrivate, 2004): \.isBracketedPasteMode
+        case (.decPrivate, 2026): \.isSynchronizedOutputActive
+        default: nil
         }
     }
 
@@ -5467,16 +5478,9 @@ public struct Terminal: Equatable, Sendable {
     private mutating func applyANSIModes(_ parameters: CSIParameters, enabled: Bool) {
         var recognized = false
         for parameter in parameters {
-            switch parameter {
-            case 4:
-                isInsertMode = enabled
-                recognized = true
-            case 20:
-                isLineFeedNewLineMode = enabled
-                recognized = true
-            default:
-                continue
-            }
+            guard let keyPath = Self.modeKeyPath(parameter, namespace: .ansi) else { continue }
+            modes[keyPath: keyPath] = enabled
+            recognized = true
         }
         if recognized {
             clearPendingMotionState()
@@ -5486,32 +5490,21 @@ public struct Terminal: Equatable, Sendable {
     private mutating func applyDECPrivateModes(_ parameters: CSIParameters, enabled: Bool) {
         var shouldClearPendingMotion = false
         for parameter in parameters {
+            if let keyPath = Self.modeKeyPath(parameter, namespace: .decPrivate) {
+                modes[keyPath: keyPath] = enabled
+            }
             switch parameter {
-            case 1:
-                isApplicationCursorKeysMode = enabled
             case 6:
-                isOriginMode = enabled
                 cursor = CellPosition(row: positioningOriginRow, column: 0)
                 shouldClearPendingMotion = true
             case 7:
-                isAutoWrapMode = enabled
                 shouldClearPendingMotion = true
-            case 25:
-                isCursorVisible = enabled
-            case 1004:
-                isFocusReportingMode = enabled
             case 1000:
-                mouseTrackingMode = enabled ? .click : .off
+                modes.mouseTrackingMode = enabled ? .click : .off
             case 1002:
-                mouseTrackingMode = enabled ? .drag : .off
+                modes.mouseTrackingMode = enabled ? .drag : .off
             case 1003:
-                mouseTrackingMode = enabled ? .anyMotion : .off
-            case 1006:
-                isSGRMouseEncodingMode = enabled
-            case 2004:
-                isBracketedPasteMode = enabled
-            case 2026:
-                isSynchronizedOutputActive = enabled
+                modes.mouseTrackingMode = enabled ? .anyMotion : .off
             case 1048:
                 if shouldClearPendingMotion {
                     clearPendingMotionState()
@@ -5541,7 +5534,7 @@ public struct Terminal: Equatable, Sendable {
                     restoreCursor()
                 }
             default:
-                continue
+                break
             }
         }
         if shouldClearPendingMotion {
@@ -5552,23 +5545,23 @@ public struct Terminal: Equatable, Sendable {
     private mutating func applyCursorStyle(_ parameter: UInt16) {
         switch parameter {
         case 0, 1:
-            cursorShape = .block
-            isCursorBlinking = true
+            modes.cursorShape = .block
+            modes.isCursorBlinking = true
         case 2:
-            cursorShape = .block
-            isCursorBlinking = false
+            modes.cursorShape = .block
+            modes.isCursorBlinking = false
         case 3:
-            cursorShape = .underline
-            isCursorBlinking = true
+            modes.cursorShape = .underline
+            modes.isCursorBlinking = true
         case 4:
-            cursorShape = .underline
-            isCursorBlinking = false
+            modes.cursorShape = .underline
+            modes.isCursorBlinking = false
         case 5:
-            cursorShape = .bar
-            isCursorBlinking = true
+            modes.cursorShape = .bar
+            modes.isCursorBlinking = true
         case 6:
-            cursorShape = .bar
-            isCursorBlinking = false
+            modes.cursorShape = .bar
+            modes.isCursorBlinking = false
         default:
             break
         }
@@ -5869,7 +5862,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private var positioningRowRange: Range<Int> {
-        isOriginMode ? activeScrollRegion : 0..<rowCount
+        modes.isOriginMode ? activeScrollRegion : 0..<rowCount
     }
 
     private var positioningOriginRow: Int {
@@ -5897,9 +5890,9 @@ public struct Terminal: Equatable, Sendable {
     private mutating func dispatchEscape(_ final: UInt8) {
         switch final {
         case 0x3D:
-            isApplicationKeypadMode = true
+            modes.isApplicationKeypadMode = true
         case 0x3E:
-            isApplicationKeypadMode = false
+            modes.isApplicationKeypadMode = false
         case 0x37:
             saveCursor()
         case 0x38:
@@ -5953,7 +5946,7 @@ public struct Terminal: Equatable, Sendable {
         case 0x0A, 0x0B, 0x0C:
             clearPendingMotionState()
             lineFeed()
-            if isLineFeedNewLineMode {
+            if modes.isLineFeedNewLineMode {
                 cursor.column = 0
             }
         case 0x0D:
@@ -5999,15 +5992,15 @@ public struct Terminal: Equatable, Sendable {
             position: cursor,
             style: currentStyle,
             isPendingWrap: isPendingWrap,
-            isOriginMode: isOriginMode,
-            isCursorVisible: isCursorVisible,
-            cursorShape: cursorShape,
-            isCursorBlinking: isCursorBlinking
+            isOriginMode: modes.isOriginMode,
+            isCursorVisible: modes.isCursorVisible,
+            cursorShape: modes.cursorShape,
+            isCursorBlinking: modes.isCursorBlinking
         )
     }
 
     private mutating func restoreCursor() {
-        isOriginMode = savedCursor.isOriginMode
+        modes.isOriginMode = savedCursor.isOriginMode
         let rowRange = positioningRowRange
         cursor = CellPosition(
             row: min(max(savedCursor.position.row, rowRange.lowerBound), rowRange.upperBound - 1),
@@ -6015,12 +6008,12 @@ public struct Terminal: Equatable, Sendable {
         )
         movePositionOffWideTail(&cursor, in: rows)
         currentStyle = savedCursor.style
-        isCursorVisible = savedCursor.isCursorVisible
-        cursorShape = savedCursor.cursorShape
-        isCursorBlinking = savedCursor.isCursorBlinking
+        modes.isCursorVisible = savedCursor.isCursorVisible
+        modes.cursorShape = savedCursor.cursorShape
+        modes.isCursorBlinking = savedCursor.isCursorBlinking
         clusterContext = nil
         isPendingWrap = savedCursor.isPendingWrap
-            && isAutoWrapMode
+            && modes.isAutoWrapMode
             && cursor.column == columnCount - 1
     }
 
@@ -6082,7 +6075,7 @@ public struct Terminal: Equatable, Sendable {
         clampPosition(&cursor, in: rows)
         clampPosition(&savedCursor.position, in: rows)
         isPendingWrap = isPendingWrap
-            && isAutoWrapMode
+            && modes.isAutoWrapMode
             && cursor.column == columnCount - 1
     }
 
@@ -6090,7 +6083,7 @@ public struct Terminal: Equatable, Sendable {
         clampPosition(&screen.cursor, in: screen.rows)
         clampPosition(&screen.savedCursor.position, in: screen.rows)
         screen.isPendingWrap = screen.isPendingWrap
-            && isAutoWrapMode
+            && modes.isAutoWrapMode
             && screen.cursor.column == columnCount - 1
     }
 
@@ -6166,20 +6159,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func resetControlState() {
         scrollRegion = nil
-        isInsertMode = false
-        isLineFeedNewLineMode = false
-        isApplicationCursorKeysMode = false
-        isApplicationKeypadMode = false
-        isFocusReportingMode = false
-        isBracketedPasteMode = false
-        mouseTrackingMode = .off
-        isSGRMouseEncodingMode = false
-        isOriginMode = false
-        isAutoWrapMode = true
-        isCursorVisible = true
-        cursorShape = .block
-        isCursorBlinking = false
-        isSynchronizedOutputActive = false
+        modes = TerminalModes()
         kittyKeyboardStack.removeAll(keepingCapacity: true)
         if var inactive = inactiveScreen {
             inactive.kittyKeyboardStack.removeAll(keepingCapacity: true)
@@ -6266,7 +6246,7 @@ public struct Terminal: Equatable, Sendable {
         from start: Int,
         limit: Int
     ) -> Int {
-        guard isPendingWrap == false, isInsertMode == false else { return 0 }
+        guard isPendingWrap == false, modes.isInsertMode == false else { return 0 }
         let row = cursor.row
         let column = cursor.column
         guard rows.indices.contains(row), rows[row].cells.count == columnCount,
@@ -6358,7 +6338,7 @@ public struct Terminal: Equatable, Sendable {
         if column + count == columnCount {
             rows[row].marginErased = false
             cursor.column = columnCount - 1
-            isPendingWrap = isAutoWrapMode
+            isPendingWrap = modes.isAutoWrapMode
         } else {
             cursor.column = column + count
         }
@@ -6486,7 +6466,7 @@ public struct Terminal: Equatable, Sendable {
         var destination = target
 
         if target.column == columnCount - 1 {
-            if isAutoWrapMode {
+            if modes.isAutoWrapMode {
                 clearCellAndPair(row: target.row, column: target.column)
                 rows[target.row].cells[target.column] = GridCell(
                     kind: .spacerHead,
@@ -6574,7 +6554,7 @@ public struct Terminal: Equatable, Sendable {
     ) {
         let contentIdentity = allocateContentIdentity()
         invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
-        if isInsertMode {
+        if modes.isInsertMode {
             moveAndFillCells(
                 in: cursor.column..<columnCount,
                 row: cursor.row,
@@ -6599,7 +6579,7 @@ public struct Terminal: Equatable, Sendable {
         invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
         var preservesWrappedSpacer = false
         if cursor.column == columnCount - 1 {
-            if isAutoWrapMode {
+            if modes.isAutoWrapMode {
                 clearCellAndPair(row: cursor.row, column: cursor.column)
                 rows[cursor.row].cells[cursor.column] = GridCell(
                     kind: .spacerHead,
@@ -6619,7 +6599,7 @@ public struct Terminal: Equatable, Sendable {
 
         invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
 
-        if isInsertMode {
+        if modes.isInsertMode {
             moveAndFillCells(
                 in: cursor.column..<columnCount,
                 row: cursor.row,
@@ -6659,7 +6639,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func advanceCursorPastWideCell(at head: CellPosition) {
-        if isAutoWrapMode == false, head.column + 1 == columnCount - 1 {
+        if modes.isAutoWrapMode == false, head.column + 1 == columnCount - 1 {
             cursor = head
             isPendingWrap = false
             return
