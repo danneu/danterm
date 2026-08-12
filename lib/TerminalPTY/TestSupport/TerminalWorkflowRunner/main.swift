@@ -5,6 +5,7 @@ import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording
 import TerminalPaneSession
+import TerminalPTYWaitSupport
 import TerminalWorkflowSupport
 
 /// Defines one independently captured application contract and its owning login shell.
@@ -173,21 +174,21 @@ private enum TerminalWorkflowRunner {
         let status = failure.map { "status=failed\nerror=\($0)\n" } ?? "status=passed\n"
         try status.write(to: directory.appending(path: "result.txt"), atomically: true, encoding: .utf8)
         controller.tearDown()
-        await waitForQuiescence(terminationHandle)
-        var ownership = "pane_session=released\npty_owner=released\ndescriptors=released\nsources=released\n"
+        // The record below is a claim that every resource was released, and only
+        // quiescence supports it. A pane that never quiesces is this workflow's
+        // failure to report, not a wait to sit in until something outside kills the
+        // run -- and nothing outside would: the wrapper script imposes no timeout.
+        let quiesced = await terminationHandle.quiesced(within: .seconds(30))
+        if quiesced == false, failure == nil {
+            failure = RunnerError.timeout("pane quiescence after teardown")
+        }
+        let state = quiesced ? "released" : "live"
+        var ownership = "pane_session=\(state)\npty_owner=\(state)\ndescriptors=\(state)\nsources=\(state)\n"
         if workflow.name == "asciinema" {
-            ownership += "recorder=released\ninner_shell=released\nforeground_job=released\n"
+            ownership += "recorder=\(state)\ninner_shell=\(state)\nforeground_job=\(state)\n"
         }
         try ownership.write(to: directory.appending(path: "ownership.txt"), atomically: true, encoding: .utf8)
         if let failure { throw failure }
-    }
-
-    private static func waitForQuiescence(
-        _ handle: TerminalPaneTerminationHandle
-    ) async {
-        await withCheckedContinuation { continuation in
-            handle.whenQuiescent { continuation.resume() }
-        }
     }
 
     @MainActor
@@ -200,8 +201,10 @@ private enum TerminalWorkflowRunner {
             controller.synchronizeState()
             if controller.readFullHistoryText().contains(marker) { return }
             // Sleeping, not yielding: this wait shares a machine with the pane it is
-            // waiting on, and a spin competes with the very work that ends it.
-            try? await Task.sleep(for: .milliseconds(5))
+            // waiting on, and a spin competes with the very work that ends it. A
+            // cancelled sleep ends the wait rather than leaving the loop to sample on
+            // with nothing pacing it.
+            do { try await Task.sleep(for: .milliseconds(5)) } catch { break }
         }
         throw RunnerError.timeout(marker)
     }
@@ -218,7 +221,7 @@ private enum TerminalWorkflowRunner {
             let history = controller.readFullHistoryText()
             if let anchorRange = history.range(of: anchor, options: .backwards),
                history[anchorRange.upperBound...].contains(marker) { return }
-            try? await Task.sleep(for: .milliseconds(5))
+            do { try await Task.sleep(for: .milliseconds(5)) } catch { break }
         }
         throw RunnerError.timeout("\(marker) after \(anchor)")
     }

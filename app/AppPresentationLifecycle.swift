@@ -6,7 +6,7 @@ import Cocoa
 @MainActor
 final class WorkspaceLifecycleObserver {
     private weak var runtime: AppRuntime?
-    nonisolated(unsafe) private var notificationTokens: [NSObjectProtocol] = []
+    private var notificationTokens: [NSObjectProtocol] = []
     private let notificationCenter: NotificationCenter
 
     init(
@@ -37,11 +37,14 @@ final class WorkspaceLifecycleObserver {
         removeObservers()
     }
 
-    deinit {
+    // `isolated deinit` so the token list stays ordinary main-actor state. The list is
+    // written from `init` and `tearDown()`, both main-actor, and a nonisolated deinit
+    // could only reach it by declaring the race away.
+    isolated deinit {
         removeObservers()
     }
 
-    nonisolated private func removeObservers() {
+    private func removeObservers() {
         for token in notificationTokens {
             notificationCenter.removeObserver(token)
         }

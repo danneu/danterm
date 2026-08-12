@@ -4,6 +4,7 @@ import Foundation
 import Testing
 @testable import TerminalPTYHost
 import TerminalPTYTestSupport
+import TerminalPTYWaitSupport
 import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording
@@ -733,8 +734,8 @@ struct TerminalPTYHostTests {
         // Scenario: a megabyte is submitted well after its originating event occurred, to a
         //   child that drains it over many owner turns.
         let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(command: "stty raw -echo; printf '__DRAINING__\\n'; exec cat > /dev/null"))
-        #expect(await host.waitForOutput(containing: Array("__DRAINING__".utf8)))
+        await host.start(makeLaunchInput(command: drainingCommand))
+        #expect(await host.waitForOutput(containing: drainingMarker))
 
         let submission = host.fencedFlightRecordingOriginFromNow().cursor
         let origin = DispatchTime.now().uptimeNanoseconds
@@ -791,8 +792,8 @@ struct TerminalPTYHostTests {
         //   as a measurement rather than as the absence of one.
         // Scenario: a child asks for the cursor position and the user types straight after.
         let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(command: "stty raw -echo; printf '__DRAINING__\\n'; exec cat > /dev/null"))
-        #expect(await host.waitForOutput(containing: Array("__DRAINING__".utf8)))
+        await host.start(makeLaunchInput(command: drainingCommand))
+        #expect(await host.waitForOutput(containing: drainingMarker))
 
         let submission = host.fencedFlightRecordingOriginFromNow().cursor
         host.deliverOutputForTesting(Array("\u{1B}[6n".utf8))
@@ -803,10 +804,16 @@ struct TerminalPTYHostTests {
         let events = host.fencedFlightRecording(from: submission)
             .events
             .filter { writtenBytes($0) != nil }
+        // Row 4 column 13: `stty raw` clears ONLCR, so the newline that ends
+        // the marker line moves the cursor down without returning it to
+        // column 1. The coordinates stay exact because they are what notices
+        // the child printing something this test did not ask for -- and the
+        // screen rides along with a failure, so the next such surprise
+        // explains itself instead of arriving as a byte array.
         #expect(events.compactMap(writtenBytes) == [
-            Array("\u{1B}[2;1R".utf8),
+            Array("\u{1B}[4;13R".utf8),
             Array("hi".utf8),
-        ])
+        ], "screen when the cursor was reported:\n\(occupiedScreenText(host))")
         #expect(events.first?.originElapsedNanoseconds == nil)
         #expect(events.last?.originElapsedNanoseconds != nil)
 
@@ -2213,6 +2220,37 @@ private func hexBytes(_ bytes: some Sequence<UInt8>) -> String {
     bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
 }
 
+/// A child that prints one marker line and then drains everything sent to it,
+/// for the flight-recording tests: they need a child that writes nothing of its
+/// own once they start measuring.
+///
+/// `printf` assembles the marker from a format and an argument rather than
+/// carrying it whole, so the marker cannot appear in the command line. The line
+/// discipline echoes that command line before `stty -echo` takes effect, and a
+/// marker spelled out there would be matched in the echo -- so the wait would
+/// return before the child had printed anything, leaving every later step to
+/// race the rest of its startup output.
+private let drainingCommand =
+    "stty raw -echo; printf '__DRAI%s__\\n' NING; exec cat > /dev/null"
+
+/// The line `drainingCommand` prints once its startup output is complete.
+private let drainingMarker = Array("__DRAINING__".utf8)
+
+/// The screen with its blank padding removed, for a failure message that has to
+/// stay readable. A raw `screenText` is 24 rows of 80 columns, which buries the
+/// one or two lines a child actually printed.
+private func occupiedScreenText(_ host: TerminalPTYHost) -> String {
+    let rows = host.fencedSnapshot().screenText
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .map { $0.reversed().drop { $0 == " " }.reversed() }
+        .map(String.init)
+    guard let last = rows.lastIndex(where: { !$0.isEmpty }) else { return "(blank screen)" }
+    return rows[...last]
+        .enumerated()
+        .map { "  row \($0.offset + 1): \($0.element)" }
+        .joined(separator: "\n")
+}
+
 /// The transmitted payload of one recorded input-direction transfer; nil for every other event.
 private func writtenBytes(_ recorded: TerminalFlightRecordingEvent) -> [UInt8]? {
     guard case .write(let bytes) = recorded.event else { return nil }
@@ -2230,7 +2268,10 @@ private extension TerminalPTYHost {
             let sample = resourceSnapshot().pendingInputByteCount
             if sample == previous { return sample }
             previous = sample
-            try? await Task.sleep(for: .milliseconds(50))
+            // Stops on a cancelled sleep rather than sampling on with nothing left
+            // to pace the loop. See `pollUntil`, which this cannot use: it reports
+            // a count, and the count is what the caller asserts on.
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
         return resourceSnapshot().pendingInputByteCount
     }
@@ -2250,7 +2291,7 @@ private extension TerminalPTYHost {
         while clock.now < deadline {
             let sample = resourceSnapshot().pendingInputByteCount
             if sample == 0 { return 0 }
-            try? await Task.sleep(for: .milliseconds(50))
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
         return resourceSnapshot().pendingInputByteCount
     }
@@ -2413,12 +2454,7 @@ private func waitForProcessExit(
     _ processID: Int,
     within limit: Duration = .seconds(10)
 ) async -> Bool {
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: limit)
-    while processExists(processID), clock.now < deadline {
-        try? await Task.sleep(for: .milliseconds(20))
-    }
-    return processExists(processID) == false
+    await pollUntil({ processExists(processID) == false }, within: limit)
 }
 
 /// Waits for `processID` to stop being a direct child of this process.
@@ -2430,12 +2466,7 @@ private func waitForDirectChildExit(
     _ processID: pid_t,
     within limit: Duration = .seconds(10)
 ) async -> Bool {
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: limit)
-    while directChildProcessIDs().contains(processID), clock.now < deadline {
-        try? await Task.sleep(for: .milliseconds(20))
-    }
-    return directChildProcessIDs().contains(processID) == false
+    await pollUntil({ directChildProcessIDs().contains(processID) == false }, within: limit)
 }
 
 private func openFileDescriptorCount() throws -> Int {

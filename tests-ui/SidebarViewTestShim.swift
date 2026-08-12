@@ -8,7 +8,6 @@ final class AppRuntime {
     // UI tests always construct it on the main thread.
     let schedulingLifecycle = MainActor.assumeIsolated { AppRuntimeSchedulingLifecycle() }
     var model: AppModel
-    var viewLocalState = ViewLocalState()
     var sessions: [PaneId: any TerminalSession] = [:]
     var paneHosts: [PaneId: PaneHost] = [:]
     var paneVisibility: [PaneId: Bool] = [:]

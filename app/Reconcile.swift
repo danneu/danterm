@@ -229,32 +229,28 @@ extension AppRuntime {
     /// reapplies through `resolveReloadSelection` (replacing the deleted
     /// `.setSidebarSelection` effect). The narrow rename guard suppresses only a `reload`
     /// of the live-editing row (its title/attrs belong to the field editor) while
-    /// structural ops still apply; a structural op on that row ends the edit and clears
-    /// the sidecar. Replaces the deleted `reloadSidebar` / `setSidebarSelection` /
+    /// structural ops still apply; a structural op on that row ends the view-owned edit.
+    /// Replaces the deleted `reloadSidebar` / `setSidebarSelection` /
     /// `updateSidebarTabRow` / `updateSidebarGroupRow` effects + the imperative
     /// `reload(model:)`.
     func reconcileSidebar(tally: UnreadAlertTally) {
         guard let sidebarView = sidebarView else { return }
         let new = desiredSidebar(in: model, tally: tally)
         let rawOps = computeSidebarRowOps(old: caches.sidebar, new: new)
+        let renameTarget = sidebarView.activeRenameTarget
         let guarded = guardSidebarRenameOps(
             ops: rawOps,
-            renameTarget: viewLocalState.sidebarRenameTarget,
+            renameTarget: renameTarget,
             new: new)
-        if guarded.clearRename {
-            // A structural op removed/moved the edited row (or a wholesale rebuild ran):
-            // end the now-orphaned edit so the field editor never strands.
-            viewLocalState.sidebarRenameTarget = nil
-        }
         let unapplied = sidebarView.applySidebarOps(
             guarded.ops, model: model, projection: new,
-            clearActiveRename: guarded.clearRename)
+            renameTargetToEnd: guarded.clearRename ? renameTarget : nil)
         // Advance the cache. If a reload was suppressed for the still-editing row,
         // or could not paint a visible row, retain its prior projection so the deferred
         // attr update re-fires later.
         caches.sidebar = advanceSidebarCache(
             old: caches.sidebar, new: new,
-            suppressedRenameTarget: viewLocalState.sidebarRenameTarget,
+            suppressedRenameTarget: sidebarView.activeRenameTarget,
             unappliedTabIds: unapplied.tabs,
             unappliedGroupIds: unapplied.groups)
     }

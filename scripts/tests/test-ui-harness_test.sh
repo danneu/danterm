@@ -7,6 +7,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
+# shellcheck source=../lib/bounded-wait.sh
+source "$REPO_ROOT/scripts/lib/bounded-wait.sh"
+
 fail() {
     echo "test-ui-harness_test: $*" >&2
     exit 1
@@ -66,8 +69,13 @@ pid_b=$!
 
 status_a=0
 status_b=0
+# These two take a lock against each other, and a deadlock in that lock is exactly
+# what this test exists to catch. Without the watchdog the deadlock would park the
+# waits below instead of failing them, and report nothing at all.
+watchdog="$(start_watchdog 300 "$pid_a" "$pid_b")"
 wait "$pid_a" || status_a=$?
 wait "$pid_b" || status_b=$?
+cancel_watchdog "$watchdog"
 [[ $status_a -eq 0 ]] || fail "checkout A exited $status_a: $(cat "$TEST_ROOT/a.err")"
 [[ $status_b -eq 0 ]] || fail "checkout B exited $status_b: $(cat "$TEST_ROOT/b.err")"
 

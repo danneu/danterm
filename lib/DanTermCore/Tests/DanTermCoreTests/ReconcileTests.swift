@@ -5,7 +5,7 @@
 // (single<->multi mode flip, tab insert/remove/reorder/cross-group move,
 // reload-on-changed-attrs, group churn, combined structural+attr churn),
 // guardSidebarRenameOps (suppress reload of edited row; structural ops clear
-// the sidecar; nil target is a pass-through), advanceSidebarCache attribute
+// the active view session; nil target is a pass-through), advanceSidebarCache attribute
 // retention, the eager desiredContainerShapes projection, the
 // computeContainerOps model-apply suite (remove / build / patch / visibility-only
 // switch / no-op), containerOpsStrandVisible classification, ContainerShape
@@ -301,10 +301,10 @@ import Testing
         #expect(editingB.ops.contains(.reloadTab(id: a)), "reload of a different row applies")
     }
 
-    @Test("guardSidebarRenameOps: structural ops on the edited row apply AND clear the sidecar")
+    @Test("guardSidebarRenameOps: structural ops apply and request ending the edit")
     func guardSidebarRenameOpsStructuralOpsApplyAndClear() {
         // Intent: structural ops (close, move) on the edited row apply
-        //   normally and clear the rename sidecar.
+        //   normally and request that the view end its rename session.
         // Why it exists: pins the structural-ops-end-edit branch.
         // Scenario: spec-first close-while-editing + move-while-editing.
         let g1 = GroupId(); let g2 = GroupId(); let a = TabId(); let b = TabId(); let c = TabId()
@@ -318,7 +318,7 @@ import Testing
         ])
         let closeGuarded = guardSidebarRenameOps(
             ops: computeSidebarRowOps(old: old, new: closed), renameTarget: .tab(a), new: closed)
-        #expect(closeGuarded.clearRename, "closing the edited row clears the sidecar")
+        #expect(closeGuarded.clearRename, "closing the edited row requests rename cleanup")
         #expect(applySidebarRowOps(closeGuarded.ops, to: old, new: closed) == closed,
             "the remove still applies")
         let moved = sbProj(false, [
@@ -327,7 +327,7 @@ import Testing
         ])
         let moveGuarded = guardSidebarRenameOps(
             ops: computeSidebarRowOps(old: old, new: moved), renameTarget: .tab(a), new: moved)
-        #expect(moveGuarded.clearRename, "moving the edited row to another group clears the sidecar")
+        #expect(moveGuarded.clearRename, "moving the edited row requests rename cleanup")
         #expect(applySidebarRowOps(moveGuarded.ops, to: old, new: moved) == moved,
             "the move (remove + insert-by-id) still applies")
     }
@@ -335,7 +335,7 @@ import Testing
     @Test("guardSidebarRenameOps: collapsing the edited row's group ends the edit")
     func guardSidebarRenameOpsCollapseEndsEdit() {
         // Intent: a setGroupCollapsed(collapsed: true) on the group holding the
-        //   edited tab applies normally AND clears the rename sidecar, exactly
+        //   edited tab applies normally and requests ending the view-owned edit, exactly
         //   like close/move/reloadAll of the edited row.
         // Why it exists: collapseItem tears down the edited row's cell view with
         //   no field-editor delegate callback, so a rename left live across a

@@ -73,10 +73,17 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
+            name: "TerminalPTYWaitSupport",
+            dependencies: ["TerminalPaneSession"],
+            path: "TestSupport/TerminalPTYWaitSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
             name: "TerminalPTYTestSupport",
             dependencies: [
                 "PaneProcessLifecycle",
                 "TerminalPTYHost",
+                "TerminalPTYWaitSupport",
             ],
             path: "TestSupport/TerminalPTYTestSupport",
             swiftSettings: [.swiftLanguageMode(.v6)]
@@ -89,6 +96,7 @@ let package = Package(
             name: "TerminalWorkflowRunner",
             dependencies: [
                 "TerminalPaneSession",
+                "TerminalPTYWaitSupport",
                 "TerminalWorkflowSupport",
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
             ],
@@ -99,6 +107,7 @@ let package = Package(
             name: "TerminalProtocolProbeRunner",
             dependencies: [
                 "TerminalPaneSession",
+                "TerminalPTYWaitSupport",
                 "TerminalProtocolProbeSupport",
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
             ],

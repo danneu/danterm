@@ -10,6 +10,7 @@ import PaneProcessLifecycle
 import Synchronization
 import Testing
 import TerminalPTYHost
+import TerminalPTYWaitSupport
 
 public extension TerminalPTYHost {
     /// Recreates the former conflated update stream outside production ownership code.
@@ -171,23 +172,26 @@ public extension TerminalPTYHost {
         within limit: Duration = .seconds(30),
         where predicate: @Sendable (TerminalPTYHost) -> Bool
     ) async -> Bool {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: limit)
-        while clock.now < deadline {
-            if predicate(self) { return true }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return predicate(self)
+        await pollUntil({ predicate(self) }, within: limit)
     }
 
     /// Requests shutdown and suspends only test code until the host reports quiescence.
-    nonisolated func close() async {
-        let completion = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
-        requestShutdown {
-            completion.continuation.yield()
-            completion.continuation.finish()
-        }
-        for await _ in completion.stream {
+    ///
+    /// Names its own failure. The host arms an exit bound of its own, so a shutdown
+    /// that never completes is a bug in that bound rather than an ordinary wait --
+    /// and the wait that hid it reported nothing: it suspended until the test's time
+    /// limit, which then blamed the limit and left the test looking merely slow.
+    nonisolated func close(
+        within limit: Duration = .seconds(30),
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        let closed = Mutex(false)
+        requestShutdown { closed.withLock { $0 = true } }
+        guard await pollUntil({ closed.withLock { $0 } }, within: limit) else {
+            Issue.record(
+                "the host did not report quiescence within \(limit) of the shutdown request",
+                sourceLocation: sourceLocation
+            )
             return
         }
     }

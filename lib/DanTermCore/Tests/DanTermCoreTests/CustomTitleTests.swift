@@ -425,7 +425,7 @@ import Testing
         // Scenario: spec-first enter commit.
         let tabId = TabId()
         let msgs = renameCompletionMessages(
-            isConfirm: true, action: .tab(tabId), newName: "New Name")
+            isConfirm: true, target: .tab(tabId), newName: "New Name")
         #expect(msgs.count == 2)
         guard case .renameTab(let id, let name) = msgs[0] else {
             Issue.record("expected renameTab")
@@ -447,7 +447,7 @@ import Testing
         // Scenario: spec-first unchanged-still-fires.
         let tabId = TabId()
         let msgs = renameCompletionMessages(
-            isConfirm: true, action: .tab(tabId), newName: "zsh")
+            isConfirm: true, target: .tab(tabId), newName: "zsh")
         #expect(msgs.count == 2)
         guard case .renameTab = msgs[0] else {
             Issue.record("expected renameTab")
@@ -467,7 +467,7 @@ import Testing
         // Scenario: spec-first empty-clear.
         let tabId = TabId()
         let msgs = renameCompletionMessages(
-            isConfirm: true, action: .tab(tabId), newName: "")
+            isConfirm: true, target: .tab(tabId), newName: "")
         #expect(msgs.count == 2)
         guard case .renameTab(_, let name) = msgs[0] else {
             Issue.record("expected renameTab")
@@ -507,7 +507,7 @@ import Testing
         // Scenario: spec-first empty group.
         let groupId = GroupId()
         let msgs = renameCompletionMessages(
-            isConfirm: true, action: .group(groupId), newName: "")
+            isConfirm: true, target: .group(groupId), newName: "")
         #expect(msgs.count == 1)
         guard case .sidebarRenameEnded = msgs[0] else {
             Issue.record("expected sidebarRenameEnded")
@@ -522,7 +522,7 @@ import Testing
         // Scenario: spec-first esc tab.
         let tabId = TabId()
         let msgs = renameCompletionMessages(
-            isConfirm: false, action: .tab(tabId), newName: "Changed Text")
+            isConfirm: false, target: .tab(tabId), newName: "Changed Text")
         #expect(msgs.count == 1)
         guard case .sidebarRenameEnded = msgs[0] else {
             Issue.record("expected sidebarRenameEnded")
@@ -537,7 +537,7 @@ import Testing
         // Scenario: spec-first esc group.
         let groupId = GroupId()
         let msgs = renameCompletionMessages(
-            isConfirm: false, action: .group(groupId), newName: "New Name")
+            isConfirm: false, target: .group(groupId), newName: "New Name")
         #expect(msgs.count == 1)
         guard case .sidebarRenameEnded = msgs[0] else {
             Issue.record("expected sidebarRenameEnded")
@@ -551,7 +551,7 @@ import Testing
         // Why it exists: pins the no-target branch.
         // Scenario: spec-first no target.
         let msgs = renameCompletionMessages(
-            isConfirm: true, action: nil, newName: "text")
+            isConfirm: true, target: nil, newName: "text")
         #expect(msgs.count == 1)
         guard case .sidebarRenameEnded = msgs[0] else {
             Issue.record("expected sidebarRenameEnded")

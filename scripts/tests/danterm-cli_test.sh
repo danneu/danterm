@@ -10,12 +10,19 @@ smoke_output="$(mktemp)"
 smoke_error="$(mktemp)"
 launcher_pid=""
 
+# `reap_pid` bounds the waits on the launcher below. A bare `wait` parks for good on
+# a child that blocks SIGTERM, and one of those waits is in the EXIT trap -- so the
+# hang would outlive the Ctrl-C meant to end it, holding a dev slot that every other
+# checkout on this machine shares.
+# shellcheck source=../lib/bounded-wait.sh
+source "$SCRIPT_DIR/scripts/lib/bounded-wait.sh"
+
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
     if [[ "$launcher_pid" =~ ^[0-9]+$ ]]; then
         kill -TERM "$launcher_pid" 2>/dev/null || true
-        wait "$launcher_pid" 2>/dev/null || true
+        reap_pid "$launcher_pid"
     fi
     rm -f "$launch_output" "$launch_error" "$smoke_output" "$smoke_error"
     exit "$status"
@@ -50,6 +57,20 @@ slot="$(printf '%s\n' "$handle" | jq -er '.slot')"
 [[ "$bundle_id" == "com.danneu.danterm-dev.$slot" ]]
 [[ "$reported_pid" == "$launcher_pid" ]]
 [[ "$socket" == "$HOME/Library/Caches/$bundle_id/control.sock" ]]
+
+# Asserts a string is absent from the given files.
+#
+# A leading `!` on a grep cannot assert this. `errexit` does not apply to a command
+# whose status a `!` inverts, so all eleven lines written that way were no-ops: the
+# string could appear and the script would carry on to report a pass.
+refute() {
+    local pattern="$1"
+    shift
+    if grep -qF "$pattern" "$@"; then
+        echo "unexpected output: $pattern" >&2
+        exit 1
+    fi
+}
 
 # Help-text smoke tests. These run against the freshly built helper but
 # do not require the app to be running -- help is local arg handling.
@@ -93,12 +114,12 @@ grep -qF 'agent detach --pane <pane-id> --kind <kind> --id <session-id>' "$err"
 grep -qF 'todo clear-completed --pane <pane-id>' "$err"
 grep -qE '^ *doctor +Check DanTerm integration health' "$err"
 grep -qE '^ *skill +Print DanTerm' "$err"
-! grep -qF 'doctor [--all|-v]' "$err"
+refute 'doctor [--all|-v]' "$err"
 grep -qF 'tab new opens in the background at the target group end' "$err"
 grep -qF 'danterm [--socket <path>] <command> [args]' "$err"
 grep -qF 'DANTERM_SOCK' "$err"
 grep -qF 'DANTERM_PANE' "$err"
-! grep -qF 'DANTERM_TAB' "$err"
+refute 'DANTERM_TAB' "$err"
 
 # Explicit help requests: usage on stdout, exit 0, stderr silent. Same
 # stable tokens checked across each flag form.
@@ -124,12 +145,12 @@ for help_arg in help --help -h; do
     grep -qF 'todo clear-completed --pane <pane-id>' "$out"
     grep -qE '^ *doctor +Check DanTerm integration health' "$out"
     grep -qE '^ *skill +Print DanTerm' "$out"
-    ! grep -qF 'doctor [--all|-v]' "$out"
+    refute 'doctor [--all|-v]' "$out"
     grep -qF 'tab new opens in the background at the target group end' "$out"
     grep -qF 'danterm [--socket <path>] <command> [args]' "$out"
     grep -qF 'DANTERM_SOCK' "$out"
     grep -qF 'DANTERM_PANE' "$out"
-    ! grep -qF 'DANTERM_TAB' "$out"
+    refute 'DANTERM_TAB' "$out"
 done
 
 # `skill` is local-only and emits the canonical bundled skill bytes without
@@ -158,12 +179,12 @@ run_cli skill extra
 [[ $status -ne 0 ]]
 [[ ! -s "$out" ]]
 grep -qx 'danterm: unexpected argument: extra' "$err"
-! grep -qF 'DanTerm is not running' "$out" "$err"
+refute 'DanTerm is not running' "$out" "$err"
 run_cli skill --bogus
 [[ $status -ne 0 ]]
 [[ ! -s "$out" ]]
 grep -qx 'danterm: unknown flag: --bogus' "$err"
-! grep -qF 'DanTerm is not running' "$out" "$err"
+refute 'DanTerm is not running' "$out" "$err"
 
 missing_bundle="$skill_bin/Missing.app"
 mkdir -p "$missing_bundle/Contents/Helpers"
@@ -178,7 +199,7 @@ fi
 [[ $status -ne 0 ]]
 [[ ! -s "$out" ]]
 grep -qx 'danterm: bundled skill is missing or unreadable' "$err"
-! grep -qF 'DanTerm is not running' "$out" "$err"
+refute 'DanTerm is not running' "$out" "$err"
 rm -rf "$skill_bin"
 
 # `doctor` keeps its local checks available before the app launches; app-owned
@@ -201,22 +222,22 @@ grep -qF 'OK ' "$out"
 grep -qF 'SKIP Notifications enabled: DanTerm is not running, so its permissions cannot be checked.' "$out"
 grep -qF 'SKIP Full Disk Access permission granted: DanTerm is not running, so its permissions cannot be checked.' "$out"
 grep -qF 'SKIP Developer Tools permission granted: DanTerm is not running, so its permissions cannot be checked.' "$out"
-! grep -qF 'DanTerm is not running' "$err"
+refute 'DanTerm is not running' "$err"
 run_doctor_with_temp_home doctor --all
 [[ $status -ne 0 ]]
 [[ ! -s "$out" ]]
 grep -qx 'danterm: unknown flag: --all' "$err"
-! grep -qF 'DanTerm is not running' "$out" "$err"
+refute 'DanTerm is not running' "$out" "$err"
 run_doctor_with_temp_home doctor -v
 [[ $status -ne 0 ]]
 [[ ! -s "$out" ]]
 grep -qx 'danterm: unknown flag: -v' "$err"
-! grep -qF 'DanTerm is not running' "$out" "$err"
+refute 'DanTerm is not running' "$out" "$err"
 run_doctor_with_temp_home doctor --bogus
 [[ $status -ne 0 ]]
 [[ ! -s "$out" ]]
 grep -qx 'danterm: unknown flag: --bogus' "$err"
-! grep -qF 'DanTerm is not running' "$out" "$err"
+refute 'DanTerm is not running' "$out" "$err"
 rm -rf "$doctor_home"
 
 for _ in $(seq 1 30); do
@@ -394,7 +415,7 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
 PY
 
 kill -TERM "$launcher_pid"
-wait "$launcher_pid" 2>/dev/null || true
+reap_pid "$launcher_pid"
 launcher_pid=""
 for _ in $(seq 1 10); do
     [[ ! -S "$socket" ]] && break

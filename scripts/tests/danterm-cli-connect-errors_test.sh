@@ -8,6 +8,9 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'chmod 700 "$TMP/denied" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 
+# shellcheck source=../lib/bounded-wait.sh
+source "$ROOT_DIR/scripts/lib/bounded-wait.sh"
+
 failures=0
 
 fail() {
@@ -51,7 +54,7 @@ for _ in {1..50}; do
     sleep 0.01
 done
 kill "$listener_pid"
-wait "$listener_pid" 2>/dev/null || true
+reap_pid "$listener_pid"
 [[ -S "$refused_socket" ]] || fail "refused fixture did not create a socket"
 run_cli refused "$refused_socket"
 assert_result refused "danterm: DanTerm is not running"

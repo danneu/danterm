@@ -7,6 +7,7 @@ import TerminalRenderPlanning
 import Testing
 @testable import TerminalPTYHost
 import TerminalPTYTestSupport
+import TerminalPTYWaitSupport
 @testable import TerminalPaneSession
 
 /// Exercises the headless pane controller through one real native PTY per scenario.
@@ -1437,6 +1438,34 @@ struct TerminalPaneSessionControllerTests {
         await waitForQuiescence(controller.terminationHandle)
     }
 
+    @Test("a pane that has not quiesced answers the wait instead of parking it", .timeLimit(.minutes(1)))
+    func quiescenceWaitReportsALivePane() async throws {
+        // Intent: waiting on quiescence gives an answer on a deadline, both when it
+        //   arrives and when it does not.
+        // Why it exists: the callback form cannot be awaited without a continuation
+        //   that a pane which never quiesces never resumes. Both opt-in runners then
+        //   park for good, and neither one's shell wrapper imposes a timeout, so
+        //   nothing outside them ends the run either. They also write an ownership
+        //   record claiming every resource was released -- a claim only quiescence
+        //   supports.
+        // Scenario: a pane running a long sleep is asked about while it is still
+        //   live, then torn down and asked again.
+        let controller = try TerminalPaneSessionController(
+            configuration: .init(
+                launchInput: makeLaunchInput(command: "sleep 60"),
+                terminalProgramVersion: "dev"
+            ),
+            bootstrapExecutable: bootstrapExecutable(),
+            captureTransitions: false
+        )
+        let handle = controller.terminationHandle
+
+        #expect(await handle.quiesced(within: .milliseconds(200)) == false)
+
+        controller.tearDown()
+        #expect(await handle.quiesced(within: .seconds(30)))
+    }
+
     @Test("tearing down a live child never exposes a recording", .timeLimit(.minutes(1)))
     func liveChildTeardownDoesNotExposeRecording() async throws {
         // Intent: recording eligibility follows child-originated session end,
@@ -2163,10 +2192,11 @@ private func findExecutable(named name: String) throws -> String {
         .first(where: FileManager.default.isExecutableFile(atPath:)))
 }
 
-private func waitForQuiescence(_ handle: TerminalPaneTerminationHandle) async {
-    await withCheckedContinuation { continuation in
-        handle.whenQuiescent { continuation.resume() }
-    }
+private func waitForQuiescence(
+    _ handle: TerminalPaneTerminationHandle,
+    sourceLocation: SourceLocation = #_sourceLocation
+) async {
+    #expect(await handle.quiesced(within: .seconds(30)), sourceLocation: sourceLocation)
 }
 
 /// Records dispatch completions while the main actor is intentionally blocked.
@@ -2215,7 +2245,10 @@ private extension TerminalPaneSessionController {
         while clock.now < deadline {
             synchronizeState()
             if predicate(self) { return true }
-            try? await Task.sleep(for: .milliseconds(5))
+            // Stops on a cancelled sleep instead of sampling on with nothing left to
+            // pace the loop, which would rebuild the spin above at the moment a time
+            // limit fired to end it.
+            do { try await Task.sleep(for: .milliseconds(5)) } catch { break }
         }
         synchronizeState()
         return predicate(self)
@@ -2236,6 +2269,6 @@ private func settles(within limit: Duration = .seconds(10), _ predicate: () -> B
     let deadline = clock.now.advanced(by: limit)
     while clock.now < deadline {
         if predicate() { return }
-        try? await Task.sleep(for: .milliseconds(5))
+        do { try await Task.sleep(for: .milliseconds(5)) } catch { return }
     }
 }
