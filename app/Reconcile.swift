@@ -197,13 +197,12 @@ extension AppRuntime {
             &caches.paneToolbar,
             apply: { paneId, render in
             findPaneWrapper(for: paneId)?.updateToolbar(
-                title: render.title,
-                cwd: render.cwd,
-                command: render.command,
+                label: render.label,
                 progress: render.progress,
                 isRemote: render.isRemote,
-                remoteSession: render.remoteSession,
-                agentSession: render.agentSession,
+                remoteLabel: render.remoteLabel,
+                agentLabel: render.agentLabel,
+                chipTooltip: render.chipTooltip,
                 chipKind: render.chipKind,
                 unreadAlertCount: render.unreadAlertCount,
                 totalTodoCount: render.totalTodoCount,

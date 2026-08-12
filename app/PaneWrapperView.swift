@@ -292,17 +292,16 @@ class PaneWrapperView: NSView {
         scrollWrapper.setFocusRing(focused: focused, hasBell: hasBell)
     }
 
-    func updateToolbar(title: String, cwd: String?, command: String? = nil, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, agentSession: AgentSession? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0, isZoomed: Bool? = nil, hasSplits: Bool? = nil) {
-        toolbarLabel.stringValue = paneCommandChromeText(
-            title: title,
-            cwd: cwd,
-            command: command
-        )
+    /// Every string arrives composed by `desiredPaneToolbar`; this method only
+    /// reads values out into labels. Composing text here would put untrusted
+    /// terminal-reported values back together inside the view.
+    func updateToolbar(label: String, progress: ProgressState? = nil, isRemote: Bool = false, remoteLabel: String? = nil, agentLabel: String? = nil, chipTooltip: String? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0, isZoomed: Bool? = nil, hasSplits: Bool? = nil) {
+        toolbarLabel.stringValue = label
         applyProgressState(progress)
         remoteAccessory.isHidden = !isRemote
-        remoteSessionLabel.stringValue = remoteSession?.displayString ?? ""
-        remoteSessionLabel.isHidden = remoteSession == nil
-        let expanded = remoteSession != nil
+        remoteSessionLabel.stringValue = remoteLabel ?? ""
+        remoteSessionLabel.isHidden = remoteLabel == nil
+        let expanded = remoteLabel != nil
         if expanded != remoteExpanded {
             remoteExpanded = expanded
             if expanded {
@@ -316,13 +315,9 @@ class PaneWrapperView: NSView {
         paneChip.kind = chipKind
         // The chip's tooltip carries the session id, so it survives the pill
         // being hidden for an agent the chip can name on its own.
-        paneChip.toolTip = agentSession.map { "\($0.kind) session \($0.sessionId)" }
-        // `.agent` is the mark for an agent DanTerm cannot name, so the pill has
-        // to supply the name the chip is missing. Every other kind either names
-        // the agent itself or means there is no agent.
-        let needsAgentLabel = chipKind == .agent
-        agentAccessory.isHidden = !needsAgentLabel
-        agentSessionLabel.stringValue = needsAgentLabel ? (agentSession?.toolbarLabel ?? "") : ""
+        paneChip.toolTip = chipTooltip
+        agentAccessory.isHidden = agentLabel == nil
+        agentSessionLabel.stringValue = agentLabel ?? ""
         alertBadge.updateBadge(count: unreadAlertCount)
         todoButton.update(totalCount: totalTodoCount, uncompletedCount: uncompletedTodoCount)
         if let isZoomed {

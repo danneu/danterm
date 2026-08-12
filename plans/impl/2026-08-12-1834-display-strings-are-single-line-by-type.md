@@ -248,7 +248,7 @@ shows one line and keeps its subtitle and pane strip.
 - [x] 1. Add `DisplayLine` and rebuild `singleLineName` on the shared
       normalizer. No consumer adopts it yet; the only behavior change is
       control-character stripping in user-name admission. Obligations 1-2.
-- [ ] 2. Move pane-toolbar composition from the view into `desiredPaneToolbar`:
+- [x] 2. Move pane-toolbar composition from the view into `desiredPaneToolbar`:
       `PaneToolbarRender`'s `title`/`cwd`/`command` become one composed field,
       and its `RemoteSession`/`AgentSession` become the composed remote pill,
       agent pill, and chip tooltip, all still `String`. Stands on its own -- the
@@ -260,3 +260,16 @@ shows one line and keeps its subtitle and pane strip.
 - [ ] 4. Harden the single-line labels. Obligations 9-10. Separate because it is
       the only commit needing a GUI session and the only one that can regress
       the rename field editor.
+
+## Implementation notes
+
+- `just test-ui` could not compile at all before this work started: the harness
+  is a raw `swiftc` build over an explicit file list, and `PaneTapeFollow.swift`
+  had begun naming `IpcConnection` without the list being extended. Obligations
+  9-10 need that suite, so the one-line repair landed as its own commit ahead of
+  the plan's commits rather than riding inside one of them.
+- `PaneToolbarRender`'s composed field is named `label`, and the accessory
+  fields `remoteLabel`, `agentLabel`, and `chipTooltip`. Each accessory's
+  visibility now follows its value being nil, so `agentLabel` is nil for every
+  agent whose chip already names it -- the `chipKind == .agent` rule the view
+  used to apply moved into the projection with it.

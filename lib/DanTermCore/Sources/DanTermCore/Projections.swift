@@ -288,14 +288,25 @@ func desiredFocusBorders(in model: AppModel, tally: UnreadAlertTally) -> [PaneId
 /// Pane-toolbar render the reconciler diffs and pushes to a PaneWrapperView's
 /// toolbar. Live lifecycle fields come only from the pane owner's immutable
 /// snapshot. Equatable lets the diff skip panes whose inputs are unchanged.
+///
+/// Every string here is already composed. The view receives no raw model value
+/// and no domain object, so no untrusted terminal-reported text -- a title, a
+/// cwd, a remote user and host -- is assembled inside AppKit.
 struct PaneToolbarRender: Equatable {
-  let title: String
-  let cwd: String?
-  let command: String?
+  /// The running command while one is live, otherwise the title and cwd.
+  let label: String
   let progress: ProgressState?
+  /// Whether the pane is on a remote host at all. Independent of `remoteLabel`,
+  /// which is nil until the remote declares who it is.
   let isRemote: Bool
-  let remoteSession: RemoteSession?
-  let agentSession: AgentSession?
+  /// The remote pill's text, nil when there is no pill to show.
+  let remoteLabel: String?
+  /// The agent pill's text, nil when there is no pill to show -- which includes
+  /// every agent whose chip already names it.
+  let agentLabel: String?
+  /// The chip's tooltip, which names the attached agent and its full session id.
+  /// Nil when no agent is attached.
+  let chipTooltip: String?
   let chipKind: ChipKind
   let unreadAlertCount: Int
   let totalTodoCount: Int
@@ -350,15 +361,22 @@ func desiredPaneToolbar(
         } else {
           command = nil
         }
+        let chipKind = ChipKind(agent: session?.agent ?? .none)
         result[pane.id] = PaneToolbarRender(
-          title: session?.title ?? "Terminal",
-          cwd: session?.cwd,
-          command: command,
+          label: paneCommandChromeText(
+            title: session?.title ?? "Terminal",
+            cwd: session?.cwd,
+            command: command
+          ),
           progress: session?.progress,
           isRemote: remoteSession != nil || (session?.connection ?? .local) != .local,
-          remoteSession: remoteSession,
-          agentSession: agentSession,
-          chipKind: ChipKind(agent: session?.agent ?? .none),
+          remoteLabel: remoteSession?.displayString,
+          // `.agent` is the mark for an agent DanTerm cannot name, so the pill
+          // has to supply the name the chip is missing. Every other kind either
+          // names the agent itself or means there is no agent.
+          agentLabel: chipKind == .agent ? agentSession?.toolbarLabel : nil,
+          chipTooltip: agentSession.map { "\($0.kind) session \($0.sessionId)" },
+          chipKind: chipKind,
           unreadAlertCount: tally.byPane[pane.id] ?? 0,
           totalTodoCount: pane.todos.count,
           uncompletedTodoCount: pane.todos.count { !$0.isDone },
