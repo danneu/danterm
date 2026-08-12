@@ -150,7 +150,7 @@ in itself.
 |        | [S08](#s08) | 20    | 4   | 5   | docs           | small  | Design-doc statuses lie: superseded notes say `Status: Accepted` and the index shows no status                          |
 |        | [S09](#s09) | 20    | 4   | 5   | docs           | medium | Delete plan-terminal-engine/: 2,232 tracked lines that declare themselves normative and the engine ADR says it replaced |
 |        | [S10](#s10) | 20    | 4   | 5   | docs           | medium | Lint doc-to-code citations: seven cited paths no longer exist, one of them misstating a layer                           |
-|        | [S11](#s11) | 20    | 4   | 5   | ipc-cli        | medium | Stop compiling the entire app core into the danterm CLI binary                                                          |
+| a9b99e58 | [S11](#s11) | 20    | 4   | 5   | ipc-cli        | medium | Stop compiling the entire app core into the danterm CLI binary                                                        |
 |        | [S12](#s12) | 20    | 4   | 5   | pty            | large  | Move test-only state and fault injection out of the production PTY actor                                                |
 |        | [S13](#s13) | 20    | 4   | 5   | sidebar        | medium | Give sidebar cells typed subviews instead of string-identifier lookups                                                  |
 | a8eefabc | [S14](#s14) | 20    | 4   | 5   | terminal-core  | medium | Store both screens as ScreenState instead of one boxed and one loose                                                  |
