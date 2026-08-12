@@ -253,15 +253,24 @@ func themeBrowserViewTests() {
         try uiExpect(payload.themeName == "Gruvbox Dark", "builder should use filtered row names")
     }
 
-    uiTest("menuNeedsUpdate with no click builds an empty menu") {
+    uiTest("a right-click on a row yields a menu carrying that row's theme") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
-        let menu = NSMenu()
-        menu.addItem(withTitle: "Stale", action: nil, keyEquivalent: "")
 
-        fx.view.menuNeedsUpdate(menu)
+        let menu = try themeContextMenu(rightClickingRow: 1, in: fx)
+        let payload = try menuPayload(from: try onlyThemeMenuItem(in: menu))
 
-        try uiExpect(menu.items.isEmpty, "menu without a clicked row should be empty")
+        try uiExpect(payload.themeName == fx.names[1], "menu payload theme mismatch: \(payload.themeName)")
+    }
+
+    uiTest("a right-click that misses every row yields no menu") {
+        let fx = makeThemeBrowserFixture()
+        defer { fx.window.close() }
+        let table = fx.view.tableView
+        let below = NSPoint(x: 10, y: CGFloat(fx.names.count + 4) * table.rowHeight)
+        let event = try makeThemeRightClickEvent(at: table.convert(below, to: nil), in: fx)
+
+        try uiExpect(table.menu(for: event) == nil, "a click past the last row should yield no menu")
     }
 
     uiTest("menu keeps the browser alive and Copy Name still fires after teardown") {
@@ -297,39 +306,90 @@ func themeBrowserViewTests() {
         try uiExpect(copied == "Gruvbox Dark", "Copy Name should write to recording pasteboard")
     }
 
-    uiTest("menuDidClose breaks the anchor cycle by releasing menu payloads") {
-        // Intent: closing the persistent table menu removes anchored items after
-        //   AppKit finishes tracking, so the payloads anchoring the browser are
-        //   released.
-        // Why it exists: this menu is stored on tableView.menu; without a
-        //   deferred clear it forms view -> tableView -> menu -> payload -> view.
-        // Scenario: the delegate receives menuDidClose, one main run-loop turn
-        //   drains the deferred clear, and the payload anchoring the browser
-        //   deallocates.
-        var view: ThemeBrowserView? = ThemeBrowserView(themeNames: ["Dracula", "Gruvbox Dark"])
-        var menu: NSMenu?
+    uiTest("the per-click menu, its item, and its payload all deallocate after dismissal") {
+        // Intent: nothing survives one right-click. The browser stores no menu,
+        //   so the whole menu graph goes away once AppKit releases it.
+        // Why it exists: a menu stored on the table view closes the cycle
+        //   view -> tableView -> menu -> item -> payload -> view, which leaks the
+        //   browser and needs a deferred clear to break. Spec-first.
+        // Scenario: a right-click builds a menu, tracking ends, and one run-loop
+        //   turn later the menu, its item, and its anchor payload are all gone.
+        let fx = makeThemeBrowserFixture()
+        defer { fx.window.close() }
+        weak var menuObserver: NSMenu?
+        weak var itemObserver: NSMenuItem?
         weak var payloadObserver: ThemeBrowserView.MenuPayload?
 
-        guard let persistentMenu = view?.tableView.menu else {
-            throw UITestFailure(message: "theme browser should own a persistent table menu")
-        }
-        menu = persistentMenu
-        view?.buildThemeContextMenu(into: persistentMenu, forRow: 1)
-        var item: NSMenuItem? = try onlyThemeMenuItem(in: persistentMenu)
-        payloadObserver = try menuPayload(from: item!)
-        item = nil
-        try uiExpect(payloadObserver != nil, "menu item should initially retain its payload")
+        try uiExpect(fx.view.tableView.menu == nil, "the table view should hold no persistent menu")
 
-        view?.menuDidClose(persistentMenu)
+        try autoreleasepool {
+            let menu = try themeContextMenu(rightClickingRow: 1, in: fx)
+            let item = try onlyThemeMenuItem(in: menu)
+            menuObserver = menu
+            itemObserver = item
+            payloadObserver = try menuPayload(from: item)
+        }
         autoreleasepool {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
         }
-        try uiExpect(menu?.items.isEmpty == true, "menuDidClose should clear anchored items after the deferred turn")
-        try uiExpect(payloadObserver == nil, "menu payload should deallocate after anchored items are cleared")
 
-        menu = nil
-        view = nil
+        try uiExpect(menuObserver == nil, "the per-click menu should deallocate after dismissal")
+        try uiExpect(itemObserver == nil, "the menu item should deallocate after dismissal")
+        try uiExpect(payloadObserver == nil, "the anchor payload should deallocate after dismissal")
     }
+
+    uiTest("the browser deallocates once its owner and its menu are both gone") {
+        // Intent: the anchor payload retains the browser for the menu's lifetime
+        //   and no longer.
+        // Why it exists: the anchor is what keeps Copy Name working across a
+        //   mid-track teardown, and it must not become a permanent retain cycle.
+        //   Spec-first.
+        // Scenario: an unowned browser builds a menu; dropping the menu and the
+        //   owning reference deallocates the browser.
+        weak var browserObserver: ThemeBrowserView?
+
+        autoreleasepool {
+            var view: ThemeBrowserView? = ThemeBrowserView(themeNames: ["Dracula", "Gruvbox Dark"])
+            browserObserver = view
+            var menu: NSMenu? = NSMenu()
+            view?.buildThemeContextMenu(into: menu!, forRow: 1)
+            menu = nil
+            view = nil
+        }
+
+        try uiExpect(browserObserver == nil, "the browser should deallocate with no menu holding it")
+    }
+}
+
+/// Synthesizes the right-click AppKit would deliver over `row` and returns the
+/// menu the table view builds for it.
+private func themeContextMenu(rightClickingRow row: Int, in fx: ThemeBrowserFixture) throws -> NSMenu {
+    settleThemeBrowserFixture(fx)
+    let table = fx.view.tableView
+    let rowRect = table.rect(ofRow: row)
+    let center = NSPoint(x: rowRect.midX, y: rowRect.midY)
+    let event = try makeThemeRightClickEvent(at: table.convert(center, to: nil), in: fx)
+    guard let menu = table.menu(for: event) else {
+        throw UITestFailure(message: "no context menu for row \(row)")
+    }
+    return menu
+}
+
+private func makeThemeRightClickEvent(at windowPoint: NSPoint, in fx: ThemeBrowserFixture) throws -> NSEvent {
+    guard let event = NSEvent.mouseEvent(
+        with: .rightMouseDown,
+        location: windowPoint,
+        modifierFlags: [],
+        timestamp: 1,
+        windowNumber: fx.window.windowNumber,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 1
+    ) else {
+        throw UITestFailure(message: "could not synthesize a right-click")
+    }
+    return event
 }
 
 /// Builds one complete packed entry for the app-side catalog and bridge tests.

@@ -17,7 +17,22 @@ protocol ThemeNamePasteboard: AnyObject {
 
 extension NSPasteboard: ThemeNamePasteboard {}
 
-class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSMenuDelegate {
+/// Table view that builds a fresh context menu per right-click, so the browser
+/// never stores a menu that could anchor itself through `representedObject`.
+class ThemeBrowserTableView: NSTableView {
+    weak var browserView: ThemeBrowserView?
+
+    // NSView: AppKit calls this on right-click / control-click and pops up the returned menu.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let browserView else { return nil }
+        let row = row(at: convert(event.locationInWindow, from: nil))
+        let menu = NSMenu()
+        browserView.buildThemeContextMenu(into: menu, forRow: row)
+        return menu.items.isEmpty ? nil : menu
+    }
+}
+
+class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     weak var runtime: AppRuntime?
 
     private let backgroundView: NSVisualEffectView
@@ -26,7 +41,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
     let closeButton: NSButton
     let searchField: NSSearchField
     private let scrollView: NSScrollView
-    let tableView: NSTableView
+    let tableView: ThemeBrowserTableView
 
     private var allNames: [String] = []
     private var filteredNames: [String] = []
@@ -75,7 +90,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         searchField = NSSearchField()
         searchField.placeholderString = "Filter themes"
 
-        tableView = NSTableView()
+        tableView = ThemeBrowserTableView()
         tableView.headerView = nil
         tableView.rowHeight = 24
         tableView.intercellSpacing = NSSize(width: 0, height: 0)
@@ -150,10 +165,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         tableView.dataSource = self
         tableView.delegate = self
         tableView.target = self
-
-        let menu = NSMenu()
-        menu.delegate = self
-        tableView.menu = menu
+        tableView.browserView = self
 
         allNames = themeNames
         filteredNames = allNames
@@ -285,10 +297,10 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         searchChanged(searchField)
     }
 
-    // MARK: - NSMenuDelegate
+    // MARK: - Context menu
 
-    /// Rebuild the right-click menu for `row`, using NSTableView.clickedRow
-    /// semantics where -1 means the click missed every row.
+    /// Fill `menu` with the right-click items for `row`, using NSTableView
+    /// hit-test semantics where -1 means the click missed every row.
     func buildThemeContextMenu(into menu: NSMenu, forRow row: Int) {
         menu.removeAllItems()
         guard row >= 0, row < filteredNames.count else { return }
@@ -296,22 +308,6 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         item.target = self
         item.representedObject = MenuPayload(themeName: filteredNames[row], anchor: self)
         menu.addItem(item)
-    }
-
-    /// NSMenuDelegate: build the context menu for the right-clicked row.
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        buildThemeContextMenu(into: menu, forRow: tableView.clickedRow)
-    }
-
-    /// NSMenuDelegate: break the anchor cycle after AppKit finishes tracking.
-    func menuDidClose(_ menu: NSMenu) {
-        RunLoop.main.perform {
-            for item in menu.items {
-                item.target = nil
-                item.representedObject = nil
-            }
-            menu.removeAllItems()
-        }
     }
 
     @objc private func copyThemeName(_ sender: NSMenuItem) {

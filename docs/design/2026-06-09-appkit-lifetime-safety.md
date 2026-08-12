@@ -109,11 +109,13 @@ The current high-risk sites are safe for these specific reasons:
   `PaneWrapperView.makePaneMenu` targets the runtime-owned wrapper and
   anchors it via `representedObject = self` on each wrapper-targeted item
   (`app/PaneWrapperView.swift:425-485`); its clipboard items target the
-  reconcile-stable `TerminalView` and need no anchor. `ThemeBrowserView` uses a
-  persistent table menu, so `buildThemeContextMenu(into:forRow:)` anchors the
-  browser with a payload carrying the stable theme name, then `menuDidClose`
-  clears the items on the next main-run-loop turn to break the menu -> payload ->
-  browser cycle (`app/ThemeBrowserView.swift:330-352`).
+  reconcile-stable `TerminalView` and need no anchor. `ThemeBrowserView` uses the
+  same per-event shape as the other two sites: `ThemeBrowserTableView.menu(for:)`
+  builds a fresh menu on each right-click and the browser never stores one, so
+  `buildThemeContextMenu(into:forRow:)` can anchor the browser with a payload
+  carrying the stable theme name and no menu -> payload -> browser cycle is
+  possible. AppKit retains the popped-up menu while tracking, which is what keeps
+  the anchor load-bearing, and releases it afterwards.
 - Menu `undo:` / `redo:` (`app/AppDelegate.swift:246-249`) dispatches through
   the responder chain. DanTerm has no window-level `registerUndo` site.
 - `WindowChromeView` selector observers
