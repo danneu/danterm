@@ -134,19 +134,19 @@ worktree without changing the primary checkout.
 
 When an agent needs its own development app, run `just launch-slot` from the
 source tree instead of `just replace-dev`. The launcher builds without replacing
-or focusing the user's slot-zero app, claims a free slot from 1 through 8, prints
-one JSON handle, and then becomes the app process. Capture the handle from
-stdout and target its `socketPath` explicitly:
+or focusing the user's slot-zero app, claims a free slot from 1 through 8, starts
+the app detached, waits until that app's control socket accepts connections,
+prints one JSON handle on stdout, and exits. Build output goes to stderr, so the
+handle is the last stdout line, and the socket it names is ready to drive. Read
+it and target its `socketPath` explicitly:
 
-    SLOT_HANDLE="$(mktemp /tmp/danterm-slot.XXXXXX)"
-    ./scripts/dev-slot-launcher.py > "$SLOT_HANDLE" &
-    DANTERM_SLOT_PID=$!
-    while ! SLOT_SOCKET="$(jq -er '.socketPath' "$SLOT_HANDLE" 2>/dev/null)" \
-        && kill -0 "$DANTERM_SLOT_PID" 2>/dev/null; do sleep 0.1; done
-    test -n "${SLOT_SOCKET:-}" && danterm --socket "$SLOT_SOCKET" ls
+    SLOT_SOCKET="$(just launch-slot | tail -1 | jq -er '.socketPath')"
+    danterm --socket "$SLOT_SOCKET" ls
 
-The handle also contains `slot`, `bundleId`, and `pid`; `pid` is the launched
-app because the launcher uses direct exec. The default is fresh, background,
+The handle also contains `slot`, `bundleId`, and `pid`; `pid` is the detached
+app. The app writes its own stdout and stderr to
+`~/Library/Caches/com.danneu.danterm-dev-slots/logs/slot-<n>.log`, not to your
+terminal. The default is fresh, background,
 and notification-prompt-free. Use `just launch-slot-prime` only when a human is
 ready to grant one slot's notification permission, and
 `just launch-slot-optimized` for an optimized build. Pool exhaustion exits with

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Claim, stage, and directly exec one isolated DanTerm development slot."""
+"""Claim, stage, and launch one isolated DanTerm development slot.
+
+The launcher prints its JSON handle and exits instead of becoming the app, so
+that a caller's `just launch-slot | tail -2` sees end-of-file right away. The
+app runs on in its own session with its output in the slot log.
+"""
 
 from __future__ import annotations
 
@@ -14,9 +19,11 @@ from pathlib import Path
 import plistlib
 import pwd
 import shutil
+import socket as socket_module
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Iterable, Mapping
 
 
@@ -31,6 +38,12 @@ PASSTHROUGH_ENVIRONMENT_VARIABLES = (
 )
 
 
+class LaunchFailedError(Exception):
+    """Reports a started app that never became usable, separately from build failure."""
+
+    exit_status = 1
+
+
 class PoolExhaustedError(Exception):
     """Reports fixed-pool exhaustion separately from build or launch failures."""
 
@@ -39,7 +52,7 @@ class PoolExhaustedError(Exception):
 
 @dataclass
 class SlotClaim:
-    """Owns a kernel-released slot lock that intentionally survives app exec."""
+    """Owns a kernel-released slot lock the launched app inherits and keeps."""
 
     slot: int
     descriptor: int
@@ -160,7 +173,7 @@ def stage_slot_bundle(
 
 
 def launch_handle(identity: Mapping[str, object], pid: int) -> dict[str, object]:
-    """Emits the complete identity handle clients need before the launcher execs."""
+    """Emits the complete identity handle clients need to drive the new slot."""
 
     return {
         "slot": identity["slot"],
@@ -168,6 +181,83 @@ def launch_handle(identity: Mapping[str, object], pid: int) -> dict[str, object]
         "socketPath": identity["socketPath"],
         "pid": pid,
     }
+
+
+def slot_log_path(slot_root: Path, slot: int) -> Path:
+    """Gives the detached app a stable place to write once stdout is not a pipe."""
+
+    logs = slot_root / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    return logs / f"slot-{slot}.log"
+
+
+def spawn_detached(
+    executable: Path,
+    arguments: list[str],
+    environment: Mapping[str, str],
+    log_path: Path,
+) -> int:
+    """Starts the app in its own session so the launcher can close its own stdout.
+
+    The app must not hold the caller's pipe: a reader such as `tail` waits for
+    end-of-file, and a reader such as `head` would break the pipe under the app.
+    Its own session also keeps it alive when the caller's shell goes away.
+    """
+
+    log_descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        return os.posix_spawn(
+            str(executable),
+            arguments,
+            dict(environment),
+            file_actions=[
+                (os.POSIX_SPAWN_OPEN, 0, os.devnull, os.O_RDONLY, 0o600),
+                (os.POSIX_SPAWN_DUP2, log_descriptor, 1),
+                (os.POSIX_SPAWN_DUP2, log_descriptor, 2),
+            ],
+            setsid=True,
+        )
+    finally:
+        os.close(log_descriptor)
+
+
+def accepts_connections(socket_path: Path) -> bool:
+    """Answers whether a live server is behind the path, not whether a file is."""
+
+    connection = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    try:
+        connection.settimeout(1.0)
+        connection.connect(str(socket_path))
+        return True
+    except OSError:
+        return False
+    finally:
+        connection.close()
+
+
+def await_control_socket(socket_path: Path, pid: int, timeout: float = 30.0) -> None:
+    """Holds the handle back until the caller's next CLI call can actually connect.
+
+    Without this every caller repeats the same poll loop, and the first
+    `danterm --socket` after a launch fails with "DanTerm is not running".
+    """
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        # Connect rather than test for the file: a slot killed uncleanly leaves
+        # its socket on disk, and that stale path accepts nothing.
+        if accepts_connections(socket_path):
+            return
+        # The app is this process's child, so a dead one is a zombie that still
+        # answers kill(pid, 0); only reaping it reports the exit.
+        try:
+            reaped, _ = os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            reaped = pid
+        if reaped == pid:
+            raise LaunchFailedError("the app exited before it opened its control socket")
+        time.sleep(0.02)
+    raise LaunchFailedError(f"the app did not open {socket_path} within {timeout:g}s")
 
 
 def gui_launchd_environment(uid: int) -> dict[str, str]:
@@ -294,19 +384,34 @@ def main(arguments: list[str]) -> int:
         app_path = slot_root / "apps" / f"{app_name}.app"
         stage_slot_bundle(source_app, app_path, identity)
 
-    handle = launch_handle(identity, os.getpid())
-    print(json.dumps(handle, separators=(",", ":")), flush=True)
-
     executable = app_path / "Contents" / "MacOS" / str(identity["executableName"])
     app_arguments = [
         str(executable),
         "--fresh",
         f"--development-slot-lock-fd={claim.descriptor}",
     ]
-    if not options.foreground:
-        app_arguments.append("--background")
-    os.execve(executable, app_arguments, environment)
-    return 1
+    if options.foreground:
+        # A human primes notification authorization here and wants the app
+        # attached to their terminal, so this path keeps replacing the launcher.
+        print(json.dumps(launch_handle(identity, os.getpid()), separators=(",", ":")), flush=True)
+        os.execve(executable, app_arguments, environment)
+        return 1
+
+    app_arguments.append("--background")
+    pid = spawn_detached(
+        executable,
+        app_arguments,
+        environment,
+        slot_log_path(slot_root, slot),
+    )
+    claim.close()
+    try:
+        await_control_socket(Path(str(identity["socketPath"])), pid)
+    except LaunchFailedError as error:
+        print(f"dev-slot-launcher: {error}", file=sys.stderr)
+        return error.exit_status
+    print(json.dumps(launch_handle(identity, pid), separators=(",", ":")), flush=True)
+    return 0
 
 
 if __name__ == "__main__":

@@ -28,7 +28,9 @@ CoreText, and UniformTypeIdentifiers.
   not production releases and do not publish anything.
 - `scripts/dev-slot-launcher.py` -- claims a user-global slot from 1 through 8,
   runs `dev-build.sh --no-install`, stages and signs the slot clone, emits its
-  JSON handle, and directly execs the app with fresh/background policy. Wrapped
+  JSON handle once the detached app's control socket accepts connections, having
+  started it with fresh/background policy before exiting, so a caller piping the launcher reaches end-of-file at once and the
+  app's own output lands in `<slot cache>/logs/slot-<n>.log`. Wrapped
   by `just launch-slot`, `just launch-slot-optimized`, and the foreground
   notification-permission path `just launch-slot-prime`. Slot 0 is never
   claimed. The build-only `DanTermInstanceIdentityTool` resolves each clone's

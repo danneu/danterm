@@ -158,9 +158,11 @@ would lose nothing a reader could not recover from the code, don't write it.
 ### Prose
 
 Plain, simple English in active voice -- in comments, docs, plans, commit
-messages, and replies alike. The reader should parse every sentence correctly on
-the first pass, with nothing to decode: no garden paths, no compressed
-headline-style grammar, no clever compression.
+messages, and replies alike, in the spirit of ASD-STE100 (Simplified Technical
+English): short sentences, one idea each, a consistent word for a given thing,
+and no jargon where a common word works. The reader should parse every sentence
+correctly on the first pass, with nothing to decode: no garden paths, no
+compressed headline-style grammar, no clever compression.
 
 ### Object lifetime (no use-after-free)
 
@@ -205,10 +207,15 @@ and legitimately have none).
 prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
 
 - `just launch-slot` -- **the way an agent runs the app.** Builds without
-  installing, claims an isolated slot from 1 through 8, and execs it. Suffix
-  `-optimized` for a release-configuration build, `-prime` only when a human is
-  granting a slot notification permission. Drive the slot with an explicit
-  `danterm --socket` argument every time; do not rely on ambient `DANTERM_SOCK`.
+  installing, claims an isolated slot from 1 through 8, starts the app detached,
+  waits for its control socket to accept connections, prints one JSON handle on
+  stdout, and exits -- so `just launch-slot | tail -1` returns the handle, and
+  the app's own output goes to the slot log under
+  `~/Library/Caches/com.danneu.danterm-dev-slots/logs/`. Suffix `-optimized` for
+  a release-configuration build, `-prime` only when a human is granting a slot
+  notification permission (that one stays attached). Drive the slot with an
+  explicit `danterm --socket` argument every time; do not rely on ambient
+  `DANTERM_SOCK`.
 - `just build` / `just replace-dev` -- **the user's commands; do not run them
   unless asked.** Both overwrite `~/Applications/DanTerm Dev.app`, and
   `replace-dev` also quits the running instance the user may be working in.

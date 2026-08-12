@@ -31,24 +31,23 @@ canonical app, so an agent running the app from anywhere in this repo wants a
 slot. Provisioning is the only part of this document a worktree adds.
 
 Capture the launcher's JSON handle and pass its socket explicitly on every CLI
-call:
+call. The launcher starts the app detached, waits for its control socket, and
+then exits, so it is a plain command: build output goes to stderr, and the
+handle on the last stdout line names a socket that already accepts connections.
 
 ```sh
-SLOT_HANDLE="$(mktemp /tmp/danterm-slot.XXXXXX)"
-./scripts/dev-slot-launcher.py > "$SLOT_HANDLE" &
-DANTERM_SLOT_PID=$!
-while ! SLOT_SOCKET="$(jq -er '.socketPath' "$SLOT_HANDLE" 2>/dev/null)" \
-    && kill -0 "$DANTERM_SLOT_PID" 2>/dev/null; do sleep 0.1; done
-test -n "${SLOT_SOCKET:-}" && danterm --socket "$SLOT_SOCKET" ls
+SLOT_SOCKET="$(just launch-slot | tail -1 | jq -er '.socketPath')"
+danterm --socket "$SLOT_SOCKET" ls
 ```
 
 Do not export `DANTERM_SOCK` for a slot. Keeping
 `--socket "$SLOT_SOCKET"` at each call site prevents a command from silently
 falling back to the user's app.
 
-The handle also contains the slot number, bundle ID, and app PID. The launcher
-uses direct exec, so the background PID is the launched app. If all slots are
-occupied, the launcher exits with status 75 without launching another app.
+The handle also contains the slot number, bundle ID, and the detached app's PID.
+The app runs in its own session and writes its stdout and stderr to
+`~/Library/Caches/com.danneu.danterm-dev-slots/logs/slot-<n>.log`. If all slots
+are occupied, the launcher exits with status 75 without launching another app.
 
 Use `just launch-slot-optimized` for an optimized isolated build. Use
 `just launch-slot-prime` only when granting a slot notification permission in
@@ -63,9 +62,8 @@ The allowlist currently holds `DANTERM_PTY_RECORDING_DIR` and
 to per second):
 
 ```sh
-RECORDING_SLOT_HANDLE="$(mktemp /tmp/danterm-recording-slot.XXXXXX)"
-DANTERM_PTY_RECORDING_DIR="$(mktemp -d)" ./scripts/dev-slot-launcher.py \
-  --pass-env DANTERM_PTY_RECORDING_DIR > "$RECORDING_SLOT_HANDLE" &
+RECORDING_HANDLE="$(DANTERM_PTY_RECORDING_DIR="$(mktemp -d)" \
+  ./scripts/dev-slot-launcher.py --pass-env DANTERM_PTY_RECORDING_DIR | tail -1)"
 ```
 
 There is no backend-selection variable: the Swift engine is the only backend.
