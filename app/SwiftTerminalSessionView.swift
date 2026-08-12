@@ -580,13 +580,16 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             isPrecise: event.hasPreciseScrollingDeltas,
             cellHeight: Double(state.cellHeight)
         )
-        controller.sendWheel(.init(
-            rowDelta: rows,
-            column: cell.column,
-            row: cell.row,
-            modifiers: Self.terminalModifiers(event.modifierFlags),
-            phase: Self.wheelPhase(for: event)
-        ))
+        controller.sendWheel(
+            .init(
+                rowDelta: rows,
+                column: cell.column,
+                row: cell.row,
+                modifiers: Self.terminalModifiers(event.modifierFlags),
+                phase: Self.wheelPhase(for: event)
+            ),
+            origin: PaneInputOrigin.systemEvent(event)
+        )
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -653,7 +656,11 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         else {
             return
         }
-        forwardPointerMove(at: location, modifiers: event.modifierFlags)
+        forwardPointerMove(
+            at: location,
+            modifiers: event.modifierFlags,
+            origin: PaneInputOrigin.systemEvent(event)
+        )
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -665,21 +672,32 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         keyTextAccumulator = []
         defer { keyTextAccumulator = nil }
 
+        // Every submission below reports the event's own occurrence time, not the clock now:
+        // whatever delayed this handler is the app's, and stamping it here would hide that.
+        let origin = PaneInputOrigin.systemEvent(event)
         let markedTextBefore = hasMarkedText()
         interpretKeyEvents([event])
         if markedTextBefore == false, hasMarkedText() == false,
            Self.isKeypadKeyCode(event.keyCode), let key = Self.terminalKey(for: event) {
-            controller.sendKey(key, modifiers: Self.terminalModifiers(event.modifierFlags))
+            controller.sendKey(
+                key,
+                modifiers: Self.terminalModifiers(event.modifierFlags),
+                origin: origin
+            )
             return
         }
         if let texts = keyTextAccumulator, texts.isEmpty == false,
            texts.allSatisfy(Self.isCommittedTerminalText) {
-            for text in texts { controller.sendText(text) }
+            for text in texts { controller.sendText(text, origin: origin) }
             return
         }
         guard markedTextBefore == false, hasMarkedText() == false else { return }
         guard let key = Self.terminalKey(for: event) else { return }
-        controller.sendKey(key, modifiers: Self.terminalModifiers(event.modifierFlags))
+        controller.sendKey(
+            key,
+            modifiers: Self.terminalModifiers(event.modifierFlags),
+            origin: origin
+        )
     }
 
     func hasMarkedText() -> Bool {
@@ -740,7 +758,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             accumulator.append(text)
             keyTextAccumulator = accumulator
         } else {
-            controller.sendText(text)
+            // Reached outside a `keyDown`, so there is no system event whose time this text
+            // is the product of; the app-entry stamp is the earliest moment it can claim.
+            controller.sendText(text, origin: PaneInputOrigin.appEntry())
         }
     }
 
@@ -752,18 +772,22 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     // paste path, so it goes through owner-side safe-paste policy (control stripping, bracket
     // markers) exactly like the clipboard entry points.
     func sendText(_ text: String) {
-        controller.sendPaste(text)
+        controller.sendPaste(text, origin: PaneInputOrigin.appEntry())
     }
 
     // TerminalSessionView: `Command.sendInputText`, structured `input` text. Deliberately raw --
     // vim and htop must see the characters as if typed, so paste semantics must not apply.
     func sendInputText(_ text: String) {
-        controller.sendText(text)
+        controller.sendText(text, origin: PaneInputOrigin.appEntry())
     }
 
     func sendInputKey(_ key: KeyName, modifiers: KeyMods) {
         guard let key = Self.terminalKey(for: key) else { return }
-        controller.sendKey(key, modifiers: Self.terminalModifiers(modifiers))
+        controller.sendKey(
+            key,
+            modifiers: Self.terminalModifiers(modifiers),
+            origin: PaneInputOrigin.appEntry()
+        )
     }
 
     func setFocused(_ focused: Bool) {
@@ -1009,7 +1033,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
 
     func pasteClipboard() {
         guard let text = selectionPasteboard.string(forType: .string) else { return }
-        controller.sendPaste(text)
+        controller.sendPaste(text, origin: PaneInputOrigin.appEntry())
     }
 
     func requestClose() {
@@ -1199,7 +1223,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private func forwardFocusIfChanged(_ focused: Bool) {
         guard isTornDown == false, focused != lastForwardedFocus else { return }
         lastForwardedFocus = focused
-        controller.sendFocus(focused)
+        // Responder changes reach here from several AppKit callbacks with no event in hand, so
+        // the pane entry is the earliest moment a focus report can honestly claim.
+        controller.sendFocus(focused, origin: PaneInputOrigin.appEntry())
     }
 
     private func normalizedCell(for event: NSEvent) -> TerminalViewportCell? {
@@ -1224,14 +1250,17 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
         lastPointerLocationInWindow = event.locationInWindow
         isPointerInside = pointerIsOutsideGrid(event.locationInWindow) == false
-        controller.sendPointer(.down(
-            button,
-            column: cell.column,
-            row: cell.row,
-            offsetX: cell.offsetX,
-            modifiers: Self.terminalModifiers(event.modifierFlags),
-            clickCount: event.clickCount
-        ))
+        controller.sendPointer(
+            .down(
+                button,
+                column: cell.column,
+                row: cell.row,
+                offsetX: cell.offsetX,
+                modifiers: Self.terminalModifiers(event.modifierFlags),
+                clickCount: event.clickCount
+            ),
+            origin: PaneInputOrigin.systemEvent(event)
+        )
         if pointerIsOutsideGrid(event.locationInWindow) {
             controller.cancelLinkInteraction()
         }
@@ -1244,31 +1273,42 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             isPointerInside = false
             controller.cancelLinkInteraction()
         }
-        controller.sendPointer(.up(
-            button,
-            column: cell.column,
-            row: cell.row,
-            modifiers: Self.terminalModifiers(event.modifierFlags)
-        ))
+        controller.sendPointer(
+            .up(
+                button,
+                column: cell.column,
+                row: cell.row,
+                modifiers: Self.terminalModifiers(event.modifierFlags)
+            ),
+            origin: PaneInputOrigin.systemEvent(event)
+        )
     }
 
     private func forwardPointerMove(_ event: NSEvent) {
         lastPointerLocationInWindow = event.locationInWindow
         isPointerInside = pointerIsOutsideGrid(event.locationInWindow) == false
-        forwardPointerMove(at: event.locationInWindow, modifiers: event.modifierFlags)
+        forwardPointerMove(
+            at: event.locationInWindow,
+            modifiers: event.modifierFlags,
+            origin: PaneInputOrigin.systemEvent(event)
+        )
     }
 
     private func forwardPointerMove(
         at locationInWindow: NSPoint,
-        modifiers: NSEvent.ModifierFlags
+        modifiers: NSEvent.ModifierFlags,
+        origin: UInt64
     ) {
         guard isTornDown == false, let cell = normalizedCell(at: locationInWindow) else { return }
-        controller.sendPointer(.move(
-            column: cell.column,
-            row: cell.row,
-            offsetX: cell.offsetX,
-            modifiers: Self.terminalModifiers(modifiers)
-        ))
+        controller.sendPointer(
+            .move(
+                column: cell.column,
+                row: cell.row,
+                offsetX: cell.offsetX,
+                modifiers: Self.terminalModifiers(modifiers)
+            ),
+            origin: origin
+        )
         if pointerIsOutsideGrid(locationInWindow) {
             controller.cancelLinkInteraction()
         }
@@ -1509,7 +1549,7 @@ extension SwiftTerminalSessionView {
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         guard let content = dragDropContent(from: sender.draggingPasteboard) else { return false }
-        controller.sendPaste(content)
+        controller.sendPaste(content, origin: PaneInputOrigin.appEntry())
         return true
     }
 }

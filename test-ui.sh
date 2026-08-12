@@ -68,6 +68,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DragDropInput.swift" \
         "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/TerminalInputEncoding.swift" \
         "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/ActivatableWebURI.swift" \
+        "$SCRIPT_DIR/app/PaneInputOrigin.swift" \
         "$SCRIPT_DIR/app/TerminalLinkURL.swift" \
         "$SCRIPT_DIR/app/DragDropPasteboard.swift" \
         "$SCRIPT_DIR/app/BadgeLabel.swift" \

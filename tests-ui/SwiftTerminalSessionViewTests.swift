@@ -1267,6 +1267,55 @@ func swiftTerminalSessionViewTests() {
                      "F3 did not use Kitty encoding: \(String(describing: controller.inputBytes.last))")
     }
 
+    uiTest("a keystroke's origin is the system event's own occurrence time") {
+        // Intent: both `keyDown` routes -- committed text and a fixed terminal key -- attribute
+        // their bytes to the time the system created the event.
+        // Why it exists: the pane recorder charges the distance between that origin and the
+        // completed write to the app, so a handler that sampled its own clock instead would
+        // charge every stall ahead of it to the child, which is the ambiguity the tape removes.
+        // Scenario: two key events that occurred at 2.5s and 3.5s of uptime reach the pane.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller)
+
+        pane.keyDown(with: try makeKeyEvent(
+            keyCode: 40,
+            modifiers: [],
+            characters: "k",
+            timestamp: 2.5
+        ))
+        pane.keyDown(with: try makeKeyEvent(keyCode: 48, modifiers: [], timestamp: 3.5))
+
+        try uiExpect(controller.textInputs == ["k"], "typed text did not reach the controller")
+        try uiExpect(controller.inputBytes == [Array("\t".utf8)], "Tab did not reach the controller")
+        try uiExpect(controller.inputOrigins == [2_500_000_000, 3_500_000_000],
+                     "input lost the event's own time: \(controller.inputOrigins)")
+    }
+
+    uiTest("input the app originates carries the time it entered the pane") {
+        // Intent: input with no system event behind it -- the IPC text and key entries -- still
+        // reports an origin, taken as it enters the pane.
+        // Why it exists: an absent origin means "these bytes originated at the pane owner", so
+        // an unstamped IPC submission would misattribute the app's own queueing to the owner.
+        // Scenario: the control socket sends one text run and one named key.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller)
+
+        let before = DispatchTime.now().uptimeNanoseconds
+        pane.sendInputText("ls")
+        pane.sendInputKey(.named(.enter), modifiers: [])
+        let after = DispatchTime.now().uptimeNanoseconds
+
+        try uiExpect(controller.inputOrigins.count == 2,
+                     "expected two submissions, got \(controller.inputOrigins.count)")
+        for origin in controller.inputOrigins {
+            guard let origin else {
+                throw UITestFailure(message: "app-originated input reported no origin at all")
+            }
+            try uiExpect(origin >= before && origin <= after,
+                         "origin \(origin) is outside the submission window")
+        }
+    }
+
     uiTest("keyboard input runs before a sustained frame stream completes") {
         // Intent: the real AppKit key route reaches the pane controller before a
         //   continuing stream of visible frame callbacks finishes.
@@ -1665,13 +1714,14 @@ private func mountInTestWindow(_ view: NSView, frame: NSRect) {
 private func makeKeyEvent(
     keyCode: UInt16,
     modifiers: NSEvent.ModifierFlags,
-    characters: String = ""
+    characters: String = "",
+    timestamp: TimeInterval = 1
 ) throws -> NSEvent {
     guard let event = NSEvent.keyEvent(
         with: .keyDown,
         location: .zero,
         modifierFlags: modifiers,
-        timestamp: 1,
+        timestamp: timestamp,
         windowNumber: 0,
         context: nil,
         characters: characters,

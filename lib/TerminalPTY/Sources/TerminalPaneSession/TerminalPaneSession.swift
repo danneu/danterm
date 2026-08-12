@@ -596,36 +596,44 @@ public final class TerminalPaneSessionController {
     }
 
     /// Sends committed UTF-8 text through the host's shared ordered submission queue.
-    public func sendText(_ text: String) {
-        send(Array(text.utf8))
+    ///
+    /// Every submission here carries an `origin`: when the event that produced these bytes
+    /// occurred, on `DispatchTime`'s scale. Nil means the bytes originated at the pane itself
+    /// and have no earlier moment to report.
+    public func sendText(_ text: String, origin: UInt64? = nil) {
+        send(Array(text.utf8), origin: origin)
     }
 
     /// Sends already encoded terminal bytes without introducing an ordering-opaque Task.
-    public func send(_ bytes: [UInt8]) {
+    public func send(_ bytes: [UInt8], origin: UInt64? = nil) {
         guard isTornDown == false, bytes.isEmpty == false else { return }
-        host.send(bytes)
+        host.send(bytes, origin: origin)
     }
 
     /// Forwards one normalized key for atomic owner-side mode lookup and encoding.
-    public func sendKey(_ key: TerminalInputKey, modifiers: TerminalKeyModifiers) {
+    public func sendKey(
+        _ key: TerminalInputKey,
+        modifiers: TerminalKeyModifiers,
+        origin: UInt64? = nil
+    ) {
         guard isTornDown == false else { return }
-        host.sendKey(key, modifiers: modifiers)
+        host.sendKey(key, modifiers: modifiers, origin: origin)
     }
 
     /// Forwards paste text so sanitizing and bracket-mode lookup occur on the owner queue.
-    public func sendPaste(_ text: String) {
+    public func sendPaste(_ text: String, origin: UInt64? = nil) {
         guard isTornDown == false else { return }
-        host.sendPaste(text)
+        host.sendPaste(text, origin: origin)
     }
 
     /// Forwards focus state so the owner gates its report against authoritative mode 1004.
-    public func sendFocus(_ focused: Bool) {
+    public func sendFocus(_ focused: Bool, origin: UInt64? = nil) {
         guard isTornDown == false else { return }
-        host.sendFocus(focused)
+        host.sendFocus(focused, origin: origin)
     }
 
     /// Forwards normalized pointer input without mirroring child modes on the main actor.
-    public func sendPointer(_ event: TerminalPointerEvent) {
+    public func sendPointer(_ event: TerminalPointerEvent, origin: UInt64? = nil) {
         guard isTornDown == false else { return }
         let deliveryBoundary = deliveryBoundary
         // Resolved at submission rather than at delivery, so the owner is handed no
@@ -641,6 +649,7 @@ public final class TerminalPaneSessionController {
         }
         host.sendPointer(
             event,
+            origin: origin,
             onPaneMenu: { [weak self] cell in
                 deliveryBoundary.enqueue { [weak self] in
                     guard let self, self.isTornDown == false else { return }
@@ -682,9 +691,9 @@ public final class TerminalPaneSessionController {
     }
 
     /// Forwards fractional wheel input and gesture boundaries for owner-side routing.
-    public func sendWheel(_ event: TerminalWheelEvent) {
+    public func sendWheel(_ event: TerminalWheelEvent, origin: UInt64? = nil) {
         guard isTornDown == false else { return }
-        host.sendWheel(event)
+        host.sendWheel(event, origin: origin)
     }
 
     /// Submits each distinct valid grid once, preserving its order relative to input.

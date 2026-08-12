@@ -459,6 +459,9 @@ final class TerminalPaneSessionController {
     private(set) var scrolledTopRows: [Int] = []
     private(set) var textInputs: [String] = []
     private(set) var inputBytes: [[UInt8]] = []
+    /// Origin stamps in submission order, so a test can assert which moment the pane view
+    /// attributed its input to. The real controller forwards these to the flight recorder.
+    private(set) var inputOrigins: [UInt64?] = []
     private(set) var focusChanges: [Bool] = []
     private(set) var pointerEvents: [TerminalPointerEvent] = []
     private(set) var wheelEvents: [TerminalWheelEvent] = []
@@ -490,24 +493,40 @@ final class TerminalPaneSessionController {
         self.currentPlan = currentPlan
     }
 
-    func sendText(_ text: String) { textInputs.append(text) }
-    func sendKey(_ key: TerminalInputKey, modifiers: TerminalKeyModifiers) {
-        inputBytes.append(encodeTerminalKey(key, modifiers: modifiers, modes: inputModes))
+    func sendText(_ text: String, origin: UInt64? = nil) {
+        textInputs.append(text)
+        inputOrigins.append(origin)
     }
-    func sendPaste(_ text: String) {
+    func sendKey(
+        _ key: TerminalInputKey,
+        modifiers: TerminalKeyModifiers,
+        origin: UInt64? = nil
+    ) {
+        inputBytes.append(encodeTerminalKey(key, modifiers: modifiers, modes: inputModes))
+        inputOrigins.append(origin)
+    }
+    func sendPaste(_ text: String, origin: UInt64? = nil) {
         inputBytes.append(encodeTerminalPaste(text, modes: inputModes))
+        inputOrigins.append(origin)
     }
     func beginSearch(_ query: String) { searchQueries.append(query) }
     func searchNext() { searchNextRequests += 1 }
     func searchPrevious() { searchPreviousRequests += 1 }
     func clearSearch() { clearSearchRequests += 1 }
-    func sendFocus(_ focused: Bool) {
+    func sendFocus(_ focused: Bool, origin: UInt64? = nil) {
         focusChanges.append(focused)
         let bytes = encodeTerminalFocus(focused: focused, modes: inputModes)
-        if bytes.isEmpty == false { inputBytes.append(bytes) }
+        if bytes.isEmpty == false {
+            inputBytes.append(bytes)
+            inputOrigins.append(origin)
+        }
     }
-    func sendWheel(_ event: TerminalWheelEvent) { wheelEvents.append(event) }
-    func sendPointer(_ event: TerminalPointerEvent) {
+    // `origin` is accepted and dropped: this shim records wheel and pointer input as events
+    // rather than as bytes, and only the byte-producing paths above assert on their stamps.
+    func sendWheel(_ event: TerminalWheelEvent, origin: UInt64? = nil) {
+        wheelEvents.append(event)
+    }
+    func sendPointer(_ event: TerminalPointerEvent, origin: UInt64? = nil) {
         pointerEvents.append(event)
         if allowsPaneMenu, case let .up(.right, column, row, _) = event {
             onPaneMenu?(.init(column: column, row: row))

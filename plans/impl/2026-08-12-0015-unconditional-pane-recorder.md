@@ -266,7 +266,7 @@ recording schema audit.
 - [x] 1. delete the flight-tape build capability so every pane records
 - [x] 2. add an input-direction byte event to the neutral recording vocabulary
 - [x] 3. record input bytes at the PTY write boundary with origin stamps
-- [ ] 4. stamp pane input with its originating system event time
+- [x] 4. stamp pane input with its originating system event time
 
 ## Implementation notes
 
@@ -316,6 +316,32 @@ recording schema audit.
   widest origin the clock admits: that is the costliest per-event encoding in the
   schema, so a ring of output events fits wherever this one does.
 
+- **Commit 4.** The origin is chosen at one named seam, `app/PaneInputOrigin.swift`. An AppKit
+  handler passes the event's own `NSEvent.timestamp`; everything the app originates itself --
+  IPC input, a menu or drag paste, a focus change, text committed outside a `keyDown` -- is
+  stamped as it enters the pane. Both land on `DispatchTime`'s scale, which is the scale the
+  recorder stamps completed transfers with, so the two are subtractable within a pane.
+- **Commit 4.** The ideal is an `origin` the pane controller refuses to default, so no caller can
+  submit input without saying where it came from. It was not taken: the parameter keeps `= nil`,
+  matching the host beneath it, and the app-side guarantee is instead that every submission in
+  `SwiftTerminalSessionView` names one explicitly. The trade-off is that a future call site can
+  still omit it and silently report "originated at the owner"; the required-parameter form would
+  make that a compile error, at the cost of restating `origin: nil` at ~65 call sites in the PTY
+  package's own suites, which genuinely have no origin.
+- **Commit 4.** PO2's keystroke half is proved twice, because neither place can carry it alone.
+  `DanTermAppTests` runs in the gate but is headless -- no WindowServer, no input context for
+  `interpretKeyEvents`, no spawned pane -- so it pins the seam's semantics: an event stamped in
+  the past reports its own time, not the handler's. The UI harness owns a stub pane controller
+  and so can drive `keyDown` itself; its test pins the wiring, which is the half that would go
+  green against a handler that stopped calling the seam. The harness is excluded from the gate,
+  which is why the gated half exists at all.
+- **Commit 4 / PO8.** The paired throughput comparison and its admissibility proof are recorded
+  in the commit message, per the plan's instruction to keep decision-bearing numbers out of the
+  disposable artifact directory. The first invocation was invalid -- every gate on both
+  `scrollback-stream` blocks failed, on the untouched baseline arm as well, which is the display
+  going to sleep mid-run and not a property of either tree. It was rerun from scratch under
+  `caffeinate -dis`, as the harness's own rule for a lost condition prescribes.
+
 ## Follow Up
 
 - `scripts/tests/terminal_tape_to_fixture_test.py`, in
@@ -323,3 +349,8 @@ recording schema audit.
   `--allow-truncated`, a flag `scripts/terminal-tape-to-fixture.py` does not
   define, so the conversion fails in argparse rather than at the truncation
   check. The test asserts less than its name claims. Pre-existing, untouched here.
+- Nothing stops a future input call site in `app/SwiftTerminalSessionView.swift` from omitting
+  `origin:` and silently reporting the absence that means "originated at the pane owner". The
+  structural close is a required parameter on `TerminalPaneSessionController`'s submissions,
+  which costs an explicit `origin: nil` at the PTY package's own call sites; a gate lint over
+  that one file is the cheap alternative.
