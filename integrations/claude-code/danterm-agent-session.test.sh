@@ -90,6 +90,9 @@ check_case "prompt submit reports working" \
 check_case "root question reports waiting" \
   '{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","session_id":"4f3a2b1c"}' \
   'agent activity --pane 11111111-1111-4111-8111-111111111111 --kind claude --id 4f3a2b1c --state waiting'
+check_case "answered root question reports working" \
+  '{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[]},"tool_response":{"answers":{}},"tool_use_id":"toolu_1","session_id":"4f3a2b1c"}' \
+  'agent activity --pane 11111111-1111-4111-8111-111111111111 --kind claude --id 4f3a2b1c --state working'
 check_case "permission request reports waiting" \
   '{"hook_event_name":"PermissionRequest","tool_name":"Bash","session_id":"4f3a2b1c"}' \
   'agent activity --pane 11111111-1111-4111-8111-111111111111 --kind claude --id 4f3a2b1c --state waiting'
@@ -98,6 +101,8 @@ check_case "elicitation reports waiting" \
   'agent activity --pane 11111111-1111-4111-8111-111111111111 --kind claude --id 4f3a2b1c --state waiting'
 check_case "ordinary tool use is ignored" \
   '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"4f3a2b1c"}'
+check_case "ordinary completed tool use is ignored" \
+  '{"hook_event_name":"PostToolUse","tool_name":"Bash","session_id":"4f3a2b1c"}'
 # request_user_input is codex's ask-user tool. Claude never sends it, so matching
 # it here would be a check that can only ever fire on a payload we do not receive.
 check_case "codex ask-user tool name is not matched" \

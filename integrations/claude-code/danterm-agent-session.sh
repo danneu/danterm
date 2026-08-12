@@ -40,6 +40,12 @@ case "$EVENT" in
       danterm agent activity --pane "$DANTERM_PANE" --kind claude --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
     fi
     ;;
+  PostToolUse)
+    TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')
+    if [ "$TOOL" = "AskUserQuestion" ]; then
+      danterm agent activity --pane "$DANTERM_PANE" --kind claude --id "$SESSION_ID" --state working >/dev/null 2>&1 || true
+    fi
+    ;;
   PermissionRequest|Elicitation)
     danterm agent activity --pane "$DANTERM_PANE" --kind claude --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
     ;;
