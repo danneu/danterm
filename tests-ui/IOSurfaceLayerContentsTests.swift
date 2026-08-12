@@ -1,7 +1,8 @@
 // Real-AppKit pins for the owned-pane-surface route (research/33/T25): the
 // IOSurface layer-contents premises the headless harness cannot model. Pin
 // one: with implicit actions disabled, a contents swap attaches no animation,
-// so no presentation layer keeps a released surface alive. Pin two is the
+// so no presentation layer keeps a released surface alive. Whether the surface
+// then goes free, and how fast, is deliberately not pin one's business. Pin two is the
 // route's viability gate: the render server takes a use count on an attached
 // surface, drops it after the detaching transaction commits, and once the
 // surface reports free it stays free -- the premise that makes
@@ -23,15 +24,20 @@ func ioSurfaceLayerContentsTests() {
     print("IOSurfaceLayerContents")
 
     // Intent: with a "contents" entry of NSNull in the layer's actions
-    // dictionary, repeated contents swaps attach no implicit animation, and
-    // the swapped-out surface's use count drops.
+    // dictionary, repeated contents swaps attach no implicit animation.
     // Why it exists: an implicit crossfade would hold the released surface in
     // a presentation layer past the swap, so the swapchain's "detached means
     // releasable" reasoning would be wrong by one animation duration.
     // Scenario: two filled surfaces alternate as the contents of a composited
-    // layer; after every swap the layer carries no "contents" animation and
-    // the replaced surface goes free.
-    uiTest("disabled actions: contents swaps attach no animation and release the old surface") {
+    // layer; after every swap the layer carries no "contents" animation.
+    //
+    // This pin does not assert that the swapped-out surface goes free, and must
+    // not: freeing is presentation-driven, so a wait that presents no new frame
+    // cannot make it happen, and a cold pipeline has been measured holding a
+    // detached surface across four later presentations. Promptness is not part
+    // of the contract -- pin two owns freeing, demands only monotonicity, and
+    // waits by presenting frames the way a live swapchain does.
+    uiTest("disabled actions: a contents swap attaches no implicit animation") {
         let layer = CALayer()
         layer.actions = ["contents": NSNull()]
         let front = try makeProbeSurface()
@@ -47,9 +53,9 @@ func ioSurfaceLayerContentsTests() {
             "render server never acquired the attached surface; is the probe window composited?")
 
         var attached = front
-        var released = back
+        var idle = back
         for _ in 0 ..< 4 {
-            swap(&attached, &released)
+            swap(&attached, &idle)
             layer.contents = attached
             try uiExpect(
                 layer.animation(forKey: "contents") == nil,
@@ -58,9 +64,6 @@ func ioSurfaceLayerContentsTests() {
             try uiExpect(
                 layer.animation(forKey: "contents") == nil,
                 "contents animation appeared at commit despite the disabling actions dictionary")
-            try uiExpect(
-                flushAndPump(deadline: 5.0) { !released.isInUse },
-                "swapped-out surface still in use after the swap committed")
         }
     }
 
@@ -362,6 +365,13 @@ private func fill(_ surface: IOSurface, byte: UInt8) {
 /// Commits the implicit transaction and pumps the run loop until `condition`
 /// holds or `deadline` seconds pass. Render-server effects (surface use
 /// counts) land asynchronously, so every expectation here needs this shape.
+///
+/// It re-flushes an unchanged layer tree, so it presents no new frame. That
+/// makes it right for waiting on an effect an already-committed attach will
+/// produce -- the render server taking its use count -- and wrong for waiting
+/// on one that only later presentations produce. Waiting here for a detached
+/// surface to go free never terminates on a cold pipeline, however long the
+/// deadline: see pin two, which waits by presenting frames instead.
 @MainActor
 private func flushAndPump(deadline: TimeInterval, until condition: () -> Bool) -> Bool {
     let end = Date().addingTimeInterval(deadline)
