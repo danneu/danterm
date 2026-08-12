@@ -485,7 +485,7 @@ import Testing
         // Scenario: spec-first group commit.
         let groupId = GroupId()
         let msgs = renameCompletionMessages(
-            isConfirm: true, action: .group(groupId), newName: "Release work")
+            isConfirm: true, target: .group(groupId), newName: "Release work")
         #expect(msgs.count == 2)
         guard case .renameGroup(let id, let name) = msgs[0] else {
             Issue.record("expected renameGroup")

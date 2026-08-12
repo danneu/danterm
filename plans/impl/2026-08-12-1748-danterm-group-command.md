@@ -238,6 +238,17 @@ existing help assertions.
 
 ## Implementation notes
 
+- Master gained `refactor(sidebar): own inline rename state in the view` while
+  this branch was in flight. It removes the `AssociatedKeys.renameTarget`
+  associated object this plan's UI test was written against, and it adds
+  `group commit cancel and click-away each end ownership once`, which covers the
+  group Enter commit plus Escape and click-away. That supersedes the UI test in
+  commit 2, so the merge dropped it rather than keep a weaker duplicate against a
+  deleted API. The `CustomTitleTests` translation case survives: master renamed
+  `renameCompletionMessages`' `action:` label to `target:` but still had no case
+  for group plus Enter with a non-empty name. Commit 2's contribution is now that
+  one pure test.
+
 - The `{id, name}` group reference was written inline in two reply encoders
   (`paneInfo`, `tabNew`). Rather than add a third copy for `group rename`, the
   shape moved into one `IpcEntityEncoder.groupReference` all three now call.
@@ -273,11 +284,6 @@ existing help assertions.
   in the gate, so it rotted unnoticed; the new `group` steps in that script are
   therefore unverified by the harness (they were verified by hand against a live
   slot instead).
-- `just test-ui` has one failure unrelated to this change:
-  `tests-ui/IOSurfaceLayerContentsTests.swift:61`, "contents swaps attach no
-  animation and release the old surface", reports "swapped-out surface still in
-  use after the swap committed". It reproduces on two consecutive runs and runs
-  before any sidebar test in the suite, so it is not caused by the new test.
 - `scripts/tests/danterm-cli_test.sh` has a second pre-existing break, again from
   not being in the gate: both help blocks assert
   `grep -qF 'todo clear-completed --pane <pane-id>'`, but `usageText` spells that

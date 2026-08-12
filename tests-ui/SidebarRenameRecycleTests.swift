@@ -189,54 +189,6 @@ func sidebarRenameRecycleTests() {
             "editable group title should retain useful width beside its accessories")
     }
 
-    uiTest("committing an inline group rename dispatches the group rename once") {
-        // Intent: Enter on a live group inline rename renames that group exactly
-        //   once, and returns the title field to display state.
-        // Why it exists: this is the only test that drives the group branch of the
-        //   AssociatedKeys.renameTarget commit path. Every other behavioral test in
-        //   this suite renames a tab, and the one group test asserts layout lanes
-        //   only, so a group-only regression in that path would go unseen.
-        // Scenario: the user double-clicks a group row, types a new name, and
-        //   presses Enter.
-        let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
-        defer { window.close() }
-
-        let group = GroupId(); let other = GroupId()
-        let tab = TabId(); let anchor = TabId()
-        let model = renameRecycleModel([
-            (group, "Primary", false, [(tab, "alpha")]),
-            (other, "Secondary", false, [(anchor, "beta")]),
-        ], selected: tab)
-        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
-
-        sidebar.beginRenamingGroup(group)
-        let cell = try renameRecycleCell(for: .group(group), in: outline)
-        guard let titleField = cell.textField else {
-            throw UITestFailure(message: "group cell should have a title field")
-        }
-        titleField.stringValue = "Release work"
-        guard let editor = titleField.currentEditor() as? NSTextView else {
-            throw UITestFailure(message: "group rename should install a field editor")
-        }
-
-        _ = sidebar.control(
-            titleField, textView: editor,
-            doCommandBy: #selector(NSResponder.insertNewline(_:)))
-
-        let renameMessages = runtime.sentMessages.filter {
-            if case .renameGroup(let id, let name) = $0 {
-                return id == group && name == "Release work"
-            }
-            return false
-        }
-        try uiExpect(renameMessages.count == 1,
-            "committing a group rename should dispatch exactly one renameGroup message")
-        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == nil,
-            "committing a group rename should clear rename ownership")
-        try uiExpect(titleField.isEditable == false,
-            "committing a group rename should return the title field to display state")
-    }
-
     uiTest("pointer click-away commits a live rename exactly once") {
         // Intent: an outline pointer interaction commits the current draft before
         //   AppKit can discard the editor, without producing duplicate rename sends.
