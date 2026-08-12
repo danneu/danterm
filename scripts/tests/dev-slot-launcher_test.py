@@ -230,6 +230,31 @@ time.sleep(30)
             finally:
                 os.killpg(pid, signal.SIGKILL)
 
+    def test_unreachable_app_is_killed_so_its_slot_returns_to_the_pool(self) -> None:
+        # Intent: a launch that never becomes reachable leaves no app behind holding a slot.
+        # Why it exists: the caller gets no handle in that case, so a surviving app would
+        #   strand one of the eight slots with nothing able to address or stop it.
+        # Scenario: an app starts, hangs before serving its control socket, and times out.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            claim = launcher.claim_development_slot(root, range(1, 2))
+            pid = launcher.spawn_detached(
+                Path("/bin/sh"),
+                ["sh", "-c", "sleep 300"],
+                {"PATH": "/usr/bin:/bin"},
+                root / "slot.log",
+            )
+            claim.close()
+
+            with self.assertRaises(launcher.LaunchFailedError):
+                launcher.await_control_socket(root / "control.sock", pid, timeout=0.2)
+
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+            reclaimed = launcher.claim_development_slot(root, range(1, 2))
+            self.addCleanup(reclaimed.close)
+            self.assertEqual(reclaimed.slot, 1)
+
     def test_launch_reports_an_app_that_dies_before_serving(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             socket_path = Path(directory) / "control.sock"

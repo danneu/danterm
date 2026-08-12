@@ -108,13 +108,20 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
             self?.handleLiveScroll()
         })
 
-        // Force overlay style even if system preference changes
+        // Force overlay style even if system preference changes. AppKit documents
+        // this notification's object as private, so this observer filters on the
+        // name alone. It is the one registration here that cannot rely on the
+        // poster's thread: `queue: .main` makes NotificationCenter deliver on the
+        // main thread, and the hop makes that delivery guarantee something the
+        // compiler can check before we touch main-actor scroller state.
         observers.append(NotificationCenter.default.addObserver(
             forName: NSScroller.preferredScrollerStyleDidChangeNotification,
             object: nil,
-            queue: nil
+            queue: .main
         ) { [weak self] _ in
-            self?.scrollView.scrollerStyle = .overlay
+            Task { @MainActor in
+                self?.scrollView.scrollerStyle = .overlay
+            }
         })
     }
 

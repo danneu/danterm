@@ -19,6 +19,7 @@ from pathlib import Path
 import plistlib
 import pwd
 import shutil
+import signal
 import socket as socket_module
 import subprocess
 import sys
@@ -184,7 +185,11 @@ def launch_handle(identity: Mapping[str, object], pid: int) -> dict[str, object]
 
 
 def slot_log_path(slot_root: Path, slot: int) -> Path:
-    """Gives the detached app a stable place to write once stdout is not a pipe."""
+    """Gives the detached app a stable place to write once stdout is not a pipe.
+
+    One file per slot, holding only the instance running in it: the launcher
+    truncates on each launch, so relaunching a slot cannot grow the file forever.
+    """
 
     logs = slot_root / "logs"
     logs.mkdir(parents=True, exist_ok=True)
@@ -204,7 +209,7 @@ def spawn_detached(
     Its own session also keeps it alive when the caller's shell goes away.
     """
 
-    log_descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    log_descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         return os.posix_spawn(
             str(executable),
@@ -239,7 +244,9 @@ def await_control_socket(socket_path: Path, pid: int, timeout: float = 30.0) -> 
     """Holds the handle back until the caller's next CLI call can actually connect.
 
     Without this every caller repeats the same poll loop, and the first
-    `danterm --socket` after a launch fails with "DanTerm is not running".
+    `danterm --socket` after a launch fails with "DanTerm is not running". An app
+    that never becomes reachable is killed rather than left holding one of the
+    eight slots that no caller has a handle to.
     """
 
     deadline = time.monotonic() + timeout
@@ -255,9 +262,29 @@ def await_control_socket(socket_path: Path, pid: int, timeout: float = 30.0) -> 
         except ChildProcessError:
             reaped = pid
         if reaped == pid:
-            raise LaunchFailedError("the app exited before it opened its control socket")
+            raise LaunchFailedError("the app exited before its control socket was reachable")
         time.sleep(0.02)
-    raise LaunchFailedError(f"the app did not open {socket_path} within {timeout:g}s")
+    terminate_session(pid)
+    raise LaunchFailedError(
+        f"the app did not answer on {socket_path} within {timeout:g}s, so it was killed"
+    )
+
+
+def terminate_session(pid: int) -> None:
+    """Frees a claimed slot whose app is running but unreachable.
+
+    The app leads its own session, so this reaches the shells it has forked and
+    the kernel releases the slot lock every one of them inherited.
+    """
+
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    try:
+        os.waitpid(pid, 0)
+    except ChildProcessError:
+        pass
 
 
 def gui_launchd_environment(uid: int) -> dict[str, str]:
@@ -393,7 +420,8 @@ def main(arguments: list[str]) -> int:
     if options.foreground:
         # A human primes notification authorization here and wants the app
         # attached to their terminal, so this path keeps replacing the launcher.
-        print(json.dumps(launch_handle(identity, os.getpid()), separators=(",", ":")), flush=True)
+        handle = launch_handle(identity, os.getpid())
+        print(json.dumps(handle, separators=(",", ":")), flush=True)
         os.execve(executable, app_arguments, environment)
         return 1
 
