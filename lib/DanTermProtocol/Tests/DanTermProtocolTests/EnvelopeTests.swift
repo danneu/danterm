@@ -51,9 +51,9 @@ struct EnvelopeTests {
         let request = makeCLIRequest(
             CLICommand(
                 request: .todoList(
-                    pane: PaneId(
+                    owner: .pane(PaneId(
                         rawValue: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
-                    )
+                    ))
                 ),
                 outputMode: .json
             ),

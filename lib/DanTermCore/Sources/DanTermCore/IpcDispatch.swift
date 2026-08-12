@@ -268,35 +268,34 @@ private func dispatchIpc(
             ? [.followPaneTape(reqId: reqId, paneId: paneId, fromNow: fromNow)]
             : [.dumpPaneTape(reqId: reqId, paneId: paneId)]
 
-    case .todoList(let paneId):
-        try requirePane(paneId, in: model)
-        let todos = model.pane(paneId)?.todos ?? []
+    case .todoList(let owner):
+        try requireTodoOwner(owner, in: model)
+        let todos = model.todos(for: owner) ?? []
         return [.ipcReply(reqId: reqId, result: todoListResult(todos))]
 
-    case .todoAdd(let paneId, let text):
-        try requirePane(paneId, in: model)
-        guard let item = appendTodo(&model, paneId: paneId, text: text, id: env.newId()) else {
+    case .todoAdd(let owner, let text):
+        try requireTodoOwner(owner, in: model)
+        guard let item = appendTodo(
+            &model, owner: owner, text: text, id: TodoId(rawValue: env.newId())
+        ) else {
             throw IpcParamsError("invalid todo text")
         }
-        // Pane toolbar (incl. todo counts) reconciles from the model change above.
         return [.ipcReply(reqId: reqId, result: todoResult(item))]
 
-    case .todoEdit(let paneId, let rawTodoId, let text):
-        try requirePane(paneId, in: model)
-        guard let todoId = UUID(uuidString: rawTodoId) else { throw IpcParamsError("invalid todo") }
-        guard todoExists(todoId, paneId: paneId, in: model) else {
+    case .todoEdit(let owner, let todoId, let text):
+        try requireTodoOwner(owner, in: model)
+        guard todoExists(todoId, owner: owner, in: model) else {
             throw IpcParamsError("invalid todo")
         }
-        let commands = update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: text), env: env)
-        let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
+        let commands = update(&model, .editTodoText(owner: owner, todoId: todoId, text: text), env: env)
+        let updated = model.todos(for: owner)?.first(where: { $0.id == todoId })
         return commands + [
             .ipcReply(reqId: reqId, result: todoResult(updated)),
         ]
 
-    case .todoDone(let paneId, let rawTodoId), .todoOpen(let paneId, let rawTodoId):
-        try requirePane(paneId, in: model)
-        guard let todoId = UUID(uuidString: rawTodoId) else { throw IpcParamsError("invalid todo") }
-        guard todoExists(todoId, paneId: paneId, in: model) else {
+    case .todoDone(let owner, let todoId), .todoOpen(let owner, let todoId):
+        try requireTodoOwner(owner, in: model)
+        guard todoExists(todoId, owner: owner, in: model) else {
             throw IpcParamsError("invalid todo")
         }
         let shouldBeDone: Bool
@@ -305,26 +304,25 @@ private func dispatchIpc(
         case .todoOpen: shouldBeDone = false
         default: preconditionFailure("exhaustive todo state request")
         }
-        let commands = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: shouldBeDone), env: env)
-        let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
+        let commands = update(&model, .setTodoDone(owner: owner, todoId: todoId, isDone: shouldBeDone), env: env)
+        let updated = model.todos(for: owner)?.first(where: { $0.id == todoId })
         return commands + [
             .ipcReply(reqId: reqId, result: todoResult(updated)),
         ]
 
-    case .todoDelete(let paneId, let rawTodoId):
-        try requirePane(paneId, in: model)
-        guard let todoId = UUID(uuidString: rawTodoId) else { throw IpcParamsError("invalid todo") }
-        guard todoExists(todoId, paneId: paneId, in: model) else {
+    case .todoDelete(let owner, let todoId):
+        try requireTodoOwner(owner, in: model)
+        guard todoExists(todoId, owner: owner, in: model) else {
             throw IpcParamsError("invalid todo")
         }
-        let commands = update(&model, .deleteTodo(paneId: paneId, todoId: todoId), env: env)
+        let commands = update(&model, .deleteTodo(owner: owner, todoId: todoId), env: env)
         return commands + [
             .ipcReply(reqId: reqId, result: okResult()),
         ]
 
-    case .todoClearCompleted(let paneId):
-        try requirePane(paneId, in: model)
-        let commands = update(&model, .clearCompletedTodos(paneId: paneId), env: env)
+    case .todoClearCompleted(let owner):
+        try requireTodoOwner(owner, in: model)
+        let commands = update(&model, .clearCompletedTodos(owner: owner), env: env)
         return commands + [
             .ipcReply(reqId: reqId, result: okResult()),
         ]
@@ -411,13 +409,22 @@ private func okResult() -> JSONValue {
     .object(["ok": .bool(true)])
 }
 
-private func todoExists(_ todoId: UUID, paneId: PaneId, in model: AppModel) -> Bool {
-    model.pane(paneId)?.todos.contains(where: { $0.id == todoId }) == true
+private func requireTodoOwner(_ owner: TodoOwner, in model: AppModel) throws {
+    guard model.todos(for: owner) != nil else {
+        switch owner {
+        case .pane: throw IpcParamsError("pane not found")
+        case .tab: throw IpcParamsError("tab not found")
+        }
+    }
+}
+
+private func todoExists(_ todoId: TodoId, owner: TodoOwner, in model: AppModel) -> Bool {
+    model.todos(for: owner)?.contains(where: { $0.id == todoId }) == true
 }
 
 private func todoJSON(_ item: TodoItem) -> JSONValue {
     .object([
-        "id": .string(item.id.uuidString),
+        "id": .string(item.id.rawValue.uuidString),
         "text": .string(item.text),
         "isDone": .bool(item.isDone),
     ])

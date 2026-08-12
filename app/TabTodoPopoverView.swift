@@ -18,7 +18,29 @@ private struct TabTodoDragPayload: Codable {
     }
 
     let source: Source
-    let todoId: UUID
+    let todoId: TodoId
+
+    private enum CodingKeys: String, CodingKey {
+        case source
+        case todoId
+    }
+
+    init(source: Source, todoId: TodoId) {
+        self.source = source
+        self.todoId = todoId
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        source = try container.decode(Source.self, forKey: .source)
+        todoId = TodoId(rawValue: try container.decode(UUID.self, forKey: .todoId))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(source, forKey: .source)
+        try container.encode(todoId.rawValue, forKey: .todoId)
+    }
 }
 
 extension TabTodoDragPayload.Source: Codable {
@@ -155,7 +177,7 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
         apply(projection)
     }
 
-    override var parentTodoPopover: NSPopover? { runtime?.tabTodoPopover }
+    override var parentTodoPopover: NSPopover? { runtime?.todoPopover }
 
     override var shortcutHelpScope: TodoShortcutScope { .tab }
 
@@ -340,11 +362,11 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
     override func addTodoAndStayInCompose() {
         let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        let previousTabTodoIds = Set(rows.compactMap { row -> UUID? in
-            if case .tabItem(let item) = row { return item.id }
+        let previousTabTodoIds = Set(rows.compactMap { row -> TodoId? in
+            if case .tabItem(_, let item) = row { return item.id }
             return nil
         })
-        runtime?.send(.addTabTodo(tabId: tabId, text: text))
+        runtime?.send(.addTodo(owner: .tab(tabId), text: text))
         popoverState.clearComposeDraft()
         addInput.string = ""
         if let target = newlyAddedTabTodoTarget(
@@ -370,19 +392,14 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
     private func saveEdit(target: TabTodoEditTarget, text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        switch target {
-        case .tab(let todoId):
-            runtime?.send(.editTabTodoText(tabId: tabId, todoId: todoId, text: trimmed))
-        case .pane(let paneId, let todoId):
-            runtime?.send(.editTodoText(paneId: paneId, todoId: todoId, text: trimmed))
-        }
+        runtime?.send(.editTodoText(owner: target.owner, todoId: target.id, text: trimmed))
     }
 
     private func editTitle(for target: TabTodoEditTarget) -> String {
-        switch target {
+        switch target.owner {
         case .tab:
             return "Edit tab task"
-        case .pane(let paneId, _):
+        case .pane(let paneId):
             let title = paneTitle(for: paneId) ?? "pane"
             return "Edit pane task: \(title)"
         }
@@ -397,7 +414,7 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
         return nil
     }
 
-    private func sectionItemCount(for destination: TodoDestination) -> Int {
+    private func sectionItemCount(for destination: TodoOwner) -> Int {
         switch destination {
         case .tab:
             return rows.count { row in
@@ -442,7 +459,7 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
             view.configure(title: "This tab")
             return view
 
-        case .tabItem(let item):
+        case .tabItem(_, let item):
             let rowView = (tableView.makeView(withIdentifier: todoRowId, owner: self) as? TodoRowView) ?? TodoRowView()
             rowView.identifier = todoRowId
             rowView.configure(with: item)
@@ -532,7 +549,7 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
         guard row < rows.count else { return nil }
         let payload: TabTodoDragPayload
         switch rows[row] {
-        case .tabItem(let item):
+        case .tabItem(_, let item):
             payload = TabTodoDragPayload(source: .tab, todoId: item.id)
         case .paneItem(let paneId, let item):
             payload = TabTodoDragPayload(source: .pane(paneId.rawValue), todoId: item.id)
@@ -573,19 +590,9 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
 
         let source = todoSource(from: payload.source, tabId: tabId)
         let targetToSelect: TabTodoEditTarget
-        switch target.destination {
-        case .tab:
-            targetToSelect = .tab(todoId: payload.todoId)
-        case .pane(let paneId):
-            targetToSelect = .pane(paneId: paneId, todoId: payload.todoId)
-        }
+        targetToSelect = .init(owner: target.destination, id: payload.todoId)
         if sameTodoBucket(source: source, destination: target.destination) {
-            switch source {
-            case .tab(let sourceTabId):
-                runtime.send(.reorderTabTodo(tabId: sourceTabId, todoId: payload.todoId, toIndex: target.atIndex))
-            case .pane(let sourcePaneId):
-                runtime.send(.reorderTodo(paneId: sourcePaneId, todoId: payload.todoId, toIndex: target.atIndex))
-            }
+            runtime.send(.reorderTodo(owner: source, todoId: payload.todoId, toIndex: target.atIndex))
         } else {
             runtime.send(.moveTodo(
                 from: source,
@@ -602,17 +609,17 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
 
     @objc private func tabCheckboxToggled(_ sender: NSButton) {
         let row = tableView.row(for: sender)
-        guard row >= 0, row < rows.count, case .tabItem(let item) = rows[row] else { return }
+        guard row >= 0, row < rows.count, case .tabItem(_, let item) = rows[row] else { return }
         let selectedTarget = selectedEditTarget()
-        runtime?.send(.toggleTabTodoDone(tabId: tabId, todoId: item.id))
+        runtime?.send(.setTodoDone(owner: .tab(tabId), todoId: item.id, isDone: !item.isDone))
         if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
     }
 
     @objc private func tabDeleteTask(_ sender: NSButton) {
         let row = tableView.row(for: sender)
-        guard row >= 0, row < rows.count, case .tabItem(let item) = rows[row] else { return }
+        guard row >= 0, row < rows.count, case .tabItem(_, let item) = rows[row] else { return }
         let selectedTarget = selectedEditTarget()
-        runtime?.send(.deleteTabTodo(tabId: tabId, todoId: item.id))
+        runtime?.send(.deleteTodo(owner: .tab(tabId), todoId: item.id))
         if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
     }
 
@@ -621,7 +628,7 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
         guard row >= 0, row < rows.count,
               case .paneItem(let paneId, let item) = rows[row] else { return }
         let selectedTarget = selectedEditTarget()
-        runtime?.send(.setTodoDone(paneId: paneId, todoId: item.id, isDone: !item.isDone))
+        runtime?.send(.setTodoDone(owner: .pane(paneId), todoId: item.id, isDone: !item.isDone))
         if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
     }
 
@@ -630,24 +637,19 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
         guard row >= 0, row < rows.count,
               case .paneItem(let paneId, let item) = rows[row] else { return }
         let selectedTarget = selectedEditTarget()
-        runtime?.send(.deleteTodo(paneId: paneId, todoId: item.id))
+        runtime?.send(.deleteTodo(owner: .pane(paneId), todoId: item.id))
         if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
     }
 
     @objc override func clearCompleted() {
         let selectedTarget = selectedEditTarget()
-        runtime?.send(.clearCompletedTabTodos(tabId: tabId))
+        runtime?.send(.clearCompletedTodos(owner: .tab(tabId)))
         if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
     }
 
     private func toggleSelectedTodoDone() {
         guard let target = selectedEditTarget() else { return }
-        switch target {
-        case .tab(let todoId):
-            runtime?.send(.toggleTabTodoDone(tabId: tabId, todoId: todoId))
-        case .pane(let paneId, let todoId):
-            runtime?.send(.toggleTodoDone(paneId: paneId, todoId: todoId))
-        }
+        runtime?.send(.toggleTodoDone(owner: target.owner, todoId: target.id))
         _ = selectResolvedTarget(target)
         view.window?.makeFirstResponder(tableView)
     }
@@ -655,12 +657,7 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
     private func deleteSelectedTodo() {
         let row = tableView.selectedRow
         guard let target = selectedEditTarget() else { return }
-        switch target {
-        case .tab(let todoId):
-            runtime?.send(.deleteTabTodo(tabId: tabId, todoId: todoId))
-        case .pane(let paneId, let todoId):
-            runtime?.send(.deleteTodo(paneId: paneId, todoId: todoId))
-        }
+        runtime?.send(.deleteTodo(owner: target.owner, todoId: target.id))
         selectNearestSelectableRow(near: row)
     }
 
@@ -694,29 +691,13 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
         let targetToSelect: TabTodoEditTarget
         switch step {
         case .reorderInSection(let destination):
-            switch target {
-            case .tab(let todoId):
-                runtime?.send(.reorderTabTodo(tabId: tabId, todoId: todoId, toIndex: destination))
-            case .pane(let paneId, let todoId):
-                runtime?.send(.reorderTodo(paneId: paneId, todoId: todoId, toIndex: destination))
-            }
+            runtime?.send(.reorderTodo(owner: target.owner, todoId: target.id, toIndex: destination))
             targetToSelect = target
         case .moveToBucket(let destination, let atIndex):
             guard let item = item(for: target) else { return }
-            let source: TodoSource
-            switch target {
-            case .tab:
-                source = .tab(tabId)
-            case .pane(let paneId, _):
-                source = .pane(paneId)
-            }
+            let source = target.owner
             runtime?.send(.moveTodo(from: source, todoId: item.id, to: destination, atIndex: atIndex))
-            switch destination {
-            case .tab:
-                targetToSelect = .tab(todoId: item.id)
-            case .pane(let paneId):
-                targetToSelect = .pane(paneId: paneId, todoId: item.id)
-            }
+            targetToSelect = .init(owner: destination, id: item.id)
         }
         _ = selectTarget(targetToSelect)
         view.window?.makeFirstResponder(tableView)
@@ -742,22 +723,11 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
                 delta: delta
               ) else { return true }
 
-        let source: TodoSource
-        switch current {
-        case .tab:
-            source = .tab(tabId)
-        case .pane(let paneId, _):
-            source = .pane(paneId)
-        }
+        let source = current.owner
 
         runtime?.send(.moveTodo(from: source, todoId: item.id, to: destination, atIndex: 0))
         let newTarget: TabTodoEditTarget
-        switch destination {
-        case .tab:
-            newTarget = .tab(todoId: item.id)
-        case .pane(let paneId):
-            newTarget = .pane(paneId: paneId, todoId: item.id)
-        }
+        newTarget = .init(owner: destination, id: item.id)
         _ = selectTarget(newTarget)
         view.window?.makeFirstResponder(tableView)
         return true
@@ -832,7 +802,7 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
     }
 
     override func closePopoverFromList() {
-        runtime?.send(.toggleTodoPopoverForTab(tabId: tabId))
+        runtime?.send(.toggleTodoPopover(owner: .tab(tabId)))
     }
 }
 
@@ -847,7 +817,7 @@ private func tabTodoDropOperation(from operation: NSTableView.DropOperation) -> 
     }
 }
 
-private func todoSource(from payloadSource: TabTodoDragPayload.Source, tabId: TabId) -> TodoSource {
+private func todoSource(from payloadSource: TabTodoDragPayload.Source, tabId: TabId) -> TodoOwner {
     switch payloadSource {
     case .tab:
         return .tab(tabId)
@@ -856,7 +826,7 @@ private func todoSource(from payloadSource: TabTodoDragPayload.Source, tabId: Ta
     }
 }
 
-private func sameTodoBucket(source: TodoSource, destination: TodoDestination) -> Bool {
+private func sameTodoBucket(source: TodoOwner, destination: TodoOwner) -> Bool {
     switch (source, destination) {
     case (.tab(let sourceId), .tab(let destinationId)):
         return sourceId == destinationId
@@ -868,11 +838,5 @@ private func sameTodoBucket(source: TodoSource, destination: TodoDestination) ->
 }
 
 private func tabTodoTargetsReferToSameTodo(_ lhs: TabTodoEditTarget, _ rhs: TabTodoEditTarget) -> Bool {
-    switch (lhs, rhs) {
-    case (.tab(let left), .tab(let right)),
-         (.tab(let left), .pane(_, let right)),
-         (.pane(_, let left), .tab(let right)),
-         (.pane(_, let left), .pane(_, let right)):
-        return left == right
-    }
+    lhs.id == rhs.id
 }

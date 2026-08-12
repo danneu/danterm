@@ -14,7 +14,7 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
     let paneId: PaneId
     private let emptyLabel = NSTextField(labelWithString: "No tasks yet")
 
-    private var popoverState = TodoPopoverState<UUID>()
+    private var popoverState = TodoPopoverState<TodoId>()
     private var projection: PaneTodoPopoverProjection
 
     private var todos: [TodoItem] { projection.rows }
@@ -135,7 +135,7 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
         return items[row]
     }
 
-    private func todo(id: UUID) -> TodoItem? {
+    private func todo(id: TodoId) -> TodoItem? {
         todos.first { $0.id == id }
     }
 
@@ -147,7 +147,7 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
         isSyncingTableSelection = false
     }
 
-    private func selectTodo(id: UUID) -> Bool {
+    private func selectTodo(id: TodoId) -> Bool {
         guard let row = todos.firstIndex(where: { $0.id == id }) else { return false }
         setSelectedRow(row)
         return true
@@ -224,16 +224,16 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
     override func addTodoAndStayInCompose() {
         let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        runtime?.send(.addTodo(paneId: paneId, text: text))
+        runtime?.send(.addTodo(owner: .pane(paneId), text: text))
         popoverState.clearComposeDraft()
         addInput.string = ""
         view.window?.makeFirstResponder(addInput.textView)
     }
 
-    private func saveEdit(todoId: UUID, text: String) {
+    private func saveEdit(todoId: TodoId, text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        runtime?.send(.editTodoText(paneId: paneId, todoId: todoId, text: trimmed))
+        runtime?.send(.editTodoText(owner: .pane(paneId), todoId: todoId, text: trimmed))
     }
 
     override func syncModeVisibility() {
@@ -308,7 +308,7 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
         let items = todos
         guard row < items.count else { return nil }
         let pbItem = NSPasteboardItem()
-        pbItem.setString(items[row].id.uuidString, forType: todoRowDragType)
+        pbItem.setString(items[row].id.rawValue.uuidString, forType: todoRowDragType)
         return pbItem
     }
 
@@ -322,7 +322,7 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
               let idStr = pbItem.string(forType: todoRowDragType),
               let uuid = UUID(uuidString: idStr) else { return false }
         let selectedIdBeforeMutation = selectedTodo()?.id
-        runtime?.send(.reorderTodo(paneId: paneId, todoId: uuid, toIndex: row))
+        runtime?.send(.reorderTodo(owner: .pane(paneId), todoId: TodoId(rawValue: uuid), toIndex: row))
         if let selectedIdBeforeMutation {
             _ = selectTodo(id: selectedIdBeforeMutation)
         }
@@ -335,7 +335,7 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
         let row = tableView.row(for: sender)
         guard row >= 0, row < todos.count else { return }
         let selectedIdBeforeMutation = selectedTodo()?.id
-        runtime?.send(.toggleTodoDone(paneId: paneId, todoId: todos[row].id))
+        runtime?.send(.toggleTodoDone(owner: .pane(paneId), todoId: todos[row].id))
         if let selectedIdBeforeMutation {
             _ = selectTodo(id: selectedIdBeforeMutation)
         }
@@ -345,7 +345,7 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
         let row = tableView.row(for: sender)
         guard row >= 0, row < todos.count else { return }
         let selectedIdBeforeMutation = selectedTodo()?.id
-        runtime?.send(.deleteTodo(paneId: paneId, todoId: todos[row].id))
+        runtime?.send(.deleteTodo(owner: .pane(paneId), todoId: todos[row].id))
         if let selectedIdBeforeMutation {
             _ = selectTodo(id: selectedIdBeforeMutation)
         }
@@ -353,7 +353,7 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
 
     @objc override func clearCompleted() {
         let selectedIdBeforeMutation = selectedTodo()?.id
-        runtime?.send(.clearCompletedTodos(paneId: paneId))
+        runtime?.send(.clearCompletedTodos(owner: .pane(paneId)))
         if let selectedIdBeforeMutation {
             _ = selectTodo(id: selectedIdBeforeMutation)
         }
@@ -361,7 +361,7 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
 
     private func toggleSelectedTodoDone() {
         guard let item = selectedTodo() else { return }
-        runtime?.send(.toggleTodoDone(paneId: paneId, todoId: item.id))
+        runtime?.send(.toggleTodoDone(owner: .pane(paneId), todoId: item.id))
         _ = selectTodo(id: item.id)
         view.window?.makeFirstResponder(tableView)
     }
@@ -369,7 +369,7 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
     private func deleteSelectedTodo() {
         let row = tableView.selectedRow
         guard let item = selectedTodo() else { return }
-        runtime?.send(.deleteTodo(paneId: paneId, todoId: item.id))
+        runtime?.send(.deleteTodo(owner: .pane(paneId), todoId: item.id))
         selectNearestSelectableRow(near: row)
     }
 
@@ -377,7 +377,7 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
         let row = tableView.selectedRow
         let destination = row + delta
         guard let item = selectedTodo(), todos.indices.contains(destination) else { return }
-        runtime?.send(.reorderTodo(paneId: paneId, todoId: item.id, toIndex: destination))
+        runtime?.send(.reorderTodo(owner: .pane(paneId), todoId: item.id, toIndex: destination))
         _ = selectTodo(id: item.id)
         view.window?.makeFirstResponder(tableView)
     }
@@ -453,6 +453,6 @@ class TodoPopoverViewController: TodoPopoverControllerBase {
     }
 
     override func closePopoverFromList() {
-        runtime?.send(.toggleTodoPopover(paneId: paneId))
+        runtime?.send(.toggleTodoPopover(owner: .pane(paneId)))
     }
 }

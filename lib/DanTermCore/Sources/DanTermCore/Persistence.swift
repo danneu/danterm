@@ -74,7 +74,7 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
   let groupSnapshots: [GroupSnapshot] = model.groups.map { group in
     let tabSnapshots: [TabSnapshot] = group.tabs.map { tab in
       let tabTodoSnapshots: [TodoSnapshot]? = tab.todos.isEmpty ? nil : tab.todos.map {
-        TodoSnapshot(id: $0.id.uuidString, text: $0.text, isDone: $0.isDone)
+        TodoSnapshot(id: $0.id.rawValue.uuidString, text: $0.text, isDone: $0.isDone)
       }
       var tabSnapshot = TabSnapshot(
         id: tab.id.rawValue.uuidString,
@@ -106,7 +106,7 @@ private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
   let session = pane.session
   let abbrevCwd = session?.cwd.map { abbreviateHome($0, home: home) }
   let todoSnapshots: [TodoSnapshot]? = pane.todos.isEmpty ? nil : pane.todos.map {
-    TodoSnapshot(id: $0.id.uuidString, text: $0.text, isDone: $0.isDone)
+    TodoSnapshot(id: $0.id.rawValue.uuidString, text: $0.text, isDone: $0.isDone)
   }
   var snapshot = PaneSnapshot(
     id: pane.id.rawValue.uuidString,

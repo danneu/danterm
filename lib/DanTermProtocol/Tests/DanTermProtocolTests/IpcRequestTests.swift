@@ -31,14 +31,40 @@ struct IpcRequestTests {
         for command in try representativeCLICommands()
         where command.request.method.isTargeting {
             var params = command.params
-            let targetKey = try #require(command.request.targetParameterKey)
-            params.removeValue(forKey: targetKey)
+            let targetKeys = command.request.targetParameterKeys
+            let targetKey = try #require(targetKeys.first)
+            for key in targetKeys { params.removeValue(forKey: key) }
 
             let error = #expect(throws: IpcRequestDecodeError.self) {
                 try IpcRequest.decode(method: command.method, params: .object(params))
             }
-            #expect(error?.message == "\(targetKey) required")
+            let expected = targetKeys.count == 1 ? "\(targetKey) required" : "pane or tab required"
+            #expect(error?.message == expected)
         }
+    }
+
+    @Test("todo requests accept either owner and reject ambiguous targeting")
+    func todoRequestsRequireExactlyOneOwner() throws {
+        let pane = "11111111-1111-4111-8111-111111111111"
+        let tab = "22222222-2222-4222-8222-222222222222"
+
+        #expect(try IpcRequest.decode(
+            method: IpcRequestMethod.todoList.rawValue,
+            params: .object(["tab": .string(tab)])
+        ) == .todoList(owner: .tab(TabId(rawValue: UUID(uuidString: tab)!))))
+
+        let absent = #expect(throws: IpcRequestDecodeError.self) {
+            try IpcRequest.decode(method: IpcRequestMethod.todoList.rawValue, params: .object([:]))
+        }
+        #expect(absent?.message == "pane or tab required")
+
+        let ambiguous = #expect(throws: IpcRequestDecodeError.self) {
+            try IpcRequest.decode(
+                method: IpcRequestMethod.todoList.rawValue,
+                params: .object(["pane": .string(pane), "tab": .string(tab)])
+            )
+        }
+        #expect(ambiguous?.message == "exactly one of pane or tab required")
     }
 
     private func representativeCLICommands() throws -> [CLICommand] {
@@ -74,6 +100,13 @@ struct IpcRequestTests {
             try parseCLI(["todo", "open", "--pane", pane, todo]),
             try parseCLI(["todo", "delete", "--pane", pane, todo]),
             try parseCLI(["todo", "clear-completed", "--pane", pane]),
+            try parseCLI(["todo", "list", "--tab", tab]),
+            try parseCLI(["todo", "add", "--tab", tab, "write", "test"]),
+            try parseCLI(["todo", "edit", "--tab", tab, todo, "write", "test"]),
+            try parseCLI(["todo", "done", "--tab", tab, todo]),
+            try parseCLI(["todo", "open", "--tab", tab, todo]),
+            try parseCLI(["todo", "delete", "--tab", tab, todo]),
+            try parseCLI(["todo", "clear-completed", "--tab", tab]),
         ]
     }
 }

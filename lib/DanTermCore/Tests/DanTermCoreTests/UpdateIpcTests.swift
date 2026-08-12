@@ -68,7 +68,10 @@ import DanTermProtocol
                 params: .object(testCase.params)
             )
 
-            #expect(try requireIpcError(commands).message == "\(testCase.entity) required")
+            let expected = testCase.method.hasPrefix("todo.")
+                ? "pane or tab required"
+                : "\(testCase.entity) required"
+            #expect(try requireIpcError(commands).message == expected)
             #expect(model == before)
         }
     }
@@ -951,8 +954,8 @@ import DanTermProtocol
         let survivorPaneId = selectedTab(in: model)!.focusedPaneId
         _ = update(&model, .splitPane(paneId: survivorPaneId, direction: .horizontal))
         let closedPaneId = selectedTab(in: model)!.focusedPaneId
-        _ = update(&model, .addTodo(paneId: closedPaneId, text: "pane task"))
-        _ = update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        _ = update(&model, .addTodo(owner: .pane(closedPaneId), text: "pane task"))
+        _ = update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
 
         let commands = sendIpc(
             &model,
@@ -972,8 +975,8 @@ import DanTermProtocol
         createTab(&tabModel)
         let closedTabId = selectedTab(in: tabModel)!.id
         let solePaneId = selectedTab(in: tabModel)!.focusedPaneId
-        _ = update(&tabModel, .addTodo(paneId: solePaneId, text: "pane task"))
-        _ = update(&tabModel, .addTabTodo(tabId: closedTabId, text: "tab task"))
+        _ = update(&tabModel, .addTodo(owner: .pane(solePaneId), text: "pane task"))
+        _ = update(&tabModel, .addTodo(owner: .tab(closedTabId), text: "tab task"))
         createTab(&tabModel)
 
         let tabCommands = sendIpc(
@@ -2339,6 +2342,77 @@ import DanTermProtocol
         #expect(model.pane(targetPaneId)?.todos.count == 0)
     }
 
+    @Test("todo command family edits a tab owner")
+    func todoCommandFamilyEditsTabOwner() throws {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+        let tab = JSONValue.string(tabId.rawValue.uuidString)
+
+        let add = try requireIpcReply(sendIpc(
+            &model,
+            method: IpcRequestMethod.todoAdd.rawValue,
+            params: .object(["tab": tab, "text": .string("ship tab")])
+        ))
+        let todoId = try requireString(add["todo"]?["id"], "tab todo add should return id")
+        #expect(tabById(tabId, in: model)?.todos.first?.text == "ship tab")
+
+        let list = try requireIpcReply(sendIpc(
+            &model, method: IpcRequestMethod.todoList.rawValue, params: .object(["tab": tab])
+        ))
+        #expect(list["todos"]?.asArray?.count == 1)
+
+        _ = sendIpc(&model, method: IpcRequestMethod.todoEdit.rawValue, params: .object([
+            "tab": tab, "todoId": .string(todoId), "text": .string("ship tab v2"),
+        ]))
+        #expect(tabById(tabId, in: model)?.todos.first?.text == "ship tab v2")
+
+        _ = sendIpc(&model, method: IpcRequestMethod.todoDone.rawValue, params: .object([
+            "tab": tab, "todoId": .string(todoId),
+        ]))
+        #expect(tabById(tabId, in: model)?.todos.first?.isDone == true)
+
+        _ = sendIpc(&model, method: IpcRequestMethod.todoOpen.rawValue, params: .object([
+            "tab": tab, "todoId": .string(todoId),
+        ]))
+        #expect(tabById(tabId, in: model)?.todos.first?.isDone == false)
+
+        _ = sendIpc(&model, method: IpcRequestMethod.todoDone.rawValue, params: .object([
+            "tab": tab, "todoId": .string(todoId),
+        ]))
+        _ = sendIpc(
+            &model, method: IpcRequestMethod.todoClearCompleted.rawValue,
+            params: .object(["tab": tab])
+        )
+        #expect(tabById(tabId, in: model)?.todos.isEmpty == true)
+
+        let deleteAdd = try requireIpcReply(sendIpc(
+            &model, method: IpcRequestMethod.todoAdd.rawValue,
+            params: .object(["tab": tab, "text": .string("delete")])
+        ))
+        let deleteId = try requireString(deleteAdd["todo"]?["id"], "tab todo add should return id")
+        _ = sendIpc(&model, method: IpcRequestMethod.todoDelete.rawValue, params: .object([
+            "tab": tab, "todoId": .string(deleteId),
+        ]))
+        #expect(tabById(tabId, in: model)?.todos.isEmpty == true)
+    }
+
+    @Test("todo command rejects an unknown tab owner")
+    func todoCommandRejectsUnknownTabOwner() throws {
+        var model = makeModel()
+        createTab(&model)
+        let before = model
+
+        let commands = sendIpc(
+            &model,
+            method: IpcRequestMethod.todoList.rawValue,
+            params: .object(["tab": .string(TabId().rawValue.uuidString)])
+        )
+
+        #expect(try requireIpcError(commands) == .init(code: -32602, message: "tab not found"))
+        #expect(model == before)
+    }
+
     @Test("todo commands malformed or unknown explicit pane do not fall back to context")
     func todoCommandsMalformedOrUnknownExplicitPaneNoFallback() throws {
         // Intent: malformed / unknown / non-string explicit pane on
@@ -2369,7 +2443,7 @@ import DanTermProtocol
                 var params = baseParams
                 params["pane"] = paneValue
                 if params["todoId"] != nil {
-                    params["todoId"] = .string(item.id.uuidString)
+                    params["todoId"] = .string(item.id.rawValue.uuidString)
                 }
 
                 let sent = sendIpc(

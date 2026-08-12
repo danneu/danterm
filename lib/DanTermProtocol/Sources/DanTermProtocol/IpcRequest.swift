@@ -198,20 +198,20 @@ public enum IpcRequest: Equatable, Sendable {
     case agentActivity(pane: PaneId, session: IpcAgentSession, activity: IpcAgentActivity)
     /// Detaches a decoded agent identity from a structurally required pane.
     case agentDetach(pane: PaneId, session: IpcAgentSession)
-    /// Lists todos from a structurally required pane.
-    case todoList(pane: PaneId)
-    /// Adds validated text to a structurally required pane's todos.
-    case todoAdd(pane: PaneId, text: String)
-    /// Edits a named todo in a structurally required pane.
-    case todoEdit(pane: PaneId, todoId: String, text: String)
-    /// Completes a named todo in a structurally required pane.
-    case todoDone(pane: PaneId, todoId: String)
-    /// Reopens a named todo in a structurally required pane.
-    case todoOpen(pane: PaneId, todoId: String)
-    /// Deletes a named todo from a structurally required pane.
-    case todoDelete(pane: PaneId, todoId: String)
-    /// Clears completed todos from a structurally required pane.
-    case todoClearCompleted(pane: PaneId)
+    /// Lists todos from a structurally required pane or tab owner.
+    case todoList(owner: TodoOwner)
+    /// Adds validated text to a structurally required owner's todos.
+    case todoAdd(owner: TodoOwner, text: String)
+    /// Edits a named todo in a structurally required owner.
+    case todoEdit(owner: TodoOwner, todoId: TodoId, text: String)
+    /// Completes a named todo in a structurally required owner.
+    case todoDone(owner: TodoOwner, todoId: TodoId)
+    /// Reopens a named todo in a structurally required owner.
+    case todoOpen(owner: TodoOwner, todoId: TodoId)
+    /// Deletes a named todo from a structurally required owner.
+    case todoDelete(owner: TodoOwner, todoId: TodoId)
+    /// Clears completed todos from a structurally required owner.
+    case todoClearCompleted(owner: TodoOwner)
 
     /// Identifies the wire method for this catalog case.
     public var method: IpcRequestMethod {
@@ -245,24 +245,25 @@ public enum IpcRequest: Equatable, Sendable {
         }
     }
 
-    /// Names the concrete target key carried by this request, if any.
-    public var targetParameterKey: String? {
+    /// Names every target key this request can carry.
+    public var targetParameterKeys: [String] {
         switch self {
         case .doctorPermissions, .ls, .focusInfo:
-            return nil
+            return []
         case .tabNew(let target, _, _):
             switch target {
-            case .group: return "group"
-            case .afterTab: return "afterTabId"
+            case .group: return ["group"]
+            case .afterTab: return ["afterTabId"]
             }
         case .tabRename, .tabClose:
-            return "tab"
+            return ["tab"]
         case .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
              .paneRead, .paneRows, .paneZoom, .paneTape, .themeSet,
-             .agentAttach, .agentActivity, .agentDetach,
-             .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
+             .agentAttach, .agentActivity, .agentDetach:
+            return ["pane"]
+        case .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
              .todoDelete, .todoClearCompleted:
-            return "pane"
+            return ["pane", "tab"]
         }
     }
 
@@ -287,7 +288,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .tabClose(let tab):
             return ["tab": idValue(tab)]
         case .paneFocus(let pane), .paneInfo(let pane), .paneClose(let pane),
-             .paneRows(let pane), .todoList(let pane), .todoClearCompleted(let pane):
+             .paneRows(let pane):
             return ["pane": idValue(pane)]
         case .paneSplit(let pane, let direction, let launch, let background):
             var object = launchParams(launch, background: background)
@@ -320,13 +321,17 @@ public enum IpcRequest: Equatable, Sendable {
             var object = agentParams(pane: pane, session: session)
             object["state"] = .string(activity.rawValue)
             return object
-        case .todoAdd(let pane, let text):
-            return ["pane": idValue(pane), "text": .string(text)]
-        case .todoEdit(let pane, let todoId, let text):
-            return ["pane": idValue(pane), "todoId": .string(todoId), "text": .string(text)]
-        case .todoDone(let pane, let todoId), .todoOpen(let pane, let todoId),
-             .todoDelete(let pane, let todoId):
-            return ["pane": idValue(pane), "todoId": .string(todoId)]
+        case .todoList(let owner), .todoClearCompleted(let owner):
+            return ownerParams(owner)
+        case .todoAdd(let owner, let text):
+            return ownerParams(owner).merging(["text": .string(text)]) { _, new in new }
+        case .todoEdit(let owner, let todoId, let text):
+            return ownerParams(owner).merging([
+                "todoId": idValue(todoId), "text": .string(text),
+            ]) { _, new in new }
+        case .todoDone(let owner, let todoId), .todoOpen(let owner, let todoId),
+             .todoDelete(let owner, let todoId):
+            return ownerParams(owner).merging(["todoId": idValue(todoId)]) { _, new in new }
         }
     }
 
@@ -419,33 +424,53 @@ public enum IpcRequest: Equatable, Sendable {
             let pane: PaneId = try target("pane", object: object)
             return .agentDetach(pane: pane, session: try agentSession(object))
         case .todoList:
-            return .todoList(pane: try target("pane", object: object))
+            return .todoList(owner: try todoOwner(object))
         case .todoAdd:
-            let pane: PaneId = try target("pane", object: object)
+            let owner = try todoOwner(object)
             guard case .string(let text)? = object?["text"] else { throw invalid("invalid todo text") }
-            return .todoAdd(pane: pane, text: text)
+            return .todoAdd(owner: owner, text: text)
         case .todoEdit:
-            let pane: PaneId = try target("pane", object: object)
-            guard case .string(let todoId)? = object?["todoId"],
+            let owner = try todoOwner(object)
+            guard case .string(let rawTodoId)? = object?["todoId"],
                   case .string(let text)? = object?["text"],
-                  UUID(uuidString: todoId) != nil,
+                  let todoId = UUID(uuidString: rawTodoId),
                   text.trimmingCharacters(in: .whitespaces).isEmpty == false
             else { throw invalid("invalid todo") }
-            return .todoEdit(pane: pane, todoId: todoId, text: text)
+            return .todoEdit(owner: owner, todoId: TodoId(rawValue: todoId), text: text)
         case .todoDone, .todoOpen, .todoDelete:
-            let pane: PaneId = try target("pane", object: object)
-            guard case .string(let todoId)? = object?["todoId"], UUID(uuidString: todoId) != nil else {
+            let owner = try todoOwner(object)
+            guard case .string(let rawTodoId)? = object?["todoId"], let todoId = UUID(uuidString: rawTodoId) else {
                 throw invalid("invalid todo")
             }
             switch method {
-            case .todoDone: return .todoDone(pane: pane, todoId: todoId)
-            case .todoOpen: return .todoOpen(pane: pane, todoId: todoId)
-            case .todoDelete: return .todoDelete(pane: pane, todoId: todoId)
+            case .todoDone: return .todoDone(owner: owner, todoId: TodoId(rawValue: todoId))
+            case .todoOpen: return .todoOpen(owner: owner, todoId: TodoId(rawValue: todoId))
+            case .todoDelete: return .todoDelete(owner: owner, todoId: TodoId(rawValue: todoId))
             default: preconditionFailure("exhaustive todo method switch")
             }
         case .todoClearCompleted:
-            return .todoClearCompleted(pane: try target("pane", object: object))
+            return .todoClearCompleted(owner: try todoOwner(object))
         }
+    }
+}
+
+private func todoOwner(_ object: [String: JSONValue]?) throws -> TodoOwner {
+    let hasPane = object?["pane"] != nil
+    let hasTab = object?["tab"] != nil
+    guard hasPane || hasTab else { throw invalid("pane or tab required") }
+    guard hasPane != hasTab else { throw invalid("exactly one of pane or tab required") }
+    if hasPane {
+        let pane: PaneId = try target("pane", object: object)
+        return .pane(pane)
+    }
+    let tab: TabId = try target("tab", object: object)
+    return .tab(tab)
+}
+
+private func ownerParams(_ owner: TodoOwner) -> [String: JSONValue] {
+    switch owner {
+    case .pane(let pane): return ["pane": idValue(pane)]
+    case .tab(let tab): return ["tab": idValue(tab)]
     }
 }
 

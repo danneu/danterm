@@ -152,8 +152,6 @@ class AppRuntime {
     private lazy var alertsPopoverDelegate = AlertsPopoverDelegateAdapter(runtime: self)
     var todoPopover: NSPopover?
     private var todoPopoverDelegate: TodoPopoverDelegateAdapter?
-    var tabTodoPopover: NSPopover?
-    private var tabTodoPopoverDelegate: TabTodoPopoverDelegateAdapter?
     // internal (not private): the cross-file reconcileThemeBrowser extension reads it.
     var themeBrowserView: ThemeBrowserView?
     // internal (not private): the cross-file reconcilePreferencesPanel extension reads it.
@@ -421,11 +419,12 @@ class AppRuntime {
     /// Close pane-level shortcut help without dismissing the parent todo popover.
     func closeTodoShortcutHelpPopover() {
         (todoPopover?.contentViewController as? TodoPopoverViewController)?.closeShortcutHelpPopover()
+        (todoPopover?.contentViewController as? TabTodoPopoverViewController)?.closeShortcutHelpPopover()
     }
 
     /// Close tab-level shortcut help without dismissing the parent todo popover.
     func closeTabTodoShortcutHelpPopover() {
-        (tabTodoPopover?.contentViewController as? TabTodoPopoverViewController)?.closeShortcutHelpPopover()
+        (todoPopover?.contentViewController as? TabTodoPopoverViewController)?.closeShortcutHelpPopover()
     }
 
     /// Dismiss child help before its pane parent so AppKit cannot refuse the parent close.
@@ -434,14 +433,6 @@ class AppRuntime {
         todoPopover?.performClose(nil)
         todoPopover = nil
         todoPopoverDelegate = nil
-    }
-
-    /// Dismiss child help before its tab parent so AppKit cannot refuse the parent close.
-    private func dismissTabTodoPopoverPair() {
-        closeTabTodoShortcutHelpPopover()
-        tabTodoPopover?.performClose(nil)
-        tabTodoPopover = nil
-        tabTodoPopoverDelegate = nil
     }
 
     /// Build, configure, and show a transient popover anchored to `anchor`, returning
@@ -1166,33 +1157,29 @@ class AppRuntime {
 
         // TODO popover
 
-        case .showTodoPopover(let paneId):
+        case .showTodoPopover(let owner):
             dismissTodoPopoverPair()
-            guard let wrapper = findPaneWrapper(for: paneId) else { return }
-            let vc = TodoPopoverViewController(paneId: paneId, runtime: self)
-            let delegate = TodoPopoverDelegateAdapter(paneId: paneId, runtime: self)
-            vc.loadViewIfNeeded()
-            guard let projection = desiredPaneTodoPopover(paneId: paneId, in: model) else { return }
-            vc.apply(projection)
-            todoPopover = presentTransientPopover(vc, delegate: delegate, from: wrapper.todoButtonView)
+            let delegate = TodoPopoverDelegateAdapter(owner: owner, runtime: self)
+            switch owner {
+            case .pane(let paneId):
+                guard let wrapper = findPaneWrapper(for: paneId) else { return }
+                let vc = TodoPopoverViewController(paneId: paneId, runtime: self)
+                vc.loadViewIfNeeded()
+                guard let projection = desiredPaneTodoPopover(paneId: paneId, in: model) else { return }
+                vc.apply(projection)
+                todoPopover = presentTransientPopover(vc, delegate: delegate, from: wrapper.todoButtonView)
+            case .tab(let tabId):
+                guard let anchor = chromeView?.tabTodoButton else { return }
+                let vc = TabTodoPopoverViewController(tabId: tabId, runtime: self)
+                vc.loadViewIfNeeded()
+                guard let projection = desiredTabTodoPopover(tabId: tabId, in: model) else { return }
+                vc.apply(projection)
+                todoPopover = presentTransientPopover(vc, delegate: delegate, from: anchor)
+            }
             todoPopoverDelegate = delegate
 
         case .dismissTodoPopover:
             dismissTodoPopoverPair()
-
-        case .showTodoPopoverForTab(let tabId):
-            dismissTabTodoPopoverPair()
-            guard let anchor = chromeView?.tabTodoButton else { return }
-            let vc = TabTodoPopoverViewController(tabId: tabId, runtime: self)
-            let delegate = TabTodoPopoverDelegateAdapter(tabId: tabId, runtime: self)
-            vc.loadViewIfNeeded()
-            guard let projection = desiredTabTodoPopover(tabId: tabId, in: model) else { return }
-            vc.apply(projection)
-            tabTodoPopover = presentTransientPopover(vc, delegate: delegate, from: anchor)
-            tabTodoPopoverDelegate = delegate
-
-        case .dismissTodoPopoverForTab:
-            dismissTabTodoPopoverPair()
 
         case .showClosePaneConfirmation(let paneId, let uncompletedCount):
             let tasks = uncompletedCount == 1 ? "1 uncompleted task" : "\(uncompletedCount) uncompleted tasks"
@@ -2028,12 +2015,11 @@ class AppRuntime {
     func dismissStrandedPopovers() {
         cancelPaneDrag()
         dismissTodoPopoverPair()
-        dismissTabTodoPopoverPair()
     }
 
     /// Dismisses only a tab-scoped popover when a live tree edit preserves pane anchors.
     func dismissStrandedTabPopover() {
-        dismissTabTodoPopoverPair()
+        dismissTodoPopoverPair()
     }
 
     // MARK: - Alerts Popover
@@ -2068,14 +2054,14 @@ private final class AlertsPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
     }
 }
 
-/// NSPopoverDelegate adapter for the per-pane TODO popover.
+/// NSPopoverDelegate adapter shared by pane- and tab-owned TODO popovers.
 /// Sends .todoPopoverClosed when the popover closes for any reason (click-away,
 /// programmatic, etc.) so model.todoPopover stays in sync.
-private class TodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
+private final class TodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
     weak var runtime: AppRuntime?
-    let paneId: PaneId
-    init(paneId: PaneId, runtime: AppRuntime?) {
-        self.paneId = paneId
+    let owner: TodoOwner
+    init(owner: TodoOwner, runtime: AppRuntime?) {
+        self.owner = owner
         self.runtime = runtime
     }
     /// NSPopoverDelegate: cascade-close shortcut help before the parent closes.
@@ -2084,26 +2070,7 @@ private class TodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
     }
     /// NSPopoverDelegate: keep model.todoPopover in sync after any close path.
     func popoverDidClose(_ notification: Notification) {
-        runtime?.send(.todoPopoverClosed(paneId: paneId))
-    }
-}
-
-/// NSPopoverDelegate adapter for the tab-level TODO popover. Mirrors the pane
-/// adapter; sends .todoPopoverForTabClosed so model.todoPopover stays in sync.
-class TabTodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
-    weak var runtime: AppRuntime?
-    let tabId: TabId
-    init(tabId: TabId, runtime: AppRuntime?) {
-        self.tabId = tabId
-        self.runtime = runtime
-    }
-    /// NSPopoverDelegate: cascade-close shortcut help before the parent closes.
-    func popoverWillClose(_ notification: Notification) {
-        runtime?.closeTabTodoShortcutHelpPopover()
-    }
-    /// NSPopoverDelegate: keep model.todoPopover in sync after any close path.
-    func popoverDidClose(_ notification: Notification) {
-        runtime?.send(.todoPopoverForTabClosed(tabId: tabId))
+        runtime?.send(.todoPopoverClosed(owner: owner))
     }
 }
 

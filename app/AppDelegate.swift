@@ -653,12 +653,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func openTodo(_ sender: Any?) {
         guard let tab = selectedTab(in: runtime.model) else { return }
-        runtime.send(.toggleTodoPopover(paneId: tab.focusedPaneId))
+        runtime.send(.toggleTodoPopover(owner: .pane(tab.focusedPaneId)))
     }
 
     @objc func toggleTabTodoPopover(_ sender: Any?) {
         guard let tabId = runtime.model.selectedTabId else { return }
-        runtime.send(.toggleTodoPopoverForTab(tabId: tabId))
+        runtime.send(.toggleTodoPopover(owner: .tab(tabId)))
     }
 
     @objc func focusLeft(_ sender: Any?) {

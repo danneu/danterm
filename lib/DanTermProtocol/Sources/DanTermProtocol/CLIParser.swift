@@ -560,53 +560,66 @@ private func parseAgentActivityCommand(_ args: [String]) throws -> CLICommand {
 
 private func parseTodo(_ args: [String]) throws -> CLICommand {
     guard let head = args.first else { throw CLIParseError("usage: danterm todo <command>") }
+    let ownerUsage = "(--pane <pane-id> | --tab <tab-id>)"
     switch head {
     case "list":
-        let (pane, rest) = try parseTodoPanePrefix(Array(args.dropFirst()), usage: "usage: danterm todo list --pane <pane-id>")
-        guard rest.isEmpty else { throw CLIParseError("usage: danterm todo list --pane <pane-id>") }
-        return CLICommand(request: .todoList(pane: pane), outputMode: .json)
+        let usage = "usage: danterm todo list \(ownerUsage)"
+        let (owner, rest) = try parseTodoOwnerPrefix(Array(args.dropFirst()), usage: usage)
+        guard rest.isEmpty else { throw CLIParseError(usage) }
+        return CLICommand(request: .todoList(owner: owner), outputMode: .json)
     case "add":
-        let (pane, rest) = try parseTodoPanePrefix(Array(args.dropFirst()), usage: "usage: danterm todo add --pane <pane-id> <text>")
+        let usage = "usage: danterm todo add \(ownerUsage) <text>"
+        let (owner, rest) = try parseTodoOwnerPrefix(Array(args.dropFirst()), usage: usage)
         let text = rest.joined(separator: " ")
-        guard !text.isEmpty else { throw CLIParseError("usage: danterm todo add --pane <pane-id> <text>") }
-        return CLICommand(request: .todoAdd(pane: pane, text: text), outputMode: .json)
+        guard !text.isEmpty else { throw CLIParseError(usage) }
+        return CLICommand(request: .todoAdd(owner: owner, text: text), outputMode: .json)
     case "edit":
-        let (pane, rest) = try parseTodoPanePrefix(Array(args.dropFirst()), usage: "usage: danterm todo edit --pane <pane-id> <todo-id> <text>")
-        guard rest.count >= 2 else { throw CLIParseError("usage: danterm todo edit --pane <pane-id> <todo-id> <text>") }
+        let usage = "usage: danterm todo edit \(ownerUsage) <todo-id> <text>"
+        let (owner, rest) = try parseTodoOwnerPrefix(Array(args.dropFirst()), usage: usage)
+        guard rest.count >= 2, let todoId = UUID(uuidString: rest[0]) else { throw CLIParseError(usage) }
         let text = rest.dropFirst().joined(separator: " ")
         return CLICommand(
-            request: .todoEdit(pane: pane, todoId: rest[0], text: text),
+            request: .todoEdit(owner: owner, todoId: TodoId(rawValue: todoId), text: text),
             outputMode: .none
         )
     case "done":
-        return try parseTodoIdCommand(method: .todoDone, args: Array(args.dropFirst()), usage: "usage: danterm todo done --pane <pane-id> <todo-id>")
+        return try parseTodoIdCommand(method: .todoDone, args: Array(args.dropFirst()), usage: "usage: danterm todo done \(ownerUsage) <todo-id>")
     case "open":
-        return try parseTodoIdCommand(method: .todoOpen, args: Array(args.dropFirst()), usage: "usage: danterm todo open --pane <pane-id> <todo-id>")
+        return try parseTodoIdCommand(method: .todoOpen, args: Array(args.dropFirst()), usage: "usage: danterm todo open \(ownerUsage) <todo-id>")
     case "delete":
-        return try parseTodoIdCommand(method: .todoDelete, args: Array(args.dropFirst()), usage: "usage: danterm todo delete --pane <pane-id> <todo-id>")
+        return try parseTodoIdCommand(method: .todoDelete, args: Array(args.dropFirst()), usage: "usage: danterm todo delete \(ownerUsage) <todo-id>")
     case "clear-completed":
-        let (pane, rest) = try parseTodoPanePrefix(Array(args.dropFirst()), usage: "usage: danterm todo clear-completed --pane <pane-id>")
-        guard rest.isEmpty else { throw CLIParseError("usage: danterm todo clear-completed --pane <pane-id>") }
-        return CLICommand(request: .todoClearCompleted(pane: pane), outputMode: .none)
+        let usage = "usage: danterm todo clear-completed \(ownerUsage)"
+        let (owner, rest) = try parseTodoOwnerPrefix(Array(args.dropFirst()), usage: usage)
+        guard rest.isEmpty else { throw CLIParseError(usage) }
+        return CLICommand(request: .todoClearCompleted(owner: owner), outputMode: .none)
     default:
         throw CLIParseError("unknown todo command")
     }
 }
 
-private func parseTodoPanePrefix(_ args: [String], usage: String) throws -> (PaneId, [String]) {
-    guard args.first == "--pane" else { throw CLIParseError(usage) }
+private func parseTodoOwnerPrefix(_ args: [String], usage: String) throws -> (TodoOwner, [String]) {
+    guard args.first == "--pane" || args.first == "--tab" else { throw CLIParseError(usage) }
     guard args.count >= 2 else { throw CLIParseError(usage) }
-    return (try paneId(args[1]), Array(args.dropFirst(2)))
+    let owner: TodoOwner = args[0] == "--pane"
+        ? .pane(try paneId(args[1]))
+        : .tab(try tabId(args[1]))
+    let rest = Array(args.dropFirst(2))
+    guard rest.contains("--pane") == false, rest.contains("--tab") == false else {
+        throw CLIParseError(usage)
+    }
+    return (owner, rest)
 }
 
 private func parseTodoIdCommand(method: IpcRequestMethod, args: [String], usage: String) throws -> CLICommand {
-    let (pane, rest) = try parseTodoPanePrefix(args, usage: usage)
-    guard rest.count == 1 else { throw CLIParseError(usage) }
+    let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
+    guard rest.count == 1, let rawTodoId = UUID(uuidString: rest[0]) else { throw CLIParseError(usage) }
+    let todoId = TodoId(rawValue: rawTodoId)
     let request: IpcRequest
     switch method {
-    case .todoDone: request = .todoDone(pane: pane, todoId: rest[0])
-    case .todoOpen: request = .todoOpen(pane: pane, todoId: rest[0])
-    case .todoDelete: request = .todoDelete(pane: pane, todoId: rest[0])
+    case .todoDone: request = .todoDone(owner: owner, todoId: todoId)
+    case .todoOpen: request = .todoOpen(owner: owner, todoId: todoId)
+    case .todoDelete: request = .todoDelete(owner: owner, todoId: todoId)
     default: preconditionFailure("todo id parser requires a todo mutation method")
     }
     return CLICommand(request: request, outputMode: .none)

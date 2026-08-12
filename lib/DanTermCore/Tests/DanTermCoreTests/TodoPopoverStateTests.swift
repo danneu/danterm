@@ -47,16 +47,20 @@ import Testing
         // Scenario: spec-first cross-bucket retarget.
         let todoId = UUID()
         let paneId = PaneId()
+        let tabId = TabId()
+        let typedTodoId = TodoId(rawValue: todoId)
         var state = TodoPopoverState<TabTodoEditTarget>(
-            mode: .edit(.tab(todoId: todoId)),
+            mode: .edit(.init(owner: .tab(tabId), id: typedTodoId)),
             composeDraft: "abc"
         )
 
         state.reconcileEditTarget { target in
-            target == .tab(todoId: todoId) ? .pane(paneId: paneId, todoId: todoId) : nil
+            target == .init(owner: .tab(tabId), id: typedTodoId)
+                ? .init(owner: .pane(paneId), id: typedTodoId)
+                : nil
         }
 
-        #expect(state.mode == .edit(.pane(paneId: paneId, todoId: todoId)))
+        #expect(state.mode == .edit(.init(owner: .pane(paneId), id: typedTodoId)))
         #expect(state.composeDraft == "abc")
     }
 
@@ -82,8 +86,8 @@ import Testing
         // Scenario: spec-first selectRow.
         runSelectionPreservesCompose(target: UUID(), otherTarget: UUID())
         runSelectionPreservesCompose(
-            target: TabTodoEditTarget.tab(todoId: UUID()),
-            otherTarget: TabTodoEditTarget.pane(paneId: PaneId(), todoId: UUID())
+            target: TabTodoEditTarget(owner: .tab(TabId()), id: TodoId()),
+            otherTarget: TabTodoEditTarget(owner: .pane(PaneId()), id: TodoId())
         )
     }
 
@@ -95,8 +99,8 @@ import Testing
         // Scenario: spec-first enterEdit.
         runEnterEditPreservesCompose(target: UUID(), otherTarget: UUID())
         runEnterEditPreservesCompose(
-            target: TabTodoEditTarget.tab(todoId: UUID()),
-            otherTarget: TabTodoEditTarget.pane(paneId: PaneId(), todoId: UUID())
+            target: TabTodoEditTarget(owner: .tab(TabId()), id: TodoId()),
+            otherTarget: TabTodoEditTarget(owner: .pane(PaneId()), id: TodoId())
         )
     }
 
@@ -108,8 +112,8 @@ import Testing
         // Scenario: spec-first save.
         runSaveReturnsToListAndPreservesCompose(target: UUID(), otherTarget: UUID())
         runSaveReturnsToListAndPreservesCompose(
-            target: TabTodoEditTarget.tab(todoId: UUID()),
-            otherTarget: TabTodoEditTarget.pane(paneId: PaneId(), todoId: UUID())
+            target: TabTodoEditTarget(owner: .tab(TabId()), id: TodoId()),
+            otherTarget: TabTodoEditTarget(owner: .pane(PaneId()), id: TodoId())
         )
     }
 
@@ -121,8 +125,8 @@ import Testing
         // Scenario: spec-first cancel.
         runCancelReturnsToListAndPreservesCompose(target: UUID(), otherTarget: UUID())
         runCancelReturnsToListAndPreservesCompose(
-            target: TabTodoEditTarget.tab(todoId: UUID()),
-            otherTarget: TabTodoEditTarget.pane(paneId: PaneId(), todoId: UUID())
+            target: TabTodoEditTarget(owner: .tab(TabId()), id: TodoId()),
+            otherTarget: TabTodoEditTarget(owner: .pane(PaneId()), id: TodoId())
         )
     }
 
@@ -134,8 +138,8 @@ import Testing
         // Scenario: spec-first empty save reject.
         runEmptySaveIsRejected(target: UUID(), otherTarget: UUID())
         runEmptySaveIsRejected(
-            target: TabTodoEditTarget.tab(todoId: UUID()),
-            otherTarget: TabTodoEditTarget.pane(paneId: PaneId(), todoId: UUID())
+            target: TabTodoEditTarget(owner: .tab(TabId()), id: TodoId()),
+            otherTarget: TabTodoEditTarget(owner: .pane(PaneId()), id: TodoId())
         )
     }
 
@@ -147,8 +151,8 @@ import Testing
         // Scenario: spec-first clear from list.
         runClearFromList(target: UUID(), otherTarget: UUID())
         runClearFromList(
-            target: TabTodoEditTarget.tab(todoId: UUID()),
-            otherTarget: TabTodoEditTarget.pane(paneId: PaneId(), todoId: UUID())
+            target: TabTodoEditTarget(owner: .tab(TabId()), id: TodoId()),
+            otherTarget: TabTodoEditTarget(owner: .pane(PaneId()), id: TodoId())
         )
     }
 
@@ -160,8 +164,8 @@ import Testing
         // Scenario: spec-first cmd-n success.
         runEditCmdNSuccessSavesBeforeClear(target: UUID(), otherTarget: UUID())
         runEditCmdNSuccessSavesBeforeClear(
-            target: TabTodoEditTarget.tab(todoId: UUID()),
-            otherTarget: TabTodoEditTarget.pane(paneId: PaneId(), todoId: UUID())
+            target: TabTodoEditTarget(owner: .tab(TabId()), id: TodoId()),
+            otherTarget: TabTodoEditTarget(owner: .pane(PaneId()), id: TodoId())
         )
     }
 
@@ -173,8 +177,8 @@ import Testing
         // Scenario: spec-first cmd-n reject.
         runEditCmdNRejectedPreservesDraft(target: UUID(), otherTarget: UUID())
         runEditCmdNRejectedPreservesDraft(
-            target: TabTodoEditTarget.tab(todoId: UUID()),
-            otherTarget: TabTodoEditTarget.pane(paneId: PaneId(), todoId: UUID())
+            target: TabTodoEditTarget(owner: .tab(TabId()), id: TodoId()),
+            otherTarget: TabTodoEditTarget(owner: .pane(PaneId()), id: TodoId())
         )
     }
 }

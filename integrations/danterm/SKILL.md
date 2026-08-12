@@ -45,13 +45,13 @@ and skips those rows when the app is unavailable.
     danterm agent detach --pane <pane-id> --kind <kind> --id <session-id>
     danterm skill
     danterm doctor
-    danterm todo list --pane <pane-id>
-    danterm todo add --pane <pane-id> <text>
-    danterm todo edit --pane <pane-id> <todo-id> <text>
-    danterm todo done --pane <pane-id> <todo-id>
-    danterm todo open --pane <pane-id> <todo-id>
-    danterm todo delete --pane <pane-id> <todo-id>
-    danterm todo clear-completed --pane <pane-id>
+    danterm todo list (--pane <pane-id> | --tab <tab-id>)
+    danterm todo add (--pane <pane-id> | --tab <tab-id>) <text>
+    danterm todo edit (--pane <pane-id> | --tab <tab-id>) <todo-id> <text>
+    danterm todo done (--pane <pane-id> | --tab <tab-id>) <todo-id>
+    danterm todo open (--pane <pane-id> | --tab <tab-id>) <todo-id>
+    danterm todo delete (--pane <pane-id> | --tab <tab-id>) <todo-id>
+    danterm todo clear-completed (--pane <pane-id> | --tab <tab-id>)
 
 CLI defaults are agent-safe: `tab new` opens in the background at the target
 group end, and `pane split` opens in the background. The interactive app UI
@@ -101,7 +101,9 @@ For agent commands:
   background. Pass `--foreground` only when the user asked to focus the new pane
   within its tab.
 - `pane close`: always pass `--pane <pane-id>`.
-- `pane input`, `theme set`, and todos: always pass `--pane <pane-id>`.
+- `pane input` and `theme set`: always pass `--pane <pane-id>`.
+- Todos: always pass exactly one explicit owner, `--pane <pane-id>` or
+  `--tab <tab-id>`.
 - `agent attach`, `agent activity`, and `agent detach`: always pass
   `--pane <pane-id>`. The bundled hooks pass `$DANTERM_PANE` explicitly.
 - `pane focus`, `pane info`, `pane read`, `pane rows`, `pane zoom`, and
@@ -211,7 +213,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "which control owns key focus?" | `focus` |
 | "which tab/group contains this pane?" | `pane info --pane <pane-id>` |
 | "switch the theme to X" | `theme set --pane <pane-id>` |
-| "add/check off/edit a todo" | `todo ... --pane <pane-id>` |
+| "add/check off/edit a todo" | `todo ... --pane <pane-id>` or `todo ... --tab <tab-id>` |
 | "check DanTerm integration health" | `doctor` |
 | "show DanTerm's agent instructions" | `skill` |
 
@@ -497,6 +499,10 @@ document. It is always advisory -- a font problem never changes the exit code.
 
 ### Todos
 
+Every todo command requires exactly one owner flag: `--pane <pane-id>` or
+`--tab <tab-id>`. The examples below use a pane; substitute `--tab "$TAB_ID"`
+to edit the tab-level list.
+
     danterm todo list --pane "$PANE_ID"
     ID=$(danterm todo add --pane "$PANE_ID" "write the failing test first" | jq -r '.todo.id')
     danterm todo edit --pane "$PANE_ID" "$ID" "write the failing test first, then implement"
@@ -549,8 +555,8 @@ else prints nothing on success and exits 0.
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, command, connection, agent, integration}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |
-| `todo list --pane <pane-id>` | JSON: `{todos: [{id, text, isDone}, ...]}` |
-| `todo add --pane <pane-id>` | JSON: `{todo: {id, text, isDone}}` |
+| `todo list (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todos: [{id, text, isDone}, ...]}` |
+| `todo add (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
 | `pane zoom --pane <pane-id> on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `tab.isZoomed` and current session-reported fields |
 | `pane rows --pane <pane-id>` | JSON: per-display-row line structure |

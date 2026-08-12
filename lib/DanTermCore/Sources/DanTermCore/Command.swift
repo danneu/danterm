@@ -74,10 +74,8 @@ enum Command {
     case sendEndSearch(paneId: PaneId)
 
     // TODO
-    case showTodoPopover(paneId: PaneId)
-    case dismissTodoPopover
-    case showTodoPopoverForTab(tabId: TabId)
-    case dismissTodoPopoverForTab
+    case showTodoPopover(owner: TodoOwner)
+    case dismissTodoPopover(owner: TodoOwner)
     case showClosePaneConfirmation(paneId: PaneId, uncompletedCount: Int)
     // The MRU tab switcher overlay is derived by reconcileSwitcher from model.mruCycle
     // after every send() (Stage 7); showSwitcherOverlay/hideSwitcherOverlay are gone.

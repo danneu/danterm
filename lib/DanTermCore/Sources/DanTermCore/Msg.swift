@@ -31,16 +31,6 @@ enum TabInsertPosition {
     case afterTab(TabId)
 }
 
-enum TodoSource: Equatable {
-    case tab(TabId)
-    case pane(PaneId)
-}
-
-enum TodoDestination: Equatable {
-    case tab(TabId)
-    case pane(PaneId)
-}
-
 enum Msg {
     // User actions
     case createTab(inGroupId: GroupId, position: TabInsertPosition = .afterSelected, launch: LaunchSpec? = nil, background: Bool = false)
@@ -168,28 +158,19 @@ enum Msg {
     case searchSelectionReported(paneId: PaneId, selected: Int?)
 
     // TODO
-    case toggleTodoPopover(paneId: PaneId)
-    case todoPopoverClosed(paneId: PaneId)
-    case addTodo(paneId: PaneId, text: String)
-    case toggleTodoDone(paneId: PaneId, todoId: UUID)
-    case setTodoDone(paneId: PaneId, todoId: UUID, isDone: Bool)
-    case editTodoText(paneId: PaneId, todoId: UUID, text: String)
-    case deleteTodo(paneId: PaneId, todoId: UUID)
-    case reorderTodo(paneId: PaneId, todoId: UUID, toIndex: Int)
-    case clearCompletedTodos(paneId: PaneId)
+    case toggleTodoPopover(owner: TodoOwner)
+    case todoPopoverClosed(owner: TodoOwner)
+    case addTodo(owner: TodoOwner, text: String)
+    case toggleTodoDone(owner: TodoOwner, todoId: TodoId)
+    case setTodoDone(owner: TodoOwner, todoId: TodoId, isDone: Bool)
+    case editTodoText(owner: TodoOwner, todoId: TodoId, text: String)
+    case deleteTodo(owner: TodoOwner, todoId: TodoId)
+    case reorderTodo(owner: TodoOwner, todoId: TodoId, toIndex: Int)
+    case clearCompletedTodos(owner: TodoOwner)
     case requestClosePane(paneId: PaneId)
 
     // Tab-level TODO
-    case toggleTodoPopoverForTab(tabId: TabId)
-    case todoPopoverForTabClosed(tabId: TabId)
-    case addTabTodo(tabId: TabId, text: String)
-    case toggleTabTodoDone(tabId: TabId, todoId: UUID)
-    case setTabTodoDone(tabId: TabId, todoId: UUID, isDone: Bool)
-    case editTabTodoText(tabId: TabId, todoId: UUID, text: String)
-    case deleteTabTodo(tabId: TabId, todoId: UUID)
-    case reorderTabTodo(tabId: TabId, todoId: UUID, toIndex: Int)
-    case moveTodo(from: TodoSource, todoId: UUID, to: TodoDestination, atIndex: Int)
-    case clearCompletedTabTodos(tabId: TabId)
+    case moveTodo(from: TodoOwner, todoId: TodoId, to: TodoOwner, atIndex: Int)
 
     // MRU tab switcher
     case mruCycleStepped(direction: MruDirection)  // hold path: tapped cmd-shift-i/-o

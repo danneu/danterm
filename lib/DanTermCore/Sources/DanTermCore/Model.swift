@@ -8,6 +8,8 @@ typealias TypedId<Tag> = DanTermProtocol.TypedId<Tag>
 typealias TabId = DanTermProtocol.TabId
 typealias PaneId = DanTermProtocol.PaneId
 typealias GroupId = DanTermProtocol.GroupId
+typealias TodoId = DanTermProtocol.TodoId
+typealias TodoOwner = DanTermProtocol.TodoOwner
 
 /// Keeps terminal-session identity distinct from its owning pane identity.
 enum SessionTag {}
@@ -88,9 +90,31 @@ struct RemoteSession: Equatable {
 // MARK: - TODO
 
 struct TodoItem: Equatable, Codable {
-    let id: UUID
+    let id: TodoId
     var text: String
     var isDone: Bool
+
+    private enum CodingKeys: String, CodingKey { case id, text, isDone }
+
+    init(id: TodoId, text: String, isDone: Bool) {
+        self.id = id
+        self.text = text
+        self.isDone = isDone
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = TodoId(rawValue: try container.decode(UUID.self, forKey: .id))
+        text = try container.decode(String.self, forKey: .text)
+        isDone = try container.decode(Bool.self, forKey: .isDone)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id.rawValue, forKey: .id)
+        try container.encode(text, forKey: .text)
+        try container.encode(isDone, forKey: .isDone)
+    }
 }
 
 // MARK: - Model
@@ -154,14 +178,6 @@ struct TabModel: Equatable {
     var color: TabColor? = nil
     var todos: [TodoItem] = []
 
-}
-
-/// Which TODO popover (if any) is currently open. Replaces the old
-/// `todoPopoverPaneId` slot so opening a tab popover and a pane popover are
-/// mutually exclusive by construction.
-enum TodoPopoverScope: Equatable {
-    case pane(PaneId)
-    case tab(TabId)
 }
 
 struct GroupModel: Equatable {
@@ -238,7 +254,7 @@ struct AppModel: Equatable {
     // Bundled theme names injected when Settings opens. Ephemeral and
     // panel-scoped for the same reason as `installedFontFamilies`.
     var availableThemeNames: [String] = []
-    var todoPopover: TodoPopoverScope? = nil  // ephemeral — which TODO popover (pane or tab) is open
+    var todoPopover: TodoOwner? = nil  // ephemeral -- which TODO popover (pane or tab) is open
     var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
@@ -298,6 +314,32 @@ extension AppModel {
                     return
                 }
             }
+        }
+    }
+
+    /// Mutates a tab without exposing group and tab array locations to callers.
+    mutating func updateTab(_ id: TabId, _ body: (inout TabModel) -> Void) {
+        guard let (groupIndex, tabIndex) = tabLocation(id, in: self) else { return }
+        body(&groups[groupIndex].tabs[tabIndex])
+    }
+
+    /// Reads the todo collection for either supported owner kind.
+    func todos(for owner: TodoOwner) -> [TodoItem]? {
+        switch owner {
+        case .pane(let paneId): return pane(paneId)?.todos
+        case .tab(let tabId): return tabById(tabId, in: self)?.todos
+        }
+    }
+
+    /// Mutates the todo collection only when its owner still exists.
+    mutating func updateTodos(for owner: TodoOwner, _ body: (inout [TodoItem]) -> Void) {
+        switch owner {
+        case .pane(let paneId):
+            guard pane(paneId) != nil else { return }
+            updatePane(paneId) { body(&$0.todos) }
+        case .tab(let tabId):
+            guard tabById(tabId, in: self) != nil else { return }
+            updateTab(tabId) { body(&$0.todos) }
         }
     }
 
@@ -550,7 +592,7 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
             if let todoSnaps = ts.todos {
                 tab.todos = todoSnaps.compactMap { ts in
                     guard let uuid = UUID(uuidString: ts.id) else { return nil }
-                    return TodoItem(id: uuid, text: ts.text, isDone: ts.isDone)
+                    return TodoItem(id: TodoId(rawValue: uuid), text: ts.text, isDone: ts.isDone)
                 }
             }
             tabs.append(tab)
@@ -672,7 +714,7 @@ private func parseSplitNode(
         if let todoSnaps = ps.todos {
             paneModel.todos = todoSnaps.compactMap { ts in
                 guard let uuid = UUID(uuidString: ts.id) else { return nil }
-                return TodoItem(id: uuid, text: ts.text, isDone: ts.isDone)
+                return TodoItem(id: TodoId(rawValue: uuid), text: ts.text, isDone: ts.isDone)
             }
         }
         paneSnapshotById[paneId] = ps

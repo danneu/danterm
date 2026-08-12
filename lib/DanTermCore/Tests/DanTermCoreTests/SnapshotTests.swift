@@ -750,6 +750,73 @@ import DanTermProtocol
 
     // MARK: - TODO Snapshot
 
+    @Test("legacy checkpoint restores bare-string pane and tab todo ids")
+    func legacyCheckpointRestoresBareStringTodoIds() throws {
+        let tabTodoId = "11111111-1111-4111-8111-111111111111"
+        let paneTodoId = "22222222-2222-4222-8222-222222222222"
+        let json = """
+        {
+          "version": 3,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "id": "33333333-3333-4333-8333-333333333333",
+                "todos": [{ "id": "\(tabTodoId)", "text": "tab task", "isDone": true }],
+                "rootNode": { "type": "leaf", "pane": {
+                  "id": "44444444-4444-4444-8444-444444444444",
+                  "title": "Terminal",
+                  "todos": [{ "id": "\(paneTodoId)", "text": "pane task", "isDone": false }]
+                } }
+              }]
+            }]
+          }
+        }
+        """
+
+        let initFile = try JSONDecoder().decode(AppInitFile.self, from: Data(json.utf8))
+        let model = try #require(validateAndBuild(initFile.model))
+        let tab = try #require(model.groups.first?.tabs.first)
+        let pane = try #require(model.pane(tab.focusedPaneId))
+
+        #expect(tab.todos == [TodoItem(
+            id: TodoId(rawValue: try #require(UUID(uuidString: tabTodoId))),
+            text: "tab task",
+            isDone: true
+        )])
+        #expect(pane.todos == [TodoItem(
+            id: TodoId(rawValue: try #require(UUID(uuidString: paneTodoId))),
+            text: "pane task",
+            isDone: false
+        )])
+    }
+
+    @Test("checkpoint encodes pane and tab todo ids as bare strings")
+    func checkpointEncodesBareStringTodoIds() throws {
+        var model = makeModel()
+        createTab(&model)
+        let tab = try #require(selectedTab(in: model))
+        update(&model, .addTodo(owner: .tab(tab.id), text: "tab task"))
+        update(&model, .addTodo(owner: .pane(tab.focusedPaneId), text: "pane task"))
+
+        let data = try JSONEncoder().encode(AppInitFile(
+            version: appInitFileVersion,
+            model: toSnapshot(model)
+        ))
+        let root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let snapshot = try #require(root["model"] as? [String: Any])
+        let groups = try #require(snapshot["groups"] as? [[String: Any]])
+        let tabs = try #require(groups.first?["tabs"] as? [[String: Any]])
+        let encodedTab = try #require(tabs.first)
+        let tabTodos = try #require(encodedTab["todos"] as? [[String: Any]])
+        let rootNode = try #require(encodedTab["rootNode"] as? [String: Any])
+        let pane = try #require(rootNode["pane"] as? [String: Any])
+        let paneTodos = try #require(pane["todos"] as? [[String: Any]])
+
+        #expect(tabTodos.first?["id"] as? String == model.todos(for: .tab(tab.id))?.first?.id.rawValue.uuidString)
+        #expect(paneTodos.first?["id"] as? String == model.todos(for: .pane(tab.focusedPaneId))?.first?.id.rawValue.uuidString)
+    }
+
     @Test("snapshot round-trip preserves todos")
     func snapshotRoundTripPreservesTodos() {
         // Intent: pane-level todos (text + isDone) round-trip through the
@@ -763,10 +830,10 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "task one"))
-        update(&model, .addTodo(paneId: paneId, text: "task two"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "task one"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "task two"))
         let todoId = model.pane(paneId)!.todos[0].id
-        update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
+        update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: todoId))
 
         let snapshot = toSnapshot(model)
         let rebuilt = validateAndBuild(snapshot)
@@ -927,10 +994,10 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
-        update(&model, .addTabTodo(tabId: tabId, text: "tab one"))
-        update(&model, .addTabTodo(tabId: tabId, text: "tab two"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab one"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab two"))
         let id1 = tabById(tabId, in: model)!.todos[0].id
-        update(&model, .toggleTabTodoDone(tabId: tabId, todoId: id1))
+        update(&model, .toggleTodoDone(owner: .tab(tabId), todoId: id1))
 
         let snapshot = toSnapshot(model)
         let rebuilt = validateAndBuild(snapshot)

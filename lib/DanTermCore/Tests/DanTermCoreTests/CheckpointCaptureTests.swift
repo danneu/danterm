@@ -130,12 +130,12 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         #expect(current != previous, "pane font steps")
         previous = current
 
-        update(&model, .addTodo(paneId: paneIds[0], text: "pane task"))
+        update(&model, .addTodo(owner: .pane(paneIds[0]), text: "pane task"))
         current = lightProjection(model)
         #expect(current != previous, "pane todos")
         previous = current
 
-        update(&model, .addTabTodo(tabId: firstTabId, text: "tab task"))
+        update(&model, .addTodo(owner: .tab(firstTabId), text: "tab task"))
         current = lightProjection(model)
         #expect(current != previous, "tab todos")
     }

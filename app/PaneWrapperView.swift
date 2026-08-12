@@ -483,7 +483,7 @@ class PaneWrapperView: NSView {
     }
 
     @objc private func toggleTodoPopover() {
-        runtime?.send(.toggleTodoPopover(paneId: paneId))
+        runtime?.send(.toggleTodoPopover(owner: .pane(paneId)))
     }
 
     @objc private func splitRightAction() {

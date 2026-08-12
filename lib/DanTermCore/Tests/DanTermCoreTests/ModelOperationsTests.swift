@@ -1974,14 +1974,14 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         update(&model, .splitPane(paneId: paneA, direction: .horizontal))
         let paneA2 = selectedTab(in: model)!.focusedPaneId
 
-        update(&model, .addTabTodo(tabId: tabA.id, text: "tab task"))
-        update(&model, .addTodo(paneId: paneA, text: "p1 a"))
-        update(&model, .addTodo(paneId: paneA, text: "p1 b done"))
+        update(&model, .addTodo(owner: .tab(tabA.id), text: "tab task"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "p1 a"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "p1 b done"))
         let pAdone = model.pane(paneA)!.todos[1].id
-        update(&model, .toggleTodoDone(paneId: paneA, todoId: pAdone))
-        update(&model, .addTodo(paneId: paneA2, text: "p2 a"))
+        update(&model, .toggleTodoDone(owner: .pane(paneA), todoId: pAdone))
+        update(&model, .addTodo(owner: .pane(paneA2), text: "p2 a"))
 
-        update(&model, .addTodo(paneId: tabB.focusedPaneId, text: "tab B pane task"))
+        update(&model, .addTodo(owner: .pane(tabB.focusedPaneId), text: "tab B pane task"))
 
         let rollup = tabTodoRollup(tabA.id, in: model)
         #expect(rollup.total == 4, "1 tab + 2 paneA + 1 paneA2")
@@ -2002,7 +2002,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first header coverage -- two-pane tab, only
         //   paneA has todos; both panes still get headers.
         var (model, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(paneId: paneA, text: "pane A task"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane A task"))
 
         let rows = buildTabTodoRows(model: model, tabId: tabId)
         let paneHeaders = rows.compactMap { row -> PaneId? in
@@ -2043,8 +2043,8 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first mixed -- tab + paneA populated, paneB
         //   empty; only paneB's placeholder remains.
         var (model, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
-        update(&model, .addTodo(paneId: paneA, text: "pane A task"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane A task"))
 
         let rows = buildTabTodoRows(model: model, tabId: tabId)
 
@@ -2117,10 +2117,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "done"))
-        update(&model, .addTodo(paneId: paneId, text: "pending"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "done"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "pending"))
         let doneId = model.pane(paneId)!.todos[0].id
-        update(&model, .toggleTodoDone(paneId: paneId, todoId: doneId))
+        update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: doneId))
 
         let projection = desiredPaneTodoPopover(paneId: paneId, in: model)
 
@@ -2152,10 +2152,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   complete the pane todo (tabHasCompleted stays false), then
         //   complete the tab todo (tabHasCompleted flips true).
         var (model, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab pending"))
-        update(&model, .addTodo(paneId: paneA, text: "pane done"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab pending"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane done"))
         let paneDoneId = model.pane(paneA)!.todos[0].id
-        update(&model, .toggleTodoDone(paneId: paneA, todoId: paneDoneId))
+        update(&model, .toggleTodoDone(owner: .pane(paneA), todoId: paneDoneId))
 
         var projection = desiredTabTodoPopover(tabId: tabId, in: model)
 
@@ -2165,7 +2165,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(projection?.tabHasCompleted == false, "pane completion should not show tab clear button")
 
         let tabTodoId = tabById(tabId, in: model)!.todos[0].id
-        update(&model, .toggleTabTodoDone(tabId: tabId, todoId: tabTodoId))
+        update(&model, .toggleTodoDone(owner: .tab(tabId), todoId: tabTodoId))
         projection = desiredTabTodoPopover(tabId: tabId, in: model)
 
         #expect(projection?.tabHasCompleted == true)
@@ -2182,12 +2182,12 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         var (model, tabId, paneA, _) = makeTwoPaneTabTodoRowsModel()
         var previous = desiredTabTodoPopover(tabId: tabId, in: model)
 
-        update(&model, .addTodo(paneId: paneA, text: "pane task"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane task"))
         var next = desiredTabTodoPopover(tabId: tabId, in: model)
         #expect(previous != next, "pane todo changes should update the projection")
 
         previous = next
-        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
         next = desiredTabTodoPopover(tabId: tabId, in: model)
         #expect(previous != next, "tab todo changes should update the projection")
 
@@ -2206,21 +2206,21 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first follow -- add a tab todo, move it to a
         //   pane (edit target switches), move it back (switches back).
         var (model, tabId, paneA, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTabTodo(tabId: tabId, text: "movable"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "movable"))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
         update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 0))
         var projection = desiredTabTodoPopover(tabId: tabId, in: model)!
         #expect(
-            resolveTabTodoEditTarget(.tab(todoId: todoId), in: projection) ==
-            .pane(paneId: paneA, todoId: todoId)
+            resolveTabTodoEditTarget(.init(owner: .tab(tabId), id: todoId), in: projection) ==
+            .init(owner: .pane(paneA), id: todoId)
         )
 
         update(&model, .moveTodo(from: .pane(paneA), todoId: todoId, to: .tab(tabId), atIndex: 0))
         projection = desiredTabTodoPopover(tabId: tabId, in: model)!
         #expect(
-            resolveTabTodoEditTarget(.pane(paneId: paneA, todoId: todoId), in: projection) ==
-            .tab(todoId: todoId)
+            resolveTabTodoEditTarget(.init(owner: .pane(paneA), id: todoId), in: projection) ==
+            .init(owner: .tab(tabId), id: todoId)
         )
     }
 
@@ -2235,14 +2235,14 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         var model = makeModel()
         createTab(&model)
         let tabA = selectedTab(in: model)!.id
-        update(&model, .addTabTodo(tabId: tabA, text: "outside"))
+        update(&model, .addTodo(owner: .tab(tabA), text: "outside"))
         let outsideTodoId = tabById(tabA, in: model)!.todos[0].id
         createTab(&model)
         let tabB = selectedTab(in: model)!.id
 
         let projection = desiredTabTodoPopover(tabId: tabB, in: model)!
 
-        #expect(resolveTabTodoEditTarget(.tab(todoId: outsideTodoId), in: projection) == nil)
+        #expect(resolveTabTodoEditTarget(.init(owner: .tab(tabA), id: outsideTodoId), in: projection) == nil)
     }
 
     @Test("newlyAddedTabTodoTarget returns the first tab item missing from the captured id set")
@@ -2254,20 +2254,20 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first new-item focus -- capture ids before add,
         //   then assert the helper picks the new id.
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTabTodo(tabId: tabId, text: "existing"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "existing"))
         let previousProjection = desiredTabTodoPopover(tabId: tabId, in: model)!
-        let previousIds = Set(previousProjection.rows.compactMap { row -> UUID? in
-            if case .tabItem(let item) = row { return item.id }
+        let previousIds = Set(previousProjection.rows.compactMap { row -> TodoId? in
+            if case .tabItem(_, let item) = row { return item.id }
             return nil
         })
 
-        update(&model, .addTabTodo(tabId: tabId, text: "new"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "new"))
         let updatedProjection = desiredTabTodoPopover(tabId: tabId, in: model)!
         let newTodoId = tabById(tabId, in: model)!.todos[1].id
 
         #expect(
             newlyAddedTabTodoTarget(previousTabTodoIds: previousIds, in: updatedProjection) ==
-            .tab(todoId: newTodoId)
+            .init(owner: .tab(tabId), id: newTodoId)
         )
     }
 
@@ -2279,8 +2279,8 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first header drop -- two tab todos; drop on the
         //   tab header lands at index 2.
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
-        update(&model, .addTabTodo(tabId: tabId, text: "tab B"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab B"))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
 
         let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: 0, dropOperation: .on)
@@ -2298,7 +2298,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first pane header drop -- one paneA todo; drop
         //   on the paneA header lands at index 1.
         var (model, tabId, paneA, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(paneId: paneA, text: "pane A"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane A"))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
         let headerRow = rows.firstIndex {
             if case .paneSectionHeader(let paneId, _) = $0 { return paneId == paneA }
@@ -2352,7 +2352,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first above-first -- drop above row 1 (first
         //   tab item) lands at tab index 0.
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab A"))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
 
         let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: 1, dropOperation: .above)
@@ -2370,8 +2370,8 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first local-index -- two tab todos; drop above
         //   row 2 (second tab item) lands at tab index 1.
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
-        update(&model, .addTabTodo(tabId: tabId, text: "tab B"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab B"))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
 
         let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: 2, dropOperation: .above)
@@ -2390,8 +2390,8 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   above the first paneSectionHeader lands at tab index 2
         //   (append).
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
-        update(&model, .addTabTodo(tabId: tabId, text: "tab B"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab B"))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
         let firstPaneHeader = rows.firstIndex {
             if case .paneSectionHeader = $0 { return true }
@@ -2412,7 +2412,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first one-past-end -- paneB has one todo; drop
         //   above rows.count lands at pane B index 1.
         var (model, tabId, _, paneB) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(paneId: paneB, text: "pane B"))
+        update(&model, .addTodo(owner: .pane(paneB), text: "pane B"))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
 
         let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: rows.count, dropOperation: .above)
@@ -2493,7 +2493,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let (_, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
 
         let destination = resolveTabTodoBucketStep(
-            current: .tab(todoId: UUID()),
+            current: .init(owner: .tab(tabId), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             delta: 1
@@ -2511,7 +2511,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let (_, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
 
         let destination = resolveTabTodoBucketStep(
-            current: .pane(paneId: paneA, todoId: UUID()),
+            current: .init(owner: .pane(paneA), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             delta: -1
@@ -2529,7 +2529,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let (_, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
 
         let destination = resolveTabTodoBucketStep(
-            current: .tab(todoId: UUID()),
+            current: .init(owner: .tab(tabId), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             delta: -1
@@ -2547,7 +2547,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let (_, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
 
         let destination = resolveTabTodoBucketStep(
-            current: .pane(paneId: paneB, todoId: UUID()),
+            current: .init(owner: .pane(paneB), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             delta: 1
@@ -2569,7 +2569,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let tabId = TabId()
 
         let step = resolveTabTodoReorderStep(
-            current: .tab(todoId: UUID()),
+            current: .init(owner: .tab(tabId), id: TodoId()),
             paneOrder: [PaneId(), PaneId()],
             tabId: tabId,
             currentIndex: 1,
@@ -2590,7 +2590,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let tabId = TabId()
 
         let step = resolveTabTodoReorderStep(
-            current: .tab(todoId: UUID()),
+            current: .init(owner: .tab(tabId), id: TodoId()),
             paneOrder: [PaneId(), PaneId()],
             tabId: tabId,
             currentIndex: 1,
@@ -2614,7 +2614,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let paneB = PaneId()
 
         let step = resolveTabTodoReorderStep(
-            current: .tab(todoId: UUID()),
+            current: .init(owner: .tab(tabId), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             currentIndex: 2,
@@ -2639,7 +2639,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let paneB = PaneId()
 
         let step = resolveTabTodoReorderStep(
-            current: .tab(todoId: UUID()),
+            current: .init(owner: .tab(tabId), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             currentIndex: 2,
@@ -2662,7 +2662,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let paneB = PaneId()
 
         let step = resolveTabTodoReorderStep(
-            current: .pane(paneId: paneA, todoId: UUID()),
+            current: .init(owner: .pane(paneA), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             currentIndex: 0,
@@ -2688,7 +2688,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let paneB = PaneId()
 
         let step = resolveTabTodoReorderStep(
-            current: .pane(paneId: paneA, todoId: UUID()),
+            current: .init(owner: .pane(paneA), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             currentIndex: 0,
@@ -2711,7 +2711,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let paneB = PaneId()
 
         let step = resolveTabTodoReorderStep(
-            current: .pane(paneId: paneA, todoId: UUID()),
+            current: .init(owner: .pane(paneA), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             currentIndex: 3,
@@ -2736,7 +2736,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let paneB = PaneId()
 
         let step = resolveTabTodoReorderStep(
-            current: .pane(paneId: paneB, todoId: UUID()),
+            current: .init(owner: .pane(paneB), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             currentIndex: 0,
@@ -2761,7 +2761,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let paneB = PaneId()
 
         let step = resolveTabTodoReorderStep(
-            current: .tab(todoId: UUID()),
+            current: .init(owner: .tab(tabId), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             currentIndex: 0,
@@ -2784,7 +2784,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let paneB = PaneId()
 
         let step = resolveTabTodoReorderStep(
-            current: .pane(paneId: paneB, todoId: UUID()),
+            current: .init(owner: .pane(paneB), id: TodoId()),
             paneOrder: [paneA, paneB],
             tabId: tabId,
             currentIndex: 1,

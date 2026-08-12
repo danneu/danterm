@@ -67,19 +67,19 @@ struct DanTermCLI {
                                       Detach the matching root agent session
           skill                       Print DanTerm's agent skill instructions
           doctor                      Check DanTerm integration health
-          todo list --pane <pane-id>
+          todo list (--pane <pane-id> | --tab <tab-id>)
                                       List todos as JSON
-          todo add --pane <pane-id> <text>
+          todo add (--pane <pane-id> | --tab <tab-id>) <text>
                                       Add a todo
-          todo edit --pane <pane-id> <id> <text>
+          todo edit (--pane <pane-id> | --tab <tab-id>) <id> <text>
                                       Edit a todo's text
-          todo done --pane <pane-id> <id>
+          todo done (--pane <pane-id> | --tab <tab-id>) <id>
                                       Mark a todo done
-          todo open --pane <pane-id> <id>
+          todo open (--pane <pane-id> | --tab <tab-id>) <id>
                                       Reopen a completed todo
-          todo delete --pane <pane-id> <id>
+          todo delete (--pane <pane-id> | --tab <tab-id>) <id>
                                       Delete a todo
-          todo clear-completed --pane <pane-id>
+          todo clear-completed (--pane <pane-id> | --tab <tab-id>)
                                       Remove all completed todos
           help, --help, -h            Print this message
 

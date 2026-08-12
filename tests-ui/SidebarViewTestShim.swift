@@ -16,7 +16,6 @@ final class AppRuntime {
     weak var window: NSWindow?
     var sentMessages: [Msg] = []
     var todoPopover: NSPopover?
-    var tabTodoPopover: NSPopover?
     var onSend: ((Msg) -> Void)?
     var focusedPaneSessions: [PaneId] = []
     var themeBrowserToggles = 0

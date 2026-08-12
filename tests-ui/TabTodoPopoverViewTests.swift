@@ -51,9 +51,9 @@ func tabTodoPopoverViewTests() {
         try uiExpect(!clearButton.isHidden, "clear button should be visible with completed tab todos")
     }
 
-    uiTest("tab-row checkbox sends toggleTabTodoDone") {
-        // Intent: a tab task checkbox dispatches the tab-level toggle message
-        //   with the row item's todo id.
+    uiTest("tab-row checkbox sends explicit setTodoDone") {
+        // Intent: a tab task checkbox dispatches the explicit done value with
+        //   the row item's owner and todo id.
         // Why it exists: pins the button target/action route independently of
         //   row selection. Spec-first.
         // Scenario: the user checks an open task in the tab section.
@@ -63,9 +63,9 @@ func tabTodoPopoverViewTests() {
         let row = try todoRow(titled: "Tab alpha", in: fx)
         row.view.checkbox.performClick(nil)
 
-        try expectSingleMessage(fx.runtime, "toggle tab todo") { msg in
-            if case .toggleTabTodoDone(let tabId, let todoId) = msg {
-                return tabId == fx.tabId && todoId == fx.tabOpenId
+        try expectSingleMessage(fx.runtime, "set tab todo done") { msg in
+            if case .setTodoDone(.tab(let tabId), let todoId, let isDone) = msg {
+                return tabId == fx.tabId && todoId.rawValue == fx.tabOpenId && isDone
             }
             return false
         }
@@ -84,8 +84,8 @@ func tabTodoPopoverViewTests() {
         row.view.checkbox.performClick(nil)
 
         try expectSingleMessage(fx.runtime, "set pane todo done") { msg in
-            if case .setTodoDone(let paneId, let todoId, let isDone) = msg {
-                return paneId == fx.paneIds[0] && todoId == fx.paneOpenId && isDone
+            if case .setTodoDone(.pane(let paneId), let todoId, let isDone) = msg {
+                return paneId == fx.paneIds[0] && todoId.rawValue == fx.paneOpenId && isDone
             }
             return false
         }
@@ -106,22 +106,22 @@ func tabTodoPopoverViewTests() {
 
         try uiExpect(fx.runtime.sentMessages.count == 2, "expected two delete messages")
         try uiExpect(message(fx.runtime.sentMessages[0]) {
-            if case .deleteTabTodo(let tabId, let todoId) = $0 {
-                return tabId == fx.tabId && todoId == fx.tabOpenId
+            if case .deleteTodo(.tab(let tabId), let todoId) = $0 {
+                return tabId == fx.tabId && todoId.rawValue == fx.tabOpenId
             }
             return false
         }, "first delete should target tab todo")
         try uiExpect(message(fx.runtime.sentMessages[1]) {
-            if case .deleteTodo(let paneId, let todoId) = $0 {
-                return paneId == fx.paneIds[0] && todoId == fx.paneOpenId
+            if case .deleteTodo(.pane(let paneId), let todoId) = $0 {
+                return paneId == fx.paneIds[0] && todoId.rawValue == fx.paneOpenId
             }
             return false
         }, "second delete should target pane todo")
     }
 
-    uiTest("clear completed sends clearCompletedTabTodos") {
-        // Intent: the Clear completed button dispatches the tab-level clear
-        //   message for the popover tab id.
+    uiTest("clear completed sends owner-scoped clearCompletedTodos") {
+        // Intent: the Clear completed button dispatches the shared clear
+        //   message with the popover's tab owner.
         // Why it exists: pins that the tab popover button does not call the
         //   pane-level clear command. Spec-first.
         // Scenario: a tab with a completed task shows the control and the user
@@ -133,14 +133,14 @@ func tabTodoPopoverViewTests() {
         clearButton.performClick(nil)
 
         try expectSingleMessage(fx.runtime, "clear completed tab todos") { msg in
-            if case .clearCompletedTabTodos(let tabId) = msg { return tabId == fx.tabId }
+            if case .clearCompletedTodos(.tab(let tabId)) = msg { return tabId == fx.tabId }
             return false
         }
     }
 
-    uiTest("non-empty compose submit sends addTabTodo and clears field") {
-        // Intent: Enter in the compose field trims, sends a tab add message,
-        //   and clears the compose draft.
+    uiTest("non-empty compose submit sends owner-scoped addTodo and clears field") {
+        // Intent: Enter in the compose field trims, sends the shared add
+        //   message with the tab owner, and clears the compose draft.
         // Why it exists: pins the NSTextViewDelegate submit path without
         //   synthesizing broader keyboard state. Spec-first.
         // Scenario: the user types a new tab task with surrounding whitespace
@@ -154,7 +154,7 @@ func tabTodoPopoverViewTests() {
 
         try uiExpect(handled, "compose newline should be handled")
         try expectSingleMessage(fx.runtime, "add tab todo") { msg in
-            if case .addTabTodo(let tabId, let text) = msg {
+            if case .addTodo(.tab(let tabId), let text) = msg {
                 return tabId == fx.tabId && text == "New tab task"
             }
             return false
@@ -213,8 +213,8 @@ func tabTodoPopoverViewTests() {
             try onlyTabTodoButton(titled: "Save", in: fx.vc.view).performClick(nil)
 
             try expectSingleMessage(fx.runtime, "edit tab todo") { msg in
-                if case .editTabTodoText(let tabId, let todoId, let text) = msg {
-                    return tabId == fx.tabId && todoId == fx.tabOpenId && text == "Tab changed"
+                if case .editTodoText(.tab(let tabId), let todoId, let text) = msg {
+                    return tabId == fx.tabId && todoId.rawValue == fx.tabOpenId && text == "Tab changed"
                 }
                 return false
             }
@@ -230,8 +230,8 @@ func tabTodoPopoverViewTests() {
             try onlyTabTodoButton(titled: "Save", in: fx.vc.view).performClick(nil)
 
             try expectSingleMessage(fx.runtime, "edit pane todo") { msg in
-                if case .editTodoText(let paneId, let todoId, let text) = msg {
-                    return paneId == fx.paneIds[0] && todoId == fx.paneOpenId && text == "Pane changed"
+                if case .editTodoText(.pane(let paneId), let todoId, let text) = msg {
+                    return paneId == fx.paneIds[0] && todoId.rawValue == fx.paneOpenId && text == "Pane changed"
                 }
                 return false
             }
@@ -379,7 +379,7 @@ func tabTodoPopoverViewTests() {
         let fx = makeTabTodoFixture()
         defer { fx.window.close() }
         let parentPopover = NSPopover()
-        fx.runtime.tabTodoPopover = parentPopover
+        fx.runtime.todoPopover = parentPopover
         fx.window.orderFrontRegardless()
 
         fx.vc.toggleShortcutHelp(nil)

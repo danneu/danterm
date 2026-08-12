@@ -1,11 +1,10 @@
 // Swift Testing migration of the legacy `tests/UpdateTabTodoTests.swift`
-// harness suite. Pins the tab-level TODO Msg surface: addTabTodo /
-// toggleTabTodoDone / setTabTodoDone / editTabTodoText / deleteTabTodo /
-// reorderTabTodo / clearCompletedTabTodos, the moveTodo paths (pane->tab,
+// harness suite. Pins tab-owner behavior through the shared TODO Msg surface,
+// plus the moveTodo paths (pane->tab,
 // tab->pane, pane->pane, atIndex clamps in both directions, source ==
 // destination no-op, unknown todo no-op, missing destination no-op,
 // cross-tab no-op, successful moves), the popover scope
-// transitions (toggleTodoPopoverForTab + toggleTodoPopover mutual
+// transitions (owner-scoped toggleTodoPopover mutual
 // exclusion, same-scope close, dismiss on tab removal), and the close-tab
 // + close-pane confirmation rollup against the tab/pane todo counts.
 import Foundation
@@ -24,14 +23,14 @@ import Testing
         return (model, tabId, paneOrder[0], paneOrder[1])
     }
 
-    // MARK: - addTabTodo
+    // MARK: - Tab-owner mutations
 
-    @Test("addTabTodo appends to the tab and leaves panes/other tabs untouched")
-    func addTabTodoAppendsAndLeavesOthersUntouched() {
-        // Intent: addTabTodo appends to that tab's todos and leaves pane todos and
+    @Test("addTodo for a tab owner leaves panes and other tabs untouched")
+    func addTodoForTabOwnerLeavesOthersUntouched() {
+        // Intent: addTodo appends to that tab's todos and leaves pane todos and
         //   sibling tabs untouched.
         // Why it exists: pins the bare append + persistence path.
-        // Scenario: spec-first addTabTodo.
+        // Scenario: spec-first tab-owner add.
         var model = makeModel()
         createTab(&model)
         createTab(&model)
@@ -39,8 +38,8 @@ import Testing
         let tabB = model.groups[0].tabs[1]
         let paneA = tabA.focusedPaneId
 
-        update(&model, .addTodo(paneId: paneA, text: "pane task"))
-        update(&model, .addTabTodo(tabId: tabA.id, text: "tab task"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane task"))
+        update(&model, .addTodo(owner: .tab(tabA.id), text: "tab task"))
 
         let updatedTabA = tabById(tabA.id, in: model)!
         #expect(updatedTabA.todos.count == 1)
@@ -54,115 +53,107 @@ import Testing
 
     }
 
-    @Test("addTabTodo trims whitespace and rejects empty")
-    func addTabTodoTrimsWhitespaceRejectsEmpty() {
-        // Intent: addTabTodo trims whitespace and rejects empty /
+    @Test("addTodo for a tab owner trims whitespace and rejects empty")
+    func addTodoForTabOwnerTrimsWhitespaceRejectsEmpty() {
+        // Intent: addTodo trims whitespace and rejects empty /
         //   whitespace-only text.
         // Why it exists: pins the validation rules.
         // Scenario: spec-first trim + reject.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        update(&model, .addTabTodo(tabId: tabId, text: "  hello  "))
+        update(&model, .addTodo(owner: .tab(tabId), text: "  hello  "))
         #expect(tabById(tabId, in: model)!.todos[0].text == "hello")
-        update(&model, .addTabTodo(tabId: tabId, text: ""))
-        update(&model, .addTabTodo(tabId: tabId, text: "   "))
+        update(&model, .addTodo(owner: .tab(tabId), text: ""))
+        update(&model, .addTodo(owner: .tab(tabId), text: "   "))
         #expect(tabById(tabId, in: model)!.todos.count == 1)
     }
 
-    // MARK: - toggleTabTodoDone
-
-    @Test("toggleTabTodoDone flips only the matched item")
-    func toggleTabTodoDoneFlipsMatchedOnly() {
-        // Intent: toggleTabTodoDone flips isDone on the matched item
+    @Test("toggleTodoDone for a tab owner flips only the matched item")
+    func toggleTodoDoneForTabOwnerFlipsMatchedOnly() {
+        // Intent: toggleTodoDone flips isDone on the matched item
         //   only.
         // Why it exists: pins per-item scope.
         // Scenario: spec-first toggle.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        update(&model, .addTabTodo(tabId: tabId, text: "A"))
-        update(&model, .addTabTodo(tabId: tabId, text: "B"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "B"))
         let idA = tabById(tabId, in: model)!.todos[0].id
-        update(&model, .toggleTabTodoDone(tabId: tabId, todoId: idA))
+        update(&model, .toggleTodoDone(owner: .tab(tabId), todoId: idA))
         #expect(tabById(tabId, in: model)!.todos[0].isDone == true)
         #expect(tabById(tabId, in: model)!.todos[1].isDone == false)
     }
 
-    @Test("setTabTodoDone sets explicit value")
-    func setTabTodoDoneSetsExplicitValue() {
-        // Intent: setTabTodoDone explicitly assigns isDone; same-value
+    @Test("setTodoDone for a tab owner sets the explicit value")
+    func setTodoDoneForTabOwnerSetsExplicitValue() {
+        // Intent: setTodoDone explicitly assigns isDone; same-value
         //   is a no-op.
         // Why it exists: pins the idempotence guard.
         // Scenario: spec-first set + no-op.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        update(&model, .addTabTodo(tabId: tabId, text: "A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "A"))
         let idA = tabById(tabId, in: model)!.todos[0].id
-        update(&model, .setTabTodoDone(tabId: tabId, todoId: idA, isDone: true))
+        update(&model, .setTodoDone(owner: .tab(tabId), todoId: idA, isDone: true))
         #expect(tabById(tabId, in: model)!.todos[0].isDone == true)
-        let commands = update(&model, .setTabTodoDone(tabId: tabId, todoId: idA, isDone: true))
+        let commands = update(&model, .setTodoDone(owner: .tab(tabId), todoId: idA, isDone: true))
         #expect(commands.isEmpty, "no-op when value unchanged")
     }
 
-    // MARK: - editTabTodoText
-
-    @Test("editTabTodoText trims and replaces text; rejects empty")
-    func editTabTodoTextTrimsAndReplacesRejectsEmpty() {
-        // Intent: editTabTodoText trims and replaces; whitespace-only
+    @Test("editTodoText for a tab owner trims and replaces text; rejects empty")
+    func editTodoTextForTabOwnerTrimsAndReplacesRejectsEmpty() {
+        // Intent: editTodoText trims and replaces; whitespace-only
         //   is rejected.
         // Why it exists: pins the edit validation.
         // Scenario: spec-first edit + reject.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        update(&model, .addTabTodo(tabId: tabId, text: "old"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "old"))
         let idA = tabById(tabId, in: model)!.todos[0].id
-        update(&model, .editTabTodoText(tabId: tabId, todoId: idA, text: "  new  "))
+        update(&model, .editTodoText(owner: .tab(tabId), todoId: idA, text: "  new  "))
         #expect(tabById(tabId, in: model)!.todos[0].text == "new")
-        update(&model, .editTabTodoText(tabId: tabId, todoId: idA, text: "   "))
+        update(&model, .editTodoText(owner: .tab(tabId), todoId: idA, text: "   "))
         #expect(tabById(tabId, in: model)!.todos[0].text == "new")
     }
 
-    // MARK: - deleteTabTodo
-
-    @Test("deleteTabTodo removes by id")
-    func deleteTabTodoRemovesById() {
-        // Intent: deleteTabTodo removes the matching item.
+    @Test("deleteTodo for a tab owner removes by id")
+    func deleteTodoForTabOwnerRemovesById() {
+        // Intent: deleteTodo removes the matching item.
         // Why it exists: pins the bare delete path.
         // Scenario: spec-first delete.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        update(&model, .addTabTodo(tabId: tabId, text: "A"))
-        update(&model, .addTabTodo(tabId: tabId, text: "B"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "B"))
         let idA = tabById(tabId, in: model)!.todos[0].id
-        update(&model, .deleteTabTodo(tabId: tabId, todoId: idA))
+        update(&model, .deleteTodo(owner: .tab(tabId), todoId: idA))
         #expect(tabById(tabId, in: model)!.todos.count == 1)
         #expect(tabById(tabId, in: model)!.todos[0].text == "B")
     }
 
-    // MARK: - reorderTabTodo
-
-    @Test("reorderTabTodo moves item; clamps out-of-bounds")
-    func reorderTabTodoMovesItemClampsOutOfBounds() {
-        // Intent: reorderTabTodo moves the item; out-of-bounds toIndex
+    @Test("reorderTodo for a tab owner moves the item and rejects out-of-bounds")
+    func reorderTodoForTabOwnerMovesItemRejectsOutOfBounds() {
+        // Intent: reorderTodo moves the item; out-of-bounds toIndex
         //   is a no-op.
         // Why it exists: pins the reorder math + clamp.
         // Scenario: spec-first reorder + OOB.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        update(&model, .addTabTodo(tabId: tabId, text: "A"))
-        update(&model, .addTabTodo(tabId: tabId, text: "B"))
-        update(&model, .addTabTodo(tabId: tabId, text: "C"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "B"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "C"))
         let idC = tabById(tabId, in: model)!.todos[2].id
-        update(&model, .reorderTabTodo(tabId: tabId, todoId: idC, toIndex: 0))
+        update(&model, .reorderTodo(owner: .tab(tabId), todoId: idC, toIndex: 0))
         #expect(tabById(tabId, in: model)!.todos.map(\.text) == ["C", "A", "B"])
 
         let idA = tabById(tabId, in: model)!.todos[1].id
-        let commands = update(&model, .reorderTabTodo(tabId: tabId, todoId: idA, toIndex: 99))
+        let commands = update(&model, .reorderTodo(owner: .tab(tabId), todoId: idA, toIndex: 99))
         #expect(commands.isEmpty, "out of bounds is no-op")
     }
 
@@ -175,9 +166,9 @@ import Testing
         // Why it exists: pins the pane->tab move.
         // Scenario: spec-first pane->tab.
         var (model, tabId, paneA, _) = Self.makeTwoPaneTabForMoveTests()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
-        update(&model, .addTabTodo(tabId: tabId, text: "tab B"))
-        update(&model, .addTodo(paneId: paneA, text: "pane task"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab B"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane task"))
         let todoId = model.pane(paneA)!.todos[0].id
 
         update(&model, .moveTodo(from: .pane(paneA), todoId: todoId, to: .tab(tabId), atIndex: 1))
@@ -193,9 +184,9 @@ import Testing
         // Why it exists: pins the symmetric tab->pane move.
         // Scenario: spec-first tab->pane.
         var (model, tabId, paneA, _) = Self.makeTwoPaneTabForMoveTests()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
-        update(&model, .addTodo(paneId: paneA, text: "pane A"))
-        update(&model, .addTodo(paneId: paneA, text: "pane B"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane A"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane B"))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
         update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 1))
@@ -210,8 +201,8 @@ import Testing
         // Why it exists: pins the pane->pane move.
         // Scenario: spec-first pane->pane.
         var (model, _, paneA, paneB) = Self.makeTwoPaneTabForMoveTests()
-        update(&model, .addTodo(paneId: paneA, text: "source"))
-        update(&model, .addTodo(paneId: paneB, text: "dest A"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "source"))
+        update(&model, .addTodo(owner: .pane(paneB), text: "dest A"))
         let todoId = model.pane(paneA)!.todos[0].id
 
         update(&model, .moveTodo(from: .pane(paneA), todoId: todoId, to: .pane(paneB), atIndex: 0))
@@ -227,8 +218,8 @@ import Testing
         // Why it exists: pins the high clamp.
         // Scenario: spec-first high clamp.
         var (model, tabId, paneA, _) = Self.makeTwoPaneTabForMoveTests()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
-        update(&model, .addTodo(paneId: paneA, text: "pane A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane A"))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
         update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 99))
@@ -242,8 +233,8 @@ import Testing
         // Why it exists: pins the low clamp.
         // Scenario: spec-first low clamp.
         var (model, tabId, paneA, _) = Self.makeTwoPaneTabForMoveTests()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
-        update(&model, .addTodo(paneId: paneA, text: "pane A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane A"))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
         update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: -5))
@@ -257,7 +248,7 @@ import Testing
         // Why it exists: pins the identity guard.
         // Scenario: spec-first identity guard.
         var (model, tabId, _, _) = Self.makeTwoPaneTabForMoveTests()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
         let commands = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .tab(tabId), atIndex: 0))
@@ -272,9 +263,9 @@ import Testing
         // Why it exists: pins fail-closed for stale todo ids.
         // Scenario: spec-first stale todo.
         var (model, tabId, paneA, _) = Self.makeTwoPaneTabForMoveTests()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
 
-        let commands = update(&model, .moveTodo(from: .tab(tabId), todoId: UUID(), to: .pane(paneA), atIndex: 0))
+        let commands = update(&model, .moveTodo(from: .tab(tabId), todoId: TodoId(), to: .pane(paneA), atIndex: 0))
 
         #expect(commands.isEmpty, "unknown todo should not checkpoint")
         #expect(tabById(tabId, in: model)!.todos.map(\.text) == ["tab task"])
@@ -288,7 +279,7 @@ import Testing
         // Why it exists: pins fail-closed for stale destination panes.
         // Scenario: spec-first stale destination.
         var (model, tabId, _, _) = Self.makeTwoPaneTabForMoveTests()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
         let commands = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(PaneId()), atIndex: 0))
@@ -307,7 +298,7 @@ import Testing
         createTab(&model)
         let tabA = model.groups[0].tabs[0]
         let tabB = model.groups[0].tabs[1]
-        update(&model, .addTabTodo(tabId: tabA.id, text: "tab A task"))
+        update(&model, .addTodo(owner: .tab(tabA.id), text: "tab A task"))
         let todoId = tabById(tabA.id, in: model)!.todos[0].id
 
         let commands = update(&model, .moveTodo(from: .tab(tabA.id), todoId: todoId, to: .tab(tabB.id), atIndex: 0))
@@ -323,7 +314,7 @@ import Testing
         // Why it exists: pins the cross-owner mutation path.
         // Scenario: spec-first tab-to-pane move.
         var (model, tabId, paneA, _) = Self.makeTwoPaneTabForMoveTests()
-        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
         update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 0))
@@ -332,29 +323,27 @@ import Testing
         #expect(model.pane(paneA)!.todos.map(\.text) == ["tab task"])
     }
 
-    // MARK: - clearCompletedTabTodos
-
-    @Test("clearCompletedTabTodos removes only done items")
-    func clearCompletedTabTodosRemovesOnlyDone() {
-        // Intent: clearCompletedTabTodos removes only done items.
+    @Test("clearCompletedTodos for a tab owner removes only done items")
+    func clearCompletedTodosForTabOwnerRemovesOnlyDone() {
+        // Intent: clearCompletedTodos removes only done items.
         // Why it exists: pins the clear-completed scope.
         // Scenario: spec-first clear completed.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        update(&model, .addTabTodo(tabId: tabId, text: "done"))
-        update(&model, .addTabTodo(tabId: tabId, text: "pending"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "done"))
+        update(&model, .addTodo(owner: .tab(tabId), text: "pending"))
         let idDone = tabById(tabId, in: model)!.todos[0].id
-        update(&model, .toggleTabTodoDone(tabId: tabId, todoId: idDone))
-        update(&model, .clearCompletedTabTodos(tabId: tabId))
+        update(&model, .toggleTodoDone(owner: .tab(tabId), todoId: idDone))
+        update(&model, .clearCompletedTodos(owner: .tab(tabId)))
         #expect(tabById(tabId, in: model)!.todos.count == 1)
         #expect(tabById(tabId, in: model)!.todos[0].text == "pending")
     }
 
     // MARK: - popover scope transitions
 
-    @Test("toggleTodoPopoverForTab while pane popover is open swaps to tab")
-    func toggleTodoPopoverForTabWhilePaneOpenSwapsToTab() {
+    @Test("toggleTodoPopover for a tab owner swaps from an open pane popover")
+    func toggleTodoPopoverForTabOwnerWhilePaneOpenSwapsToTab() {
         // Intent: opening the tab popover while the pane popover is
         //   open swaps scope; dismiss + show commands are emitted.
         // Why it exists: pins mutual-exclusion between pane and tab
@@ -364,23 +353,23 @@ import Testing
         createTab(&model)
         let tab = selectedTab(in: model)!
         let paneId = tab.focusedPaneId
-        update(&model, .toggleTodoPopover(paneId: paneId))
+        update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == .pane(paneId))
 
-        let commands = update(&model, .toggleTodoPopoverForTab(tabId: tab.id))
+        let commands = update(&model, .toggleTodoPopover(owner: .tab(tab.id)))
         #expect(model.todoPopover == .tab(tab.id))
         #expect(hasEffect(commands) {
             if case .dismissTodoPopover = $0 { return true }
             return false
         }, "expected dismissTodoPopover")
         #expect(hasEffect(commands) {
-            if case .showTodoPopoverForTab(let tid) = $0 { return tid == tab.id }
+            if case .showTodoPopover(owner: .tab(let tid)) = $0 { return tid == tab.id }
             return false
         }, "expected showTodoPopoverForTab")
     }
 
-    @Test("toggleTodoPopoverForTab while same tab is open closes the popover")
-    func toggleTodoPopoverForTabWhileSameTabClosesPopover() {
+    @Test("toggleTodoPopover for the open tab owner closes the popover")
+    func toggleTodoPopoverForOpenTabOwnerClosesPopover() {
         // Intent: re-toggling the tab popover on the same tab closes
         //   it.
         // Why it exists: pins the same-scope close rule.
@@ -388,13 +377,13 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab = selectedTab(in: model)!
-        update(&model, .toggleTodoPopoverForTab(tabId: tab.id))
+        update(&model, .toggleTodoPopover(owner: .tab(tab.id)))
         #expect(model.todoPopover == .tab(tab.id))
 
-        let commands = update(&model, .toggleTodoPopoverForTab(tabId: tab.id))
+        let commands = update(&model, .toggleTodoPopover(owner: .tab(tab.id)))
         #expect(model.todoPopover == nil, "should clear scope")
         #expect(hasEffect(commands) {
-            if case .dismissTodoPopoverForTab = $0 { return true }
+            if case .dismissTodoPopover(owner: .tab) = $0 { return true }
             return false
         }, "expected dismissTodoPopoverForTab")
     }
@@ -409,17 +398,17 @@ import Testing
         createTab(&model)
         let tab = selectedTab(in: model)!
         let paneId = tab.focusedPaneId
-        update(&model, .toggleTodoPopoverForTab(tabId: tab.id))
+        update(&model, .toggleTodoPopover(owner: .tab(tab.id)))
         #expect(model.todoPopover == .tab(tab.id))
 
-        let commands = update(&model, .toggleTodoPopover(paneId: paneId))
+        let commands = update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == .pane(paneId))
         #expect(hasEffect(commands) {
-            if case .dismissTodoPopoverForTab = $0 { return true }
+            if case .dismissTodoPopover(owner: .tab) = $0 { return true }
             return false
         }, "expected dismissTodoPopoverForTab")
         #expect(hasEffect(commands) {
-            if case .showTodoPopover(let pid) = $0 { return pid == paneId }
+            if case .showTodoPopover(owner: .pane(let pid)) = $0 { return pid == paneId }
             return false
         }, "expected showTodoPopover")
     }
@@ -433,8 +422,8 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .toggleTodoPopover(paneId: paneId))
-        let commands = update(&model, .toggleTodoPopover(paneId: paneId))
+        update(&model, .toggleTodoPopover(owner: .pane(paneId)))
+        let commands = update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == nil)
         #expect(hasEffect(commands) {
             if case .dismissTodoPopover = $0 { return true }
@@ -453,13 +442,13 @@ import Testing
         createTab(&model)
         let tabAId = model.groups[0].tabs[0].id
         update(&model, .selectTab(id: tabAId))
-        update(&model, .toggleTodoPopoverForTab(tabId: tabAId))
+        update(&model, .toggleTodoPopover(owner: .tab(tabAId)))
         #expect(model.todoPopover == .tab(tabAId))
 
         let commands = update(&model, .closeTab(id: tabAId))
         #expect(model.todoPopover == nil, "scope should be cleared")
         #expect(hasEffect(commands) {
-            if case .dismissTodoPopoverForTab = $0 { return true }
+            if case .dismissTodoPopover(owner: .tab) = $0 { return true }
             return false
         }, "expected dismissTodoPopoverForTab")
     }
@@ -495,7 +484,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
-        update(&model, .addTabTodo(tabId: firstTabId, text: "pending"))
+        update(&model, .addTodo(owner: .tab(firstTabId), text: "pending"))
 
         let commands = update(&model, .requestCloseTab(id: firstTabId))
         #expect(hasEffect(commands) {
@@ -517,7 +506,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let firstTab = model.groups[0].tabs[0]
-        update(&model, .addTodo(paneId: firstTab.focusedPaneId, text: "pane task"))
+        update(&model, .addTodo(owner: .pane(firstTab.focusedPaneId), text: "pane task"))
 
         let commands = update(&model, .requestCloseTab(id: firstTab.id))
         #expect(hasEffect(commands) {
@@ -542,13 +531,13 @@ import Testing
         update(&model, .splitPane(paneId: paneA, direction: .horizontal))
         let paneB = selectedTab(in: model)!.focusedPaneId
 
-        update(&model, .addTabTodo(tabId: firstTabId, text: "tab one"))
-        update(&model, .addTabTodo(tabId: firstTabId, text: "tab two"))
-        update(&model, .addTodo(paneId: paneA, text: "pane A 1"))
-        update(&model, .addTodo(paneId: paneB, text: "pane B 1"))
-        update(&model, .addTodo(paneId: paneB, text: "pane B 2 done"))
+        update(&model, .addTodo(owner: .tab(firstTabId), text: "tab one"))
+        update(&model, .addTodo(owner: .tab(firstTabId), text: "tab two"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane A 1"))
+        update(&model, .addTodo(owner: .pane(paneB), text: "pane B 1"))
+        update(&model, .addTodo(owner: .pane(paneB), text: "pane B 2 done"))
         let lastB = model.pane(paneB)!.todos.last!.id
-        update(&model, .toggleTodoDone(paneId: paneB, todoId: lastB))
+        update(&model, .toggleTodoDone(owner: .pane(paneB), todoId: lastB))
 
         let commands = update(&model, .requestCloseTab(id: firstTabId))
         #expect(hasEffect(commands) {
@@ -569,7 +558,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
-        update(&model, .addTabTodo(tabId: firstTabId, text: "pending"))
+        update(&model, .addTodo(owner: .tab(firstTabId), text: "pending"))
         update(&model, .requestCloseTab(id: firstTabId))
         #expect(model.pendingConfirmation == .closeTab)
 
@@ -590,7 +579,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let firstTab = model.groups[0].tabs[0]
-        update(&model, .addTabTodo(tabId: firstTab.id, text: "tab task"))
+        update(&model, .addTodo(owner: .tab(firstTab.id), text: "tab task"))
 
         let commands = update(&model, .requestClosePane(paneId: firstTab.focusedPaneId))
         #expect(hasEffect(commands) {
@@ -620,7 +609,7 @@ import Testing
         let paneA = firstTab.focusedPaneId
         update(&model, .splitPane(paneId: paneA, direction: .horizontal))
         let paneB = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTabTodo(tabId: firstTab.id, text: "tab task"))
+        update(&model, .addTodo(owner: .tab(firstTab.id), text: "tab task"))
 
         let commands = update(&model, .requestClosePane(paneId: paneB))
         #expect(!hasEffect(commands) {
@@ -645,8 +634,8 @@ import Testing
         createTab(&model)
         let firstTab = model.groups[0].tabs[0]
         let paneA = firstTab.focusedPaneId
-        update(&model, .addTabTodo(tabId: firstTab.id, text: "tab task"))
-        update(&model, .addTodo(paneId: paneA, text: "pane task"))
+        update(&model, .addTodo(owner: .tab(firstTab.id), text: "tab task"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane task"))
 
         let commands = update(&model, .requestClosePane(paneId: paneA))
         #expect(hasEffect(commands) {
@@ -670,7 +659,7 @@ import Testing
         createTab(&model)
         let firstTab = model.groups[0].tabs[0]
         let paneA = firstTab.focusedPaneId
-        update(&model, .addTodo(paneId: paneA, text: "pane only"))
+        update(&model, .addTodo(owner: .pane(paneA), text: "pane only"))
 
         let commands = update(&model, .requestClosePane(paneId: paneA))
         #expect(hasEffect(commands) {

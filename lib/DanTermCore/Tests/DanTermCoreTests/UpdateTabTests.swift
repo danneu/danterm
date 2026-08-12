@@ -906,7 +906,7 @@ import Testing
         let thirdTabId = model.groups[0].tabs[2].id
         update(&model, .selectTab(id: firstTabId))
         update(&model, .splitFocusedPane(direction: .horizontal))
-        update(&model, .addTabTodo(tabId: secondTabId, text: "finish this"))
+        update(&model, .addTodo(owner: .tab(secondTabId), text: "finish this"))
         let tabIdsBefore = model.groups.flatMap(\.tabs).map(\.id)
         let liveBefore = Set(model.allPaneIds)
 
@@ -941,8 +941,8 @@ import Testing
         let thirdTab = model.groups[0].tabs[2]
         update(&model, .selectTab(id: firstTabId))
         update(&model, .splitFocusedPane(direction: .horizontal))
-        update(&model, .addTabTodo(tabId: secondTabId, text: "tab task"))
-        update(&model, .addTodo(paneId: thirdTab.focusedPaneId, text: "pane task"))
+        update(&model, .addTodo(owner: .tab(secondTabId), text: "tab task"))
+        update(&model, .addTodo(owner: .pane(thirdTab.focusedPaneId), text: "pane task"))
 
         let commands = update(&model, .requestCloseTabs(ids: [firstTabId, secondTabId, thirdTab.id]))
 

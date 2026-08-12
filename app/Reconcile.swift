@@ -407,7 +407,7 @@ extension AppRuntime {
     /// as nil and clears the cache.
     func reconcileTabTodoPopover() {
         reconcileTodoPopover(
-            handle: tabTodoPopover,
+            handle: todoPopover,
             cache: \.tabTodoPopover,
             as: TabTodoPopoverViewController.self,
             desired: {

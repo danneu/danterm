@@ -69,8 +69,8 @@ func todoPopoverViewTests() {
         settlePaneTodoFixture(fx)
 
         try expectSingleMessage(fx.runtime, "toggle pane todo") { msg in
-            if case .toggleTodoDone(let paneId, let todoId) = msg {
-                return paneId == fx.paneId && todoId == fx.openId
+            if case .toggleTodoDone(.pane(let paneId), let todoId) = msg {
+                return paneId == fx.paneId && todoId.rawValue == fx.openId
             }
             return false
         }
@@ -86,8 +86,8 @@ func todoPopoverViewTests() {
         row.view.deleteButton.performClick(nil)
 
         try expectSingleMessage(fx.runtime, "delete pane todo") { msg in
-            if case .deleteTodo(let paneId, let todoId) = msg {
-                return paneId == fx.paneId && todoId == fx.openId
+            if case .deleteTodo(.pane(let paneId), let todoId) = msg {
+                return paneId == fx.paneId && todoId.rawValue == fx.openId
             }
             return false
         }
@@ -100,7 +100,7 @@ func todoPopoverViewTests() {
         try onlyTodoButton(titled: "Clear completed", in: fx.vc.view).performClick(nil)
 
         try expectSingleMessage(fx.runtime, "clear completed pane todos") { msg in
-            if case .clearCompletedTodos(let paneId) = msg { return paneId == fx.paneId }
+            if case .clearCompletedTodos(.pane(let paneId)) = msg { return paneId == fx.paneId }
             return false
         }
     }
@@ -121,7 +121,7 @@ func todoPopoverViewTests() {
 
         try uiExpect(handled, "compose newline should be handled")
         try expectSingleMessage(fx.runtime, "add pane todo") { msg in
-            if case .addTodo(let paneId, let text) = msg {
+            if case .addTodo(.pane(let paneId), let text) = msg {
                 return paneId == fx.paneId && text == "New pane task"
             }
             return false
@@ -174,8 +174,8 @@ func todoPopoverViewTests() {
         try onlyTodoButton(titled: "Save", in: fx.vc.view).performClick(nil)
 
         try expectSingleMessage(fx.runtime, "edit pane todo") { msg in
-            if case .editTodoText(let paneId, let todoId, let text) = msg {
-                return paneId == fx.paneId && todoId == fx.openId && text == "Pane changed"
+            if case .editTodoText(.pane(let paneId), let todoId, let text) = msg {
+                return paneId == fx.paneId && todoId.rawValue == fx.openId && text == "Pane changed"
             }
             return false
         }
@@ -283,8 +283,8 @@ func todoPopoverViewTests() {
         settlePaneTodoFixture(fx)
 
         try expectSingleMessage(fx.runtime, "keyboard delete pane todo") { msg in
-            if case .deleteTodo(let paneId, let todoId) = msg {
-                return paneId == fx.paneId && todoId == fx.secondOpenId
+            if case .deleteTodo(.pane(let paneId), let todoId) = msg {
+                return paneId == fx.paneId && todoId.rawValue == fx.secondOpenId
             }
             return false
         }
@@ -311,8 +311,8 @@ func todoPopoverViewTests() {
         fx.table.keyDown(with: keyDownEvent(characters: "J", modifiers: [.shift], keyCode: 38, window: fx.window))
 
         try expectSingleMessage(fx.runtime, "keyboard reorder pane todo") { msg in
-            if case .reorderTodo(let paneId, let todoId, let toIndex) = msg {
-                return paneId == fx.paneId && todoId == fx.openId && toIndex == 1
+            if case .reorderTodo(.pane(let paneId), let todoId, let toIndex) = msg {
+                return paneId == fx.paneId && todoId.rawValue == fx.openId && toIndex == 1
             }
             return false
         }
@@ -325,7 +325,7 @@ func todoPopoverViewTests() {
         fx.table.cancelOperation(nil)
 
         try expectSingleMessage(fx.runtime, "list escape dismiss") { msg in
-            if case .toggleTodoPopover(let paneId) = msg { return paneId == fx.paneId }
+            if case .toggleTodoPopover(.pane(let paneId)) = msg { return paneId == fx.paneId }
             return false
         }
     }
@@ -359,7 +359,7 @@ func todoPopoverViewTests() {
 
             try uiExpect(handled, "empty compose escape should be handled")
             try expectSingleMessage(fx.runtime, "empty compose escape dismiss") { msg in
-                if case .toggleTodoPopover(let paneId) = msg { return paneId == fx.paneId }
+                if case .toggleTodoPopover(.pane(let paneId)) = msg { return paneId == fx.paneId }
                 return false
             }
         }
@@ -466,8 +466,8 @@ func todoPopoverViewTests() {
 
         try uiExpect(handled, "Cmd-N should be handled by the popover root view")
         try expectSingleMessage(fx.runtime, "Cmd-N save edit") { msg in
-            if case .editTodoText(let paneId, let todoId, let text) = msg {
-                return paneId == fx.paneId && todoId == fx.openId && text == "Pane renamed"
+            if case .editTodoText(.pane(let paneId), let todoId, let text) = msg {
+                return paneId == fx.paneId && todoId.rawValue == fx.openId && text == "Pane renamed"
             }
             return false
         }
@@ -747,15 +747,15 @@ private func installPaneTodoReapplyHook(_ fx: PaneTodoFixture) {
 
 private func applyPaneTodoMessage(_ msg: Msg, paneId: PaneId, pane: inout PaneModel) {
     switch msg {
-    case .toggleTodoDone(let targetPaneId, let todoId) where targetPaneId == paneId:
+    case .toggleTodoDone(.pane(let targetPaneId), let todoId) where targetPaneId == paneId:
         guard let index = pane.todos.firstIndex(where: { $0.id == todoId }) else { return }
         pane.todos[index].isDone.toggle()
-    case .editTodoText(let targetPaneId, let todoId, let text) where targetPaneId == paneId:
+    case .editTodoText(.pane(let targetPaneId), let todoId, let text) where targetPaneId == paneId:
         guard let index = pane.todos.firstIndex(where: { $0.id == todoId }) else { return }
         pane.todos[index].text = text
-    case .deleteTodo(let targetPaneId, let todoId) where targetPaneId == paneId:
+    case .deleteTodo(.pane(let targetPaneId), let todoId) where targetPaneId == paneId:
         pane.todos.removeAll { $0.id == todoId }
-    case .reorderTodo(let targetPaneId, let todoId, let toIndex) where targetPaneId == paneId:
+    case .reorderTodo(.pane(let targetPaneId), let todoId, let toIndex) where targetPaneId == paneId:
         guard let fromIndex = pane.todos.firstIndex(where: { $0.id == todoId }),
               toIndex >= 0,
               toIndex <= pane.todos.count else { return }
@@ -763,7 +763,7 @@ private func applyPaneTodoMessage(_ msg: Msg, paneId: PaneId, pane: inout PaneMo
         guard fromIndex != clampedTo else { return }
         let item = pane.todos.remove(at: fromIndex)
         pane.todos.insert(item, at: min(clampedTo, pane.todos.count))
-    case .clearCompletedTodos(let targetPaneId) where targetPaneId == paneId:
+    case .clearCompletedTodos(.pane(let targetPaneId)) where targetPaneId == paneId:
         pane.todos.removeAll { $0.isDone }
     default:
         break

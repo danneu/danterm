@@ -240,7 +240,7 @@ func update(
         clearPaneSideTables(paneId, in: &model)
         if model.todoPopover == .pane(paneId) {
             model.todoPopover = nil
-            commands.append(.dismissTodoPopover)
+            commands.append(.dismissTodoPopover(owner: .pane(paneId)))
         }
 
         guard let newRoot = newTree else {
@@ -1154,93 +1154,60 @@ func update(
 
     // MARK: - TODO
 
-    case .toggleTodoPopover(let paneId):
-        guard model.pane(paneId) != nil else { return [] }
-        if model.todoPopover == .pane(paneId) {
+    case .toggleTodoPopover(let owner):
+        guard model.todos(for: owner) != nil else { return [] }
+        if model.todoPopover == owner {
             model.todoPopover = nil
-            return [.dismissTodoPopover]
-        }
-        // Close any other open popover (pane or tab) before showing the new one.
-        var commands: [Command] = []
-        if case .tab = model.todoPopover {
-            commands.append(.dismissTodoPopoverForTab)
-        }
-        model.todoPopover = .pane(paneId)
-        commands.append(.showTodoPopover(paneId: paneId))
-        return commands
-
-    case .todoPopoverClosed(let paneId):
-        if model.todoPopover == .pane(paneId) {
-            model.todoPopover = nil
-        }
-        return []
-
-    case .toggleTodoPopoverForTab(let tabId):
-        guard tabById(tabId, in: model) != nil else { return [] }
-        if model.todoPopover == .tab(tabId) {
-            model.todoPopover = nil
-            return [.dismissTodoPopoverForTab]
+            return [.dismissTodoPopover(owner: owner)]
         }
         var commands: [Command] = []
-        if case .pane = model.todoPopover {
-            commands.append(.dismissTodoPopover)
+        if let previous = model.todoPopover {
+            commands.append(.dismissTodoPopover(owner: previous))
         }
-        model.todoPopover = .tab(tabId)
-        commands.append(.showTodoPopoverForTab(tabId: tabId))
+        model.todoPopover = owner
+        commands.append(.showTodoPopover(owner: owner))
         return commands
 
-    case .todoPopoverForTabClosed(let tabId):
-        if model.todoPopover == .tab(tabId) {
+    case .todoPopoverClosed(let owner):
+        if model.todoPopover == owner {
             model.todoPopover = nil
         }
         return []
 
-    case .addTabTodo(let tabId, let text):
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, tabById(tabId, in: model) != nil else { return [] }
-        updateTab(tabId, in: &model) { t in
-            t.todos.append(TodoItem(id: env.newId(), text: trimmed, isDone: false))
-        }
+    case .addTodo(let owner, let text):
+        guard appendTodo(&model, owner: owner, text: text, id: TodoId(rawValue: env.newId())) != nil else { return [] }
         return []
 
-    case .toggleTabTodoDone(let tabId, let todoId):
-        guard let tab = tabById(tabId, in: model),
-              let idx = tab.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
-        updateTab(tabId, in: &model) { t in
-            t.todos[idx].isDone.toggle()
-        }
+    case .toggleTodoDone(let owner, let todoId):
+        guard let todos = model.todos(for: owner),
+              let idx = todos.firstIndex(where: { $0.id == todoId }) else { return [] }
+        model.updateTodos(for: owner) { $0[idx].isDone.toggle() }
         return []
 
-    case .setTabTodoDone(let tabId, let todoId, let isDone):
-        guard let tab = tabById(tabId, in: model),
-              let idx = tab.todos.firstIndex(where: { $0.id == todoId }),
-              tab.todos[idx].isDone != isDone else { return [] }
-        updateTab(tabId, in: &model) { t in
-            t.todos[idx].isDone = isDone
-        }
+    case .setTodoDone(let owner, let todoId, let isDone):
+        guard let todos = model.todos(for: owner),
+              let idx = todos.firstIndex(where: { $0.id == todoId }),
+              todos[idx].isDone != isDone else { return [] }
+        model.updateTodos(for: owner) { $0[idx].isDone = isDone }
         return []
 
-    case .editTabTodoText(let tabId, let todoId, let text):
+    case .editTodoText(let owner, let todoId, let text):
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty,
-              let tab = tabById(tabId, in: model),
-              let idx = tab.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
-        updateTab(tabId, in: &model) { t in
-            t.todos[idx].text = trimmed
-        }
+              let todos = model.todos(for: owner),
+              let idx = todos.firstIndex(where: { $0.id == todoId }) else { return [] }
+        model.updateTodos(for: owner) { $0[idx].text = trimmed }
         return []
 
-    case .deleteTabTodo(let tabId, let todoId):
-        guard tabById(tabId, in: model) != nil else { return [] }
-        updateTab(tabId, in: &model) { t in
-            t.todos.removeAll { $0.id == todoId }
-        }
+    case .deleteTodo(let owner, let todoId):
+        guard model.todos(for: owner) != nil else { return [] }
+        model.updateTodos(for: owner) { $0.removeAll { $0.id == todoId } }
         return []
 
-    case .reorderTabTodo(let tabId, let todoId, let toIndex):
-        guard let tab = tabById(tabId, in: model),
-              let todos = reorderedTodos(tab.todos, moving: todoId, to: toIndex) else { return [] }
-        updateTab(tabId, in: &model) { t in t.todos = todos }
+    case .reorderTodo(let owner, let todoId, let toIndex):
+        guard let current = model.todos(for: owner),
+              let todos = reorderedTodos(current, moving: todoId, to: toIndex) else { return [] }
+        model.updateTodos(for: owner) { $0 = todos }
         return []
 
     case .moveTodo(let source, let todoId, let destination, let atIndex):
@@ -1294,65 +1261,22 @@ func update(
 
         switch source {
         case .tab(let tabId):
-            updateTab(tabId, in: &model) { t in
-                t.todos.remove(at: sourceIndex)
-            }
+            model.updateTodos(for: .tab(tabId)) { $0.remove(at: sourceIndex) }
         case .pane(let paneId):
-            model.updatePane(paneId) { $0.todos.remove(at: sourceIndex) }
+            model.updateTodos(for: .pane(paneId)) { $0.remove(at: sourceIndex) }
         }
 
         switch destination {
         case .tab(let tabId):
-            updateTab(tabId, in: &model) { t in
-                t.todos.insert(sourceItem, at: insertAt)
-            }
+            model.updateTodos(for: .tab(tabId)) { $0.insert(sourceItem, at: insertAt) }
         case .pane(let paneId):
-            model.updatePane(paneId) { $0.todos.insert(sourceItem, at: insertAt) }
+            model.updateTodos(for: .pane(paneId)) { $0.insert(sourceItem, at: insertAt) }
         }
         return []
 
-    case .clearCompletedTabTodos(let tabId):
-        guard tabById(tabId, in: model) != nil else { return [] }
-        updateTab(tabId, in: &model) { t in
-            t.todos.removeAll { $0.isDone }
-        }
-        return []
-
-    case .addTodo(let paneId, let text):
-        guard appendTodo(&model, paneId: paneId, text: text, id: env.newId()) != nil else { return [] }
-        return []
-
-    case .toggleTodoDone(let paneId, let todoId):
-        guard let idx = model.pane(paneId)?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
-        model.updatePane(paneId) { $0.todos[idx].isDone.toggle() }
-        return []
-
-    case .setTodoDone(let paneId, let todoId, let isDone):
-        guard let pane = model.pane(paneId),
-              let idx = pane.todos.firstIndex(where: { $0.id == todoId }),
-              pane.todos[idx].isDone != isDone else { return [] }
-        model.updatePane(paneId) { $0.todos[idx].isDone = isDone }
-        return []
-
-    case .editTodoText(let paneId, let todoId, let text):
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return [] }
-        guard let idx = model.pane(paneId)?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
-        model.updatePane(paneId) { $0.todos[idx].text = trimmed }
-        return []
-
-    case .deleteTodo(let paneId, let todoId):
-        model.updatePane(paneId) { $0.todos.removeAll { $0.id == todoId } }
-        return []
-
-    case .reorderTodo(let paneId, let todoId, let toIndex):
-        guard let current = model.pane(paneId)?.todos,
-              let todos = reorderedTodos(current, moving: todoId, to: toIndex) else { return [] }
-        model.updatePane(paneId) { $0.todos = todos }
-        return []
-
-    case .clearCompletedTodos(let paneId):
-        model.updatePane(paneId) { $0.todos.removeAll { $0.isDone } }
+    case .clearCompletedTodos(let owner):
+        guard model.todos(for: owner) != nil else { return [] }
+        model.updateTodos(for: owner) { $0.removeAll { $0.isDone } }
         return []
 
     case .requestClosePane(let paneId):
@@ -1412,7 +1336,7 @@ func update(
 /// reinserts it at the clamped destination. Returns nil when the id is absent,
 /// the index is out of range, or the item would not move -- so both callers can
 /// `guard let` it and skip the checkpoint on a no-op.
-func reorderedTodos(_ todos: [TodoItem], moving todoId: UUID, to toIndex: Int) -> [TodoItem]? {
+func reorderedTodos(_ todos: [TodoItem], moving todoId: TodoId, to toIndex: Int) -> [TodoItem]? {
     guard let fromIndex = todos.firstIndex(where: { $0.id == todoId }),
           toIndex >= 0, toIndex <= todos.count else { return nil }
     let clampedTo = min(toIndex, todos.count - 1)
@@ -1569,8 +1493,7 @@ private func updateSelectedTab(_ model: inout AppModel, _ body: (inout TabModel)
 }
 
 private func updateTab(_ tabId: TabId, in model: inout AppModel, _ body: (inout TabModel) -> Void) {
-    guard let (gi, ti) = tabLocation(tabId, in: model) else { return }
-    body(&model.groups[gi].tabs[ti])
+    model.updateTab(tabId, body)
 }
 
 private func removeTab(_ tabId: TabId, from model: inout AppModel) {
@@ -1648,7 +1571,7 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
         clearPaneSideTables(pid, in: &model)
         if model.todoPopover == .pane(pid) {
             model.todoPopover = nil
-            commands.append(.dismissTodoPopover)
+            commands.append(.dismissTodoPopover(owner: .pane(pid)))
         }
     }
     // Tab popover open against this tab dies with the tab. Emit the dismiss
@@ -1656,7 +1579,7 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
     // closes the floating NSPopover.
     if model.todoPopover == .tab(id) {
         model.todoPopover = nil
-        commands.append(.dismissTodoPopoverForTab)
+        commands.append(.dismissTodoPopover(owner: .tab(id)))
     }
 
     model.groups[groupIdx].tabs.remove(at: tabIdx)

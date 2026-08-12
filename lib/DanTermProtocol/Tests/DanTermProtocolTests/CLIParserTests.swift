@@ -318,10 +318,11 @@ struct CLIParserTests {
         #expect(add.params["pane"] == .string(paneId))
         #expect(add.params["text"] == .string("write test"))
 
-        let edit = try parseCLI(["todo", "edit", "--pane", paneId, "TODO1", "write", "test"])
+        let todoId = "44444444-4444-4444-8444-444444444444"
+        let edit = try parseCLI(["todo", "edit", "--pane", paneId, todoId, "write", "test"])
         #expect(edit.method == IpcRequestMethod.todoEdit.rawValue)
         #expect(edit.params["pane"] == .string(paneId))
-        #expect(edit.params["todoId"] == .string("TODO1"))
+        #expect(edit.params["todoId"] == .string(todoId))
         #expect(edit.params["text"] == .string("write test"))
 
         let clear = try parseCLI(["todo", "clear-completed", "--pane", paneId])
@@ -335,10 +336,34 @@ struct CLIParserTests {
         ("delete", IpcRequestMethod.todoDelete.rawValue),
     ])
     func todoStateMutationsParseExplicitPanes(_ testCase: (subcommand: String, method: String)) throws {
-        let command = try parseCLI(["todo", testCase.subcommand, "--pane", paneId, "TODO1"])
+        let todoId = "44444444-4444-4444-8444-444444444444"
+        let command = try parseCLI(["todo", testCase.subcommand, "--pane", paneId, todoId])
         #expect(command.method == testCase.method)
         #expect(command.params["pane"] == .string(paneId))
-        #expect(command.params["todoId"] == .string("TODO1"))
+        #expect(command.params["todoId"] == .string(todoId))
+    }
+
+    @Test("todo verbs accept tab owners and typed todo ids", arguments: [
+        "done", "open", "delete",
+    ])
+    func todoStateMutationsParseTabs(_ subcommand: String) throws {
+        let todoId = "44444444-4444-4444-8444-444444444444"
+        let command = try parseCLI(["todo", subcommand, "--tab", tabId, todoId])
+        #expect(command.params["tab"] == .string(tabId))
+        #expect(command.params["todoId"] == .string(todoId))
+    }
+
+    @Test("todo owners are mutually exclusive and todo ids are validated locally")
+    func todoTargetValidation() {
+        let usage = "usage: danterm todo done (--pane <pane-id> | --tab <tab-id>) <todo-id>"
+        for args in [
+            ["todo", "done", "44444444-4444-4444-8444-444444444444"],
+            ["todo", "done", "--pane", paneId, "--tab", tabId, "44444444-4444-4444-8444-444444444444"],
+            ["todo", "done", "--pane", paneId, "not-a-uuid"],
+        ] {
+            let error = #expect(throws: CLIParseError.self) { try parseCLI(args) }
+            #expect(error?.message == usage)
+        }
     }
 
     @Test("pane input read and split parse")
@@ -565,8 +590,8 @@ struct CLIParserTests {
         (["pane", "input", "--pane"], "usage: danterm pane input --pane <pane-id> ..."),
         (["theme", "set", "--pane"], "usage: danterm theme set --pane <pane-id> <name>|--clear"),
         (["theme", "set", "--pane", paneId, "--clear", "extra"], "usage: danterm theme set --pane <pane-id> <name>|--clear"),
-        (["todo", "list", "--pane"], "usage: danterm todo list --pane <pane-id>"),
-        (["todo", "add", "--pane"], "usage: danterm todo add --pane <pane-id> <text>"),
+        (["todo", "list", "--pane"], "usage: danterm todo list (--pane <pane-id> | --tab <tab-id>)"),
+        (["todo", "add", "--pane"], "usage: danterm todo add (--pane <pane-id> | --tab <tab-id>) <text>"),
     ] as [([String], String)])
     func malformedExplicitTargetSyntaxThrowsUsageErrors(_ testCase: ([String], String)) {
         let error = #expect(throws: CLIParseError.self) {

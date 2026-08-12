@@ -1,6 +1,5 @@
 // Swift Testing migration of the legacy `tests/UpdateTodoTests.swift` harness
-// suite. Pins per-pane TODO Msg surface plus pure helpers: addTodo /
-// toggleTodoDone / editTodoText / deleteTodo / reorderTodo / clearCompletedTodos,
+// suite. Pins the owner-parameterized TODO Msg surface plus pure helpers,
 // requestClosePane confirmation gating, closePane popover cleanup,
 // toggleTodoPopover open/close + stale-pane race guard, the
 // reconcileTodoPopover preservation rules (clear on selected-tab change /
@@ -21,7 +20,100 @@ private struct SectionRow {
     let section: String?
 }
 
+enum TodoOwnerKind: String, CaseIterable, Sendable {
+    case pane
+    case tab
+}
+
+func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: TodoOwner) {
+    var model = makeModel()
+    createTab(&model)
+    let tab = selectedTab(in: model)!
+    let owner: TodoOwner = switch kind {
+    case .pane: .pane(tab.focusedPaneId)
+    case .tab: .tab(tab.id)
+    }
+    return (model, owner)
+}
+
 @Suite struct UpdateTodoTests {
+    @Test("every todo mutation has the same owner-independent behavior", arguments: TodoOwnerKind.allCases)
+    func todoMutationsAreOwnerIndependent(kind: TodoOwnerKind) {
+        var (model, owner) = makeTodoOwnerFixture(kind)
+
+        update(&model, .addTodo(owner: owner, text: "  A  "))
+        update(&model, .addTodo(owner: owner, text: "B"))
+        update(&model, .addTodo(owner: owner, text: "C"))
+        let ids = model.todos(for: owner)!.map(\.id)
+        #expect(model.todos(for: owner)!.map(\.text) == ["A", "B", "C"])
+
+        update(&model, .toggleTodoDone(owner: owner, todoId: ids[0]))
+        #expect(model.todos(for: owner)![0].isDone)
+        update(&model, .setTodoDone(owner: owner, todoId: ids[0], isDone: false))
+        #expect(model.todos(for: owner)![0].isDone == false)
+        update(&model, .editTodoText(owner: owner, todoId: ids[1], text: "  edited  "))
+        #expect(model.todos(for: owner)![1].text == "edited")
+        update(&model, .reorderTodo(owner: owner, todoId: ids[2], toIndex: 0))
+        #expect(model.todos(for: owner)!.map(\.text) == ["C", "A", "edited"])
+
+        update(&model, .setTodoDone(owner: owner, todoId: ids[0], isDone: true))
+        update(&model, .clearCompletedTodos(owner: owner))
+        #expect(model.todos(for: owner)!.map(\.text) == ["C", "edited"])
+        update(&model, .deleteTodo(owner: owner, todoId: ids[1]))
+        #expect(model.todos(for: owner)!.map(\.text) == ["C"])
+    }
+
+    @Test("every todo verb is inert for an unknown owner", arguments: TodoOwnerKind.allCases)
+    func todoVerbsAreInertForUnknownOwner(kind: TodoOwnerKind) {
+        var (model, knownOwner) = makeTodoOwnerFixture(kind)
+        let unknownOwner: TodoOwner = switch kind {
+        case .pane: .pane(PaneId())
+        case .tab: .tab(TabId())
+        }
+        let todoId = TodoId()
+        let baseline = model
+        let messages: [Msg] = [
+            .addTodo(owner: unknownOwner, text: "task"),
+            .toggleTodoDone(owner: unknownOwner, todoId: todoId),
+            .setTodoDone(owner: unknownOwner, todoId: todoId, isDone: true),
+            .editTodoText(owner: unknownOwner, todoId: todoId, text: "changed"),
+            .deleteTodo(owner: unknownOwner, todoId: todoId),
+            .reorderTodo(owner: unknownOwner, todoId: todoId, toIndex: 0),
+            .clearCompletedTodos(owner: unknownOwner),
+            .moveTodo(from: unknownOwner, todoId: todoId, to: knownOwner, atIndex: 0),
+            .moveTodo(from: knownOwner, todoId: todoId, to: unknownOwner, atIndex: 0),
+            .toggleTodoPopover(owner: unknownOwner),
+        ]
+
+        for message in messages {
+            model = baseline
+            let commands = update(&model, message)
+            #expect(model == baseline)
+            #expect(commands.isEmpty)
+        }
+    }
+
+    @Test("todo popover toggling has the same owner-independent behavior", arguments: TodoOwnerKind.allCases)
+    func todoPopoverTogglingIsOwnerIndependent(kind: TodoOwnerKind) {
+        var (model, owner) = makeTodoOwnerFixture(kind)
+
+        let openCommands = update(&model, .toggleTodoPopover(owner: owner))
+        #expect(model.todoPopover == owner)
+        #expect(openCommands.count == 1)
+        #expect(hasEffect(openCommands) {
+            if case .showTodoPopover(let commandOwner) = $0 { return commandOwner == owner }
+            return false
+        })
+
+        let closeCommands = update(&model, .toggleTodoPopover(owner: owner))
+        #expect(model.todoPopover == nil)
+        #expect(closeCommands.count == 1)
+        #expect(hasEffect(closeCommands) {
+            if case .dismissTodoPopover(let commandOwner) = $0 { return commandOwner == owner }
+            return false
+        })
+    }
+
     // MARK: - addTodo
 
     @Test("addTodo creates item with correct text and isDone false")
@@ -32,7 +124,7 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "run tests"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "run tests"))
         #expect(model.pane(paneId)!.todos.count == 1)
         #expect(model.pane(paneId)!.todos[0].text == "run tests")
         #expect(model.pane(paneId)!.todos[0].isDone == false)
@@ -46,7 +138,7 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "  hello  "))
+        update(&model, .addTodo(owner: .pane(paneId), text: "  hello  "))
         #expect(model.pane(paneId)!.todos[0].text == "hello")
     }
 
@@ -58,8 +150,8 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: ""))
-        update(&model, .addTodo(paneId: paneId, text: "   "))
+        update(&model, .addTodo(owner: .pane(paneId), text: ""))
+        update(&model, .addTodo(owner: .pane(paneId), text: "   "))
         #expect(model.pane(paneId)!.todos.count == 0)
     }
 
@@ -73,11 +165,11 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "task"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "task"))
         let todoId = model.pane(paneId)!.todos[0].id
-        update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
+        update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: todoId))
         #expect(model.pane(paneId)!.todos[0].isDone == true)
-        update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
+        update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: todoId))
         #expect(model.pane(paneId)!.todos[0].isDone == false)
     }
 
@@ -89,17 +181,17 @@ private struct SectionRow {
         //   -- the rewrite reads the pane once and bails on `isDone != isDone`
         //   before mutating, so the no-op contract must be locked first.
         // Scenario: spec-first -- no incident; the pane-level arm mirrors the
-        //   already-pinned tab-level `setTabTodoDoneSetsExplicitValue`.
+        //   corresponding tab-owner behavior.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "task"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "task"))
         let todoId = model.pane(paneId)!.todos[0].id
 
-        update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: true))
+        update(&model, .setTodoDone(owner: .pane(paneId), todoId: todoId, isDone: true))
         #expect(model.pane(paneId)!.todos[0].isDone == true)
 
-        let noopCommands = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: true))
+        let noopCommands = update(&model, .setTodoDone(owner: .pane(paneId), todoId: todoId, isDone: true))
         #expect(noopCommands.isEmpty, "no-op when value unchanged")
     }
 
@@ -113,9 +205,9 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "old"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "old"))
         let todoId = model.pane(paneId)!.todos[0].id
-        update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: "new"))
+        update(&model, .editTodoText(owner: .pane(paneId), todoId: todoId, text: "new"))
         #expect(model.pane(paneId)!.todos[0].text == "new")
     }
 
@@ -128,11 +220,11 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "keep"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "keep"))
         let todoId = model.pane(paneId)!.todos[0].id
-        update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: ""))
+        update(&model, .editTodoText(owner: .pane(paneId), todoId: todoId, text: ""))
         #expect(model.pane(paneId)!.todos[0].text == "keep")
-        update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: "   "))
+        update(&model, .editTodoText(owner: .pane(paneId), todoId: todoId, text: "   "))
         #expect(model.pane(paneId)!.todos[0].text == "keep")
     }
 
@@ -147,10 +239,10 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "A"))
-        update(&model, .addTodo(paneId: paneId, text: "B"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "A"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "B"))
         let idA = model.pane(paneId)!.todos[0].id
-        update(&model, .deleteTodo(paneId: paneId, todoId: idA))
+        update(&model, .deleteTodo(owner: .pane(paneId), todoId: idA))
         #expect(model.pane(paneId)!.todos.count == 1)
         #expect(model.pane(paneId)!.todos[0].text == "B")
     }
@@ -166,11 +258,11 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "A"))
-        update(&model, .addTodo(paneId: paneId, text: "B"))
-        update(&model, .addTodo(paneId: paneId, text: "C"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "A"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "B"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "C"))
         let idC = model.pane(paneId)!.todos[2].id
-        update(&model, .reorderTodo(paneId: paneId, todoId: idC, toIndex: 0))
+        update(&model, .reorderTodo(owner: .pane(paneId), todoId: idC, toIndex: 0))
         #expect(model.pane(paneId)!.todos.map(\.text) == ["C", "A", "B"])
     }
 
@@ -183,10 +275,10 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "A"))
-        update(&model, .addTodo(paneId: paneId, text: "B"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "A"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "B"))
         let idA = model.pane(paneId)!.todos[0].id
-        let commands = update(&model, .reorderTodo(paneId: paneId, todoId: idA, toIndex: 0))
+        let commands = update(&model, .reorderTodo(owner: .pane(paneId), todoId: idA, toIndex: 0))
         #expect(model.pane(paneId)!.todos.map(\.text) == ["A", "B"])
         #expect(commands.isEmpty)
     }
@@ -199,10 +291,10 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "A"))
-        update(&model, .addTodo(paneId: paneId, text: "B"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "A"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "B"))
         let idA = model.pane(paneId)!.todos[0].id
-        let commands = update(&model, .reorderTodo(paneId: paneId, todoId: idA, toIndex: 99))
+        let commands = update(&model, .reorderTodo(owner: .pane(paneId), todoId: idA, toIndex: 99))
         #expect(commands.isEmpty, "out of bounds should be no-op")
     }
 
@@ -217,14 +309,14 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "done"))
-        update(&model, .addTodo(paneId: paneId, text: "pending"))
-        update(&model, .addTodo(paneId: paneId, text: "also done"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "done"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "pending"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "also done"))
         let idDone = model.pane(paneId)!.todos[0].id
         let idAlsoDone = model.pane(paneId)!.todos[2].id
-        update(&model, .toggleTodoDone(paneId: paneId, todoId: idDone))
-        update(&model, .toggleTodoDone(paneId: paneId, todoId: idAlsoDone))
-        update(&model, .clearCompletedTodos(paneId: paneId))
+        update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: idDone))
+        update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: idAlsoDone))
+        update(&model, .clearCompletedTodos(owner: .pane(paneId)))
         #expect(model.pane(paneId)!.todos.count == 1)
         #expect(model.pane(paneId)!.todos[0].text == "pending")
     }
@@ -242,7 +334,7 @@ private struct SectionRow {
         createTab(&model)
         let firstPaneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
-        update(&model, .addTodo(paneId: firstPaneId, text: "incomplete task"))
+        update(&model, .addTodo(owner: .pane(firstPaneId), text: "incomplete task"))
         let commands = update(&model, .requestClosePane(paneId: firstPaneId))
         #expect(hasEffect(commands) {
             if case .showClosePaneConfirmation(let pid, let count) = $0 {
@@ -265,9 +357,9 @@ private struct SectionRow {
         let tab = model.groups[0].tabs[0]
         let paneId = tab.focusedPaneId
         model.selectedTabId = tab.id
-        update(&model, .addTodo(paneId: paneId, text: "task"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "task"))
         let todoId = model.pane(paneId)!.todos[0].id
-        update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
+        update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: todoId))
         let liveBefore = Set(model.allPaneIds)
         update(&model, .requestClosePane(paneId: paneId))
         #expect(model.pane(paneId) == nil, "pane should be removed")
@@ -326,13 +418,13 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let openEffects = update(&model, .toggleTodoPopover(paneId: paneId))
+        let openEffects = update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == .pane(paneId))
         #expect(hasEffect(openEffects) {
-            if case .showTodoPopover(let pid) = $0 { return pid == paneId }
+            if case .showTodoPopover(owner: .pane(let pid)) = $0 { return pid == paneId }
             return false
         }, "expected showTodoPopover")
-        let closeEffects = update(&model, .toggleTodoPopover(paneId: paneId))
+        let closeEffects = update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == nil, "should be nil after close")
         #expect(hasEffect(closeEffects) {
             if case .dismissTodoPopover = $0 { return true }
@@ -357,7 +449,7 @@ private struct SectionRow {
         let paneB = tab.focusedPaneId
         model.todoPopover = .pane(paneB)
         let paneA = paneId
-        update(&model, .todoPopoverClosed(paneId: paneA))
+        update(&model, .todoPopoverClosed(owner: .pane(paneA)))
         #expect(model.todoPopover == .pane(paneB), "paneB popover should still be open")
     }
 
@@ -369,7 +461,7 @@ private struct SectionRow {
         //   popovers.
         // Why it exists: pins the selected-tab clear rule.
         // Scenario: spec-first cross-tab clear (pane + tab variants).
-        func check(_ scopeFor: (TabId, PaneId) -> TodoPopoverScope, _ label: String) {
+        func check(_ scopeFor: (TabId, PaneId) -> TodoOwner, _ label: String) {
             var model = makeModel()
             createTab(&model)
             let firstTab = selectedTab(in: model)!
@@ -461,7 +553,7 @@ private struct SectionRow {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
 
-        update(&model, .toggleTodoPopover(paneId: paneId))
+        update(&model, .toggleTodoPopover(owner: .pane(paneId)))
 
         #expect(model.todoPopover == .pane(paneId))
     }
@@ -477,7 +569,7 @@ private struct SectionRow {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "parent task"))
+        update(&model, .addTodo(owner: .pane(paneId), text: "parent task"))
         update(&model, .splitPane(paneId: paneId, direction: .horizontal))
         let tab = selectedTab(in: model)!
         let newPaneId = tab.focusedPaneId

@@ -10,3 +10,9 @@ import Foundation
 extension TypedId {
     init() { self.init(rawValue: UUID()) }
 }
+
+extension TodoItem {
+    init(id: UUID, text: String, isDone: Bool) {
+        self.init(id: TodoId(rawValue: id), text: text, isDone: isDone)
+    }
+}

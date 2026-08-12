@@ -6,23 +6,25 @@
 // rows from. Split out of ModelOperations.swift because the row model is a sizable,
 // self-contained, separately-tested cluster; kept apart from the *projection*
 // (`TabTodoPopoverProjection`, which lives with the other projections) so the
-// projection boundary stays clean. `import Foundation` only -- no AppKit.
+// projection boundary stays clean. It stays portable and imports no AppKit.
 import Foundation
+import DanTermProtocol
 
 // MARK: - Tab Todo Popover
 
 enum TabTodoRow: Equatable {
   case tabSectionHeader
-  case tabItem(TodoItem)
+  case tabItem(tabId: TabId, item: TodoItem)
   case tabEmptyPlaceholder
   case paneSectionHeader(paneId: PaneId, title: String)
   case paneItem(paneId: PaneId, item: TodoItem)
   case paneEmptyPlaceholder(paneId: PaneId)
 }
 
-enum TabTodoEditTarget: Equatable {
-  case tab(todoId: UUID)
-  case pane(paneId: PaneId, todoId: UUID)
+/// Keeps an edit anchored to the same todo while it moves between owner buckets.
+struct TabTodoEditTarget: Equatable {
+  let owner: TodoOwner
+  let id: TodoId
 }
 
 enum TabTodoDropOperation: Equatable {
@@ -32,7 +34,7 @@ enum TabTodoDropOperation: Equatable {
 
 enum TabTodoReorderStep: Equatable {
   case reorderInSection(toIndex: Int)
-  case moveToBucket(destination: TodoDestination, atIndex: Int)
+  case moveToBucket(destination: TodoOwner, atIndex: Int)
 }
 
 extension TabTodoRow {
@@ -56,10 +58,10 @@ extension TabTodoRow {
 
   var editTarget: TabTodoEditTarget? {
     switch self {
-    case .tabItem(let item):
-      return .tab(todoId: item.id)
+    case .tabItem(let tabId, let item):
+      return .init(owner: .tab(tabId), id: item.id)
     case .paneItem(let paneId, let item):
-      return .pane(paneId: paneId, todoId: item.id)
+      return .init(owner: .pane(paneId), id: item.id)
     case .tabSectionHeader, .tabEmptyPlaceholder, .paneSectionHeader, .paneEmptyPlaceholder:
       return nil
     }
@@ -67,7 +69,7 @@ extension TabTodoRow {
 
   var itemText: String? {
     switch self {
-    case .tabItem(let item), .paneItem(_, let item):
+    case .tabItem(_, let item), .paneItem(_, let item):
       return item.text
     case .tabSectionHeader, .tabEmptyPlaceholder, .paneSectionHeader, .paneEmptyPlaceholder:
       return nil
@@ -76,7 +78,7 @@ extension TabTodoRow {
 
   var item: TodoItem? {
     switch self {
-    case .tabItem(let item), .paneItem(_, let item):
+    case .tabItem(_, let item), .paneItem(_, let item):
       return item
     case .tabSectionHeader, .tabEmptyPlaceholder, .paneSectionHeader, .paneEmptyPlaceholder:
       return nil
@@ -106,22 +108,19 @@ func resolveTabTodoEditTarget(
 }
 
 func newlyAddedTabTodoTarget(
-  previousTabTodoIds: Set<UUID>,
+  previousTabTodoIds: Set<TodoId>,
   in projection: TabTodoPopoverProjection
 ) -> TabTodoEditTarget? {
   for row in projection.rows {
-    if case .tabItem(let item) = row, !previousTabTodoIds.contains(item.id) {
-      return .tab(todoId: item.id)
+    if case .tabItem(let tabId, let item) = row, !previousTabTodoIds.contains(item.id) {
+      return .init(owner: .tab(tabId), id: item.id)
     }
   }
   return nil
 }
 
-private func tabTodoTargetId(_ target: TabTodoEditTarget) -> UUID {
-  switch target {
-  case .tab(let todoId), .pane(_, let todoId):
-    return todoId
-  }
+private func tabTodoTargetId(_ target: TabTodoEditTarget) -> TodoId {
+  target.id
 }
 
 func tabTodoItemCount(_ tabId: TabId, in model: AppModel) -> Int {
@@ -140,7 +139,7 @@ func buildTabTodoRows(model: AppModel, tabId: TabId) -> [TabTodoRow] {
     rows.append(.tabEmptyPlaceholder)
   } else {
     for item in tab.todos {
-      rows.append(.tabItem(item))
+      rows.append(.tabItem(tabId: tabId, item: item))
     }
   }
   for paneId in allPaneIds(tab.rootNode) {
@@ -165,7 +164,7 @@ func resolveTabTodoDropTarget(
   tabId: TabId,
   proposedRow: Int,
   dropOperation: TabTodoDropOperation
-) -> (destination: TodoDestination, atIndex: Int)? {
+) -> (destination: TodoOwner, atIndex: Int)? {
   switch dropOperation {
   case .on:
     guard rows.indices.contains(proposedRow) else { return nil }
@@ -223,7 +222,7 @@ func resolveTabTodoDropTarget(
   tabId: TabId,
   proposedRow: Int,
   dropOperation: TabTodoDropOperation
-) -> (destination: TodoDestination, atIndex: Int)? {
+) -> (destination: TodoOwner, atIndex: Int)? {
   guard tabById(tabId, in: model) != nil,
         let target = resolveTabTodoDropTarget(
           rows: rows,
@@ -245,13 +244,13 @@ func resolveTabTodoBucketStep(
   paneOrder: [PaneId],
   tabId: TabId,
   delta: Int
-) -> TodoDestination? {
+) -> TodoOwner? {
   guard delta != 0 else { return nil }
   let currentIndex: Int
-  switch current {
+  switch current.owner {
   case .tab:
     currentIndex = 0
-  case .pane(let paneId, _):
+  case .pane(let paneId):
     guard let paneIndex = paneOrder.firstIndex(of: paneId) else { return nil }
     currentIndex = paneIndex + 1
   }
@@ -270,7 +269,7 @@ func resolveTabTodoReorderStep(
   tabId: TabId,
   currentIndex: Int,
   currentSectionCount: Int,
-  destinationSectionCount: (TodoDestination) -> Int,
+  destinationSectionCount: (TodoOwner) -> Int,
   delta: Int
 ) -> TabTodoReorderStep? {
   guard delta == 1 || delta == -1,
@@ -302,7 +301,7 @@ func resolveTabTodoReorderStep(
   return .moveToBucket(destination: destination, atIndex: destinationSectionCount(destination))
 }
 
-private func tabTodoDestination(for row: TabTodoRow, tabId: TabId) -> TodoDestination? {
+private func tabTodoDestination(for row: TabTodoRow, tabId: TabId) -> TodoOwner? {
   switch row {
   case .tabSectionHeader, .tabItem, .tabEmptyPlaceholder:
     return .tab(tabId)
@@ -311,7 +310,7 @@ private func tabTodoDestination(for row: TabTodoRow, tabId: TabId) -> TodoDestin
   }
 }
 
-private func tabTodoCount(for destination: TodoDestination, in model: AppModel) -> Int? {
+private func tabTodoCount(for destination: TodoOwner, in model: AppModel) -> Int? {
   switch destination {
   case .tab(let tabId):
     return tabById(tabId, in: model)?.todos.count
@@ -320,7 +319,7 @@ private func tabTodoCount(for destination: TodoDestination, in model: AppModel) 
   }
 }
 
-private func tabTodoCount(for destination: TodoDestination, rows: [TabTodoRow]) -> Int {
+private func tabTodoCount(for destination: TodoOwner, rows: [TabTodoRow]) -> Int {
   switch destination {
   case .tab:
     return rows.count { row in

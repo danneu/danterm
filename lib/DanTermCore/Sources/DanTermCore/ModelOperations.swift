@@ -687,12 +687,12 @@ func adjacentTabId(direction: TabDirection, in model: AppModel) -> TabId? {
 
 // MARK: - Todo Operations
 
-/// Adds one normalized pane todo through the shared reducer and IPC mutation path.
-func appendTodo(_ model: inout AppModel, paneId: PaneId, text: String, id: UUID) -> TodoItem? {
+/// Adds one normalized todo through the shared reducer and IPC mutation path.
+func appendTodo(_ model: inout AppModel, owner: TodoOwner, text: String, id: TodoId) -> TodoItem? {
   let trimmed = text.trimmingCharacters(in: .whitespaces)
-  guard !trimmed.isEmpty, model.pane(paneId) != nil else { return nil }
+  guard !trimmed.isEmpty, model.todos(for: owner) != nil else { return nil }
   let item = TodoItem(id: id, text: trimmed, isDone: false)
-  model.updatePane(paneId) { $0.todos.append(item) }
+  model.updateTodos(for: owner) { $0.append(item) }
   return item
 }
 
@@ -1005,7 +1005,7 @@ func reconcileDecision(
 /// nil from todoPopoverStrandKey means no popover is open, so callers can skip
 /// the tree walk and avoid clearing a popover opened during the current message.
 struct TodoPopoverStrandKey: Equatable {
-  let scope: TodoPopoverScope
+  let scope: TodoOwner
   let visibleTabId: TabId?
   let visibleShape: ContainerShape?
 }
