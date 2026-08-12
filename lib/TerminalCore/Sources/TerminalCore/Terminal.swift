@@ -5460,6 +5460,7 @@ public struct Terminal: Equatable, Sendable {
         case (.decPrivate, 1): \.isApplicationCursorKeysMode
         case (.decPrivate, 6): \.isOriginMode
         case (.decPrivate, 7): \.isAutoWrapMode
+        case (.decPrivate, 12): \.isCursorBlinking
         case (.decPrivate, 25): \.isCursorVisible
         case (.decPrivate, 1004): \.isFocusReportingMode
         case (.decPrivate, 1006): \.isSGRMouseEncodingMode

@@ -107,6 +107,7 @@ struct TerminalQueryTests {
             (1, 2, 1, 2),
             (6, 2, 1, 2),
             (7, 1, 1, 2),
+            (12, 2, 1, 2),
             (25, 1, 1, 2),
             (1004, 2, 1, 2),
             (1006, 2, 1, 2),
@@ -170,13 +171,13 @@ struct TerminalQueryTests {
     func resetsPreserveReplies() throws {
         for reset in ["\u{1B}[!p", "\u{1B}c"] {
             var terminal = try #require(Terminal(columns: 8, rows: 4))
-            terminal.feed(Array("\u{1B}[c\u{1B}[?25l\u{1B}[?2026h\(reset)".utf8))
+            terminal.feed(Array("\u{1B}[c\u{1B}[?12h\u{1B}[?25l\u{1B}[?2026h\(reset)".utf8))
 
             #expect(terminal.pendingReplyBytes == Array("\u{1B}[?1;2c".utf8))
-            terminal.feed(Array("\u{1B}[?25$p\u{1B}[?2026$p".utf8))
+            terminal.feed(Array("\u{1B}[?12$p\u{1B}[?25$p\u{1B}[?2026$p".utf8))
             #expect(
                 terminal.drainReplyBytes()
-                    == Array("\u{1B}[?1;2c\u{1B}[?25;1$y\u{1B}[?2026;2$y".utf8)
+                    == Array("\u{1B}[?1;2c\u{1B}[?12;2$y\u{1B}[?25;1$y\u{1B}[?2026;2$y".utf8)
             )
         }
     }

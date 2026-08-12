@@ -146,7 +146,7 @@ is behavior-neutral.
 ## Commit progress
 
 - [x] 1. Refactor terminal modes behind one registry
-- [ ] 2. Add DEC cursor-blink mode 12
+- [x] 2. Add DEC cursor-blink mode 12
 
 ## Implementation notes
 

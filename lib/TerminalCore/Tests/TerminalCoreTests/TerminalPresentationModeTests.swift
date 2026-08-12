@@ -40,6 +40,26 @@ struct TerminalPresentationModeTests {
         #expect(terminal.presentation.isSynchronizedOutputActive == false)
     }
 
+    @Test("DEC cursor-blink mode and DECSCUSR compose last-writer-wins")
+    func cursorBlinkModeAndStyleComposition() throws {
+        // Intent: prove DEC mode 12 and DECSCUSR share one blink value while shape stays independent.
+        // Why it exists: separate dispatch paths can otherwise overwrite or ignore each other's state.
+        // Scenario: a child alternates steady and blinking cursor styles with mode-only blink changes.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+
+        terminal.feed(Array("\u{1B}[?12h\u{1B}[2 q".utf8))
+        #expect(terminal.presentation.cursorShape == .block)
+        #expect(terminal.presentation.isCursorBlinking == false)
+
+        terminal.feed(Array("\u{1B}[?12h".utf8))
+        #expect(terminal.presentation.cursorShape == .block)
+        #expect(terminal.presentation.isCursorBlinking)
+
+        terminal.feed(Array("\u{1B}[5 q\u{1B}[?12l".utf8))
+        #expect(terminal.presentation.cursorShape == .bar)
+        #expect(terminal.presentation.isCursorBlinking == false)
+    }
+
     @Test("invalid cursor styles are inert and presentation controls preserve print-side state")
     func invalidStylesAndPrintSideState() throws {
         for sequence in ["\u{1B}[7 q", "\u{1B}[99 q", "\u{1B}[1;2 q"] {
