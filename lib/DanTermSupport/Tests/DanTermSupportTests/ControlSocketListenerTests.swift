@@ -53,7 +53,7 @@ struct ControlSocketListenerTests {
         let fixture = try SocketFixture()
         defer { fixture.remove() }
         try leaveAbandonedSocket(at: fixture.socketURL)
-        let results = LockedResults()
+        let results = LockedResults<Result<ControlSocketListener, Error>>()
 
         DispatchQueue.concurrentPerform(iterations: 2) { _ in
             results.append(Result { try ControlSocketListener.open(at: fixture.socketURL) })
@@ -64,6 +64,59 @@ struct ControlSocketListenerTests {
         #expect(listeners.count == 1)
         #expect(results.values.count(where: { if case .failure = $0 { true } else { false } }) == 1)
         #expect(canConnect(to: fixture.socketURL))
+    }
+
+    @Test("every concurrent close returns only after the path is gone")
+    func concurrentCloseUnlinksBeforeAnyCallerReturns() throws {
+        // Intent: a close that did not perform the teardown still returns only once the
+        //   socket path is unlinked.
+        // Why it exists: guarding close with a bare flag lets the loser return while the
+        //   winner is still inside the replacement lock, so IpcServer.stop() could hand
+        //   control back to the app exit path with the socket still on disk and still
+        //   connectable.
+        // Scenario: quit and an explicit shutdown request race on the same listener.
+        let fixture = try SocketFixture()
+        defer { fixture.remove() }
+        let listener = try ControlSocketListener.open(at: fixture.socketURL)
+        let pathStillPresent = LockedResults<Bool>()
+
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in
+            listener.close()
+            pathStillPresent.append(FileManager.default.fileExists(atPath: fixture.socketURL.path))
+        }
+
+        #expect(pathStillPresent.values.count == 8)
+        #expect(pathStillPresent.values.allSatisfy { $0 == false })
+    }
+
+    @Test("a repeated close leaves the reused descriptor number open")
+    func repeatedCloseDoesNotCloseAReusedDescriptor() throws {
+        // Intent: only the first close closes the listening descriptor.
+        // Why it exists: a second Darwin.close on the same number hits whatever the
+        //   process opened next, since the kernel hands out the lowest free number.
+        // Scenario: IpcServer.stop() runs on quit and the listener then deinitializes.
+        let fixture = try SocketFixture()
+        defer { fixture.remove() }
+        let listener = try ControlSocketListener.open(at: fixture.socketURL)
+        let freedNumber = listener.fileDescriptor
+        listener.close()
+
+        // The kernel hands out the lowest free number, so a probe should land on the one
+        // the listener just freed. A test running in parallel can take it first, which
+        // leaves nothing to observe -- stand down rather than assert on someone else's
+        // descriptor.
+        var probes: [Int32] = []
+        defer { probes.forEach { Darwin.close($0) } }
+        while probes.contains(freedNumber) == false && probes.count < 64 {
+            let probe = Darwin.open("/dev/null", O_RDONLY)
+            try #require(probe >= 0)
+            probes.append(probe)
+        }
+        guard probes.contains(freedNumber) else { return }
+
+        listener.close()
+
+        #expect(fcntl(freedNumber, F_GETFD) != -1)
     }
 
     @Test("closing an old listener preserves a replacement path")
@@ -86,16 +139,16 @@ struct ControlSocketListenerTests {
     }
 }
 
-private final class LockedResults: @unchecked Sendable {
+private final class LockedResults<Value>: @unchecked Sendable {
     private let lock = NSLock()
-    private var storage: [Result<ControlSocketListener, Error>] = []
+    private var storage: [Value] = []
 
-    var values: [Result<ControlSocketListener, Error>] {
+    var values: [Value] {
         lock.withLock { storage }
     }
 
-    func append(_ result: Result<ControlSocketListener, Error>) {
-        lock.withLock { storage.append(result) }
+    func append(_ value: Value) {
+        lock.withLock { storage.append(value) }
     }
 }
 

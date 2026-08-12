@@ -4,15 +4,19 @@
 // layer owns this mechanism; app/IpcServer owns request acceptance and dispatch.
 import Darwin
 import Foundation
+import Synchronization
 
 /// Owns one listening Unix socket and removes its path only while that path still
 /// names the socket created by this owner.
-final class ControlSocketListener {
+final class ControlSocketListener: Sendable {
     let fileDescriptor: Int32
 
     private let socketURL: URL
     private let boundPathIdentity: BoundPathIdentity
-    private var isClosed = false
+    /// Guards the whole teardown, not just the flag: every caller of `close()` has to
+    /// return with the path unlinked and the descriptor closed, so the one that finds
+    /// the work already done must have waited for it rather than raced past it.
+    private let isClosed = Mutex(false)
 
     private init(
         fileDescriptor: Int32,
@@ -81,15 +85,17 @@ final class ControlSocketListener {
 
     /// Stops accepting connections and unlinks only this listener's still-owned path.
     func close() {
-        guard isClosed == false else { return }
-        isClosed = true
+        isClosed.withLock { closed in
+            guard closed == false else { return }
+            closed = true
 
-        try? withReplacementLock(for: socketURL) {
-            if try pathIdentity(at: socketURL) == boundPathIdentity {
-                guard unlink(socketURL.path) == 0 else { throw currentPOSIXError() }
+            try? withReplacementLock(for: socketURL) {
+                if try pathIdentity(at: socketURL) == boundPathIdentity {
+                    guard unlink(socketURL.path) == 0 else { throw currentPOSIXError() }
+                }
             }
+            Darwin.close(fileDescriptor)
         }
-        Darwin.close(fileDescriptor)
     }
 }
 

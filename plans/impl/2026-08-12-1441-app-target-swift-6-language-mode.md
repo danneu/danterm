@@ -271,7 +271,7 @@ Per-site direction:
 - [x] 2. `refactor(theme): make the theme catalog sendable` -- move the
   `NSColor` preview projection to the swatch consumer, carrying its
   exact-color assertion with it (PO6).
-- [ ] 3. `fix(ipc): close the control socket exactly once under a race` --
+- [x] 3. `fix(ipc): close the control socket exactly once under a race` --
   `Sendable` listener plus a mutex spanning the whole close, with the
   concurrent-close test from PO3.
 - [ ] 4. `refactor(app): state observer-token and associated-key isolation`
@@ -301,3 +301,31 @@ at `.v5`; only 5 flips it.
   the background's red channel alone to all three channels. Verified by
   ablation -- swapping green for blue in the projection fails the test
   with `(4, 6, 6)`, and restoring it passes.
+- Commit 3: the primitive is `Synchronization.Mutex(false)` holding the
+  `isClosed` flag, with `withLock` spanning the flag check, the
+  identity-guarded unlink, and `Darwin.close`, so a caller that finds the
+  work done has waited for it. The new concurrent test fails against the
+  old bare-flag guard exactly as I4 predicts.
+- Commit 3: the fd-once half of I4 is pinned by a repeated close, not a
+  concurrent one. A racing caller cannot reserve the freed descriptor
+  number mid-race, so the test closes once, takes descriptors until one
+  lands on the freed number, closes again, and asserts that descriptor is
+  still open. Both paths go through the same guard.
+- Commit 3: re-measuring the app target at `.v6` after this commit
+  confirms the two `app/IpcServer.swift` listener errors (`:8`, `:42`) are
+  gone, and surfaces two the plan's table did not list, both at
+  `app/IpcServer.swift:59`: `sending 'request' risks causing data races`
+  and a sending-closure error on the `startReading(onRequest:)` argument.
+  They were invisible when the plan was measured because root
+  `DanTermSupport` still compiled at `.v5`; commit 1 flipped it, which is
+  what makes `IpcConnection.startReading`'s `@Sendable` callbacks enforce
+  sending at the call site. Commit 5 has to fix them to flip the target.
+
+## Follow Up
+
+- `lib/TerminalPTY/Tests/TerminalPTYHostTests/TerminalPTYHostTests.swift:781`
+  ("owner-originated bytes cross without an origin stamp") flaked once
+  during this commit's gate run: the observed writes were
+  `[ESC [ 3;13R, "hi"]`, an unexpected cursor-position report ahead of the
+  expected bytes. It passes on re-run and is unrelated to this plan, but
+  the test admits a stray device-status reply into its event list.
