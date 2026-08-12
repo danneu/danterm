@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Behavioral contract tests for isolated development-slot launching."""
 
+import contextlib
 import importlib.util
+import io
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -191,23 +194,81 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
                 [True, False],
             )
 
-    def test_stopping_refuses_a_slot_that_is_free_or_still_building(self) -> None:
+    def test_stopping_an_already_free_slot_does_nothing_and_succeeds(self) -> None:
+        # Intent: releasing a slot is repeatable, so a slot that is already free reports
+        #   no occupant rather than an error.
+        # Why it exists: every agent is told to release its slot on the way out, and one
+        #   whose app already crashed would otherwise end its run on a failure.
+        # Scenario: an agent runs `just stop-slot 3` after its app has already died.
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(launcher.stop_slot(Path(directory), 1))
+
+    def test_stopping_refuses_a_slot_that_is_still_building(self) -> None:
         # Intent: a stop that cannot name a running app kills nothing.
         # Why it exists: a launcher holding a slot through its build is not a session
-        #   leader, so killing its process group would reach the caller's own shell,
-        #   and a stale pid from a freed slot may belong to an unrelated process.
-        # Scenario: an agent stops a slot number it read from an out-of-date handle.
+        #   leader, so killing its process group would reach the caller's own shell.
+        # Scenario: an agent stops a slot another checkout is still building into.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with self.assertRaises(launcher.SlotStopError):
-                launcher.stop_slot(root, 1)
-
             claim = launcher.claim_development_slot(root, range(1, 2))
             self.addCleanup(claim.close)
             launcher.describe_occupant(claim, {"state": "building", "checkout": "/checkout"})
 
             with self.assertRaises(launcher.SlotStopError):
                 launcher.stop_slot(root, 1)
+
+    def stand_in_app(self, root: Path, socket_path: Path) -> Path:
+        """A bundle executable that reports its arguments and serves its control socket."""
+
+        script = root / "DanTerm Dev (1)"
+        script.write_text(
+            f"#!{sys.executable}\n"
+            "import socket, sys, time\n"
+            "print('args:', ' '.join(sys.argv[1:]), flush=True)\n"
+            "server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+            f"server.bind({str(socket_path)!r})\n"
+            "server.listen(8)\n"
+            "time.sleep(300)\n",
+            encoding="utf-8",
+        )
+        script.chmod(0o700)
+        return script
+
+    def launch(self, root: Path, *, foreground: bool) -> tuple[dict[str, object], Path]:
+        """Runs the real launch path against a stand-in app, as main() does after staging."""
+
+        identity = self.identity(1)
+        socket_path = root / "control.sock"
+        identity["socketPath"] = str(socket_path)
+        claim = launcher.claim_development_slot(root, range(1, 2))
+        handle = launcher.launch_slot_app(
+            self.stand_in_app(root, socket_path),
+            identity,
+            {"PATH": "/usr/bin:/bin"},
+            claim,
+            slot_root=root,
+            checkout=Path("/Users/test/worktrees/feature"),
+            foreground=foreground,
+        )
+        self.addCleanup(launcher.terminate_session, int(handle["pid"]))
+        return handle, launcher.slot_log_path(root, 1)
+
+    def test_both_launch_requests_spawn_a_detached_app_and_report_it_ready(self) -> None:
+        # Intent: --foreground and the default reach the same running app, and the handle
+        #   they return names a control socket that already accepts connections.
+        # Why it exists: --foreground used to exec the app, so its handle promised nothing
+        #   about readiness and named the launcher's own pid.
+        # Scenario: a human runs `just launch-slot-prime` to grant notification permission.
+        for foreground in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                handle, log = self.launch(root, foreground=foreground)
+
+                self.assertTrue(launcher.accepts_connections(root / "control.sock"))
+                self.assertNotEqual(os.getsid(int(handle["pid"])), os.getsid(0))
+                arguments = log.read_text(encoding="utf-8").strip()
+                self.assertIn("--fresh", arguments)
+                self.assertEqual("--background" in arguments, not foreground)
 
     def test_launched_app_releases_the_caller_pipe_and_keeps_the_claim(self) -> None:
         # Intent: the launcher hands the app off instead of becoming it, so a caller's
@@ -217,50 +278,33 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         # Scenario: an agent pipes the launcher into `tail` to read the JSON handle.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            log = root / "slot.log"
             read_end, write_end = os.pipe()
             child = os.fork()
             if child == 0:
                 os.close(read_end)
                 os.dup2(write_end, 1)
                 os.close(write_end)
-                claim = launcher.claim_development_slot(root, range(1, 2))
-                pid = launcher.spawn_detached(
-                    Path("/bin/sh"),
-                    ["sh", "-c", "echo started; sleep 30"],
-                    {"PATH": "/usr/bin:/bin"},
-                    log,
-                )
-                claim.close()
-                print(pid, flush=True)
+                handle, _ = self.launch(root, foreground=False)
+                print(handle["pid"], flush=True)
                 os._exit(0)
             os.close(write_end)
             try:
                 # The launcher's own exit is the only thing that closes this pipe.
-                with os.fdopen(read_end, "r") as handle:
-                    emitted = handle.read()
+                with os.fdopen(read_end, "r") as reader:
+                    emitted = reader.read()
                 os.waitpid(child, 0)
                 app = int(emitted.strip())
 
-                deadline = time.monotonic() + 5
-                while not log.read_text(encoding="utf-8") and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                self.assertEqual(log.read_text(encoding="utf-8").strip(), "started")
-                self.assertNotEqual(os.getsid(app), os.getsid(0))
-                with self.assertRaises(launcher.PoolExhaustedError):
-                    launcher.claim_development_slot(root, range(1, 2))
-
-                # The app owns its session, so this reaches the shells it forked too.
-                os.killpg(app, signal.SIGKILL)
+                self.assertEqual(
+                    launcher.survey_slots(root, range(1, 2))[0]["pid"],
+                    app,
+                )
+                launcher.terminate_session(app)
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline:
-                    try:
-                        reclaimed = launcher.claim_development_slot(root, range(1, 2))
-                    except launcher.PoolExhaustedError:
-                        time.sleep(0.01)
-                        continue
-                    self.addCleanup(reclaimed.close)
-                    break
+                    if launcher.survey_slots(root, range(1, 2)) == [{"slot": 1, "free": True}]:
+                        break
+                    time.sleep(0.01)
                 else:
                     self.fail("killing the app did not release its slot")
             finally:
@@ -268,6 +312,45 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
                     os.kill(child, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
+
+    def test_pool_commands_answer_without_building_or_claiming(self) -> None:
+        # Intent: --list and --stop-all report and free the pool without a build, and
+        #   without claiming a slot of their own.
+        # Why it exists: an agent asks what the pool holds exactly when the pool is full,
+        #   so a pool command that fell through to the launch path would claim a ninth
+        #   slot to free the eighth, and would take minutes to answer.
+        # Scenario: an agent hits pool exhaustion, lists the pool, then empties it.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            account = mock.Mock(pw_dir=directory, pw_name="test", pw_shell="/bin/zsh")
+            slot_root = Path(directory) / "Library" / "Caches" / "com.danneu.danterm-dev-slots"
+            slot_root.mkdir(parents=True)
+            claim = launcher.claim_development_slot(slot_root, range(1, 2))
+            pid = launcher.spawn_detached(
+                Path("/bin/sh"),
+                ["sh", "-c", "sleep 300"],
+                {"PATH": "/usr/bin:/bin"},
+                root / "slot.log",
+            )
+            self.addCleanup(launcher.terminate_session, pid)
+            launcher.describe_occupant(claim, {"state": "running", "pid": pid})
+            claim.close()
+
+            listed = io.StringIO()
+            with mock.patch.object(launcher.pwd, "getpwuid", return_value=account), \
+                    mock.patch.object(launcher.subprocess, "run") as run:
+                with contextlib.redirect_stdout(listed):
+                    self.assertEqual(launcher.main(["--list"]), 0)
+                    self.assertEqual(launcher.main(["--stop-all"]), 0)
+
+            run.assert_not_called()
+            pool, stopped = (json.loads(line) for line in listed.getvalue().splitlines())
+            self.assertEqual(pool[0], {"slot": 1, "free": False, "state": "running", "pid": pid})
+            self.assertEqual(stopped, [{"state": "running", "pid": pid}])
+            self.assertEqual(
+                launcher.survey_slots(slot_root, range(1, 2)),
+                [{"slot": 1, "free": True}],
+            )
 
     def test_handle_waits_for_a_connectable_control_socket(self) -> None:
         # Intent: the handle waits for a socket that accepts connections, not for a path.

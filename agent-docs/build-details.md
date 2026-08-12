@@ -35,12 +35,12 @@ CoreText, and UniformTypeIdentifiers.
   launch-slot-optimized`, and the notification-permission path `just
   launch-slot-prime`, which differs only in letting the app activate and prompt.
   `--list` and `--stop <slot>` (`just slots` / `just stop-slot`) report and free
-  the shared pool without building: each slot's lock file also holds the JSON
-  record of its occupant, so occupancy and owner cannot disagree.
-  Slot 0 is never
-  claimed. The build-only `DanTermInstanceIdentityTool` resolves each clone's
-  identity and paths through `DanTermProtocol` so the launcher does not
-  duplicate the naming scheme.
+  the shared pool without building. Occupancy comes from each slot's lock, and
+  that same file also holds the JSON record naming its occupant, so there is no
+  second file to fall out of step with the lock. Slot 0 is never claimed. The
+  build-only `DanTermInstanceIdentityTool` resolves each clone's identity and
+  paths through `DanTermProtocol` so the launcher does not duplicate the naming
+  scheme.
 - `build-app.sh` -- release mode (`--configuration release`, applies `-O`),
   production icons, optional `--version` stamping. Called by CI and release
   workflows. It does not sign or notarize.

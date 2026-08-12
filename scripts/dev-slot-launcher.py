@@ -30,6 +30,7 @@ from typing import Iterable, Mapping
 
 DEVELOPMENT_SLOTS = range(1, 9)
 POOL_EXHAUSTED_STATUS = 75
+OCCUPANT_RECORD_SIZE = 1024
 DEFAULT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 PASSTHROUGH_ENVIRONMENT_VARIABLES = (
     "DANTERM_PTY_RECORDING_DIR",
@@ -78,29 +79,41 @@ def slot_lock_path(root: Path, slot: int) -> Path:
     owner could disagree with the lock; the same file cannot.
     """
 
-    locks = root / "locks"
-    locks.mkdir(parents=True, exist_ok=True)
-    return locks / f"slot-{slot}.lock"
+    return root / "locks" / f"slot-{slot}.lock"
 
 
-def claim_development_slot(root: Path, slots: Iterable[int] = DEVELOPMENT_SLOTS) -> SlotClaim:
-    """Claims the first free nonzero slot without any stale-state cleanup."""
+def claim_development_slot(
+    root: Path,
+    slots: Iterable[int] = DEVELOPMENT_SLOTS,
+    patience: float = 1.0,
+) -> SlotClaim:
+    """Claims the first free nonzero slot without any stale-state cleanup.
 
-    for slot in slots:
-        if slot == 0:
-            continue
-        descriptor = os.open(slot_lock_path(root, slot), os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(descriptor)
-            continue
-        os.set_inheritable(descriptor, True)
-        return SlotClaim(slot=slot, descriptor=descriptor)
-    raise PoolExhaustedError(
-        "all DanTerm development slots are in use; "
-        "`./scripts/dev-slot-launcher.py --list` names the occupants"
-    )
+    Rescans while a slot may still free up, because reading the pool locks each
+    slot for an instant: one `--list` running beside this scan would otherwise
+    report a full pool that is not full.
+    """
+
+    (root / "locks").mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + patience
+    while True:
+        for slot in slots:
+            if slot == 0:
+                continue
+            descriptor = os.open(slot_lock_path(root, slot), os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(descriptor)
+                continue
+            os.set_inheritable(descriptor, True)
+            return SlotClaim(slot=slot, descriptor=descriptor)
+        if time.monotonic() >= deadline:
+            raise PoolExhaustedError(
+                "all DanTerm development slots are in use; "
+                "`./scripts/dev-slot-launcher.py --list` names the occupants"
+            )
+        time.sleep(0.05)
 
 
 def describe_occupant(claim: SlotClaim, description: Mapping[str, object]) -> None:
@@ -109,11 +122,15 @@ def describe_occupant(claim: SlotClaim, description: Mapping[str, object]) -> No
     The launcher writes twice: once at the claim, when only the checkout is known,
     and again at launch, when the app has a pid and a socket. Whoever finds the
     slot busy in between still learns which checkout is holding it.
+
+    Readers take no lock, so the record is padded to one fixed size and replaced
+    by a single write. Truncating first would let a reader see an empty slot file.
     """
 
     payload = json.dumps(dict(description), separators=(",", ":")).encode("utf-8")
-    os.ftruncate(claim.descriptor, 0)
-    os.pwrite(claim.descriptor, payload, 0)
+    if len(payload) > OCCUPANT_RECORD_SIZE:
+        raise ValueError("occupancy record does not fit one slot lock file")
+    os.pwrite(claim.descriptor, payload.ljust(OCCUPANT_RECORD_SIZE), 0)
 
 
 def read_occupant(lock_path: Path) -> dict[str, object] | None:
@@ -137,9 +154,10 @@ def slot_is_claimed(lock_path: Path) -> bool:
     lock and dropping it again is the one test that cannot go stale.
     """
 
-    if not lock_path.exists():
+    try:
+        descriptor = os.open(lock_path, os.O_RDWR)
+    except FileNotFoundError:
         return False
-    descriptor = os.open(lock_path, os.O_RDWR)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return False
@@ -154,7 +172,7 @@ def survey_slots(root: Path, slots: Iterable[int] = DEVELOPMENT_SLOTS) -> list[d
 
     rows: list[dict[str, object]] = []
     for slot in slots:
-        lock_path = root / "locks" / f"slot-{slot}.lock"
+        lock_path = slot_lock_path(root, slot)
         if not slot_is_claimed(lock_path):
             rows.append({"slot": slot, "free": True})
             continue
@@ -164,20 +182,22 @@ def survey_slots(root: Path, slots: Iterable[int] = DEVELOPMENT_SLOTS) -> list[d
     return rows
 
 
-def stop_slot(root: Path, slot: int, timeout: float = 5.0) -> dict[str, object]:
+def stop_slot(root: Path, slot: int, timeout: float = 5.0) -> dict[str, object] | None:
     """Returns one agent's slot to the shared pool without disturbing the others.
 
-    Killing the app's whole session is the only stop available: the app has no
-    quit command, and it forks shells that inherit the slot lock. A slot still
-    building is refused instead, because the launcher holding it is not a session
+    Killing the app is the only stop available while it has no quit command. That
+    is safe to aim at a process group because the app leads its own session and
+    its pane shells leave that session at once, so nothing else of the user's can
+    be in the group. Returns None when the slot is already free: every agent is
+    told to release its slot on the way out, and that has to stay repeatable.
+
+    A slot still building is refused. The launcher holding it is not a session
     leader, so killing its group would reach the caller's own shell.
     """
 
-    lock_path = root / "locks" / f"slot-{slot}.lock"
+    lock_path = slot_lock_path(root, slot)
     if not slot_is_claimed(lock_path):
-        raise SlotStopError(f"slot {slot} is already free")
-    # The lock is held, so the recorded pid names a process that is still alive
-    # and cannot have been reused by an unrelated one.
+        return None
     occupant = read_occupant(lock_path) or {}
     pid = occupant.get("pid")
     if not isinstance(pid, int):
@@ -397,13 +417,17 @@ def await_control_socket(socket_path: Path, pid: int, timeout: float = 30.0) -> 
 
 
 def terminate_session(pid: int) -> None:
-    """Frees a claimed slot whose app is running but unreachable.
+    """Frees a claimed slot by killing the one process that holds its lock.
 
-    The app leads its own session, so this reaches the shells it has forked and
-    the kernel releases the slot lock every one of them inherited.
+    Signals the group rather than the process so that a child which has not yet
+    left the app's session dies with it. Refuses any pid that does not lead its
+    own group: only the app does, so a pid the kernel has recycled since the
+    record was written can never turn this into a kill of unrelated processes.
     """
 
     try:
+        if os.getpgid(pid) != pid:
+            return
         os.killpg(pid, signal.SIGKILL)
     except ProcessLookupError:
         return
@@ -513,6 +537,36 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
     return parser.parse_args(arguments)
 
 
+def launch_slot_app(
+    executable: Path,
+    identity: Mapping[str, object],
+    environment: Mapping[str, str],
+    claim: SlotClaim,
+    *,
+    slot_root: Path,
+    checkout: Path,
+    foreground: bool,
+) -> dict[str, object]:
+    """Turns a staged bundle into a running slot, and is where the handle earns its meaning.
+
+    Holds every step between the build and the caller's handle -- spawn, record,
+    hand off the claim, wait for the control socket -- so both launch requests
+    provably take one path and the returned handle always names a reachable app.
+    """
+
+    pid = spawn_detached(
+        executable,
+        app_arguments(executable, claim.descriptor, foreground=foreground),
+        environment,
+        slot_log_path(slot_root, int(identity["slot"])),
+    )
+    handle = launch_handle(identity, pid)
+    describe_occupant(claim, {"state": "running", "checkout": str(checkout), **handle})
+    claim.close()
+    await_control_socket(Path(str(identity["socketPath"])), pid)
+    return handle
+
+
 def run_pool_command(options: argparse.Namespace, slot_root: Path) -> int:
     """Answers the pool questions that need no build, so they stay instant and safe.
 
@@ -533,9 +587,12 @@ def run_pool_command(options: argparse.Namespace, slot_root: Path) -> int:
     failures: list[SlotStopError] = []
     for slot in targets:
         try:
-            stopped.append(stop_slot(slot_root, int(slot)))
+            occupant = stop_slot(slot_root, int(slot))
         except SlotStopError as error:
             failures.append(error)
+            continue
+        if occupant is not None:
+            stopped.append(occupant)
     print(json.dumps(stopped, separators=(",", ":")), flush=True)
     for error in failures:
         print(f"dev-slot-launcher: {error}", file=sys.stderr)
@@ -548,7 +605,7 @@ def main(arguments: list[str]) -> int:
     account = pwd.getpwuid(os.getuid())
     home = Path(account.pw_dir)
     slot_root = home / "Library" / "Caches" / "com.danneu.danterm-dev-slots"
-    if options.list or options.stop or options.stop_all:
+    if options.list or options.stop is not None or options.stop_all:
         return run_pool_command(options, slot_root)
     try:
         claim = claim_development_slot(slot_root)
@@ -590,17 +647,16 @@ def main(arguments: list[str]) -> int:
         stage_slot_bundle(source_app, app_path, identity)
 
     executable = app_path / "Contents" / "MacOS" / str(identity["executableName"])
-    pid = spawn_detached(
-        executable,
-        app_arguments(executable, claim.descriptor, foreground=options.foreground),
-        environment,
-        slot_log_path(slot_root, slot),
-    )
-    handle = launch_handle(identity, pid)
-    describe_occupant(claim, {"state": "running", "checkout": str(repository_root), **handle})
-    claim.close()
     try:
-        await_control_socket(Path(str(identity["socketPath"])), pid)
+        handle = launch_slot_app(
+            executable,
+            identity,
+            environment,
+            claim,
+            slot_root=slot_root,
+            checkout=repository_root,
+            foreground=options.foreground,
+        )
     except LaunchFailedError as error:
         print(f"dev-slot-launcher: {error}", file=sys.stderr)
         return error.exit_status

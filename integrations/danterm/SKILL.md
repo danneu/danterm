@@ -167,6 +167,11 @@ stopped, because the process holding it is the launcher, not an app. Occupancy
 comes from the slot's lock, so an app that died leaves its slot free however it
 went.
 
+Both stop commands print the JSON array of the occupants they killed and exit 0,
+including when there was nothing to kill: stopping a slot that is already free is
+a success, so an agent can always release its slot without checking first. They
+exit 1 only when a slot could not be freed, such as one still building.
+
 ## Shell integration capability
 
 DanTerm ships opt-in zsh, Bash, and fish integrations at
