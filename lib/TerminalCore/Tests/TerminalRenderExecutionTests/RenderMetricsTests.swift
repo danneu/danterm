@@ -1,8 +1,8 @@
 // Behavioral proofs for display-scale metrics, its styled font set, and
 // overflow-safe frame sizing.
-import AppKit
 import CoreGraphics
 import CoreText
+import Foundation
 import Testing
 
 import TerminalCore
@@ -39,7 +39,7 @@ struct RenderMetricsTests {
         #expect(implicit.fonts == explicitNil.fonts)
         #expect(
             explicitNil.baseFontName
-                == NSFont.monospacedSystemFont(ofSize: 13, weight: .regular).fontName
+                == PlatformFont.monospacedSystemFont(ofSize: 13, weight: .regular).fontName
         )
     }
 

@@ -108,6 +108,11 @@ struct TerminalShiftDamageTests {
         #expect(TerminalDamage.none.expandingShift() == .none)
     }
 
+    // The precondition this pins holds on every platform; only the instrument is
+    // host-bound. An exit test spawns a child process to observe the trap, and the
+    // testing library does not offer that on iOS, so the case is compiled where it
+    // can run. macOS -- where the gate runs it -- loses no coverage.
+    #if os(macOS)
     @Test("an out-of-range row cannot be constructed into bounded damage")
     func outOfRangeRowsAreUnrepresentable() async {
         await #expect(processExitsWith: .failure) {
@@ -117,6 +122,7 @@ struct TerminalShiftDamageTests {
             _ = TerminalDamage(rows: [-1])
         }
     }
+    #endif
 }
 
 /// Engine-side proofs that a scroll records a translation at the scroll site

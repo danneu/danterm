@@ -1,7 +1,8 @@
-// AppKit/CoreText/CoreGraphics execution of deterministic terminal render plans.
-import AppKit
+// CoreText/CoreGraphics execution of deterministic terminal render plans. The one
+// platform font type it needs is behind `PlatformFont`.
 import CoreGraphics
 import CoreText
+import Foundation
 import TerminalRenderPlanning
 import TerminalSpriteGeometry
 
@@ -87,7 +88,7 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
         // Only the base face comes from the configured family; bold and italic are
         // still derived by trait below, since the schema carries no per-style names.
         let baseName = fontFamily
-            ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular).fontName
+            ?? PlatformFont.monospacedSystemFont(ofSize: fontSize, weight: .regular).fontName
         let font = CTFontCreateWithName(baseName as CFString, fontSize, nil)
         var character = UniChar(0x004D)
         var glyph = CGGlyph()

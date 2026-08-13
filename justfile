@@ -84,8 +84,8 @@ benchmark-confirm baseline:
 #   just terminal-memory-probe "--payload scrollback-plain" # one payload, attributable footprint
 #   just terminal-memory-probe "--columns 80 --rows 24"
 terminal-memory-probe flags="":
-    swift build -c release --package-path lib/TerminalCore --product TerminalMemoryProbe
-    lib/TerminalCore/.build/release/TerminalMemoryProbe {{flags}}
+    swift build -c release --package-path lib/TerminalHostTools --product TerminalMemoryProbe
+    lib/TerminalHostTools/.build/release/TerminalMemoryProbe {{flags}}
 
 # Measure how long a single job holds TerminalPTYHost's serial queue, at a saturated history.
 #
@@ -195,7 +195,7 @@ benchmark-headless-draw rounds="8" candidate_core="":
 
 # Build and open the unoptimized system-glyph versus sprite comparison app.
 preview-glyphs:
-    swift run --package-path lib/TerminalCore GlyphPreview
+    swift run --package-path lib/TerminalHostTools GlyphPreview
 
 # Benchmark fixed-row updates through the real optimized AppKit draw path.
 benchmark-draw-app batches="15" target_ms="400":
