@@ -47,9 +47,8 @@ closure adjudication of WezTerm/xterm.js/Contour.
 
 ## Trigger and current evidence
 
-Milestones 1-8 are checked in
-[plan-terminal-engine/14-roadmap.md](../../plan-terminal-engine/14-roadmap.md);
-Milestone 9 ("Pass the replacement quality gates") is not, and one of its four
+Milestones 1-8 were checked off in the terminal-engine roadmap at the time;
+Milestone 9 ("Pass the replacement quality gates") was not, and one of its four
 criteria is doc 1's pinned, reproducible, gating evidence package. That prompted
 a census of what the pinned corpora currently skip, taken at `593ce4a`.
 

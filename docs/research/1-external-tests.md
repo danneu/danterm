@@ -47,7 +47,7 @@ DanTerm should reuse the strongest public terminal-emulator test work where it
 can improve coverage without making another emulator's storage model or quirks
 normative. This note surveys reusable fixture corpora, semantic test cases,
 black-box conformance programs, and official Unicode data, then maps them onto
-the [terminal-engine roadmap](../../plan-terminal-engine/14-roadmap.md).
+the terminal-engine milestone roadmap in force when it was written.
 
 The central finding is that there is no single authoritative terminal test
 suite. The useful portfolio has four layers:

@@ -3,8 +3,10 @@
 ## Judgment
 
 DanTerm's real TerminalPTY/TerminalPaneSession boundary completes the minimum
-zsh, Bash, fish, ssh, fzf, more, and less workflows in
-[Testing and conformance](../../plan-terminal-engine/12-testing-conformance.md).
+zsh, Bash, fish, ssh, fzf, more, and less workflows, as defined at the time by
+Testing and conformance and now by K8 and the **Minimum compatibility
+workflows** table in
+[2026-08-06-swift-terminal-engine.md](../design/2026-08-06-swift-terminal-engine.md).
 This closes only the baseline application workflow item in Milestone 7. It does
 not claim the protocol/capability or external black-box tranches.
 

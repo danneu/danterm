@@ -182,6 +182,9 @@ app-lifetime or stays retained until after the matching `free`.
 TDD: write the failing test first, verify it fails for the expected reason, then
 change the code and verify it passes.
 
+Assert observable behavior and architecture boundaries, never the structure of a
+private helper: a refactor that keeps the behavior must keep the test passing.
+
 A Swift Testing `@Test` earns a `//` preamble only when something non-trivial
 belongs above the body -- a regression it pins down, or an invariant the test
 name can't carry. Trivial spec-first tests just need a descriptive title. When

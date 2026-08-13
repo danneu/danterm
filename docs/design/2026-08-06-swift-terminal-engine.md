@@ -6,9 +6,11 @@
 
 This note is the terminal engine's decision register. It replaced the
 `plan-terminal-engine/` planning directory when the engine left the plan state
-ahead of 0.1.0, and it is **live**: a decision here is amended in place when the
-engine's behavior changes. It is not a frozen historical record, and the
-milestone roadmap it grew out of is not preserved -- see git history for that.
+ahead of 0.1.0; that directory was deleted on 2026-08-12 once every claim it
+still carried was either a row below or dead with the migration. This register
+is **live**: a decision here is amended in place when the engine's behavior
+changes. It is not a frozen historical record, and the milestone roadmap it grew
+out of is not preserved -- see git history for both.
 
 ### Keeping the register honest
 
@@ -45,31 +47,39 @@ outright at Milestone 10: no Zig, no xcframework, no GhosttyKit, no
 `DANTERM_TERMINAL_BACKEND`, no fallback. Ghostty survives only as a gitignored
 reference checkout under `references/`, alongside nine other emulators.
 
-**Milestone 9 never closed.** Its power-and-performance gate was not run;
-removal proceeded ahead of it by owner decision, and its "no required fallback
-to Ghostty" criterion closed by construction rather than by evidence.
+**Milestone 9 never closed as one composite gate.** Removal proceeded ahead of
+it by owner decision, and its "no required fallback to Ghostty" criterion closed
+by construction rather than by evidence.
 
-Section L is therefore the **contract with partial proof**, not a proven gate.
-Most of the scheduling contract does have maintained deterministic coverage --
+Section L is therefore the **contract proved layer by layer**, not one proven
+gate. Most of the scheduling contract has maintained deterministic coverage --
 unchanged visible terminals publish no recurring frames, hidden panes keep
 terminal/semantic/inspection/recovery state current without rendering and then
 reveal one complete frame, stalled consumers coalesce into bounded pending work
 retaining final state, and recovery traces prove freshness, retry, and
-quiescence. Four seams remain unproved:
+quiescence.
+[docs/evidence/2026-08-06-milestone-9-power-performance.md](../evidence/2026-08-06-milestone-9-power-performance.md)
+records a pass on the maintained idle, hidden-pane, visible-output,
+recovery-freshness, system-sleep, responsiveness, and teardown gates. Three
+seams the register once listed as unproved closed there:
 
-- **Sleep/wake** has one successful real-system observation (2026-07-20) and no
-  maintained scheduling-policy or AppKit adapter proof. No production
-  `NSWorkspace` sleep/wake adapter exists.
-- **Application-runtime teardown** -- timers, debouncers, monitors, deferred
-  callbacks owned by the app runtime rather than a pane -- has no exhaustive
-  post-shutdown proof. Pane and PTY teardown are strongly covered.
-- **Sustained-output responsiveness** is proved as convergence and release, not
-  as latency or input ordering through a real AppKit input route.
+- **Sleep/wake** now has a production `NSWorkspace` adapter,
+  `WorkspaceLifecycleObserver` in `app/AppPresentationLifecycle.swift`, with
+  deterministic session and observer-lifetime tests behind it. The 2026-07-20
+  real-system observation corroborates it rather than carrying it.
+- **Application-runtime teardown** is proved across all six production owner
+  categories, including a repeated shutdown and an inert-callback census.
+- **Sustained-output responsiveness** is proved as input ordering through the
+  real AppKit `keyDown` route, not only as convergence and release. It is still
+  not a latency bound; no number defines "interactive" (see Open questions).
+
+One seam remains unproved:
+
 - **Sparse-clip topology** can be measured as whole-process CPU but has no
   frozen rule letting the workload issue a verdict.
 
 [plans/impl/2026-08-06-1143-m9-power-performance-gates.md](../../plans/impl/2026-08-06-1143-m9-power-performance-gates.md)
-owns closing these and is the authority on their current state.
+owns closing it and is the authority on its current state.
 
 ## Decision
 
@@ -146,6 +156,7 @@ Status values:
 | D9 | Resize never duplicates or discards logical content, except through ordinary 16 MiB eviction or OSC 133 prompt/input rows blanked before reflow when the shell has promised to redraw them after SIGWINCH. | live |
 | D10 | Alternate-screen resize does not reflow and never contributes rows to primary history. Cells retain coordinates; shrink discards cells outside the rectangle and clears a grapheme or wide cell as a whole; growth adds blanks; cursors clamp without landing on a wide-cell tail; margins reset to the full grid. | live |
 | D11 | Eviction removes oldest content at valid grapheme boundaries. A single logical line larger than the budget may lose its oldest prefix, but retained content stays valid and is marked truncated. | live |
+| D13 | Every grid mutation leaves a wide cell and a grapheme cluster whole. Overwrite, erase, insert, delete, scroll, and reflow rewrite or clear both halves of a wide pair together and never strand a combining mark, so no mutation can produce an orphaned half-cell. A projected text range starts and ends on a cluster boundary, because the projection trims whole units rather than cells (`Terminal.trimmedLogicalLineRange`). D10 states the alternate-screen resize case and G10 the token-classification case; both specialize this rule. | live |
 | D12 | Out of scope: configurable ambiguous-width or scrollback policies. | deferred |
 
 ### E. Logical-text projection (inspection, selection, search, recovery)
@@ -202,6 +213,7 @@ Status values:
 | G13 | OSC 8 hyperlinks and automatic `http://`/`https://` detection are supported. Both explicit and detected links are activatable only when the resolved URL uses `http` or `https`; other schemes remain inert text. Cmd-hover exposes link interaction and Cmd-click opens the resolved URL. | live |
 | G14 | File path and source-location navigation is deferred. Removing the previous backend narrowed this visibly: bare file paths are no longer Cmd-clickable. | deferred |
 | G15 | Copy-on-select is configurable through `ui.copyOnSelect`, default on. The text is captured atomically with the completing pointer event, so later output cannot change it; consumed gestures and empty selections never copy. Explicit copy uses the current selection and is identical in both modes. | live |
+| G17 | A width change preserves a live selection and a live search match. Reflow keeps both attached to the same logical content, together with the selection's granularity, and clamps an endpoint only into retained content; it never clears them. G9 remains the destruction rule and is unchanged: content that output overwrote or eviction removed invalidates the endpoint or match. Alternate-screen resize is the one exception -- it clears inspection outright, because alternate content does not reflow (D10). | live |
 | G16 | Out of scope: a multiline-paste confirmation, and clipboard read permission prompts. | deferred |
 
 ### H. Renderer, presentation, and configuration
@@ -303,8 +315,10 @@ mechanics are implementation discretion; these tasks and outcomes are not.
 | L5 | There is no periodic visual behavior. Application-requested cursor blinking retains its semantic preference but renders steadily; timed blink presentation is a deferred enhancement covering focus, visibility, activation, teardown, redraw equivalence, and quiescent timer ownership. | deferred |
 | L6 | Correctness takes priority over peak rendering throughput. Heavy visible output must still keep the app responsive and use bounded queues. | live |
 | L7 | Teardown cancels every owner-bound timer and scheduled callback, and leaves no AppKit message aimed at a deallocated object. | elsewhere -- [2026-06-09-appkit-lifetime-safety.md](2026-06-09-appkit-lifetime-safety.md) |
+| L10 | **Application deactivation alone never suppresses rendering for a visible pane.** Losing frontmost status feeds alert policy, jump mode, drag cancellation, and checkpoint flushing; it reaches nothing on the render-scheduling path, which reads pane visibility, window occlusion, and system sleep. A pane the user still watches in a background window keeps drawing. This is the reading of L2 that a plausible "energy optimization" would break silently, so it is stated rather than inferred. | live |
 | L8 | Rejected: a first-version GPU renderer, or maximum benchmark parity with Ghostty. | rejected |
 | L9 | Rejected: rendering every intermediate frame of an output burst. | rejected |
+| L11 | Rejected: a separate screen-sleep adapter. A 2026-08-06 AppKit probe found that screen sleep clears `NSWindow.OcclusionState.visible`, so the occlusion route already suppresses those panes; a second, narrower signal would duplicate a broader one and could disagree with it. `app/` therefore observes `NSWorkspace` system sleep and wake and window occlusion, and nothing else. Whether system sleep and screen sleep should ever be told apart is still open in `research/29/Q3`. | rejected |
 
 ### M. Migration mechanics -- spent
 
@@ -354,7 +368,7 @@ which is narrower than the workflow the evidence originally described.
 | Date | Gate | Proof class | Result and reproduction |
 |---|---|---|---|
 | 2026-07-20 | Milestone 4 workflow recording replay | maintained gate (default) | `DanTermRecordingFixtureTests.milestone4ViabilityRecording` decodes the captured `milestone-4-viability.json` and replays it through `TerminalCore` under authored, bytewise, and split feed chunking, asserting one final state and every workflow marker. This is **headless terminal-core proof only** -- it pins the engine's response to the recorded byte stream and cannot fail when AppKit or PTY integration regresses. |
-| 2026-07-20 | Milestone 4 live interactive viability run | historical observation | One run on MacBookPro18,1 (M1 Pro), macOS 26.5.2, zsh 5.9, `en_US.UTF-8`. A real zsh PTY through the AppKit input and rendering path: typing, dead-key composition, Spanish/Chinese/emoji, Ctrl-C and a background job, `ls`/`cat`/`less`, hidden-pane output and reveal, non-last-pane exit, last-pane quit confirmation, teardown with no owned descendants; marker-bounded reflow byte-identical across 56x25 -> 90x25 -> 56x25; idle window 0.01s CPU with no render-plan events and no DanTerm-owned power assertion; a lid-close sleep of >10s preserved content exactly once, redrew the current frame, stayed interactive, and returned to quiescence. `DANTERM_TERMINAL_ENGINE_TEST_ALLOW_APP_CONTROL=1 just test-terminal-viability` remains a maintained **reproduction facility** -- it can be re-run, but nothing re-runs it, and this 2026-07-20 result is not evidence about the current tree. See the Milestone 9 seams in Context; no production `NSWorkspace` sleep/wake adapter exists. |
+| 2026-07-20 | Milestone 4 live interactive viability run | historical observation | One run on MacBookPro18,1 (M1 Pro), macOS 26.5.2, zsh 5.9, `en_US.UTF-8`. A real zsh PTY through the AppKit input and rendering path: typing, dead-key composition, Spanish/Chinese/emoji, Ctrl-C and a background job, `ls`/`cat`/`less`, hidden-pane output and reveal, non-last-pane exit, last-pane quit confirmation, teardown with no owned descendants; marker-bounded reflow byte-identical across 56x25 -> 90x25 -> 56x25; idle window 0.01s CPU with no render-plan events and no DanTerm-owned power assertion; a lid-close sleep of >10s preserved content exactly once, redrew the current frame, stayed interactive, and returned to quiescence. `DANTERM_TERMINAL_ENGINE_TEST_ALLOW_APP_CONTROL=1 just test-terminal-viability` remains a maintained **reproduction facility** -- it can be re-run, but nothing re-runs it, and this 2026-07-20 result is not evidence about the current tree. The maintained sleep/wake proof is the `NSWorkspace` adapter and session coverage recorded in Context, not this run. |
 | 2026-07-21 | Workflow compatibility | maintained gate (opt-in) | `nix develop .#terminal-workflows -c just test-terminal-workflows` -- zsh, bash, fish, ssh, fzf, more, less through the real `TerminalPTY`/`TerminalPaneSession` boundary. Last recorded pass 2026-07-21. |
 | 2026-07-21 | Asciinema nested PTY | maintained gate (opt-in) | Same harness; record and local replay of an interactive shell through asciinema's intermediate PTY. Last recorded pass 2026-07-21. |
 | 2026-07-21 | Terminfo baseline capture | historical observation | The claimed capabilities were captured against two baselines -- macOS 26's `/usr/share/terminfo` `xterm-256color` entry and pinned ncurses `terminfo.src` r1.1261 (2026-07-19) -- which agreed. The v1 JSON manifest, its fixtures, and the build/CI byte-comparison gates that enforced this were **retired**. Nothing now re-compares the tables against either baseline, so a non-key table error would not be caught automatically. The capture is recorded as the provenance note in `docs/terminal-capabilities.md`. |
@@ -398,15 +412,17 @@ historical and these outlive any plan.
 ## Consequences
 
 - The engine's acceptance standard is now this document plus the design notes it
-  points at. `plan-terminal-engine/` and `docs/evidence/` are gone; their
-  content is either above, superseded by a live document, or in git history.
+  points at. `plan-terminal-engine/` is deleted; its content is either above,
+  superseded by a live document, or in git history. `docs/evidence/` is
+  superseded by the **Proof record** above and retained as dated evidence
+  records, not as a current acceptance standard.
 - Amendment rules are in **Keeping the register honest** above. They apply to
   code changes too: a commit that contradicts a `live` row amends that row.
-- Milestone 9's composite power-and-performance gate has still not been run.
-  DanTerm ships 0.1.0 on partial per-layer proof of the section L contracts,
-  with four named seams unproved.
+- Milestone 9's criteria were never run as one composite gate. DanTerm ships
+  0.1.0 on per-layer proof of the section L contracts, with sparse-clip topology
+  the one named seam still unproved.
   [plans/impl/2026-08-06-1143-m9-power-performance-gates.md](../../plans/impl/2026-08-06-1143-m9-power-performance-gates.md)
-  owns closing them.
+  owns closing it.
 - Undecided *questions* are in **Open questions** above. Undecided *features*
   with a candidate design live in `plans/wip/`; the deferred command journal
   moved there. The shipped ownership rule for terminal-reported facts is

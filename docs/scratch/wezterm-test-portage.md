@@ -193,8 +193,9 @@ These are 7-bit ESC forms despite the file name.
 
 `kitty_zero_dimension_image_does_not_panic`, `kitty_valid_image_is_accepted`,
 and `kitty_image_with_zero_pixel_dimensions_does_not_panic` exercise Kitty
-graphics decoding and placement. Terminal graphics are an explicit initial
-replacement non-goal in `plan-terminal-engine/04-terminal-core.md`. DanTerm's
+graphics decoding and placement. Terminal graphics are an explicit out-of-scope
+item in `docs/design/2026-08-06-swift-terminal-engine.md` (`C8` for graphics
+emulation, `A9` for terminal image protocols). DanTerm's
 generic parser fuzz/recovery contract still requires an unsupported APC payload
 not to crash and later text to survive, but these PNG and pixel-geometry cases
 should not be ported unless graphics enters the product scope.

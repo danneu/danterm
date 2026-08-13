@@ -933,6 +933,55 @@ control the change cannot reach -- are in
 a new metric, freezing a decision rule, or acting on a difference between two
 numbers.
 
+## Performance optimization index
+
+The engine began with intentionally straightforward implementations. This
+index records the places where profiling justified additional complexity so a
+future reader can distinguish deliberate performance machinery from incidental
+cleverness. Percentages are approximate reductions in median duration measured
+when each change landed, relative to the code immediately before it rather than
+to the original naive baseline. They are historical orientation, not
+reproducible measurements or permanent performance guarantees; a current claim
+comes from `just benchmark-quick` / `just benchmark-confirm`.
+
+- **[Bounded damage bitset](../plans/impl/2026-07-22-1736-terminal-core-feed-throughput-recovery.md)
+  -- about 20% faster core feed.** A reusable viewport-
+  row bitset replaced per-scalar `Set<Int>` allocation, hashing, and union while
+  preserving the public `TerminalDamage` value. The trade-off is separate
+  internal and consumer-facing damage representations, with set materialization
+  deferred until drain.
+- **[Packed Unicode lookup and cached look-behind class](../plans/impl/2026-07-22-1736-terminal-core-feed-throughput-recovery.md)
+  -- about 31% faster core feed after the damage change.** One generated
+  two-stage lookup replaced repeated binary searches for width, emoji
+  properties, and grapheme-break class, and the segmenter now retains the
+  preceding class. The trade-off is a larger generated table and a less direct
+  classification path.
+- **[Generation counters for change detection](../plans/impl/2026-07-22-1736-terminal-core-feed-throughput-recovery.md)
+  -- no measured core-feed gain on styled redraw.** Monotonic generations
+  replaced whole-`Terminal` copies for pending-work detection and repeated
+  O(history) string comparisons for recovery notifications. Styled redraw was
+  about 1% slower than the preceding result, within the role of this slice as a
+  scrollback-specific fix. The saved results do not include an immediately
+  preceding scrollback run, so no isolated scrollback percentage is claimed.
+  The trade-off is explicit mutation accounting and conservative history-change
+  signaling.
+- **[Inline single-scalar grid cells](../plans/impl/2026-07-22-1736-terminal-core-feed-throughput-recovery.md)
+  -- about 2% faster core feed than the prior best result.** Empty and
+  single-scalar clusters stay inline while multi-scalar graphemes spill to an
+  array. The trade-off is a specialized three-case storage representation and
+  more involved upgrade and downgrade paths.
+- **[Sparse AppKit damage retention](../plans/impl/2026-08-01-2219-preserve-sparse-appkit-terminal-damage.md)
+  -- about 65% less direct draw time and 8% less whole-process CPU in the final
+  two-distant-row acceptance run.** The view retains and merges exact engine
+  damage until `draw(_:)`, then clips both the frame plan and graphics context
+  to maximal contiguous sparse-row spans instead of AppKit's bounding dirty
+  rectangle. Per-row clip rectangles initially doubled CPU during controlled
+  btop scrolling; span coalescing restored CPU to equivalent or better than the
+  parent and remained no slower at the 17-span maximum for the measured 179x66
+  grid. The trade-off is an explicit view-owned full-invalidation path plus
+  benchmark-only topology accounting; the percentages describe a controlled
+  distant-row workload, not a calibrated general verdict.
+
 ## Optimize safely
 
 Note the pre-change revision before you start -- that is the baseline the

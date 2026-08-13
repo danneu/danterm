@@ -26,10 +26,11 @@ Rules for this file, so it stays worth trusting:
 - Anything unverified is marked UNVERIFIED. No exceptions -- an unmarked claim
   here will get believed later, including by me.
 
-Target: `plan-terminal-engine/14-roadmap.md`, milestone 9, criterion 2 --
-"[Power and performance](13-power-performance.md) passes idle, hidden-pane,
-visible-output, recovery-freshness, sleep/wake, responsiveness, and teardown
-gates."
+Target: the terminal-engine roadmap's milestone 9, criterion 2 -- "Power and
+performance passes idle, hidden-pane, visible-output, recovery-freshness,
+sleep/wake, responsiveness, and teardown gates." That contract is now section L
+of `docs/design/2026-08-06-swift-terminal-engine.md`; `M8` records that the
+composite gate was never run.
 
 ## Gate status
 

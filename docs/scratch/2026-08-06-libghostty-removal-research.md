@@ -24,9 +24,11 @@ The best target is:
   binary target, Zig toolchain, or Ghostty build/cache workflow.
 
 Do not start the destructive part of the removal until the remaining Milestone
-9 gates are closed. `plan-terminal-engine/14-roadmap.md` still has power and
-performance plus sustained daily use unchecked. The roadmap explicitly makes
-those prerequisites for Milestone 10.
+9 gates are closed. The roadmap still has power and performance plus sustained
+daily use unchecked, and explicitly makes those prerequisites for Milestone 10.
+*Overtaken 2026-08-06:* removal proceeded ahead of Milestone 9 by owner
+decision; see `M8` in
+[docs/design/2026-08-06-swift-terminal-engine.md](../design/2026-08-06-swift-terminal-engine.md).
 
 ## Cutover blockers found during this audit
 

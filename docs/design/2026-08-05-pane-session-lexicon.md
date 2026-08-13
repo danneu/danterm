@@ -38,9 +38,7 @@ pane-scoped projections such as visibility. `surface` remains valid only for:
 
 - graphics resources and geometry, including `IOSurfaceLayer` and bitmap test
   surfaces;
-- ordinary English such as a public API surface or clipboard write surface;
-- Ghostty adapter identifiers, including `ghostty_surface_t` and the bridge
-  that wraps it.
+- ordinary English such as a public API surface or clipboard write surface.
 
 ## Consequences
 
@@ -50,10 +48,15 @@ pane-scoped projections such as visibility. `surface` remains valid only for:
   likely including a session identity, rather than another terminology pass.
 - The rename does not change IPC methods or payloads, persisted snapshot
   fields, configuration keys, CLI behavior, or terminal byte output.
+- *Amended after libghostty removal:* this rule originally carried a third
+  exception for Ghostty adapter identifiers such as `ghostty_surface_t`. That
+  adapter no longer exists, so the exception was removed rather than left as a
+  case nothing can satisfy.
 
 ## References
 
 - `lib/DanTermCore/Sources/DanTermCore/TerminalBackendBoundary.swift#TerminalSessionEvent`
-- `app/TerminalBackend.swift#TerminalSession`
-- `app/TerminalView.swift#SurfaceBridge`
-- [Migration and app boundary](../../plan-terminal-engine/02-migration-and-boundary.md)
+- `app/TerminalSession.swift#TerminalSession`
+- [2026-08-06-swift-terminal-engine.md](2026-08-06-swift-terminal-engine.md)
+  B10 -- the surviving narrow per-session `TerminalSession` boundary this
+  vocabulary names; M2 records the migration-era boundary it came from

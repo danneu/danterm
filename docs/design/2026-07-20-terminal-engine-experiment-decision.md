@@ -9,8 +9,8 @@
 > production backend and backend selection a development facility. Milestones
 > 6-8 closed, and libghostty was then removed outright: the Swift engine is the
 > only backend, there is no backend-selection seam or fallback, and no build,
-> runtime, or release path depends on Ghostty. See Milestone 10 in
-> [plan-terminal-engine/14-roadmap.md](../../plan-terminal-engine/14-roadmap.md).
+> runtime, or release path depends on Ghostty. See M8 and the Context section of
+> [2026-08-06-swift-terminal-engine.md](2026-08-06-swift-terminal-engine.md).
 > The body is unedited on purpose -- it records the evidence available on
 > 2026-07-20, not today's state.
 
@@ -18,8 +18,8 @@
 
 The Swift terminal engine experiment was required to pass an explicit
 viability gate before DanTerm invests in the broader replacement roadmap.
-[Migration and app boundary](../../plan-terminal-engine/02-migration-and-boundary.md)
-defines that gate and requires a deliberate choice at it: abandon the
+[2026-08-06-swift-terminal-engine.md](2026-08-06-swift-terminal-engine.md) M5
+records that gate and the deliberate choice it required: abandon the
 experiment, continue it, retain only independently useful infrastructure, or
 commit to the full replacement roadmap.
 
@@ -43,8 +43,7 @@ architecture. Judged from the Milestone 2-4 proof and the viability run:
 
 - **Unicode and reflow.** Tractable. Grapheme clustering, emoji width,
   wide-cell atomicity, hard/soft line identity, and width/height reflow walks
-  are proven headlessly (Milestone 2, Slice 8 judgments in the
-  [roadmap](../../plan-terminal-engine/14-roadmap.md)), and the live run
+  are proven headlessly (Milestone 2, Slice 8 judgments), and the live run
   reproduced the marker-bounded reflow region byte-identically across
   56x25 -> 90x25 -> 56x25.
 - **PTY ownership.** Tractable. The single actor owner per pane, the
@@ -169,14 +168,15 @@ replacement quality gates.
 - Differential replay (Termless or similar) gets a concrete evaluate-or-drop
   point during Milestone 6 instead of an open-ended maybe.
 - Passing the viability gate satisfies no replacement proof obligation; the
-  [roadmap](../../plan-terminal-engine/14-roadmap.md) replacement gate is
-  unchanged.
+  replacement gate (now
+  [2026-08-06-swift-terminal-engine.md](2026-08-06-swift-terminal-engine.md) M7)
+  is unchanged.
 
 ## References
 
 - [Milestone 4 interactive viability evidence](../evidence/2026-07-20-milestone-4-viability.md)
-- [Migration and app boundary](../../plan-terminal-engine/02-migration-and-boundary.md)
-  (experiment viability gate and outcome menu)
-- [Incremental roadmap](../../plan-terminal-engine/14-roadmap.md)
+- [2026-08-06: The Swift Terminal Engine -- Migration Record and Decision Register](2026-08-06-swift-terminal-engine.md)
+  section M (migration mechanics: M5 is the viability gate and its outcome menu,
+  M7 the replacement gate, M8 the Milestone 10 decision)
 - [External terminal test research](../research/1-external-tests.md)
   (Milestone 5 testability questions)

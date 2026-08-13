@@ -49,7 +49,7 @@ app/                      52 files   16,006 lines   AppKit layer
 
 Also present: `cli/`, `cli-tests/`, `app-tests/`, `tests-ui/`, `benchmarks/`, `integrations/danterm/`
 (the agent skill), `themes/`, `tools/`, `docs/`, `plans/`, `impl-notes/`, `agent-docs/`,
-`plan-terminal-engine/`, `justfile`, `flake.nix`, `hm-module.nix`, `build-app.sh`.
+`justfile`, `flake.nix`, `hm-module.nix`, `build-app.sh`.
 
 Notable individual files:
 

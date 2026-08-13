@@ -275,10 +275,11 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   -- is the column that shows why re-declaring per prompt is load-bearing.
 - [x] Folded the shipped dialect into `docs/terminal-capabilities.md` (accepted
   actions and options, the per-integration emit/declare table, and why Bash uses
-  `P`) and `plan-terminal-engine/10-protocols-shell-integration.md` (the
-  measured-not-inherited `redraw` choice and why the declaration is load-bearing
-  rather than a hint). Both previously recorded only the OSC 1337 envelope on the
-  emitting side.
+  `P`) and the engine register's protocol section (the measured-not-inherited
+  `redraw` choice and why the declaration is load-bearing rather than a hint;
+  written at the time into the protocols-and-shell-integration planning doc, now
+  `I10` in `docs/design/2026-08-06-swift-terminal-engine.md`). Both previously
+  recorded only the OSC 1337 envelope on the emitting side.
 
 ### Phase 4 -- render it in a real pane
 
