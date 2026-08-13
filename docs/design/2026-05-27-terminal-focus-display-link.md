@@ -12,6 +12,8 @@
 > engine. Read this only as a record of the Ghostty-era contract; the body is
 > unedited on purpose.
 
+<!-- docs-lint: allow-missing app/TerminalView.swift -->
+
 ## Context
 
 DanTerm hosts libghostty surfaces inside AppKit views. When a terminal pane is

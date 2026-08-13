@@ -88,7 +88,7 @@ compile the same files standalone so they can be tested.
 Cross-cutting features are layered across all three. IPC: method semantics in
 core `update()`, envelope + line framing in `DanTermProtocol`, per-connection
 socket lifecycle in `DanTermSupport.IpcConnection`, accept loop in
-`app/IpcServer`. Persistence: pure snapshot/restore codec in core, path
+`app/IpcServer.swift`. Persistence: pure snapshot/restore codec in core, path
 resolution + file IO + session lock in `DanTermSupport.RecoveryStore`,
 checkpoint scheduling and on-disk write in `app`.
 
@@ -207,6 +207,12 @@ and legitimately have none).
   carried the id, because plans are historical and their ids are not unique.
   When the same invariant needs restating across many files, graduate it to a
   design doc instead.
+- `scripts/docs-lint.sh` resolves every repo-relative path cited in AGENTS.md,
+  CLAUDE.md, `agent-docs/`, and `docs/` outside `docs/scratch/`, so a rename that
+  orphans a citation fails the gate. When a document names a deleted path on
+  purpose -- a supersession banner does exactly that -- declare it in that file
+  with `<!-- docs-lint: allow-missing the/path -->`. The marker exempts only
+  that path and only in that file.
 
 ## Build
 

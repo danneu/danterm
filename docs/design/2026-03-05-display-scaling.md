@@ -15,6 +15,9 @@
 > invariant, and the non-positive-dimension guard is part of it, not a cosmetic
 > defensive check. The body is unedited on purpose.
 
+<!-- docs-lint: allow-missing app/TerminalView.swift -->
+<!-- docs-lint: allow-missing lib/DanTermCore/Sources/DanTermCore/BackingGeometry.swift -->
+
 ## Context
 
 DanTerm hosts Ghostty surfaces in AppKit views that may run on Retina and

@@ -1,5 +1,8 @@
 # Decisions -- logical-line scrollback (doc 31)
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Sources/TerminalMemoryProbe/main.swift -->
+
 Auditable decision log for
 [31-logical-line-scrollback](README.md); the contract is
 [../FORMAT.md](../FORMAT.md).

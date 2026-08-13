@@ -1,5 +1,8 @@
 # By-construction performance survey
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing scripts/research/33/t7-streaming-parser.py -->
+
 Research started: 2026-08-06.
 Research completed: 2026-08-09.
 Continues: [18-cpu-renderer-optimization-leads.md](../18-cpu-renderer-optimization-leads.md) (`18/D7`),

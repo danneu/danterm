@@ -1,5 +1,11 @@
 # Findings -- by-construction performance survey
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing scripts/research/33/t7-streaming-parser.patch -->
+<!-- docs-lint: allow-missing scripts/research/33/t7-streaming-parser.py -->
+<!-- docs-lint: allow-missing scripts/research/33/t18-exact-incremental-fills.sh -->
+<!-- docs-lint: allow-missing docs/t24-aa-marker.md -->
+
 Append-only. `F1`-`F8` are the survey's directly verified results: a code-read
 in the tree at the stated commit, or a contention-free probe. Everything the
 survey merely *proposed* lives in the task ledger in

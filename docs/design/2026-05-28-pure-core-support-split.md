@@ -336,7 +336,7 @@ does not carry the model's per-field tax.)
   GhosttyKit-free package, the same ~1-2s loop the core enjoys.
 - **The IPC and persistence layerings are explicit.** IPC: method semantics live
   in core `update()`; envelope + framing in `DanTermProtocol`; socket lifecycle
-  in `DanTermSupport.IpcConnection`; the accept loop in `app/IpcServer`.
+  in `DanTermSupport.IpcConnection`; the accept loop in `app/IpcServer.swift`.
   Persistence: the pure codec in core; path resolution + file IO + session lock
   in `DanTermSupport.RecoveryStore`; checkpoint scheduling and the
   snapshot-to-disk write in `app`.

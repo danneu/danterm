@@ -17,6 +17,8 @@
 > by default rather than needing an allowlist entry. The body is unedited on
 > purpose.
 
+<!-- docs-lint: allow-missing lib/ghostty-themes -->
+
 ## Context
 
 DanTerm's pure model/update layer (the 22 files that comprise `Model.swift` /

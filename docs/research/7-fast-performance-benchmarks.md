@@ -1,5 +1,8 @@
 # Fast paired A/B performance benchmarks
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing benchmarks/results/terminal-redraw.jsonl -->
+
 Research started: 2026-07-23. **Status: CLOSED 2026-07-28. The runner shipped,
 graduated to `plans/impl/2026-07-24-1423-fast-paired-performance-benchmarks.md`,
 and decided every optimization verdict in docs 8-13. Phase 6 (the Ghostty

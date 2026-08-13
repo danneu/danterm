@@ -1,5 +1,8 @@
 # Serialized full-screen redraw optimization research
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing benchmarks/results/terminal-redraw.jsonl -->
+
 Research date: 2026-07-23. **Status: CLOSED 2026-07-23.** Its one hypothesis --
 per-cell fixed overhead dominates, not glyph rasterization -- was confirmed, the
 fix shipped (`7e990fa`), and serialized redraw medians fell ~97%. See "Outcome".

@@ -1,5 +1,8 @@
 # F2 -- TerminalRenderExecution on iOS
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing .claude/worktrees/t2-render-execution-ios -->
+
 Promoted to its own file per [FORMAT.md](../FORMAT.md) because it carries an
 itemization table, a running-app result, and three screenshot artifacts.
 Referenced from [findings.md](findings.md) as `F2`.

@@ -3,6 +3,9 @@
 - Status: Accepted
 - Date: 2026-08-06
 - Supersedes: [2026-07-20: Terminal Engine Experiment Decision (Milestone 5)](2026-07-20-terminal-engine-experiment-decision.md)
+- Supersedes: [2026-05-27: Terminal Focus and Display Link Recovery](2026-05-27-terminal-focus-display-link.md)
+
+<!-- docs-lint: allow-missing plan-terminal-engine/ -->
 
 This note is the terminal engine's decision register. It replaced the
 `plan-terminal-engine/` planning directory when the engine left the plan state

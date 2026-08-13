@@ -1,5 +1,8 @@
 # Render frame budget
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing app/TerminalView.swift -->
+
 Research started: 2026-07-28. **Status: CLOSED 2026-07-28. No change proposed,
 and none is warranted. H1 is refuted; H2 versus H3 was never reached because the
 gap both hypotheses set out to explain does not exist.** See "Outcome". Doc 13

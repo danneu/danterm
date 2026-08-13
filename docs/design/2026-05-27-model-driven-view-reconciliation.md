@@ -217,8 +217,10 @@ AppKit and session state.
 
 - `AGENTS.md`: Elm architecture and data flow
 - `app/Reconcile.swift`: reconciler template, pass ordering, `ReconcilerCaches`
-- `app/Projections.swift`: pure view projections + structural diff/op helpers
-- `app/ModelOperations.swift`: shared model helpers, reconcile scheduling (`reconcileDecision`)
+- `lib/DanTermCore/Sources/DanTermCore/Projections.swift`: pure view projections
+  + structural diff/op helpers
+- `lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift`: shared model
+  helpers, reconcile scheduling (`reconcileDecision`)
 - `plans/impl/2026-05-26-tree-owns-panes-reconciler.md`: main reconciler migration plan
 - `plans/impl/2026-05-27-coalesce-reconcile-sweeps.md`: reconcile scheduling policy
 - `plans/impl/2026-05-27-quit-confirmation-reconcile.md`: single-optional panel projection precedent

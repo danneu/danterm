@@ -10,9 +10,11 @@
 > closures -- are unchanged and still normative. What is gone is the Ghostty half:
 > there is no `ghostty_surface_t`, no `ghostty_surface_free`, and no C `userdata`
 > boundary, so rule 5 now applies only to whatever C/`Unmanaged` bridges DanTerm
-> introduces itself. `docs/upgrading-ghostty.md`, linked below, was retired with
-> the dependency; find it in Git history if the historical procedure matters.
-> The body is unedited on purpose.
+> introduces itself. `docs/upgrading-ghostty.md`, which rule 5 used to link, was
+> retired with the dependency; find it in Git history if the historical procedure
+> matters. The body is otherwise unedited on purpose.
+
+<!-- docs-lint: allow-missing docs/upgrading-ghostty.md -->
 
 ## Context
 
@@ -61,8 +63,7 @@ stored-callback code:
    `SurfaceBridge` for the surface's life, with a weak back-reference to the
    view. Never assume a deferred-free closure's `nsview` is alive; it is safe
    only while the free path does not message the view. Re-check that upstream
-   condition during Ghostty upgrades, per
-   [`../upgrading-ghostty.md#steps`](../upgrading-ghostty.md#steps).
+   condition during Ghostty upgrades.
 6. Prefer `[weak self]` for stored escaping closures, timers, monitors, and
    async hops. Avoid `unowned`; the codebase currently has none.
 7. `NSMenuItem.target` is weak -- an AppKit target that can outlive its referent
@@ -155,8 +156,6 @@ closures.
   fix for the transient todo input.
 - `tests-ui/TodoInputViewTests.swift:45-72` -- UI regression coverage for
   keeping todo input undo out of the window undo manager.
-- `docs/upgrading-ghostty.md` -- Ghostty upgrade step that re-checks the
-  deferred-free `nsview` assumption.
 - `app/PaneWrapperView.swift:425-485` -- `makePaneMenu` / `wrapperItem`, the
   `representedObject` anchor for menus owned by a reconcile-ephemeral view.
 - [Apple: Using Undo in AppKit-Based Applications](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/UndoArchitecture/Articles/AppKitUndo.html)

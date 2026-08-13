@@ -1,5 +1,8 @@
 # Findings -- logical-line scrollback (doc 31)
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing app/TerminalView.swift -->
+
 Append-only evidence chain for
 [31-logical-line-scrollback](README.md); the contract is
 [../FORMAT.md](../FORMAT.md). Cross-file citations are qualified (`28/F23` is

@@ -1,5 +1,8 @@
 # Fallback-glyph batching for symbol-heavy screens
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing benchmarks/results/terminal-redraw.jsonl -->
+
 Research date: 2026-07-23. **Status: CLOSED 2026-07-28. All four tasks done.**
 The chosen direction -- DanTerm-owned procedural sprites rather than batched
 fallback glyphs -- shipped across eight families and removed the CTLine path

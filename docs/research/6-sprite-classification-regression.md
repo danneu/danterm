@@ -1,5 +1,8 @@
 # Per-cell sprite classification redraw regression
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing benchmarks/results/terminal-redraw.jsonl -->
+
 Research started: 2026-07-23.
 
 ## Purpose

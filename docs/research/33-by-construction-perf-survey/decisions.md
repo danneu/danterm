@@ -1,5 +1,8 @@
 # Decisions -- by-construction performance survey
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing scripts/research/33/t7-streaming-parser.patch -->
+
 One entry per stable ID. `D1` is a standing rule for the whole doc; the later
 entries record the directions, landings, and rejections that resolved the
 survey's inherited tensions.

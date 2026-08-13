@@ -1,5 +1,8 @@
 # Findings -- sparse AppKit damage clip topology
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing docs/scratch/m9-criterion-2-power-performance.md -->
+
 This is the append-only investigation notebook migrated from
 `docs/scratch/m9-criterion-2-power-performance.md`. It began as the broader M9
 criterion-2 survey, then captured the complete sparse-damage regression and fix.

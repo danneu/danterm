@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-08-06
 
+<!-- docs-lint: allow-missing app/TerminalView.swift -->
+
 ## Context
 
 `test-ui.sh` compiles ~60 hand-listed source paths -- app views, a subset of

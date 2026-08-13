@@ -1,5 +1,8 @@
 # Findings -- append-only evidence chain
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Tests/TerminalCoreTests/TerminalHistoryDepthSizingProbe.swift -->
+
 Next free ID: **F24**. **That claim is now vacant: the resize-*profile* task it was
 reserved for is OBSOLETE as of 2026-08-05**, superseded by
 [doc 31](../31-logical-line-scrollback/README.md) -- `9ad7cc5` deleted reflow of

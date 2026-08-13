@@ -1,5 +1,8 @@
 # Retained-row optimization opportunities
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Tests/TerminalCoreTests/TerminalHistoryDepthSizingProbe.swift -->
+
 Research started: 2026-08-03.
 Continues: [15-memory-footprint.md](../15-memory-footprint.md) (`15/H6`,
 `15/H7`, `15/F18`).
