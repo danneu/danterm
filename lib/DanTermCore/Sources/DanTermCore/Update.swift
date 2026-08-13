@@ -228,6 +228,7 @@ func update(
 
         // removeLeaf drops the leaf (and its pane payload) atomically; the close
         // path discards the removed pane. Side-table cleanup stays here.
+        let focusMoved = tab.focusedPaneId == paneId
         let (newTree, nextFocus, _) = removeLeaf(tab.rootNode, paneId: paneId)
 
         if newTree == nil && wouldQuitFromClose(model) {
@@ -248,18 +249,17 @@ func update(
             return update(&model, .closeTab(id: tab.id), env: env)
         }
 
-        // Focus-mode alert clearing only applies when the close happens in the
-        // selected tab: a background tab's survivor never actually gains
-        // user-visible focus, so its unread alerts must survive until the user
-        // views the tab (they clear through the tab-selection path).
-        if model.config.alertClearMode == .focus, let next = nextFocus,
+        // Focus-mode alert clearing only applies when focus moves in the
+        // selected tab. A background tab's survivor never gains user-visible
+        // focus, and closing a non-focused pane does not move focus at all.
+        if focusMoved, model.config.alertClearMode == .focus, let next = nextFocus,
            tab.id == model.selectedTabId {
             markAlertsReadForPane(next, in: &model)
         }
         updateTab(tab.id, in: &model) { tab in
             tab.rootNode = newRoot
             tab.isZoomed = false
-            if let next = nextFocus {
+            if focusMoved, let next = nextFocus {
                 tab.focusedPaneId = next
             }
         }

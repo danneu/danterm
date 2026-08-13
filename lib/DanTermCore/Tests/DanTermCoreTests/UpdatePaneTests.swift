@@ -758,6 +758,36 @@ import Testing
                 "selected-tab successor gains focus, so its alert is marked read")
     }
 
+    @Test("closing a non-focused pane preserves focus and its unread alert")
+    func closePaneNonFocusedPanePreservesFocusAndAlert() {
+        // Intent: closing a background pane in the selected tab keeps focus on
+        //   the pane the user is viewing and leaves the successor's alert unread.
+        // Why it exists: closePane used removeLeaf's successor unconditionally,
+        //   so closing a non-focused pane stole focus and acknowledged its alert.
+        // Scenario: spec-first selected-tab close -- pane A stays focused while
+        //   pane B closes and pane C, B's successor, has an unread alert.
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitFocusedPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitFocusedPane(direction: .vertical))
+        let paneC = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
+        model.alerts = [AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneC,
+            title: "DanTerm", body: "bell", createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            isUnread: true
+        )]
+
+        update(&model, .closePane(paneId: paneB))
+
+        #expect(model.groups[0].tabs[0].focusedPaneId == paneA,
+                "closing a non-focused pane must not steal focus")
+        #expect(model.alerts[0].isUnread == true,
+                "the successor's alert must remain unread when focus did not move")
+    }
+
     @Test("closePane for a vanished pane is a pure no-op")
     func closePaneVanishedPaneIsNoOp() {
         // Intent: .closePane for a paneId present in no tab returns [] and leaves the
