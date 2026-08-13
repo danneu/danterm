@@ -85,6 +85,15 @@ by the task ledger in [README.md](README.md) and remain open.
     depth and `inputModes`. F4's `aftermath` run showed the visible screen
     heals through a prompt repaint, so a screen-reading test would pass against
     a sync that carried nothing.
+  - **The round-trip obligation asserts state equality, not byte equality, and
+    its corpus is classes of state rather than a fixed list.** Both are load
+    bearing and both look like looseness worth tightening, so they are recorded
+    here rather than left to the plan. Comparing emitted bytes would convert a
+    behavioral test into a structure-sensitive one and would fail on encoding
+    choices this decision deliberately leaves to implementation. A fixed corpus
+    would silently stop covering the payload floor the moment the engine grows a
+    mode, which is the exact failure the obligation exists to catch -- it is the
+    only test here that fails when the serializer falls behind the engine.
 - Deferred, with reasons recorded in the plan: the two-engines-answering-a-query
   question, which is an input-direction rule (only the engine owning the PTY
   answers) and belongs with the input surface, not with state transfer; and
