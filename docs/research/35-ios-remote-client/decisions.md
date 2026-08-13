@@ -1,7 +1,7 @@
 # Decisions -- iOS remote client
 
-Auditable decision log for doc 35. D2, D3, D4, D6, and D7 are reserved as gates
-by the task ledger in [README.md](README.md) and remain open.
+Auditable decision log for doc 35. D3, D4, D6, and D7 are reserved as gates by
+the task ledger in [README.md](README.md) and remain open.
 
 ### D1 -- scope and first milestone
 
@@ -25,6 +25,59 @@ by the task ledger in [README.md](README.md) and remain open.
   facts that weight later decisions: a paid Apple Developer account exists
   (APNs and TestFlight available), and Tailscale runs on the Mac today with
   the phone able to join the tailnet.
+
+### D2 -- the iOS presentation path is the existing swapchain
+
+- Status: decided 2026-08-13, by user direction, on a second opinion's
+  recommendation.
+- Evidence used: F3 in full -- the device confirmation and both instruments --
+  plus F2 for the compile and the simulator behavior it corrected. The
+  transcripts are in `f3-artifacts/`. Also read directly:
+  `TerminalFrameSwapchain.defaultDepth`'s comment on why three buffers rather
+  than two, and `app/SwiftTerminalSessionView.swift`, which shows what owning
+  the swapchain costs a client.
+- Candidate solutions:
+  1. The existing `TerminalFrameSwapchain`, which renders into a detached
+     buffer and then attaches it.
+  2. CGImage-copy-per-frame: render into one store, wrap its pixels in an
+     immutable image, assign that as layer contents.
+  3. A substitute surface path (`CAMetalLayer`, `CVPixelBuffer`), which F2 and
+     F3 removed from consideration -- IOSurface displays as `layer.contents` on
+     a real device, so no substitute is needed.
+- Selected direction: (1).
+- Decision and rationale:
+  - **One strategy, not two.** macOS keeps the swapchain whichever arm iOS
+    picks, so (2) does not replace a path, it adds one. Two presentation
+    strategies fork every later change to presentation -- colorspace, scale,
+    damage semantics -- along a platform seam, and a divergence there produces
+    exactly the bugs that reproduce on one device and not the other. This is
+    the argument the decision rests on.
+  - **The measurements agree but did not decide it.** The swapchain presents a
+    full-repaint frame in 1195us against 1984us, and spends about 11% less CPU
+    on a bursty workload where its own presentation cost is indistinguishable
+    from presenting nothing. Those numbers were taken with a display link
+    ticking through an idle in which nothing was damaged; once presentation is
+    gated on damage the copy delta shrinks toward noise. Support, not the case.
+  - **What this declines, knowingly.** (2) cannot present indeterminately *by
+    construction*, because every frame is a new immutable image. The swapchain
+    avoids the same hazard *by discipline* -- it never mutates an attached
+    buffer -- and that discipline rests on "a detached surface reported free
+    stays free", pinned by `tests-ui/IOSurfaceLayerContentsTests.swift` on
+    macOS and by one 100-frame device run here. F3 showed what violating it
+    looks like on iOS, and it is not a crash but an indefinite alternation
+    between two frames, which is the kind of defect that reads as a rendering
+    glitch and gets chased for a day.
+  - **The client owns a contract.** The swapchain type is portable, but its
+    owner is not: a coalesced publish must be retried on a later tick, as
+    `app/SwiftTerminalSessionView.swift` does. That is real iOS code (2) would
+    not need, and "the swapchain is free because it already exists" is wrong
+    for that reason.
+- Consequence for the client, larger than this decision: presentation is a
+  small share of the workload's energy. Presenting nothing at all cost 1.57s
+  against the swapchain's 1.59s, with the rest going to engine feed, plan
+  building, and a display link running at 60Hz through an idle in which nothing
+  was damaged. Gating presentation on damage matters more than the arm choice
+  did, and it is a client design task, not part of this decision.
 
 ### D5 -- durable subscriptions: state sync as tape bytes, and cursor resume
 

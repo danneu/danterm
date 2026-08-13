@@ -312,25 +312,12 @@ Provisional shape; every leg has a gate in the ledger.
   wrong grid size; and resume already has its coordinates in
   `TerminalFlightRecordingCursor`, with only the ability for a client to supply
   one missing at the protocol edge.
-- **D2 gate, ready to decide** -- select the iOS presentation path, from F2 and
-  F3. Both arms are correct on device, and the case for the swapchain is that it
-  keeps one presentation strategy rather than two: macOS needs it either way, so
-  the copy path is not a replacement but an addition, and every later change to
-  presentation -- colorspace, scale, damage semantics -- would then fork per
-  platform. F3's numbers agree (1195us against 1984us per full-repaint frame,
-  about 11% less CPU on a bursty workload) but they are support, not the
-  argument; the copy delta shrinks toward noise once presentation is gated on
-  damage.
-  What the swapchain costs, and what selecting it consciously declines: the copy
-  path cannot present indeterminately *by construction*, because each frame is a
-  new immutable image, while the swapchain avoids it *by discipline* -- never
-  mutating an attached buffer, resting on "a detached surface reported free
-  stays free", which is pinned by macOS tests and one 100-frame device run.
-  Choosing the swapchain also means the client owns its contract: retrying a
-  coalesced publish on a later tick, the way `app/SwiftTerminalSessionView.swift`
-  does. That owner is real iOS code the copy path would not need, so "no new
-  code" is wrong -- the type is portable, its owner is not.
-  Awaiting the user's decision, recorded in [decisions.md](decisions.md).
+- **D2 DECIDED** ([decisions.md](decisions.md)) -- the iOS presentation path is
+  the existing `TerminalFrameSwapchain`. Both arms are correct on device, and
+  the decision rests on keeping one presentation strategy rather than two, not
+  on F3's numbers, which agree but are support. The client owns the swapchain's
+  contract, including retrying a coalesced publish, so it is not free. D2
+  records what selecting it declines.
 - **D3 gate** -- confirm or restate the day-one-engine direction after F1-F4;
   reopening the rejected text renderer requires these spikes to have failed. When
   it is restated, adopt H5's invariant by name -- single-owner replicated state
