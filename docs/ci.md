@@ -13,8 +13,8 @@
 |---|---|---|
 | `cliff-smoke` | `ubuntu-latest` | git-cliff changelog grouping, plus the two Nix checks that can only execute on Linux (`shell-integration`, `home-manager-shell-integration`) |
 | `theme-freshness` | `ubuntu-latest` | re-importing the pinned theme archive leaves `themes/` byte-identical |
-| `build` | `macos-26` | `./build-app.sh` produces an ad-hoc-signable bundle |
-| `release-build-check` | `macos-26` | `./build-app.sh --version` produces the full release layout, and that layout survives a signed ZIP round-trip |
+| `build` | `macos-26` | `./build-app.sh` produces a bundle that still matches its declared layout after ad-hoc signing |
+| `release-build-check` | `macos-26` | `./build-app.sh --version` produces the declared release layout, and that layout survives a signed ZIP round-trip |
 
 Both macOS jobs are checkout-then-build: DanTerm is a pure SwiftPM/AppKit build,
 so there is no external toolchain to install or artifact to cache. `nix` appears
@@ -61,8 +61,11 @@ signatures the helpers already carry, so a helper signed afterwards invalidates
 the app -- then verifies the full bundle with
 `codesign --verify --deep --strict --verbose=2`.
 
-Both workflows assert the presence of both helpers, and re-assert
-`PTYSessionBootstrap` after the ZIP round-trip.
+The build emits `.spm-build/bundle-layout-release.json` from the Swift
+`BundleLayout` declaration. Both workflows run
+`scripts/verify-bundle-layout.sh` against that plan after signing and after each
+ZIP round-trip. This checks the complete layout, including both helpers, instead
+of repeating a reduced list of paths in workflow YAML.
 
 The agent hook scripts live at `DanTerm.app/Contents/Resources/danterm-hooks/`,
 not `Contents/Helpers/`. They are executable shell scripts, not Mach-O nested

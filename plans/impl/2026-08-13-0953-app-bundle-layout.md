@@ -261,7 +261,7 @@ Behavioral, run locally:
       they have today; both harnesses assemble and verify through the shared path
       instead of literal ones. The slot clone verifies after its
       rename-and-resign.
-- [ ] Workflows: delete the two redundant verify blocks, add verifier calls at
+- [x] Workflows: delete the two redundant verify blocks, add verifier calls at
       the signing and round-trip sites, retarget the meta-test at the verifier
       invocation, update `agent-docs/build-details.md` and `docs/ci.md`.
 

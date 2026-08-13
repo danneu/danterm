@@ -184,22 +184,52 @@ cmp "$BUILD_ROOT/integrations/danterm/SKILL.md" \
     "$APP_PATH/Contents/Resources/danterm/SKILL.md" \
     || fail "release bundle did not preserve the canonical DanTerm skill"
 
-# Intent: the workflows that gate a release assert the helper is present.
-# Why it exists: build-app.sh once produced a bundle whose default terminal
-#   backend could not start, and every packaging check still passed.
-# Scenario: reviewing CI and the stable-release workflow.
-grep -q 'Contents/Helpers/PTYSessionBootstrap' "$ROOT_DIR/.github/workflows/ci.yml" \
-    || fail "ci.yml bundle-layout check does not require PTYSessionBootstrap"
-grep -q 'Contents/Helpers/PTYSessionBootstrap' "$ROOT_DIR/.github/workflows/release-stable.yml" \
-    || fail "release-stable.yml layout check does not require PTYSessionBootstrap"
-grep -q 'Contents/Resources/danterm/SKILL.md' "$ROOT_DIR/.github/workflows/ci.yml" \
-    || fail "ci.yml release checks do not require the bundled DanTerm skill"
-grep -q 'Contents/Resources/danterm/SKILL.md' "$ROOT_DIR/.github/workflows/release-stable.yml" \
-    || fail "release-stable.yml checks do not require the bundled DanTerm skill"
+# Intent: each workflow verifies a bundle after every signing or ZIP transformation.
+# Why it exists: producer verification cannot prove that a later transformation
+#   preserves the complete declared layout.
+# Scenario: CI ad-hoc signs two bundles and round-trips one through ZIP, while
+#   the stable release signs one bundle and round-trips it through ZIP.
+[[ $(grep -c 'scripts/verify-bundle-layout.sh' "$ROOT_DIR/.github/workflows/ci.yml") -eq 3 ]] \
+    || fail "ci.yml does not verify all three transformed bundles"
+[[ $(grep -c 'scripts/verify-bundle-layout.sh' "$ROOT_DIR/.github/workflows/release-stable.yml") -eq 2 ]] \
+    || fail "release-stable.yml does not verify both transformed bundles"
+
+CI_WORKFLOW="$ROOT_DIR/.github/workflows/ci.yml"
+CI_FIRST_SIGN_LINE=$(grep -n 'codesign --force --deep --sign - build/DanTerm.app' "$CI_WORKFLOW" | cut -d: -f1)
+CI_RELEASE_SIGN_LINE=$(grep -n 'codesign --force --deep --sign - "\$APP_PATH"' "$CI_WORKFLOW" | cut -d: -f1)
+CI_UNZIP_LINE=$(grep -n 'unzip -q build/DanTerm-test.zip' "$CI_WORKFLOW" | cut -d: -f1)
+CI_FIRST_VERIFY_LINE=$(grep -n 'scripts/verify-bundle-layout.sh' "$CI_WORKFLOW" | sed -n '1s/:.*//p')
+CI_SECOND_VERIFY_LINE=$(grep -n 'scripts/verify-bundle-layout.sh' "$CI_WORKFLOW" | sed -n '2s/:.*//p')
+CI_THIRD_VERIFY_LINE=$(grep -n 'scripts/verify-bundle-layout.sh' "$CI_WORKFLOW" | sed -n '3s/:.*//p')
+[[ -n "$CI_FIRST_SIGN_LINE" && -n "$CI_RELEASE_SIGN_LINE" && -n "$CI_UNZIP_LINE" \
+    && "$CI_FIRST_SIGN_LINE" -lt "$CI_FIRST_VERIFY_LINE" \
+    && "$CI_RELEASE_SIGN_LINE" -lt "$CI_SECOND_VERIFY_LINE" \
+    && "$CI_UNZIP_LINE" -lt "$CI_THIRD_VERIFY_LINE" ]] \
+    || fail "ci.yml verifies a bundle before its final transformation"
+grep -qF 'build/DanTerm.app .spm-build/bundle-layout-release.json .' "$CI_WORKFLOW" \
+    || fail "ci.yml does not verify the ad-hoc signed bundle"
+grep -qF '"$APP_PATH" .spm-build/bundle-layout-release.json .' "$CI_WORKFLOW" \
+    || fail "ci.yml does not verify the signed release-check bundle"
+grep -qF '"$ZIP_WORK/DanTerm.app" .spm-build/bundle-layout-release.json .' "$CI_WORKFLOW" \
+    || fail "ci.yml does not verify the ZIP round-trip bundle"
+
+RELEASE_WORKFLOW="$ROOT_DIR/.github/workflows/release-stable.yml"
+RELEASE_SIGN_LINE=$(grep -n -- '--sign "${{ env.SIGNING_IDENTITY }}" "\$APP_PATH"' "$RELEASE_WORKFLOW" | cut -d: -f1)
+RELEASE_UNZIP_LINE=$(grep -n 'unzip -q "build/${{ env.ZIP_NAME }}"' "$RELEASE_WORKFLOW" | cut -d: -f1)
+RELEASE_FIRST_VERIFY_LINE=$(grep -n 'scripts/verify-bundle-layout.sh' "$RELEASE_WORKFLOW" | sed -n '1s/:.*//p')
+RELEASE_SECOND_VERIFY_LINE=$(grep -n 'scripts/verify-bundle-layout.sh' "$RELEASE_WORKFLOW" | sed -n '2s/:.*//p')
+[[ -n "$RELEASE_SIGN_LINE" && -n "$RELEASE_UNZIP_LINE" \
+    && "$RELEASE_SIGN_LINE" -lt "$RELEASE_FIRST_VERIFY_LINE" \
+    && "$RELEASE_UNZIP_LINE" -lt "$RELEASE_SECOND_VERIFY_LINE" ]] \
+    || fail "release-stable.yml verifies a bundle before its final transformation"
+grep -qF '"$APP_PATH" .spm-build/bundle-layout-release.json .' "$RELEASE_WORKFLOW" \
+    || fail "release-stable.yml does not verify the signed app bundle"
+grep -qF '"$WORK/${{ env.APP_NAME }}.app" .spm-build/bundle-layout-release.json .' \
+    "$RELEASE_WORKFLOW" \
+    || fail "release-stable.yml does not verify the ZIP round-trip bundle"
 
 # Nested code must be signed before its container, or the outer signature seals a
 # helper whose own signature is then replaced.
-RELEASE_WORKFLOW="$ROOT_DIR/.github/workflows/release-stable.yml"
 # Workflow literals, matched verbatim -- no shell expansion intended.
 # shellcheck disable=SC2016
 BOOTSTRAP_SIGN_LINE=$(grep -n 'Helpers/PTYSessionBootstrap"$' "$RELEASE_WORKFLOW" | head -n 1 | cut -d: -f1)

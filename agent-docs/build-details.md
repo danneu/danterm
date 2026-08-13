@@ -14,9 +14,9 @@ produce before the first `swift build`.
 Build scripts use `swift build` via `Package.swift`, the single source of truth
 for Swift sources, package dependencies, and linker flags. The root package
 declares the `DanTerm` app, the `DanTermCLI` (`danterm`) executable, the
-build-only `DanTermInstanceIdentityTool`, and the `DanTermProtocol` library. It
-depends on two local packages, `lib/TerminalCore` and `lib/TerminalPTY`, which
-carry the terminal engine; the app target links only Cocoa, QuartzCore,
+build-only identity and bundle-layout tools, and the `DanTermProtocol` library.
+It depends on two local packages, `lib/TerminalCore` and `lib/TerminalPTY`,
+which carry the terminal engine; the app target links only Cocoa, QuartzCore,
 CoreText, and UniformTypeIdentifiers.
 
 `lib/TerminalHostTools` is a third local package that nothing links. It holds the
@@ -48,9 +48,9 @@ for iOS belongs in `TerminalHostTools`; it never belongs on an exemption list.
   the shared pool without building. Occupancy comes from each slot's lock, and
   that same file also holds the JSON record naming its occupant, so there is no
   second file to fall out of step with the lock. Slot 0 is never claimed. The
-  build-only `DanTermInstanceIdentityTool` resolves each clone's identity and
-  paths through `DanTermProtocol` so the launcher does not duplicate the naming
-  scheme.
+  emitted development layout resolves each clone's identity and paths through
+  `DanTermProtocol`. The launcher rewrites that plan for the slot identity, then
+  verifies the clone after its rename and signing step.
 - `build-app.sh` -- release mode (`--configuration release`, applies `-O`),
   production icons, optional `--version` stamping. Called by CI and release
   workflows. It does not sign or notarize.
@@ -73,13 +73,20 @@ A release bundle therefore has three executable/signing boundaries:
 
 Dev bundles add `Contents/Helpers/danterm-instance-identity`.
 
-Both scripts also stage `Contents/Resources`: the icon `Assets.car`, the three
+`BundleLayout` in `DanTermProtocol` declares each variant's identity, entries,
+modes, copy sources, and exact-set directories. `DanTermBundleLayoutTool` emits
+that declaration as JSON. `scripts/assemble-app-bundle.sh` consumes the plan for
+release, development, benchmark, and viability bundles, and
+`scripts/verify-bundle-layout.sh` checks the result against the same plan. Both
+shipping producers verify after assembly. CI and release workflows verify again
+after signing and after a ZIP round-trip.
+
+The declaration covers `Contents/Resources`: the icon `Assets.car`, the three
 agent hook scripts under `danterm-hooks/` (raw scripts, so `jq` -- and `danterm`
 for the session hooks -- must be on the runtime PATH), the whole
 `shell-integration` tree including `vendor/`, and the theme catalog plus bundled
-symbol font packed by `scripts/bundle-theme-resources.sh`. Each of those staging
-steps asserts its assets landed, so a silently thinned copy fails the build
-rather than the user's shell.
+symbol font. A missing, changed, incorrectly executable, or undeclared exact-set
+entry fails verification.
 
 Themes are tracked JSON under `themes/`, refreshed by
 `scripts/import-themes.py` from a pinned iTerm2-Color-Schemes release. That

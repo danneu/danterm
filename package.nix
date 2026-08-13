@@ -18,6 +18,8 @@ stdenvNoCC.mkDerivation {
     mkdir -p "$out/Applications/DanTerm.app"
     cp -R . "$out/Applications/DanTerm.app/"
 
+    # This package checks a pinned published ZIP without a source checkout, so
+    # the repository-owned bundle layout verifier cannot run here.
     gui="$out/Applications/DanTerm.app/Contents/MacOS/DanTerm"
     cli="$out/Applications/DanTerm.app/Contents/Helpers/danterm"
 

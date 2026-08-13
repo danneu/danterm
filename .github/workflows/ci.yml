@@ -128,7 +128,10 @@ jobs:
         run: ./build-app.sh
 
       - name: Codesign (ad-hoc)
-        run: codesign --force --deep --sign - build/DanTerm.app
+        run: |
+          codesign --force --deep --sign - build/DanTerm.app
+          scripts/verify-bundle-layout.sh \
+            build/DanTerm.app .spm-build/bundle-layout-release.json .
 
   release-build-check:
     runs-on: macos-26
@@ -141,45 +144,18 @@ jobs:
       - name: Verify release bundle
         run: |
           APP_PATH="build/DanTerm.app"
-          test -x "$APP_PATH/Contents/MacOS/DanTerm"
-          test -x "$APP_PATH/Contents/Helpers/danterm"
-          cmp integrations/danterm/SKILL.md \
-            "$APP_PATH/Contents/Resources/danterm/SKILL.md"
-          # The Swift terminal backend reports itself not ready without this
-          # helper, so a bundle missing it launches and then fails to open a session.
-          test -x "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
-          for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
-            test -x "$APP_PATH/Contents/Resources/danterm-hooks/$h"
-          done
-          for shell in zsh bash fish; do
-            test -r "$APP_PATH/Contents/Resources/shell-integration/danterm.$shell"
-          done
-          # danterm.bash sources this as a sibling; without it the bundle path the
-          # README documents for bash fails on its source line.
-          test -r "$APP_PATH/Contents/Resources/shell-integration/vendor/bash-preexec.sh"
-          test -r "$APP_PATH/Contents/Resources/themes/catalog.json"
-          if cmp -s "$APP_PATH/Contents/MacOS/DanTerm" "$APP_PATH/Contents/Helpers/danterm"; then
-            echo "Error: GUI and CLI bundle binaries have identical content" >&2
-            exit 1
-          fi
           VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Contents/Info.plist")
           [ "$VERSION" = "0.0.0-test" ] || { echo "Version mismatch: $VERSION"; exit 1; }
           codesign --force --deep --sign - "$APP_PATH"
           codesign -v "$APP_PATH"
+          scripts/verify-bundle-layout.sh \
+            "$APP_PATH" .spm-build/bundle-layout-release.json .
           ZIP_WORK="$RUNNER_TEMP/release-build-ziptest"
           rm -rf "$ZIP_WORK"
           mkdir -p "$ZIP_WORK"
           ( cd build && zip -qr DanTerm-test.zip DanTerm.app )
           unzip -q build/DanTerm-test.zip -d "$ZIP_WORK"
           codesign --verify --deep --strict --verbose=2 "$ZIP_WORK/DanTerm.app"
-          cmp integrations/danterm/SKILL.md \
-            "$ZIP_WORK/DanTerm.app/Contents/Resources/danterm/SKILL.md"
-          test -x "$ZIP_WORK/DanTerm.app/Contents/Helpers/PTYSessionBootstrap"
-          for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
-            test -x "$ZIP_WORK/DanTerm.app/Contents/Resources/danterm-hooks/$h"
-          done
-          for shell in zsh bash fish; do
-            test -r "$ZIP_WORK/DanTerm.app/Contents/Resources/shell-integration/danterm.$shell"
-          done
-          test -r "$ZIP_WORK/DanTerm.app/Contents/Resources/shell-integration/vendor/bash-preexec.sh"
+          scripts/verify-bundle-layout.sh \
+            "$ZIP_WORK/DanTerm.app" .spm-build/bundle-layout-release.json .
           echo "Release build validation passed"

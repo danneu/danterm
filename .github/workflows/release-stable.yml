@@ -38,30 +38,6 @@ jobs:
       - name: Build app bundle
         run: ./build-app.sh --version "${{ env.VERSION }}"
 
-      - name: Verify release bundle layout
-        run: |
-          APP_PATH="build/${{ env.APP_NAME }}.app"
-          test -x "$APP_PATH/Contents/MacOS/DanTerm"
-          test -x "$APP_PATH/Contents/Helpers/danterm"
-          cmp integrations/danterm/SKILL.md \
-            "$APP_PATH/Contents/Resources/danterm/SKILL.md"
-          # The Swift terminal backend reports itself not ready without this
-          # helper, so a bundle missing it launches and then fails to open a session.
-          test -x "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
-          for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
-            test -x "$APP_PATH/Contents/Resources/danterm-hooks/$h"
-          done
-          for shell in zsh bash fish; do
-            test -r "$APP_PATH/Contents/Resources/shell-integration/danterm.$shell"
-          done
-          # danterm.bash sources this as a sibling; without it the bundle path the
-          # README documents for bash fails on its source line.
-          test -r "$APP_PATH/Contents/Resources/shell-integration/vendor/bash-preexec.sh"
-          if cmp -s "$APP_PATH/Contents/MacOS/DanTerm" "$APP_PATH/Contents/Helpers/danterm"; then
-            echo "Error: GUI and CLI bundle binaries have identical content" >&2
-            exit 1
-          fi
-
       - name: Import signing certificate
         env:
           DEVELOPER_ID_APPLICATION_CERT_P12: ${{ secrets.DEVELOPER_ID_APPLICATION_CERT_P12 }}
@@ -97,6 +73,8 @@ jobs:
           codesign --force --deep --options runtime \
             --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          scripts/verify-bundle-layout.sh \
+            "$APP_PATH" .spm-build/bundle-layout-release.json .
 
       - name: Create DMG
         run: |
@@ -119,16 +97,8 @@ jobs:
           mkdir -p "$WORK"
           unzip -q "build/${{ env.ZIP_NAME }}" -d "$WORK"
           codesign --verify --deep --strict --verbose=2 "$WORK/${{ env.APP_NAME }}.app"
-          cmp integrations/danterm/SKILL.md \
-            "$WORK/${{ env.APP_NAME }}.app/Contents/Resources/danterm/SKILL.md"
-          test -x "$WORK/${{ env.APP_NAME }}.app/Contents/Helpers/PTYSessionBootstrap"
-          for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
-            test -x "$WORK/${{ env.APP_NAME }}.app/Contents/Resources/danterm-hooks/$h"
-          done
-          for shell in zsh bash fish; do
-            test -r "$WORK/${{ env.APP_NAME }}.app/Contents/Resources/shell-integration/danterm.$shell"
-          done
-          test -r "$WORK/${{ env.APP_NAME }}.app/Contents/Resources/shell-integration/vendor/bash-preexec.sh"
+          scripts/verify-bundle-layout.sh \
+            "$WORK/${{ env.APP_NAME }}.app" .spm-build/bundle-layout-release.json .
 
       - name: Notarize DMG
         env:
