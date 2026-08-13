@@ -263,6 +263,16 @@ Provisional shape; every leg has a gate in the ledger.
   scrollback depth and `inputModes`, not the visible screen. F4 showed the
   visible screen recovers on its own through a prompt repaint, so a test that
   reads it would pass against a snapshot that carries nothing. Records D5.
+
+  **Decided as D5.** State transfers as terminal bytes in a `sync` record, not
+  as a structured state dump: a reader already knows how to feed bytes to a
+  terminal, so an engine change stops being a wire change. The broker is the app
+  runtime and there is nothing new to build -- the ring is
+  `TerminalFlightRecorder` and the cursors are `PaneTapeFollowSubscriptions` --
+  so T8 does not depend on T5. The retention bound stays at 8 MiB / 32,768
+  events and reverts to a debugging parameter, because the design invariant is
+  that no stream's ability to reach exact state depends on retention. Plan:
+  [plans/wip/2026-08-12-1500-pane-snapshot-and-tape-resume.md](../../../plans/wip/2026-08-12-1500-pane-snapshot-and-tape-resume.md).
 - **T9 TODO** -- Reconnect behavior on the phone against the T5 bridge and the
   T8 protocol: airplane-mode toggles, backgrounding, cold relaunch. Record what
   each recovery actually required in a finding.
@@ -296,17 +306,57 @@ Provisional shape; every leg has a gate in the ledger.
   can graduate into supported code and Mac-to-Mac attach becomes a product
   capability.
 - **T14 TODO** -- Extend `scripts/core-purity-lint.sh` into a platform-layering
-  lint once iOS pins exist, so boundary violations fail at the seam.
-- **T16 TODO** -- Separate the host-only half of `DanTermSupport` from the
-  portable half, so the module a client links carries no Mac-host role. F1
-  fixed the boundary at file granularity: `CLIPathInstaller` and `DoctorProber`
-  are the only two files that fail to compile, and `ControlSocketListener`,
-  `RecoveryStore`, `CheckpointWriter`, `DanTermConfigPaths`, and
-  `FontAvailability` compile while meaning something different on a phone.
-  Settle at the same time what access level the client needs, since the module
-  exports nothing today: every declaration is `internal` except three `package`
-  ones in `DoctorProber.swift`. Landing the iOS platform pins is part of this
-  task, not of T1.
+  lint once iOS pins exist, so boundary violations fail at the seam. T16 stated
+  the invariant to enforce: *a package that declares `.iOS` in `platforms:` has
+  every one of its targets build for the iOS device triple.* The package is the
+  unit of the platform claim, which is exactly why the pin was dishonest. T16
+  rejected the alternative of an allowlist of exempt targets, because that makes
+  the pin mean "iOS, except where a list says otherwise", which is the unchecked
+  claim F1 declined to land. Open: whether the gate is a full cross-compile or a
+  cheaper static check backed by a periodic build.
+- **T16 DONE as investigation** -- The task asked to separate the host-only half
+  of `DanTermSupport` from the portable half. There is no portable half to
+  separate. Of the ten files that compile for iOS, four are the *producer* end
+  of the control socket (`ControlSocketListener` binds it, `IpcConnection`
+  writes server responses and notifications, `PaneTapeFollow` tracks what the
+  server owes a subscriber, `PaneTapeRecords` builds the records a server
+  emits), and four more name the Mac's own filesystem and session
+  (`RecoveryStore`, `CheckpointWriter`, `InstancePaths`, `DanTermConfigPaths`).
+  Only `Debouncer` and `FontAvailability` carry no Mac-specific meaning, and
+  both are under 80 lines. A client that linked the "portable half" would import
+  it and call nothing. F1 fixed a *compile* boundary, and this task established
+  that a compile boundary is not a role boundary. The work T16 was reaching for
+  is T17. Plan:
+  [plans/wip/2026-08-12-2225-host-layer-and-the-missing-client-module.md](../../../plans/wip/2026-08-12-2225-host-layer-and-the-missing-client-module.md).
+- **T17 TODO** -- Create the client end of the control socket, which exists
+  nowhere and is written three times: `cli/main.swift` (connect, framed read and
+  write, hello), `cli/PaneTapeStream.swift` (a second copy), and the T4 spike (a
+  third, about 85 lines). The pane-tape record shape has a producer and no
+  reader -- the vocabulary is public in `DanTermProtocol`, but `kind`,
+  `sequence`, and `byteOffset` are spelled out inside each reader separately,
+  which is the direct reason T2's spike had to drive a local `Terminal` with
+  literal bytes. Scope: a transport seam, the framed request/reply/notification
+  loop over the existing `IpcLineFramer`, the hello handshake, and a tape record
+  decoder. Rewire `cli/` onto it as the first consumer so `just test` gates it
+  rather than it shipping untested. The module is `public` by construction, and
+  `DanTermSupport` gains zero annotations -- the symlink doc's annotation-tax
+  objection is about `DanTermCore`'s field-bearing model structs and does not
+  transfer to a handful of behavioral types designed as an API. A candidate
+  module already builds for macOS and both iOS triples with `DanTermProtocol`
+  as its only dependency, referencing nothing in `DanTermSupport`
+  ([t16-probe.sh](t16-probe.sh)). `DanTermSupport` itself stays whole, is named
+  the Mac host's side-effect layer, and gets no iOS pin.
+- **T18 TODO** -- Land F2's font seam and the iOS platform pins that F1 and T16
+  deferred. The seam is a `PlatformFont` typealias behind
+  `#if canImport(AppKit)`, one import block and one call site, after which
+  `TerminalRenderExecution` builds for macOS and both iOS triples. The pin
+  question then has a precise answer: a package-level iOS pin on
+  `lib/TerminalCore` is false for exactly two of its roughly 26 targets,
+  `GlyphPreview` (no AppKit on iOS) and `TerminalMemoryProbe` (no `Process`).
+  Every other target builds for the device triple, including
+  `TerminalDrawBenchmarkSupport`. So the honest pin costs moving host-only
+  tooling out of the engine package, not a port. `lib/DanTermProtocol` is a
+  single portable target and its pin is honest as-is.
 
 ### Phase 6 -- push notifications and quick replies (after milestone 1)
 

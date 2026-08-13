@@ -81,6 +81,15 @@ the linked file carries the evidence.
 - Inference: the portability boundary in `DanTermSupport` runs between files,
   not through them. Two files are the whole failure, and both are Mac-host
   roles a phone client would never call.
+
+  **Corrected by T16.** That inference is true as a compile result and
+  misleading as a boundary, and the difference sent T16 looking for a file move
+  that does not exist. Compiling for iOS is not the same as having a role a
+  client would call: eight of the ten files that compile are either the producer
+  end of the control socket or names for the Mac's own filesystem and session.
+  "Portable" in this tree has always meant "not AppKit", never "not a Mac".
+  There is no client half of `DanTermSupport` to separate out; the client end of
+  the conversation is a module that does not exist yet, which is now T17.
 - Competing interpretations: a compile is not a run. Several modules compile on
   iOS while carrying Mac-shaped runtime assumptions that only fail in use --
   `NSHomeDirectory()` in `DanTermCore` (`CoreEnvironment.swift`, `Model.swift`,
