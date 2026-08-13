@@ -372,89 +372,62 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         return (unappliedTabIds, unappliedGroupIds)
     }
 
-    /// Apply one ordered op, keeping the dataSource backing store (rootItems / childItems
-    /// / item caches) in lockstep with the NSOutlineView mutation -- update the array,
-    /// then issue the matching insert/remove with the same index (the contract for the
-    /// animated row methods). Indices are relative to the running state (the op list is a
-    /// sequential script). In single-group mode tabs are root rows (parent nil); in
-    /// multi-group mode they are children of their group item.
+    /// Apply one ordered op by obeying the outline mutation accepted by the store.
     private func applyRowOp(
         _ op: SidebarRowOp,
         projection: SidebarProjection,
         unappliedTabIds: inout Set<TabId>,
         unappliedGroupIds: inout Set<GroupId>
     ) {
-        switch op {
-        case .reloadAll:
-            rebuildAllRows(projection: projection)
+        switch store.apply(op, projection: projection) {
+        case .none:
+            return
 
-        case .insertGroup(let id, let index):
-            guard store.apply(op, projection: projection),
-                  let item = groupItemCache[id],
-                  let group = projection.group(id)
-            else { return }
-            outlineView.insertItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
-            // Inserts default expanded; match the projection (a setGroupCollapsed op may
-            // also follow for a collapsed insert -- idempotent).
-            if group.isCollapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
+        case .reloadAll(let collapseStates):
+            rebuildAllRows(groupCollapseStates: collapseStates)
 
-        case .removeGroup(let index):
-            guard store.apply(op, projection: projection) else { return }
-            outlineView.removeItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
-
-        case .reloadGroup(let id):
-            _ = store.apply(op, projection: projection)
-            if updateGroupRow(groupId: id, projection: projection) {
-                unappliedGroupIds.insert(id)
+        case .insert(_, let index, let parent, let collapseState):
+            outlineView.insertItems(
+                at: IndexSet(integer: index),
+                inParent: parent,
+                withAnimation: [])
+            if let collapseState {
+                if collapseState.collapsed {
+                    outlineView.collapseItem(collapseState.item)
+                } else {
+                    outlineView.expandItem(collapseState.item)
+                }
             }
 
-        case .setGroupCollapsed(let id, let collapsed):
-            _ = store.apply(op, projection: projection)
-            guard let item = groupItemCache[id] else { return }
+        case .remove(_, let index, let parent):
+            outlineView.removeItems(
+                at: IndexSet(integer: index),
+                inParent: parent,
+                withAnimation: [])
+
+        case .setGroupCollapsed(let item, let collapsed):
             if collapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
             applyGroupCollapseState(for: item, collapsed: collapsed)
 
-        case .insertTab(_, let groupId, let index):
-            guard store.apply(op, projection: projection) else { return }
-            if isSingleGroupMode {
-                outlineView.insertItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
-            } else {
-                guard let parent = groupItemCache[groupId] else { return }
-                outlineView.insertItems(at: IndexSet(integer: index), inParent: parent, withAnimation: [])
-            }
-
-        case .removeTab(let groupId, let index):
-            guard store.apply(op, projection: projection) else { return }
-            if isSingleGroupMode {
-                outlineView.removeItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
-            } else {
-                guard let parent = groupItemCache[groupId] else { return }
-                outlineView.removeItems(at: IndexSet(integer: index), inParent: parent, withAnimation: [])
-            }
-
-        case .reloadTab(let id):
-            _ = store.apply(op, projection: projection)
-            if updateTabRow(tabId: id, projection: projection) {
-                unappliedTabIds.insert(id)
+        case .repaint(let item):
+            switch item.kind {
+            case .tab(let tab):
+                if updateTabRow(item) { unappliedTabIds.insert(tab.id) }
+            case .group(let group):
+                if updateGroupRow(item) { unappliedGroupIds.insert(group.id) }
             }
         }
     }
 
-    /// reloadAll executor: rebuild the backing item lists and reloadData (first reconcile
-    /// and single<->multi group-mode flips). Selection is restored by the caller after.
-    private func rebuildAllRows(projection: SidebarProjection) {
-        store.apply(.reloadAll, projection: projection)
+    /// Reload the rebuilt store and restore the group states it returned.
+    private func rebuildAllRows(groupCollapseStates: [SidebarGroupCollapseState]) {
         outlineView.reloadData()
-        restoreCollapseState(projection: projection)
-    }
-
-    /// Re-apply each group's expanded/collapsed state after a full reloadData (which
-    /// resets expansion). No-op in single-group mode (tabs are roots, no group rows).
-    private func restoreCollapseState(projection: SidebarProjection) {
-        guard !isSingleGroupMode else { return }
-        for group in projection.groups {
-            guard let item = groupItemCache[group.id] else { continue }
-            if group.isCollapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
+        for state in groupCollapseStates {
+            if state.collapsed {
+                outlineView.collapseItem(state.item)
+            } else {
+                outlineView.expandItem(state.item)
+            }
         }
     }
 
@@ -568,11 +541,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 endActiveRename(target)
                 switch target {
                 case .tab(let id):
-                    if updateTabRow(tabId: id, projection: projection) {
+                    if let item = store.updateTabItem(tabId: id, projection: projection),
+                       updateTabRow(item) {
                         unappliedTabIds.insert(id)
                     }
                 case .group(let id):
-                    if updateGroupRow(groupId: id, projection: projection) {
+                    if let item = store.updateGroupItem(groupId: id, projection: projection),
+                       updateGroupRow(item) {
                         unappliedGroupIds.insert(id)
                     }
                 }
@@ -619,13 +594,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// Mutate an existing tab cell's subviews in place. Returns true only when an
     /// on-screen row could not fetch its cell, so the caller should retain the old
     /// projection and retry the reload in a later reconcile pass.
-    func updateTabRow(tabId: TabId, projection: SidebarProjection) -> Bool {
-        guard let item = store.updateTabItem(tabId: tabId, projection: projection) else { return false }
+    func updateTabRow(_ item: SidebarItem) -> Bool {
+        guard case .tab(let tab) = item.kind else { return false }
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return false }
         let isVisible = outlineView.visibleRect.intersects(outlineView.rect(ofRow: row))
 #if DANTERM_UI_TEST
-        if testForceNextNilCellTabIds.remove(tabId) != nil {
+        if testForceNextNilCellTabIds.remove(tab.id) != nil {
             return isVisible
         }
 #endif
@@ -633,7 +608,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             atColumn: 0, row: row,
             makeIfNecessary: false) as? SidebarTabCellView
         else { return isVisible }
-        guard case .tab(let tab) = item.kind else { return false }
         let isEditing = cell.titleField.currentEditor() != nil
         cell.apply(tab, isEditingTitle: isEditing)
         return false
@@ -641,13 +615,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     /// In-place group row update. Returns true only when an on-screen row could
     /// not fetch its cell, so the caller should retain and retry the reload attrs.
-    func updateGroupRow(groupId: GroupId, projection: SidebarProjection) -> Bool {
-        guard let item = store.updateGroupItem(groupId: groupId, projection: projection) else { return false }
+    func updateGroupRow(_ item: SidebarItem) -> Bool {
+        guard case .group(let group) = item.kind else { return false }
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return false }
         let isVisible = outlineView.visibleRect.intersects(outlineView.rect(ofRow: row))
 #if DANTERM_UI_TEST
-        if testForceNextNilCellGroupIds.remove(groupId) != nil {
+        if testForceNextNilCellGroupIds.remove(group.id) != nil {
             return isVisible
         }
 #endif
@@ -655,7 +629,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             atColumn: 0, row: row,
             makeIfNecessary: false) as? SidebarGroupCellView
         else { return isVisible }
-        guard case .group(let group) = item.kind else { return false }
         let isEditing = cell.titleField.currentEditor() != nil
         cell.apply(group, isEditingTitle: isEditing)
         return false

@@ -270,7 +270,7 @@ Pure-layer obligations are Swift Testing in
       `app/SidebarReconcileDriver.swift` and the shared `tests-ui/` helper,
       deletes `ReconcilerCaches.sidebar` and all five test-side pipeline
       copies)
-- [ ] 2. refactor(sidebar): the store returns the outline mutation
+- [x] 2. refactor(sidebar): the store returns the outline mutation
       (D3, D4; I4, I5; PO1 -- rewrites `SidebarItemStore.apply`'s return,
       `applyRowOp`, `updateTabRow` / `updateGroupRow`, and
       `SidebarItemStoreTests`)

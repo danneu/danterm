@@ -25,6 +25,28 @@ class SidebarItem {
     }
 }
 
+// MARK: - SidebarOutlineMutation
+
+/// Pairs a mounted group row with the collapse state AppKit must restore.
+struct SidebarGroupCollapseState {
+    let item: SidebarItem
+    let collapsed: Bool
+}
+
+/// Gives the AppKit bridge the exact outline work accepted by the backing store.
+enum SidebarOutlineMutation {
+    case none
+    case reloadAll(groupCollapseStates: [SidebarGroupCollapseState])
+    case insert(
+        item: SidebarItem,
+        at: Int,
+        inParent: SidebarItem?,
+        groupCollapseState: SidebarGroupCollapseState?)
+    case remove(item: SidebarItem, at: Int, inParent: SidebarItem?)
+    case setGroupCollapsed(item: SidebarItem, collapsed: Bool)
+    case repaint(item: SidebarItem)
+}
+
 // MARK: - SidebarItemStore
 
 /// Owns the sidebar's backing rows and id caches without depending on AppKit.
@@ -41,33 +63,45 @@ struct SidebarItemStore {
         }
     }
 
-    /// Apply one row op to the backing store. The Bool tells the AppKit bridge
-    /// whether the matching structural NSOutlineView mutation should run.
+    /// Apply one row op and return the exact outline mutation the bridge must run.
     @discardableResult
-    mutating func apply(_ op: SidebarRowOp, projection: SidebarProjection) -> Bool {
+    mutating func apply(
+        _ op: SidebarRowOp,
+        projection: SidebarProjection
+    ) -> SidebarOutlineMutation {
         switch op {
         case .reloadAll:
             rebuildAllRows(projection: projection)
-            return true
+            let collapseStates = rootItems.compactMap { item -> SidebarGroupCollapseState? in
+                guard case .group(let group) = item.kind else { return nil }
+                return SidebarGroupCollapseState(item: item, collapsed: group.isCollapsed)
+            }
+            return .reloadAll(groupCollapseStates: collapseStates)
 
         case .insertGroup(let id, let index):
             guard !projection.isSingleGroupMode,
                   let group = projection.group(id),
                   rootItems.indices.contains(index) || index == rootItems.count
-            else { return false }
+            else { return .none }
 
             let item = groupItemCache[id] ?? SidebarItem(id: id.rawValue, kind: .group(group))
             item.kind = .group(group)
             groupItemCache[id] = item
             childItems[id] = group.tabs.map { makeFreshTabItem(for: $0) }
             rootItems.insert(item, at: index)
-            return true
+            return .insert(
+                item: item,
+                at: index,
+                inParent: nil,
+                groupCollapseState: SidebarGroupCollapseState(
+                    item: item,
+                    collapsed: group.isCollapsed))
 
         case .removeGroup(let index):
             guard !projection.isSingleGroupMode,
                   rootItems.indices.contains(index),
                   case .group(let group) = rootItems[index].kind
-            else { return false }
+            else { return .none }
 
             let item = rootItems[index]
             for child in childItems[group.id] ?? [] {
@@ -78,60 +112,76 @@ struct SidebarItemStore {
                 groupItemCache.removeValue(forKey: group.id)
             }
             rootItems.remove(at: index)
-            return true
+            return .remove(item: item, at: index, inParent: nil)
 
         case .reloadGroup(let id):
-            _ = updateGroupItem(groupId: id, projection: projection)
-            return true
+            guard let item = updateGroupItem(groupId: id, projection: projection) else {
+                return .none
+            }
+            return .repaint(item: item)
 
-        case .setGroupCollapsed(let id, _):
-            _ = updateGroupItem(groupId: id, projection: projection)
-            return true
+        case .setGroupCollapsed(let id, let collapsed):
+            guard !projection.isSingleGroupMode,
+                  let group = projection.group(id),
+                  group.isCollapsed == collapsed,
+                  let item = updateGroupItem(groupId: id, projection: projection)
+            else { return .none }
+            return .setGroupCollapsed(item: item, collapsed: collapsed)
 
         case .insertTab(let id, let groupId, let index):
-            guard let tab = projection.tab(id) else { return false }
+            guard let tab = projection.tab(id) else { return .none }
 
             if projection.isSingleGroupMode {
                 guard rootItems.indices.contains(index) || index == rootItems.count else {
-                    return false
+                    return .none
                 }
                 let item = makeFreshTabItem(for: tab)
                 rootItems.insert(item, at: index)
-                return true
+                return .insert(
+                    item: item,
+                    at: index,
+                    inParent: nil,
+                    groupCollapseState: nil)
             } else {
-                guard groupItemCache[groupId] != nil,
+                guard let parent = groupItemCache[groupId],
                       var children = childItems[groupId],
                       children.indices.contains(index) || index == children.count
-                else { return false }
+                else { return .none }
                 let item = makeFreshTabItem(for: tab)
                 children.insert(item, at: index)
                 childItems[groupId] = children
-                return true
+                return .insert(
+                    item: item,
+                    at: index,
+                    inParent: parent,
+                    groupCollapseState: nil)
             }
 
         case .removeTab(let groupId, let index):
             if projection.isSingleGroupMode {
                 guard rootItems.indices.contains(index),
                       case .tab = rootItems[index].kind
-                else { return false }
+                else { return .none }
                 let item = rootItems.remove(at: index)
                 removeCachedTabItemIfCurrent(item)
-                return true
+                return .remove(item: item, at: index, inParent: nil)
             } else {
-                guard groupItemCache[groupId] != nil,
+                guard let parent = groupItemCache[groupId],
                       var children = childItems[groupId],
                       children.indices.contains(index),
                       case .tab = children[index].kind
-                else { return false }
+                else { return .none }
                 let item = children.remove(at: index)
                 childItems[groupId] = children
                 removeCachedTabItemIfCurrent(item)
-                return true
+                return .remove(item: item, at: index, inParent: parent)
             }
 
         case .reloadTab(let id):
-            _ = updateTabItem(tabId: id, projection: projection)
-            return true
+            guard let item = updateTabItem(tabId: id, projection: projection) else {
+                return .none
+            }
+            return .repaint(item: item)
         }
     }
 

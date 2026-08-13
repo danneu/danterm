@@ -1,29 +1,154 @@
-// Swift Testing migration of the legacy `tests/SidebarItemStoreTests.swift`
-// harness suite. Pins SidebarItemStore.apply structural-op preconditions
-// (missing/out-of-range ops return false and do NOT mutate the backing
-// store) and the cache-identity invariants the reconciler relies on: under
-// granular row-op transitions (cross-group move, inserted-group child
-// construction, group removal, intra-group reorder, plain close, topmost
-// close, multi->single mode flip), every displayed tab's cache item
-// remains pointer-identical to its displayed row, removed tabs are evicted
-// from the cache, and the selected survivor stays cached. The
-// assertSidebarStoreCacheInvariant helper's two `guard let ... else { throw }`
-// patterns convert to `try #require` (single-value optionals).
+// Pins the sidebar store's outline-mutation contract and row identity invariants.
 import Foundation
 import Testing
 
 @testable import DanTermCore
 
 @Suite struct SidebarItemStoreTests {
-    @Test("apply contract: missing structural ops skip backing mutations")
-    func applyContractMissingStructuralOpsSkipMutations() {
-        // Intent: structural ops referencing missing groups/tabs return
-        //   false and DO NOT mutate the backing store; non-structural
-        //   ops (reload* / setGroupCollapsed) return true even when the
-        //   id is unknown and still leave the backing structure
-        //   unchanged.
-        // Why it exists: pins the apply contract's precondition checks.
-        // Scenario: spec-first apply contract.
+    @Test("valid row ops return complete outline mutations")
+    func validRowOpsReturnCompleteOutlineMutations() throws {
+        let groupA = GroupId()
+        let groupB = GroupId()
+        let tabA = TabId()
+        let tabB = TabId()
+        var model = sidebarStoreModel([
+            (groupA, "A", [tabA]),
+            (groupB, "B", [tabB]),
+        ], selected: tabA)
+        model.groups[1].isCollapsed = true
+        let projection = desiredSidebar(in: model)
+        var store = SidebarItemStore()
+
+        let reloadAll = store.apply(.reloadAll, projection: projection)
+        guard case .reloadAll(let collapseStates) = reloadAll else {
+            Issue.record("reloadAll should return a full outline reload")
+            return
+        }
+        #expect(collapseStates.count == 2)
+        #expect(collapseStates[0].item === store.groupItemCache[groupA])
+        #expect(!collapseStates[0].collapsed)
+        #expect(collapseStates[1].item === store.groupItemCache[groupB])
+        #expect(collapseStates[1].collapsed)
+
+        model.groups[0].name = "Renamed"
+        model.groups[0].isCollapsed = true
+        model.groups[0].tabs[0].customTitle = "Custom"
+        let updatedProjection = desiredSidebar(in: model)
+
+        let reloadGroup = store.apply(.reloadGroup(id: groupA), projection: updatedProjection)
+        let repaintedGroup = try requireRepaint(reloadGroup)
+        #expect(repaintedGroup === store.groupItemCache[groupA])
+        guard case .group(let updatedGroup) = repaintedGroup.kind else {
+            Issue.record("reloadGroup should return a group item")
+            return
+        }
+        #expect(updatedGroup.name == DisplayLine("Renamed"))
+
+        let setCollapsed = store.apply(
+            .setGroupCollapsed(id: groupA, collapsed: true),
+            projection: updatedProjection)
+        guard case .setGroupCollapsed(let collapsedItem, let collapsed) = setCollapsed else {
+            Issue.record("setGroupCollapsed should return a collapse mutation")
+            return
+        }
+        #expect(collapsedItem === store.groupItemCache[groupA])
+        #expect(collapsed)
+
+        let reloadTab = store.apply(.reloadTab(id: tabA), projection: updatedProjection)
+        let repaintedTab = try requireRepaint(reloadTab)
+        #expect(repaintedTab === store.tabItemCache[tabA])
+        guard case .tab(let updatedTab) = repaintedTab.kind else {
+            Issue.record("reloadTab should return a tab item")
+            return
+        }
+        #expect(updatedTab.hasCustomTitle)
+    }
+
+    @Test("structural row ops return their item parent and running index")
+    func structuralRowOpsReturnItemParentAndIndex() throws {
+        let groupA = GroupId()
+        let groupB = GroupId()
+        let tabA = TabId()
+        let tabB = TabId()
+        let tabC = TabId()
+        let oldModel = sidebarStoreModel([
+            (groupA, "A", [tabA]),
+            (groupB, "B", [tabB]),
+        ], selected: tabA)
+        var store = seedSidebarStore(oldModel)
+
+        var insertedModel = sidebarStoreModel([
+            (groupA, "A", [tabA, tabC]),
+            (groupB, "B", [tabB]),
+        ], selected: tabA)
+        var projection = desiredSidebar(in: insertedModel)
+        let insertTab = store.apply(
+            .insertTab(id: tabC, groupId: groupA, index: 1),
+            projection: projection)
+        let insertedTab = try requireInsert(insertTab, at: 1, parent: store.groupItemCache[groupA])
+        #expect(insertedTab === store.tabItemCache[tabC])
+
+        let removeTab = store.apply(
+            .removeTab(groupId: groupA, index: 0),
+            projection: projection)
+        let removedTab = try requireRemove(removeTab, at: 0, parent: store.groupItemCache[groupA])
+        guard case .tab(let removedTabProjection) = removedTab.kind else {
+            Issue.record("removeTab should return a tab item")
+            return
+        }
+        #expect(removedTabProjection.id == tabA)
+
+        let groupC = GroupId()
+        insertedModel.groups.append(GroupModel(
+            id: groupC,
+            name: "C",
+            isCollapsed: true,
+            tabs: [sidebarStoreTab(TabId())]))
+        projection = desiredSidebar(in: insertedModel)
+        let insertGroup = store.apply(
+            .insertGroup(id: groupC, index: 2),
+            projection: projection)
+        let insertedGroup = try requireInsert(insertGroup, at: 2, parent: nil)
+        #expect(insertedGroup === store.groupItemCache[groupC])
+        guard case .insert(_, _, _, let collapseState) = insertGroup else {
+            Issue.record("insertGroup should return an insert mutation")
+            return
+        }
+        #expect(collapseState?.item === insertedGroup)
+        #expect(collapseState?.collapsed == true)
+
+        let removeGroup = store.apply(.removeGroup(index: 1), projection: projection)
+        let removedGroup = try requireRemove(removeGroup, at: 1, parent: nil)
+        guard case .group(let removedGroupProjection) = removedGroup.kind else {
+            Issue.record("removeGroup should return a group item")
+            return
+        }
+        #expect(removedGroupProjection.id == groupB)
+
+        let singleGroup = GroupId()
+        let singleTabA = TabId()
+        let singleTabB = TabId()
+        let singleOldModel = sidebarStoreModel([
+            (singleGroup, "Single", [singleTabA]),
+        ], selected: singleTabA)
+        var singleStore = seedSidebarStore(singleOldModel)
+        let singleNewModel = sidebarStoreModel([
+            (singleGroup, "Single", [singleTabA, singleTabB]),
+        ], selected: singleTabA)
+        let singleProjection = desiredSidebar(in: singleNewModel)
+
+        let insertRootTab = singleStore.apply(
+            .insertTab(id: singleTabB, groupId: singleGroup, index: 1),
+            projection: singleProjection)
+        _ = try requireInsert(insertRootTab, at: 1, parent: nil)
+        let removeRootTab = singleStore.apply(
+            .removeTab(groupId: singleGroup, index: 0),
+            projection: singleProjection)
+        _ = try requireRemove(removeRootTab, at: 0, parent: nil)
+    }
+
+    @Test("rejected row ops return none without changing the store")
+    func rejectedRowOpsReturnNoneWithoutChangingStore() {
         let groupA = GroupId()
         let groupB = GroupId()
         let tabA = TabId()
@@ -37,37 +162,39 @@ import Testing
 
         let projection = desiredSidebar(in: model)
 
-        let insertGroupResult = store.apply(.insertGroup(id: GroupId(), index: 0), projection: projection)
-        #expect(!insertGroupResult, "missing group insert should return false")
-        #expect(sidebarStoreSnapshot(store) == before, "missing group insert should not mutate")
+        let rejectedOps: [SidebarRowOp] = [
+            .insertGroup(id: GroupId(), index: 0),
+            .insertGroup(id: groupA, index: 99),
+            .insertTab(id: TabId(), groupId: groupA, index: 0),
+            .insertTab(id: tabA, groupId: GroupId(), index: 0),
+            .insertTab(id: tabA, groupId: groupA, index: 99),
+            .removeGroup(index: 99),
+            .removeTab(groupId: GroupId(), index: 0),
+            .removeTab(groupId: groupA, index: 99),
+            .reloadGroup(id: GroupId()),
+            .setGroupCollapsed(id: GroupId(), collapsed: true),
+            .setGroupCollapsed(id: groupA, collapsed: true),
+            .reloadTab(id: TabId()),
+        ]
+        for op in rejectedOps {
+            #expect(isNoOutlineMutation(store.apply(op, projection: projection)))
+            #expect(sidebarStoreSnapshot(store) == before)
+        }
 
-        let insertTabResult = store.apply(.insertTab(id: TabId(), groupId: groupA, index: 0), projection: projection)
-        #expect(!insertTabResult, "missing tab insert should return false")
-        #expect(sidebarStoreSnapshot(store) == before, "missing tab insert should not mutate")
-
-        let insertTabMissingParent = store.apply(.insertTab(id: tabA, groupId: GroupId(), index: 0), projection: projection)
-        #expect(!insertTabMissingParent, "missing parent tab insert should return false")
-        #expect(sidebarStoreSnapshot(store) == before, "missing parent insert should not mutate")
-
-        let removeGroupOOR = store.apply(.removeGroup(index: 99), projection: projection)
-        #expect(!removeGroupOOR, "out-of-range group remove should return false")
-        #expect(sidebarStoreSnapshot(store) == before, "out-of-range group remove should not mutate")
-
-        let removeTabMissingParent = store.apply(.removeTab(groupId: GroupId(), index: 0), projection: projection)
-        #expect(!removeTabMissingParent, "missing parent tab remove should return false")
-        #expect(sidebarStoreSnapshot(store) == before, "missing parent remove should not mutate")
-
-        let removeTabOOR = store.apply(.removeTab(groupId: groupA, index: 99), projection: projection)
-        #expect(!removeTabOOR, "out-of-range tab remove should return false")
-        #expect(sidebarStoreSnapshot(store) == before, "out-of-range tab remove should not mutate")
-
-        let reloadGroup = store.apply(.reloadGroup(id: GroupId()), projection: projection)
-        #expect(reloadGroup, "reloadGroup should return true")
-        let setCollapsed = store.apply(.setGroupCollapsed(id: GroupId(), collapsed: true), projection: projection)
-        #expect(setCollapsed, "setGroupCollapsed should return true")
-        let reloadTab = store.apply(.reloadTab(id: TabId()), projection: projection)
-        #expect(reloadTab, "reloadTab should return true")
-        #expect(sidebarStoreSnapshot(store) == before, "non-structural ops should not mutate backing structure")
+        let singleModel = sidebarStoreModel([
+            (groupA, "A", [tabA]),
+        ], selected: tabA)
+        let singleProjection = desiredSidebar(in: singleModel)
+        var singleStore = seedSidebarStore(singleModel)
+        let singleBefore = sidebarStoreSnapshot(singleStore)
+        let wrongModeOps: [SidebarRowOp] = [
+            .insertGroup(id: groupA, index: 0),
+            .removeGroup(index: 0),
+        ]
+        for op in wrongModeOps {
+            #expect(isNoOutlineMutation(singleStore.apply(op, projection: singleProjection)))
+            #expect(sidebarStoreSnapshot(singleStore) == singleBefore)
+        }
     }
 
     @Test("later group to earlier group move keeps moved tab cache pointed at displayed item")
@@ -298,6 +425,51 @@ private struct SidebarStoreSnapshot: Equatable {
     var childItems: [GroupId: [ObjectIdentifier]]
     var tabItemCache: [TabId: ObjectIdentifier]
     var groupItemCache: [GroupId: ObjectIdentifier]
+}
+
+private func isNoOutlineMutation(_ mutation: SidebarOutlineMutation) -> Bool {
+    if case .none = mutation { return true }
+    return false
+}
+
+private func requireRepaint(_ mutation: SidebarOutlineMutation) throws -> SidebarItem {
+    guard case .repaint(let item) = mutation else {
+        Issue.record("expected a repaint mutation")
+        throw SidebarStoreTestError.unexpectedMutation
+    }
+    return item
+}
+
+private func requireInsert(
+    _ mutation: SidebarOutlineMutation,
+    at expectedIndex: Int,
+    parent expectedParent: SidebarItem?
+) throws -> SidebarItem {
+    guard case .insert(let item, let index, let parent, _) = mutation else {
+        Issue.record("expected an insert mutation")
+        throw SidebarStoreTestError.unexpectedMutation
+    }
+    #expect(index == expectedIndex)
+    #expect(parent === expectedParent)
+    return item
+}
+
+private func requireRemove(
+    _ mutation: SidebarOutlineMutation,
+    at expectedIndex: Int,
+    parent expectedParent: SidebarItem?
+) throws -> SidebarItem {
+    guard case .remove(let item, let index, let parent) = mutation else {
+        Issue.record("expected a remove mutation")
+        throw SidebarStoreTestError.unexpectedMutation
+    }
+    #expect(index == expectedIndex)
+    #expect(parent === expectedParent)
+    return item
+}
+
+private enum SidebarStoreTestError: Error {
+    case unexpectedMutation
 }
 
 private func sidebarStoreSnapshot(_ store: SidebarItemStore) -> SidebarStoreSnapshot {
