@@ -9,6 +9,7 @@ let package = Package(
         .executable(name: "DanTermCLI", targets: ["DanTermCLI"]),
         .executable(name: "DanTermInstanceIdentityTool", targets: ["DanTermInstanceIdentityTool"]),
         .library(name: "DanTermProtocol", targets: ["DanTermProtocol"]),
+        .library(name: "DanTermClient", targets: ["DanTermClient"]),
     ],
     dependencies: [
         .package(path: "lib/TerminalCore"),
@@ -18,6 +19,14 @@ let package = Package(
         .target(
             name: "DanTermProtocol",
             path: "lib/DanTermProtocol/Sources/DanTermProtocol",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
+        .target(
+            name: "DanTermClient",
+            dependencies: ["DanTermProtocol"],
+            path: "lib/DanTermClient/Sources/DanTermClient",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]
@@ -62,7 +71,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "DanTermCLI",
-            dependencies: ["DanTermProtocol", "DanTermSupport"],
+            dependencies: ["DanTermClient", "DanTermProtocol", "DanTermSupport"],
             path: "cli",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
@@ -80,6 +89,25 @@ let package = Package(
             name: "DanTermProtocolTests",
             dependencies: ["DanTermProtocol"],
             path: "lib/DanTermProtocol/Tests/DanTermProtocolTests",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
+        .testTarget(
+            name: "DanTermClientTests",
+            dependencies: ["DanTermClient", "DanTermProtocol"],
+            path: "lib/DanTermClient/Tests/DanTermClientTests",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
+        // Pairs the pane-tape producer, which is a Mac-host role, with the client's
+        // reader. Neither package can host this on its own: the producer is internal to
+        // DanTermSupport, and DanTermClient must not depend on the host layer.
+        .testTarget(
+            name: "DanTermPaneTapeRoundTripTests",
+            dependencies: ["DanTermClient", "DanTermProtocol", "DanTermSupport"],
+            path: "client-tests",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]
