@@ -160,6 +160,57 @@ explanations: connection churn is frequent enough that even resume feels broken
 without server-side buffering (feeds T8's design), or Tailscale's own iOS
 background behavior dominates. T5 and T9 test with a real phone.
 
+### H5 -- the split is decided by derivability, not by a smart/dumb dial
+
+The question this hypothesis answers: how much work belongs on the phone versus
+the Mac, and whether a simpler client would cost less network traffic.
+
+For most remote-UI systems a dumber client means more bytes on the wire, and the
+two are traded against each other. Terminals do not work that way, because the
+byte stream is itself an application-aware delta encoding of screen state. So the
+candidate splits order the same way on fidelity and on cost: a pixel stream is
+the dumbest client and the most traffic, a served `RenderFramePlan` is less (and
+would force the Mac to know the phone's font metrics), a cell diff is less again,
+and the raw byte stream is the least. The day-one-engine direction of D1/D3 is
+therefore not fidelity bought with bandwidth. That argument is independent of the
+fidelity one and belongs in the D3 restatement.
+
+The rule that follows, and the ideal structure the whole question dissolves in,
+is **single-owner replicated state over the terminal's own protocol**: the
+PTY-owning engine on the Mac is the sole authority for terminal state and input
+semantics; the wire is terminal bytes, plus sync-as-bytes (D5), plus the small
+authoritative control surface; the client is a replica that derives everything
+derivable and originates nothing. Under that invariant, what lives where is not a
+dial to tune -- it is decided per item by "derivable from the byte stream or
+not". Replicated: terminal state, scrollback, reflow, render planning,
+rasterization, and local reflow in observe mode. Asked for: geometry (F4 settled
+it as unconditional), the tab and pane list, semantic activity events, and the
+query replies the replica must discard.
+
+Three things this hypothesis does *not* settle, each recorded so it is not read
+as settled:
+
+- **The flood case is a real counterexample to the cost ordering.** Bytes cost
+  what the program emits; a frame-bounded diff costs screen area times frame
+  rate. A pane dumping 50 MB is the case where the byte stream is the expensive
+  encoding, and it is also this product's headline workload -- panes running
+  coding agents. The architecture survives it by skipping rather than by
+  compressing, which is why the repair policy below is load bearing rather than
+  cosmetic. T21 sizes it.
+- **Input encoding contradicts a recorded finding.** F4's payload floor item 5
+  states that a client encodes keystrokes from its own `inputModes`, "which is
+  what a real client must do". The competing position is that the client sends
+  `KeyTokens` and the PTY-owning engine encodes, which removes the race where a
+  program toggles a mode inside the round trip and the phone encodes against dead
+  modes, serializes input order across several writers, and matches D5's deferred
+  input-direction rule. Neither is adopted here; T11 decides and says which of
+  the two it overrules. Note that predictive local echo needs local modes either
+  way, so the sync payload's mode floor stays load bearing under both.
+- **No traffic number in this hypothesis has been measured.** The ordering is
+  structural and stands; the magnitudes do not exist yet. T19, T20, and T21 are
+  the probes, and no wire-format or policy change may cite this section as
+  evidence until they report.
+
 ## Candidate direction, pending evidence
 
 Provisional shape; every leg has a gate in the ledger.
@@ -231,14 +282,27 @@ Provisional shape; every leg has a gate in the ledger.
   the candidates to the real swapchain versus CGImage-per-frame; T3 supplies the
   numbers and the device confirmation.
 - **D3 gate** -- confirm or restate the day-one-engine direction after F1-F4;
-  reopening the rejected text renderer requires these spikes to have failed.
+  reopening the rejected text renderer requires these spikes to have failed. When
+  it is restated, adopt H5's invariant by name -- single-owner replicated state
+  over the terminal's own protocol -- so that later placement questions (who
+  encodes input, who answers queries, who owns geometry, whether the client
+  predicts) are checked against one rule instead of argued one at a time.
 
 ### Phase 2 -- transport, authentication, security
 
 - **T5 RESEARCH** -- Bridge prototype: TCP+TLS listener proxying frames into
   the Unix socket, bound to the tailnet interface; put Tailscale on the phone
   and connect with a scratch client. Record round-trip latency and behavior
-  across a wifi/cell switch in F5.
+  across a wifi/cell switch in F5. Two H5 consequences land here rather than in
+  T8. First, the bridge is where an unbounded per-subscriber buffer can exist at
+  all: the app side already holds a cursor and two booleans per subscription and
+  stores no events, and the ring is the flight recorder, so the invariant to
+  carry across the network is that **the bridge buffers at most one in-flight
+  batch per subscriber**. State it where the bound lives, or it gets enforced in
+  the layer that was never the risk. Second, stream compression at the bridge is
+  architectural and safe to adopt now; a binary tape framing is not, because
+  deflate over JSON envelopes and base64 may erase most of that tax for no
+  protocol change. T19 decides whether any framing work is left.
 - **T6 VETTING** -- Pairing and auth model: compare tailnet-identity-only,
   pinned client certificates, and a pairing token; decide where the method
   allowlist, rate limits, and audit log live. Also weigh the ideal alternative
@@ -248,6 +312,30 @@ Provisional shape; every leg has a gate in the ledger.
   internet-reachable `pane.input` implies, the `NSHomeDirectory` taint in `ls`
   and snapshot payloads (briefing.md sec. 7) now that replies cross machines,
   and what an audit log must capture. Feeds D4.
+- **T19 TODO** -- Measure what the tape stream actually costs on the wire, since
+  H5 asserts an ordering and no magnitude. Capture a follow stream's bytes over a
+  real interactive session against a live slot, raw and deflated, and separate
+  payload from envelope: an 8-byte echo rides inside a base64 payload and a JSON
+  envelope, and the ratio between them decides whether a binary tape framing has
+  anything left to win after compression. Report an interactive session, a build
+  log, and an idle pane. Diagnostic, not benchmark, and labeled so.
+- **T21 TODO** -- Size the flood counterexample H5 names: the byte rate for a
+  pane emitting far faster than a screen can show it, against the bound a
+  frame-coalesced cell diff would have at the same grid and frame rate. This is
+  the one workload where the byte stream is the expensive encoding, and it is the
+  agent-supervision workload, so the number decides how much the repair policy in
+  T20 has to carry. It does not reopen the wire format by itself: a diff wire
+  would have to beat bytes *plus* skipping, not bytes alone.
+- **T22 TODO** -- Subscription scope: a full tape subscription for the pane on
+  screen, and 34/D2 activity transitions for every other pane, so a backgrounded
+  agent costs a few bytes per state change instead of its whole output. This is
+  the one traffic lever that is architectural rather than an encoding tweak, and
+  it survives H5's "no numbers yet" caveat because it changes what is sent rather
+  than how. Its unexamined cost is the pane switch: if each switch splices a
+  fresh sync, and sync carries history with attributes, then flipping between
+  panes is expensive in exactly the way a scrollable pane list invites. Decide
+  whether sync's history component can be lazy or bounded for the
+  interactive-switch case -- T8-adjacent, but not a question D5 answered.
 
 ### Phase 3 -- durable subscriptions and resume
 
@@ -278,6 +366,19 @@ Provisional shape; every leg has a gate in the ledger.
   events and reverts to a debugging parameter, because the design invariant is
   that no stream's ability to reach exact state depends on retention. Plan:
   [plans/wip/2026-08-12-1500-pane-snapshot-and-tape-resume.md](../../../plans/wip/2026-08-12-1500-pane-snapshot-and-tape-resume.md).
+- **T20 TODO** -- Measure a sync payload against the backlog it would replace,
+  across three panes: quiet with deep history, freshly started, and flooding.
+  This decides two things H5 left open, and both currently rest on an unchecked
+  assumption that sync is cheap. First, whether a reconnecting client should ever
+  prefer sync to a reconstructible backlog: D5 already injects sync exactly when
+  the requested position is unreachable, and because sync carries the primary
+  screen's history with attributes, a preference rule would resend a whole
+  scrollback to avoid replaying a few bytes on a quiet pane. Second, the repair
+  policy for a subscriber that cannot keep up on a slow link -- drop it forward
+  to a fresh sync, or deliver a gap record and let it hold stale-but-bounded
+  state until the flood ends and then sync once. Under sustained flood the first
+  can thrash, on exactly the deep-history pane where sync is largest. Sizes
+  decide it; the buffering bound itself is not in question and belongs to T5.
 - **T9 TODO** -- Reconnect behavior on the phone against the T5 bridge and the
   T8 protocol: airplane-mode toggles, backgrounding, cold relaunch. Record what
   each recovery actually required in a finding.
@@ -295,7 +396,13 @@ Provisional shape; every leg has a gate in the ledger.
   client's size enters the stream as a normal resize event. Records D6.
 - **T11 TODO** -- Input surface: map an iOS keyboard plus an accessory key row
   (Esc, Ctrl, Tab, arrows, pipe, tilde, slash) onto `pane.input`/`KeyTokens`;
-  itemize what the token grammar cannot express today.
+  itemize what the token grammar cannot express today. Also decide who encodes,
+  which H5 opened as a live contradiction: F4's payload floor says the client
+  encodes from its own `inputModes`, and the competing position is that the
+  client sends tokens and the PTY-owning engine encodes. Traffic does not
+  separate them -- a keystroke is a keystroke either way -- so decide it on the
+  mode race, on input ordering across several writers, and on D5's deferred
+  input-direction rule, then say explicitly which position is overruled.
 
 ### Phase 5 -- codebase refactors the client justifies
 
@@ -371,6 +478,20 @@ misrepresenting wide characters, colors, and mouse-mode programs the whole
 time. Reopen only if Phase 1 shows the engine stack cannot reasonably build or
 present on iOS (D3 gate).
 
+### A fixed server-side coalescing window on the tape stream
+
+Proposed under H5 as a traffic lever: hold appended events for one frame
+(16-30ms) so an interactive echo cannot ride alone inside its envelope. Rejected
+on inspection, for two reasons. Coalescing already exists and is paced by
+backpressure rather than by a clock: `PaneTapeFollowSubscriptions` keeps one
+batch in flight per stream and merges every append edge behind it into a single
+next fetch, so batches grow by themselves exactly when the link is slow. A fixed
+window on top of that adds latency to the most latency-sensitive traffic on the
+phone -- the echo of the user's own keystroke -- to save bytes on the traffic
+that already self-coalesces. Reopen only with T19 numbers plus an energy result
+showing the radio cost of a trickle outweighs the added latency, which is the
+tension recorded under open questions.
+
 ### Todo surface on iOS
 
 Scoped out by the user (D1). The `todo.*` methods stay server-side; the client
@@ -398,7 +519,21 @@ issues `pane.split`. Reopen on user request only.
   the choice when it first matters (push entitlements).
 - **Battery.** A live tape stream driving a full engine plus rendering is
   unmeasured on the phone; T3 collects first energy notes, but a real answer
-  needs a session-length measurement.
+  needs a session-length measurement. Frame the model correctly when it runs:
+  feed is per byte, but rendering is per frame under `CADisplayLink` and is
+  bounded at display rate however fast the bytes arrive, so the cost is not
+  "engine plus rendering per byte". The unresolved part is a genuine tension
+  rather than a missing number -- the radio prefers fewer, larger transfers,
+  which argues for coalescing, and interactive latency argues against it. Do not
+  pick a window before T3 and T9 measure both sides.
+- **Latency is the phone's dominant variable, and no task owns it.** Bandwidth
+  over a tailnet is nearly free; the round trip on cell is not, so every traffic
+  lever should be scored against latency and not only against bytes. The replica
+  engine also makes mosh-style predictive local echo reachable later -- the
+  client has a real terminal, so it can apply its own keystrokes speculatively
+  and reconcile against the authoritative stream. That is not milestone-1 work
+  under D1, but it is an option the day-one-engine direction keeps open, and it
+  is a further argument at the D3 gate.
 - **Fonts.** `monospacedSystemFont` exists on iOS, but parity for the user's
   configured font (Nerd Font glyphs, ligature behavior) on the phone is
   unexamined.
