@@ -208,5 +208,11 @@ app-tests automatically); targeted iteration via
 
 - [x] 1. test(app): prove pane hosts construct headlessly
 - [x] 2. refactor(app): inject ambient-effect ports into the command interpreter
-- [ ] 3. test(app): cover session and scheduling command dispatch
+- [x] 3. test(app): cover session and scheduling command dispatch
 - [ ] 4. test(app): cover IPC dispatch, re-entry, and command ordering
+
+## Implementation notes
+
+- The export-destination port accepts an optional window. Headless app tests cannot
+  construct `NSWindow`; the live port treats `nil` as cancellation, which preserves
+  the no-window behavior while letting the real export writer run under `swift test`.

@@ -986,7 +986,6 @@ class AppRuntime {
                 scrollbackReads: captureScrollbackReads(keeping: .checkpoint),
                 retention: .checkpoint
             )
-            guard let window = window else { return }
             let exportWriter = exportWriter
             let presentAlert = ports.presentAlert
             ports.selectExportDestination(window) { url in

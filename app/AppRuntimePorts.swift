@@ -9,7 +9,7 @@ struct AppRuntimePorts {
     var createTerminalSession: @MainActor (TerminalSessionRequest) -> (any TerminalSession)?
     var deliverNotification: @MainActor (UNNotificationRequest) -> Void
     var selectExportDestination: @MainActor (
-        NSWindow,
+        NSWindow?,
         @escaping @MainActor (URL?) -> Void
     ) -> Void
     var presentAlert: @MainActor (_ title: String, _ message: String) -> Void
@@ -31,6 +31,10 @@ struct AppRuntimePorts {
                 )
             },
             selectExportDestination: { window, completion in
+                guard let window else {
+                    completion(nil)
+                    return
+                }
                 let panel = NSSavePanel()
                 panel.nameFieldStringValue = "danterm-state.json"
                 panel.allowedContentTypes = [.json]
