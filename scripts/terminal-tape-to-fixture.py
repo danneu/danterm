@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Scrub a live-pane terminal tape into a neutral replay fixture.
 
-A tape is normally the JSON document printed by `danterm pane tape --pane ID`.
-It already uses the neutral recording schema, including real PTY chunk boundaries
-and resize ordering, so this script only scrubs the byte payloads it carries in
-either direction, verifies that local identifiers are gone, and marks the result
-as fixture-ready DanTerm evidence. The two accepted inputs are a complete
-snapshot JSON document from `pane tape`
-and an incremental, unwrapped JSONL stream from `pane tape --follow`. The stream
-may end at EOF without an `end` record after an app crash. JSON-RPC envelopes,
-legacy bare-event JSONL, gaps, and snapshots that report dropped events are not
-fixture evidence and are refused unconditionally.
+A tape is the version 2 JSON Lines stream printed by `danterm pane tape --pane
+ID`, with or without `--follow`. Its events already use the neutral recording
+schema, including real PTY chunk boundaries and resize ordering, so this script
+only scrubs the byte payloads they carry in either direction, verifies that local
+identifiers are gone, and marks the result as fixture-ready DanTerm evidence.
 
-    scripts/terminal-tape-to-fixture.py /tmp/tape.json \\
+The stream must be exact replay evidence. A `--format inspect` stream, a stream
+that reports a `gap`, a JSON-RPC envelope, and any older capture format are
+refused unconditionally. So is a record whose sequence or byte offset does not
+continue the stream, because a fixture is only evidence if it is the whole run of
+bytes the pane saw. A finite capture must carry its `end` record; a `--follow`
+capture may stop at EOF, because that is what surviving an app crash looks like.
+
+    scripts/terminal-tape-to-fixture.py /tmp/tape.jsonl \\
         lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json
 
 The summary this prints (event count, resize count, resize geometries) helps
@@ -73,110 +75,184 @@ def local_identifiers() -> list:
     return sorted((c.encode() for c in candidates if len(c) > 2), key=len, reverse=True)
 
 
+STREAM_VERSION = 2
+START_KEYS = {"kind", "version", "capture", "format", "provenance", "initial", "cursor"}
+CURSOR_KEYS = {"sequence", "feedByteOffset", "writeByteOffset"}
+EVENT_KEYS = {"kind", "sequence", "elapsedNanoseconds", "event"}
+EVENT_OPTIONAL_KEYS = {"originElapsedNanoseconds", "byteOffset", "byteLength"}
+# A finite capture always states its own end, so a missing one means the records stop
+# somewhere the producer never chose. A follow capture legitimately stops at EOF.
+END_REASONS = {"snapshot": {"snapshot-complete"}, "follow": {"pane-closed", "stream-failed"}}
+
+
 def load_tape(path: str):
-    """Loads a complete live-capture snapshot or an ordered follow stream."""
+    """Loads one version 2 pane-tape replay stream as a flat neutral recording."""
     with open(path, encoding="utf-8") as handle:
         contents = handle.read()
-    try:
-        document = json.loads(contents)
-    except json.JSONDecodeError:
-        document = None
-
-    if isinstance(document, dict) and all(
-        key in document for key in ("version", "provenance", "initial", "events")
-    ):
-        provenance = document.get("provenance")
-        if not isinstance(provenance, dict) or provenance.get("source") != "danterm-live-capture":
-            raise ValueError("recording is not a raw DanTerm live capture")
-        events = document.get("events")
-        if not isinstance(events, list):
-            raise ValueError("invalid snapshot events")
-        for event in events:
-            validate_event(event)
-        return document, document.get("truncation")
-
-    try:
-        lines = [json.loads(line) for line in contents.splitlines() if line.strip()]
-    except json.JSONDecodeError as error:
-        raise ValueError(f"invalid tape JSON: {error.msg}") from error
-    if lines and isinstance(lines[0], dict) and lines[0].get("kind") == "start":
-        return load_follow_stream(lines), None
-    raise ValueError("recording is neither a snapshot nor a follow stream")
+    return load_replay_stream(parse_records(contents))
 
 
-def load_follow_stream(records: list):
-    """Flatten one ordered pane-tape follow stream into a snapshot-shaped value."""
+def parse_records(contents: str) -> list:
+    """Reads the file as JSON Lines, naming the one older shape that is not."""
+    lines = [line for line in contents.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("recording is empty")
+    records = []
+    for number, line in enumerate(lines, start=1):
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError as error:
+            raise ValueError(f"line {number} is not one JSON record: {error.msg}") from error
+    if len(records) == 1 and isinstance(records[0], dict) and "kind" not in records[0]:
+        raise ValueError("recording is a single JSON document, not a pane-tape stream")
+    return records
+
+
+def load_replay_stream(records: list):
+    """Flattens one ordered pane-tape stream into a neutral recording, or refuses it.
+
+    Every check here answers the same question: are these records the whole run of bytes
+    the pane saw, stated by a producer that could still speak? Order, sequence, per-
+    direction byte position, and the terminator all bear on it, so none of them is
+    cosmetic and none of them has an override.
+    """
     start = records[0]
-    if set(start) != {"kind", "version", "provenance", "initial"}:
-        raise ValueError("invalid follow start record")
-    if isinstance(start["version"], bool) or start["version"] != 1:
-        raise ValueError("unsupported follow stream version")
+    if not isinstance(start, dict) or start.get("kind") != "start":
+        raise ValueError("recording does not begin with a start record")
+    version = start.get("version")
+    if isinstance(version, bool) or version != STREAM_VERSION:
+        raise ValueError(f"unsupported pane-tape stream version: {version!r}")
+    if set(start) != START_KEYS:
+        raise ValueError("invalid start record")
+    capture = start["capture"]
+    if capture not in END_REASONS:
+        raise ValueError(f"invalid capture mode: {capture!r}")
+    stream_format = start["format"]
+    if stream_format == "inspect":
+        raise ValueError("an inspect stream is a derived view, not replay evidence")
+    if stream_format != "replay":
+        raise ValueError(f"invalid stream format: {stream_format!r}")
     provenance = start["provenance"]
     if not isinstance(provenance, dict) or provenance.get("source") != "danterm-live-capture":
         raise ValueError("recording is not a raw DanTerm live capture")
     initial = start["initial"]
-    if not isinstance(initial, dict) or set(initial) != {"columns", "rows"}:
-        raise ValueError("invalid follow start geometry")
+    if (
+        not isinstance(initial, dict)
+        or set(initial) != {"columns", "rows"}
+        or not all(integer(initial[key]) for key in initial)
+    ):
+        raise ValueError("invalid start geometry")
+    cursor = start["cursor"]
+    if (
+        not isinstance(cursor, dict)
+        or set(cursor) != CURSOR_KEYS
+        or not all(nonnegative_integer(cursor[key]) for key in cursor)
+    ):
+        raise ValueError("invalid start cursor")
 
     events = []
-    previous_sequence = None
+    expected_sequence = cursor["sequence"]
+    # The start cursor is the baseline each direction's first offset must match, so a
+    # capture that begins past the beginning is still checked against a stated origin.
+    offsets = {"feed": cursor["feedByteOffset"], "write": cursor["writeByteOffset"]}
     ended = False
     for record in records[1:]:
         if not isinstance(record, dict) or not isinstance(record.get("kind"), str):
-            raise ValueError("invalid follow stream record")
+            raise ValueError("invalid stream record")
         if ended:
-            raise ValueError("follow stream contains a record after end")
+            raise ValueError("stream contains a record after end")
         kind = record["kind"]
         if kind == "gap":
-            raise ValueError("follow stream dropped events")
+            raise ValueError("stream reports dropped events")
+        if kind == "start":
+            raise ValueError("stream contains a second start record")
         if kind == "end":
-            if (
-                set(record) not in ({"kind"}, {"kind", "reason"})
-                or ("reason" in record and not isinstance(record["reason"], str))
-            ):
-                raise ValueError("invalid follow end record")
+            validate_end(record, capture)
             ended = True
             continue
-        required = {"kind", "sequence", "elapsedNanoseconds", "event"}
-        if kind != "event" or not required <= set(record) <= (
-            required | {"originElapsedNanoseconds"}
-        ):
-            raise ValueError("invalid follow stream order")
+        if kind != "event":
+            raise ValueError(f"unsupported stream record: {kind}")
+        events.append(read_event(record, expected_sequence, offsets))
+        expected_sequence += 1
 
-        sequence = record["sequence"]
-        elapsed = record["elapsedNanoseconds"]
-        event = record["event"]
-        if (
-            isinstance(sequence, bool)
-            or not isinstance(sequence, int)
-            or sequence < 0
-            or not nonnegative_integer(elapsed)
-            or not isinstance(event, dict)
-            or not isinstance(event.get("type"), str)
-            or "elapsedNanoseconds" in event
-            or "originElapsedNanoseconds" in event
-        ):
-            raise ValueError("invalid follow event record")
-        if previous_sequence is not None and sequence != previous_sequence + 1:
-            raise ValueError("follow stream event sequence is not contiguous")
-        previous_sequence = sequence
-        # The stream hoists both stamps above the event; the snapshot shape carries them
-        # inside it, and validate_event admits an origin on write events alone.
-        flattened = {**event, "elapsedNanoseconds": elapsed}
-        if "originElapsedNanoseconds" in record:
-            origin = record["originElapsedNanoseconds"]
-            if not nonnegative_integer(origin):
-                raise ValueError("invalid follow event record")
-            flattened["originElapsedNanoseconds"] = origin
-        validate_event(flattened)
-        events.append(flattened)
+    if capture == "snapshot" and not ended:
+        raise ValueError("finite capture stops without its end record")
+    return {"initial": initial, "events": events}
 
-    return {
-        "version": start["version"],
-        "provenance": provenance,
-        "initial": initial,
-        "events": events,
-    }
+
+def validate_end(record: dict, capture: str):
+    """Require the terminator the capture that stated it is allowed to end with."""
+    if set(record) != {"kind", "reason"}:
+        raise ValueError("invalid end record")
+    reason = record["reason"]
+    if reason not in END_REASONS[capture]:
+        raise ValueError(f"a {capture} capture cannot end with reason {reason!r}")
+
+
+def read_event(record: dict, expected_sequence: int, offsets: dict) -> dict:
+    """Check one event record against the stream's running position, then flatten it."""
+    if not EVENT_KEYS <= set(record) <= EVENT_KEYS | EVENT_OPTIONAL_KEYS:
+        raise ValueError("invalid event record")
+    sequence = record["sequence"]
+    if not nonnegative_integer(sequence):
+        raise ValueError("invalid event record")
+    if sequence != expected_sequence:
+        raise ValueError(
+            f"event sequence {sequence} does not continue the stream at {expected_sequence}"
+        )
+    elapsed = record["elapsedNanoseconds"]
+    event = record["event"]
+    if (
+        not nonnegative_integer(elapsed)
+        or not isinstance(event, dict)
+        or not isinstance(event.get("type"), str)
+        or "elapsedNanoseconds" in event
+        or "originElapsedNanoseconds" in event
+    ):
+        raise ValueError("invalid event record")
+
+    # The stream hoists both stamps above the event; the neutral shape carries them inside
+    # it, and validate_event admits an origin on write events alone.
+    flattened = {**event, "elapsedNanoseconds": elapsed}
+    if "originElapsedNanoseconds" in record:
+        origin = record["originElapsedNanoseconds"]
+        if not nonnegative_integer(origin):
+            raise ValueError("invalid event record")
+        flattened["originElapsedNanoseconds"] = origin
+    validate_event(flattened)
+    read_payload_position(record, flattened, offsets)
+    return flattened
+
+
+def read_payload_position(record: dict, event: dict, offsets: dict):
+    """Hold each direction's byte offsets to one contiguous run of that direction's bytes.
+
+    Feed and write bytes are numbered apart, so a stream that continued a feed offset from
+    the write total would still look monotonic. Only measuring each direction against its
+    own running total catches a missing event, and only comparing the stated length with
+    the decoded payload catches a payload that was rewritten after it was recorded.
+    """
+    stated = {"byteOffset", "byteLength"} & set(record)
+    direction = event["type"] if event["type"] in offsets else None
+    if direction is None:
+        if stated:
+            raise ValueError(f"a {event['type']} event carries no bytes to place")
+        return
+    if stated != {"byteOffset", "byteLength"}:
+        raise ValueError(f"{direction} event is missing its byte position")
+    offset = record["byteOffset"]
+    length = record["byteLength"]
+    if not nonnegative_integer(offset) or not nonnegative_integer(length):
+        raise ValueError("invalid event byte position")
+    if offset != offsets[direction]:
+        raise ValueError(
+            f"{direction} byteOffset {offset} does not continue that direction "
+            f"at {offsets[direction]}"
+        )
+    _, raw = decode_payload(event)
+    if length != len(raw):
+        raise ValueError(f"{direction} byteLength {length} disagrees with its {len(raw)} bytes")
+    offsets[direction] = offset + length
 
 
 def decode_payload(event: dict):
@@ -315,7 +391,7 @@ def validate_modifiers(event: dict, event_type: str):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tape", help="snapshot JSON or follow JSONL from `danterm pane tape`")
+    parser.add_argument("tape", help="version 2 replay JSONL from `danterm pane tape`")
     parser.add_argument("fixture", help="fixture JSON to write")
     parser.add_argument("--keep-identifiers", action="store_true",
                         help="skip host/home scrubbing (local-only tapes)")
@@ -339,19 +415,9 @@ def main() -> int:
         swaps.append((old.encode(), new.encode()))
 
     try:
-        tape, truncation = load_tape(args.tape)
+        tape = load_tape(args.tape)
     except (OSError, ValueError) as error:
         print(f"{args.tape}: {error}", file=sys.stderr)
-        return 1
-    if truncation and (
-        truncation.get("isTruncated")
-        or truncation.get("droppedEventCount", 0) > 0
-        or truncation.get("droppedPayloadBytes", 0) > 0
-    ):
-        print(
-            f"{args.tape}: tape is truncated and cannot become fixture evidence",
-            file=sys.stderr,
-        )
         return 1
 
     events = tape["events"]
@@ -397,8 +463,6 @@ def main() -> int:
 
     fixture = {"version": 1, "initial": tape["initial"], "events": events,
                "provenance": provenance}
-    if truncation is not None:
-        fixture["truncation"] = truncation
     with open(args.fixture, "w", encoding="utf-8") as handle:
         json.dump(fixture, handle)
         handle.write("\n")

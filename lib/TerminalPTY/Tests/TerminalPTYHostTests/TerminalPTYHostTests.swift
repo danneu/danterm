@@ -666,19 +666,23 @@ struct TerminalPTYHostTests {
         host.send(Array("continue\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(0)))
 
-        let snapshot = host.fencedFlightRecording()
+        let capture = host.fencedFlightRecordingCapture()
+        let snapshot = capture.snapshot
         let fromNow = host.fencedFlightRecordingOriginFromNow()
         let liveSuffix = host.fencedFlightRecording(from: fromNow.cursor)
-        let recording = try JSONDecoder().decode(
-            NeutralTerminalRecording.self,
-            from: snapshot.encodedRecording()
+        // The capture's own halves are the whole replay: birth geometry from the origin, and
+        // the ordered events from the snapshot fenced with it.
+        let recording = NeutralTerminalRecording(
+            provenance: .liveCapture(),
+            initial: capture.origin.initial,
+            events: snapshot.events.map(\.event)
         )
         let resizeIndex = try #require(snapshot.events.firstIndex {
             if case .resize = $0.event { true } else { false }
         })
 
+        #expect(capture.origin.initial == .init(columns: 80, rows: 24))
         #expect(try recording.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
-        #expect(recording.events == snapshot.events.map(\.event))
         // The tape carries the bytes this test typed as well as the child's output, and the
         // replay above is what proves replay ignores them rather than echoing them back in.
         #expect(snapshot.events.contains { writtenBytes($0) != nil })

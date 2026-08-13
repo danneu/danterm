@@ -905,44 +905,18 @@ public final class TerminalPaneSessionController {
         return makeRecording(test: test, events: completedRecordingEvents)
     }
 
-    /// Fences and copies the live recorder state without serializing on the PTY owner queue.
-    public func flightRecordingSnapshot() -> TerminalFlightRecordingSnapshot {
-        host.fencedFlightRecording()
-    }
-
-    /// Fences the recorder suffix and exact loss after a previously delivered cursor.
-    public func flightRecordingSnapshot(
-        from cursor: TerminalFlightRecordingCursor
-    ) -> TerminalFlightRecordingCursorSnapshot {
-        host.fencedFlightRecording(from: cursor)
-    }
-
-    /// Keeps app adapters from importing the recorder host module just to construct a cursor.
-    public func flightRecordingSnapshot(
-        nextSequence: UInt64,
-        payloadBytesBeforeNextSequence: Int
-    ) -> TerminalFlightRecordingCursorSnapshot {
-        flightRecordingSnapshot(from: .init(
-            nextSequence: nextSequence,
-            payloadBytesBeforeNextSequence: payloadBytesBeforeNextSequence
-        ))
+    /// Fences the whole retained tape with its origin, for one finite dump.
+    public func flightRecordingCapture() -> TerminalFlightRecordingCapture {
+        host.fencedFlightRecordingCapture()
     }
 
     /// Arms one append edge without carrying recorder events across the owner boundary.
     public func addFlightRecordingFollowNotice(
         id: UUID,
-        nextSequence: UInt64,
-        payloadBytesBeforeNextSequence: Int,
+        from cursor: TerminalFlightRecordingCursor,
         notify: @escaping @Sendable () -> Void
     ) {
-        host.addFlightRecordingFollowNotice(
-            id: id,
-            from: .init(
-                nextSequence: nextSequence,
-                payloadBytesBeforeNextSequence: payloadBytesBeforeNextSequence
-            ),
-            notify: notify
-        )
+        host.addFlightRecordingFollowNotice(id: id, from: cursor, notify: notify)
     }
 
     /// Removes one append edge before the app releases its subscription state.
@@ -953,15 +927,11 @@ public final class TerminalPaneSessionController {
     /// Fences one followed suffix and rearms that subscriber's next append edge atomically.
     public func flightRecordingFollowSnapshot(
         subscriptionId: UUID,
-        nextSequence: UInt64,
-        payloadBytesBeforeNextSequence: Int
+        from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingCursorSnapshot? {
         host.fencedFlightRecordingFollowSnapshot(
             subscriptionId: subscriptionId,
-            from: .init(
-                nextSequence: nextSequence,
-                payloadBytesBeforeNextSequence: payloadBytesBeforeNextSequence
-            )
+            from: cursor
         )
     }
 

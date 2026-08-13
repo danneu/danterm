@@ -19,16 +19,22 @@ struct PaneTapeFollowEncodingTests {
             let directData = try JSONEncoder().encode(event)
             let direct = try JSONDecoder().decode(JSONValue.self, from: directData)
             let adapted = try paneTapeFollowEventJSON(event)
-            let batch = makePaneTapeFollowBatch(from: .init(
+            let batch = makePaneTapeBatch(from: .init(
                 events: [.init(
                     sequence: 1,
                     elapsedNanoseconds: 2,
                     originElapsedNanoseconds: nil,
+                    payload: .init(byteOffset: 0, byteLength: 2),
                     event: adapted
                 )],
                 droppedEventCount: 0,
-                droppedPayloadBytes: 0,
-                nextCursor: .init(nextSequence: 2, payloadBytesBeforeNextSequence: 2)
+                droppedFeedBytes: 0,
+                droppedWriteBytes: 0,
+                nextCursor: .init(
+                    nextSequence: 2,
+                    feedBytesBeforeNextSequence: 2,
+                    writeBytesBeforeNextSequence: 0
+                )
             ))
 
             #expect(batch.records.first?["event"] == direct)

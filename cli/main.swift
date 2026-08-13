@@ -63,8 +63,14 @@ struct DanTermCLI {
                                       Print each display row's line structure as
                                       JSON: wrap claim, content end, and width.
           pane tape --pane <pane-id> [--follow] [--from-now]
-                                      Print a replayable snapshot, or follow the
-                                      bounded backlog and live events as JSON Lines
+                    [--format replay|inspect]
+                                      Print the pane's flight recording as JSON
+                                      Lines: one start record, then one record per
+                                      event. --follow keeps the stream open for
+                                      live events; --from-now skips the backlog.
+                                      --format inspect replaces each payload with
+                                      readable spans; replay (the default) keeps
+                                      the exact bytes.
           theme set --pane <pane-id> <name>|--clear
                                       Set or clear a pane theme
           agent attach --pane <pane-id> --kind <kind> --id <session-id>
@@ -145,13 +151,11 @@ struct DanTermCLI {
                 fallback: controlSocketPath().path,
                 method: command.request.method
             )
-            if command.method == IpcRequestMethod.paneTape.rawValue, command.params["follow"] == .bool(true) {
+            // Every tape capture is a record stream, finite or followed alike, so none of them
+            // go through the single-result request path below.
+            if case .tapeStream(let format) = command.outputMode {
                 signal(SIGPIPE, SIG_IGN)
-                try requestPaneTapeFollow(
-                    command,
-                    socketPath: socketPath,
-                    environment: environment
-                )
+                try requestPaneTape(command, socketPath: socketPath, format: format)
                 exit(0)
             }
             // A nil reply means the app closed the connection and the method
@@ -198,26 +202,33 @@ struct DanTermCLI {
         }
     }
 
-    private static func requestPaneTapeFollow(
+    /// Renders one tape capture to stdout. The socket carries no receive timeout: a followed
+    /// stream is idle whenever its pane is, and a finite dump's records arrive at the app's
+    /// pace, so a timeout here would cut a healthy capture short.
+    private static func requestPaneTape(
         _ command: CLICommand,
         socketPath: String,
-        environment: [String: String]
+        format: PaneTapeFormat
     ) throws {
         let fd = try connectSocket(path: socketPath, receiveTimeout: false)
         defer { Darwin.close(fd) }
 
         guard let helloLine = try readLine(from: fd) else {
-            return
+            throw CLIError("DanTerm closed the connection")
         }
         try validateHello(helloLine)
 
         let (requestId, request) = makeRequest(command)
         try writeJSON(request, to: fd)
-        _ = try renderPaneTapeFollowStream(
+        let outcome = try renderPaneTapeStream(
             socket: fd,
             output: STDOUT_FILENO,
-            requestId: requestId
+            requestId: requestId,
+            transform: format == .inspect ? paneTapeInspectRecord : { $0 }
         )
+        if let failure = paneTapeStreamFailure(for: outcome) {
+            throw failure
+        }
     }
 
     private static func makeRequest(_ command: CLICommand) -> (id: String, request: JsonRpcRequest) {
@@ -433,6 +444,11 @@ struct DanTermCLI {
                 throw CLIError("malformed response")
             }
             FileHandle.standardOutput.write(Data(text.utf8))
+        case .tapeStream:
+            // A stream is rendered record by record before any single result exists, so
+            // `main` routes it away from here. Stated rather than defaulted, so adding a
+            // mode is a compile error instead of a silent no-op.
+            throw CLIError("pane tape is rendered as a record stream, not a single result")
         }
     }
 

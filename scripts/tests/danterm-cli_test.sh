@@ -15,6 +15,9 @@ launch_output="$(mktemp)"
 launch_error="$(mktemp)"
 smoke_output="$(mktemp)"
 smoke_error="$(mktemp)"
+tape_output="$(mktemp)"
+inspect_output="$(mktemp)"
+tape_fixture="$(mktemp)"
 # Holds socket paths that must never resolve, for the cases asserting the CLI
 # ignores an ambient DANTERM_SOCK.
 unusable_dir="$(mktemp -d)"
@@ -37,7 +40,8 @@ cleanup() {
     local status=$?
     trap - EXIT INT TERM
     release_slot
-    rm -f "$launch_output" "$launch_error" "$smoke_output" "$smoke_error"
+    rm -f "$launch_output" "$launch_error" "$smoke_output" "$smoke_error" \
+        "$tape_output" "$inspect_output" "$tape_fixture"
     rm -rf "$unusable_dir"
     exit "$status"
 }
@@ -279,7 +283,30 @@ fi
 
 printf '%s\n' "$model" | jq .groups >/dev/null
 export DANTERM_PANE="$pane_id"
-slot_cli pane tape --pane "$pane_id" | jq -e '.events' >/dev/null
+# A tape is only worth asserting on once the shell in the pane has produced output, so
+# poll for the first feed event rather than reading a tape that is legitimately empty.
+for _ in $(seq 1 30); do
+    slot_cli pane tape --pane "$pane_id" >"$tape_output"
+    if jq -e -s '[.[] | select(.kind == "event" and .event.type == "feed")] | length > 0' \
+        "$tape_output" >/dev/null; then
+        break
+    fi
+    sleep 1
+done
+jq -e -s '(.[0] | .kind == "start" and .version == 2 and .capture == "snapshot"
+             and .format == "replay")
+    and (last | .kind == "end" and .reason == "snapshot-complete")
+    and ([.[] | select(.kind == "event" and .event.type == "feed")] | length > 0)' \
+    "$tape_output" >/dev/null
+slot_cli pane tape --pane "$pane_id" --format inspect >"$inspect_output"
+jq -e -s '(.[0] | .kind == "start" and .version == 2 and .format == "inspect")
+    and ([.[] | select(.kind == "event" and (.event.spans | type) == "array")] | length > 0)
+    and ([.[] | select(.event.base64 != null)] | length == 0)' \
+    "$inspect_output" >/dev/null
+python3 "$SCRIPT_DIR/scripts/terminal-tape-to-fixture.py" "$tape_output" "$tape_fixture" \
+    --keep-identifiers --test TerminalCliSmokeTests >/dev/null
+jq -e '.version == 1 and .provenance.source == "danterm" and (.events | length) > 0' \
+    "$tape_fixture" >/dev/null
 slot_cli focus | jq -e --arg pane "$pane_id" \
     '. == {"focus": {"type": "terminal", "paneId": $pane}}' >/dev/null
 

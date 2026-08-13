@@ -5,9 +5,70 @@ import DanTermProtocol
 @testable import DanTermSupport
 
 struct PaneTapeFollowTests {
+    @Test("a finite dump ends with its own terminator after its gap and events")
+    func dumpRecordsEndWithSnapshotComplete() {
+        // Intent: everything a finite dump owes after its start record is its loss, then its
+        //   events in order, then an `end` naming a completed snapshot.
+        // Why it exists: a dump's boundary is a fence it already took, so nothing can arrive
+        //   later to extend it. Stopping without that terminator would leave a reader unable
+        //   to tell a whole capture from one the app died partway through, which is exactly
+        //   the difference the CLI turns into a nonzero exit.
+        // Scenario: an agent dumps a busy pane whose oldest events the recorder already evicted.
+        let dump = PaneTapeDump(
+            start: makePaneTapeStart(
+                capture: .snapshot,
+                provenance: .object(["source": .string("danterm-live-capture")]),
+                initial: .init(columns: 80, rows: 24),
+                cursor: .beginning
+            ),
+            snapshot: PaneTapeSnapshot(
+                events: [
+                    PaneTapeEvent(
+                        sequence: 4,
+                        elapsedNanoseconds: 11,
+                        originElapsedNanoseconds: nil,
+                        payload: .init(byteOffset: 6, byteLength: 2),
+                        event: .object(["type": .string("feed")])
+                    ),
+                    PaneTapeEvent(
+                        sequence: 5,
+                        elapsedNanoseconds: 12,
+                        originElapsedNanoseconds: nil,
+                        payload: nil,
+                        event: .object(["type": .string("resize")])
+                    ),
+                ],
+                droppedEventCount: 4,
+                droppedFeedBytes: 6,
+                droppedWriteBytes: 0,
+                nextCursor: .init(
+                    nextSequence: 6,
+                    feedBytesBeforeNextSequence: 8,
+                    writeBytesBeforeNextSequence: 0
+                )
+            )
+        )
+
+        let records = makePaneTapeDumpRecords(after: dump)
+
+        #expect(records.map { $0["kind"] } == [
+            .string("gap"),
+            .string("event"),
+            .string("event"),
+            .string("end"),
+        ])
+        #expect(records.first?["droppedFeedBytes"] == .number(6))
+        #expect(records.dropFirst().compactMap { $0["sequence"] } == [.number(4), .number(5)])
+        #expect(records.last == .object([
+            "kind": .string("end"),
+            "reason": .string("snapshot-complete"),
+        ]))
+    }
+
     @Test("backlog and from-now starts preserve their fenced geometry and cursor")
     func startsPreserveMetadataAndCursor() {
-        let backlog = makePaneTapeFollowStart(
+        let backlog = makePaneTapeStart(
+            capture: .snapshot,
             provenance: .object(["source": .string("danterm-live-capture")]),
             initial: .init(columns: 120, rows: 40),
             cursor: .beginning
@@ -15,20 +76,29 @@ struct PaneTapeFollowTests {
 
         #expect(backlog.record == .object([
             "kind": .string("start"),
-            "version": .number(1),
+            "version": .number(2),
+            "capture": .string("snapshot"),
+            "format": .string("replay"),
             "provenance": .object(["source": .string("danterm-live-capture")]),
             "initial": .object([
                 "columns": .number(120),
                 "rows": .number(40),
             ]),
+            "cursor": .object([
+                "sequence": .number(0),
+                "feedByteOffset": .number(0),
+                "writeByteOffset": .number(0),
+            ]),
         ]))
         #expect(backlog.cursor == .beginning)
 
-        let tailCursor = PaneTapeFollowCursor(
+        let tailCursor = PaneTapeCursor(
             nextSequence: 9,
-            payloadBytesBeforeNextSequence: 42
+            feedBytesBeforeNextSequence: 42,
+            writeBytesBeforeNextSequence: 7
         )
-        let fromNow = makePaneTapeFollowStart(
+        let fromNow = makePaneTapeStart(
+            capture: .follow,
             provenance: .object(["source": .string("danterm-live-capture")]),
             initial: .init(columns: 100, rows: 30),
             cursor: tailCursor
@@ -40,13 +110,113 @@ struct PaneTapeFollowTests {
         #expect(fromNow.cursor == tailCursor)
     }
 
+    @Test("a start record states the stream version, its capture, its format, and its baseline")
+    func startRecordStatesTheStreamContract() {
+        // Intent: every start record declares the version a reader keys its expectations off,
+        //   which of the two captures it opens, that its payloads are the replay form, and the
+        //   exact three-coordinate cursor its later offsets are measured from.
+        // Why it exists: a stream that starts past the beginning -- a tail-only follow, or a
+        //   dump whose head was already evicted -- reports byte offsets that mean nothing
+        //   without their baseline, and a reader cannot demand the right terminator without
+        //   knowing which capture it is reading.
+        let cursor = PaneTapeCursor(
+            nextSequence: 12,
+            feedBytesBeforeNextSequence: 480,
+            writeBytesBeforeNextSequence: 36
+        )
+        let start = makePaneTapeStart(
+            capture: .follow,
+            provenance: .object(["source": .string("danterm-live-capture")]),
+            initial: .init(columns: 100, rows: 30),
+            cursor: cursor
+        )
+
+        #expect(start.record["version"] == .number(2))
+        #expect(start.record["capture"] == .string("follow"))
+        #expect(start.record["format"] == .string("replay"))
+        #expect(start.record["cursor"] == .object([
+            "sequence": .number(12),
+            "feedByteOffset": .number(480),
+            "writeByteOffset": .number(36),
+        ]))
+    }
+
+    @Test("an event record locates its bytes only when it carries any")
+    func eventRecordCarriesItsPayloadSpanOnlyWhenItHasOne() {
+        // Intent: an event that carries bytes reports where they sit in its own direction's
+        //   stream, and an event that carries none reports neither coordinate.
+        // Why it exists: a reader turns an offset back into a position in one direction's
+        //   byte stream. A zero offset on a resize would name a real position in that stream
+        //   which no byte of that event occupies.
+        let batch = makePaneTapeBatch(from: .init(
+            events: [
+                .init(
+                    sequence: 4,
+                    elapsedNanoseconds: 10,
+                    originElapsedNanoseconds: nil,
+                    payload: .init(byteOffset: 96, byteLength: 12),
+                    event: .object(["type": .string("feed"), "base64": .string("SGk=")])
+                ),
+                .init(
+                    sequence: 5,
+                    elapsedNanoseconds: 20,
+                    originElapsedNanoseconds: nil,
+                    payload: nil,
+                    event: .object([
+                        "type": .string("resize"),
+                        "columns": .number(100),
+                        "rows": .number(30),
+                    ])
+                ),
+            ],
+            droppedEventCount: 0,
+            droppedFeedBytes: 0,
+            droppedWriteBytes: 0,
+            nextCursor: .init(
+                nextSequence: 6,
+                feedBytesBeforeNextSequence: 108,
+                writeBytesBeforeNextSequence: 0
+            )
+        ))
+
+        #expect(batch.records.first?["byteOffset"] == .number(96))
+        #expect(batch.records.first?["byteLength"] == .number(12))
+        #expect(batch.records.last?["byteOffset"] == nil)
+        #expect(batch.records.last?["byteLength"] == nil)
+    }
+
+    @Test("each end reason reaches the wire with its own spelling")
+    func endRecordSpellsEveryReason() {
+        // Intent: the three reasons a producer can state are distinct strings on the wire.
+        // Why it exists: a reader holds a snapshot capture to `snapshot-complete` and accepts
+        //   the two follow endings, so two reasons sharing a spelling would let a truncated
+        //   dump pass as a complete one.
+        #expect(makePaneTapeEndRecord(reason: .snapshotComplete) == .object([
+            "kind": .string("end"),
+            "reason": .string("snapshot-complete"),
+        ]))
+        #expect(makePaneTapeEndRecord(reason: .paneClosed) == .object([
+            "kind": .string("end"),
+            "reason": .string("pane-closed"),
+        ]))
+        #expect(makePaneTapeEndRecord(reason: .streamFailed) == .object([
+            "kind": .string("end"),
+            "reason": .string("stream-failed"),
+        ]))
+    }
+
     @Test("empty cursor snapshot emits nothing and leaves the cursor unchanged")
     func emptySnapshotLeavesCursorUnchanged() {
-        let cursor = PaneTapeFollowCursor(nextSequence: 4, payloadBytesBeforeNextSequence: 20)
-        let batch = makePaneTapeFollowBatch(from: .init(
+        let cursor = PaneTapeCursor(
+            nextSequence: 4,
+            feedBytesBeforeNextSequence: 20,
+            writeBytesBeforeNextSequence: 0
+        )
+        let batch = makePaneTapeBatch(from: .init(
             events: [],
             droppedEventCount: 0,
-            droppedPayloadBytes: 0,
+            droppedFeedBytes: 0,
+            droppedWriteBytes: 0,
             nextCursor: cursor
         ))
 
@@ -62,21 +232,41 @@ struct PaneTapeFollowTests {
             "columns": .number(100),
             "rows": .number(30),
         ])
-        let nextCursor = PaneTapeFollowCursor(nextSequence: 9, payloadBytesBeforeNextSequence: 99)
-        let batch = makePaneTapeFollowBatch(from: .init(
+        let nextCursor = PaneTapeCursor(
+            nextSequence: 9,
+            feedBytesBeforeNextSequence: 99,
+            writeBytesBeforeNextSequence: 0
+        )
+        let batch = makePaneTapeBatch(from: .init(
             events: [
-                .init(sequence: 7, elapsedNanoseconds: 10, originElapsedNanoseconds: nil, event: feed),
-                .init(sequence: 8, elapsedNanoseconds: 20, originElapsedNanoseconds: nil, event: resize),
+                .init(
+                    sequence: 7,
+                    elapsedNanoseconds: 10,
+                    originElapsedNanoseconds: nil,
+                    payload: .init(byteOffset: 30, byteLength: 2),
+                    event: feed
+                ),
+                .init(
+                    sequence: 8,
+                    elapsedNanoseconds: 20,
+                    originElapsedNanoseconds: nil,
+                    payload: nil,
+                    event: resize
+                ),
             ],
             droppedEventCount: 7,
-            droppedPayloadBytes: 42,
+            droppedFeedBytes: 30,
+            droppedWriteBytes: 12,
             nextCursor: nextCursor
         ))
 
+        // The two directions stay apart: a summed loss cannot be subtracted from either
+        // stream's offsets, which would leave every byte position after the gap unverifiable.
         #expect(batch.records.first == .object([
             "kind": .string("gap"),
             "droppedEventCount": .number(7),
-            "droppedPayloadBytes": .number(42),
+            "droppedFeedBytes": .number(30),
+            "droppedWriteBytes": .number(12),
         ]))
         #expect(batch.records.dropFirst().map { $0["event"] } == [feed, resize])
         #expect(batch.nextCursor == nextCursor)
@@ -91,14 +281,31 @@ struct PaneTapeFollowTests {
         //   fact from the one the recorder holds.
         let write: JSONValue = .object(["type": .string("write"), "base64": .string("SGk=")])
         let feed: JSONValue = .object(["type": .string("feed"), "base64": .string("SGk=")])
-        let batch = makePaneTapeFollowBatch(from: .init(
+        let batch = makePaneTapeBatch(from: .init(
             events: [
-                .init(sequence: 0, elapsedNanoseconds: 30, originElapsedNanoseconds: 10, event: write),
-                .init(sequence: 1, elapsedNanoseconds: 40, originElapsedNanoseconds: nil, event: feed),
+                .init(
+                    sequence: 0,
+                    elapsedNanoseconds: 30,
+                    originElapsedNanoseconds: 10,
+                    payload: nil,
+                    event: write
+                ),
+                .init(
+                    sequence: 1,
+                    elapsedNanoseconds: 40,
+                    originElapsedNanoseconds: nil,
+                    payload: nil,
+                    event: feed
+                ),
             ],
             droppedEventCount: 0,
-            droppedPayloadBytes: 0,
-            nextCursor: .init(nextSequence: 2, payloadBytesBeforeNextSequence: 4)
+            droppedFeedBytes: 0,
+            droppedWriteBytes: 0,
+            nextCursor: .init(
+                nextSequence: 2,
+                feedBytesBeforeNextSequence: 4,
+                writeBytesBeforeNextSequence: 0
+            )
         ))
 
         #expect(batch.records.first == .object([
@@ -118,8 +325,8 @@ struct PaneTapeFollowTests {
 
     @Test("consecutive cursor batches neither duplicate nor skip a sequence")
     func consecutiveBatchesAreContiguous() {
-        let first = makePaneTapeFollowBatch(from: snapshot(sequences: [0, 1], nextSequence: 2))
-        let second = makePaneTapeFollowBatch(from: snapshot(sequences: [2, 3], nextSequence: 4))
+        let first = makePaneTapeBatch(from: snapshot(sequences: [0, 1], nextSequence: 2))
+        let second = makePaneTapeBatch(from: snapshot(sequences: [2, 3], nextSequence: 4))
 
         #expect((first.records + second.records).compactMap(sequence) == [0, 1, 2, 3])
         #expect(first.nextCursor.nextSequence == 2)
@@ -142,7 +349,7 @@ struct PaneTapeFollowTests {
         #expect(firstFetch.subscriptionId == subscriptionId)
         #expect(subscriptions.eventsAvailable(subscriptionId) == nil)
 
-        let preparedBatch = makePaneTapeFollowBatch(
+        let preparedBatch = makePaneTapeBatch(
             from: snapshot(sequences: [0], nextSequence: 1)
         )
         let finishedBatch = subscriptions.finishFetch(
@@ -235,9 +442,10 @@ struct PaneTapeFollowTests {
             paneId: UUID(),
             cursor: .beginning
         )
-        let siblingCursor = PaneTapeFollowCursor(
+        let siblingCursor = PaneTapeCursor(
             nextSequence: 12,
-            payloadBytesBeforeNextSequence: 480
+            feedBytesBeforeNextSequence: 480,
+            writeBytesBeforeNextSequence: 0
         )
         subscriptions.add(
             id: siblingId,
@@ -246,13 +454,13 @@ struct PaneTapeFollowTests {
             cursor: siblingCursor
         )
 
-        let end = subscriptions.end(retiredId, reason: "stream-failed")
+        let end = subscriptions.end(retiredId, reason: .streamFailed)
         #expect(end?.subscriptionId == retiredId)
         #expect(end?.record == .object([
             "kind": .string("end"),
             "reason": .string("stream-failed"),
         ]))
-        #expect(subscriptions.end(retiredId, reason: "stream-failed") == nil)
+        #expect(subscriptions.end(retiredId, reason: .streamFailed) == nil)
         #expect(subscriptions.eventsAvailable(retiredId) == nil)
 
         let siblingFetch = subscriptions.eventsAvailable(siblingId)
@@ -312,21 +520,24 @@ struct PaneTapeFollowTests {
     private func snapshot(
         sequences: [UInt64],
         nextSequence: UInt64
-    ) -> PaneTapeFollowSnapshot {
-        PaneTapeFollowSnapshot(
+    ) -> PaneTapeSnapshot {
+        PaneTapeSnapshot(
             events: sequences.map {
                 .init(
                     sequence: $0,
                     elapsedNanoseconds: $0 * 10,
                     originElapsedNanoseconds: nil,
+                    payload: .init(byteOffset: Int($0), byteLength: 0),
                     event: .object(["type": .string("feed"), "base64": .string("")])
                 )
             },
             droppedEventCount: 0,
-            droppedPayloadBytes: 0,
+            droppedFeedBytes: 0,
+            droppedWriteBytes: 0,
             nextCursor: .init(
                 nextSequence: nextSequence,
-                payloadBytesBeforeNextSequence: Int(nextSequence)
+                feedBytesBeforeNextSequence: Int(nextSequence),
+                writeBytesBeforeNextSequence: 0
             )
         )
     }

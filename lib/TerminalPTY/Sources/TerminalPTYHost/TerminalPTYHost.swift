@@ -807,9 +807,10 @@ public actor TerminalPTYHost {
         fence(countsAsProduction: false) { owner in owner.terminal }.value
     }
 
-    /// Copies retained event values on the owner queue so dump encoding stays off-actor.
-    package nonisolated func fencedFlightRecording() -> TerminalFlightRecordingSnapshot {
-        fence(countsAsProduction: false) { owner in owner.flightTape.snapshot() }.value
+    /// Copies the whole retained tape and its origin in one owner fence, so a finite dump
+    /// states one atomic moment and its record building stays off-actor.
+    package nonisolated func fencedFlightRecordingCapture() -> TerminalFlightRecordingCapture {
+        fence(countsAsProduction: false) { owner in owner.flightTape.capture() }.value
     }
 
     /// Copies the retained suffix and exact cursor gap in one owner-queue fence.

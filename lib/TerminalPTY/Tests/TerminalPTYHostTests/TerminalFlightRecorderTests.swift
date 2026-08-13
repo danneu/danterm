@@ -82,14 +82,14 @@ struct TerminalFlightRecorderTests {
         recorder.record(.resize(columns: 100, rows: 30))
         recorder.record(.feed([0x43]))
 
-        let snapshot = recorder.snapshot()
+        let snapshot = recorder.capture().snapshot
         #expect(snapshot.events.map(\.event) == [
             .feed([0x41, 0x42]),
             .resize(columns: 100, rows: 30),
             .feed([0x43]),
         ])
         #expect(snapshot.events.map(\.elapsedNanoseconds) == [12, 12, 40])
-        #expect(snapshot.isTruncated == false)
+        #expect(snapshot.droppedEventCount == 0)
     }
 
     @Test("an origin stamp is retained on the recorder's own elapsed scale")
@@ -109,7 +109,7 @@ struct TerminalFlightRecorderTests {
         recorder.record(.write([1, 2]), origin: 120)
         recorder.record(.feed([3]))
 
-        let snapshot = recorder.snapshot()
+        let snapshot = recorder.capture().snapshot
         #expect(snapshot.events.map(\.elapsedNanoseconds) == [40, 50])
         #expect(snapshot.events.map(\.originElapsedNanoseconds) == [20, nil])
     }
@@ -129,7 +129,7 @@ struct TerminalFlightRecorderTests {
 
         recorder.record(.write([1]), origin: 40)
 
-        #expect(recorder.snapshot().events.map(\.originElapsedNanoseconds) == [0])
+        #expect(recorder.capture().snapshot.events.map(\.originElapsedNanoseconds) == [0])
     }
 
     @Test("payload budget evicts the minimal oldest whole-event prefix")
@@ -143,12 +143,10 @@ struct TerminalFlightRecorderTests {
         recorder.record(.feed([1, 2, 3]))
         recorder.record(.feed([4, 5, 6, 7]))
 
-        let snapshot = recorder.snapshot()
+        let snapshot = recorder.capture().snapshot
         #expect(snapshot.events.map(\.event) == [.feed([4, 5, 6, 7])])
-        #expect(snapshot.accountedBytes == 68)
         #expect(snapshot.droppedEventCount == 1)
-        #expect(snapshot.droppedPayloadBytes == 3)
-        #expect(snapshot.isTruncated)
+        #expect(snapshot.droppedFeedBytes == 3)
     }
 
     @Test("bytes written toward the child are charged to the retention budget")
@@ -166,11 +164,10 @@ struct TerminalFlightRecorderTests {
         recorder.record(.write([1, 2, 3]))
         recorder.record(.write([4, 5, 6, 7]))
 
-        let snapshot = recorder.snapshot()
+        let snapshot = recorder.capture().snapshot
         #expect(snapshot.events.map(\.event) == [.write([4, 5, 6, 7])])
-        #expect(snapshot.accountedBytes == 68)
         #expect(snapshot.droppedEventCount == 1)
-        #expect(snapshot.droppedPayloadBytes == 3)
+        #expect(snapshot.droppedWriteBytes == 3)
     }
 
     @Test("per-event overhead bounds many tiny chunks")
@@ -185,11 +182,10 @@ struct TerminalFlightRecorderTests {
         recorder.record(.feed([2]))
         recorder.record(.feed([3]))
 
-        let snapshot = recorder.snapshot()
+        let snapshot = recorder.capture().snapshot
         #expect(snapshot.events.map(\.event) == [.feed([2]), .feed([3])])
-        #expect(snapshot.accountedBytes == 130)
         #expect(snapshot.droppedEventCount == 1)
-        #expect(snapshot.droppedPayloadBytes == 1)
+        #expect(snapshot.droppedFeedBytes == 1)
     }
 
     @Test("event-count cap evicts before the byte budget")
@@ -204,13 +200,89 @@ struct TerminalFlightRecorderTests {
         recorder.record(.resize(columns: 90, rows: 25))
         recorder.record(.feed([2]))
 
-        let snapshot = recorder.snapshot()
+        let snapshot = recorder.capture().snapshot
         #expect(snapshot.events.map(\.event) == [
             .resize(columns: 90, rows: 25),
             .feed([2]),
         ])
         #expect(snapshot.droppedEventCount == 1)
-        #expect(snapshot.droppedPayloadBytes == 1)
+        #expect(snapshot.droppedFeedBytes == 1)
+    }
+
+    @Test("byte offsets advance independently for the feed and write directions")
+    func byteOffsetsAdvanceIndependentlyPerDirection() {
+        // Intent: every byte-carrying event reports where its bytes sit within its own
+        //   direction's lifetime stream, and an event that carries no bytes reports no span.
+        // Why it exists: a reader locating retained bytes needs one coordinate per direction.
+        //   A single shared counter would report a feed offset that no feed byte occupies, so
+        //   no consumer could turn an offset back into a position in either stream.
+        // Scenario: a pane interleaves child output, an input write, a resize, an empty feed,
+        //   another write, and more output.
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 16, eventOverheadBytes: 8),
+            now: { 0 }
+        )
+
+        recorder.record(.feed([1, 2, 3]))
+        recorder.record(.write([4, 5]))
+        recorder.record(.resize(columns: 90, rows: 25))
+        recorder.record(.feed([]))
+        recorder.record(.write([6]))
+        recorder.record(.feed([7, 8]))
+
+        #expect(recorder.capture().snapshot.events.map(\.payload) == [
+            .init(byteOffset: 0, byteLength: 3),
+            .init(byteOffset: 0, byteLength: 2),
+            nil,
+            .init(byteOffset: 3, byteLength: 0),
+            .init(byteOffset: 2, byteLength: 1),
+            .init(byteOffset: 3, byteLength: 2),
+        ])
+    }
+
+    @Test("a cursor gap reports evicted feed and write bytes separately")
+    func cursorGapReportsPerDirectionLoss() {
+        // Intent: the loss between a requested cursor and the retained suffix is stated per
+        //   direction, and the next cursor carries both watermarks.
+        // Why it exists: a summed loss count cannot be subtracted from either direction's
+        //   offsets, which would leave every byte position after a gap unverifiable. The
+        //   trailing reader below starts from a cursor whose two watermarks differ and whose
+        //   values differ from the retained head's, so each subtraction is pinned to its own
+        //   direction: reading either coordinate from the other stream changes both answers.
+        // Scenario: a slow follower that consumed the first output chunk and the first input
+        //   write asks again after eviction dropped the two events that came next.
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 2, eventOverheadBytes: 8),
+            now: { 0 }
+        )
+        recorder.record(.feed([1, 2, 3]))
+        recorder.record(.write([4, 5]))
+        recorder.record(.feed([6]))
+        recorder.record(.write([7, 8, 9, 10]))
+        recorder.record(.feed([11, 12]))
+        recorder.record(.write([13]))
+
+        let fromBeginning = recorder.cursorSnapshot(from: .beginning)
+        let fromTrailingReader = recorder.cursorSnapshot(from: .init(
+            nextSequence: 2,
+            feedBytesBeforeNextSequence: 3,
+            writeBytesBeforeNextSequence: 2
+        ))
+
+        #expect(fromBeginning.firstRetainedSequence == 4)
+        #expect(fromBeginning.droppedEventCount == 4)
+        #expect(fromBeginning.droppedFeedBytes == 4)
+        #expect(fromBeginning.droppedWriteBytes == 6)
+        #expect(fromTrailingReader.droppedEventCount == 2)
+        #expect(fromTrailingReader.droppedFeedBytes == 1)
+        #expect(fromTrailingReader.droppedWriteBytes == 4)
+        #expect(fromTrailingReader.nextCursor == .init(
+            nextSequence: 6,
+            feedBytesBeforeNextSequence: 6,
+            writeBytesBeforeNextSequence: 7
+        ))
     }
 
     @Test("cursor snapshots retain stable lifetime sequences across eviction")
@@ -226,7 +298,8 @@ struct TerminalFlightRecorderTests {
         let delivered = recorder.cursorSnapshot(from: .beginning)
         let suffix = recorder.cursorSnapshot(from: .init(
             nextSequence: 1,
-            payloadBytesBeforeNextSequence: 1
+            feedBytesBeforeNextSequence: 1,
+            writeBytesBeforeNextSequence: 0
         ))
         recorder.record(.feed([4, 5, 6, 7]))
         recorder.record(.resize(columns: 100, rows: 30))
@@ -235,14 +308,22 @@ struct TerminalFlightRecorderTests {
         let truncatedBacklog = recorder.cursorSnapshot(from: .beginning)
         #expect(delivered.events.map(\.sequence) == [0, 1])
         #expect(suffix.events.map(\.sequence) == [1])
-        #expect(delivered.nextCursor == .init(nextSequence: 2, payloadBytesBeforeNextSequence: 3))
+        #expect(delivered.nextCursor == .init(
+            nextSequence: 2,
+            feedBytesBeforeNextSequence: 3,
+            writeBytesBeforeNextSequence: 0
+        ))
         #expect(retained.firstRetainedSequence == 2)
         #expect(retained.events.map(\.sequence) == [2, 3])
         #expect(retained.droppedEventCount == 0)
-        #expect(retained.droppedPayloadBytes == 0)
-        #expect(retained.nextCursor == .init(nextSequence: 4, payloadBytesBeforeNextSequence: 7))
+        #expect(retained.droppedFeedBytes == 0)
+        #expect(retained.nextCursor == .init(
+            nextSequence: 4,
+            feedBytesBeforeNextSequence: 7,
+            writeBytesBeforeNextSequence: 0
+        ))
         #expect(truncatedBacklog.droppedEventCount == 2)
-        #expect(truncatedBacklog.droppedPayloadBytes == 3)
+        #expect(truncatedBacklog.droppedFeedBytes == 3)
         #expect(truncatedBacklog.events.map(\.sequence) == [2, 3])
     }
 
@@ -264,7 +345,7 @@ struct TerminalFlightRecorderTests {
         let snapshot = recorder.cursorSnapshot(from: delivered.nextCursor)
         #expect(snapshot.firstRetainedSequence == 3)
         #expect(snapshot.droppedEventCount == 1)
-        #expect(snapshot.droppedPayloadBytes == 4)
+        #expect(snapshot.droppedFeedBytes == 4)
         #expect(snapshot.events.map(\.sequence) == [3, 4])
         #expect(snapshot.events.map(\.event) == [
             .feed([8, 9, 10, 11, 12]),
@@ -289,13 +370,14 @@ struct TerminalFlightRecorderTests {
 
         let snapshot = recorder.cursorSnapshot(from: .init(
             nextSequence: 3,
-            payloadBytesBeforeNextSequence: 6
+            feedBytesBeforeNextSequence: 6,
+            writeBytesBeforeNextSequence: 0
         ))
 
         #expect(snapshot.firstRetainedSequence == 2)
         #expect(snapshot.events.map(\.sequence) == [3, 4])
         #expect(snapshot.droppedEventCount == 0)
-        #expect(snapshot.droppedPayloadBytes == 0)
+        #expect(snapshot.droppedFeedBytes == 0)
     }
 
     @Test("caught-up cursor remains empty after head eviction")
@@ -313,7 +395,8 @@ struct TerminalFlightRecorderTests {
         }
         let cursor = TerminalFlightRecordingCursor(
             nextSequence: 5,
-            payloadBytesBeforeNextSequence: 15
+            feedBytesBeforeNextSequence: 15,
+            writeBytesBeforeNextSequence: 0
         )
 
         let snapshot = recorder.cursorSnapshot(from: cursor)
@@ -321,7 +404,7 @@ struct TerminalFlightRecorderTests {
         #expect(snapshot.events.isEmpty)
         #expect(snapshot.firstRetainedSequence == 2)
         #expect(snapshot.droppedEventCount == 0)
-        #expect(snapshot.droppedPayloadBytes == 0)
+        #expect(snapshot.droppedFeedBytes == 0)
         #expect(snapshot.nextCursor == cursor)
     }
 
@@ -338,15 +421,14 @@ struct TerminalFlightRecorderTests {
         recorder.record(.feed([1, 2]))
         recorder.record(.feed([3, 4, 5]))
 
-        let dump = recorder.snapshot()
+        let dump = recorder.capture().snapshot
         let cursorSnapshot = recorder.cursorSnapshot(from: .beginning)
 
         #expect(dump.events.isEmpty)
-        #expect(dump.accountedBytes == 0)
         #expect(cursorSnapshot.events.isEmpty)
         #expect(cursorSnapshot.firstRetainedSequence == cursorSnapshot.nextSequence)
         #expect(cursorSnapshot.droppedEventCount == 2)
-        #expect(cursorSnapshot.droppedPayloadBytes == 5)
+        #expect(cursorSnapshot.droppedFeedBytes == 5)
     }
 
     @Test("production recorder preserves order across repeated ring wraparound")
@@ -365,12 +447,13 @@ struct TerminalFlightRecorderTests {
             recorder.record(.feed([1]))
         }
 
-        let dump = recorder.snapshot()
+        let dump = recorder.capture().snapshot
         let firstRetainedSequence = UInt64(recordedCount - eventLimit)
         let midSequence = firstRetainedSequence + UInt64(eventLimit / 2)
         let suffix = recorder.cursorSnapshot(from: .init(
             nextSequence: midSequence,
-            payloadBytesBeforeNextSequence: Int(midSequence)
+            feedBytesBeforeNextSequence: Int(midSequence),
+            writeBytesBeforeNextSequence: 0
         ))
 
         #expect(dump.events.count == eventLimit)
@@ -387,6 +470,7 @@ struct TerminalFlightRecorderTests {
             now: { 0 }
         )
         recorder.record(.feed([1, 2]))
+        recorder.record(.write([9, 10, 11]))
         recorder.record(.resize(columns: 100, rows: 30))
 
         let origin = recorder.fromNowOrigin()
@@ -394,9 +478,17 @@ struct TerminalFlightRecorderTests {
         let snapshot = recorder.cursorSnapshot(from: origin.cursor)
 
         #expect(origin.initial == .init(columns: 100, rows: 30))
-        #expect(origin.cursor == .init(nextSequence: 2, payloadBytesBeforeNextSequence: 2))
-        #expect(snapshot.events.map(\.sequence) == [2])
+        // Both watermarks ride the origin. A tail-only stream that lost the write watermark
+        // would report every write byte recorded before it began as loss on its first gap.
+        #expect(origin.cursor == .init(
+            nextSequence: 3,
+            feedBytesBeforeNextSequence: 2,
+            writeBytesBeforeNextSequence: 3
+        ))
+        #expect(snapshot.events.map(\.sequence) == [3])
         #expect(snapshot.events.map(\.event) == [.feed([3])])
+        #expect(snapshot.droppedFeedBytes == 0)
+        #expect(snapshot.droppedWriteBytes == 0)
     }
 
     @Test("backlog origin pairs birth geometry with the beginning cursor")
@@ -411,6 +503,13 @@ struct TerminalFlightRecorderTests {
         let origin = recorder.backlogOrigin()
         #expect(origin.initial == .init(columns: 80, rows: 24))
         #expect(origin.cursor == .beginning)
+
+        // A finite capture is that same origin paired with the read it describes, taken as one
+        // moment. Geometry read apart from the events would let a dump state the pane's shape
+        // from before an event it then reports.
+        let capture = recorder.capture()
+        #expect(capture.origin == origin)
+        #expect(capture.snapshot == recorder.cursorSnapshot(from: .beginning))
     }
 
     // Intent: a host built the way the shipping app builds one records from birth.
@@ -428,67 +527,20 @@ struct TerminalFlightRecorderTests {
         host.deliverOutputForTesting(Array("retained".utf8))
 
         #expect(
-            host.fencedFlightRecording().events.map(\.event)
+            host.fencedFlightRecordingCapture().snapshot.events.map(\.event)
                 == [.feed(Array("retained".utf8))]
         )
     }
 
-    @Test("dump encoding produces one replayable raw recording document")
-    func dumpEncodingProducesReplayableDocument() throws {
-        let clock = TestFlightClock([100, 112, 125])
-        let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 4, rows: 2),
-            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
-            now: clock.now
-        )
-        recorder.record(.feed([0x41, 0x00, 0xFF]))
-        recorder.record(.resize(columns: 5, rows: 3))
-
-        let data = try recorder.snapshot().encodedRecording()
-        let recording = try JSONDecoder().decode(NeutralTerminalRecording.self, from: data)
-        let json = try #require(
-            JSONSerialization.jsonObject(with: data) as? [String: Any]
-        )
-        let events = try #require(json["events"] as? [[String: Any]])
-        let truncation = try #require(json["truncation"] as? [String: Any])
-
-        #expect(recording.provenance == .liveCapture())
-        #expect(recording.events == [.feed([0x41, 0x00, 0xFF]), .resize(columns: 5, rows: 3)])
-        #expect(events.compactMap { ($0["elapsedNanoseconds"] as? NSNumber)?.uint64Value } == [12, 25])
-        #expect(truncation["isTruncated"] as? Bool == false)
-        #expect(truncation["droppedEventCount"] as? Int == 0)
-        #expect(truncation["droppedPayloadBytes"] as? Int == 0)
-        #expect(events.allSatisfy { $0["sequence"] == nil })
-        _ = try recording.replay()
-    }
-
-    @Test("dump encoding carries an origin stamp beside the transfer stamp")
-    func dumpEncodingCarriesOriginStamps() throws {
-        // Intent: the snapshot document reports both stamps for a transfer that had an
-        //   earlier origin, and omits the key entirely for one that did not.
-        // Why it exists: the origin is inert metadata, so nothing but the document itself
-        //   proves it survived encoding, and an omitted key is how absence is stated.
-        let clock = TestFlightClock([0, 30, 40])
-        let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 4, rows: 2),
-            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
-            now: clock.now
-        )
-        recorder.record(.write([0x41]), origin: 10)
-        recorder.record(.feed([0x42]))
-
-        let data = try recorder.snapshot().encodedRecording()
-        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let events = try #require(json["events"] as? [[String: Any]])
-        let recording = try JSONDecoder().decode(NeutralTerminalRecording.self, from: data)
-
-        #expect(events.map { ($0["originElapsedNanoseconds"] as? NSNumber)?.uint64Value } == [10, nil])
-        #expect(events.map { ($0["elapsedNanoseconds"] as? NSNumber)?.uint64Value } == [30, 40])
-        #expect(recording.events == [.write([0x41]), .feed([0x42])])
-        _ = try recording.replay()
-    }
-
-    @Test("production recorder bounds fit complete JSON-RPC lines")
+    // Intent: no single record a production-bounded recorder can produce exceeds the IPC line
+    //   ceiling once it is wrapped in the `pane.tape.event` notification that carries it.
+    // Why it exists: the tape now reaches a reader as one framed line per record, so the
+    //   ceiling applies to the largest record, not to the whole capture. A retention budget
+    //   that admits one event larger than a line would make that pane's tape unreadable, and
+    //   no smaller record before or after it would show the problem.
+    // Scenario: one pane fills its whole payload budget with a single burst of output, and
+    //   another fills its whole event ring with the costliest small record the schema admits.
+    @Test("no single record from a production-bounded recorder exceeds one JSON-RPC line")
     func productionBoundsFitIPCLine() throws {
         let bulkRecorder = TerminalFlightRecorder(
             initialDimensions: .init(columns: 80, rows: 24),
@@ -509,34 +561,52 @@ struct TerminalFlightRecorderTests {
             tinyRecorder.record(.write([0xFF]), origin: .max)
         }
 
-        for snapshot in [bulkRecorder.snapshot(), tinyRecorder.snapshot()] {
-            let document = try JSONDecoder().decode(JSONValue.self, from: snapshot.encodedRecording())
-            let line = try encodeIpcLine(JsonRpcResponse(id: .number(1), result: document))
-            #expect(line.count <= IpcLineFramer.maxLineBytes)
-            #expect(try JSONDecoder().decode(JsonRpcResponse.self, from: line).result == document)
+        for recorder in [bulkRecorder, tinyRecorder] {
+            let events = recorder.capture().snapshot.events
+            #expect(events.isEmpty == false)
+            var widestLine = Data()
+            for event in events {
+                let line = try encodeIpcLine(paneTapeEventNotification(event))
+                if line.count > widestLine.count { widestLine = line }
+            }
+            #expect(widestLine.count <= IpcLineFramer.maxLineBytes)
+            #expect(
+                try JSONDecoder().decode(JsonRpcRequest.self, from: widestLine).method
+                    == Methods.paneTapeEvent
+            )
         }
     }
+}
 
-    @Test("dump encoding carries lifetime eviction metadata")
-    func dumpEncodingCarriesEvictionMetadata() throws {
-        let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
-            configuration: .init(budgetBytes: 65, eventLimit: 8, eventOverheadBytes: 64),
-            now: { 0 }
-        )
-        recorder.record(.feed([1]))
-        recorder.record(.feed([2]))
-
-        let json = try #require(
-            JSONSerialization.jsonObject(with: recorder.snapshot().encodedRecording())
-                as? [String: Any]
-        )
-        let truncation = try #require(json["truncation"] as? [String: Any])
-
-        #expect(truncation["isTruncated"] as? Bool == true)
-        #expect(truncation["droppedEventCount"] as? Int == 1)
-        #expect(truncation["droppedPayloadBytes"] as? Int == 1)
+/// Wraps one recorded event in the notification the producer sends it in, so the size this
+/// file measures is the size that actually has to cross the socket. The record shape mirrors
+/// the producer's in DanTermSupport, which this package cannot import.
+private func paneTapeEventNotification(
+    _ event: TerminalFlightRecordingEvent
+) throws -> JsonRpcRequest {
+    var record: [String: JSONValue] = [
+        "kind": .string("event"),
+        "sequence": .number(Double(event.sequence)),
+        "elapsedNanoseconds": .number(Double(event.elapsedNanoseconds)),
+        "event": try JSONDecoder().decode(
+            JSONValue.self,
+            from: JSONEncoder().encode(event.event)
+        ),
+    ]
+    if let origin = event.originElapsedNanoseconds {
+        record["originElapsedNanoseconds"] = .number(Double(origin))
     }
+    if let payload = event.payload {
+        record["byteOffset"] = .number(Double(payload.byteOffset))
+        record["byteLength"] = .number(Double(payload.byteLength))
+    }
+    return JsonRpcRequest(
+        method: Methods.paneTapeEvent,
+        params: .object([
+            "subscription": .string(UUID().uuidString),
+            "record": .object(record),
+        ])
+    )
 }
 
 private final class TestFlightClock: Sendable {

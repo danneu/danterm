@@ -88,11 +88,6 @@ private func appendTerminalCharacterizationEvent(_ description: String) {
 }
 #endif
 
-/// Names the reason an `end` record carries when a stream is retired by an internal failure
-/// rather than by its pane closing. The client is owed a terminator either way; only a dead
-/// transport leaves it with a bare EOF.
-private let paneTapeFollowFailureReason = "stream-failed"
-
 /// Holds one follow stream's transport resources, so ending that stream retires exactly its
 /// own socket handle, shutdown census entry, and recorder notice -- never a sibling's.
 ///
@@ -513,6 +508,55 @@ class AppRuntime {
         }
     }
 
+    /// Streams one finite capture: the start record as the reply, then this dump's own gap,
+    /// events, and terminator as notifications on the same socket.
+    ///
+    /// The fence is taken here, once, before any record is built. Everything after it works
+    /// from that one copy, so output arriving mid-delivery, or the pane closing outright,
+    /// cannot add to or truncate a dump that already stated its boundary. This capture holds
+    /// no subscription: its id only routes its records to the socket that asked for them.
+    private func dumpPaneTape(
+        reqId: UUID,
+        connection: IpcConnection,
+        session: any TerminalSession
+    ) {
+        guard schedulingLifecycle.isActive else {
+            connection.close()
+            return
+        }
+        guard let prepareDump = session.paneTapeDump() else {
+            connection.writeError(
+                reqId: reqId,
+                code: -32603,
+                message: "pane has no terminal to read a tape from"
+            )
+            return
+        }
+        let captureId = UUID()
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                let dump = try prepareDump()
+                // Both writes are enqueued from this one utility-queue block, so every record
+                // is encoded here rather than on the main actor -- a dump can carry the whole
+                // retained tape, and the main actor is drawing panes. Order still holds: each
+                // call encodes inline and hands its bytes to the connection's serial write
+                // queue, so the start record reaches the socket ahead of everything after it.
+                connection.writeSuccess(reqId: reqId, result: dump.start.record)
+                writePaneTapeRecords(
+                    makePaneTapeDumpRecords(after: dump),
+                    connection: connection,
+                    subscriptionId: captureId
+                )
+            } catch {
+                connection.writeError(
+                    reqId: reqId,
+                    code: -32603,
+                    message: "failed to encode pane tape"
+                )
+            }
+        }
+    }
+
     private func beginPaneTapeFollow(
         reqId: UUID,
         paneId: PaneId,
@@ -571,15 +615,15 @@ class AppRuntime {
         subscriptionId: UUID,
         paneId: PaneId,
         connection: IpcConnection,
-        start: PaneTapeFollowStart
+        start: PaneTapeStart
     ) {
         guard schedulingLifecycle.isActive else { return }
         guard succeeded else { return }
         // The pane went away between the start reply and this callback. The client is owed the
         // same terminator a pane close writes; its socket stays open for its other work.
         guard let session = sessions[paneId] else {
-            writePaneTapeFollowRecords(
-                [makePaneTapeFollowEndRecord()],
+            writePaneTapeRecords(
+                [makePaneTapeEndRecord(reason: .paneClosed)],
                 connection: connection,
                 subscriptionId: subscriptionId
             )
@@ -651,7 +695,7 @@ class AppRuntime {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             do {
                 let snapshot = try prepareBatch()
-                let batch = makePaneTapeFollowBatch(from: snapshot)
+                let batch = makePaneTapeBatch(from: snapshot)
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.schedulingLifecycle.run(callbackToken) {
@@ -676,7 +720,7 @@ class AppRuntime {
     private func deliverPaneTapeFollowBatch(
         subscriptionId: UUID,
         connection: IpcConnection,
-        batch: PaneTapeFollowBatch
+        batch: PaneTapeBatch
     ) {
         guard schedulingLifecycle.isActive else { return }
         guard let accepted = paneTapeFollowSubscriptions.finishFetch(
@@ -695,7 +739,7 @@ class AppRuntime {
             return
         }
 
-        writePaneTapeFollowRecords(
+        writePaneTapeRecords(
             accepted.records,
             connection: connection,
             subscriptionId: subscriptionId
@@ -722,7 +766,7 @@ class AppRuntime {
     private func failPaneTapeFollow(_ subscriptionId: UUID) {
         guard let end = paneTapeFollowSubscriptions.end(
             subscriptionId,
-            reason: paneTapeFollowFailureReason
+            reason: .streamFailed
         ) else { return }
         writePaneTapeFollowEnd(end)
     }
@@ -744,7 +788,7 @@ class AppRuntime {
     /// accepted for it.
     private func writePaneTapeFollowEnd(_ end: PaneTapeFollowEnd) {
         guard let connection = retirePaneTapeFollowTransport(end.subscriptionId) else { return }
-        writePaneTapeFollowRecords(
+        writePaneTapeRecords(
             [end.record],
             connection: connection,
             subscriptionId: end.subscriptionId
@@ -974,28 +1018,7 @@ class AppRuntime {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
                 break
             }
-            switch preparePaneTapeDump(encoder: session.flightRecordingEncoder()) {
-            case .error(let code, let message):
-                connection.writeError(
-                    reqId: reqId,
-                    code: code,
-                    message: message
-                )
-            case .encode(let encode):
-                DispatchQueue.global(qos: .utility).async {
-                    do {
-                        let data = try encode()
-                        let recording = try JSONDecoder().decode(JSONValue.self, from: data)
-                        connection.writeSuccess(reqId: reqId, result: recording)
-                    } catch {
-                        connection.writeError(
-                            reqId: reqId,
-                            code: -32603,
-                            message: "failed to encode pane tape"
-                        )
-                    }
-                }
-            }
+            dumpPaneTape(reqId: reqId, connection: connection, session: session)
 
         case .followPaneTape(let reqId, let paneId, let fromNow):
             guard let connection = takeIpcConnection(for: reqId) else { break }
