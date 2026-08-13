@@ -283,7 +283,7 @@ manual-QA per the ADR.
       `showCloseConfirmation`, `runConfirmation`, the `runModal` fallback)
 - [x] 3. feat(confirm): route delete-group confirmation through the model
       (D4; PO5 -- deletes the SidebarView NSAlert)
-- [ ] 4. feat(todo): project TODO popover existence (D5; I1-I4; PO1, PO3 --
+- [x] 4. feat(todo): project TODO popover existence (D5; I1-I4; PO1, PO3 --
       deletes both popover Commands and both stranding sweeps; fixes the
       double-press bug)
 - [ ] 5. feat(alerts): project alerts popover existence (D5; PO6 -- deletes

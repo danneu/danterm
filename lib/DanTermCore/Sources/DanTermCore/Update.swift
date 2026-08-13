@@ -15,10 +15,9 @@ func update(
     // callers. Without this, MRU updates would have to be sprinkled into
     // every handler that touches tabs (movePaneToTab, sessionCreationFailed,
     // deleteGroup, restore/import paths, etc.).
-    let strandedPopoverPrev = todoPopoverStrandKey(model)
     defer {
         reconcileMru(&model)
-        reconcileTodoPopover(&model, previous: strandedPopoverPrev)
+        reconcileTodoPopover(&model)
         reconcilePendingConfirmation(&model, env: env)
     }
 
@@ -1107,18 +1106,15 @@ func update(
     // MARK: - TODO
 
     case .toggleTodoPopover(let owner):
-        guard model.todos(for: owner) != nil else { return [] }
+        guard model.todos(for: owner) != nil,
+              todoPopoverAnchorIsEligible(owner, in: model)
+        else { return [] }
         if model.todoPopover == owner {
             model.todoPopover = nil
-            return [.dismissTodoPopover(owner: owner)]
-        }
-        var commands: [Command] = []
-        if let previous = model.todoPopover {
-            commands.append(.dismissTodoPopover(owner: previous))
+            return []
         }
         model.todoPopover = owner
-        commands.append(.showTodoPopover(owner: owner))
-        return commands
+        return []
 
     case .todoPopoverClosed(let owner):
         if model.todoPopover == owner {
@@ -1575,7 +1571,7 @@ private func closePaneBody(
         return closeTabRemoval(&model, id: tab.id)
     }
 
-    var commands = rejectPendingCreation(
+    let commands = rejectPendingCreation(
         for: paneId,
         in: &model,
         message: "pane closed before its process started"
@@ -1583,7 +1579,6 @@ private func closePaneBody(
     clearPaneSideTables(paneId, in: &model)
     if model.todoPopover == .pane(paneId) {
         model.todoPopover = nil
-        commands.append(.dismissTodoPopover(owner: .pane(paneId)))
     }
 
     if removal.focusMoved, model.config.alertClearMode == .focus,
@@ -1840,15 +1835,11 @@ private func closeTabRemoval(_ model: inout AppModel, id: TabId) -> [Command] {
         clearPaneSideTables(pid, in: &model)
         if model.todoPopover == .pane(pid) {
             model.todoPopover = nil
-            commands.append(.dismissTodoPopover(owner: .pane(pid)))
         }
     }
-    // Tab popover open against this tab dies with the tab. Emit the dismiss
-    // command even though no `todoPopoverForTabClosed` will fire, so AppRuntime
-    // closes the floating NSPopover.
+    // A tab-scoped popover dies with its owner; the existence pass closes it.
     if model.todoPopover == .tab(id) {
         model.todoPopover = nil
-        commands.append(.dismissTodoPopover(owner: .tab(id)))
     }
 
     model.groups[groupIdx].tabs.remove(at: tabIdx)

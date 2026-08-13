@@ -146,7 +146,8 @@ class AppRuntime {
     var alertsPopover: NSPopover?
     private lazy var alertsPopoverDelegate = AlertsPopoverDelegateAdapter(runtime: self)
     var todoPopover: NSPopover?
-    private var todoPopoverDelegate: TodoPopoverDelegateAdapter?
+    /// Retains the reporting delegate while the projected TODO popover is open.
+    var todoPopoverDelegate: TodoPopoverDelegateAdapter?
     // internal (not private): the cross-file reconcileThemeBrowser extension reads it.
     var themeBrowserView: ThemeBrowserView?
     // internal (not private): the cross-file reconcilePreferencesPanel extension reads it.
@@ -430,18 +431,19 @@ class AppRuntime {
         (todoPopover?.contentViewController as? TabTodoPopoverViewController)?.closeShortcutHelpPopover()
     }
 
-    /// Dismiss child help before its pane parent so AppKit cannot refuse the parent close.
-    private func dismissTodoPopoverPair() {
+    /// Detach close reporting, dismiss child help, then silently close its parent.
+    func dismissTodoPopoverSilently() {
         closeTodoShortcutHelpPopover()
+        todoPopover?.delegate = nil
+        todoPopoverDelegate = nil
         todoPopover?.performClose(nil)
         todoPopover = nil
-        todoPopoverDelegate = nil
     }
 
     /// Build, configure, and show a transient popover anchored to `anchor`, returning
     /// it so the caller can store it in the retained handle that owns its lifetime.
     /// Callers do their own pre-show VC setup and delegate lifetime management.
-    private func presentTransientPopover(
+    func presentTransientPopover(
         _ contentViewController: NSViewController,
         delegate: NSPopoverDelegate?,
         from anchor: NSView,
@@ -1171,32 +1173,6 @@ class AppRuntime {
             searchDebouncers.removeValue(forKey: paneId)
             sessions[paneId]?.endSearch()
 
-        // TODO popover
-
-        case .showTodoPopover(let owner):
-            dismissTodoPopoverPair()
-            let delegate = TodoPopoverDelegateAdapter(owner: owner, runtime: self)
-            switch owner {
-            case .pane(let paneId):
-                guard let wrapper = findPaneWrapper(for: paneId) else { return }
-                let vc = TodoPopoverViewController(paneId: paneId, runtime: self)
-                vc.loadViewIfNeeded()
-                guard let projection = desiredPaneTodoPopover(paneId: paneId, in: model) else { return }
-                vc.apply(projection)
-                todoPopover = presentTransientPopover(vc, delegate: delegate, from: wrapper.todoButtonView)
-            case .tab(let tabId):
-                guard let anchor = chromeView?.tabTodoButton else { return }
-                let vc = TabTodoPopoverViewController(tabId: tabId, runtime: self)
-                vc.loadViewIfNeeded()
-                guard let projection = desiredTabTodoPopover(tabId: tabId, in: model) else { return }
-                vc.apply(projection)
-                todoPopover = presentTransientPopover(vc, delegate: delegate, from: anchor)
-            }
-            todoPopoverDelegate = delegate
-
-        case .dismissTodoPopover:
-            dismissTodoPopoverPair()
-
         }
     }
 
@@ -1783,7 +1759,8 @@ class AppRuntime {
 
     /// Tear down live runtime resources before swapping in a replacement session.
     private func tearDownCurrentSession() {
-        dismissStrandedPopovers()  // cancelPaneDrag + dismiss todo/tab-todo popover pairs
+        cancelPaneDrag()
+        dismissTodoPopoverSilently()
         alertsPopover?.performClose(nil)
         alertsPopover = nil
         model.todoPopover = nil  // session teardown bypasses the reconciler; clear directly
@@ -1988,20 +1965,6 @@ class AppRuntime {
         container.removeFromSuperview()
     }
 
-    /// Cancel an in-flight pane drag and dismiss any open TODO popovers.
-    /// `reconcileContainers` calls this when containerOpsStrandVisible says the
-    /// visible container was hidden or removed. The model record is
-    /// cleared separately by reconcileTodoPopover in update().
-    func dismissStrandedPopovers() {
-        cancelPaneDrag()
-        dismissTodoPopoverPair()
-    }
-
-    /// Dismisses only a tab-scoped popover when a live tree edit preserves pane anchors.
-    func dismissStrandedTabPopover() {
-        dismissTodoPopoverPair()
-    }
-
     // MARK: - Alerts Popover
 
     func toggleAlertsPopover() {
@@ -2037,7 +2000,7 @@ private final class AlertsPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
 /// NSPopoverDelegate adapter shared by pane- and tab-owned TODO popovers.
 /// Sends .todoPopoverClosed when the popover closes for any reason (click-away,
 /// programmatic, etc.) so model.todoPopover stays in sync.
-private final class TodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
+final class TodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
     weak var runtime: AppRuntime?
     let owner: TodoOwner
     init(owner: TodoOwner, runtime: AppRuntime?) {

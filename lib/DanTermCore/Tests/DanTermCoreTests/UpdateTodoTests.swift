@@ -2,14 +2,11 @@
 // suite. Pins the owner-parameterized TODO Msg surface plus pure helpers,
 // requestClosePane confirmation gating, closePane popover cleanup,
 // toggleTodoPopover open/close + stale-pane race guard, the
-// reconcileTodoPopover preservation rules (clear on selected-tab change /
-// shape change, preserve on same-tab focus / background shape change /
-// open-by-current-message), splitPane child-with-empty-todos rule, and the
+// reconcileTodoPopover eligibility rules (clear on selected-tab change or
+// zoom-hidden pane, preserve on eligible shape/focus changes and the open
+// message), splitPane child-with-empty-todos rule, and the
 // classifyInputAction / classifyListAction / firstSelectableRow /
-// nextSelectableRow / sectionLocalIndex pure helpers. The two
-// `reconcileTodoPopover` tests use nested throwing closures with two label
-// invocations each (`"pane"` + `"tab"`) -- they remain throwing and
-// preserve their inner `try expect` count via #expect.
+// nextSelectableRow / sectionLocalIndex pure helpers.
 import Foundation
 import Testing
 
@@ -99,19 +96,46 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
 
         let openCommands = update(&model, .toggleTodoPopover(owner: owner))
         #expect(model.todoPopover == owner)
-        #expect(openCommands.count == 1)
-        #expect(hasEffect(openCommands) {
-            if case .showTodoPopover(let commandOwner) = $0 { return commandOwner == owner }
-            return false
-        })
+        #expect(desiredTodoPopover(in: model) != nil)
+        #expect(openCommands.isEmpty)
 
         let closeCommands = update(&model, .toggleTodoPopover(owner: owner))
         #expect(model.todoPopover == nil)
-        #expect(closeCommands.count == 1)
-        #expect(hasEffect(closeCommands) {
-            if case .dismissTodoPopover(let commandOwner) = $0 { return commandOwner == owner }
-            return false
-        })
+        #expect(desiredTodoPopover(in: model) == nil)
+        #expect(closeCommands.isEmpty)
+    }
+
+    @Test("todo popover requests require a visible anchor", arguments: TodoOwnerKind.allCases)
+    func todoPopoverRequestRequiresVisibleAnchor(kind: TodoOwnerKind) throws {
+        var model = makeModel()
+        createTab(&model)
+        let selectedId = try #require(model.selectedTabId)
+        createTab(&model, background: true)
+        let background = try #require(model.groups[0].tabs.first { $0.id != selectedId })
+        let owner: TodoOwner = switch kind {
+        case .pane: .pane(background.paneTree.focusedPaneId)
+        case .tab: .tab(background.id)
+        }
+
+        #expect(update(&model, .toggleTodoPopover(owner: owner)).isEmpty)
+        #expect(model.todoPopover == nil)
+        #expect(desiredTodoPopover(in: model) == nil)
+    }
+
+    @Test("zoom retracts a pane popover whose anchor becomes hidden")
+    func zoomRetractsHiddenPanePopover() throws {
+        var model = makeModel()
+        createTab(&model)
+        let firstPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+        _ = update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let zoomedPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+        _ = update(&model, .toggleTodoPopover(owner: .pane(firstPaneId)))
+        #expect(model.todoPopover == .pane(firstPaneId))
+
+        _ = update(&model, .toggleZoomPane(paneId: zoomedPaneId))
+
+        #expect(model.todoPopover == nil)
+        #expect(desiredTodoPopover(in: model) == nil)
     }
 
     // MARK: - addTodo
@@ -385,10 +409,10 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
 
     // MARK: - closePane + popover cleanup
 
-    @Test("closePane clears todoPopover and emits dismissTodoPopover")
-    func closePaneClearsTodoPopoverEmitsDismiss() {
+    @Test("closePane clears todoPopover without a presentation command")
+    func closePaneClearsTodoPopoverWithoutCommand() {
         // Intent: closePane on the popover-target pane clears the
-        //   model.todoPopover and emits dismissTodoPopover.
+        //   model.todoPopover without issuing presentation work.
         // Why it exists: pins the popover-cleanup contract.
         // Scenario: spec-first popover dismiss on close.
         var model = makeModel()
@@ -398,10 +422,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         model.todoPopover = .pane(paneId)
         let commands = update(&model, .closePane(paneId: paneId))
         #expect(model.todoPopover == nil, "todoPopover should be nil")
-        #expect(hasEffect(commands) {
-            if case .dismissTodoPopover = $0 { return true }
-            return false
-        }, "expected dismissTodoPopover")
+        #expect(commands.isEmpty)
     }
 
     // MARK: - toggleTodoPopover
@@ -417,16 +438,10 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let openEffects = update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == .pane(paneId))
-        #expect(hasEffect(openEffects) {
-            if case .showTodoPopover(owner: .pane(let pid)) = $0 { return pid == paneId }
-            return false
-        }, "expected showTodoPopover")
+        #expect(openEffects.isEmpty)
         let closeEffects = update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == nil, "should be nil after close")
-        #expect(hasEffect(closeEffects) {
-            if case .dismissTodoPopover = $0 { return true }
-            return false
-        }, "expected dismissTodoPopover")
+        #expect(closeEffects.isEmpty)
     }
 
     // MARK: - todoPopoverClosed race guard
@@ -475,12 +490,10 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         check({ tabId, _ in .tab(tabId) }, "tab")
     }
 
-    @Test("reconcileTodoPopover preserves pane scope but clears tab scope on shape change")
-    func reconcileTodoPopoverNarrowsSelectedTabShapeChange() {
-        // Intent: a structural edit preserves a surviving pane anchor while
-        //   retaining the existing dismissal policy for tab-scoped popovers.
-        // Why it exists: persistent wrappers make pane anchors stable; clearing
-        //   them would discard chrome even though no host was stranded.
+    @Test("reconcileTodoPopover preserves eligible pane and tab anchors on shape change")
+    func reconcileTodoPopoverPreservesSelectedTabShapeChange() {
+        // Intent: a structural edit preserves both surviving pane and tab anchors.
+        // Why it exists: persistent wrappers and chrome keep both anchors available.
         // Scenario: the incremental-container reconciliation performance fix.
         var paneModel = makeModel()
         createTab(&paneModel)
@@ -499,7 +512,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
 
         update(&tabModel, .splitPane(paneId: tab.paneTree.focusedPaneId, direction: .horizontal))
 
-        #expect(tabModel.todoPopover == nil)
+        #expect(tabModel.todoPopover == .tab(tab.id))
     }
 
     @Test("reconcileTodoPopover preserves pane popover on same-tab focus change")

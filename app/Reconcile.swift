@@ -48,10 +48,9 @@ struct ReconcilerCaches {
     // Single-optional alerts-popover cache. nil means no open popover projection
     // has been applied; non-nil is the last value pushed while the popover was shown.
     var alertsPopover: AlertsPopoverProjection? = nil
-    // Single-optional TODO popover caches. nil means no shown matching popover;
-    // non-nil is the last projection pushed to the open pane/tab TODO popover.
-    var paneTodoPopover: PaneTodoPopoverProjection? = nil
-    var tabTodoPopover: TabTodoPopoverProjection? = nil
+    // Single-optional TODO popover cache. nil means the model wants no popover;
+    // non-nil owns both its existence and its last rendered content.
+    var todoPopover: TodoPopoverProjection? = nil
     // Single-optional theme-browser content cache. nil == no browser open; non-nil
     // == last focused-pane theme content applied.
     var themeBrowser: ThemeBrowserProjection? = nil
@@ -86,8 +85,7 @@ extension AppRuntime {
         reconcileConfirmation()
         reconcilePreferencesPanel()
         reconcileAlertsPopover()
-        reconcilePaneTodoPopover()
-        reconcileTabTodoPopover()
+        reconcileTodoPopover()
         reconcileThemeBrowser()
         syncPaneVisibility()  // existing occlusion pass; stays last
     }
@@ -110,20 +108,13 @@ extension AppRuntime {
         let new = desiredContainerShapes(in: model)
         let ops = computeContainerOps(old: caches.containerShape, new: new, selectedTabId: model.selectedTabId)
 
-        // AppKit half of view-swap popover dismissal: when the visible container is
-        // removed or hidden, the anchored popover(s) strand -- dismiss them.
-        // The model half (clearing model.todoPopover) is the pure reconcileTodoPopover
-        // in update(); the two halves read different inputs because they run in
-        // different layers (see the model-driven view reconciliation ADR).
         let previouslyVisibleTabId = tabContainers.first(where: { !$0.value.isHidden })?.key
-        if containerOpsStrandVisible(ops: ops, previouslyVisibleTabId: previouslyVisibleTabId) {
-            dismissStrandedPopovers()
-        } else if containerOpsEditVisibleTree(
-            ops: ops,
-            previouslyVisibleTabId: previouslyVisibleTabId
-        ) {
+        if containerOpsStrandVisible(ops: ops, previouslyVisibleTabId: previouslyVisibleTabId)
+            || containerOpsEditVisibleTree(
+                ops: ops,
+                previouslyVisibleTabId: previouslyVisibleTabId
+            ) {
             cancelPaneDrag()
-            dismissStrandedTabPopover()
         }
 
         // Apply ops (remove -> build/patch/zoom -> setVisible).
@@ -363,54 +354,69 @@ extension AppRuntime {
         caches.alertsPopover = new
     }
 
-    /// Shared optional-cache reconciler for the pane and tab TODO popovers.
-    /// Scope-specific desired projections stay in the caller closures.
-    private func reconcileTodoPopover<P: Equatable, VC: AnyObject>(
-        handle: NSPopover?,
-        cache: WritableKeyPath<ReconcilerCaches, P?>,
-        as _: VC.Type,
-        desired: () -> P?,
-        apply: (VC, P) -> Void
-    ) {
-        let new = (handle?.isShown == true) ? desired() : nil
-        guard caches[keyPath: cache] != new else { return }
-        if let proj = new,
-           let vc = handle?.contentViewController as? VC {
-            apply(vc, proj)
+    /// Creates, refreshes, replaces, or silently closes the projected TODO popover.
+    func reconcileTodoPopover() {
+        let new = desiredTodoPopover(in: model)
+        guard caches.todoPopover != new else { return }
+
+        let oldOwner = caches.todoPopover.map(todoPopoverOwner)
+        let newOwner = new.map(todoPopoverOwner)
+        if oldOwner != newOwner || todoPopover == nil {
+            dismissTodoPopoverSilently()
+            if let new {
+                presentTodoPopover(new)
+            }
+        } else if let new {
+            applyTodoPopover(new)
         }
-        caches[keyPath: cache] = new
+        caches.todoPopover = new
     }
 
-    /// Push the current pane TODO projection into the shown pane popover. The
-    /// popover itself is AppKit-owned, so a closed or mismatched scope projects
-    /// as nil and clears the cache.
-    func reconcilePaneTodoPopover() {
-        reconcileTodoPopover(
-            handle: todoPopover,
-            cache: \.paneTodoPopover,
-            as: TodoPopoverViewController.self,
-            desired: {
-                guard case .pane(let paneId) = model.todoPopover else { return nil }
-                return desiredPaneTodoPopover(paneId: paneId, in: model)
-            },
-            apply: { vc, proj in vc.apply(proj) }
-        )
+    /// Returns the anchor identity carried by one TODO popover projection.
+    private func todoPopoverOwner(_ projection: TodoPopoverProjection) -> TodoOwner {
+        switch projection {
+        case .pane(let pane): return .pane(pane.paneId)
+        case .tab(let tab): return .tab(tab.tabId)
+        }
     }
 
-    /// Push the current tab TODO projection into the shown tab popover. The
-    /// popover itself is AppKit-owned, so a closed or mismatched scope projects
-    /// as nil and clears the cache.
-    func reconcileTabTodoPopover() {
-        reconcileTodoPopover(
-            handle: todoPopover,
-            cache: \.tabTodoPopover,
-            as: TabTodoPopoverViewController.self,
-            desired: {
-                guard case .tab(let tabId) = model.todoPopover else { return nil }
-                return desiredTabTodoPopover(tabId: tabId, in: model)
-            },
-            apply: { vc, proj in vc.apply(proj) }
-        )
+    /// Builds and anchors a TODO popover after containers have made its anchor real.
+    private func presentTodoPopover(_ projection: TodoPopoverProjection) {
+        let owner = todoPopoverOwner(projection)
+        let delegate = TodoPopoverDelegateAdapter(owner: owner, runtime: self)
+        switch projection {
+        case .pane(let pane):
+            guard let wrapper = findPaneWrapper(for: pane.paneId) else {
+                preconditionFailure("eligible pane TODO anchor is missing")
+            }
+            let viewController = TodoPopoverViewController(paneId: pane.paneId, runtime: self)
+            viewController.loadViewIfNeeded()
+            viewController.apply(pane)
+            todoPopover = presentTransientPopover(
+                viewController,
+                delegate: delegate,
+                from: wrapper.todoButtonView
+            )
+        case .tab(let tab):
+            guard let anchor = chromeView?.tabTodoButton else {
+                preconditionFailure("eligible tab TODO anchor is missing")
+            }
+            let viewController = TabTodoPopoverViewController(tabId: tab.tabId, runtime: self)
+            viewController.loadViewIfNeeded()
+            viewController.apply(tab)
+            todoPopover = presentTransientPopover(viewController, delegate: delegate, from: anchor)
+        }
+        todoPopoverDelegate = delegate
+    }
+
+    /// Applies changed content without disturbing an open popover's local edit state.
+    private func applyTodoPopover(_ projection: TodoPopoverProjection) {
+        switch projection {
+        case .pane(let pane):
+            (todoPopover?.contentViewController as? TodoPopoverViewController)?.apply(pane)
+        case .tab(let tab):
+            (todoPopover?.contentViewController as? TabTodoPopoverViewController)?.apply(tab)
+        }
     }
 
     /// Push the focused pane's user theme into the open theme browser. The browser's

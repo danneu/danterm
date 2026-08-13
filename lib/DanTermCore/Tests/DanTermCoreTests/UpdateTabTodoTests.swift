@@ -5,7 +5,7 @@
 // destination no-op, unknown todo no-op, missing destination no-op,
 // cross-tab no-op, successful moves), the popover scope
 // transitions (owner-scoped toggleTodoPopover mutual
-// exclusion, same-scope close, dismiss on tab removal), and the close-tab
+// exclusion, same-scope close, slot clearing on tab removal), and the close-tab
 // + close-pane confirmation rollup against the tab/pane todo counts.
 import Foundation
 import Testing
@@ -358,14 +358,7 @@ import Testing
 
         let commands = update(&model, .toggleTodoPopover(owner: .tab(tab.id)))
         #expect(model.todoPopover == .tab(tab.id))
-        #expect(hasEffect(commands) {
-            if case .dismissTodoPopover = $0 { return true }
-            return false
-        }, "expected dismissTodoPopover")
-        #expect(hasEffect(commands) {
-            if case .showTodoPopover(owner: .tab(let tid)) = $0 { return tid == tab.id }
-            return false
-        }, "expected showTodoPopoverForTab")
+        #expect(commands.isEmpty)
     }
 
     @Test("toggleTodoPopover for the open tab owner closes the popover")
@@ -382,10 +375,7 @@ import Testing
 
         let commands = update(&model, .toggleTodoPopover(owner: .tab(tab.id)))
         #expect(model.todoPopover == nil, "should clear scope")
-        #expect(hasEffect(commands) {
-            if case .dismissTodoPopover(owner: .tab) = $0 { return true }
-            return false
-        }, "expected dismissTodoPopoverForTab")
+        #expect(commands.isEmpty)
     }
 
     @Test("toggleTodoPopover while tab popover is open swaps to pane")
@@ -403,14 +393,7 @@ import Testing
 
         let commands = update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == .pane(paneId))
-        #expect(hasEffect(commands) {
-            if case .dismissTodoPopover(owner: .tab) = $0 { return true }
-            return false
-        }, "expected dismissTodoPopoverForTab")
-        #expect(hasEffect(commands) {
-            if case .showTodoPopover(owner: .pane(let pid)) = $0 { return pid == paneId }
-            return false
-        }, "expected showTodoPopover")
+        #expect(commands.isEmpty)
     }
 
     @Test("toggleTodoPopover while same pane is open closes the popover")
@@ -425,16 +408,13 @@ import Testing
         update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         let commands = update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == nil)
-        #expect(hasEffect(commands) {
-            if case .dismissTodoPopover = $0 { return true }
-            return false
-        }, "expected dismissTodoPopover")
+        #expect(commands.isEmpty)
     }
 
-    @Test("removing the active tab while its tab popover is open emits dismissTodoPopoverForTab")
-    func removingActiveTabWhilePopoverOpenEmitsDismiss() {
+    @Test("removing the active tab clears its tab popover without a presentation command")
+    func removingActiveTabWhilePopoverOpenClearsSlot() {
         // Intent: closing the tab whose tab popover is open clears
-        //   scope and emits dismissTodoPopoverForTab.
+        //   scope without issuing presentation work.
         // Why it exists: pins the auto-dismiss rule on tab removal.
         // Scenario: spec-first tab close auto-dismiss.
         var model = makeModel()
@@ -447,10 +427,7 @@ import Testing
 
         let commands = update(&model, .closeTab(id: tabAId))
         #expect(model.todoPopover == nil, "scope should be cleared")
-        #expect(hasEffect(commands) {
-            if case .dismissTodoPopover(owner: .tab) = $0 { return true }
-            return false
-        }, "expected dismissTodoPopoverForTab")
+        #expect(commands.isEmpty)
     }
 
     // MARK: - close-tab confirmation rollup

@@ -1087,47 +1087,26 @@ func reconcileDecision(
 
 // MARK: - MRU Tab Switcher
 
-/// Identity of the visible container an open TODO popover is anchored to.
-/// nil from todoPopoverStrandKey means no popover is open, so callers can skip
-/// the tree walk and avoid clearing a popover opened during the current message.
-struct TodoPopoverStrandKey: Equatable {
-  let scope: TodoOwner
-  let visibleTabId: TabId?
-  let visibleShape: ContainerShape?
-}
-
-/// Capture the visible container identity before a message runs.
-func todoPopoverStrandKey(_ model: AppModel) -> TodoPopoverStrandKey? {
-  guard let scope = model.todoPopover else { return nil }
-  let sel = model.selectedTabId
-  return TodoPopoverStrandKey(
-    scope: scope,
-    visibleTabId: sel,
-    visibleShape: sel.flatMap { tabById($0, in: model) }.map(containerShape(of:))
-  )
-}
-
-/// Pure model half of view-swap popover dismissal. Clears model.todoPopover iff
-/// the message stranded the visible container the popover was anchored to: the
-/// selected tab changed, its pane anchor left that tab, or a tab-scoped anchor's
-/// container shape drifted. A surviving pane anchor remains valid across tree edits.
-func reconcileTodoPopover(_ model: inout AppModel, previous: TodoPopoverStrandKey?) {
-  guard let previous, model.todoPopover == previous.scope else { return }
-  let sel = model.selectedTabId
-  guard sel == previous.visibleTabId,
-        let tab = sel.flatMap({ tabById($0, in: model) }) else {
-    model.todoPopover = nil
-    return
-  }
-  switch previous.scope {
+/// Reports whether the owner's button is present in the currently visible chrome.
+func todoPopoverAnchorIsEligible(_ owner: TodoOwner, in model: AppModel) -> Bool {
+  guard let selectedTabId = model.selectedTabId,
+        let selectedTab = tabById(selectedTabId, in: model)
+  else { return false }
+  switch owner {
   case .pane(let paneId):
-    if !allPaneIds(tab.paneTree.root).contains(paneId) {
-      model.todoPopover = nil
-    }
-  case .tab:
-    if containerShape(of: tab) != previous.visibleShape {
-      model.todoPopover = nil
-    }
+    guard allPaneIds(selectedTab.paneTree.root).contains(paneId) else { return false }
+    return selectedTab.paneTree.isZoomed == false
+      || selectedTab.paneTree.focusedPaneId == paneId
+  case .tab(let tabId):
+    return tabId == selectedTabId
+  }
+}
+
+/// Retracts an open TODO popover as soon as its model-derived anchor is ineligible.
+func reconcileTodoPopover(_ model: inout AppModel) {
+  guard let owner = model.todoPopover else { return }
+  if todoPopoverAnchorIsEligible(owner, in: model) == false {
+    model.todoPopover = nil
   }
 }
 

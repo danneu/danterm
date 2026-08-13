@@ -159,6 +159,24 @@ struct TabTodoPopoverProjection: Equatable {
   let tabHasCompleted: Bool
 }
 
+/// Carries the complete content and owner for the one projected TODO popover.
+enum TodoPopoverProjection: Equatable {
+  case pane(PaneTodoPopoverProjection)
+  case tab(TabTodoPopoverProjection)
+}
+
+/// Projects TODO popover existence and content from its single model slot.
+func desiredTodoPopover(in model: AppModel) -> TodoPopoverProjection? {
+  switch model.todoPopover {
+  case .pane(let paneId):
+    return desiredPaneTodoPopover(paneId: paneId, in: model).map(TodoPopoverProjection.pane)
+  case .tab(let tabId):
+    return desiredTabTodoPopover(tabId: tabId, in: model).map(TodoPopoverProjection.tab)
+  case nil:
+    return nil
+  }
+}
+
 func desiredTabTodoPopover(tabId: TabId, in model: AppModel) -> TabTodoPopoverProjection? {
   guard let tab = tabById(tabId, in: model) else { return nil }
   return TabTodoPopoverProjection(
