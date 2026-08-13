@@ -103,6 +103,7 @@ STEPS=(
     './scripts/terminal-benchmark-draw-path-lint.sh'
     './scripts/core-purity-lint.sh --profile portable lib/DanTermSupport/Sources/DanTermSupport'
     './scripts/core-purity-lint.sh --profile portable lib/DanTermProtocol/Sources/DanTermProtocol'
+    './scripts/core-purity-lint.sh --profile portable lib/DanTermClient/Sources/DanTermClient'
 )
 
 # Test seam: the self-test substitutes a synthetic step list so it can exercise the
