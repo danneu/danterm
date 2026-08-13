@@ -126,9 +126,7 @@ final class GlyphPreviewView: NSView {
             systemReferenceFont.pointSize,
             nil
         )
-        guard let nerdSymbolsReferenceFont = NerdFontSymbolsResource.packaged?.face(
-                  pointSize: 13
-              ),
+        guard let nerdSymbolsReferenceFont = PackagedSymbolsFace.face(pointSize: 13),
               let unifontUpperReferenceFont = NSFont(name: "UnifontUpper", size: 13)
         else {
             return nil

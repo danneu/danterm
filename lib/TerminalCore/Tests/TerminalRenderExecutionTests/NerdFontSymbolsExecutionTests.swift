@@ -20,6 +20,23 @@ struct NerdFontSymbolsExecutionTests {
         #expect(first === second)
     }
 
+    @Test("The public entry point projects the packaged resource at the requested size")
+    func publicEntryPointMatchesPackagedResource() throws {
+        // Intent: the one public seam hands back the same face the packaged
+        //   resource would, at the size the caller asked for.
+        // Why it exists: the seam exists so callers outside this module cannot
+        //   reach the loader; it is only correct if it still serves the face.
+        // Scenario: a host tool asks for a 13 point face and compares it against
+        //   the same projection taken from the resource directly.
+        let resource = try #require(NerdFontSymbolsResource.packaged)
+        let face = try #require(PackagedSymbolsFace.face(pointSize: 13))
+
+        #expect(CTFontGetSize(face) == 13)
+        #expect(CTFontCopyPostScriptName(face) == CTFontCopyPostScriptName(
+            resource.face(pointSize: 13)
+        ))
+    }
+
     @Test("The packaged symbols face is loaded from its resource file at one-cell em size")
     func packagedFaceSourceAndSize() throws {
         let resource = try #require(NerdFontSymbolsResource.packaged)

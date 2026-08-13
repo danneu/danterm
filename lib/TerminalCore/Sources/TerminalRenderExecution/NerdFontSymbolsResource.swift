@@ -9,17 +9,16 @@ import Foundation
 /// module's `Sendable` render values. The descriptor and source URL never change
 /// after initialization, and CoreText font objects are safe for concurrent reads.
 ///
-/// The type, `packaged`, and `face(pointSize:)` are `public` rather than `package`
-/// because `GlyphPreview` compares this face against the system one and now lives
-/// in `TerminalHostTools`, a different package. Everything else here stays
-/// `package`: a caller outside this module picks a face, it does not load one.
-public final class NerdFontSymbolsResource: @unchecked Sendable {
+/// The whole resource stays `package`. `PackagedSymbolsFace` is the only public
+/// way in, so a caller outside this module can pick a face but cannot reach the
+/// loader, the parsed resource, or its lifetime.
+package final class NerdFontSymbolsResource: @unchecked Sendable {
     package static let directoryName = "NerdFontsSymbolsOnly"
     package static let fontName = "SymbolsNerdFontMono-Regular"
 
     /// The lazily initialized process-wide packaged resource, or nil when the
     /// application resource is absent or unreadable.
-    public static let packaged = load(at: packagedURL())
+    package static let packaged = load(at: packagedURL())
 
     /// The resource location retained for diagnostics and font-set equality.
     package let sourceURL: URL
@@ -76,7 +75,20 @@ public final class NerdFontSymbolsResource: @unchecked Sendable {
     }
 
     /// Projects the parsed resource to one point size without decoding it again.
-    public func face(pointSize: CGFloat) -> CTFont {
+    package func face(pointSize: CGFloat) -> CTFont {
         CTFontCreateWithFontDescriptor(descriptor, pointSize, nil)
+    }
+}
+
+/// The single public seam onto the packaged symbols font, for host tools in other
+/// packages that draw a reference glyph with the same face DanTerm renders.
+///
+/// It deliberately exposes one point-sized face and nothing else, so the loader,
+/// the resource, and its process-wide lifetime stay inside this module.
+public enum PackagedSymbolsFace {
+    /// Returns the packaged symbols face at one point size, or nil when the
+    /// packaged resource is absent or unreadable.
+    public static func face(pointSize: CGFloat) -> CTFont? {
+        NerdFontSymbolsResource.packaged?.face(pointSize: pointSize)
     }
 }
