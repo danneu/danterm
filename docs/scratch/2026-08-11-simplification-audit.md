@@ -13,6 +13,10 @@ describes code that no longer exists -- read the commit, not the finding.
 A blank status means the finding is untouched, and its prose is only as
 current as 2026-08-11; re-read the cited code before acting on it. `n/a`
 means the finding was dropped, with the reason noted in its section.
+`part` plus a sha means some of the finding landed in that commit and the
+rest did not: the section still describes real code, and a **Status note**
+in it says which part went. A partial is not a smaller finding -- the
+remainder is what the section's ideal fix was for.
 
 **How to use this.** The findings are individually actionable, but the
 themes below are the real units of work: eight root causes account for
@@ -141,12 +145,12 @@ in itself.
 | Status | #           | Score | I   | C   | Area           | Effort | Finding                                                                                                                 |
 | ------ | ----------- | ----- | --- | --- | -------------- | ------ | ----------------------------------------------------------------------------------------------------------------------- |
 |        | [S01](#s01) | 25    | 5   | 5   | build          | small  | Make CI run the local gate instead of running no tests at all                                                           |
-|        | [S02](#s02) | 20    | 4   | 5   | app-runtime    | medium | Make TODO/alerts popover existence a reconcile pass, not four commands                                                  |
+| part 3b95df8f | [S02](#s02) | 20    | 4   | 5   | app-runtime    | medium | Make TODO/alerts popover existence a reconcile pass, not four commands                                     |
 |        | [S03](#s03) | 20    | 4   | 5   | build          | medium | Collapse the duplicated bundle assembly in dev-build.sh and build-app.sh                                                |
 |        | [S04](#s04) | 20    | 4   | 5   | build          | small  | Replace the four hand-copied bundle-layout assertion lists with one script                                              |
 |        | [S05](#s05) | 20    | 4   | 5   | core-model     | medium | Make a tab's focus and zoom part of its tree, not two loose fields                                                      |
 |        | [S06](#s06) | 20    | 4   | 5   | core-model     | small  | Give sessions one tree-walking mutator instead of five whole-model traversals per report                                |
-|        | [S07](#s07) | 20    | 4   | 5   | core-reducer   | large  | Collapse the duplicated pane/tab TODO surface onto one owner type                                                       |
+| 3b95df8f | [S07](#s07) | 20    | 4   | 5   | core-reducer   | large  | Collapse the duplicated pane/tab TODO surface onto one owner type                                               |
 |        | [S08](#s08) | 20    | 4   | 5   | docs           | small  | Design-doc statuses lie: superseded notes say `Status: Accepted` and the index shows no status                          |
 |        | [S09](#s09) | 20    | 4   | 5   | docs           | medium | Delete plan-terminal-engine/: 2,232 tracked lines that declare themselves normative and the engine ADR says it replaced |
 |        | [S10](#s10) | 20    | 4   | 5   | docs           | medium | Lint doc-to-code citations: seven cited paths no longer exist, one of them misstating a layer                           |
@@ -163,12 +167,12 @@ in itself.
 |        | [S21](#s21) | 16    | 4   | 4   | tests          | large  | The Command interpreter, the app's highest-churn logic, has no automated coverage                                       |
 |        | [S22](#s22) | 15    | 3   | 5   | app-runtime    | medium | Collapse the parallel `sessions` and `paneHosts` maps into one pane map                                                 |
 |        | [S23](#s23) | 15    | 3   | 5   | app-runtime    | small  | Delete the divergent inline copy of tearDownSession in tearDownCurrentSession                                           |
-|        | [S24](#s24) | 15    | 3   | 5   | app-runtime    | medium | Give scheduled work one handle instead of a handle plus a shadow token                                                  |
+| part 6b2e27f0 | [S24](#s24) | 15    | 3   | 5   | app-runtime    | medium | Give scheduled work one handle instead of a handle plus a shadow token                                     |
 |        | [S25](#s25) | 15    | 3   | 5   | core-model     | small  | Compute a tab's chrome once instead of four times per sidebar row                                                       |
 |        | [S26](#s26) | 15    | 3   | 5   | core-reducer   | medium | Derive preferences-draft sync instead of enumerating the six fields in five places                                      |
 |        | [S27](#s27) | 15    | 3   | 5   | ipc-cli        | small  | Make --socket work for `doctor` instead of intercepting local commands before the flag parser                           |
 |        | [S28](#s28) | 15    | 3   | 5   | ipc-cli        | small  | Replace the CLI's two hand-rolled per-byte line readers with the shared framer                                          |
-|        | [S29](#s29) | 15    | 3   | 5   | pty            | medium | Record transitions once: fold TerminalPTYAppliedTransition into the flight recorder                                     |
+| part 2fc9f971 | [S29](#s29) | 15    | 3   | 5   | pty            | medium | Record transitions once: fold TerminalPTYAppliedTransition into the flight recorder            |
 |        | [S30](#s30) | 15    | 3   | 5   | pty            | small  | Replace the fence operation/output enum pair with typed fence methods                                                   |
 |        | [S31](#s31) | 15    | 3   | 5   | scrollback     | medium | Give the record side tables one owner that maintains its own byte charge                                                |
 |        | [S32](#s32) | 15    | 3   | 5   | scrollback     | small  | Collapse the seven copy-pasted task-local counters and move them out of the store file                                  |
@@ -177,7 +181,7 @@ in itself.
 |        | [S35](#s35) | 15    | 3   | 5   | terminal-views | medium | Stop re-implementing grid and cell geometry in the UI-test shim                                                         |
 |        | [S36](#s36) | 15    | 3   | 5   | tests          | small  | Retire the whole-AppModel golden snapshot; it ratchets on behavior-preserving refactors                                 |
 |        | [S37](#s37) | 15    | 3   | 5   | tests          | small  | Move the nine frozen research probes out of the default TerminalCore test target                                        |
-|        | [S38](#s38) | 12    | 3   | 4   | app-runtime    | medium | Key pane-tape follow state once, by subscription, instead of four sidecar maps                                          |
+| 6b2e27f0 | [S38](#s38) | 12    | 3   | 4   | app-runtime    | medium | Key pane-tape follow state once, by subscription, instead of four sidecar maps                                  |
 |        | [S39](#s39) | 12    | 3   | 4   | build          | small  | Drop .build-gate by deleting the unenforced -warn-long-function-bodies flag                                             |
 |        | [S40](#s40) | 12    | 3   | 4   | core-model     | medium | Nest per-pane search and notification state in PaneModel so cleanup is structural                                       |
 |        | [S41](#s41) | 12    | 3   | 4   | core-reducer   | small  | Drop @discardableResult from update() so nested calls cannot silently swallow commands                                  |
@@ -190,7 +194,7 @@ in itself.
 |        | [S48](#s48) | 10    | 2   | 5   | build          | small  | Stop running DanTermProtocolTests twice in the gate                                                                     |
 |        | [S49](#s49) | 10    | 2   | 5   | core-model     | small  | Delete the three unread-alert reference implementations no render path calls                                            |
 | 5a296702 | [S50](#s50) | 10    | 2   | 5   | core-reducer   | small  | Move the IPC dispatcher out of Update.swift; the file is two subsystems                                               |
-|        | [S51](#s51) | 10    | 2   | 5   | ipc-cli        | small  | Give todo ids the same phantom-typed treatment as every other entity id                                                 |
+| 3b95df8f | [S51](#s51) | 10    | 2   | 5   | ipc-cli        | small  | Give todo ids the same phantom-typed treatment as every other entity id                                         |
 |        | [S52](#s52) | 10    | 2   | 5   | ipc-cli        | medium | Derive the CLI help text from the parser instead of hand-syncing three copies                                           |
 | b0e2a7f6 | [S53](#s53) | 10    | 2   | 5   | terminal-core  | small  | Move the pure OSC byte helpers off Terminal and split the file at its seams                                           |
 |        | [S54](#s54) | 10    | 2   | 5   | terminal-views | small  | Return the clamp state from terminalCell so the view stops re-deriving grid extents                                     |
@@ -225,6 +229,8 @@ in itself.
 `app-runtime` &middot; structural &middot; impact 4, confidence 5 &middot; effort medium
 
 `app/AppRuntime.swift#perform`, `app/Reconcile.swift#reconcilePaneTodoPopover`, `app/Reconcile.swift#reconcileTabTodoPopover`, `app/Reconcile.swift#reconcileQuitConfirmation`, `lib/DanTermCore/Sources/DanTermCore/Update.swift#update`, `lib/DanTermCore/Sources/DanTermCore/Command.swift#Command`
+
+**Status note.** `3b95df8f` merged the four commands into two owner-parameterized ones, `showTodoPopover(owner:)` and `dismissTodoPopover(owner:)`, and `model.todoPopover` is now one `TodoOwner?` slot rather than a scope enum. Nothing else here landed: existence is still command-owned with two sources of truth, the `.showTodoPopover` arm still early-returns after `update()` committed the model, `dismissStrandedPopovers` / `dismissStrandedTabPopover` still exist, the content passes still gate on `handle?.isShown`, and the alerts popover still has no model state. Read the four-commands wording below as two; the double-truth problem is untouched.
 
 **Problem.** Whether a TODO popover is open is stored twice: in `model.todoPopover` and in the runtime's `todoPopover` / `tabTodoPopover` NSPopover handles. Four commands (`showTodoPopover`, `dismissTodoPopover`, `showTodoPopoverForTab`, `dismissTodoPopoverForTab`) push one onto the other, delegate adapters push messages back the other way, a pure `reconcileTodoPopover(&model, previous:)` stranding pass and an AppKit-side `dismissStrandedPopovers()` keep the two halves from drifting when a tab disappears, and the two content passes then gate on `handle?.isShown` rather than on the model. When the two disagree nothing repairs it: the `.showTodoPopover` arm early-returns if `findPaneWrapper(for:)` or `desiredPaneTodoPopover` returns nil, leaving `model.todoPopover == .pane(paneId)` with no popover on screen, so the next Cmd-Shift-' is consumed as a "dismiss" and the user has to press it twice. The alerts popover is the mirror image: no model state at all, an imperative `toggleAlertsPopover()`, plus a `.dismissAlertsPopover` command to poke it from the core.
 
@@ -324,13 +330,15 @@ in itself.
 
 `docs/design/index.md`, `docs/design/2026-05-27-terminal-focus-display-link.md`, `docs/design/2026-03-05-display-scaling.md`, `docs/design/2026-08-10-terminal-reported-pane-facts.md`, `docs/design/2026-06-09-appkit-lifetime-safety.md`, `docs/design/2026-05-28-core-module-via-symlink.md`
 
-**Problem.** index.md defines the ADR contract -- every note carries a `Status` from {Accepted, Superseded, Draft} -- and then lists all sixteen notes as an undifferentiated bullet list with no status shown. Meanwhile the notes contradict their own status line: 2026-05-27-terminal-focus-display-link.md reads `Status: Accepted` on line 3 and, four lines later, "superseded by the libghostty removal. Every mechanism below ... no longer exists." 2026-08-10-terminal-reported-pane-facts.md reads `Status: Accepted` immediately above a `Superseded by:` field pointing at its replacement. Five notes carry no `Status` field at all. So the only reliable way to learn that a note is a historical record is to open it and read the banner, which is exactly the cost the index exists to remove -- and an agent following AGENTS.md's "Read before you touch it" table lands on 2026-03-05-display-scaling.md (mechanism superseded) with nothing at the pointer warning it.
+**Problem.** index.md defines the ADR contract -- every note carries a `Status` from {Accepted, Superseded, Draft} -- and then lists all sixteen notes as an undifferentiated bullet list with no status shown. Meanwhile the notes contradict their own status line: 2026-05-27-terminal-focus-display-link.md reads `Status: Accepted` on line 3 and, four lines later, "superseded by the libghostty removal. Every mechanism below ... no longer exists." 2026-08-10-terminal-reported-pane-facts.md reads `Status: Accepted` immediately above a `Superseded by:` field pointing at its replacement. So the only reliable way to learn that a note is a historical record is to open it and read the banner, which is exactly the cost the index exists to remove -- and an agent following AGENTS.md's "Read before you touch it" table lands on 2026-03-05-display-scaling.md (mechanism superseded) with nothing at the pointer warning it.
 
-**Evidence.** Read index.md in full (48 lines: it mandates Status and lists 16 notes with no status annotation). Grepped `^Status|^- Status` across docs/design/2026-\*.md: 11 files have it, 5 (core-module-via-symlink, pure-core-support-split, appkit-lifetime-safety, ui-harness-whole-module-substitution, both 2026-08-10 session-owned) do not. Read the first 14 lines of terminal-focus-display-link.md and display-scaling.md and the first 30 of both 2026-08-10 notes, confirming the Accepted-plus-superseded-banner contradiction in each.
+**Evidence.** Read index.md in full (48 lines: it mandates Status and lists 16 notes with no status annotation). Read the first 14 lines of terminal-focus-display-link.md and display-scaling.md and the first 30 of both 2026-08-10 notes, confirming the Accepted-plus-superseded-banner contradiction in each.
+
+**Correction (verified 2026-08-12).** This finding originally claimed five notes carry no `Status` field, from a `^Status|^- Status` grep. That was a false positive and the claim is withdrawn: those five write it as `` `Status`: Accepted ``, with the field name backticked, which the grep could not match. The form predates the audit (for example `5301bfa1`, 2026-06-09), so nothing was fixed in between. Every note does carry a status. The rest of the finding stands -- the index still shows no status, and the superseded notes still read `Accepted`.
 
 **Ideal fix.** Make the status machine-checked and single-sourced: fix a required front-matter block (`Status`, `Date`, optional `Superseded by`) on every note, generate the `## Notes` list in index.md from those fields so each row shows its status and its successor link, and add a docs lint to scripts/run-test-suite.sh (alongside research-index-lint.sh, which already enforces exactly this shape for docs/research/) that fails when a note has a supersession banner or `Superseded by` field while its `Status` still reads `Accepted`, when a note lacks the required fields, or when the index and the directory disagree. Then a status cannot be wrong without the gate going red.
 
-**Cheaper fallback.** Hand-edit the five superseded notes to `Status: Superseded` with a successor link, add the missing Status fields, and append the status to each index row -- no lint, so it drifts again on the next removal.
+**Cheaper fallback.** Hand-edit the superseded notes to `Status: Superseded` with a successor link, settle on one spelling of the field (the notes are split between `Status:` and `` `Status`: ``), and append the status to each index row -- no lint, so it drifts again on the next removal.
 
 **Risk.** low
 
@@ -580,6 +588,8 @@ in itself.
 
 `app/AppRuntime.swift#scheduleLightCheckpointIfNeeded`, `app/AppRuntime.swift#scheduleCoalescedReconcile`, `app/AppRuntime.swift#applyRecoveryAction`, `app/AppRuntime.swift#shutdown`, `app/AppRuntime.swift#perform`, `app/AppRuntimeSchedulingLifecycle.swift#AppRuntimeSchedulingLifecycle`
 
+**Status note.** `6b2e27f0` removed the pane-tape follow teardown from the `.terminate` arm and left a comment naming `shutdown()` as its single owner, so that part of the redundant teardown is gone. Everything else stands: all three timer handle-plus-token pairs, the write-only `switcherEventMonitor`, the per-pane debouncer maps, the repeated cancel triplets, and the two timer cancels the `.terminate` arm still duplicates.
+
 **Problem.** `AppRuntimeSchedulingLifecycle` already stores, per token, the closure that retires an owner - yet AppRuntime keeps a second field beside every token holding the same owner: three `DispatchSourceTimer` + token pairs, `switcherEventMonitor` + token, and per-pane debouncer + token maps. Two fields per owner means the cancel triplet `cancel(token); token = nil; handle = nil` is written out at roughly ten sites, and the three timers repeat a near-identical twenty-line arm-schedule-guard-handler-resume block. It also breeds pure dead storage and a redundant teardown: `switcherEventMonitor` is assigned and nil'd but never read (the token's cancel closure owns `NSEvent.removeMonitor`), and the `.terminate` arm of `perform` re-implements a subset of `shutdown()` - pane-tape removal, light-timer cancel, enriched-timer cancel - purely to clear those shadow fields before `NSApp.terminate` reaches `applicationWillTerminate`, which calls `prepareRecoveryForApplicationExit` and `shutdown()` and does it all again.
 
 **Evidence.** Grepped `switcherEventMonitor`: assignments at declaration, install and shutdown, no reads. Compared `perform`'s `.terminate` arm against `shutdown()`: both call `paneTapeFollowSubscriptions.removeAll()` + `removePaneTapeFollowNotice`, both clear `paneTapeFollowConnections` / tokens / notice registrations, and the enriched-timer cancel is repeated a third time in `prepareRecoveryForApplicationExit`. `scheduleLightCheckpointIfNeeded`, `scheduleCoalescedReconcile` and `applyRecoveryAction(.schedule)` are three copies of the same body differing only in deadline and event action. Only two of the three timer handles are ever read as a predicate (`lightCheckpointTimer == nil`, `coalescedReconcileTimer != nil`); `enrichedCheckpointTimer` is write-only apart from a `?.cancel()` its own token already performs.
@@ -659,6 +669,8 @@ in itself.
 `pty` &middot; duplication &middot; impact 3, confidence 5 &middot; effort medium
 
 `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift#TerminalPTYAppliedTransition`, `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift#applyOutput`, `lib/TerminalPTY/Sources/TerminalPaneSession/TerminalPaneSession.swift#neutralEvents`, `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalFlightRecorder.swift#record`
+
+**Status note.** The blind-production-tape half is largely fixed, across `a93604e7`, `04088034`, and `2fc9f971`: `flightTape` is non-optional, `NeutralTerminalRecordingEvent` gained `case write([UInt8])`, and the submission path records it, so the tape now shows what the user typed. The duplication this finding is named for is untouched: `TerminalPTYAppliedTransition` still exists, `captureTransitions` still fires at all seven sites, `capturedOutput` still shadows `.feed`, and `neutralEvents` is still the hand-written mapping. Focus, mouse, and scroll remain recorder-invisible.
 
 **Problem.** The host runs two independent recorders over the same transition stream, in two different vocabularies. `TerminalPTYAppliedTransition` is case-for-case isomorphic to `NeutralTerminalRecordingEvent` (feed / input / paste / focus / mouse / resize, with three scroll cases against one `.viewport`), and the controller carries a 17-line hand-written mapping between them. Meanwhile the flight recorder already stores `NeutralTerminalRecordingEvent` with retention accounting, cursors, and follow notices -- but only ever receives `.feed` and `.resize`, so the production tape cannot show what the user typed, pasted, or clicked, which is precisely what a reproduction tape is for. On top of that, `applyOutput` writes every output chunk into three places at once in a characterization build: `capturedOutput`, `appliedTransitions` as `.feed`, and the DEBUG `testOutputWindow`.
 
