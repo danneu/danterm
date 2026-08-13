@@ -6,6 +6,11 @@ Research started: 2026-08-12.
 - [decisions.md](decisions.md) -- the auditable decision log.
 - [ios-cross-compile.sh](ios-cross-compile.sh) -- the F1 reproduction: builds
   each candidate portable module for both iOS triples and prints pass/fail.
+- [f2-render-execution.md](f2-render-execution.md) -- F2 in full, with
+  [ios-render-spike.sh](ios-render-spike.sh) and the `f2-artifacts/`
+  screenshots.
+- [f4-mac-to-mac.md](f4-mac-to-mac.md) -- F4 in full, with the `t4-spike/`
+  client and its ten scenarios.
 - [briefing.md](briefing.md) -- the initiating brainstorm dump: repo census, IPC
   surface, portability inference, candidate directions. Census-grade evidence;
   every claim that carries weight is re-verified by a Phase 1 task before a
@@ -58,7 +63,13 @@ spine that is already verifiable against the tree:
   transport-agnostic.
 - Tape subscriptions die with their `IpcConnection`: no sequence numbers, no
   resume, no server-side buffering. Mobile clients disconnect constantly, so
-  this is a known protocol gap, not a maybe.
+  this is a known protocol gap, not a maybe. F4 measured what the gap costs: a
+  client dropped at sequence 10089 and reconnected with `--from-now` skipped 216
+  events and was told about none of them.
+- There is no way to ask a pane what state it is in, only to watch its bytes.
+  `pane.info` carries no geometry, modes, or screen state; `pane.rows` carries
+  no attributes; `pane.read` carries text. F4 established that this is the same
+  gap as the missing `pane.snapshot`, seen from the control surface.
 - Every `lib/*/Package.swift` pins `platforms: [.macOS(.v26)]` and nothing
   else. F1 has since replaced the import census with builds: with a pin added,
   `TerminalCore`, `TerminalCoreRecording`, `TerminalRenderPlanning`,
@@ -85,32 +96,56 @@ and the phone can join the tailnet.
 after adding `.iOS` platform pins; `TerminalRenderExecution` additionally needs
 an `NSFont`/`UIFont` seam and a decision about the IOSurface-backed swapchain.
 
-Confirmed in part by F1, at compile time only -- nothing here has run on a
-device. The first five modules build for both iOS triples with nothing but a
-platform pin, and no code is conditionally compiled out. `DanTermSupport` builds
-on both triples once two host-only files leave the module (`CLIPathInstaller`,
-`DoctorProber`), which is a file split, not a port. The
-`TerminalRenderExecution` half is still open: the module stops at `import
-AppKit` before it can say what else it needs, which is T2's subject.
+Confirmed by F1 and F2, at compile time plus one simulator run -- nothing has
+run on a device. The first five modules build for both iOS triples with nothing
+but a platform pin, and no code is conditionally compiled out. `DanTermSupport`
+builds on both triples once two host-only files leave the module
+(`CLIPathInstaller`, `DoctorProber`), which is a file split, not a port. The
+`TerminalRenderExecution` half cost less than the hypothesis guessed: the font
+seam is one call site, and the IOSurface swapchain needed no decision at all
+because it ports unchanged. H1 is closed; what remains is whether the
+presentation mechanism behaves the same on hardware as in the simulator, which
+is T3's first job.
 
-### H2 -- CPU-composed frames present acceptably on iOS without IOSurface
+### H2 -- the existing swapchain is the iOS presentation path, not a substitute
 
-At phone-scale grids (tens of columns, not hundreds), drawing a
-`RenderFramePlan` into a `CGBitmapContext` and assigning a `CGImage` to
-`layer.contents` sustains device refresh at acceptable energy cost. Competing
-explanation: the per-frame copy or color management stutters under a full-repaint
-scroll workload, and a `CVPixelBuffer`/`CAMetalLayer` path (the closer analogue
-to the existing N-buffer swapchain) is required. T3 measures both; D2 selects.
+Restated after F2. The original H2 asked whether CPU-composed frames present
+acceptably *without* IOSurface, and named `CVPixelBuffer`/`CAMetalLayer` as the
+closer analogue to the N-buffer swapchain. That framing is dead: F2 shows
+`TerminalFrameSwapchain` and `TerminalFrameBackingStore` compile and run on iOS
+unchanged, and that CoreAnimation there honors the same attach-to-publish
+protocol the swapchain already speaks -- an in-place pixel rewrite does not
+reach the screen, and reassigning the same surface does.
+
+So the live question is narrower: does the real `TerminalFrameSwapchain` beat
+CGImage-copy-per-frame on a phone, at phone-scale grids, under a full-repaint
+scroll workload, in frame timing and energy? T3 measures those two; D2 selects
+between them. The substitute paths are candidates only if the device disconfirms
+the simulator result below.
+
+Competing explanation, and the one thing that could reopen the wider question:
+simulator CoreAnimation runs against the Mac's render server, so F2's
+presentation result may be a simulator affordance. On a device the surface path
+could fail outright, which would put `CAMetalLayer`/`CVPixelBuffer` back on the
+table.
 
 ### H3 -- a remote TerminalCore converges from snapshot plus tape
 
-`NeutralTerminalRecordingEvent.feed` carries raw PTY bytes, so a second
-`TerminalCore` instance fed the same stream reproduces the source pane's grid;
-the recording/corpus infrastructure already replays these tapes headlessly. The
-unproven parts are joining mid-stream (a serialized grid snapshot must exist and
-must splice cleanly onto the live stream) and how viewport/resize events from a
-differently-sized client interact with the stream. T4 confirms Mac-to-Mac with
-zero iOS variables.
+Confirmed by F4, Mac-to-Mac, with zero iOS variables. A client replaying a
+pane's whole retained tape produced a viewport byte-identical to that pane's own
+`pane read`, and planned a `RenderFramePlan` from its own engine in a process
+with no AppKit. The uplink needs nothing new either.
+
+Both parts that H3 called unproven are now answered, and neither is a maybe.
+Joining mid-stream loses modes, not just history: a late joiner differs on
+alternate-screen state, cursor visibility and position, `applicationCursorKeys`,
+`bracketedPaste`, and `mouseTracking`, so it sends the wrong key encodings and
+pastes unbracketed purely because it joined late. The stream is not
+self-synchronizing, and worse, a joiner heals whatever a prompt repaint covers,
+so it can look correct and be empty. Geometry is unconditional and
+authoritative: there is no third option where a differently-sized client quietly
+renders at its own size. F4 states the resulting `pane.snapshot` floor for T8,
+and the observe-vs-claim consequence for T10.
 
 ### H4 -- a bridge process over the tailnet survives real phone mobility
 
@@ -156,21 +191,35 @@ Provisional shape; every leg has a gate in the ledger.
   [ios-cross-compile.sh](ios-cross-compile.sh) applies and restores them per
   run, so the result is re-derived rather than asserted by a manifest. T16
   carries the split the failure implies.
-- **T2 RESEARCH** -- `TerminalRenderExecution` on iOS: itemize what it actually
-  needs (the `NSFont` call, `NSAttributedString` status, whether
-  `TerminalFrameBackingStore`/`TerminalFrameSwapchain` are ported, stubbed, or
-  replaced wholesale on iOS), then render one static `RenderFramePlan` in a
-  minimal iOS app. Record in F2.
-- **T3 RESEARCH** -- Presentation-path measurement on a real device: worst-case
-  full-repaint scroll workload at a phone-typical grid, `CGImage` ->
-  `layer.contents` vs a `CAMetalLayer`/`CVPixelBuffer` path. Diagnostic frame
-  timings and energy notes into F3.
-- **T4 RESEARCH** -- Mac-to-Mac thin-client spike: a second macOS process
-  connects to the control socket, issues `pane.tape --follow`, feeds a local
-  `TerminalCore`, and presents it. Proves the remote-session concept, and
-  exposes the mid-stream-join gap concretely, with zero iOS variables. Record
-  in F4, including exactly what state a joining client lacked.
-- **D2 gate** -- select the iOS presentation path, from F2 and F3.
+- **T2 DONE** (F2) -- `TerminalRenderExecution` on iOS. The `import AppKit`
+  hid one symbol: `NSFont.monospacedSystemFont` on line 90, which `UIFont`
+  answers identically, so the seam is one `typealias` behind
+  `#if canImport(AppKit)`. `NSAttributedString` was a false alarm (Foundation).
+  `TerminalFrameBackingStore` and `TerminalFrameSwapchain` port unchanged --
+  IOSurface is public on iOS -- and a simulator spike showed CoreAnimation there
+  honors the swapchain's attach-to-publish protocol. H2 is restated as a result.
+  The font seam stays uncommitted and lands with the pins in T16.
+- **T3 RESEARCH** -- Presentation-path measurement on a real device. First,
+  confirm on hardware what F2 saw only in the simulator: that an IOSurface
+  displays as `layer.contents` and that in-place mutation does not reach the
+  screen. Do that before measuring anything, because the H2 restatement rests on
+  it. Then measure the real `TerminalFrameSwapchain` against
+  CGImage-copy-per-frame, both on iOS, under a worst-case full-repaint scroll
+  workload at a phone-typical grid. Diagnostic frame timings and energy notes
+  into F3. Needs a physical device, so it also needs the signing and
+  provisioning path the simulator spike deliberately avoided.
+- **T4 DONE** (F4) -- Mac-to-Mac thin-client spike. Convergence confirmed
+  byte-for-byte against `pane read`. The join gap is modes, not just history,
+  and the stream is not self-synchronizing; F4 states the `pane.snapshot` floor
+  for T8 and the observe-vs-claim consequence for T10. Two unplanned results
+  carry into Phase 3: tape eviction drops the oldest events, which are the ones
+  that establish geometry and modes, so an evicted backlog replays into the
+  wrong grid size; and resume already has its coordinates in
+  `TerminalFlightRecordingCursor`, with only the ability for a client to supply
+  one missing at the protocol edge.
+- **D2 gate** -- select the iOS presentation path, from F2 and F3. F2 narrowed
+  the candidates to the real swapchain versus CGImage-per-frame; T3 supplies the
+  numbers and the device confirmation.
 - **D3 gate** -- confirm or restate the day-one-engine direction after F1-F4;
   reopening the rejected text renderer requires these spikes to have failed.
 
@@ -195,7 +244,15 @@ Provisional shape; every leg has a gate in the ledger.
 - **T8 VETTING** -- Design `pane.snapshot` plus sequence-numbered tape resume:
   a broker owning per-pane bounded ring buffers and subscriber cursors, resume
   as `fromSeq` backfill; decide whether the broker lives in the app runtime or
-  the bridge. Begin only after T4 has exposed the real gap shapes. Records D5.
+  the bridge. Unblocked -- F4 supplies the gap shapes, including an explicit
+  floor for what the snapshot payload must carry and the fence it needs against
+  the subscription it splices onto. Two F4 results shape the design: `fromSeq`
+  mostly exposes machinery that already exists, since
+  `cursorSnapshot(from:)` already computes exact per-direction loss against an
+  arbitrary cursor, and today's `--from-now` reconnect reports no gap at all
+  while silently skipping events. Settle at the same time whether the recorder's
+  eviction bound is a session-durability parameter, since F4 showed eviction
+  takes the geometry-establishing events first. Records D5.
 - **T9 TODO** -- Reconnect behavior on the phone against the T5 bridge and the
   T8 protocol: airplane-mode toggles, backgrounding, cold relaunch. Record what
   each recovery actually required in a finding.
@@ -205,7 +262,12 @@ Provisional shape; every leg has a gate in the ledger.
 - **T10 VETTING** -- Geometry conflict semantics: *observe* (read-only, local
   reflow of history) vs *claim* (the phone owns the PTY size and restores it on
   detach), selectable per pane; define what the Mac window shows while a pane
-  is claimed. Records D6.
+  is claimed. F4 removed the third option: stream geometry is unconditional and
+  authoritative, so a client cannot quietly render at its own size -- a
+  differently-sized client that ignores the stream's resize renders wide output
+  into a narrow grid as garbage. Observe therefore means local reflow *after*
+  applying the stream's geometry, which F4 verified works; claim means the
+  client's size enters the stream as a normal resize event. Records D6.
 - **T11 TODO** -- Input surface: map an iOS keyboard plus an accessory key row
   (Esc, Ctrl, Tab, arrows, pipe, tilde, slash) onto `pane.input`/`KeyTokens`;
   itemize what the token grammar cannot express today.
