@@ -274,7 +274,7 @@ Pure-layer obligations are Swift Testing in
       (D3, D4; I4, I5; PO1 -- rewrites `SidebarItemStore.apply`'s return,
       `applyRowOp`, `updateTabRow` / `updateGroupRow`, and
       `SidebarItemStoreTests`)
-- [ ] 3. refactor(sidebar): one projection-fed group painter
+- [x] 3. refactor(sidebar): one projection-fed group painter
       (D5; I6; PO4 -- deletes `applyGroupCollapseState` and its two delegate
       calls)
 - [ ] 4. docs(audit): close the sidebar thread

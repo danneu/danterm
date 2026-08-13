@@ -407,7 +407,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         case .setGroupCollapsed(let item, let collapsed):
             if collapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
-            applyGroupCollapseState(for: item, collapsed: collapsed)
+            if case .group(let group) = item.kind,
+               updateGroupRow(item) {
+                unappliedGroupIds.insert(group.id)
+            }
 
         case .repaint(let item):
             switch item.kind {
@@ -754,7 +757,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         guard let sidebarItem = notification.userInfo?["NSObject"] as? SidebarItem,
               case .group(let group) = sidebarItem.kind else { return }
         runtime?.send(.toggleGroupCollapse(groupId: group.id))
-        applyGroupCollapseState(for: sidebarItem, collapsed: true)
     }
 
     func outlineViewItemDidExpand(_ notification: Notification) {
@@ -762,18 +764,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         guard let sidebarItem = notification.userInfo?["NSObject"] as? SidebarItem,
               case .group(let group) = sidebarItem.kind else { return }
         runtime?.send(.toggleGroupCollapse(groupId: group.id))
-        applyGroupCollapseState(for: sidebarItem, collapsed: false)
-    }
-
-    private func applyGroupCollapseState(for sidebarItem: SidebarItem, collapsed: Bool) {
-        guard case .group(var group) = sidebarItem.kind else { return }
-        let row = outlineView.row(forItem: sidebarItem)
-        guard row >= 0,
-              let cell = outlineView.view(
-                atColumn: 0, row: row,
-                makeIfNecessary: false) as? SidebarGroupCellView else { return }
-        group.isCollapsed = collapsed
-        cell.apply(group, isEditingTitle: cell.titleField.currentEditor() != nil)
     }
 
     // MARK: - Drag & Drop

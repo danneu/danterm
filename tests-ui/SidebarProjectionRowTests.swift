@@ -277,6 +277,116 @@ func sidebarProjectionRowTests() {
             title: "A", hidesSeparator: true,
             bell: nil, tabCount: nil, label: "re-expanded group")
     }
+
+    uiTest("a missed collapse paint is retained and retried through the group painter") {
+        // Intent: a visible group row whose collapse paint cannot fetch its cell is
+        //   retained, then converges through the normal group repaint on the next pass.
+        // Why it exists: the collapse-only painter bypassed updateGroupRow's dropped-row
+        //   result, so the reconcile cache could accept chrome that never reached a cell.
+        // Scenario: spec-first -- AppKit temporarily returns no cell while a group
+        //   collapses, gains a third tab, and rings, then returns it on the retry.
+        let (sidebar, outline, window, _, driver) = makeProjectionRowHarness()
+        defer { window.close() }
+
+        var fixture = projectionRowGroupInteractionFixture()
+        var initialModel = fixture.model
+        initialModel.groups[0].tabs.removeLast()
+        initialModel.alerts = []
+        _ = applySidebarTestModel(
+            initialModel, using: driver, to: sidebar, outline: outline)
+
+        sidebar.testForceNextNilCellGroupIds.insert(fixture.groupId)
+        fixture.model.groups[0].isCollapsed = true
+        let missed = applySidebarTestModel(
+            fixture.model, using: driver, to: sidebar, outline: outline)
+
+        try uiExpect(missed.unappliedGroupIds == [fixture.groupId],
+            "a missed collapse paint should retain the group for retry")
+
+        let retried = applySidebarTestModel(
+            fixture.model, using: driver, to: sidebar, outline: outline)
+        try uiExpect(retried.unappliedGroupIds.isEmpty,
+            "the next pass should apply the retained group paint")
+        try assertProjectionRowGroup(
+            fixture.groupId, in: outline, caret: "chevron.right",
+            title: "A", hidesSeparator: true,
+            bell: "1", tabCount: "3", label: "retried collapsed group")
+    }
+
+    uiTest("the disclosure path paints group chrome from the reconciled projection") {
+        // Intent: disclosure collapse and expand leave the caret, bell, and tab count
+        //   on the projection produced by the synchronous toggle reconcile.
+        // Why it exists: deleting the delegate's second painter is safe only while the
+        //   delegate send remains the one path that updates all group chrome.
+        // Scenario: spec-first -- the disclosure triangle collapses and expands a
+        //   ringing three-tab group.
+        let (sidebar, outline, window, runtime, driver) = makeProjectionRowHarness()
+        defer { window.close() }
+
+        var fixture = projectionRowGroupInteractionFixture()
+        _ = applySidebarTestModel(
+            fixture.model, using: driver, to: sidebar, outline: outline)
+        runtime.onSend = { msg in
+            guard case .toggleGroupCollapse(let groupId) = msg,
+                  let index = fixture.model.groups.firstIndex(where: { $0.id == groupId })
+            else { return }
+            fixture.model.groups[index].isCollapsed.toggle()
+            _ = applySidebarTestModel(
+                fixture.model, using: driver, to: sidebar, outline: outline)
+        }
+        let item = try projectionRowGroupItem(fixture.groupId, in: outline)
+
+        outline.collapseItem(item)
+        try assertProjectionRowGroup(
+            fixture.groupId, in: outline, caret: "chevron.right",
+            title: "A", hidesSeparator: true,
+            bell: "1", tabCount: "3", label: "disclosure-collapsed group")
+
+        outline.expandItem(item)
+        try assertProjectionRowGroup(
+            fixture.groupId, in: outline, caret: "chevron.down",
+            title: "A", hidesSeparator: true,
+            bell: nil, tabCount: nil, label: "disclosure-expanded group")
+    }
+
+    uiTest("the caret button paints group chrome from the reconciled projection") {
+        // Intent: caret-button collapse and expand leave the caret, bell, and tab count
+        //   on the projection produced by the synchronous toggle reconcile.
+        // Why it exists: the custom caret enters the same AppKit delegate path as the
+        //   disclosure triangle and must not need its own collapse-state painter.
+        // Scenario: spec-first -- the caret button collapses and expands a ringing
+        //   three-tab group.
+        let (sidebar, outline, window, runtime, driver) = makeProjectionRowHarness()
+        defer { window.close() }
+
+        var fixture = projectionRowGroupInteractionFixture()
+        _ = applySidebarTestModel(
+            fixture.model, using: driver, to: sidebar, outline: outline)
+        runtime.onSend = { msg in
+            guard case .toggleGroupCollapse(let groupId) = msg,
+                  let index = fixture.model.groups.firstIndex(where: { $0.id == groupId })
+            else { return }
+            fixture.model.groups[index].isCollapsed.toggle()
+            _ = applySidebarTestModel(
+                fixture.model, using: driver, to: sidebar, outline: outline)
+        }
+
+        let expanded: SidebarGroupCellView = try sidebarCell(
+            for: .group(fixture.groupId), in: outline)
+        expanded.caretButton.performClick(nil)
+        try assertProjectionRowGroup(
+            fixture.groupId, in: outline, caret: "chevron.right",
+            title: "A", hidesSeparator: true,
+            bell: "1", tabCount: "3", label: "caret-collapsed group")
+
+        let collapsed: SidebarGroupCellView = try sidebarCell(
+            for: .group(fixture.groupId), in: outline)
+        collapsed.caretButton.performClick(nil)
+        try assertProjectionRowGroup(
+            fixture.groupId, in: outline, caret: "chevron.down",
+            title: "A", hidesSeparator: true,
+            bell: nil, tabCount: nil, label: "caret-expanded group")
+    }
 }
 
 // MARK: - Harness helpers
@@ -324,6 +434,41 @@ private func projectionRowSplitTab(
 
 private func projectionRowTitleLaneWidth(_ cell: SidebarTabCellView) -> CGFloat {
     cell.leadingStack.bounds.maxX - cell.titleField.frame.minX
+}
+
+private func projectionRowGroupInteractionFixture() -> (
+    model: AppModel, groupId: GroupId
+) {
+    let group = GroupId(); let anchorGroup = GroupId()
+    let first = TabId(); let second = TabId(); let third = TabId(); let anchor = TabId()
+    let ringingPane = PaneId()
+    var model = AppModel(
+        groups: [
+            GroupModel(id: group, name: "A", tabs: [
+                projectionRowTab(id: first, title: "one"),
+                projectionRowTab(id: second, title: "two"),
+                projectionRowTab(id: third, title: "three", paneId: ringingPane),
+            ]),
+            GroupModel(id: anchorGroup, name: "B", tabs: [
+                projectionRowTab(id: anchor, title: "anchor"),
+            ]),
+        ],
+        selectedTabId: first)
+    model.alerts = [sidebarBellAlert(paneId: ringingPane)]
+    return (model, group)
+}
+
+private func projectionRowGroupItem(
+    _ groupId: GroupId,
+    in outline: NSOutlineView
+) throws -> SidebarItem {
+    let cell: SidebarGroupCellView = try sidebarCell(
+        for: .group(groupId), in: outline)
+    let row = outline.row(for: cell)
+    guard row >= 0, let item = outline.item(atRow: row) as? SidebarItem else {
+        throw UITestFailure(message: "missing item for group \(groupId)")
+    }
+    return item
 }
 
 /// Assert a group row's three projection-driven accessories at once. `bell` and
