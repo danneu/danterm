@@ -136,11 +136,10 @@ final class SwitcherRowView: NSView {
     private let highlightLayer: CALayer
 
     override init(frame frameRect: NSRect) {
-        nameLabel = NSTextField(labelWithString: "")
+        nameLabel = SingleLineLabel.make()
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
         nameLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         nameLabel.textColor = .labelColor
-        nameLabel.lineBreakMode = .byTruncatingTail
 
         badgeLabel = NSTextField(labelWithString: "")
         badgeLabel.translatesAutoresizingMaskIntoConstraints = false

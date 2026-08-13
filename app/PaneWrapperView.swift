@@ -50,7 +50,7 @@ class PaneWrapperView: NSView {
         // Terminal view wrapped in scroll view for native scrollbar support
         self.scrollWrapper = ScrollableTerminalView(terminalSession: terminalView)
         self.toolbar = NSView()
-        self.toolbarLabel = NonHitTestingLabel(labelWithString: "")
+        self.toolbarLabel = NonHitTestingLabel.make(truncating: .byTruncatingMiddle)
         self.isZoomed = isZoomed
         self.hasSplits = hasSplits
         self.runtime = runtime
@@ -58,9 +58,9 @@ class PaneWrapperView: NSView {
         self.progressIndicator = ProgressIndicatorView()
         self.remoteAccessory = NSView()
         self.remoteIcon = NSImageView()
-        self.remoteSessionLabel = NonHitTestingLabel(labelWithString: "")
+        self.remoteSessionLabel = NonHitTestingLabel.make()
         self.agentAccessory = NSView()
-        self.agentSessionLabel = NonHitTestingLabel(labelWithString: "")
+        self.agentSessionLabel = NonHitTestingLabel.make()
         self.paneChip = ChipView(kind: .terminal, edge: ChipArtwork.toolbarSize)
         self.leadingStack = NSStackView()
 
@@ -127,8 +127,6 @@ class PaneWrapperView: NSView {
         remoteSessionLabel.translatesAutoresizingMaskIntoConstraints = false
         remoteSessionLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         remoteSessionLabel.textColor = .white
-        remoteSessionLabel.lineBreakMode = .byTruncatingTail
-        remoteSessionLabel.usesSingleLineMode = true
         remoteSessionLabel.isHidden = true
         remoteSessionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         remoteAccessory.addSubview(remoteSessionLabel)
@@ -165,8 +163,6 @@ class PaneWrapperView: NSView {
         agentSessionLabel.translatesAutoresizingMaskIntoConstraints = false
         agentSessionLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         agentSessionLabel.textColor = .white
-        agentSessionLabel.lineBreakMode = .byTruncatingTail
-        agentSessionLabel.usesSingleLineMode = true
         agentSessionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         agentAccessory.addSubview(agentSessionLabel)
 
@@ -189,7 +185,6 @@ class PaneWrapperView: NSView {
         toolbarLabel.translatesAutoresizingMaskIntoConstraints = false
         toolbarLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         toolbarLabel.textColor = NSColor.secondaryLabelColor
-        toolbarLabel.lineBreakMode = .byTruncatingMiddle
         toolbarLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // Leading stack: arranges [alertBadge, remoteAccessory, progressIndicator, label] horizontally
@@ -650,7 +645,7 @@ class ToolbarDragHandleView: NSView, NSDraggingSource {
 
 /// NSTextField subclass that never intercepts mouse events.
 /// Used for the toolbar label so the drag handle underneath receives hits.
-class NonHitTestingLabel: NSTextField {
+class NonHitTestingLabel: SingleLineLabel {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 

@@ -82,10 +82,9 @@ extension TabTodoDragPayload.Source: Codable {
 /// The pane variant is a button: clicking the header focuses the pane.
 private final class TabTodoHeaderRowView: NSView {
     let titleLabel: NSTextField = {
-        let tf = NSTextField(labelWithString: "")
+        let tf = SingleLineLabel.make()
         tf.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
         tf.textColor = .secondaryLabelColor
-        tf.lineBreakMode = .byTruncatingTail
         return tf
     }()
 

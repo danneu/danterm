@@ -257,7 +257,7 @@ shows one line and keeps its subtitle and pane strip.
 - [x] 3. Type every render-ready value as `DisplayLine` (I1) while the shared
       model and IPC helpers stay `String` (I2), with the AppKit readouts.
       Obligations 3-7, plus the design-doc decision and the SKILL.md note.
-- [ ] 4. Harden the single-line labels. Obligations 9-10. Separate because it is
+- [x] 4. Harden the single-line labels. Obligations 9-10. Separate because it is
       the only commit needing a GUI session and the only one that can regress
       the rename field editor.
 
@@ -281,6 +281,33 @@ shows one line and keeps its subtitle and pane strip.
   `.connectionDeclared` report rather than as a `DanTermShell=3` sequence: the
   base64 decode lives in `TerminalCore.Terminal`, a different module, so the
   report is the value that decode produces.
+- **The plan's AppKit premise was wrong, and obligation 9 needed a different
+  fix.** "Every fixed-height label that receives a `DisplayLine` lays out on
+  exactly one line and truncates, whatever string it is handed" is not
+  achievable with label properties. `usesSingleLineMode`,
+  `maximumNumberOfLines`, `wraps`, and `lineBreakMode` govern *soft* wrapping
+  only; every combination of them was measured, and an `NSTextField` handed
+  "a\nb" still lays out two lines and grows from 16 pt to 32 pt. So the second
+  guard cannot be a property set. It is `SingleLineLabel`, an `NSTextField`
+  subclass whose `stringValue` setter runs the same `DisplayLine` normalizer --
+  one rule about what a display line may contain, applied at two boundaries,
+  the shape `String.singleLineName` already has. The obligation-9 test passes
+  for the reason the plan wanted: handed a multi-line string directly, the label
+  lays out one line, and the assertion survives `DisplayLine` being removed from
+  the projections.
+- **The plan's Context overstates what a title can carry.** `EscapeAbsorber`
+  drops every byte below 0x20 inside an OSC string, so OSC 0/2 cannot deliver a
+  newline or any other C0 control into a title -- confirmed end to end: the
+  reported title arrived as "line oneline two". The class of bug is real, but
+  through the base64 fields of `DanTermShell=3`, which are decoded with no
+  control filtering: a running command and a remote identity's user and host.
+  Confirmed end to end -- a `command-start` carrying a newline reaches the model
+  and `pane info` byte for byte, and the pane toolbar flattens it for display.
+  Nothing in the change depends on which report is the carrier; the note is here
+  so the next reader does not chase the title.
+- Two more files joined the UI harness's `swiftc` list for obligation 9:
+  `SwitcherPanel.swift` and `WindowChromeView.swift` (with `BellToolbarButton`
+  and `TitlebarDragView`, which they need).
 - `SidebarRenameRecycleTests` used a long title ending in a space. That trailing
   space no longer survives the projection, so the title gained a final word --
   the test is about row recycling, not about trimming.

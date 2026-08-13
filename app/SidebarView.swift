@@ -1277,10 +1277,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let cell = NSTableCellView()
         cell.identifier = cellId
 
-        let textField = NSTextField(labelWithString: "")
+        let textField = SingleLineLabel.make()
         textField.translatesAutoresizingMaskIntoConstraints = false
         textField.font = .preferredFont(forTextStyle: .headline)
-        textField.lineBreakMode = .byTruncatingTail
         textField.isEditable = false
         textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textField.delegate = self
@@ -1396,10 +1395,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             colorStripe.isHidden = true
             cell.addSubview(colorStripe)
 
-            let textField = NSTextField(labelWithString: "")
+            let textField = SingleLineLabel.make()
             textField.translatesAutoresizingMaskIntoConstraints = false
             textField.font = .systemFont(ofSize: NSFont.systemFontSize)
-            textField.lineBreakMode = .byTruncatingTail
             textField.isEditable = false
             textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             textField.delegate = self
@@ -1417,12 +1415,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             leadingStack.setHuggingPriority(.defaultLow, for: .horizontal)
             cell.addSubview(leadingStack)
 
-            let subtitleField = NSTextField(labelWithString: "")
+            let subtitleField = SingleLineLabel.make(truncating: .byTruncatingMiddle)
             subtitleField.identifier = subtitleId
             subtitleField.translatesAutoresizingMaskIntoConstraints = false
             subtitleField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
             subtitleField.textColor = .secondaryLabelColor
-            subtitleField.lineBreakMode = .byTruncatingMiddle
             cell.addSubview(subtitleField)
 
             // Occupies the subtitle's line, and only one of the two is ever shown.

@@ -6,6 +6,21 @@ import Cocoa
 func alertsPopoverViewTests() {
     print("AlertsPopoverView")
 
+    uiTest("an alert row title lays out one line and truncates") {
+        let paneId = PaneId()
+        let fx = makeAlertsFixture(alerts: [
+            makeAlert(paneId: paneId, title: "one", body: "a body", isUnread: true, ageSeconds: 90),
+        ], showAll: true, livePaneId: paneId)
+        defer { fx.window.close() }
+
+        let rows = materializedAlertRows(fx)
+        guard let title = rows.first?.subviews.compactMap({ $0 as? NSTextField })
+            .first(where: { $0.stringValue == "one" }) else {
+            throw UITestFailure(message: "an alert row should show its title in a label")
+        }
+        try assertSingleLine(title, "alerts popover row title")
+    }
+
     uiTest("apply renders rows in order with text, time labels, and unread dots") {
         let paneId = PaneId()
         let alerts = [
