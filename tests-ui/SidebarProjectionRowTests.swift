@@ -12,6 +12,45 @@ import Cocoa
 func sidebarProjectionRowTests() {
     print("SidebarProjectionRow")
 
+    uiTest("badge hit testing returns only the tab with a visible badge") {
+        // Intent: a point inside a visible tab alert badge resolves that tab, and
+        //   the same point resolves nothing after the badge is hidden.
+        // Why it exists: the old badge tests built a fake cell from identifier
+        //   strings, so they did not exercise the outline view's click consumer.
+        // Scenario: spec-first -- a tab's bell is cleared while its row stays
+        //   materialized under the pointer.
+        let (sidebar, outline, window, runtime) = makeProjectionRowHarness()
+        defer { window.close() }
+
+        let group = GroupId()
+        let tab = TabId()
+        let pane = PaneId()
+        var model = AppModel(
+            groups: [GroupModel(id: group, name: "G", tabs: [
+                projectionRowTab(id: tab, title: "ringing", paneId: pane),
+            ])],
+            selectedTabId: tab)
+        model.alerts = [projectionRowBellAlert(paneId: pane)]
+        let alertedProjection = applyProjectionRowModel(model, to: sidebar, outline: outline)
+
+        let cell = try projectionRowCell(for: .tab(tab), in: outline)
+        guard let badge = visibleAlertBadge(in: cell) else {
+            throw UITestFailure(message: "alerted tab should have a visible badge")
+        }
+        let badgePoint = outline.convert(
+            NSPoint(x: badge.bounds.midX, y: badge.bounds.midY), from: badge)
+        try uiExpect(outline.tabForBadgeHit(at: badgePoint) == tab,
+            "a point inside the visible badge should resolve its tab")
+
+        model.alerts = []
+        _ = applyProjectionRowTransition(
+            old: alertedProjection, newModel: model,
+            to: sidebar, outline: outline, runtime: runtime)
+
+        try uiExpect(outline.tabForBadgeHit(at: badgePoint) == nil,
+            "the badge point should resolve nothing after the badge is hidden")
+    }
+
     uiTest("a reload suppressed by rename leaves the whole row on its old projection") {
         // Intent: while a rename suppresses a tab's reload, reconfiguring that cell
         //   redraws the projection the row last applied -- title, alert badge, and
@@ -141,7 +180,7 @@ func sidebarProjectionRowTests() {
 
 // MARK: - Harness helpers
 
-private func makeProjectionRowHarness() -> (SidebarView, NSOutlineView, NSWindow, AppRuntime) {
+private func makeProjectionRowHarness() -> (SidebarView, SidebarOutlineView, NSWindow, AppRuntime) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
     let runtime = AppRuntime()
     sidebar.runtime = runtime
@@ -315,8 +354,8 @@ private func assertProjectionRowGroup(
         "\(label): tab-count badge should show \(tabCount ?? "nothing")", file: file, line: line)
 }
 
-private func findProjectionRowOutlineView(in view: NSView) -> NSOutlineView? {
-    if let outline = view as? NSOutlineView { return outline }
+private func findProjectionRowOutlineView(in view: NSView) -> SidebarOutlineView? {
+    if let outline = view as? SidebarOutlineView { return outline }
     for subview in view.subviews {
         if let found = findProjectionRowOutlineView(in: subview) {
             return found
