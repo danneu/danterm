@@ -66,6 +66,8 @@ STEPS=(
     './scripts/tests/verify-bundle-layout_test.sh'
     './scripts/tests/bundle-transformations_test.sh'
     './scripts/tests/terminal-fence-accounting-lint_test.sh'
+    './scripts/tests/terminal-pty-host-test-seam-lint_test.sh'
+    './scripts/terminal-pty-host-test-seam-lint.sh'
     './scripts/tests/terminal-exit-concurrency-lint_test.sh'
     './scripts/tests/checkpoint-off-main-lint_test.sh'
     './scripts/tests/terminal-scalar-append-lint_test.sh'

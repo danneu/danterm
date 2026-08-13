@@ -4,14 +4,14 @@ import Darwin
 import PaneProcessLifecycle
 
 /// File descriptors and identity returned atomically after a successful spawn.
-struct SpawnedPTY: Sendable {
+package struct SpawnedPTY: Sendable {
     let master: Int32
     let leader: pid_t
     let session: pid_t
 }
 
 /// Distinguishes a complete spawn from the reducer-facing classified failure.
-enum PTYSpawnOutcome: Sendable {
+package enum PTYSpawnOutcome: Sendable {
     case success(SpawnedPTY)
     case failure(SpawnFailure)
     /// The host abandoned the launch after a child existed, so the spawner closed

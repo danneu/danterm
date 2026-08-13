@@ -46,22 +46,6 @@ final class InFlightLaunch: Sendable {
     /// Signalled exactly once, by `resolve`.
     private let workerFinished = DispatchSemaphore(value: 0)
 
-    /// The child this launch produced, once it has reported one. Test-support: it
-    /// is how a test names the process that must not outlive the host's completion,
-    /// which a process-wide census cannot do while sibling suites launch children.
-    var launchedLeader: pid_t? {
-        state.withLock { $0.launched?.leader }
-    }
-
-    /// Test-support: whether the worker has produced an outcome that has not yet
-    /// reached the owner queue.
-    var hasPendingDelivery: Bool {
-        state.withLock { state in
-            if case .available = state.phase { return true }
-            return false
-        }
-    }
-
     /// Called on the spawn queue the instant a child exists, before the bootstrap
     /// handshake. Returning `false` means the host has abandoned this launch, and
     /// the caller must release the child rather than keep launching it.

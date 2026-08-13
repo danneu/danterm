@@ -219,6 +219,7 @@ public actor TerminalPTYHost {
     private let bootstrapExecutable: String
     private let childExitProbe: any TerminalPTYChildExitProbing
     private let resourceLifecycle: any TerminalPTYResourceLifecycling
+    private let spawner: any TerminalPTYSpawning
 
     private var masterFD: Int32 = -1
     private var leaderPID: pid_t?
@@ -247,14 +248,9 @@ public actor TerminalPTYHost {
     /// mechanism and a stale outcome is discarded rather than adopted.
     private var spawnGeneration = 0
     private var pendingSpawnAdoption = false
-    private var spawnReportDelay: Double?
-    private var spawnDeliveryDelay: Double?
     /// The launch this host would still adopt, kept only so forced quiescence can
     /// stop it. Cleared as soon as its outcome lands.
     private var inFlightLaunch: InFlightLaunch?
-    /// The most recent launch, retained past its resolution purely so a test can
-    /// name the child it produced after the host has stopped tracking it.
-    private var lastIssuedLaunch: InFlightLaunch?
 
     private var pendingInput: [UInt8] = []
     private var pendingInputOffset = 0
@@ -351,7 +347,8 @@ public actor TerminalPTYHost {
         },
         applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound,
         childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe(),
-        resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle()
+        resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle(),
+        spawner: any TerminalPTYSpawning = SystemTerminalPTYSpawner()
     ) throws {
         guard let terminal = Terminal(
             columns: initialDimensions.columns,
@@ -370,6 +367,7 @@ public actor TerminalPTYHost {
         self.applicationExitBound = applicationExitBound
         self.childExitProbe = childExitProbe
         self.resourceLifecycle = resourceLifecycle
+        self.spawner = spawner
         flightTape = TerminalFlightRecorder(
             initialDimensions: initialDimensions,
             configuration: flightTapeConfiguration,
@@ -1395,23 +1393,20 @@ public actor TerminalPTYHost {
         pendingSpawnAdoption = true
         let generation = spawnGeneration
         let bootstrapExecutable = self.bootstrapExecutable
-        let reportDelay = spawnReportDelay
-        let deliveryDelay = spawnDeliveryDelay
+        let spawner = self.spawner
         let launch = InFlightLaunch()
         inFlightLaunch = launch
-        lastIssuedLaunch = launch
         let queue = self.queue
         Self.spawnQueue.async { [weak self] in
-            let outcome = PTYSpawner.spawn(spec, bootstrapExecutable: bootstrapExecutable) {
+            let outcome = spawner.spawn(spec, bootstrapExecutable: bootstrapExecutable) {
                 spawned in
-                if let reportDelay { usleep(UInt32(reportDelay * 1_000_000)) }
                 return launch.reportLaunched(spawned)
             }
             // Abandoned launches stop here only after `resolve` has released any
             // child. A deliverable outcome remains in `launch` until the owner
             // callback takes it, so exit can claim it during that handoff too.
             guard launch.resolve(outcome) else { return }
-            if let deliveryDelay { usleep(UInt32(deliveryDelay * 1_000_000)) }
+            spawner.waitForDeliveryPermission()
             queue.async { [weak self] in
                 guard let deliverable = launch.takeOutcome() else { return }
                 guard let self else {
@@ -1427,34 +1422,9 @@ public actor TerminalPTYHost {
         }
     }
 
-    /// Test-support fault injection replicating a launch still inside its
-    /// uninterruptible `posix_spawn` when application exit is requested: the next
-    /// spawn withholds the report that tells the owner queue a child exists.
-    /// The window it stands in for is real but too narrow to hit on demand.
-    package func injectSpawnReportDelay(_ delay: Double) {
-        spawnReportDelay = delay
-    }
-
-    /// Test-support fault injection for the second launch handoff window: the
-    /// worker has an outcome, but its owner-queue delivery has not been submitted.
-    package func injectSpawnDeliveryDelay(_ delay: Double) {
-        spawnDeliveryDelay = delay
-    }
-
     /// Test-support: makes the next pending-input flush take the hard write-failure edge.
     package func injectInputWriteFailure(_ code: Int32) {
         injectedInputWriteErrno = code
-    }
-
-    /// Test-support: the child produced by the most recent launch, whether or not
-    /// this host went on to adopt it.
-    package func lastLaunchedLeaderPID() -> pid_t? {
-        lastIssuedLaunch?.launchedLeader
-    }
-
-    /// Test-support: whether the most recent worker has resolved but not delivered.
-    package func lastLaunchHasPendingDelivery() -> Bool {
-        lastIssuedLaunch?.hasPendingDelivery == true
     }
 
     /// Test-support: drives the host-bound phase without relying on an elapsed

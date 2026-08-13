@@ -1085,15 +1085,20 @@ struct TerminalPTYHostTests {
         //   observation, so the old reducer waited for the full two-second bound.
         // Scenario: a user opens a pane and immediately closes it while the
         //   launch worker is handing its successful spawn back to the owner.
-        let host = try makeHost(captureTransitions: false)
-        await host.injectSpawnReportDelay(0.05)
+        let spawner = ControlledTerminalPTYSpawner(holdLaunchReport: true)
+        let host = try makeHost(captureTransitions: false, spawner: spawner)
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
+        #expect(spawner.waitForLaunchReport(within: .seconds(20)))
+        defer { spawner.releaseLaunchReport() }
 
         let clock = ContinuousClock()
         let start = clock.now
-        await host.close()
+        let recorder = ExitCompletionRecorder(expecting: 1)
+        host.requestShutdown { recorder.signal() }
+        spawner.releaseLaunchReport()
+        #expect(recorder.waitForAll(within: .seconds(20)))
         let elapsed = start.duration(to: clock.now)
 
         let snapshot = await host.resourceSnapshot()
@@ -1101,7 +1106,7 @@ struct TerminalPTYHostTests {
         #expect(snapshot.isReleased)
         #expect(snapshot.census.forcedQuiescenceCount == 0)
 
-        let leader = try #require(await host.lastLaunchedLeaderPID())
+        let leader = try #require(spawner.launchedLeader)
         var status: Int32 = 0
         errno = 0
         #expect(waitpid(leader, &status, WNOHANG) == -1)
@@ -1545,15 +1550,17 @@ struct TerminalPTYHostTests {
         //   would never reach.
         // Scenario: the user quits in the moment a freshly opened pane is
         //   launching, and the launch is slow enough to outlast the bound.
-        let host = try makeHost(captureTransitions: false, applicationExitBound: .milliseconds(50))
-        // Withholds the report that tells the owner queue a child exists, which is
-        // the window this test is about. Deliberately many times the host's bound:
-        // the host is required to wait it out, because a deadline here could only
-        // make quiescence punctual, never true.
-        await host.injectSpawnReportDelay(1.0)
+        let spawner = ControlledTerminalPTYSpawner(holdLaunchReport: true)
+        let host = try makeHost(
+            captureTransitions: false,
+            applicationExitBound: .milliseconds(50),
+            spawner: spawner
+        )
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
+        #expect(spawner.waitForLaunchReport(within: .seconds(20)))
+        defer { spawner.releaseLaunchReport() }
 
         let liveAtCompletion = LockedBox<[pid_t]>([])
         let recorder = ExitCompletionRecorder(expecting: 1)
@@ -1561,15 +1568,15 @@ struct TerminalPTYHostTests {
             liveAtCompletion.set(directChildProcessIDs())
             recorder.signal()
         }
+        // The launch-report gate makes the front half deterministic: a child
+        // exists and the host cannot see it. The short margin remains because
+        // the abandonment flip is on the owner queue immediately before its
+        // blocking join, and fencing that point would add a hook to InFlightLaunch.
+        try await Task.sleep(for: .milliseconds(100))
+        spawner.releaseLaunchReport()
         #expect(recorder.waitForAll(within: .seconds(20)))
 
-        // A launch that has still not reported by the time the host says it is
-        // quiescent is the failure itself, not an inconclusive run: the child is
-        // then born after the exit path was entitled to end the process.
-        let launched = try #require(
-            await host.lastLaunchedLeaderPID(),
-            "the host reported quiescence while its launch was still unresolved"
-        )
+        let launched = try #require(spawner.launchedLeader)
         // Named rather than counted: sibling suites launch their own children, so a
         // process-wide census cannot tell this pane's child from a neighbor's.
         #expect(
@@ -1580,8 +1587,8 @@ struct TerminalPTYHostTests {
         #expect(atCompletion.isReleased)
         #expect(atCompletion.census.forcedQuiescenceCount == 1)
 
-        // Nothing arrives afterward either: the launch is not adopted late.
-        try await Task.sleep(for: .seconds(1))
+        // Nothing arrives afterward either: the completed launch was abandoned
+        // before its report gate opened, so no late delivery remains possible.
         let snapshot = await host.resourceSnapshot()
         #expect(snapshot.isReleased, "the abandoned launch was adopted after teardown")
         #expect(snapshot.census.callbacksAfterTeardown == 0)
@@ -1596,16 +1603,17 @@ struct TerminalPTYHostTests {
         //   callback creates a second handoff race after the pre-report race.
         // Scenario: a pane finishes launching exactly as the user confirms quit,
         //   but the owner has not adopted the returned PTY yet.
-        let host = try makeHost(captureTransitions: false, applicationExitBound: .milliseconds(50))
-        await host.injectSpawnDeliveryDelay(1.0)
+        let spawner = ControlledTerminalPTYSpawner(holdDelivery: true)
+        let host = try makeHost(
+            captureTransitions: false,
+            applicationExitBound: .milliseconds(50),
+            spawner: spawner
+        )
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
-
-        for _ in 0..<200 where await host.lastLaunchHasPendingDelivery() == false {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(await host.lastLaunchHasPendingDelivery())
+        #expect(spawner.waitForDelivery(within: .seconds(20)))
+        defer { spawner.releaseDelivery() }
 
         let liveAtCompletion = LockedBox<[pid_t]>([])
         let recorder = ExitCompletionRecorder(expecting: 1)
@@ -1615,17 +1623,16 @@ struct TerminalPTYHostTests {
         }
         #expect(recorder.waitForAll(within: .seconds(20)))
 
-        let launched = try #require(await host.lastLaunchedLeaderPID())
+        let launched = try #require(spawner.launchedLeader)
         #expect(
             liveAtCompletion.value.contains(launched) == false,
             "resolved child \(launched) was still alive when the host reported quiescence"
         )
         #expect((await host.resourceSnapshot()).isReleased)
 
-        // Let the delayed worker submit its token-gated callback so a failure does
-        // not leave this test's child running into the next test. Polled rather than
-        // slept: this is a positive wait, and a fixed deadline only has to lose one
-        // race against the parallel gate's load to fail a pane that converged.
+        // Let the worker submit its token-gated callback so the test also proves
+        // a released delivery cannot revive the child claimed by application exit.
+        spawner.releaseDelivery()
         #expect(await waitForDirectChildExit(launched))
     }
 
@@ -2472,7 +2479,8 @@ private func makeHost(
     captureTransitions: Bool = true,
     applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound,
     childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe(),
-    resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle()
+    resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle(),
+    spawner: any TerminalPTYSpawning = SystemTerminalPTYSpawner()
 ) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
@@ -2480,8 +2488,70 @@ private func makeHost(
         captureTransitions: captureTransitions,
         applicationExitBound: applicationExitBound,
         childExitProbe: childExitProbe,
-        resourceLifecycle: resourceLifecycle
+        resourceLifecycle: resourceLifecycle,
+        spawner: spawner
     )
+}
+
+private final class ControlledTerminalPTYSpawner: TerminalPTYSpawning {
+    private struct State: Sendable {
+        var launchedLeader: pid_t?
+    }
+
+    private let production = SystemTerminalPTYSpawner()
+    private let state = Mutex(State())
+    private let holdLaunchReport: Bool
+    private let holdDelivery: Bool
+    private let launchReportReached = DispatchSemaphore(value: 0)
+    private let launchReportRelease = DispatchSemaphore(value: 0)
+    private let deliveryReached = DispatchSemaphore(value: 0)
+    private let deliveryRelease = DispatchSemaphore(value: 0)
+
+    init(holdLaunchReport: Bool = false, holdDelivery: Bool = false) {
+        self.holdLaunchReport = holdLaunchReport
+        self.holdDelivery = holdDelivery
+    }
+
+    func spawn(
+        _ spec: PTYLaunchSpec,
+        bootstrapExecutable: String,
+        didLaunch: (SpawnedPTY) -> Bool
+    ) -> PTYSpawnOutcome {
+        production.spawn(spec, bootstrapExecutable: bootstrapExecutable) { [self] spawned in
+            state.withLock { $0.launchedLeader = spawned.leader }
+            if holdLaunchReport {
+                launchReportReached.signal()
+                launchReportRelease.wait()
+            }
+            return didLaunch(spawned)
+        }
+    }
+
+    func waitForDeliveryPermission() {
+        guard holdDelivery else { return }
+        deliveryReached.signal()
+        deliveryRelease.wait()
+    }
+
+    func waitForLaunchReport(within timeout: DispatchTimeInterval) -> Bool {
+        launchReportReached.wait(timeout: .now() + timeout) == .success
+    }
+
+    func releaseLaunchReport() {
+        launchReportRelease.signal()
+    }
+
+    func waitForDelivery(within timeout: DispatchTimeInterval) -> Bool {
+        deliveryReached.wait(timeout: .now() + timeout) == .success
+    }
+
+    func releaseDelivery() {
+        deliveryRelease.signal()
+    }
+
+    var launchedLeader: pid_t? {
+        state.withLock { $0.launchedLeader }
+    }
 }
 
 private final class ControlledTerminalPTYResourceLifecycle: TerminalPTYResourceLifecycling {
