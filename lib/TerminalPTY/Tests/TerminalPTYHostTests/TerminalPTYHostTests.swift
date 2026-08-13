@@ -12,6 +12,133 @@ import TerminalCoreRecording
 /// Exercises the native owner only through real PTYs and controlled child behavior.
 @Suite(.serialized)
 struct TerminalPTYHostTests {
+    @Test("input submitted before spawn completes after crossing the PTY", .timeLimit(.minutes(1)))
+    func preSpawnInputCompletesAfterDelivery() async throws {
+        // Intent: pre-spawn input stays pending, then completes only after its last byte writes.
+        // Why it exists: the old lifecycle dropped input received before spawn without a result.
+        // Scenario: source activation holds a successful spawn while one submission arrives.
+        let host = try makeHost()
+        let spawnInstalled = ExitCompletionRecorder(expecting: 1)
+        await host.holdInstalledSourcesBeforeActivation {
+            spawnInstalled.signal()
+        }
+        await host.start(makeLaunchInput(command: "stty -echo; exec cat > /dev/null"))
+        let completion = InputCompletionRecorder(expecting: 1)
+
+        host.send(Array("buffered\n".utf8)) {
+            completion.signal($0)
+        }
+
+        #expect(spawnInstalled.waitForAll(within: .seconds(20)))
+        #expect(completion.results.isEmpty)
+        await host.releaseInstalledSourcesForActivation()
+        #expect(completion.waitForAll(within: .seconds(20)))
+        #expect(completion.results == [.delivered])
+        await host.close()
+    }
+
+    @Test("close during spawn rejects buffered input", .timeLimit(.minutes(1)))
+    func closeDuringSpawnRejectsBufferedInput() async throws {
+        // Intent: closing a spawning pane rejects every submission that cannot reach its PTY.
+        // Why it exists: buffered input needs a terminal result on every failed readiness edge.
+        // Scenario: a close arrives while source activation holds a successful spawn.
+        let host = try makeHost()
+        let spawnInstalled = ExitCompletionRecorder(expecting: 1)
+        await host.holdInstalledSourcesBeforeActivation {
+            spawnInstalled.signal()
+        }
+        await host.start(makeLaunchInput(command: "exec sleep 30"))
+        let completion = InputCompletionRecorder(expecting: 1)
+        host.send(Array("buffered".utf8)) {
+            completion.signal($0)
+        }
+
+        #expect(spawnInstalled.waitForAll(within: .seconds(20)))
+        let close = Task { await host.close() }
+        #expect(completion.waitForAll(within: .seconds(20)))
+        #expect(completion.results == [.rejected(.processEnded)])
+        await host.releaseInstalledSourcesForActivation()
+        await close.value
+    }
+
+    @Test("pre-spawn input overflow rejects the whole later submission", .timeLimit(.minutes(1)))
+    func preSpawnInputOverflowIsRejected() async throws {
+        // Intent: the shared byte bound admits or rejects each submission as one unit.
+        // Why it exists: buffering input before spawn must not introduce unbounded pane state.
+        // Scenario: launch input and one submission fill the bound before another byte arrives.
+        let host = try makeHost()
+        let spawnInstalled = ExitCompletionRecorder(expecting: 1)
+        await host.holdInstalledSourcesBeforeActivation {
+            spawnInstalled.signal()
+        }
+        await host.start(makeLaunchInput(command: "exec sleep 30"))
+        let accepted = InputCompletionRecorder(expecting: 1)
+        let rejected = InputCompletionRecorder(expecting: 1)
+
+        let initialInputByteCount = Array("exec sleep 30\n".utf8).count
+        host.send([UInt8](
+            repeating: 0x61,
+            count: PaneProcessLifecycleReducer.pendingInputByteLimit - initialInputByteCount
+        )) {
+            accepted.signal($0)
+        }
+        host.send([0x62]) {
+            rejected.signal($0)
+        }
+
+        #expect(spawnInstalled.waitForAll(within: .seconds(20)))
+        #expect(rejected.waitForAll(within: .seconds(20)))
+        #expect(rejected.results == [.rejected(.bufferLimitExceeded)])
+        let close = Task { await host.close() }
+        #expect(accepted.waitForAll(within: .seconds(20)))
+        #expect(accepted.results == [.rejected(.processEnded)])
+        await host.releaseInstalledSourcesForActivation()
+        await close.value
+    }
+
+    @Test("hard descriptor write failure rejects queued input", .timeLimit(.minutes(1)))
+    func hardWriteFailureRejectsInput() async throws {
+        // Intent: a hard descriptor error rejects bytes that never crossed the PTY master.
+        // Why it exists: enqueue success is not delivery when the later write can fail.
+        // Scenario: the injected next-write edge returns EIO for one complete submission.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(command: "\(printMarker("READY")); exec sleep 30"))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        await host.injectInputWriteFailure(EIO)
+        let completion = InputCompletionRecorder(expecting: 1)
+
+        host.send(Array("cannot-write".utf8)) {
+            completion.signal($0)
+        }
+
+        #expect(completion.waitForAll(within: .seconds(20)))
+        #expect(completion.results == [.rejected(.writeFailed(EIO))])
+        await host.close()
+    }
+
+    @Test("descriptor close rejects a partially written submission", .timeLimit(.minutes(1)))
+    func descriptorCloseRejectsPartiallyWrittenInput() async throws {
+        // Intent: one submission stays incomplete until every byte crosses the descriptor.
+        // Why it exists: a successful prefix must not turn later discarded bytes into success.
+        // Scenario: a child stops reading after readiness, then its pane closes under backpressure.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "stty raw -echo; exec \(try probeExecutable()) stalled \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let completion = InputCompletionRecorder(expecting: 1)
+        host.send([UInt8](repeating: 0x61, count: 4 * 1024 * 1024)) {
+            completion.signal($0)
+        }
+
+        #expect(await host.settledPendingInputByteCount() > 0)
+        #expect(completion.results.isEmpty)
+        await host.close()
+
+        #expect(completion.waitForAll(within: .seconds(20)))
+        #expect(completion.results == [.rejected(.processEnded)])
+    }
+
     @Test("Cmd link interaction publishes hover and opens once without PTY input", .timeLimit(.minutes(1)))
     func linkInteractionEffectsStayLocal() async throws {
         // Intent: prove the serialized owner applies hover/open effects without child bytes.
@@ -2350,6 +2477,34 @@ private final class ExitCompletionRecorder: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return labels
+    }
+}
+
+/// Collects whole-submission results without adding a task hop to the host callback edge.
+private final class InputCompletionRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedResults: [PaneInputSubmissionResult] = []
+    private let group = DispatchGroup()
+
+    init(expecting count: Int) {
+        for _ in 0..<count { group.enter() }
+    }
+
+    func signal(_ result: PaneInputSubmissionResult) {
+        lock.lock()
+        storedResults.append(result)
+        lock.unlock()
+        group.leave()
+    }
+
+    func waitForAll(within timeout: DispatchTimeInterval) -> Bool {
+        group.wait(timeout: .now() + timeout) == .success
+    }
+
+    var results: [PaneInputSubmissionResult] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedResults
     }
 }
 

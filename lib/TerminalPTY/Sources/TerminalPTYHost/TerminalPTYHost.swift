@@ -171,6 +171,7 @@ public actor TerminalPTYHost {
     private struct PendingInputSpan {
         let endOffset: Int
         let origin: UInt64?
+        let submissionId: PaneInputSubmissionId?
     }
 
     // Swift cannot import FIONREAD because its C macro encodes sizeof(int).
@@ -256,6 +257,11 @@ public actor TerminalPTYHost {
     /// next begins. This is what keeps a submission's origin attached to its own bytes while
     /// backpressure holds them, so the write that finally transmits them can be attributed.
     private var pendingInputSpans: Deque<PendingInputSpan> = []
+    private var nextInputSubmissionRawValue: UInt64 = 1
+    private var inputCompletions: [
+        PaneInputSubmissionId: @Sendable (PaneInputSubmissionResult) -> Void
+    ] = [:]
+    private var injectedInputWriteErrno: Int32?
     private var pendingEvents: [PaneProcessLifecycleEvent] = []
     private var isReducing = false
 
@@ -381,12 +387,19 @@ public actor TerminalPTYHost {
     }
 
     /// Enqueues user bytes directly on the owner queue without an ordering-opaque Task.
-    nonisolated public func send(_ bytes: [UInt8], origin: UInt64? = nil) {
-        guard bytes.isEmpty == false else { return }
+    nonisolated public func send(
+        _ bytes: [UInt8],
+        origin: UInt64? = nil,
+        onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
+    ) {
         queueClosingResizeRun().async { [weak self] in
-            self?.assumeIsolated { owner in
+            guard let self else {
+                onCompletion(.rejected(.processEnded))
+                return
+            }
+            self.assumeIsolated { owner in
                 owner.applyViewportNavigation(.scrollToBottom, publishUpdate: false)
-                owner.process(.sendInput(bytes, origin: origin))
+                owner.submitInput(bytes, origin: origin, onCompletion: onCompletion)
             }
         }
     }
@@ -1066,7 +1079,7 @@ public actor TerminalPTYHost {
         guard teardownFinished == false else { return }
         let decision = decideTerminalWheel(event, terminal: terminal, state: &interactionState)
         if decision.inputBytes.isEmpty == false {
-            process(.sendInput(decision.inputBytes, origin: origin))
+            submitInput(decision.inputBytes, origin: origin)
         }
         if decision.localRowDelta != 0 {
             applyViewportNavigation(
@@ -1087,7 +1100,7 @@ public actor TerminalPTYHost {
         if captureTransitions { appliedTransitions.append(.mouse(event)) }
         let decision = decideTerminalPointer(event, terminal: terminal, state: &interactionState)
         if decision.inputBytes.isEmpty == false {
-            process(.sendInput(decision.inputBytes, origin: origin))
+            submitInput(decision.inputBytes, origin: origin)
         }
         let previousTerminal = terminal
         switch decision.selectionMutation {
@@ -1216,7 +1229,7 @@ public actor TerminalPTYHost {
         let bytes = encodeTerminalKey(key, modifiers: modifiers, modes: terminal.inputModes)
         guard bytes.isEmpty == false else { return }
         applyViewportNavigation(.scrollToBottom, publishUpdate: false)
-        process(.sendInput(bytes, origin: origin))
+        submitInput(bytes, origin: origin)
     }
 
     private func applyPaste(_ text: String, origin: UInt64?) {
@@ -1225,7 +1238,7 @@ public actor TerminalPTYHost {
         let bytes = encodeTerminalPaste(text, modes: terminal.inputModes)
         guard bytes.isEmpty == false else { return }
         applyViewportNavigation(.scrollToBottom, publishUpdate: false)
-        process(.sendInput(bytes, origin: origin))
+        submitInput(bytes, origin: origin)
     }
 
     private func applyFocus(_ focused: Bool, origin: UInt64?) {
@@ -1233,7 +1246,7 @@ public actor TerminalPTYHost {
         if captureTransitions { appliedTransitions.append(.focus(focused)) }
         let bytes = encodeTerminalFocus(focused: focused, modes: terminal.inputModes)
         guard bytes.isEmpty == false else { return }
-        process(.sendInput(bytes, origin: origin))
+        submitInput(bytes, origin: origin)
     }
 
     private func applyViewportNavigation(
@@ -1280,12 +1293,14 @@ public actor TerminalPTYHost {
             spawn(spec)
         case .activateIO:
             activateIO()
-        case .writeInput(let bytes, let origin):
+        case .writeInput(let bytes, let origin, let submissionId):
             if captureTransitions {
                 capturedInputWrites.append(bytes)
                 capturedSubmittedTransitions.append(.input(bytes))
             }
-            enqueueInput(bytes, origin: origin)
+            enqueueInput(bytes, origin: origin, submissionId: submissionId)
+        case .completeInput(let submissionId, let result):
+            completeInput(submissionId, with: result)
         case .resize(let dimensions):
             applyResize(dimensions)
         case .deliverOutput(let bytes):
@@ -1360,6 +1375,11 @@ public actor TerminalPTYHost {
     /// worker has an outcome, but its owner-queue delivery has not been submitted.
     package func injectSpawnDeliveryDelay(_ delay: Double) {
         spawnDeliveryDelay = delay
+    }
+
+    /// Test-support: makes the next pending-input flush take the hard write-failure edge.
+    package func injectInputWriteFailure(_ code: Int32) {
+        injectedInputWriteErrno = code
     }
 
     /// Test-support: the child produced by the most recent launch, whether or not
@@ -1515,19 +1535,58 @@ public actor TerminalPTYHost {
         processSource.activate()
     }
 
-    private func enqueueInput(_ bytes: [UInt8], origin: UInt64?) {
+    private func submitInput(
+        _ bytes: [UInt8],
+        origin: UInt64?,
+        onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
+    ) {
+        let submissionId = PaneInputSubmissionId(rawValue: nextInputSubmissionRawValue)
+        nextInputSubmissionRawValue &+= 1
+        precondition(inputCompletions[submissionId] == nil, "input submission identity wrapped")
+        inputCompletions[submissionId] = onCompletion
+        process(.sendInput(bytes, origin: origin, submissionId: submissionId))
+    }
+
+    private func enqueueInput(
+        _ bytes: [UInt8],
+        origin: UInt64?,
+        submissionId: PaneInputSubmissionId?
+    ) {
         guard descriptorOwnershipSealed == false,
               bytes.isEmpty == false,
               masterFD >= 0
-        else { return }
+        else {
+            if let submissionId {
+                completeInput(submissionId, with: .rejected(.processEnded))
+            }
+            return
+        }
+        compactPendingInputIfNeeded()
+        let pendingByteCount = pendingInput.count - pendingInputOffset
+        guard bytes.count <= PaneProcessLifecycleReducer.pendingInputByteLimit - pendingByteCount else {
+            if let submissionId {
+                completeInput(submissionId, with: .rejected(.bufferLimitExceeded))
+            }
+            return
+        }
         pendingInput.append(contentsOf: bytes)
-        pendingInputSpans.append(.init(endOffset: pendingInput.count, origin: origin))
+        pendingInputSpans.append(.init(
+            endOffset: pendingInput.count,
+            origin: origin,
+            submissionId: submissionId
+        ))
         flushInput()
     }
 
     private func flushInput() {
         guard descriptorOwnershipSealed == false, masterFD >= 0 else {
-            discardPendingInput()
+            rejectPendingInput(because: .processEnded)
+            cancelWriteSource()
+            return
+        }
+        if let code = injectedInputWriteErrno {
+            injectedInputWriteErrno = nil
+            rejectPendingInput(because: .writeFailed(code))
             cancelWriteSource()
             return
         }
@@ -1550,11 +1609,12 @@ public actor TerminalPTYHost {
             }
             if result < 0, errno == EINTR { continue }
             if result < 0, errno == EAGAIN || errno == EWOULDBLOCK { break }
-            discardPendingInput()
+            let code = errno
+            rejectPendingInput(because: .writeFailed(code))
             return
         }
         if pendingInputOffset == pendingInput.count {
-            discardPendingInput()
+            clearPendingInput()
             cancelWriteSource()
         } else {
             installWriteSourceIfNeeded()
@@ -1573,7 +1633,12 @@ public actor TerminalPTYHost {
                 return
             }
             flightTape.record(.write(Array(pendingInput[start..<spanEnd])), origin: span.origin)
-            if spanEnd == span.endOffset { pendingInputSpans.removeFirst() }
+            if spanEnd == span.endOffset {
+                pendingInputSpans.removeFirst()
+                if let submissionId = span.submissionId {
+                    completeInput(submissionId, with: .delivered)
+                }
+            }
             start = spanEnd
         }
         assert(start == end, "written pending input outran its origin spans")
@@ -1581,10 +1646,40 @@ public actor TerminalPTYHost {
 
     /// Releases pending input without recording it: these bytes never crossed the boundary,
     /// so the tape must not claim they did.
-    private func discardPendingInput() {
+    private func clearPendingInput() {
         pendingInput.removeAll(keepingCapacity: false)
         pendingInputOffset = 0
         pendingInputSpans.removeAll(keepingCapacity: false)
+    }
+
+    private func rejectPendingInput(because failure: PaneInputSubmissionFailure) {
+        let submissionIds = pendingInputSpans.compactMap(\.submissionId)
+        clearPendingInput()
+        for submissionId in submissionIds {
+            completeInput(submissionId, with: .rejected(failure))
+        }
+    }
+
+    private func compactPendingInputIfNeeded() {
+        guard pendingInputOffset > 0 else { return }
+        let consumed = pendingInputOffset
+        pendingInput = Array(pendingInput.dropFirst(consumed))
+        pendingInputOffset = 0
+        pendingInputSpans = Deque(pendingInputSpans.map {
+            PendingInputSpan(
+                endOffset: $0.endOffset - consumed,
+                origin: $0.origin,
+                submissionId: $0.submissionId
+            )
+        })
+    }
+
+    private func completeInput(
+        _ submissionId: PaneInputSubmissionId,
+        with result: PaneInputSubmissionResult
+    ) {
+        guard let completion = inputCompletions.removeValue(forKey: submissionId) else { return }
+        completion(result)
     }
 
     private func installWriteSourceIfNeeded() {
@@ -1794,7 +1889,7 @@ public actor TerminalPTYHost {
             if captureTransitions {
                 capturedReplyWrites.append(replies)
             }
-            enqueueInput(replies, origin: nil)
+            enqueueInput(replies, origin: nil, submissionId: nil)
         }
         if terminal.hasPendingConsumerWork,
            consumerWorkWasSignaled == false
@@ -1854,7 +1949,7 @@ public actor TerminalPTYHost {
         activateProcessSourceIfNeeded()
         cancelReadSource()
         cancelWriteSource()
-        discardPendingInput()
+        rejectPendingInput(because: .processEnded)
         completeMasterCloseIfPossible()
     }
 

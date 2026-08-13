@@ -116,6 +116,17 @@ import Testing
         #expect(plan.initialInput == nil)
     }
 
+    @Test("launch policy rejects initial input above the pane input bound")
+    func rejectsOversizedInitialInput() {
+        var input = makeInput()
+        input.launchCommand = String(
+            repeating: "x",
+            count: PaneProcessLifecycleReducer.pendingInputByteLimit
+        )
+
+        #expect(resolveLaunchPlan(input) == .failure(.initialInputTooLarge))
+    }
+
     @Test("restore metadata remains environment-only")
     func restoreMetadataProducesNoInput() throws {
         var input = makeInput()

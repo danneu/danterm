@@ -13,18 +13,125 @@ import Testing
         #expect(reducer.handle(.start(input)) == [.spawn(firstSpec)])
         #expect(reducer.handle(.spawnSucceeded) == [
             .activateIO,
-            .writeInput(Array("printf ready\n".utf8), origin: nil),
+            .writeInput(Array("printf ready\n".utf8), origin: nil, submissionId: nil),
         ])
         #expect(reducer.handle(.spawnSucceeded).isEmpty)
         #expect(
-            reducer.handle(.sendInput([0x61, 0x62], origin: 7))
-                == [.writeInput([0x61, 0x62], origin: 7)]
+            reducer.handle(.sendInput(
+                [0x61, 0x62],
+                origin: 7,
+                submissionId: PaneInputSubmissionId(rawValue: 1)
+            )) == [.writeInput(
+                [0x61, 0x62],
+                origin: 7,
+                submissionId: PaneInputSubmissionId(rawValue: 1)
+            )]
         )
         #expect(reducer.handle(.resize(TerminalDimensions(columns: 120, rows: 50))) == [
             .resize(TerminalDimensions(columns: 120, rows: 50)),
         ])
         #expect(reducer.handle(.output([0x63, 0x64])) == [.deliverOutput([0x63, 0x64])])
         #expect(reducer.phase == .running)
+    }
+
+    @Test("input submitted while spawning follows launch input after spawn")
+    func spawningInputIsBufferedInArrivalOrder() throws {
+        var reducer = PaneProcessLifecycleReducer()
+        var input = lifecycleInput()
+        input.launchCommand = "printf launch"
+        let first = PaneInputSubmissionId(rawValue: 1)
+        let second = PaneInputSubmissionId(rawValue: 2)
+
+        _ = reducer.handle(.start(input))
+        #expect(reducer.handle(.sendInput([0x61], origin: 7, submissionId: first)).isEmpty)
+        #expect(reducer.handle(.sendInput([0x62], origin: 8, submissionId: second)).isEmpty)
+        #expect(reducer.handle(.spawnSucceeded) == [
+            .activateIO,
+            .writeInput(Array("printf launch\n".utf8), origin: nil, submissionId: nil),
+            .writeInput([0x61], origin: 7, submissionId: first),
+            .writeInput([0x62], origin: 8, submissionId: second),
+        ])
+    }
+
+    @Test("input submitted before start is delivered behind launch input")
+    func idleInputIsBufferedUntilStartAndSpawn() throws {
+        var reducer = PaneProcessLifecycleReducer()
+        var input = lifecycleInput()
+        input.launchCommand = "printf launch"
+        let submission = PaneInputSubmissionId(rawValue: 1)
+        let plan = try resolveLaunchPlan(input).get()
+
+        #expect(reducer.handle(.sendInput(
+            [0x61],
+            origin: 7,
+            submissionId: submission
+        )).isEmpty)
+        #expect(reducer.handle(.start(input)) == [.spawn(plan.attempts[0])])
+        #expect(reducer.handle(.spawnSucceeded) == [
+            .activateIO,
+            .writeInput(Array("printf launch\n".utf8), origin: nil, submissionId: nil),
+            .writeInput([0x61], origin: 7, submissionId: submission),
+        ])
+    }
+
+    @Test("buffered input survives working-directory retry")
+    func spawningInputSurvivesWorkingDirectoryRetry() throws {
+        var reducer = PaneProcessLifecycleReducer()
+        let submission = PaneInputSubmissionId(rawValue: 1)
+        let plan = try resolveLaunchPlan(lifecycleInput()).get()
+
+        _ = reducer.handle(.start(lifecycleInput()))
+        #expect(reducer.handle(.sendInput([0x61], origin: nil, submissionId: submission)).isEmpty)
+        #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable)) == [.spawn(plan.attempts[1])])
+        #expect(reducer.handle(.spawnSucceeded) == [
+            .activateIO,
+            .writeInput([0x61], origin: nil, submissionId: submission),
+        ])
+    }
+
+    @Test("spawn failure rejects every buffered input submission")
+    func spawnFailureRejectsBufferedInput() {
+        var reducer = PaneProcessLifecycleReducer()
+        let first = PaneInputSubmissionId(rawValue: 1)
+        let second = PaneInputSubmissionId(rawValue: 2)
+
+        _ = reducer.handle(.start(lifecycleInput()))
+        _ = reducer.handle(.sendInput([0x61], origin: nil, submissionId: first))
+        _ = reducer.handle(.sendInput([0x62], origin: nil, submissionId: second))
+
+        #expect(reducer.handle(.spawnFailed(.systemError(13))) == [
+            .completeInput(first, .rejected(.launchFailed(.systemError(13)))),
+            .completeInput(second, .rejected(.launchFailed(.systemError(13)))),
+            .report(.launchFailed(.systemError(13))),
+            .finishTeardown,
+        ])
+    }
+
+    @Test("close while spawning rejects every buffered input submission")
+    func closeWhileSpawningRejectsBufferedInput() {
+        var reducer = PaneProcessLifecycleReducer()
+        let submission = PaneInputSubmissionId(rawValue: 1)
+
+        _ = reducer.handle(.start(lifecycleInput()))
+        _ = reducer.handle(.sendInput([0x61], origin: nil, submissionId: submission))
+
+        #expect(reducer.handle(.requestClose) == [
+            .completeInput(submission, .rejected(.processEnded)),
+        ])
+    }
+
+    @Test("pre-spawn input rejects the whole submission at the byte bound")
+    func spawningInputIsBounded() {
+        var reducer = PaneProcessLifecycleReducer()
+        let accepted = PaneInputSubmissionId(rawValue: 1)
+        let rejected = PaneInputSubmissionId(rawValue: 2)
+
+        _ = reducer.handle(.start(lifecycleInput()))
+        let full = [UInt8](repeating: 0x61, count: PaneProcessLifecycleReducer.pendingInputByteLimit)
+        #expect(reducer.handle(.sendInput(full, origin: nil, submissionId: accepted)).isEmpty)
+        #expect(reducer.handle(.sendInput([0x62], origin: nil, submissionId: rejected)) == [
+            .completeInput(rejected, .rejected(.bufferLimitExceeded)),
+        ])
     }
 
     @Test("cwd spawn failures advance through the resolved fallback chain")
@@ -156,14 +263,18 @@ import Testing
         #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable)) == [.finishTeardown])
     }
 
-    @Test("finished lifecycle ignores every later event")
+    @Test("finished lifecycle rejects input and ignores every other later event")
     func finishedStateIsTerminal() {
         var reducer = PaneProcessLifecycleReducer()
         #expect(reducer.handle(.requestClose) == [.finishTeardown])
 
+        let submission = PaneInputSubmissionId(rawValue: 1)
+        #expect(reducer.handle(.sendInput([1], origin: nil, submissionId: submission)) == [
+            .completeInput(submission, .rejected(.processEnded)),
+        ])
         let events: [PaneProcessLifecycleEvent] = [
             .start(lifecycleInput()), .spawnSucceeded,
-            .spawnFailed(.systemError(1)), .sendInput([1], origin: nil),
+            .spawnFailed(.systemError(1)),
             .resize(TerminalDimensions(columns: 1, rows: 1)), .output([2]),
             .outputEOF, .childExited(.exited(0)), .requestClose,
             .graceElapsed(.hangup), .sessionDrained,

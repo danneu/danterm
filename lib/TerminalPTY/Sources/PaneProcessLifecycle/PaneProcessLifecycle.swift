@@ -17,8 +17,41 @@ public enum ChildExitStatus: Equatable, Sendable {
 public enum LaunchFailureReason: Equatable, Sendable {
     case noUsableShell
     case invalidDimensions
+    /// Initial shell input cannot fit within the pane's bounded pending-input path.
+    case initialInputTooLarge
     case workingDirectoryUnavailable
     case systemError(Int32)
+}
+
+/// Stable identity for one input submission until every byte is delivered or rejected.
+public struct PaneInputSubmissionId: Hashable, Sendable {
+    /// Monotonic owner-local value used only while the submission is incomplete.
+    public let rawValue: UInt64
+
+    /// Creates an identity allocated by the serialized PTY owner.
+    public init(rawValue: UInt64) {
+        self.rawValue = rawValue
+    }
+}
+
+/// Why a complete input submission could not cross the PTY master descriptor.
+public enum PaneInputSubmissionFailure: Equatable, Sendable {
+    /// The whole submission did not fit within the pane's shared pending-input bound.
+    case bufferLimitExceeded
+    /// The process could not start, so no buffered bytes had a destination.
+    case launchFailed(LaunchFailureReason)
+    /// The process ended or its pane closed before all bytes crossed the descriptor.
+    case processEnded
+    /// A descriptor write failed with the captured POSIX error number.
+    case writeFailed(Int32)
+}
+
+/// Exactly one terminal result for one input submission.
+public enum PaneInputSubmissionResult: Equatable, Sendable {
+    /// Every byte in the submission crossed the PTY master descriptor.
+    case delivered
+    /// At least one byte in the submission did not cross the PTY master descriptor.
+    case rejected(PaneInputSubmissionFailure)
 }
 
 /// Exactly-once terminal result reported only after lifecycle ownership converges.
@@ -52,7 +85,7 @@ public enum PaneProcessLifecycleEvent: Equatable, Sendable {
     /// `origin` is when the event that produced these bytes occurred, on the owner's monotonic
     /// clock, and travels with them so the eventual write can be attributed to it. Nil for
     /// bytes the pane owner produced itself, such as a terminal reply.
-    case sendInput([UInt8], origin: UInt64?)
+    case sendInput([UInt8], origin: UInt64?, submissionId: PaneInputSubmissionId)
     case resize(TerminalDimensions)
     case output([UInt8])
     case outputEOF
@@ -66,9 +99,10 @@ public enum PaneProcessLifecycleEvent: Equatable, Sendable {
 public enum PaneProcessLifecycleCommand: Equatable, Sendable {
     case spawn(PTYLaunchSpec)
     case activateIO
-    /// Carries the submission's `origin` unchanged, so the host can keep it attached to these
-    /// bytes for as long as backpressure holds them short of the PTY.
-    case writeInput([UInt8], origin: UInt64?)
+    /// Carries the submission metadata unchanged while backpressure holds bytes short of the PTY.
+    case writeInput([UInt8], origin: UInt64?, submissionId: PaneInputSubmissionId?)
+    /// Resolves a submission rejected by lifecycle policy before it reaches descriptor IO.
+    case completeInput(PaneInputSubmissionId, PaneInputSubmissionResult)
     case resize(TerminalDimensions)
     case deliverOutput([UInt8])
     case drainOutput
@@ -83,7 +117,10 @@ public enum PaneProcessLifecycleCommand: Equatable, Sendable {
 
 /// Owns the pure lifecycle state machine so identical event order yields identical commands.
 public struct PaneProcessLifecycleReducer: Sendable {
-    private var storage: Storage = .idle
+    /// One bound shared by input waiting before spawn and input waiting on descriptor writes.
+    public static let pendingInputByteLimit = 8 * 1024 * 1024
+
+    private var storage: Storage = .idle(.init(pendingInput: [], pendingInputByteCount: 0))
 
     /// Coarse lifecycle state used by the host to gate ownership-sensitive work.
     public var phase: PaneProcessLifecyclePhase {
@@ -103,8 +140,8 @@ public struct PaneProcessLifecycleReducer: Sendable {
     /// Applies one serialized event and returns effects in their required execution order.
     public mutating func handle(_ event: PaneProcessLifecycleEvent) -> [PaneProcessLifecycleCommand] {
         switch storage {
-        case .idle:
-            return handleIdle(event)
+        case .idle(let context):
+            return handleIdle(event, context: context)
         case .spawning(let context):
             return handleSpawning(event, context: context)
         case .closingWhileSpawning:
@@ -116,25 +153,74 @@ public struct PaneProcessLifecycleReducer: Sendable {
         case .tearingDown(let context):
             return handleTeardown(event, context: context)
         case .finished:
+            if case .sendInput(_, _, let submissionId) = event {
+                return [.completeInput(submissionId, .rejected(.processEnded))]
+            }
             return []
         }
     }
 
-    private mutating func handleIdle(_ event: PaneProcessLifecycleEvent) -> [PaneProcessLifecycleCommand] {
+    private mutating func handleIdle(
+        _ event: PaneProcessLifecycleEvent,
+        context: PreStartContext
+    ) -> [PaneProcessLifecycleCommand] {
         switch event {
         case .start(let input):
             switch resolveLaunchPlan(input) {
             case .success(let plan):
-                let context = SpawnContext(plan: plan, attemptIndex: 0, pendingDimensions: nil)
-                storage = .spawning(context)
-                return [.spawn(plan.attempts[0])]
+                var pendingInput = plan.initialInput.map {
+                    [PendingInputSubmission(id: nil, bytes: $0, origin: nil)]
+                } ?? []
+                var pendingInputByteCount = plan.initialInput?.count ?? 0
+                var commands: [PaneProcessLifecycleCommand] = []
+                for submission in context.pendingInput {
+                    if submission.bytes.count <= Self.pendingInputByteLimit - pendingInputByteCount {
+                        pendingInput.append(submission)
+                        pendingInputByteCount += submission.bytes.count
+                    } else {
+                        guard let submissionId = submission.id else {
+                            preconditionFailure("only caller input can exceed the launch remainder")
+                        }
+                        commands.append(.completeInput(
+                            submissionId,
+                            .rejected(.bufferLimitExceeded)
+                        ))
+                    }
+                }
+                let spawnContext = SpawnContext(
+                    plan: plan,
+                    attemptIndex: 0,
+                    pendingDimensions: nil,
+                    pendingInput: pendingInput,
+                    pendingInputByteCount: pendingInputByteCount
+                )
+                storage = .spawning(spawnContext)
+                commands.append(.spawn(plan.attempts[0]))
+                return commands
             case .failure(let error):
                 storage = .finished
-                return [.report(.launchFailed(launchFailure(for: error))), .finishTeardown]
+                let failure = launchFailure(for: error)
+                return context.pendingInput.compactMap {
+                    $0.id.map { .completeInput($0, .rejected(.launchFailed(failure))) }
+                } + [.report(.launchFailed(failure)), .finishTeardown]
             }
         case .requestClose:
             storage = .finished
-            return [.finishTeardown]
+            return context.pendingInput.compactMap {
+                $0.id.map { .completeInput($0, .rejected(.processEnded)) }
+            } + [.finishTeardown]
+        case .sendInput(let bytes, let origin, let submissionId):
+            guard bytes.isEmpty == false else {
+                return [.completeInput(submissionId, .delivered)]
+            }
+            guard bytes.count <= Self.pendingInputByteLimit - context.pendingInputByteCount else {
+                return [.completeInput(submissionId, .rejected(.bufferLimitExceeded))]
+            }
+            var next = context
+            next.pendingInput.append(.init(id: submissionId, bytes: bytes, origin: origin))
+            next.pendingInputByteCount += bytes.count
+            storage = .idle(next)
+            return []
         default:
             return []
         }
@@ -151,38 +237,48 @@ public struct PaneProcessLifecycleReducer: Sendable {
             if let dimensions = context.pendingDimensions {
                 commands.append(.resize(dimensions))
             }
-            if let initialInput = context.plan.initialInput {
-                commands.append(.writeInput(initialInput, origin: nil))
+            commands += context.pendingInput.map {
+                .writeInput($0.bytes, origin: $0.origin, submissionId: $0.id)
             }
             return commands
         case .spawnFailed(.workingDirectoryUnavailable):
             let nextIndex = context.attemptIndex + 1
             guard nextIndex < context.plan.attempts.count else {
                 storage = .finished
-                return [
+                return rejectPendingInput(context, because: .launchFailed(.workingDirectoryUnavailable)) + [
                     .report(.launchFailed(.workingDirectoryUnavailable)),
                     .finishTeardown,
                 ]
             }
-            storage = .spawning(SpawnContext(
-                plan: context.plan,
-                attemptIndex: nextIndex,
-                pendingDimensions: context.pendingDimensions
-            ))
+            var next = context
+            next.attemptIndex = nextIndex
+            storage = .spawning(next)
             return [.spawn(context.plan.attempts[nextIndex])]
         case .spawnFailed(.systemError(let code)):
             storage = .finished
-            return [.report(.launchFailed(.systemError(code))), .finishTeardown]
+            let failure = LaunchFailureReason.systemError(code)
+            return rejectPendingInput(context, because: .launchFailed(failure))
+                + [.report(.launchFailed(failure)), .finishTeardown]
         case .resize(let dimensions) where dimensions.isValid:
-            storage = .spawning(SpawnContext(
-                plan: context.plan,
-                attemptIndex: context.attemptIndex,
-                pendingDimensions: dimensions
-            ))
+            var next = context
+            next.pendingDimensions = dimensions
+            storage = .spawning(next)
+            return []
+        case .sendInput(let bytes, let origin, let submissionId):
+            guard bytes.isEmpty == false else {
+                return [.completeInput(submissionId, .delivered)]
+            }
+            guard bytes.count <= Self.pendingInputByteLimit - context.pendingInputByteCount else {
+                return [.completeInput(submissionId, .rejected(.bufferLimitExceeded))]
+            }
+            var next = context
+            next.pendingInput.append(.init(id: submissionId, bytes: bytes, origin: origin))
+            next.pendingInputByteCount += bytes.count
+            storage = .spawning(next)
             return []
         case .requestClose:
             storage = .closingWhileSpawning
-            return []
+            return rejectPendingInput(context, because: .processEnded)
         default:
             return []
         }
@@ -197,6 +293,8 @@ public struct PaneProcessLifecycleReducer: Sendable {
         case .spawnFailed:
             storage = .finished
             return [.finishTeardown]
+        case .sendInput(_, _, let submissionId):
+            return [.completeInput(submissionId, .rejected(.processEnded))]
         default:
             return []
         }
@@ -207,8 +305,11 @@ public struct PaneProcessLifecycleReducer: Sendable {
         outputEOF: Bool
     ) -> [PaneProcessLifecycleCommand] {
         switch event {
-        case .sendInput(let bytes, let origin):
-            return [.writeInput(bytes, origin: origin)]
+        case .sendInput(let bytes, let origin, let submissionId):
+            guard bytes.isEmpty == false else {
+                return [.completeInput(submissionId, .delivered)]
+            }
+            return [.writeInput(bytes, origin: origin, submissionId: submissionId)]
         case .resize(let dimensions) where dimensions.isValid:
             return [.resize(dimensions)]
         case .output(let bytes) where !outputEOF:
@@ -240,6 +341,8 @@ public struct PaneProcessLifecycleReducer: Sendable {
             return beginTeardown(result: .exited(status), leaderStatus: status, reapLeader: true)
         case .requestClose:
             return beginTeardown(result: .exited(status), leaderStatus: status, reapLeader: true)
+        case .sendInput(_, _, let submissionId):
+            return [.completeInput(submissionId, .rejected(.processEnded))]
         default:
             return []
         }
@@ -277,8 +380,19 @@ public struct PaneProcessLifecycleReducer: Sendable {
             case .kill:
                 return []
             }
+        case .sendInput(_, _, let submissionId):
+            return [.completeInput(submissionId, .rejected(.processEnded))]
         default:
             return []
+        }
+    }
+
+    private func rejectPendingInput(
+        _ context: SpawnContext,
+        because failure: PaneInputSubmissionFailure
+    ) -> [PaneProcessLifecycleCommand] {
+        context.pendingInput.compactMap {
+            $0.id.map { .completeInput($0, .rejected(failure)) }
         }
     }
 
@@ -313,8 +427,23 @@ public struct PaneProcessLifecycleReducer: Sendable {
 /// Reducer-only launch retry bookkeeping, never exposed to the system host.
 private struct SpawnContext: Sendable {
     let plan: ResolvedLaunchPlan
-    let attemptIndex: Int
-    let pendingDimensions: TerminalDimensions?
+    var attemptIndex: Int
+    var pendingDimensions: TerminalDimensions?
+    var pendingInput: [PendingInputSubmission]
+    var pendingInputByteCount: Int
+}
+
+/// Input can reach the serialized owner before its already-enqueued start event is reduced.
+private struct PreStartContext: Sendable {
+    var pendingInput: [PendingInputSubmission]
+    var pendingInputByteCount: Int
+}
+
+/// One whole user submission retained until a successful spawn can preserve its boundary.
+private struct PendingInputSubmission: Sendable {
+    let id: PaneInputSubmissionId?
+    let bytes: [UInt8]
+    let origin: UInt64?
 }
 
 /// Reducer-only convergence facts needed to report a result after ownership ends.
@@ -327,7 +456,7 @@ private struct TeardownContext: Sendable {
 
 /// Internal states keep race bookkeeping private while `phase` exposes stable policy state.
 private enum Storage: Sendable {
-    case idle
+    case idle(PreStartContext)
     case spawning(SpawnContext)
     case closingWhileSpawning
     case running(outputEOF: Bool)
@@ -341,5 +470,6 @@ private func launchFailure(for error: LaunchPolicyError) -> LaunchFailureReason 
     switch error {
     case .noUsableShell: .noUsableShell
     case .invalidDimensions: .invalidDimensions
+    case .initialInputTooLarge: .initialInputTooLarge
     }
 }

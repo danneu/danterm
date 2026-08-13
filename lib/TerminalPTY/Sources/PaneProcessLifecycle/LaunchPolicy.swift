@@ -88,6 +88,8 @@ public struct LaunchPolicyInput: Equatable, Sendable {
 public enum LaunchPolicyError: Error, Equatable, Sendable {
     case noUsableShell
     case invalidDimensions
+    /// Initial shell input cannot fit within the pane's bounded pending-input path.
+    case initialInputTooLarge
 }
 
 /// A complete, ambient-free child-spawn request interpreted by TerminalPTYHost.
@@ -137,6 +139,12 @@ public func resolveLaunchPlan(
     _ input: LaunchPolicyInput
 ) -> Result<ResolvedLaunchPlan, LaunchPolicyError> {
     guard input.initialDimensions.isValid else { return .failure(.invalidDimensions) }
+    let initialInput = resolvedInitialInput(
+        command: input.command,
+        launchCommand: input.launchCommand
+    )
+    guard initialInput.map({ $0.count <= PaneProcessLifecycleReducer.pendingInputByteLimit }) ?? true
+    else { return .failure(.initialInputTooLarge) }
     guard let shell = selectedShell(
         accountShell: input.accountShell,
         executablePaths: input.executablePaths
@@ -164,10 +172,7 @@ public func resolveLaunchPlan(
                 initialDimensions: input.initialDimensions
             )
         },
-        initialInput: resolvedInitialInput(
-            command: input.command,
-            launchCommand: input.launchCommand
-        )
+        initialInput: initialInput
     ))
 }
 
