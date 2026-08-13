@@ -1,6 +1,6 @@
 # 2026-07-20: Terminal Engine Experiment Decision (Milestone 5)
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-07-20
 - Superseded by: [2026-08-06: The Swift Terminal Engine -- Migration Record and Decision Register](2026-08-06-swift-terminal-engine.md)
 

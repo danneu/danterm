@@ -1,7 +1,9 @@
 # Display Scaling
 
-Status: Accepted
-Date: 2026-03-05
+- Status: Accepted
+- Date: 2026-03-05
+- Amended: 2026-08-06 -- the mechanism below is gone with libghostty; the
+  invariant it protects still holds. See the banner.
 
 > **2026-08-06: mechanism superseded by the libghostty removal; invariant
 > retained.** `app/TerminalView.swift`,

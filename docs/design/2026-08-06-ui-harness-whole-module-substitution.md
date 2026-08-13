@@ -1,7 +1,7 @@
 # The AppKit UI Harness Is a Whole-Module Substitution Seam, Not a Test Target
 
-`Status`: Accepted
-`Date`: 2026-08-06
+- Status: Accepted
+- Date: 2026-08-06
 
 ## Context
 

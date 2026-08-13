@@ -1,7 +1,8 @@
 # Session-Owned Terminal-Reported Facts
 
-`Status`: Accepted
-`Date`: 2026-08-10
+- Status: Accepted
+- Date: 2026-08-10
+- Supersedes: [Terminal-Reported Pane Facts: the Model Owns Values, the Stream Owns Lifecycles](2026-08-10-terminal-reported-pane-facts.md)
 
 ## Context
 

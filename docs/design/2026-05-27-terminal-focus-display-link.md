@@ -1,7 +1,8 @@
 # Terminal Focus and Display Link Recovery
 
-Status: Accepted
-Date: 2026-05-27
+- Status: Superseded
+- Date: 2026-05-27
+- Superseded by: [2026-08-06: The Swift Terminal Engine -- Migration Record and Decision Register](2026-08-06-swift-terminal-engine.md)
 
 > **2026-08-06: superseded by the libghostty removal.** Every mechanism below --
 > `ghostty_surface_set_focus`, `ghostty_surface_set_occlusion`,

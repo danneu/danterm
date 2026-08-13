@@ -278,12 +278,12 @@ API with a general, reusable command or query and update `SKILL.md`.
 | Where terminal-reported pane facts live | [docs/design/2026-08-10-session-owned-terminal-reported-facts.md](docs/design/2026-08-10-session-owned-terminal-reported-facts.md) |
 | Layer placement, a new side-effecting utility, `core-purity-lint.sh` | [docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md) |
 | Test architecture, the `app/DanTermCore` symlink, `lib/*/Package.swift` | [docs/design/2026-05-28-core-module-via-symlink.md](docs/design/2026-05-28-core-module-via-symlink.md) |
-| An observer, NSEvent monitor, timer, popover, escaping closure, or C `userdata` callback | [docs/design/2026-06-09-appkit-lifetime-safety.md](docs/design/2026-06-09-appkit-lifetime-safety.md) |
+| An observer, NSEvent monitor, timer, popover, escaping closure, or C `userdata` callback | [docs/design/2026-06-09-appkit-lifetime-safety.md](docs/design/2026-06-09-appkit-lifetime-safety.md) -- rules bind, the Ghostty half of rule 5 is gone |
 | Sprite classification, geometry, rendering, or their tests | [docs/terminal-sprites.md](docs/terminal-sprites.md) |
 | Measuring or optimizing terminal speed / memory | [agent-docs/terminal-performance.md](agent-docs/terminal-performance.md) |
 | Adding a metric, freezing a threshold, acting on a difference between two numbers | [agent-docs/measurement-discipline.md](agent-docs/measurement-discipline.md) |
 | `@inlinable`/`@usableFromInline` in `lib/TerminalCore`, or an `outlined copy` profile frame | [docs/design/2026-07-29-cross-module-value-dispatch.md](docs/design/2026-07-29-cross-module-value-dispatch.md) |
-| HiDPI scaling, content scale, zero-frame guards | [docs/design/2026-03-05-display-scaling.md](docs/design/2026-03-05-display-scaling.md) |
+| HiDPI scaling, content scale, zero-frame guards | [docs/design/2026-03-05-display-scaling.md](docs/design/2026-03-05-display-scaling.md) -- rule binds, body is Ghostty-era |
 | Build scripts, the dev/release bundle layout | [agent-docs/build-details.md](agent-docs/build-details.md) |
 | CI, signing, notarization, releases | [docs/ci.md](docs/ci.md) |
 

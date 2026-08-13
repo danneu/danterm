@@ -1,8 +1,8 @@
 # Terminal-Reported Pane Facts: the Model Owns Values, the Stream Owns Lifecycles
 
-`Status`: Accepted
-`Date`: 2026-08-10
-`Superseded by`: [Session-Owned Terminal-Reported Facts](2026-08-10-session-owned-terminal-reported-facts.md)
+- Status: Superseded
+- Date: 2026-08-10
+- Superseded by: [Session-Owned Terminal-Reported Facts](2026-08-10-session-owned-terminal-reported-facts.md)
 
 > **2026-08-10: superseded by session-owned terminal-reported facts.** The
 > value/lifecycle distinction still determines how a report reduces, but it no

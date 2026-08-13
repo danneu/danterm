@@ -1,7 +1,9 @@
 # AppKit / Ghostty Lifetime Safety: No Cross-Lifetime Use-After-Free
 
-`Status`: Accepted
-`Date`: 2026-06-09
+- Status: Accepted
+- Date: 2026-06-09
+- Amended: 2026-08-06 -- the AppKit rules stand; the Ghostty half of rule 5 is
+  gone. See the banner.
 
 > **2026-08-06: partly superseded by the libghostty removal.** The AppKit
 > lifetime rules -- undo managers, observers, NSEvent monitors, timers, escaping

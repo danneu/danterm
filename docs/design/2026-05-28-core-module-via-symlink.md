@@ -1,8 +1,10 @@
 # Pure Core Compiled Same-Module via Symlink, Tested via Nested Package
 
-`Status`: Accepted
-`Date`: 2026-05-28
-`Extended by`: [Pure Core / Portable Support / Platform Runtime: a Purity-Enforced Three-Layer Split](2026-05-28-pure-core-support-split.md)
+- Status: Accepted
+- Date: 2026-05-28
+- Extended by: [Pure Core / Portable Support / Platform Runtime: a Purity-Enforced Three-Layer Split](2026-05-28-pure-core-support-split.md)
+- Amended: 2026-08-06 -- the architecture stands; two GhosttyKit details in the
+  body are gone. See the banner.
 
 > **2026-08-06: partly superseded by the libghostty removal.** The symlink plus
 > nested-package architecture is unchanged and still normative. Two details are

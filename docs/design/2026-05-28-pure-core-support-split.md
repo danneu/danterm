@@ -1,7 +1,9 @@
 # Pure Core / Portable Support / Platform Runtime: a Purity-Enforced Three-Layer Split
 
-`Status`: Accepted
-`Date`: 2026-05-28
+- Status: Accepted
+- Date: 2026-05-28
+- Amended: 2026-08-06 -- GhosttyKit naming dropped; 2026-08-12 -- support target
+  and cross-process contracts. See the banners.
 
 > **2026-08-06: naming superseded by the libghostty removal.** The three-layer
 > split, the `CoreEnv` seams, and the worked example are unchanged and still
