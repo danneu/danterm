@@ -452,6 +452,298 @@ final class SpikeViewController: UIViewController {
     }
 }
 
+/// One arm's samples. Every aggregate this reports is printed beside its own
+/// sample count, so "not measured" cannot render as a reassuring zero.
+private struct ArmSamples {
+    let name: String
+    /// Building the frame plan: identical work in both arms, and nothing the
+    /// presentation path can reach. It is the control -- if it moves between
+    /// arms, the run measured the machine's state, not the presentation path.
+    var planNanoseconds: [UInt64] = []
+    /// Producing the presented layer contents from that plan, which is the
+    /// whole difference between the arms.
+    var presentNanoseconds: [UInt64] = []
+    /// Gap between consecutive display-link ticks. The continuous form of
+    /// "did it hold the frame rate", kept instead of a dropped-frame verdict.
+    var tickNanoseconds: [UInt64] = []
+    /// Publishes that acquired no buffer (swapchain) or images that failed to
+    /// build (copy). Either one means a frame did not reach the layer.
+    var missedPresentations = 0
+}
+
+private func percentile(_ samples: [UInt64], _ fraction: Double) -> UInt64 {
+    guard !samples.isEmpty else { return 0 }
+    let sorted = samples.sorted()
+    let rank = Int((Double(sorted.count - 1) * fraction).rounded())
+    return sorted[rank]
+}
+
+private func report(_ label: String, _ samples: [UInt64]) {
+    // n first, and unconditionally: an aggregate without its sample count
+    // cannot distinguish "no cost" from "no samples".
+    guard !samples.isEmpty else {
+        log("BENCH \(label) n=0 NOT-MEASURED")
+        return
+    }
+    let micros = { (value: UInt64) in String(format: "%.1f", Double(value) / 1000) }
+    log("BENCH \(label) n=\(samples.count)"
+        + " p50=\(micros(percentile(samples, 0.5)))us"
+        + " p95=\(micros(percentile(samples, 0.95)))us"
+        + " p99=\(micros(percentile(samples, 0.99)))us"
+        + " max=\(micros(samples.max() ?? 0))us")
+}
+
+/// T3's measurement half: the real `TerminalFrameSwapchain` against
+/// CGImage-copy-per-frame, under a full-repaint scroll workload at a
+/// phone-typical grid.
+///
+/// The arms alternate in blocks inside one run rather than running as two
+/// sessions, because a comparison across sessions measures the machine as much
+/// as the code. Both arms render the same plan sequence into the same grid, and
+/// both are driven by the display link at the display's own cadence.
+final class BenchViewController: UIViewController {
+    private static let framesPerBlock = 120
+
+    /// Which arm runs each block, and whether the block is recorded.
+    ///
+    /// Three properties this schedule must have, each learned from a run that
+    /// lacked it:
+    ///
+    /// - The first blocks are discarded. Launch warmup is worth hundreds of
+    ///   milliseconds and lands entirely in whichever arm goes first.
+    /// - The recorded blocks are balanced against drift, not alternating. Plain
+    ///   alternation puts one arm in every even block, so any warming or
+    ///   thermal trend across the run is charged to one arm.
+    /// - A third arm presents nothing. The plan build was meant to be a control
+    ///   the presentation path could not reach, and it turned out to differ by
+    ///   arm at a steady 35%, so it is not one. `plan-only` is the arm that
+    ///   says what the plan build costs when no presentation runs beside it,
+    ///   which is what separates "this arm slows its neighbour" from "this arm
+    ///   was measured while the machine was busy".
+    private static let schedule: [(arm: Int, record: Bool)] = [
+        (0, false), (1, false), (2, false),
+        (0, true), (1, true), (2, true), (2, true), (1, true), (0, true),
+        (0, true), (1, true), (2, true), (2, true), (1, true), (0, true),
+    ]
+
+    private var panel: UIView?
+    private var banner: UILabel?
+    private var terminal: Terminal?
+    private var swapchain: TerminalFrameSwapchain?
+    /// The copy arm's scratch store. It is never attached, so rewriting it in
+    /// place is safe -- what reaches the layer is an immutable CGImage copy.
+    private var copyStore: TerminalFrameBackingStore?
+    private var displayLink: CADisplayLink?
+    private var arms: [ArmSamples] = []
+    private var frameInBlock = 0
+    private var blockIndex = 0
+    private var lastTickNanoseconds: UInt64 = 0
+    private var columns = 0
+    private var rows = 0
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+
+        let scale = view.window?.screen.scale ?? UIScreen.main.scale
+        guard let metrics = TerminalRenderMetrics(displayScale: scale, fontSize: 11) else {
+            log("BENCH FAIL TerminalRenderMetrics returned nil")
+            return
+        }
+        columns = max(20, Int(view.bounds.width / metrics.cellSize.width))
+        rows = max(10, Int((view.bounds.height - 80) / metrics.cellSize.height))
+        log("BENCH grid=\(columns)x\(rows) displayScale=\(scale) fontSize=11")
+
+        guard var terminal = Terminal(columns: columns, rows: rows),
+              let swapchain = TerminalFrameSwapchain(
+                  columns: columns, rows: rows, metrics: metrics
+              ),
+              let copyStore = TerminalFrameBackingStore(
+                  columns: columns, rows: rows, metrics: metrics
+              )
+        else {
+            log("BENCH FAIL could not build the engine, swapchain, or store")
+            return
+        }
+        terminal.feed(Array("\u{1B}[2J\u{1B}[H".utf8))
+        self.terminal = terminal
+        self.swapchain = swapchain
+        self.copyStore = copyStore
+
+        let banner = UILabel(frame: CGRect(x: 8, y: 44, width: 400, height: 16))
+        banner.font = .systemFont(ofSize: 12, weight: .bold)
+        banner.textColor = .yellow
+        banner.text = "BENCH running"
+        view.addSubview(banner)
+        self.banner = banner
+
+        let panel = UIView(frame: CGRect(
+            x: 0,
+            y: 68,
+            width: CGFloat(metrics.cellWidthPixels * columns) / scale,
+            height: CGFloat(metrics.cellHeightPixels * rows) / scale
+        ))
+        panel.layer.contentsScale = scale
+        panel.layer.magnificationFilter = .nearest
+        view.addSubview(panel)
+        self.panel = panel
+
+        arms = [
+            ArmSamples(name: "swapchain"),
+            ArmSamples(name: "cgimage-copy"),
+            ArmSamples(name: "plan-only"),
+        ]
+        log("BENCH thermalState at start: \(ProcessInfo.processInfo.thermalState.rawValue)")
+
+        if ProcessInfo.processInfo.environment["SPIKE_MODE"] == "bench-sat" {
+            // Saturated: answers what a frame costs. Per-frame microseconds are
+            // comparable across arms only here, because the thread never idles
+            // into a lower CPU power state between frames.
+            log("BENCH pacing=saturated (per-frame cost; tick-gap is meaningless)")
+            banner.text = "BENCH saturated"
+            DispatchQueue.main.async { [weak self] in
+                self?.runSaturatedBlock()
+            }
+            return
+        }
+        // Paced: answers whether the cadence holds. The display link drives
+        // every arm, so none is measured at a cadence the others did not face.
+        // Per-frame costs from this pacing are NOT comparable across arms --
+        // the arms idle differently between vsyncs and so run at different CPU
+        // clocks.
+        log("BENCH pacing=display-link (cadence; per-frame costs not comparable)")
+        let link = CADisplayLink(target: self, selector: #selector(step))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    @objc private func step(_ link: CADisplayLink) {
+        let block = Self.schedule[blockIndex]
+        let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        if lastTickNanoseconds != 0, block.record {
+            arms[block.arm].tickNanoseconds.append(now - lastTickNanoseconds)
+        }
+        lastTickNanoseconds = now
+        runFrame(armIndex: block.arm, recording: block.record)
+        frameInBlock += 1
+        guard frameInBlock >= Self.framesPerBlock else { return }
+        endOfBlock {
+            link.invalidate()
+            self.displayLink = nil
+        }
+    }
+
+    /// Saturated pacing: every arm's frames run back to back, one block per
+    /// main-queue hop.
+    ///
+    /// The display-link pacing this replaces leaves the main thread idle
+    /// between vsyncs, and how idle depends on how much the arm does -- so the
+    /// arms sat in different CPU power states and their per-frame microseconds
+    /// were not comparable. Saturating the thread keeps the clock up for every
+    /// arm. The hop between blocks is what keeps the watchdog happy; a block is
+    /// well under a second.
+    private func runSaturatedBlock() {
+        let block = Self.schedule[blockIndex]
+        for _ in 0..<Self.framesPerBlock {
+            runFrame(armIndex: block.arm, recording: block.record)
+        }
+        endOfBlock { }
+        guard displayLink == nil, blockIndex < Self.schedule.count else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.runSaturatedBlock()
+        }
+    }
+
+    private func runFrame(armIndex: Int, recording: Bool) {
+
+        // The control: same work, same inputs, in both arms.
+        let planStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        guard var terminal else { return }
+        let line = "\u{1B}[3\(frameInBlock % 7)m"
+            + "block \(blockIndex) frame \(frameInBlock): "
+            + "the quick brown fox jumps over the lazy dog\u{1B}[0m\r\n"
+        terminal.feed(Array(line.utf8))
+        self.terminal = terminal
+        guard let plan = planFrame(
+            for: terminal,
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: true,
+                cursorShape: .block
+            )
+        ) as RenderFramePlan? else {
+            if recording { arms[armIndex].missedPresentations += 1 }
+            return
+        }
+        if recording {
+            arms[armIndex].planNanoseconds.append(
+                clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - planStart
+            )
+        }
+
+        // The arms diverge only here.
+        let presentStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        if armIndex == 0 {
+            if let store = swapchain?.publish(plan: plan, damage: .full) {
+                panel?.layer.contents = store.ioSurface
+            } else if recording {
+                arms[armIndex].missedPresentations += 1
+            }
+        } else if armIndex == 1, let copyStore {
+            copyStore.renderFull(plan)
+            if let image = makeImage(from: copyStore) {
+                panel?.layer.contents = image
+            } else if recording {
+                arms[armIndex].missedPresentations += 1
+            }
+        }
+        // armIndex 2 is plan-only: it deliberately presents nothing, so its
+        // `present` samples are the cost of the measurement itself.
+        if recording {
+            arms[armIndex].presentNanoseconds.append(
+                clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - presentStart
+            )
+        }
+    }
+
+    private func endOfBlock(_ stopPacing: () -> Void) {
+        // The pooled control can hide a trend that ran through the whole
+        // session, so each block reports its own before the arms are pooled.
+        let block = Self.schedule[blockIndex]
+        let control = arms[block.arm].planNanoseconds.suffix(Self.framesPerBlock)
+        log("BENCH block \(blockIndex) arm=\(arms[block.arm].name)"
+            + " recorded=\(block.record)"
+            + " plan-control-p50="
+            + String(format: "%.1f", Double(percentile(Array(control), 0.5)) / 1000)
+            + "us thermal=\(ProcessInfo.processInfo.thermalState.rawValue)")
+        frameInBlock = 0
+        blockIndex += 1
+        // A block boundary changes which arm runs, so the tick gap across it
+        // would be charged to the wrong arm.
+        lastTickNanoseconds = 0
+        guard blockIndex >= Self.schedule.count else { return }
+        stopPacing()
+        finish()
+    }
+
+    private func finish() {
+        log("BENCH thermalState at end: \(ProcessInfo.processInfo.thermalState.rawValue)")
+        let recorded = Self.schedule.filter(\.record).count
+        log("BENCH blocks=\(Self.schedule.count) recorded=\(recorded)"
+            + " framesPerBlock=\(Self.framesPerBlock)"
+            + " ABBA-balanced, warmup discarded, one run, one session")
+        for arm in arms {
+            report("\(arm.name) plan-control", arm.planNanoseconds)
+            report("\(arm.name) present", arm.presentNanoseconds)
+            report("\(arm.name) tick-gap", arm.tickNanoseconds)
+            log("BENCH \(arm.name) missedPresentations=\(arm.missedPresentations)")
+        }
+        log("BENCH energy: NOT-MEASURED (no Instruments attach in this recipe)")
+        banner?.text = "BENCH done -- see the console"
+        log("BENCH DONE")
+    }
+}
+
 final class SpikeAppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
@@ -460,7 +752,11 @@ final class SpikeAppDelegate: UIResponder, UIApplicationDelegate {
         didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         let window = UIWindow(frame: UIScreen.main.bounds)
-        window.rootViewController = SpikeViewController()
+        let mode = ProcessInfo.processInfo.environment["SPIKE_MODE"]
+        window.rootViewController =
+            (mode == "bench" || mode == "bench-sat")
+            ? BenchViewController()
+            : SpikeViewController()
         window.makeKeyAndVisible()
         self.window = window
         return true

@@ -1,0 +1,39 @@
+17:26:45  Acquired tunnel connection to device.
+17:26:45  Enabling developer disk image services.
+17:26:45  Acquired usage assertion.
+Launched application with com.danneu.danterm.ios-render-spike bundle identifier.
+Waiting for the application to terminate…
+SPIKE BENCH grid=53x54 displayScale=3.0 fontSize=11
+SPIKE BENCH thermalState at start: 0
+SPIKE BENCH pacing=saturated (per-frame cost; tick-gap is meaningless)
+SPIKE BENCH block 0 arm=swapchain recorded=false plan-control-p50=0.0us thermal=0
+SPIKE BENCH block 1 arm=cgimage-copy recorded=false plan-control-p50=0.0us thermal=0
+SPIKE BENCH block 2 arm=plan-only recorded=false plan-control-p50=0.0us thermal=0
+SPIKE BENCH block 3 arm=swapchain recorded=true plan-control-p50=1903.4us thermal=0
+SPIKE BENCH block 4 arm=cgimage-copy recorded=true plan-control-p50=1902.0us thermal=0
+SPIKE BENCH block 5 arm=plan-only recorded=true plan-control-p50=1895.4us thermal=0
+SPIKE BENCH block 6 arm=plan-only recorded=true plan-control-p50=1922.8us thermal=0
+SPIKE BENCH block 7 arm=cgimage-copy recorded=true plan-control-p50=1907.5us thermal=0
+SPIKE BENCH block 8 arm=swapchain recorded=true plan-control-p50=1991.5us thermal=0
+SPIKE BENCH block 9 arm=swapchain recorded=true plan-control-p50=1900.8us thermal=0
+SPIKE BENCH block 10 arm=cgimage-copy recorded=true plan-control-p50=1921.7us thermal=0
+SPIKE BENCH block 11 arm=plan-only recorded=true plan-control-p50=2027.4us thermal=0
+SPIKE BENCH block 12 arm=plan-only recorded=true plan-control-p50=2041.6us thermal=0
+SPIKE BENCH block 13 arm=cgimage-copy recorded=true plan-control-p50=2003.0us thermal=0
+SPIKE BENCH block 14 arm=swapchain recorded=true plan-control-p50=2024.2us thermal=0
+SPIKE BENCH thermalState at end: 0
+SPIKE BENCH blocks=15 recorded=12 framesPerBlock=120 ABBA-balanced, warmup discarded, one run, one session
+SPIKE BENCH swapchain plan-control n=480 p50=1922.4us p95=2107.3us p99=2145.3us max=3077.2us
+SPIKE BENCH swapchain present n=480 p50=1195.4us p95=1293.9us p99=1697.0us max=2094.3us
+SPIKE BENCH swapchain tick-gap n=0 NOT-MEASURED
+SPIKE BENCH swapchain missedPresentations=0
+SPIKE BENCH cgimage-copy plan-control n=480 p50=1913.7us p95=2105.5us p99=2123.6us max=2151.0us
+SPIKE BENCH cgimage-copy present n=480 p50=1983.5us p95=2129.3us p99=2191.1us max=2445.2us
+SPIKE BENCH cgimage-copy tick-gap n=0 NOT-MEASURED
+SPIKE BENCH cgimage-copy missedPresentations=0
+SPIKE BENCH plan-only plan-control n=480 p50=1944.7us p95=2096.2us p99=2117.0us max=2300.4us
+SPIKE BENCH plan-only present n=480 p50=0.0us p95=0.0us p99=0.0us max=0.0us
+SPIKE BENCH plan-only tick-gap n=0 NOT-MEASURED
+SPIKE BENCH plan-only missedPresentations=0
+SPIKE BENCH energy: NOT-MEASURED (no Instruments attach in this recipe)
+SPIKE BENCH DONE
