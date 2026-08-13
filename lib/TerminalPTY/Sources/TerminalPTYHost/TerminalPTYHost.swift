@@ -218,6 +218,7 @@ public actor TerminalPTYHost {
     package nonisolated let captureTransitions: Bool
     private let bootstrapExecutable: String
     private let childExitProbe: any TerminalPTYChildExitProbing
+    private let resourceLifecycle: any TerminalPTYResourceLifecycling
 
     private var masterFD: Int32 = -1
     private var leaderPID: pid_t?
@@ -236,14 +237,6 @@ public actor TerminalPTYHost {
     private var retainedSources: [Int: any DispatchSourceProtocol] = [:]
     private var descriptorSourceIDs: Set<Int> = []
     private var nextSourceID = 0
-    private var heldSourceCancellationIDs: [Int] = []
-    private var holdsSourceCancellationAcknowledgements = false
-    private var sourceCancellationHeldObserver: (@Sendable () -> Void)?
-    private var holdsInstalledSourcesBeforeActivation = false
-    private var installedSourcesObserver: (@Sendable () -> Void)?
-    private var hasDeferredSpawnSuccess = false
-    private var descriptorReuseReplacementFD: Int32?
-    private var reusedDescriptor: Int32?
     private var descriptorOwnershipSealed = false
     private var masterCloseRequested = false
     private var deferredCommandsAfterMasterClose: [PaneProcessLifecycleCommand] = []
@@ -357,7 +350,8 @@ public actor TerminalPTYHost {
             DispatchTime.now().uptimeNanoseconds
         },
         applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound,
-        childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe()
+        childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe(),
+        resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle()
     ) throws {
         guard let terminal = Terminal(
             columns: initialDimensions.columns,
@@ -375,6 +369,7 @@ public actor TerminalPTYHost {
         self.captureTransitions = captureTransitions
         self.applicationExitBound = applicationExitBound
         self.childExitProbe = childExitProbe
+        self.resourceLifecycle = resourceLifecycle
         flightTape = TerminalFlightRecorder(
             initialDimensions: initialDimensions,
             configuration: flightTapeConfiguration,
@@ -703,14 +698,24 @@ public actor TerminalPTYHost {
 
     private func sourceCancellationHandlerRan(_ id: Int) {
         guard retainedSources[id] != nil else { return }
-        guard holdsSourceCancellationAcknowledgements else {
-            acknowledgeSourceCancellation(id)
-            return
+        let resume: @Sendable () -> Void = { [weak self] in
+            self?.enqueueSourceCancellationAcknowledgement(id)
         }
-        heldSourceCancellationIDs.append(id)
-        let observer = sourceCancellationHeldObserver
-        sourceCancellationHeldObserver = nil
-        observer?()
+        switch resourceLifecycle.gateSourceCancellationAcknowledgement(resume: resume) {
+        case .proceed:
+            acknowledgeSourceCancellation(id)
+        case .deferred:
+            break
+        }
+    }
+
+    /// Re-enters the owner after a test witness releases one parked acknowledgement.
+    private nonisolated func enqueueSourceCancellationAcknowledgement(_ id: Int) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in
+                owner.acknowledgeSourceCancellation(id)
+            }
+        }
     }
 
     private func acknowledgeSourceCancellation(_ id: Int) {
@@ -1452,58 +1457,10 @@ public actor TerminalPTYHost {
         lastIssuedLaunch?.hasPendingDelivery == true
     }
 
-    /// Test-support: pauses the owner-side acknowledgement after cancellation
-    /// handlers run so tests can inspect the join barrier without elapsed sleeps.
-    package func holdSourceCancellationAcknowledgements(
-        onFirstHeld: @escaping @Sendable () -> Void
-    ) {
-        holdsSourceCancellationAcknowledgements = true
-        sourceCancellationHeldObserver = onFirstHeld
-    }
-
-    /// Test-support: releases every cancellation acknowledgement held by the
-    /// deterministic join-barrier seam.
-    package func releaseSourceCancellationAcknowledgements() {
-        holdsSourceCancellationAcknowledgements = false
-        let held = heldSourceCancellationIDs
-        heldSourceCancellationIDs.removeAll()
-        for id in held {
-            acknowledgeSourceCancellation(id)
-        }
-    }
-
     /// Test-support: drives the host-bound phase without relying on an elapsed
     /// timer while source acknowledgements are controlled separately.
     package func forceExitBoundForTesting() {
         exitBoundElapsed()
-    }
-
-    /// Test-support: holds the launch after source installation but before the
-    /// reducer can activate IO.
-    package func holdInstalledSourcesBeforeActivation(
-        onInstalled: @escaping @Sendable () -> Void
-    ) {
-        holdsInstalledSourcesBeforeActivation = true
-        installedSourcesObserver = onInstalled
-    }
-
-    /// Test-support: resumes a launch held with installed, inactive sources.
-    package func releaseInstalledSourcesForActivation() {
-        holdsInstalledSourcesBeforeActivation = false
-        guard hasDeferredSpawnSuccess else { return }
-        hasDeferredSpawnSuccess = false
-        process(.spawnSucceeded)
-    }
-
-    /// Test-support: atomically replaces the closing PTY fd with this descriptor
-    /// so the test can prove no joined source acts on the reused number.
-    package func installDescriptorReuseProbe(replacementFD: Int32) {
-        descriptorReuseReplacementFD = replacementFD
-    }
-
-    /// Test-support: returns the fd number reused while closing the PTY master.
-    package func reusedDescriptorForTesting() -> Int32? {
-        reusedDescriptor
     }
 
     /// Releases a child this host will never adopt. Off the owner queue because
@@ -1538,16 +1495,26 @@ public actor TerminalPTYHost {
             if descriptorOwnershipSealed == false {
                 installSources(for: spawned)
             }
-            if holdsInstalledSourcesBeforeActivation {
-                hasDeferredSpawnSuccess = true
-                let observer = installedSourcesObserver
-                installedSourcesObserver = nil
-                observer?()
-                return
+            let resume: @Sendable () -> Void = { [weak self] in
+                self?.enqueueSpawnActivation()
             }
-            process(.spawnSucceeded)
+            switch resourceLifecycle.gateSpawnActivation(resume: resume) {
+            case .proceed:
+                process(.spawnSucceeded)
+            case .deferred:
+                break
+            }
         case .failure(let failure):
             process(.spawnFailed(failure))
+        }
+    }
+
+    /// Re-enters the owner after a test witness releases parked source activation.
+    private nonisolated func enqueueSpawnActivation() {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in
+                owner.process(.spawnSucceeded)
+            }
         }
     }
 
@@ -1996,13 +1963,7 @@ public actor TerminalPTYHost {
         guard masterCloseRequested, descriptorSourceIDs.isEmpty else { return }
         masterCloseRequested = false
         if masterFD >= 0 {
-            if let replacementFD = descriptorReuseReplacementFD,
-               dup2(replacementFD, masterFD) == masterFD
-            {
-                reusedDescriptor = masterFD
-            } else {
-                Darwin.close(masterFD)
-            }
+            resourceLifecycle.closeMasterDescriptor(masterFD)
             masterFD = -1
         }
         if forcedCleanupAfterMasterClose {

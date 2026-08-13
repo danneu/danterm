@@ -32,11 +32,12 @@ struct TerminalPTYHostTests {
         // Intent: pre-spawn input stays pending, then completes only after its last byte writes.
         // Why it exists: the old lifecycle dropped input received before spawn without a result.
         // Scenario: source activation holds a successful spawn while one submission arrives.
-        let host = try makeHost()
         let spawnInstalled = ExitCompletionRecorder(expecting: 1)
-        await host.holdInstalledSourcesBeforeActivation {
+        let lifecycle = ControlledTerminalPTYResourceLifecycle()
+        lifecycle.holdSpawnActivation {
             spawnInstalled.signal()
         }
+        let host = try makeHost(resourceLifecycle: lifecycle)
         await host.start(makeLaunchInput(command: "stty -echo; exec cat > /dev/null"))
         let completion = InputCompletionRecorder(expecting: 1)
 
@@ -46,7 +47,7 @@ struct TerminalPTYHostTests {
 
         #expect(spawnInstalled.waitForAll(within: .seconds(20)))
         #expect(completion.results.isEmpty)
-        await host.releaseInstalledSourcesForActivation()
+        lifecycle.releaseSpawnActivation()
         #expect(completion.waitForAll(within: .seconds(20)))
         #expect(completion.results == [.delivered])
         await host.close()
@@ -57,11 +58,12 @@ struct TerminalPTYHostTests {
         // Intent: closing a spawning pane rejects every submission that cannot reach its PTY.
         // Why it exists: buffered input needs a terminal result on every failed readiness edge.
         // Scenario: a close arrives while source activation holds a successful spawn.
-        let host = try makeHost()
         let spawnInstalled = ExitCompletionRecorder(expecting: 1)
-        await host.holdInstalledSourcesBeforeActivation {
+        let lifecycle = ControlledTerminalPTYResourceLifecycle()
+        lifecycle.holdSpawnActivation {
             spawnInstalled.signal()
         }
+        let host = try makeHost(resourceLifecycle: lifecycle)
         await host.start(makeLaunchInput(command: "exec sleep 30"))
         let completion = InputCompletionRecorder(expecting: 1)
         host.send(Array("buffered".utf8)) {
@@ -72,7 +74,7 @@ struct TerminalPTYHostTests {
         let close = Task { await host.close() }
         #expect(completion.waitForAll(within: .seconds(20)))
         #expect(completion.results == [.rejected(.processEnded)])
-        await host.releaseInstalledSourcesForActivation()
+        lifecycle.releaseSpawnActivation()
         await close.value
     }
 
@@ -81,11 +83,12 @@ struct TerminalPTYHostTests {
         // Intent: the shared byte bound admits or rejects each submission as one unit.
         // Why it exists: buffering input before spawn must not introduce unbounded pane state.
         // Scenario: launch input and one submission fill the bound before another byte arrives.
-        let host = try makeHost()
         let spawnInstalled = ExitCompletionRecorder(expecting: 1)
-        await host.holdInstalledSourcesBeforeActivation {
+        let lifecycle = ControlledTerminalPTYResourceLifecycle()
+        lifecycle.holdSpawnActivation {
             spawnInstalled.signal()
         }
+        let host = try makeHost(resourceLifecycle: lifecycle)
         await host.start(makeLaunchInput(command: "exec sleep 30"))
         let accepted = InputCompletionRecorder(expecting: 1)
         let rejected = InputCompletionRecorder(expecting: 1)
@@ -107,7 +110,7 @@ struct TerminalPTYHostTests {
         let close = Task { await host.close() }
         #expect(accepted.waitForAll(within: .seconds(20)))
         #expect(accepted.results == [.rejected(.processEnded)])
-        await host.releaseInstalledSourcesForActivation()
+        lifecycle.releaseSpawnActivation()
         await close.value
     }
 
@@ -1254,7 +1257,8 @@ struct TerminalPTYHostTests {
         //   its handler runs lets callbacks and descriptor access outlive teardown.
         // Scenario: application exit pauses source cancellation acknowledgements
         //   while a live pane is closing, then releases the join barrier.
-        let host = try makeHost()
+        let lifecycle = ControlledTerminalPTYResourceLifecycle()
+        let host = try makeHost(resourceLifecycle: lifecycle)
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
@@ -1264,7 +1268,7 @@ struct TerminalPTYHostTests {
             in: String(decoding: await host.outputBytes(), as: UTF8.self)
         )
         let cancellationReached = ExitCompletionRecorder(expecting: 1)
-        await host.holdSourceCancellationAcknowledgements {
+        lifecycle.holdSourceCancellationAcknowledgements {
             cancellationReached.signal()
         }
         let completion = ExitCompletionRecorder(expecting: 1)
@@ -1278,7 +1282,7 @@ struct TerminalPTYHostTests {
         #expect(completion.queueLabels.isEmpty)
         #expect(processExists(pid))
 
-        await host.releaseSourceCancellationAcknowledgements()
+        lifecycle.releaseSourceCancellationAcknowledgements()
         #expect(completion.waitForAll(within: .seconds(20)))
         #expect(await waitForProcessExit(pid))
         #expect((await host.resourceSnapshot()).isReleased)
@@ -1292,8 +1296,10 @@ struct TerminalPTYHostTests {
         //   before cancellation callbacks run or replay superseded ladder commands.
         // Scenario: application exit forces a live pane while its source
         //   cancellation acknowledgements are deterministically paused.
+        let lifecycle = ControlledTerminalPTYResourceLifecycle()
         let host = try makeHost(
-            applicationExitBound: .seconds(30)
+            applicationExitBound: .seconds(30),
+            resourceLifecycle: lifecycle
         )
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
@@ -1304,7 +1310,7 @@ struct TerminalPTYHostTests {
             in: String(decoding: await host.outputBytes(), as: UTF8.self)
         )
         let cancellationReached = ExitCompletionRecorder(expecting: 1)
-        await host.holdSourceCancellationAcknowledgements {
+        lifecycle.holdSourceCancellationAcknowledgements {
             cancellationReached.signal()
         }
         let completion = ExitCompletionRecorder(expecting: 1)
@@ -1317,7 +1323,7 @@ struct TerminalPTYHostTests {
         #expect(processExists(pid))
         #expect(completion.queueLabels.isEmpty)
 
-        await host.releaseSourceCancellationAcknowledgements()
+        lifecycle.releaseSourceCancellationAcknowledgements()
         #expect(completion.waitForAll(within: .seconds(20)))
         #expect(await waitForProcessExit(pid))
         let finished = await host.resourceSnapshot()
@@ -1333,7 +1339,8 @@ struct TerminalPTYHostTests {
         //   ownership after the cancellation census was assumed complete.
         // Scenario: a pane with write backpressure receives another write while
         //   application exit is paused at the source join barrier.
-        let host = try makeHost()
+        let lifecycle = ControlledTerminalPTYResourceLifecycle()
+        let host = try makeHost(resourceLifecycle: lifecycle)
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) stalled \"$0\""
         ))
@@ -1344,7 +1351,7 @@ struct TerminalPTYHostTests {
         #expect(beforeShutdown.descriptorSourceCount == 2)
 
         let cancellationReached = ExitCompletionRecorder(expecting: 1)
-        await host.holdSourceCancellationAcknowledgements {
+        lifecycle.holdSourceCancellationAcknowledgements {
             cancellationReached.signal()
         }
         let completion = ExitCompletionRecorder(expecting: 1)
@@ -1357,7 +1364,7 @@ struct TerminalPTYHostTests {
         #expect(whileHeld.descriptorSourceCount == beforeShutdown.descriptorSourceCount)
         #expect(completion.queueLabels.isEmpty)
 
-        await host.releaseSourceCancellationAcknowledgements()
+        lifecycle.releaseSourceCancellationAcknowledgements()
         #expect(completion.waitForAll(within: .seconds(20)))
         #expect((await host.resourceSnapshot()).isReleased)
     }
@@ -1370,23 +1377,27 @@ struct TerminalPTYHostTests {
         //   cancellation handler runnable until the source is activated.
         // Scenario: a newly opened pane receives Cmd-Q between source installation
         //   and the reducer command that would normally activate PTY IO.
-        let host = try makeHost(captureTransitions: false)
         let sourcesInstalled = ExitCompletionRecorder(expecting: 1)
-        await host.holdInstalledSourcesBeforeActivation {
+        let lifecycle = ControlledTerminalPTYResourceLifecycle()
+        lifecycle.holdSpawnActivation {
             sourcesInstalled.signal()
         }
+        let host = try makeHost(
+            captureTransitions: false,
+            resourceLifecycle: lifecycle
+        )
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
         #expect(sourcesInstalled.waitForAll(within: .seconds(20)))
 
         let cancellationReached = ExitCompletionRecorder(expecting: 1)
-        await host.holdSourceCancellationAcknowledgements {
+        lifecycle.holdSourceCancellationAcknowledgements {
             cancellationReached.signal()
         }
         let completion = ExitCompletionRecorder(expecting: 1)
         host.requestShutdown { completion.signal() }
-        await host.releaseInstalledSourcesForActivation()
+        lifecycle.releaseSpawnActivation()
         #expect(cancellationReached.waitForAll(within: .seconds(20)))
 
         let whileHeld = await host.resourceSnapshot()
@@ -1394,7 +1405,7 @@ struct TerminalPTYHostTests {
         #expect(whileHeld.descriptorSourceCount == 1)
         #expect(completion.queueLabels.isEmpty)
 
-        await host.releaseSourceCancellationAcknowledgements()
+        lifecycle.releaseSourceCancellationAcknowledgements()
         #expect(completion.waitForAll(within: .seconds(20)))
         #expect((await host.resourceSnapshot()).isReleased)
     }
@@ -1414,15 +1425,19 @@ struct TerminalPTYHostTests {
             if pipeFDs[1] >= 0 { Darwin.close(pipeFDs[1]) }
         }
 
-        let host = try makeHost(captureTransitions: false)
-        await host.installDescriptorReuseProbe(replacementFD: pipeFDs[0])
+        let lifecycle = ControlledTerminalPTYResourceLifecycle()
+        lifecycle.installDescriptorReuseProbe(replacementFD: pipeFDs[0])
+        let host = try makeHost(
+            captureTransitions: false,
+            resourceLifecycle: lifecycle
+        )
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         await host.close()
 
-        let reusedFD = try #require(await host.reusedDescriptorForTesting())
+        let reusedFD = try #require(lifecycle.reusedDescriptor)
         let byte: UInt8 = 0x5A
         #expect(withUnsafeBytes(of: byte) {
             Darwin.write(pipeFDs[1], $0.baseAddress, $0.count)
@@ -2456,15 +2471,123 @@ private extension TerminalPTYHost {
 private func makeHost(
     captureTransitions: Bool = true,
     applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound,
-    childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe()
+    childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe(),
+    resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle()
 ) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
         bootstrapExecutable: bootstrapExecutable(),
         captureTransitions: captureTransitions,
         applicationExitBound: applicationExitBound,
-        childExitProbe: childExitProbe
+        childExitProbe: childExitProbe,
+        resourceLifecycle: resourceLifecycle
     )
+}
+
+private final class ControlledTerminalPTYResourceLifecycle: TerminalPTYResourceLifecycling {
+    private struct GateResult: Sendable {
+        let verdict: TerminalPTYLifecycleGateVerdict
+        let observer: (@Sendable () -> Void)?
+    }
+
+    private struct State: Sendable {
+        var holdsSpawnActivation = false
+        var spawnActivationObserver: (@Sendable () -> Void)?
+        var spawnActivationResumes: [@Sendable () -> Void] = []
+        var holdsSourceCancellationAcknowledgements = false
+        var sourceCancellationObserver: (@Sendable () -> Void)?
+        var sourceCancellationResumes: [@Sendable () -> Void] = []
+        var descriptorReuseReplacementFD: Int32?
+        var reusedDescriptor: Int32?
+    }
+
+    private let production = SystemTerminalPTYResourceLifecycle()
+    private let state = Mutex(State())
+
+    func gateSpawnActivation(
+        resume: @escaping @Sendable () -> Void
+    ) -> TerminalPTYLifecycleGateVerdict {
+        let result = state.withLock { state -> GateResult in
+            guard state.holdsSpawnActivation else {
+                return GateResult(verdict: .proceed, observer: nil)
+            }
+            state.spawnActivationResumes.append(resume)
+            let observer = state.spawnActivationObserver
+            state.spawnActivationObserver = nil
+            return GateResult(verdict: .deferred, observer: observer)
+        }
+        result.observer?()
+        return result.verdict
+    }
+
+    func gateSourceCancellationAcknowledgement(
+        resume: @escaping @Sendable () -> Void
+    ) -> TerminalPTYLifecycleGateVerdict {
+        let result = state.withLock { state -> GateResult in
+            guard state.holdsSourceCancellationAcknowledgements else {
+                return GateResult(verdict: .proceed, observer: nil)
+            }
+            state.sourceCancellationResumes.append(resume)
+            let observer = state.sourceCancellationObserver
+            state.sourceCancellationObserver = nil
+            return GateResult(verdict: .deferred, observer: observer)
+        }
+        result.observer?()
+        return result.verdict
+    }
+
+    func closeMasterDescriptor(_ descriptor: Int32) {
+        let replacementFD = state.withLock { $0.descriptorReuseReplacementFD }
+        guard let replacementFD, dup2(replacementFD, descriptor) == descriptor else {
+            production.closeMasterDescriptor(descriptor)
+            return
+        }
+        state.withLock { $0.reusedDescriptor = descriptor }
+    }
+
+    func holdSpawnActivation(onDeferred: @escaping @Sendable () -> Void) {
+        state.withLock { state in
+            state.holdsSpawnActivation = true
+            state.spawnActivationObserver = onDeferred
+        }
+    }
+
+    func releaseSpawnActivation() {
+        let resumes = state.withLock { state in
+            state.holdsSpawnActivation = false
+            let resumes = state.spawnActivationResumes
+            state.spawnActivationResumes.removeAll()
+            return resumes
+        }
+        for resume in resumes { resume() }
+    }
+
+    func holdSourceCancellationAcknowledgements(
+        onFirstDeferred: @escaping @Sendable () -> Void
+    ) {
+        state.withLock { state in
+            state.holdsSourceCancellationAcknowledgements = true
+            state.sourceCancellationObserver = onFirstDeferred
+        }
+    }
+
+    func releaseSourceCancellationAcknowledgements() {
+        let resumes = state.withLock { state in
+            state.holdsSourceCancellationAcknowledgements = false
+            let resumes = state.sourceCancellationResumes
+            state.sourceCancellationResumes.removeAll()
+            return resumes
+        }
+        for resume in resumes { resume() }
+    }
+
+    func installDescriptorReuseProbe(replacementFD: Int32) {
+        state.withLock { $0.descriptorReuseReplacementFD = replacementFD }
+    }
+
+    var reusedDescriptor: Int32? {
+        state.withLock { $0.reusedDescriptor }
+    }
 }
 
 private final class TransientChildExitProbe: TerminalPTYChildExitProbing {

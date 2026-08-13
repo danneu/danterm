@@ -133,7 +133,7 @@ are deleted in the same step as the witness that replaces them.
    the first witness is the point where the current wording is
    contradicted.
 3. Source/descriptor lifecycle witness (deletes eight host properties and
-   five package methods; rewires six tests).
+   six package methods; rewires eight tests).
 4. Spawning witness (riskiest, last; deletes the delay knobs and
    `lastIssuedLaunch`; rewires three tests -- prompt-spawn close,
    pre-report application exit, and resolved pre-delivery application exit;
@@ -194,6 +194,6 @@ are deleted in the same step as the witness that replaces them.
 
 - [x] 1. refactor(pty): group lifecycle census observations
 - [x] 2. refactor(pty): inject child-exit probing
-- [ ] 3. refactor(pty): inject source and descriptor lifecycle
+- [x] 3. refactor(pty): inject source and descriptor lifecycle
 - [ ] 4. refactor(pty): inject deterministic spawning
 - [ ] 5. docs(audit): close S12 production fault-injection finding
