@@ -43,7 +43,7 @@ retired more than one predecessor repeats `Supersedes`, one bullet per note.
 `Supersedes` and `Superseded by` are two views of one fact, so both notes carry
 their half.
 
-`scripts/docs-lint.sh` checks all of this, plus that the note list below names
+`scripts/docs-lint.py` checks all of this, plus that the note list below names
 every note exactly once with the status the note itself carries.
 
 A note whose decision still binds, but whose body names code that is gone,

@@ -207,7 +207,7 @@ and legitimately have none).
   carried the id, because plans are historical and their ids are not unique.
   When the same invariant needs restating across many files, graduate it to a
   design doc instead.
-- `scripts/docs-lint.sh` resolves every repo-relative path cited in AGENTS.md,
+- `scripts/docs-lint.py` resolves every repo-relative path cited in AGENTS.md,
   CLAUDE.md, `agent-docs/`, and `docs/` outside `docs/scratch/`, so a rename that
   orphans a citation fails the gate. When a document names a deleted path on
   purpose -- a supersession banner does exactly that -- declare it in that file
