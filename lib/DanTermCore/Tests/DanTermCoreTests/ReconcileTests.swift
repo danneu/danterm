@@ -135,18 +135,18 @@ import Testing
         //   tab-selection, zoom, and search transitions that use the same policy.
         var model = makeModel()
         createTab(&model)
-        let firstPane = selectedTab(in: model)!.focusedPaneId
+        let firstPane = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(desiredPaneFocus(in: model) == .terminal(firstPane))
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let foregroundSplitPane = selectedTab(in: model)!.focusedPaneId
+        let foregroundSplitPane = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(desiredPaneFocus(in: model) == .terminal(foregroundSplitPane))
 
         let selectedTabId = model.selectedTabId!
         update(&model, .createTabInSelectedGroup(background: true))
         let backgroundTab = model.groups[0].tabs.first { $0.id != selectedTabId }!
         update(&model, .splitPane(
-            paneId: backgroundTab.focusedPaneId,
+            paneId: backgroundTab.paneTree.focusedPaneId,
             direction: .vertical,
             background: false
         ))
@@ -162,7 +162,7 @@ import Testing
         #expect(desiredPaneFocus(in: model) == .terminal(firstPane))
 
         update(&model, .selectTab(id: backgroundTab.id))
-        let selectedBackgroundPane = selectedTab(in: model)!.focusedPaneId
+        let selectedBackgroundPane = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(desiredPaneFocus(in: model) == .terminal(selectedBackgroundPane))
 
         update(&model, .searchStarted(paneId: selectedBackgroundPane, needle: "hit"))
@@ -515,18 +515,15 @@ import Testing
         let selectedTabId = TabId(), siblingTabId = TabId(), otherTabId = TabId()
         let selectedTab = TabModel(
             id: selectedTabId,
-            focusedPaneId: selectedPaneId,
-            rootNode: .leaf(PaneModel(id: selectedPaneId))
+            paneTree: PaneTree(root: .leaf(PaneModel(id: selectedPaneId)))
         )
         let siblingTab = TabModel(
             id: siblingTabId,
-            focusedPaneId: siblingPaneId,
-            rootNode: .leaf(PaneModel(id: siblingPaneId))
+            paneTree: PaneTree(root: .leaf(PaneModel(id: siblingPaneId)))
         )
         let otherTab = TabModel(
             id: otherTabId,
-            focusedPaneId: otherPaneId,
-            rootNode: .leaf(PaneModel(id: otherPaneId))
+            paneTree: PaneTree(root: .leaf(PaneModel(id: otherPaneId)))
         )
         var model = AppModel(
             groups: [
@@ -750,8 +747,8 @@ import Testing
         //   never rebuilds the container.
         // Scenario: spec-first ratio carveout.
         let p1 = PaneId(), p2 = PaneId(), sid = SplitId()
-        let lo = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p2, ratio: 0.3))
-        let hi = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p2, ratio: 0.8))
+        let lo = TabModel(id: TabId(), paneTree: PaneTree(root: splitNode(sid, p1, p2, ratio: 0.3), focusedPaneId: p1))
+        let hi = TabModel(id: TabId(), paneTree: PaneTree(root: splitNode(sid, p1, p2, ratio: 0.8), focusedPaneId: p1))
         #expect(containerShape(of: lo) == containerShape(of: hi),
             "split ratio is excluded -- splitRatioChanged must not rebuild")
     }
@@ -771,8 +768,8 @@ import Testing
         leftB.theme = "Dracula"
         let nodeA = SplitNodeModel.split(id: sid, direction: .horizontal, first: .leaf(leftA), second: .leaf(PaneModel(id: p2)), ratio: 0.5)
         let nodeB = SplitNodeModel.split(id: sid, direction: .horizontal, first: .leaf(leftB), second: .leaf(PaneModel(id: p2)), ratio: 0.5)
-        let tabA = TabModel(id: TabId(), focusedPaneId: p1, rootNode: nodeA)
-        let tabB = TabModel(id: TabId(), focusedPaneId: p1, rootNode: nodeB)
+        let tabA = TabModel(id: TabId(), paneTree: PaneTree(root: nodeA, focusedPaneId: p1))
+        let tabB = TabModel(id: TabId(), paneTree: PaneTree(root: nodeB, focusedPaneId: p1))
         #expect(containerShape(of: tabA) == containerShape(of: tabB),
             "leaf payload (title/cwd/progress/todo/theme) is excluded -- a metadata edit must not rebuild")
     }
@@ -785,18 +782,29 @@ import Testing
         //   contract.
         // Scenario: spec-first structural unequal.
         let p1 = PaneId(), p2 = PaneId(), p3 = PaneId(), sid = SplitId()
-        let single = TabModel(id: TabId(), focusedPaneId: p1, rootNode: .leaf(PaneModel(id: p1)))
-        let split = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p2, ratio: 0.5))
+        let single = TabModel(id: TabId(), paneTree: PaneTree(root: .leaf(PaneModel(id: p1)), focusedPaneId: p1))
+        let split = TabModel(id: TabId(), paneTree: PaneTree(root: splitNode(sid, p1, p2, ratio: 0.5), focusedPaneId: p1))
         #expect(containerShape(of: single) != containerShape(of: split),
             "adding a leaf (single -> split) changes the shape")
-        let splitV = TabModel(id: TabId(), focusedPaneId: p1,
-            rootNode: .split(id: sid, direction: .vertical, first: .leaf(PaneModel(id: p1)), second: .leaf(PaneModel(id: p2)), ratio: 0.5))
+        let splitV = TabModel(
+            id: TabId(),
+            paneTree: PaneTree(
+                root: .split(
+                    id: sid,
+                    direction: .vertical,
+                    first: .leaf(PaneModel(id: p1)),
+                    second: .leaf(PaneModel(id: p2)),
+                    ratio: 0.5
+                ),
+                focusedPaneId: p1
+            )
+        )
         #expect(containerShape(of: split) != containerShape(of: splitV),
             "changing split direction changes the shape")
-        let splitMoved = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p3, ratio: 0.5))
+        let splitMoved = TabModel(id: TabId(), paneTree: PaneTree(root: splitNode(sid, p1, p3, ratio: 0.5), focusedPaneId: p1))
         #expect(containerShape(of: split) != containerShape(of: splitMoved),
             "swapping a leaf id changes the shape")
-        var zoomed = split; zoomed.isZoomed = true
+        var zoomed = split; _ = zoomed.paneTree.toggleZoom()
         #expect(containerShape(of: split) != containerShape(of: zoomed),
             "toggling zoom changes the shape")
     }

@@ -27,12 +27,12 @@ private func paneSnap(_ id: PaneId, title: String, cwd: String? = nil, scrollbac
         update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .toggleZoomPane(paneId: nil))
         let tab = selectedTab(in: model)!
-        #expect(tab.isZoomed, "tab should be zoomed before snapshot")
+        #expect(tab.paneTree.isZoomed, "tab should be zoomed before snapshot")
 
         let snapshot = toSnapshot(model)
         let restored = try #require(validateAndBuild(snapshot), "snapshot round-trip failed")
         let restoredTab = selectedTab(in: restored)!
-        #expect(!restoredTab.isZoomed, "restored tab should not be zoomed")
+        #expect(!restoredTab.paneTree.isZoomed, "restored tab should not be zoomed")
     }
 
     // MARK: - mergeCheckpoints (single-format, on the validated pair)

@@ -79,8 +79,8 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
       var tabSnapshot = TabSnapshot(
         id: tab.id.rawValue.uuidString,
         customTitle: tab.customTitle,
-        focusedPaneId: tab.focusedPaneId.rawValue.uuidString,
-        rootNode: toSplitNodeSnapshot(tab.rootNode, home: h),
+        focusedPaneId: tab.paneTree.focusedPaneId.rawValue.uuidString,
+        rootNode: toSplitNodeSnapshot(tab.paneTree.root, home: h),
         color: tab.color
       )
       tabSnapshot.todos = tabTodoSnapshots

@@ -233,7 +233,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         guard currentThemeName != nil else { return }
         guard let runtime = runtime,
               let tab = selectedTab(in: runtime.model) else { return }
-        runtime.send(.setPaneTheme(paneId: tab.focusedPaneId, themeName: nil))
+        runtime.send(.setPaneTheme(paneId: tab.paneTree.focusedPaneId, themeName: nil))
     }
 
     @objc private func closeBrowser() {
@@ -279,7 +279,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         guard name != currentThemeName else { return }
         guard let runtime = runtime,
               let tab = selectedTab(in: runtime.model) else { return }
-        runtime.send(.setPaneTheme(paneId: tab.focusedPaneId, themeName: name))
+        runtime.send(.setPaneTheme(paneId: tab.paneTree.focusedPaneId, themeName: name))
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {

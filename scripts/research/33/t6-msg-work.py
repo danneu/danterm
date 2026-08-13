@@ -57,10 +57,10 @@ PATCHES = [
     (
         "Model.swift",
         "    var allPanes: [PaneModel] {\n"
-        "        groups.flatMap { $0.tabs.flatMap { panesInNode($0.rootNode) } }\n",
+        "        groups.flatMap { $0.tabs.flatMap { panesInNode($0.paneTree.root) } }\n",
         "    var allPanes: [PaneModel] {\n"
         "        t6Counters.allPanesWalks += 1\n"
-        "        return groups.flatMap { $0.tabs.flatMap { panesInNode($0.rootNode) } }\n",
+        "        return groups.flatMap { $0.tabs.flatMap { panesInNode($0.paneTree.root) } }\n",
     ),
     (
         "Model.swift",

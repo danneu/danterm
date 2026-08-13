@@ -239,7 +239,7 @@ import Testing
         //   the abbreviated cwd without a runtime lifecycle graft.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.updatePane(paneId) { $0.session?.cwd = NSHomeDirectory() + "/projects" }
         let expected = toSnapshot(model)
         let commands = update(&model, .exportState)
@@ -305,7 +305,7 @@ import Testing
         #expect(rebuilt.groups[0].id == model.groups[0].id)
         #expect(rebuilt.groups[0].tabs[0].id == model.groups[0].tabs[0].id)
         #expect(rebuilt.selectedTabId == model.selectedTabId)
-        let origPaneId = model.groups[0].tabs[0].focusedPaneId
+        let origPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         #expect(rebuilt.pane(origPaneId) != nil, "pane ID should survive round-trip")
     }
 
@@ -340,14 +340,14 @@ import Testing
         let snapshot = toSnapshot(model)
         let rebuilt = validateAndBuild(snapshot)!
         let tab = rebuilt.groups[0].tabs[0]
-        if case .split(_, let dir, _, _, let ratio) = tab.rootNode {
+        if case .split(_, let dir, _, _, let ratio) = tab.paneTree.root {
             #expect(dir == .horizontal)
             #expect(ratio == 0.5)
         } else {
             Issue.record("expected split node")
             return
         }
-        #expect(allPaneIds(tab.rootNode).count == 2)
+        #expect(allPaneIds(tab.paneTree.root).count == 2)
     }
 
     @Test("toSnapshot preserves multiple groups")
@@ -396,7 +396,7 @@ import Testing
     func commandAndCwdAreNilWhenSourcesAreAbsent() {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.updatePane(paneId) { $0.session?.cwd = nil }
         let snapshot = toSnapshot(model)
         #expect(allPaneSnapshots(snapshot)[0].command == nil)
@@ -413,7 +413,7 @@ import Testing
         //   exports as ~/projects.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let home = NSHomeDirectory()
         model.updatePane(paneId) { $0.session?.cwd = home + "/projects" }
         let snapshot = toSnapshot(model)
@@ -424,7 +424,7 @@ import Testing
     func paneCwdPresentWhenCwdIsSet() {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let home = NSHomeDirectory()
         model.updatePane(paneId) { $0.session?.cwd = home + "/work" }
         let snapshot = toSnapshot(model)
@@ -435,7 +435,7 @@ import Testing
     func sessionRecoveryMemoCombinesCommandAndCwd() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let home = NSHomeDirectory()
         model.updatePane(paneId) { $0.session?.cwd = home + "/code" }
         let sessionId = try #require(model.pane(paneId)?.session?.id)
@@ -462,7 +462,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.updatePane(paneId) { $0.session?.cwd = NSHomeDirectory() + "/work" }
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("claude")))

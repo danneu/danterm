@@ -174,15 +174,8 @@ import DanTermProtocol
             ),
             ratio: 0.6
         )
-        let tabA = TabModel(
-            id: tabAId,
-            customTitle: "work",
-            focusedPaneId: paneBId,
-            rootNode: nestedRoot,
-            color: .purple,
-            todos: [TodoItem(id: tabTodoId, text: "review", isDone: true)]
-        )
-        let tabB = TabModel(id: tabBId, focusedPaneId: paneDId, rootNode: .leaf(paneD))
+        let tabA = TabModel(id: tabAId, customTitle: "work", paneTree: PaneTree(root: nestedRoot, focusedPaneId: paneBId), color: .purple, todos: [TodoItem(id: tabTodoId, text: "review", isDone: true)])
+        let tabB = TabModel(id: tabBId, paneTree: PaneTree(root: .leaf(paneD), focusedPaneId: paneDId))
         var model = AppModel(
             groups: [
                 GroupModel(id: groupAId, name: "General", tabs: [tabA]),
@@ -302,7 +295,7 @@ import DanTermProtocol
         let groupId = GroupId(rawValue: rawId)
         let state = SessionModel(id: SessionId(), command: .running("make test"), lastCommand: "make test")
         let pane = PaneModel(id: paneId, session: state)
-        let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(pane))
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
         var model = AppModel(
             groups: [GroupModel(id: groupId, name: "collision", tabs: [tab])],
             selectedTabId: tabId
@@ -332,7 +325,7 @@ import DanTermProtocol
         //   inside a DanTerm pane.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -357,7 +350,7 @@ import DanTermProtocol
     func paneInfoRepliesDirectlyWithDefaultLifecycles() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -396,7 +389,7 @@ import DanTermProtocol
     func agentActivityAndDetachRouteSessionQualifiedEvents() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let context = paneId
         let session = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         let sessionId = try #require(model.pane(paneId)?.session?.id)
@@ -430,7 +423,7 @@ import DanTermProtocol
     func agentActivityRejectsUnsupportedStates() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -456,7 +449,7 @@ import DanTermProtocol
         // Scenario: a malicious pane process tries to report a flag-shaped id.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -482,11 +475,11 @@ import DanTermProtocol
         createTab(&model)
         let backgroundGroupId = model.groups[0].id
         let backgroundTabId = selectedTab(in: model)!.id
-        let backgroundPaneId = selectedTab(in: model)!.focusedPaneId
+        let backgroundPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .createGroup(name: "Other"))
         let otherGroupId = model.groups.last!.id
         createTab(&model, inGroupId: otherGroupId)
-        let contextPaneId = selectedTab(in: model)!.focusedPaneId
+        let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -507,7 +500,7 @@ import DanTermProtocol
     func paneInfoUsesExplicitPane() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let tabId = selectedTab(in: model)!.id
 
         let commands = sendIpc(
@@ -529,7 +522,7 @@ import DanTermProtocol
         // Scenario: spec-first missing/invalid/unknown.
         var model = makeModel()
         createTab(&model)
-        let contextPaneId = selectedTab(in: model)!.focusedPaneId
+        let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let missing = sendIpc(&model, method: IpcRequestMethod.paneInfo.rawValue, pane: nil)
         #expect(try requireIpcError(missing).code == -32602)
@@ -588,7 +581,7 @@ import DanTermProtocol
         // Scenario: spec-first live tab via pane.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .splitFocusedPane(direction: .horizontal))
         createTab(&model)
         let targetTabId = selectedTab(in: model)!.id
@@ -618,10 +611,10 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let backgroundTabId = selectedTab(in: model)!.id
-        let backgroundPaneId = selectedTab(in: model)!.focusedPaneId
+        let backgroundPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         createTab(&model)
         let foregroundTabId = selectedTab(in: model)!.id
-        let foregroundPaneId = selectedTab(in: model)!.focusedPaneId
+        let foregroundPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -650,7 +643,7 @@ import DanTermProtocol
             var model = makeModel()
             createTab(&model)
             let contextTabId = selectedTab(in: model)!.id
-            let contextPaneId = selectedTab(in: model)!.focusedPaneId
+            let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
             let commands = sendIpc(
                 &model,
@@ -714,7 +707,7 @@ import DanTermProtocol
         #expect(reply["tab"]?["id"]?.asString == created.tabs[0].id.rawValue.uuidString)
         let paneId = try requirePaneId(
             reply["panes"]?.asArray?.first?["id"], "group.new should return pane id")
-        #expect(created.tabs[0].focusedPaneId == paneId)
+        #expect(created.tabs[0].paneTree.focusedPaneId == paneId)
     }
 
     // `Msg.createGroup` forwards to `.createTab` with background: false, so before
@@ -1087,7 +1080,7 @@ import DanTermProtocol
         // Scenario: spec-first implicit close from a DanTerm pane context.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .splitFocusedPane(direction: .horizontal))
         createTab(&model)
         let targetTabId = selectedTab(in: model)!.id
@@ -1139,7 +1132,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let closedTabId = selectedTab(in: model)!.id
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .splitPane(paneId: paneId, direction: .horizontal))
         createTab(&model)
 
@@ -1242,7 +1235,7 @@ import DanTermProtocol
             var model = makeModel()
             createTab(&model)
             let contextTabId = selectedTab(in: model)!.id
-            let contextPaneId = selectedTab(in: model)!.focusedPaneId
+            let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
             let countBefore = totalTabCount(model)
 
             let commands = sendIpc(
@@ -1285,9 +1278,9 @@ import DanTermProtocol
         // Scenario: spec-first close of the focused pane in a two-pane tab.
         var model = makeModel()
         createTab(&model)
-        let survivorPaneId = selectedTab(in: model)!.focusedPaneId
+        let survivorPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .splitPane(paneId: survivorPaneId, direction: .horizontal))
-        let closedPaneId = selectedTab(in: model)!.focusedPaneId
+        let closedPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let tabId = selectedTab(in: model)!.id
 
         let commands = sendIpc(
@@ -1300,8 +1293,8 @@ import DanTermProtocol
         #expect(reply["pane"]?["id"]?.asString == closedPaneId.rawValue.uuidString)
         #expect(model.pane(closedPaneId) == nil)
         let tab = try #require(tabById(tabId, in: model))
-        #expect(tab.focusedPaneId == survivorPaneId)
-        if case .leaf(let survivor) = tab.rootNode {
+        #expect(tab.paneTree.focusedPaneId == survivorPaneId)
+        if case .leaf(let survivor) = tab.paneTree.root {
             #expect(survivor.id == survivorPaneId)
         } else {
             Issue.record("pane.close should promote the surviving sibling")
@@ -1317,7 +1310,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let closedTabId = selectedTab(in: model)!.id
-        let closedPaneId = selectedTab(in: model)!.focusedPaneId
+        let closedPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         createTab(&model)
         let countBefore = totalTabCount(model)
 
@@ -1341,7 +1334,7 @@ import DanTermProtocol
         // Scenario: spec-first attempt to close the app's sole pane.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -1367,9 +1360,9 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
-        let survivorPaneId = selectedTab(in: model)!.focusedPaneId
+        let survivorPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .splitPane(paneId: survivorPaneId, direction: .horizontal))
-        let closedPaneId = selectedTab(in: model)!.focusedPaneId
+        let closedPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .addTodo(owner: .pane(closedPaneId), text: "pane task"))
         _ = update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
 
@@ -1390,7 +1383,7 @@ import DanTermProtocol
         var tabModel = makeModel()
         createTab(&tabModel)
         let closedTabId = selectedTab(in: tabModel)!.id
-        let solePaneId = selectedTab(in: tabModel)!.focusedPaneId
+        let solePaneId = selectedTab(in: tabModel)!.paneTree.focusedPaneId
         _ = update(&tabModel, .addTodo(owner: .pane(solePaneId), text: "pane task"))
         _ = update(&tabModel, .addTodo(owner: .tab(closedTabId), text: "tab task"))
         createTab(&tabModel)
@@ -1419,7 +1412,7 @@ import DanTermProtocol
         // Scenario: spec-first missing, malformed, unknown, and wrong-type ids.
         var model = makeModel()
         createTab(&model)
-        let contextPaneId = selectedTab(in: model)!.focusedPaneId
+        let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let context = contextPaneId
         let before = model
         let cases: [JSONValue] = [
@@ -1447,7 +1440,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let backgroundTabId = selectedTab(in: model)!.id
-        let backgroundPaneId = selectedTab(in: model)!.focusedPaneId
+        let backgroundPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         createTab(&model)
         let foregroundTabId = selectedTab(in: model)!.id
         let beforePaneIds = Set(model.allPaneIds)
@@ -1462,7 +1455,7 @@ import DanTermProtocol
         )
 
         #expect(model.selectedTabId == foregroundTabId)
-        #expect(allPaneIds(tabById(backgroundTabId, in: model)!.rootNode).count == 2)
+        #expect(allPaneIds(tabById(backgroundTabId, in: model)!.paneTree.root).count == 2)
         let reply = try requireIpcReply(commands)
         let returnedPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return the new pane id")
         #expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
@@ -1477,9 +1470,9 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
-        let callerPaneId = selectedTab(in: model)!.focusedPaneId
+        let callerPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .splitPane(paneId: callerPaneId, direction: .horizontal))
-        let siblingPaneId = selectedTab(in: model)!.focusedPaneId
+        let siblingPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let beforePaneIds = Set(model.allPaneIds)
 
         let commands = sendIpc(
@@ -1497,7 +1490,7 @@ import DanTermProtocol
         #expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
         #expect(Set(model.allPaneIds).subtracting(beforePaneIds) == Set([returnedPaneId]))
         guard case .split(_, .horizontal, .leaf(let first), .split(_, .vertical, .leaf(let second), .leaf(let third), _), _) =
-            tabById(tabId, in: model)!.rootNode
+            tabById(tabId, in: model)!.paneTree.root
         else {
             Issue.record("expected explicit sibling pane to be split")
             return
@@ -1515,7 +1508,7 @@ import DanTermProtocol
         // Scenario: spec-first malformed explicit.
         var model = makeModel()
         createTab(&model)
-        let callerPaneId = selectedTab(in: model)!.focusedPaneId
+        let callerPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let beforePaneIds = Set(model.allPaneIds)
 
         let commands = sendIpc(
@@ -1541,7 +1534,7 @@ import DanTermProtocol
         // Scenario: spec-first non-string explicit.
         var model = makeModel()
         createTab(&model)
-        let callerPaneId = selectedTab(in: model)!.focusedPaneId
+        let callerPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let beforePaneIds = Set(model.allPaneIds)
 
         let commands = sendIpc(
@@ -1569,7 +1562,7 @@ import DanTermProtocol
         // Scenario: spec-first unknown explicit.
         var model = makeModel()
         createTab(&model)
-        let callerPaneId = selectedTab(in: model)!.focusedPaneId
+        let callerPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let beforePaneIds = Set(model.allPaneIds)
 
         let commands = sendIpc(
@@ -1641,7 +1634,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let targetTabId = selectedTab(in: model)!.id
-        let targetPaneId = selectedTab(in: model)!.focusedPaneId
+        let targetPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         createTab(&model)
 
         let commands = sendIpc(
@@ -1666,10 +1659,10 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
-        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        let firstPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
-        let secondPaneId = selectedTab(in: model)!.focusedPaneId
-        updateTabForTest(tabId, in: &model) { $0.focusedPaneId = firstPaneId }
+        let secondPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        updateTabForTest(tabId, in: &model) { $0.paneTree.focus(firstPaneId) }
 
         let commands = sendIpc(
             &model,
@@ -1679,7 +1672,7 @@ import DanTermProtocol
 
         let reply = try requireIpcReply(commands)
         #expect(reply["tab"]?["focusedPaneId"]?.asString == secondPaneId.rawValue.uuidString)
-        #expect(tabById(tabId, in: model)?.focusedPaneId == secondPaneId)
+        #expect(tabById(tabId, in: model)?.paneTree.focusedPaneId == secondPaneId)
     }
 
     @Test("pane.focus preserves popover on same-tab focus in unzoomed tab")
@@ -1692,10 +1685,10 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
-        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        let firstPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
-        let secondPaneId = selectedTab(in: model)!.focusedPaneId
-        updateTabForTest(tabId, in: &model) { $0.focusedPaneId = firstPaneId }
+        let secondPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        updateTabForTest(tabId, in: &model) { $0.paneTree.focus(firstPaneId) }
         model.todoPopover = .pane(firstPaneId)
 
         _ = sendIpc(
@@ -1706,7 +1699,7 @@ import DanTermProtocol
         )
 
         #expect(model.todoPopover == .pane(firstPaneId))
-        #expect(tabById(tabId, in: model)?.focusedPaneId == secondPaneId)
+        #expect(tabById(tabId, in: model)?.paneTree.focusedPaneId == secondPaneId)
     }
 
     @Test("pane.focus clears target pane alerts in focus mode")
@@ -1719,10 +1712,10 @@ import DanTermProtocol
         model.config.alertClearMode = .focus
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
-        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        let firstPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
-        let secondPaneId = selectedTab(in: model)!.focusedPaneId
-        updateTabForTest(tabId, in: &model) { $0.focusedPaneId = firstPaneId }
+        let secondPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        updateTabForTest(tabId, in: &model) { $0.paneTree.focus(firstPaneId) }
         model.alerts.insert(AlertModel(
             id: AlertId(),
             kind: .bell,
@@ -1876,7 +1869,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let callerGroupId = model.groups[0].id
-        let callerPaneId = selectedTab(in: model)!.focusedPaneId
+        let callerPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .createGroup(name: "Builds"))
         let explicitGroupId = model.groups.last!.id
         let callerCountBefore = model.groups.first(where: { $0.id == callerGroupId })!.tabs.count
@@ -1903,7 +1896,7 @@ import DanTermProtocol
         for groupValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
             var model = makeModel()
             createTab(&model)
-            let contextPaneId = selectedTab(in: model)!.focusedPaneId
+            let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
             let groupsBefore = model.groups.count
             let tabsBefore = model.groups.flatMap(\.tabs).count
 
@@ -1925,7 +1918,7 @@ import DanTermProtocol
     func tabNewDoesNotInferGroupFromPane() throws {
         var model = makeModel()
         createTab(&model)
-        let callerPaneId = selectedTab(in: model)!.focusedPaneId
+        let callerPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .createGroup(name: "Other"))
         let tabsBefore = model.groups.flatMap(\.tabs).count
 
@@ -2083,10 +2076,10 @@ import DanTermProtocol
             var model = makeModel()
             createTab(&model)
             let selectedTabId = selectedTab(in: model)!.id
-            let selectedPaneId = selectedTab(in: model)!.focusedPaneId
+            let selectedPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
             model.updatePane(selectedPaneId) { $0.session?.cwd = "/selected" }
             createTab(&model)
-            let callerPaneId = selectedTab(in: model)!.focusedPaneId
+            let callerPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
             model.updatePane(callerPaneId) { $0.session?.cwd = "/caller" }
             _ = update(&model, .selectTab(id: selectedTabId))
             let groupId = model.groups[0].id
@@ -2128,7 +2121,7 @@ import DanTermProtocol
         // Scenario: spec-first launch shell input.
         var model = makeModel()
         createTab(&model)
-        let paneIdInContext = selectedTab(in: model)!.focusedPaneId
+        let paneIdInContext = selectedTab(in: model)!.paneTree.focusedPaneId
         let groupId = model.groups[0].id
         let commands = sendIpc(
             &model,
@@ -2185,7 +2178,7 @@ import DanTermProtocol
         )
 
         let group = model.groups.first(where: { $0.id == groupId })
-        let paneId = group?.tabs.last?.focusedPaneId
+        let paneId = group?.tabs.last?.paneTree.focusedPaneId
         #expect(paneId != nil, "target group should have a new tab")
         #expect(hasEffect(commands) {
             if case .createSession(_, let effectPaneId, _, let command, let launchCommand) = $0 {
@@ -2341,7 +2334,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -2381,7 +2374,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
-        let focusedPaneId = selectedTab(in: model)!.focusedPaneId
+        let focusedPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -2396,8 +2389,8 @@ import DanTermProtocol
         let reply = try requireIpcReply(commands)
         let newPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return pane id")
         let tab = tabById(tabId, in: model)!
-        #expect(allPaneIds(tab.rootNode).contains(newPaneId), "target tab should contain new pane")
-        #expect(tab.focusedPaneId == focusedPaneId, "background split should preserve focused pane")
+        #expect(allPaneIds(tab.paneTree.root).contains(newPaneId), "target tab should contain new pane")
+        #expect(tab.paneTree.focusedPaneId == focusedPaneId, "background split should preserve focused pane")
         #expect(model.selectedTabId == tabId, "background split should not change selected tab")
     }
 
@@ -2412,7 +2405,7 @@ import DanTermProtocol
         let selectedTabId = selectedTab(in: model)!.id
         createTab(&model)
         let backgroundTabId = selectedTab(in: model)!.id
-        let backgroundPaneId = selectedTab(in: model)!.focusedPaneId
+        let backgroundPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .selectTab(id: selectedTabId))
 
         let commands = sendIpc(
@@ -2428,8 +2421,8 @@ import DanTermProtocol
         let reply = try requireIpcReply(commands)
         let newPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return pane id")
         let backgroundTab = tabById(backgroundTabId, in: model)!
-        #expect(allPaneIds(backgroundTab.rootNode).contains(newPaneId), "background tab should contain new pane")
-        #expect(backgroundTab.focusedPaneId == backgroundPaneId, "background split should preserve target focus")
+        #expect(allPaneIds(backgroundTab.paneTree.root).contains(newPaneId), "background tab should contain new pane")
+        #expect(backgroundTab.paneTree.focusedPaneId == backgroundPaneId, "background split should preserve target focus")
         #expect(model.selectedTabId == selectedTabId, "background split should not change selected tab")
     }
 
@@ -2441,7 +2434,7 @@ import DanTermProtocol
         // Scenario: spec-first malformed background.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let paneIdsBefore = Set(model.allPaneIds)
 
         let commands = sendIpc(
@@ -2473,7 +2466,7 @@ import DanTermProtocol
         for launchValue in launchValues {
             var model = makeModel()
             createTab(&model)
-            let contextPaneId = selectedTab(in: model)!.focusedPaneId
+            let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
             let paneIdsBefore = Set(model.allPaneIds)
             let tabEffects = sendIpc(
                 &model,
@@ -2512,7 +2505,7 @@ import DanTermProtocol
         // Scenario: spec-first theme set + clear.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let ctx = paneId
 
         let setEffects = sendIpc(&model, method: IpcRequestMethod.themeSet.rawValue, params: .object(["themeName": .string("Tokyo Night")]), pane: ctx)
@@ -2531,9 +2524,9 @@ import DanTermProtocol
         // Scenario: spec-first theme explicit pane.
         var model = makeModel()
         createTab(&model)
-        let targetPaneId = selectedTab(in: model)!.focusedPaneId
+        let targetPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         createTab(&model)
-        let contextPaneId = selectedTab(in: model)!.focusedPaneId
+        let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -2559,7 +2552,7 @@ import DanTermProtocol
         for paneValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
             var model = makeModel()
             createTab(&model)
-            let contextPaneId = selectedTab(in: model)!.focusedPaneId
+            let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
             let commands = sendIpc(
                 &model,
@@ -2585,7 +2578,7 @@ import DanTermProtocol
         // Scenario: spec-first no-pane.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.themeSet.rawValue,
@@ -2608,7 +2601,7 @@ import DanTermProtocol
         // Scenario: spec-first todo lifecycle on context pane.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let ctx = paneId
 
         let addEffects = sendIpc(
@@ -2660,9 +2653,9 @@ import DanTermProtocol
         // Scenario: spec-first explicit pane routing.
         var model = makeModel()
         createTab(&model)
-        let targetPaneId = selectedTab(in: model)!.focusedPaneId
+        let targetPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         createTab(&model)
-        let contextPaneId = selectedTab(in: model)!.focusedPaneId
+        let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let ctx = contextPaneId
 
         let addReply = try requireIpcReply(sendIpc(
@@ -2851,7 +2844,7 @@ import DanTermProtocol
             for (method, baseParams) in commands {
                 var model = makeModel()
                 createTab(&model)
-                let contextPaneId = selectedTab(in: model)!.focusedPaneId
+                let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
                 let item = appendTodoForTest(&model, paneId: contextPaneId, text: "context")
                 if method == IpcRequestMethod.todoClearCompleted.rawValue || method == IpcRequestMethod.todoOpen.rawValue {
                     model.updatePane(contextPaneId) { $0.todos[0].isDone = true }
@@ -2898,7 +2891,7 @@ import DanTermProtocol
         for (method, params) in commands {
             var model = makeModel()
             createTab(&model)
-            let paneId = selectedTab(in: model)!.focusedPaneId
+            let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
             _ = appendTodoForTest(&model, paneId: paneId, text: "context")
 
             let sent = sendIpc(
@@ -2921,7 +2914,7 @@ import DanTermProtocol
         // Scenario: spec-first stale todo delete.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.todoDelete.rawValue,
@@ -2940,7 +2933,7 @@ import DanTermProtocol
         // Scenario: spec-first text input.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -2962,7 +2955,7 @@ import DanTermProtocol
         // Scenario: spec-first input array.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3005,7 +2998,7 @@ import DanTermProtocol
         // Scenario: spec-first empty mods.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3035,7 +3028,7 @@ import DanTermProtocol
         // Scenario: spec-first non-array mods.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3062,7 +3055,7 @@ import DanTermProtocol
         // Scenario: spec-first ctrl-c.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3092,7 +3085,7 @@ import DanTermProtocol
         // Scenario: spec-first both-fields.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3113,7 +3106,7 @@ import DanTermProtocol
         // Scenario: spec-first no-field.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3131,7 +3124,7 @@ import DanTermProtocol
         // Scenario: spec-first inner no-field.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3151,7 +3144,7 @@ import DanTermProtocol
         // Scenario: spec-first inner both-fields.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3178,7 +3171,7 @@ import DanTermProtocol
         // Scenario: spec-first unknown key.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3206,7 +3199,7 @@ import DanTermProtocol
         // Scenario: spec-first non-string key.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3229,7 +3222,7 @@ import DanTermProtocol
         // Scenario: spec-first unknown mod.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3253,7 +3246,7 @@ import DanTermProtocol
     func paneInputShiftModReachesNamedKeyCommand() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3282,9 +3275,9 @@ import DanTermProtocol
         // Scenario: spec-first explicit pane.
         var model = makeModel()
         createTab(&model)
-        let backgroundPaneId = selectedTab(in: model)!.focusedPaneId
+        let backgroundPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         createTab(&model)
-        let foregroundPaneId = selectedTab(in: model)!.focusedPaneId
+        let foregroundPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3310,7 +3303,7 @@ import DanTermProtocol
         // Scenario: spec-first unknown explicit pane.
         var model = makeModel()
         createTab(&model)
-        let realPaneId = selectedTab(in: model)!.focusedPaneId
+        let realPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3338,7 +3331,7 @@ import DanTermProtocol
         // Scenario: spec-first non-string pane.
         var model = makeModel()
         createTab(&model)
-        let realPaneId = selectedTab(in: model)!.focusedPaneId
+        let realPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInput.rawValue,
@@ -3381,7 +3374,7 @@ import DanTermProtocol
         // Scenario: spec-first viewport read.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneRead.rawValue,
@@ -3409,7 +3402,7 @@ import DanTermProtocol
         // Scenario: spec-first lines limit.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneRead.rawValue,
@@ -3492,7 +3485,7 @@ import DanTermProtocol
         for linesValue in invalidValues {
             var model = makeModel()
             createTab(&model)
-            let paneId = selectedTab(in: model)!.focusedPaneId
+            let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
             let commands = sendIpc(
                 &model,
                 method: IpcRequestMethod.paneRead.rawValue,
@@ -3516,7 +3509,7 @@ import DanTermProtocol
         // Scenario: a CLI client requests a tape from a known background pane.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -3539,7 +3532,7 @@ import DanTermProtocol
         // Scenario: an agent asks to tail a known background pane without its backlog.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let commands = sendIpc(
             &model,
@@ -3583,7 +3576,7 @@ import DanTermProtocol
 
         var invalidModel = makeModel()
         createTab(&invalidModel)
-        let paneId = selectedTab(in: invalidModel)!.focusedPaneId
+        let paneId = selectedTab(in: invalidModel)!.paneTree.focusedPaneId
         let invalid = sendIpc(
             &invalidModel,
             method: IpcRequestMethod.paneTape.rawValue,
@@ -3640,7 +3633,7 @@ private func sendIpc(
 }
 
 private func selectedPaneId(in model: AppModel) -> PaneId {
-    selectedTab(in: model)!.focusedPaneId
+    selectedTab(in: model)!.paneTree.focusedPaneId
 }
 
 private func groupTabIds(in model: AppModel) -> [[TabId]] {
@@ -3679,8 +3672,8 @@ private func expectAfterTabInserted(
     let newPaneIds = Set(model.allPaneIds).subtracting(panesBefore)
     #expect(newPaneIds == [paneId])
     let tab = try #require(tabById(tabId, in: model), "new tab should exist")
-    #expect(tab.focusedPaneId == paneId)
-    if case .leaf(let rootPane) = tab.rootNode {
+    #expect(tab.paneTree.focusedPaneId == paneId)
+    if case .leaf(let rootPane) = tab.paneTree.root {
         #expect(rootPane.id == paneId)
     } else {
         Issue.record("new tab should have a root leaf")
@@ -3757,7 +3750,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         var model = makeModel()
         createTab(&model)
         _ = update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let params = JSONValue.object([
             "pane": .string(paneId.rawValue.uuidString),
             "state": .string("on"),
@@ -3766,7 +3759,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         for _ in 0..<2 {
             let reply = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.paneZoom.rawValue, params: params))
             #expect(reply["tab"]?["isZoomed"]?.asBool == true)
-            #expect(selectedTab(in: model)!.isZoomed)
+            #expect(selectedTab(in: model)!.paneTree.isZoomed)
         }
 
         let off = JSONValue.object([
@@ -3776,7 +3769,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         for _ in 0..<2 {
             let reply = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.paneZoom.rawValue, params: off))
             #expect(reply["tab"]?["isZoomed"]?.asBool == false)
-            #expect(selectedTab(in: model)!.isZoomed == false)
+            #expect(selectedTab(in: model)!.paneTree.isZoomed == false)
         }
     }
 
@@ -3785,7 +3778,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         var model = makeModel()
         createTab(&model)
         _ = update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let params = JSONValue.object([
             "pane": .string(paneId.rawValue.uuidString),
             "state": .string("toggle"),
@@ -3803,7 +3796,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         // Scenario: spec-first; an agent zooms a tab holding a single pane.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let reply = try requireIpcReply(sendIpc(
             &model,
@@ -3821,7 +3814,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         var model = makeModel()
         createTab(&model)
         _ = update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let badState = sendIpc(&model, method: IpcRequestMethod.paneZoom.rawValue, params: .object([
             "pane": .string(paneId.rawValue.uuidString),
@@ -3834,7 +3827,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
             "state": .string("on"),
         ]))
         #expect(try requireIpcError(unknownPane).code == -32602)
-        #expect(selectedTab(in: model)!.isZoomed == false)
+        #expect(selectedTab(in: model)!.paneTree.isZoomed == false)
     }
 
     @Test("pane.info reports the tab's zoom state")
@@ -3847,7 +3840,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         var model = makeModel()
         createTab(&model)
         _ = update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let context = paneId
 
         let before = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.paneInfo.rawValue, pane: context))

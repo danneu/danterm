@@ -21,7 +21,7 @@ import Testing
         // Scenario: spec-first set.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
         #expect(model.pane(paneId)?.theme == "Dracula")
     }
@@ -33,7 +33,7 @@ import Testing
         // Scenario: spec-first projection.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Nord"))
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Nord")
     }
@@ -45,7 +45,7 @@ import Testing
         // Scenario: spec-first clear.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
         #expect(model.pane(paneId)?.theme == "Dracula")
         update(&model, .setPaneTheme(paneId: paneId, themeName: nil))
@@ -60,11 +60,11 @@ import Testing
         // Scenario: spec-first split inherit.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Catppuccin Mocha"))
         update(&model, .splitPane(paneId: paneId, direction: .horizontal))
         let tab = selectedTab(in: model)!
-        let newPaneId = tab.focusedPaneId
+        let newPaneId = tab.paneTree.focusedPaneId
         #expect(newPaneId != paneId, "new pane should be different from parent")
         #expect(model.pane(newPaneId)?.theme == "Catppuccin Mocha")
     }
@@ -77,11 +77,11 @@ import Testing
         // Scenario: spec-first split projection.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Rose Pine"))
         update(&model, .splitPane(paneId: paneId, direction: .vertical))
         let tab = selectedTab(in: model)!
-        let newPaneId = tab.focusedPaneId
+        let newPaneId = tab.paneTree.focusedPaneId
         #expect(desiredPaneConfig(in: model)[newPaneId]?.theme == "Rose Pine")
     }
 
@@ -90,7 +90,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(desiredPaneConfig(in: model)[paneId] == PaneConfigKey(
             theme: "Monokai Remastered",
             fontSize: 13
@@ -104,7 +104,7 @@ import Testing
         // Scenario: spec-first snapshot write.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Gruvbox Dark"))
         let snapshot = toSnapshot(model)
         let ps = paneSnapshot(paneId.rawValue.uuidString, in: snapshot)
@@ -118,7 +118,7 @@ import Testing
         // Scenario: spec-first round-trip.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "TokyoNight Night"))
         let snapshot = toSnapshot(model)
         let restored = try #require(validateAndBuild(snapshot), "snapshot round-trip failed")
@@ -170,7 +170,7 @@ import Testing
         // Scenario: spec-first export theme.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Catppuccin Latte"))
         let commands = update(&model, .exportState)
         guard case .exportState(let snapshot) = commands.first else {
@@ -208,7 +208,7 @@ import Testing
         // Scenario: spec-first custom name round-trip.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "My Custom Theme"))
         let snapshot = toSnapshot(model)
         let restored = try #require(validateAndBuild(snapshot), "snapshot round-trip failed")
@@ -255,7 +255,7 @@ import Testing
         // Scenario: spec-first nil round-trip.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let snapshot = toSnapshot(model)
         let restored = try #require(validateAndBuild(snapshot), "snapshot round-trip failed")
         #expect(restored.pane(paneId)?.theme == nil, "nil theme should survive round-trip")

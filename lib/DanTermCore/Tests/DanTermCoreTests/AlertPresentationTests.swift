@@ -35,7 +35,7 @@ struct AlertPresentationTests {
     func senderTitleFillsTitleSlot() {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         createTab(&model)
 
         let sent = notification(&model, paneId: paneId, title: "claude", body: "Build finished")
@@ -48,7 +48,7 @@ struct AlertPresentationTests {
     func liveLifecycleTitleTiersPrecedeTerminalTitles() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("pane-title")))
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         let sessionId = try #require(model.pane(paneId)?.session?.id)
@@ -74,7 +74,7 @@ struct AlertPresentationTests {
     func desktopAlertUsesLifecycleTitleEndToEnd() {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         createTab(&model)
         let sent = notification(
             &model,
@@ -95,7 +95,7 @@ struct AlertPresentationTests {
     func emptySenderTitleFallsBackToPaneTitle() {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("codex")))
         createTab(&model)
 
@@ -109,7 +109,7 @@ struct AlertPresentationTests {
     func storedAlertMatchesBanner() {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("codex")))
         createTab(&model)
 
@@ -124,7 +124,7 @@ struct AlertPresentationTests {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .renameTab(id: tabId, name: "danterm"))
         createTab(&model)
 
@@ -139,7 +139,7 @@ struct AlertPresentationTests {
     func redundantSubtitleIsDropped() {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("codex")))
         createTab(&model)
 
@@ -153,10 +153,10 @@ struct AlertPresentationTests {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
+        let firstPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .renameTab(id: tabId, name: "danterm"))
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
-        let paneIds = allPaneIds(model.groups[0].tabs[0].rootNode)
+        let paneIds = allPaneIds(model.groups[0].tabs[0].paneTree.root)
         #expect(paneIds.count == 2)
         createTab(&model)
 

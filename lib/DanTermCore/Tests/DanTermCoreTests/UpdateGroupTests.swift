@@ -106,7 +106,7 @@ import Testing
 
         update(&model, .moveTabs(tabIds: [tabId1], toGroupId: tempGroupId, atIndex: 0))
 
-        let deletedPanes = Set(model.groups[1].tabs.flatMap { allPaneIds($0.rootNode) })
+        let deletedPanes = Set(model.groups[1].tabs.flatMap { allPaneIds($0.paneTree.root) })
         let liveBefore = Set(model.allPaneIds)
 
         update(&model, .deleteGroup(id: tempGroupId, moveTabs: false))
@@ -281,7 +281,7 @@ import Testing
         let newTab = workGroup.tabs[0]
         #expect(model.selectedTabId == newTab.id, "new tab should be selected")
         #expect(model.selectedTabId != oldSelectedTabId, "selection should have changed")
-        #expect(model.pane(newTab.focusedPaneId) != nil, "pane should exist in model")
+        #expect(model.pane(newTab.paneTree.focusedPaneId) != nil, "pane should exist in model")
 
         #expect(hasEffect(commands) {
             if case .createSession = $0 { return true }
@@ -414,7 +414,7 @@ import Testing
         // Scenario: spec-first extract-prune.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .createGroup(name: "Work"))
         let workGroupId = model.groups[1].id
@@ -442,7 +442,7 @@ import Testing
         let workGroupId = model.groups[1].id
 
         let generalTabId = model.groups[0].tabs[0].id
-        let generalPaneId = model.groups[0].tabs[0].focusedPaneId
+        let generalPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .selectTab(id: generalTabId))
 
         let sessionId = model.pane(generalPaneId)!.session!.id

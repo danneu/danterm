@@ -1539,7 +1539,7 @@ class AppRuntime {
         guard let contentArea = contentArea else { return }
         guard let tab = selectedTab(in: model) else { return }
 
-        let targetIds = allPaneIds(tab.rootNode).filter { $0 != paneId }
+        let targetIds = allPaneIds(tab.paneTree.root).filter { $0 != paneId }
 
         // Build pane frame provider: converts PaneWrapperView frames to window coordinates
         let provider: (PaneId) -> NSRect? = { [weak self] targetPaneId in
@@ -1711,7 +1711,7 @@ class AppRuntime {
         do {
             for group in restoredModel.groups {
                 for tab in group.tabs {
-                    for paneId in allPaneIds(tab.rootNode) {
+                    for paneId in allPaneIds(tab.paneTree.root) {
                         let ps = loaded.paneSnapshots[paneId]
                         let resolved = ps.map { resolveLaunch($0) }
                         var scrollbackFilePath: String?
@@ -1979,7 +1979,7 @@ class AppRuntime {
     func buildAndInsertContainer(for tab: TabModel) -> SplitContainerView {
         guard let contentArea = contentArea else { fatalError("contentArea unavailable") }
         let container = SplitContainerView(
-            rootNode: tab.rootNode,
+            rootNode: tab.paneTree.root,
             wrapperLookup: { [weak self] paneId in self?.paneHost(for: paneId)?.wrapper },
             runtime: self,
             frame: contentArea.bounds
@@ -1991,7 +1991,7 @@ class AppRuntime {
             contentArea.addSubview(container)
         }
         container.rebuild()
-        container.setZoomedPane(tab.isZoomed ? tab.focusedPaneId : nil)
+        container.setZoomedPane(tab.paneTree.isZoomed ? tab.paneTree.focusedPaneId : nil)
         tabContainers[tab.id] = container
         return container
     }

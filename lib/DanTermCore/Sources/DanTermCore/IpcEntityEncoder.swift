@@ -33,8 +33,8 @@ struct IpcEntityEncoder {
     private func tab(_ tab: TabModel, in model: AppModel, includeLifecycles: Bool) -> JSONValue {
         var object: [String: JSONValue] = [
             "id": .string(tab.id.rawValue.uuidString),
-            "focusedPaneId": .string(tab.focusedPaneId.rawValue.uuidString),
-            "rootNode": splitNode(tab.rootNode, includeLifecycles: includeLifecycles),
+            "focusedPaneId": .string(tab.paneTree.focusedPaneId.rawValue.uuidString),
+            "rootNode": splitNode(tab.paneTree.root, includeLifecycles: includeLifecycles),
         ]
         if let customTitle = tab.customTitle {
             object["customTitle"] = .string(customTitle)
@@ -84,7 +84,7 @@ struct IpcEntityEncoder {
                 "id": .string(tab.id.rawValue.uuidString),
                 "title": .string(tabDisplayTitle(tab)),
                 "groupId": .string(group.id.rawValue.uuidString),
-                "isZoomed": .bool(tab.isZoomed),
+                "isZoomed": .bool(tab.paneTree.isZoomed),
             ]),
             "group": groupReference(group),
         ])
@@ -103,7 +103,7 @@ struct IpcEntityEncoder {
         var object: [String: JSONValue] = [
             "tab": tab.map { self.tab($0, in: model, includeLifecycles: false) } ?? .null,
             "panes": .array(tab.map { tab in
-                allPaneIds(tab.rootNode)
+                allPaneIds(tab.paneTree.root)
                     .map { .object(["id": .string($0.rawValue.uuidString)]) }
             } ?? []),
         ]

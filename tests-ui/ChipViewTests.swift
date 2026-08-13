@@ -134,7 +134,7 @@ func chipViewTests() {
 private func makeChipWrapper() -> PaneWrapperView {
     let paneId = PaneId()
     let pane = PaneModel(id: paneId, session: SessionModel(id: SessionId()))
-    let tab = TabModel(id: TabId(), customTitle: nil, focusedPaneId: paneId, rootNode: .leaf(pane))
+    let tab = TabModel(id: TabId(), customTitle: nil, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
     var model = AppModel(groups: [GroupModel(id: GroupId(), name: "g", tabs: [tab])])
     model.selectedTabId = tab.id
     return PaneWrapperView(

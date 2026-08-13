@@ -226,7 +226,7 @@ private func makeAlertsFixture(
     let paneId = livePaneId ?? PaneId()
     let tabId = TabId()
     let pane = PaneModel(id: paneId)
-    let tab = TabModel(id: tabId, customTitle: nil, focusedPaneId: paneId, rootNode: .leaf(pane))
+    let tab = TabModel(id: tabId, customTitle: nil, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
     let group = GroupModel(id: GroupId(), name: "Group", tabs: [tab])
     var model = AppModel(groups: [group])
     model.selectedTabId = tabId

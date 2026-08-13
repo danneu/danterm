@@ -180,7 +180,7 @@ Each commit leaves the tree building and `just test` green.
   arm on the existing fields, with the PO2 test. Isolated so the one
   user-visible change in this plan is bisectable on its own, and so the suite is
   already green under the new semantics before the refactor starts.
-- [ ] **2. Introduce `PaneTree` and migrate every writer and reader.** The new
+- [x] **2. Introduce `PaneTree` and migrate every writer and reader.** The new
   type with its own unit tests covering the focus/zoom outcome of each mutator,
   the six ritual sites, the three shape-neutral rebuild sites, the focus and
   zoom arms, the three production constructions, the persistence and restore

@@ -86,7 +86,7 @@ private func makeSidebarRightClickHarness() -> (SidebarView, NSOutlineView, NSWi
         let paneId = PaneId()
         var pane = PaneModel(id: paneId)
         pane.session = SessionModel(id: SessionId(), title: "tab \(index)")
-        return TabModel(id: TabId(), focusedPaneId: paneId, rootNode: .leaf(pane))
+        return TabModel(id: TabId(), paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
     }
     let model = AppModel(
         groups: [GroupModel(id: GroupId(), name: "Group", tabs: tabs)],

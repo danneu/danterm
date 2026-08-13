@@ -99,7 +99,7 @@ import Testing
         let (m0, ids) = Self.buildModelWithTabs(3)
         var model = m0
         let snapshot = model.mruOrder
-        let focusedPane = model.groups[0].tabs.first { $0.id == ids[2] }!.focusedPaneId
+        let focusedPane = model.groups[0].tabs.first { $0.id == ids[2] }!.paneTree.focusedPaneId
 
         _ = update(&model, .paneBecameFirstResponder(paneId: focusedPane))
         #expect(model.mruOrder == snapshot, "pane focus must not move tab in MRU")
@@ -118,7 +118,7 @@ import Testing
         let firstTab = model.groups[0].tabs[0]
         _ = update(&model, .selectTab(id: firstTab.id))
         _ = update(&model, .splitFocusedPane(direction: .horizontal))
-        let panes = allPaneIds(model.groups[0].tabs[0].rootNode)
+        let panes = allPaneIds(model.groups[0].tabs[0].paneTree.root)
         #expect(panes.count == 2, "split should produce 2 panes in source tab")
         let groupId = model.groups[0].id
         let countBefore = model.mruOrder.count
@@ -138,7 +138,7 @@ import Testing
         let (m0, ids) = Self.buildModelWithTabs(3)
         var model = m0
         let failedTabId = ids[1]
-        let failedPaneId = model.groups[0].tabs.first { $0.id == failedTabId }!.focusedPaneId
+        let failedPaneId = model.groups[0].tabs.first { $0.id == failedTabId }!.paneTree.focusedPaneId
 
         let sessionId = model.pane(failedPaneId)!.session!.id
         _ = update(&model, .sessionCreationFailed(sessionId: sessionId))

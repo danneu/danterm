@@ -262,7 +262,7 @@ import DanTermProtocol
         #expect(model != nil, "should validate split tree")
         #expect(model!.allPaneIds.count == 2)
         let tab = model!.groups[0].tabs[0]
-        #expect(allPaneIds(tab.rootNode).count == 2)
+        #expect(allPaneIds(tab.paneTree.root).count == 2)
     }
 
     // MARK: - Validation
@@ -472,9 +472,48 @@ import DanTermProtocol
         let built = model!
         let firstTab = built.groups[0].tabs[0]
         #expect(built.selectedTabId == firstTab.id, "selected tab should default to first group's first tab")
-        let firstPane = firstLeafId(firstTab.rootNode)
-        #expect(firstTab.focusedPaneId == firstPane, "focused pane should default to first pane in first tab")
+        let firstPane = firstLeafId(firstTab.paneTree.root)
+        #expect(firstTab.paneTree.focusedPaneId == firstPane, "focused pane should default to first pane in first tab")
         #expect(built.pane(firstPane) != nil, "synthesized pane id should exist as a tree leaf")
+    }
+
+    @Test(
+        "validation repairs a focusedPaneId that cannot name a tree leaf",
+        arguments: [
+            "BBBB0000-0000-0000-0000-000000000002",
+            "not-a-uuid",
+        ]
+    )
+    func validationRepairsInvalidFocusedPaneId(_ focusedPaneId: String) throws {
+        // Intent: restore normalizes both a valid foreign pane UUID and a
+        //   malformed focus string to the tree's first leaf.
+        // Why it exists: hand-edited snapshots must not lose a recoverable
+        //   session or create live model state with focus outside its tree.
+        // Scenario: spec-first restore -- one leaf and an unusable focus field.
+        let leafId = "AAAA0000-0000-0000-0000-000000000001"
+        let json = """
+        {
+          "version": 3,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "focusedPaneId": "\(focusedPaneId)",
+                "rootNode": {
+                  "type": "leaf",
+                  "pane": { "id": "\(leafId)", "title": "Terminal" }
+                }
+              }]
+            }]
+          }
+        }
+        """
+
+        let initFile = try JSONDecoder().decode(AppInitFile.self, from: Data(json.utf8))
+        let model = try #require(validateAndBuild(initFile.model))
+        let tab = try #require(model.groups.first?.tabs.first)
+
+        #expect(tab.paneTree.focusedPaneId.rawValue.uuidString == leafId)
     }
 
     // MARK: - Reconstruction invariants
@@ -777,7 +816,7 @@ import DanTermProtocol
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: Data(json.utf8))
         let model = try #require(validateAndBuild(initFile.model))
         let tab = try #require(model.groups.first?.tabs.first)
-        let pane = try #require(model.pane(tab.focusedPaneId))
+        let pane = try #require(model.pane(tab.paneTree.focusedPaneId))
 
         #expect(tab.todos == [TodoItem(
             id: TodoId(rawValue: try #require(UUID(uuidString: tabTodoId))),
@@ -797,7 +836,7 @@ import DanTermProtocol
         createTab(&model)
         let tab = try #require(selectedTab(in: model))
         update(&model, .addTodo(owner: .tab(tab.id), text: "tab task"))
-        update(&model, .addTodo(owner: .pane(tab.focusedPaneId), text: "pane task"))
+        update(&model, .addTodo(owner: .pane(tab.paneTree.focusedPaneId), text: "pane task"))
 
         let data = try JSONEncoder().encode(AppInitFile(
             version: appInitFileVersion,
@@ -814,7 +853,7 @@ import DanTermProtocol
         let paneTodos = try #require(pane["todos"] as? [[String: Any]])
 
         #expect(tabTodos.first?["id"] as? String == model.todos(for: .tab(tab.id))?.first?.id.rawValue.uuidString)
-        #expect(paneTodos.first?["id"] as? String == model.todos(for: .pane(tab.focusedPaneId))?.first?.id.rawValue.uuidString)
+        #expect(paneTodos.first?["id"] as? String == model.todos(for: .pane(tab.paneTree.focusedPaneId))?.first?.id.rawValue.uuidString)
     }
 
     @Test("snapshot round-trip preserves todos")
@@ -829,7 +868,7 @@ import DanTermProtocol
         //   match the original.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "task one"))
         update(&model, .addTodo(owner: .pane(paneId), text: "task two"))
         let todoId = model.pane(paneId)!.todos[0].id
@@ -856,7 +895,7 @@ import DanTermProtocol
         //   restores after a crash.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let session = try #require(AgentSession(kind: "claude", sessionId: "4f3a2b1c"))
 
         let sessionId = try #require(model.pane(paneId)?.session?.id)
@@ -968,7 +1007,7 @@ import DanTermProtocol
         //   and reloads the next checkpoint.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd("/tmp/project")))
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd(nil)))

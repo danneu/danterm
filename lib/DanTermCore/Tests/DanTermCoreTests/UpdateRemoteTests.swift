@@ -29,7 +29,7 @@ struct UpdateRemoteTests {
     func remoteThemeChangesProjectImmediately() {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let sessionId = model.pane(paneId)!.session!.id
         update(&model, .sessionReport(
             sessionId: sessionId,
@@ -54,7 +54,7 @@ struct UpdateRemoteTests {
     func setPaneThemeWhileRemoteChangesLaterLocalTheme() {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let sessionId = model.pane(paneId)!.session!.id
         update(&model, .sessionReport(
             sessionId: sessionId,
@@ -72,7 +72,7 @@ struct UpdateRemoteTests {
     func lifecycleRecoveryProjectionChangesOnlyForPersistedTransitions() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
         let sessionId = try #require(model.pane(paneId)?.session?.id)
 

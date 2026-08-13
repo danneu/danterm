@@ -168,6 +168,159 @@ indirect enum SplitNodeModel: Equatable {
     }
 }
 
+/// Owns a tab's pane shape, focus, and zoom as one value so those facts cannot drift apart.
+struct PaneTree: Equatable {
+    private(set) var root: SplitNodeModel
+    private(set) var focusedPaneId: PaneId
+    private(set) var isZoomed: Bool
+
+    /// Repairs external or persisted inputs while constructing a valid pane tree.
+    init(root: SplitNodeModel, focusedPaneId: PaneId? = nil, isZoomed: Bool = false) {
+        let paneIds = Set(allPaneIds(root))
+        self.root = root
+        self.focusedPaneId = focusedPaneId.flatMap { paneIds.contains($0) ? $0 : nil }
+            ?? firstLeafId(root)
+        if case .split = root {
+            self.isZoomed = isZoomed
+        } else {
+            self.isZoomed = false
+        }
+    }
+
+    /// The focused pane is non-optional because construction and every mutator preserve it.
+    var focusedPane: PaneModel {
+        paneInNode(root, id: focusedPaneId)!
+    }
+
+    /// Rebuilds one pane payload without changing shape, focus, or zoom.
+    @discardableResult
+    mutating func updatePane<Result>(
+        where predicate: (PaneModel) -> Bool,
+        _ body: (inout PaneModel) -> Result
+    ) -> Result? {
+        guard let mutation = updatePaneInNode(root, where: predicate, body) else { return nil }
+        root = mutation.node
+        return mutation.result
+    }
+
+    /// Rebuilds one identified pane payload without changing shape, focus, or zoom.
+    @discardableResult
+    mutating func updatePane(_ paneId: PaneId, _ body: (inout PaneModel) -> Void) -> Bool {
+        guard let newRoot = updatePaneInNode(root, id: paneId, body) else { return false }
+        root = newRoot
+        return true
+    }
+
+    /// Splits one leaf and applies the caller's foreground-focus policy atomically.
+    @discardableResult
+    mutating func split(
+        paneId: PaneId,
+        direction: SplitNodeModel.Direction,
+        newPane: PaneModel,
+        newSplitId: SplitId,
+        focusNewPane: Bool
+    ) -> Bool {
+        guard let newRoot = splitLeaf(
+            root, paneId: paneId, direction: direction, newPane: newPane,
+            newSplitId: newSplitId
+        ) else { return false }
+        root = newRoot
+        if focusNewPane { focusedPaneId = newPane.id }
+        isZoomed = false
+        return true
+    }
+
+    /// Describes a removal without permitting an empty `PaneTree` value.
+    struct Removal {
+        let pane: PaneModel
+        let emptiedTree: Bool
+        let focusMoved: Bool
+    }
+
+    /// Removes one pane, moving focus only if that pane held it and clearing zoom on success.
+    @discardableResult
+    mutating func remove(_ paneId: PaneId) -> Removal? {
+        let focusMoved = focusedPaneId == paneId
+        let (newRoot, nextFocus, removedPane) = removeLeaf(root, paneId: paneId)
+        guard let removedPane else { return nil }
+        guard let newRoot else {
+            return Removal(pane: removedPane, emptiedTree: true, focusMoved: focusMoved)
+        }
+        root = newRoot
+        if focusMoved {
+            focusedPaneId = nextFocus!
+        }
+        isZoomed = false
+        return Removal(pane: removedPane, emptiedTree: false, focusMoved: focusMoved)
+    }
+
+    /// Swaps two pane positions, focuses the moved source, and clears zoom.
+    @discardableResult
+    mutating func swap(source: PaneId, target: PaneId) -> Bool {
+        guard let newRoot = swapLeaves(root, source, target) else { return false }
+        root = newRoot
+        focusedPaneId = source
+        isZoomed = false
+        return true
+    }
+
+    /// Moves one pane beside another, focuses it, and clears zoom.
+    @discardableResult
+    mutating func move(
+        source: PaneId,
+        target: PaneId,
+        direction: SplitNodeModel.Direction,
+        insertFirst: Bool,
+        newSplitId: SplitId
+    ) -> Bool {
+        guard let newRoot = moveLeaf(
+            root, source: source, target: target, direction: direction,
+            insertFirst: insertFirst, newSplitId: newSplitId
+        ) else { return false }
+        root = newRoot
+        focusedPaneId = source
+        isZoomed = false
+        return true
+    }
+
+    /// Adds a pane as the trailing child, focuses it, and clears zoom.
+    mutating func adopt(_ pane: PaneModel, splitId: SplitId) {
+        root = .split(
+            id: splitId, direction: .horizontal,
+            first: root, second: .leaf(pane), ratio: 0.5
+        )
+        focusedPaneId = pane.id
+        isZoomed = false
+    }
+
+    /// Changes focus only when the pane belongs to this tree and preserves zoom.
+    @discardableResult
+    mutating func focus(_ paneId: PaneId) -> Bool {
+        guard paneInNode(root, id: paneId) != nil else { return false }
+        let changed = focusedPaneId != paneId
+        focusedPaneId = paneId
+        return changed
+    }
+
+    /// Clears zoom without changing focus.
+    mutating func unzoom() {
+        isZoomed = false
+    }
+
+    /// Toggles zoom only for a split tree and leaves focus unchanged.
+    @discardableResult
+    mutating func toggleZoom() -> Bool {
+        guard case .split = root else { return false }
+        isZoomed.toggle()
+        return true
+    }
+
+    /// Rebuilds split ratios without changing shape, focus, or zoom.
+    mutating func updateRatio(splitId: SplitId, ratio: CGFloat) {
+        root = setRatio(root, splitId: splitId, ratio: ratio)
+    }
+}
+
 enum TabColor: String, Codable, CaseIterable, Equatable, Sendable {
     case red, orange, yellow, green, blue, purple, gray
 }
@@ -175,12 +328,23 @@ enum TabColor: String, Codable, CaseIterable, Equatable, Sendable {
 struct TabModel: Equatable {
     let id: TabId
     var customTitle: String?
-    var focusedPaneId: PaneId
-    var rootNode: SplitNodeModel
-    var isZoomed: Bool = false
+    var paneTree: PaneTree
     var color: TabColor? = nil
     var todos: [TodoItem] = []
 
+    init(
+        id: TabId,
+        customTitle: String? = nil,
+        paneTree: PaneTree,
+        color: TabColor? = nil,
+        todos: [TodoItem] = []
+    ) {
+        self.id = id
+        self.customTitle = customTitle
+        self.paneTree = paneTree
+        self.color = color
+        self.todos = todos
+    }
 }
 
 struct GroupModel: Equatable {
@@ -281,7 +445,7 @@ extension AppModel {
     func pane(_ id: PaneId) -> PaneModel? {
         for group in groups {
             for tab in group.tabs {
-                if let found = paneInNode(tab.rootNode, id: id) { return found }
+                if let found = paneInNode(tab.paneTree.root, id: id) { return found }
             }
         }
         return nil
@@ -292,7 +456,7 @@ extension AppModel {
     func pane(owning sessionId: SessionId) -> PaneModel? {
         for group in groups {
             for tab in group.tabs {
-                if let found = paneInNode(tab.rootNode, where: { $0.session?.id == sessionId }) {
+                if let found = paneInNode(tab.paneTree.root, where: { $0.session?.id == sessionId }) {
                     return found
                 }
             }
@@ -305,13 +469,13 @@ extension AppModel {
     /// never-per-render-frame reason above; see `Projection Scan Cost` in
     /// `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
     var allPanes: [PaneModel] {
-        groups.flatMap { $0.tabs.flatMap { panesInNode($0.rootNode) } }
+        groups.flatMap { $0.tabs.flatMap { panesInNode($0.paneTree.root) } }
     }
 
     /// All pane ids, in tab then tree order. Replaces the old `panes.keys`.
     var allPaneIds: [PaneId] {
         groups.flatMap { group in
-            group.tabs.flatMap { paneIdsInNode($0.rootNode) }
+            group.tabs.flatMap { paneIdsInNode($0.paneTree.root) }
         }
     }
 
@@ -321,8 +485,7 @@ extension AppModel {
     mutating func updatePane(_ id: PaneId, _ body: (inout PaneModel) -> Void) {
         for gi in groups.indices {
             for ti in groups[gi].tabs.indices {
-                if let newRoot = updatePaneInNode(groups[gi].tabs[ti].rootNode, id: id, body) {
-                    groups[gi].tabs[ti].rootNode = newRoot
+                if groups[gi].tabs[ti].paneTree.updatePane(id, body) {
                     return
                 }
             }
@@ -364,9 +527,7 @@ extension AppModel {
     ) -> (paneId: PaneId, didChange: Bool)? {
         for groupIndex in groups.indices {
             for tabIndex in groups[groupIndex].tabs.indices {
-                let root = groups[groupIndex].tabs[tabIndex].rootNode
-                guard let mutation = updatePaneInNode(
-                    root,
+                guard let result = groups[groupIndex].tabs[tabIndex].paneTree.updatePane(
                     where: { $0.session?.id == id },
                     { pane -> (paneId: PaneId, didChange: Bool) in
                         guard var session = pane.session else {
@@ -378,8 +539,7 @@ extension AppModel {
                         return (pane.id, session != previous)
                     }
                 ) else { continue }
-                groups[groupIndex].tabs[tabIndex].rootNode = mutation.node
-                return mutation.result
+                return result
             }
         }
         return nil
@@ -606,8 +766,7 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
             var tab = TabModel(
                 id: tabId,
                 customTitle: ts.customTitle,
-                focusedPaneId: focusedPaneId,
-                rootNode: rootNode,
+                paneTree: PaneTree(root: rootNode, focusedPaneId: focusedPaneId),
                 color: ts.color
             )
             if let todoSnaps = ts.todos {

@@ -19,17 +19,13 @@ private func testAlert(_ paneId: PaneId, unread: Bool = true, offset: TimeInterv
 }
 
 private func splitTab(_ tabId: TabId, _ first: PaneId, _ second: PaneId) -> TabModel {
-    TabModel(
-        id: tabId,
-        focusedPaneId: first,
-        rootNode: .split(
+    TabModel(id: tabId, paneTree: PaneTree(root: .split(
             id: SplitId(),
             direction: .horizontal,
             first: .leaf(PaneModel(id: first)),
             second: .leaf(PaneModel(id: second)),
             ratio: 0.5
-        )
-    )
+        ), focusedPaneId: first))
 }
 
 @Suite struct UnreadAlertTallyTests {
@@ -46,7 +42,7 @@ private func splitTab(_ tabId: TabId, _ first: PaneId, _ second: PaneId) -> TabM
         let t1 = TabId(), t2 = TabId(), t3 = TabId()
         let p1 = PaneId(), p2 = PaneId(), p3 = PaneId(), p4 = PaneId(), p5 = PaneId()
         let tab1 = splitTab(t1, p1, p2)
-        let tab2 = TabModel(id: t2, focusedPaneId: p3, rootNode: .leaf(PaneModel(id: p3)))
+        let tab2 = TabModel(id: t2, paneTree: PaneTree(root: .leaf(PaneModel(id: p3)), focusedPaneId: p3))
         let tab3 = splitTab(t3, p4, p5)
         var model = AppModel(groups: [
             GroupModel(id: g1, name: "Work", tabs: [tab1, tab2]),
@@ -87,7 +83,7 @@ private func splitTab(_ tabId: TabId, _ first: PaneId, _ second: PaneId) -> TabM
         //   pane no longer exists.
         let livePane = PaneId()
         let stalePane = PaneId()
-        let tab = TabModel(id: TabId(), focusedPaneId: livePane, rootNode: .leaf(PaneModel(id: livePane)))
+        let tab = TabModel(id: TabId(), paneTree: PaneTree(root: .leaf(PaneModel(id: livePane)), focusedPaneId: livePane))
         let group = GroupModel(id: GroupId(), name: "General", tabs: [tab])
         var model = AppModel(groups: [group], selectedTabId: tab.id)
         model.alerts = [testAlert(stalePane)]
@@ -119,8 +115,8 @@ private func splitTab(_ tabId: TabId, _ first: PaneId, _ second: PaneId) -> TabM
         #expect((emptyTally.byGroup[empty.groups[0].id] ?? -1) == 0)
 
         let p1 = PaneId(), p2 = PaneId()
-        let tab1 = TabModel(id: TabId(), focusedPaneId: p1, rootNode: .leaf(PaneModel(id: p1)))
-        let tab2 = TabModel(id: TabId(), focusedPaneId: p2, rootNode: .leaf(PaneModel(id: p2)))
+        let tab1 = TabModel(id: TabId(), paneTree: PaneTree(root: .leaf(PaneModel(id: p1)), focusedPaneId: p1))
+        let tab2 = TabModel(id: TabId(), paneTree: PaneTree(root: .leaf(PaneModel(id: p2)), focusedPaneId: p2))
         let group = GroupModel(id: GroupId(), name: "General", tabs: [tab1, tab2])
         var model = AppModel(groups: [group], selectedTabId: tab1.id)
         model.alerts = [

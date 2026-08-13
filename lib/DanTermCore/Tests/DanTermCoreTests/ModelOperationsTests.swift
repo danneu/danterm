@@ -25,9 +25,9 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
     var model = makeModel()
     createTab(&model)
     let tabId = selectedTab(in: model)!.id
-    let paneA = selectedTab(in: model)!.focusedPaneId
+    let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
     update(&model, .splitPane(paneId: paneA, direction: .horizontal))
-    let paneOrder = allPaneIds(selectedTab(in: model)!.rootNode)
+    let paneOrder = allPaneIds(selectedTab(in: model)!.paneTree.root)
     return (model, tabId, paneOrder[0], paneOrder[1])
 }
 
@@ -86,17 +86,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   window not visible; all three panes report hidden.
         let a = PaneId(), b = PaneId(), c = PaneId()
         let tabAId = TabId(), tabBId = TabId()
-        let tabA = TabModel(
-            id: tabAId,
-            focusedPaneId: a,
-            rootNode: .split(
+        let tabA = TabModel(id: tabAId, paneTree: PaneTree(root: .split(
                 id: SplitId(), direction: .horizontal,
                 first: .leaf(PaneModel(id: a)),
                 second: .leaf(PaneModel(id: b)),
                 ratio: 0.5
-            )
-        )
-        let tabB = TabModel(id: tabBId, focusedPaneId: c, rootNode: .leaf(PaneModel(id: c)))
+            ), focusedPaneId: a))
+        let tabB = TabModel(id: tabBId, paneTree: PaneTree(root: .leaf(PaneModel(id: c)), focusedPaneId: c))
         let model = makeVisibilityModel(tabs: [tabA, tabB], selectedTabId: tabAId)
 
         let visibility = effectivePaneVisibility(in: model, windowVisible: false)
@@ -112,7 +108,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   visible.
         let paneId = PaneId()
         let tabId = TabId()
-        let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(PaneModel(id: paneId)))
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: .leaf(PaneModel(id: paneId)), focusedPaneId: paneId))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
         let visibility = effectivePaneVisibility(in: model, windowVisible: true)
@@ -130,21 +126,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   background single-pane); the background pane reports hidden.
         let selectedA = PaneId(), selectedB = PaneId(), background = PaneId()
         let selectedTabId = TabId(), backgroundTabId = TabId()
-        let selectedTab = TabModel(
-            id: selectedTabId,
-            focusedPaneId: selectedA,
-            rootNode: .split(
+        let selectedTab = TabModel(id: selectedTabId, paneTree: PaneTree(root: .split(
                 id: SplitId(), direction: .horizontal,
                 first: .leaf(PaneModel(id: selectedA)),
                 second: .leaf(PaneModel(id: selectedB)),
                 ratio: 0.5
-            )
-        )
-        let backgroundTab = TabModel(
-            id: backgroundTabId,
-            focusedPaneId: background,
-            rootNode: .leaf(PaneModel(id: background))
-        )
+            ), focusedPaneId: selectedA))
+        let backgroundTab = TabModel(id: backgroundTabId, paneTree: PaneTree(root: .leaf(PaneModel(id: background)), focusedPaneId: background))
         let model = makeVisibilityModel(tabs: [selectedTab, backgroundTab], selectedTabId: selectedTabId)
 
         let visibility = effectivePaneVisibility(in: model, windowVisible: true)
@@ -162,17 +150,12 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   reports the focused pane visible and the sibling hidden.
         let focused = PaneId(), sibling = PaneId()
         let tabId = TabId()
-        let tab = TabModel(
-            id: tabId,
-            focusedPaneId: focused,
-            rootNode: .split(
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: .split(
                 id: SplitId(), direction: .horizontal,
                 first: .leaf(PaneModel(id: focused)),
                 second: .leaf(PaneModel(id: sibling)),
                 ratio: 0.5
-            ),
-            isZoomed: true
-        )
+            ), focusedPaneId: focused, isZoomed: true))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
         let visibility = effectivePaneVisibility(in: model, windowVisible: true)
@@ -190,12 +173,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   reports the pane visible.
         let paneId = PaneId()
         let tabId = TabId()
-        let tab = TabModel(
-            id: tabId,
-            focusedPaneId: paneId,
-            rootNode: .leaf(PaneModel(id: paneId)),
-            isZoomed: true
-        )
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: .leaf(PaneModel(id: paneId)), focusedPaneId: paneId, isZoomed: true))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
         let visibility = effectivePaneVisibility(in: model, windowVisible: true)
@@ -213,16 +191,12 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   selectedTabId nil; both panes report hidden.
         let a = PaneId(), b = PaneId()
         let tabId = TabId()
-        let tab = TabModel(
-            id: tabId,
-            focusedPaneId: a,
-            rootNode: .split(
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: .split(
                 id: SplitId(), direction: .horizontal,
                 first: .leaf(PaneModel(id: a)),
                 second: .leaf(PaneModel(id: b)),
                 ratio: 0.5
-            )
-        )
+            ), focusedPaneId: a))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: nil)
 
         let visibility = effectivePaneVisibility(in: model, windowVisible: true)
@@ -240,10 +214,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   horizontal/vertical split all report visible.
         let a = PaneId(), b = PaneId(), c = PaneId()
         let tabId = TabId()
-        let tab = TabModel(
-            id: tabId,
-            focusedPaneId: a,
-            rootNode: .split(
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: .split(
                 id: SplitId(), direction: .horizontal,
                 first: .leaf(PaneModel(id: a)),
                 second: .split(
@@ -253,8 +224,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
                     ratio: 0.5
                 ),
                 ratio: 0.5
-            )
-        )
+            ), focusedPaneId: a))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
         let visibility = effectivePaneVisibility(in: model, windowVisible: true)
@@ -616,16 +586,16 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   one true, sibling false; new single-pane tab is also false.
         var model = makeModel()
         createTab(&model)
-        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        let firstPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let focusedSplitPaneId = selectedTab(in: model)!.focusedPaneId
+        let focusedSplitPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         #expect(isFocusedAndVisible(focusedSplitPaneId, in: model), "focused pane in selected split tab should be visible")
         #expect(!isFocusedAndVisible(firstPaneId, in: model), "non-focused pane should not be focused and visible")
 
         createTab(&model)
-        let singlePaneId = selectedTab(in: model)!.focusedPaneId
+        let singlePaneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         #expect(!isFocusedAndVisible(singlePaneId, in: model), "focused pane in single-pane tab should not show a focus border")
         #expect(!isFocusedAndVisible(focusedSplitPaneId, in: model), "pane in non-selected tab should not be focused and visible")
@@ -984,7 +954,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   search, and throttle state, all of which disappear together.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneId,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
@@ -1011,16 +981,12 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   pane reports 2 unread.
         let a = PaneId(), b = PaneId()
         let tabId = TabId()
-        let tab = TabModel(
-            id: tabId,
-            focusedPaneId: a,
-            rootNode: .split(
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: .split(
                 id: SplitId(), direction: .horizontal,
                 first: .leaf(PaneModel(id: a)),
                 second: .leaf(PaneModel(id: b)),
                 ratio: 0.5
-            )
-        )
+            ), focusedPaneId: a))
         var alerts: [AlertModel] = []
         #expect(unreadAlertCount(for: tab, alerts: alerts) == 0)
 
@@ -1047,8 +1013,8 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   in the second tab, returns 1.
         let a = PaneId(), b = PaneId()
         let tabId1 = TabId(), tabId2 = TabId()
-        let tab1 = TabModel(id: tabId1, focusedPaneId: a, rootNode: .leaf(PaneModel(id: a)))
-        let tab2 = TabModel(id: tabId2, focusedPaneId: b, rootNode: .leaf(PaneModel(id: b)))
+        let tab1 = TabModel(id: tabId1, paneTree: PaneTree(root: .leaf(PaneModel(id: a)), focusedPaneId: a))
+        let tab2 = TabModel(id: tabId2, paneTree: PaneTree(root: .leaf(PaneModel(id: b)), focusedPaneId: b))
         let group = GroupModel(id: GroupId(), name: "Test", tabs: [tab1, tab2])
         var alerts: [AlertModel] = []
 
@@ -1373,7 +1339,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   shrink to {unread} then expand to both.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let unread = AlertModel(
             id: AlertId(), kind: .bell, paneId: paneId,
             title: "Unread", body: "bell", createdAt: Date(timeIntervalSince1970: 10), isUnread: true)
@@ -1402,7 +1368,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   visible until the last unread alert is marked read.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let read = AlertModel(
             id: AlertId(), kind: .bell, paneId: paneId,
             title: "Read", body: "x", createdAt: Date(timeIntervalSince1970: 10), isUnread: false)
@@ -1433,7 +1399,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   tab toggles and after inserting an alert.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         var proj = desiredAlertsPopover(in: model)
         #expect(proj.emptyText == "No unread alerts", "empty unread tab uses unread copy")
@@ -1460,7 +1426,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   an unread alert is prepended.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let proj0 = desiredAlertsPopover(in: model)
         let alert = AlertModel(
@@ -1491,7 +1457,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(desiredSwitcher(in: model) == nil, "no MRU cycle -> nil projection")
 
         model.groups[0].tabs[0].customTitle = "Alpha"
-        let alertPane = model.groups[0].tabs[1].focusedPaneId
+        let alertPane = model.groups[0].tabs[1].paneTree.focusedPaneId
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: alertPane,
             title: "DanTerm", body: "x", createdAt: Date(), isUnread: true), at: 0)
@@ -1556,7 +1522,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(desiredQuitConfirmation(in: model)?.paneCount == 2,
             "open quit panel starts with both panes")
 
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         _ = update(&model, .closePane(paneId: paneId))
 
         #expect(model.allPaneIds.count == 1, "non-last pane close removes one pane")
@@ -1970,9 +1936,9 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let tabA = model.groups[0].tabs[0]
         let tabB = model.groups[0].tabs[1]
         update(&model, .selectTab(id: tabA.id))
-        let paneA = selectedTab(in: model)!.focusedPaneId
+        let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: paneA, direction: .horizontal))
-        let paneA2 = selectedTab(in: model)!.focusedPaneId
+        let paneA2 = selectedTab(in: model)!.paneTree.focusedPaneId
 
         update(&model, .addTodo(owner: .tab(tabA.id), text: "tab task"))
         update(&model, .addTodo(owner: .pane(paneA), text: "p1 a"))
@@ -1981,7 +1947,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         update(&model, .toggleTodoDone(owner: .pane(paneA), todoId: pAdone))
         update(&model, .addTodo(owner: .pane(paneA2), text: "p2 a"))
 
-        update(&model, .addTodo(owner: .pane(tabB.focusedPaneId), text: "tab B pane task"))
+        update(&model, .addTodo(owner: .pane(tabB.paneTree.focusedPaneId), text: "tab B pane task"))
 
         let rollup = tabTodoRollup(tabA.id, in: model)
         #expect(rollup.total == 4, "1 tab + 2 paneA + 1 paneA2")
@@ -2116,7 +2082,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   marked done, hasCompleted is true.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "done"))
         update(&model, .addTodo(owner: .pane(paneId), text: "pending"))
         let doneId = model.pane(paneId)!.todos[0].id
@@ -2826,10 +2792,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   projected theme.
         var model = makeModel()
         createTab(&model)
-        let paneA = selectedTab(in: model)!.focusedPaneId
+        let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: paneA, direction: .horizontal))
-        let focused = selectedTab(in: model)!.focusedPaneId
-        let other = allPaneIds(selectedTab(in: model)!.rootNode).first { $0 != focused }!
+        let focused = selectedTab(in: model)!.paneTree.focusedPaneId
+        let other = allPaneIds(selectedTab(in: model)!.paneTree.root).first { $0 != focused }!
         update(&model, .setPaneTheme(paneId: focused, themeName: "Dracula"))
         update(&model, .setPaneTheme(paneId: other, themeName: "Nord"))
 
@@ -2861,7 +2827,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
     func desiredThemeBrowserReportsUserTheme() {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
 
         #expect(desiredThemeBrowser(in: model).currentThemeName == "Dracula",
@@ -2881,7 +2847,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.groups[0].tabs[0].customTitle = "Alpha"
         model.mruCycle = MruCycleState(frozenOrder: [tabId], cursorIndex: 0)
         let tally = UnreadAlertTally(
@@ -2915,7 +2881,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   true after inserting an unread alert.
         var model = makeModel()
         createTab(&model)
-        let pane = selectedTab(in: model)!.focusedPaneId
+        let pane = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(
             desiredFocusBorders(in: model)[pane] ==
             BorderState(focused: false, bell: false),
@@ -2940,10 +2906,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   on the unfocused one; focused stays unaffected.
         var model = makeModel()
         createTab(&model)
-        let paneA = selectedTab(in: model)!.focusedPaneId
+        let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: paneA, direction: .horizontal))
-        let focusedId = selectedTab(in: model)!.focusedPaneId
-        let otherId = allPaneIds(selectedTab(in: model)!.rootNode).first { $0 != focusedId }!
+        let focusedId = selectedTab(in: model)!.paneTree.focusedPaneId
+        let otherId = allPaneIds(selectedTab(in: model)!.paneTree.root).first { $0 != focusedId }!
 
         var borders = desiredFocusBorders(in: model)
         #expect(borders[focusedId] == BorderState(focused: true, bell: false),
@@ -2971,14 +2937,14 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   background single); background panes report no border.
         var model = makeModel()
         createTab(&model)
-        let tab0Pane = selectedTab(in: model)!.focusedPaneId
+        let tab0Pane = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: tab0Pane, direction: .horizontal))
         createTab(&model)
 
         let borders = desiredFocusBorders(in: model)
         #expect(Set(borders.keys) == Set(model.allPaneIds),
             "projection is keyed over every live pane")
-        for paneId in allPaneIds(model.groups[0].tabs[0].rootNode) {
+        for paneId in allPaneIds(model.groups[0].tabs[0].paneTree.root) {
             #expect(borders[paneId] == BorderState(focused: false, bell: false),
                 "panes in a non-selected tab draw no border")
         }
@@ -2995,7 +2961,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   PaneToolbarRender.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         model.updatePane(paneId) {
             $0.session?.title = "vim"
             $0.session?.cwd = "/work/proj"
@@ -3038,11 +3004,11 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: the incremental-container reconciliation performance fix.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(desiredPaneToolbar(in: model)[paneId]?.hasSplits == false)
 
         update(&model, .splitPane(paneId: paneId, direction: .horizontal))
-        let siblingId = selectedTab(in: model)!.focusedPaneId
+        let siblingId = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(desiredPaneToolbar(in: model)[paneId]?.hasSplits == true)
         update(&model, .paneBecameFirstResponder(paneId: paneId))
 
@@ -3060,7 +3026,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
     func desiredPaneToolbarReadsCommandLifecycle() {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let sessionId = model.pane(paneId)!.session!.id
         update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("swift test")))
 
@@ -3073,7 +3039,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
     func desiredPaneToolbarReadsEveryLifecycleChip() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let remote = RemoteSession(user: "dan", host: "caja")
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
         let sessionId = try #require(model.pane(paneId)?.session?.id)
@@ -3114,7 +3080,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first coverage.
         var model = makeModel()
         createTab(&model)
-        let tab0Pane = selectedTab(in: model)!.focusedPaneId
+        let tab0Pane = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: tab0Pane, direction: .horizontal))
         createTab(&model)
         #expect(Set(desiredPaneToolbar(in: model).keys) == Set(model.allPaneIds),
@@ -3133,7 +3099,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   render mid-search, no key post-search.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(desiredSearchOverlays(in: model)[paneId] == nil,
             "no active search -> no key")
 
@@ -3155,7 +3121,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
     func desiredPaneConfigReturnsToDefaultOnClear() {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Monokai Remastered")
 
@@ -3173,7 +3139,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
     func desiredPaneConfigUsesRemoteLifecycleSnapshot() {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         model.updatePane(paneId) { $0.theme = "Dracula" }
         let sessionId = model.pane(paneId)!.session!.id
         update(&model, .sessionReport(
@@ -3209,10 +3175,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             title: "shell",
             cwd: "\(NSHomeDirectory())/src"
         )
-        var tabA = TabModel(id: tA, focusedPaneId: pA, rootNode: .leaf(paneA))
+        var tabA = TabModel(id: tA, paneTree: PaneTree(root: .leaf(paneA), focusedPaneId: pA))
         tabA.customTitle = "Edited"; tabA.color = .blue
-        let tabB = TabModel(id: tB, focusedPaneId: pB, rootNode: .leaf(PaneModel(id: pB)))
-        let tabC = TabModel(id: tC, focusedPaneId: pC, rootNode: .leaf(PaneModel(id: pC)))
+        let tabB = TabModel(id: tB, paneTree: PaneTree(root: .leaf(PaneModel(id: pB)), focusedPaneId: pB))
+        let tabC = TabModel(id: tC, paneTree: PaneTree(root: .leaf(PaneModel(id: pC)), focusedPaneId: pC))
         var model = AppModel(groups: [
             GroupModel(id: g1, name: "Work", isCollapsed: true, tabs: [tabA, tabB]),
             GroupModel(id: g2, name: "Home", tabs: [tabC]),
@@ -3281,7 +3247,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   subtitle, mixed tab + pane todos, two unread + one read alert.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         model.groups[0].tabs[0].customTitle = "Custom"
         model.updatePane(paneId) { $0.session?.cwd = "\(NSHomeDirectory())/src" }
         model.groups[0].tabs[0].todos = [TodoItem(id: UUID(), text: "t1", isDone: false)]
@@ -3333,7 +3299,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   subtitle equal to display title.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.updatePane(paneId) { $0.session?.title = "vim" }
         var proj = desiredWindowChrome(in: model)
         #expect(proj.windowTitle == "vim", "no subtitle -> window title is the bare display title")

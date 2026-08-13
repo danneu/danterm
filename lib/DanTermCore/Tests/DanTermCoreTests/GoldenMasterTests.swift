@@ -32,12 +32,12 @@ import DanTermProtocol
         var model = makeModel(env: env)
 
         _ = update(&model, .createTabInSelectedGroup(), env: env)
-        let firstPane = model.groups[0].tabs[0].focusedPaneId
+        let firstPane = model.groups[0].tabs[0].paneTree.focusedPaneId
         _ = update(&model, .splitPane(paneId: firstPane, direction: .horizontal), env: env)
 
         _ = update(&model, .createGroup(name: "Golden"), env: env)
 
-        let secondGroupPane = model.groups[1].tabs[0].focusedPaneId
+        let secondGroupPane = model.groups[1].tabs[0].paneTree.focusedPaneId
         _ = update(&model, .ipcRequest(
             reqId: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
             request: .paneSplit(

@@ -23,7 +23,7 @@ import Testing
         // Scenario: spec-first mark read.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
@@ -64,9 +64,9 @@ import Testing
         // Scenario: spec-first mark all.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         createTab(&model)
-        let paneB = model.groups[0].tabs[1].focusedPaneId
+        let paneB = model.groups[0].tabs[1].paneTree.focusedPaneId
 
         for paneId in [paneA, paneB, paneA] {
             model.alerts.insert(AlertModel(
@@ -90,7 +90,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -123,7 +123,7 @@ import Testing
         // Scenario: spec-first same-tab activate.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
         let tabId = model.groups[0].tabs[0].id
 
@@ -136,8 +136,8 @@ import Testing
         update(&model, .activateAlert(alertId: alertId))
 
         #expect(model.selectedTabId == tabId, "should stay on current tab")
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneA, "should focus alert pane")
-        #expect(model.groups[0].tabs[0].isZoomed == false, "non-zoom navigation leaves zoom off")
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == paneA, "should focus alert pane")
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == false, "non-zoom navigation leaves zoom off")
     }
 
     @Test("testActivateAlertSameTabZoomClearRebuildsContainer")
@@ -148,12 +148,12 @@ import Testing
         // Scenario: spec-first zoom clear on activate.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneB, "paneB should be focused before navigation")
-        #expect(model.groups[0].tabs[0].isZoomed == true, "tab should be zoomed before navigation")
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == paneB, "paneB should be focused before navigation")
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true, "tab should be zoomed before navigation")
 
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
@@ -164,8 +164,8 @@ import Testing
         update(&model, .activateAlert(alertId: alertId))
 
         let tab = model.groups[0].tabs[0]
-        #expect(tab.focusedPaneId == paneA, "should focus alert pane")
-        #expect(tab.isZoomed == false, "zoom should clear when navigating to hidden pane")
+        #expect(tab.paneTree.focusedPaneId == paneA, "should focus alert pane")
+        #expect(tab.paneTree.isZoomed == false, "zoom should clear when navigating to hidden pane")
     }
 
     @Test("testActivateAlertDoesNotMarkReadInManualMode")
@@ -179,7 +179,7 @@ import Testing
         model.config.alertClearMode = .manual
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -228,7 +228,7 @@ import Testing
         //   one more; total stays at 100 with the new alert at the front.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -257,7 +257,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabAId = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -279,10 +279,10 @@ import Testing
         // Scenario: spec-first focus clear.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
@@ -303,10 +303,10 @@ import Testing
         // Scenario: spec-first zoom-close clear.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         update(&model, .toggleZoomPane(paneId: nil))
@@ -317,7 +317,7 @@ import Testing
         ), at: 0)
 
         update(&model, .closePane(paneId: paneA))
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneB, "paneB should be focused after closing paneA")
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == paneB, "paneB should be focused after closing paneA")
         #expect(!model.alerts[0].isUnread, "alert on newly focused pane should be marked read")
     }
 
@@ -329,7 +329,7 @@ import Testing
         // Scenario: spec-first closePane cleanup.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
 
@@ -354,10 +354,10 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -390,7 +390,7 @@ import Testing
         // Scenario: spec-first failure cleanup.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -416,7 +416,7 @@ import Testing
         // Scenario: spec-first per-kind throttle.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -452,7 +452,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -482,7 +482,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         #expect(model.selectedTabId != tab1Id, "tab2 should be selected")
@@ -505,10 +505,10 @@ import Testing
         // Scenario: spec-first stale skip.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let stalePaneId = PaneId()
         model.alerts.insert(AlertModel(
@@ -547,13 +547,13 @@ import Testing
         // Scenario: spec-first intra-tab fallback.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .paneBecameFirstResponder(paneId: paneA))
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneA)
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == paneA)
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneB,
@@ -564,7 +564,7 @@ import Testing
 
         #expect(desiredPaneFocus(in: model) == .terminal(paneB))
 
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneB,
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == paneB,
             "tab's focusedPaneId should be paneB after navigation")
         #expect(model.alerts[0].isUnread == false,
             "paneB's alert should be marked read by the current-tab clear")
@@ -580,10 +580,10 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .paneBecameFirstResponder(paneId: paneA))
 
@@ -616,17 +616,17 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         let tab1Id = model.groups[0].tabs[0].id
 
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneC = model.groups[0].tabs[1].focusedPaneId
-        let tab2PaneIds = allPaneIds(model.groups[0].tabs[1].rootNode)
+        let paneC = model.groups[0].tabs[1].paneTree.focusedPaneId
+        let tab2PaneIds = allPaneIds(model.groups[0].tabs[1].paneTree.root)
         let paneB = tab2PaneIds.first(where: { $0 != paneC })!
 
         update(&model, .paneBecameFirstResponder(paneId: paneB))
-        #expect(model.groups[0].tabs[1].focusedPaneId == paneB)
+        #expect(model.groups[0].tabs[1].paneTree.focusedPaneId == paneB)
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
@@ -661,7 +661,7 @@ import Testing
         //   paneA, navigate; lands on paneA's new tab.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
@@ -690,10 +690,10 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -723,10 +723,10 @@ import Testing
         model.config.alertClearMode = .manual
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
-        let paneB = model.groups[0].tabs[1].focusedPaneId
+        let paneB = model.groups[0].tabs[1].paneTree.focusedPaneId
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
@@ -753,7 +753,7 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
@@ -776,11 +776,11 @@ import Testing
         model.config.alertClearMode = .manual
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
-        let paneB = model.groups[0].tabs[1].focusedPaneId
+        let paneB = model.groups[0].tabs[1].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -817,12 +817,12 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneC = model.groups[0].tabs[1].focusedPaneId
-        let tab2PaneIds = allPaneIds(model.groups[0].tabs[1].rootNode)
+        let paneC = model.groups[0].tabs[1].paneTree.focusedPaneId
+        let tab2PaneIds = allPaneIds(model.groups[0].tabs[1].paneTree.root)
         let paneB = tab2PaneIds.first(where: { $0 != paneC })!
 
         model.alerts.insert(AlertModel(
@@ -931,7 +931,7 @@ import Testing
         model.config.alertClearMode = .manual
         createTab(&model)
         let tabAId = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -954,7 +954,7 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
 
@@ -977,10 +977,10 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         update(&model, .toggleZoomPane(paneId: nil))
@@ -1004,7 +1004,7 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
@@ -1028,7 +1028,7 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
         let groupId = model.groups[0].id
 
@@ -1051,7 +1051,7 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
@@ -1070,7 +1070,7 @@ import Testing
         // Scenario: spec-first no-op clear.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let commands = update(&model, .clearAlertsForPane(paneId: paneA))
         #expect(commands.count == 0, "clearAlertsForPane with no unread alerts should be a no-op")
@@ -1086,10 +1086,10 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         #expect(paneA != paneB, "split should create a new pane")
 
         model.alerts.insert(AlertModel(
@@ -1112,10 +1112,10 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let tab1Pane = model.groups[0].tabs[0].focusedPaneId
+        let tab1Pane = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
-        let tab2Pane = model.groups[0].tabs[1].focusedPaneId
+        let tab2Pane = model.groups[0].tabs[1].paneTree.focusedPaneId
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: tab1Pane,
@@ -1158,10 +1158,10 @@ import Testing
         model.config.alertClearMode = .manual
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         #expect(paneA != paneB, "split should create a new pane")
 
         model.alerts.insert(AlertModel(
@@ -1188,12 +1188,12 @@ import Testing
         // Scenario: spec-first go-to unzoom.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == true)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true)
 
         createTab(&model)
 
@@ -1203,7 +1203,7 @@ import Testing
         ), at: 0)
 
         update(&model, .goToMostRecentAlertPane)
-        #expect(model.groups[0].tabs[0].isZoomed == false, "zoom should clear when navigating to different pane")
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == false, "zoom should clear when navigating to different pane")
         _ = paneB
     }
 
@@ -1222,9 +1222,9 @@ import Testing
         let id1 = model.groups[0].tabs[0].id
         let id2 = model.groups[0].tabs[1].id
         let id3 = model.groups[0].tabs[2].id
-        let pane1 = model.groups[0].tabs[0].focusedPaneId
-        let pane2 = model.groups[0].tabs[1].focusedPaneId
-        let pane3 = model.groups[0].tabs[2].focusedPaneId
+        let pane1 = model.groups[0].tabs[0].paneTree.focusedPaneId
+        let pane2 = model.groups[0].tabs[1].paneTree.focusedPaneId
+        let pane3 = model.groups[0].tabs[2].paneTree.focusedPaneId
 
         for pid in [pane1, pane2, pane3] {
             model.alerts.insert(AlertModel(
@@ -1256,7 +1256,7 @@ import Testing
         createTab(&model)
         let id1 = model.groups[0].tabs[0].id
         let id2 = model.groups[0].tabs[1].id
-        let pane1 = model.groups[0].tabs[0].focusedPaneId
+        let pane1 = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: pane1,
@@ -1294,7 +1294,7 @@ import Testing
         // Scenario: spec-first batch stale.
         var model = makeModel()
         createTab(&model)
-        let pane = model.groups[0].tabs[0].focusedPaneId
+        let pane = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: pane,
             title: "x", body: "y", createdAt: Date(), isUnread: true

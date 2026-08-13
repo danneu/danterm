@@ -64,7 +64,7 @@ import Testing
     func labelIsTitleAndCwdWhenIdle() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
 
         update(&model, .sessionReport(sessionId: sessionId, report: .title("vim")))
@@ -77,7 +77,7 @@ import Testing
     func runningCommandTakesOverTheLabel() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
 
         update(&model, .sessionReport(sessionId: sessionId, report: .title("vim")))
@@ -91,7 +91,7 @@ import Testing
     func remoteIdentityComposesThePill() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
 
         update(&model, .sessionReport(sessionId: sessionId, report: .connectionDeclared(
@@ -108,7 +108,7 @@ import Testing
     func remoteWithoutIdentityHasNoPillText() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
 
         update(&model, .sessionReport(sessionId: sessionId, report: .connectionDeclared(
@@ -123,7 +123,7 @@ import Testing
     func localPaneHasNoRemotePill() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
 
         let render = try #require(desiredPaneToolbar(in: model)[paneId])
         #expect(render.remoteLabel == nil)
@@ -136,7 +136,7 @@ import Testing
     func chipTooltipNamesTheAgent() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         let claude = try #require(AgentSession(kind: "claude", sessionId: "abc123"))
 
@@ -151,7 +151,7 @@ import Testing
     func namedAgentHasNoPillText() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         let claude = try #require(AgentSession(kind: "claude", sessionId: "abc123"))
 
@@ -164,7 +164,7 @@ import Testing
     func unknownAgentIsNamedInThePill() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         let aider = try #require(AgentSession(kind: "aider", sessionId: "abc123"))
 
@@ -179,7 +179,7 @@ import Testing
     func detachingClearsAgentText() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         let aider = try #require(AgentSession(kind: "aider", sessionId: "abc123"))
 

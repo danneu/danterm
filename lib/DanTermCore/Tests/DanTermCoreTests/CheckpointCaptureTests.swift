@@ -21,7 +21,7 @@ private final class Recorder<Value>: @unchecked Sendable {
 private func makeModelWithPanes(_ count: Int) -> (AppModel, [PaneId]) {
     var model = makeModel()
     for _ in 0..<count { createTab(&model) }
-    let paneIds = model.groups[0].tabs.map(\.focusedPaneId)
+    let paneIds = model.groups[0].tabs.map(\.paneTree.focusedPaneId)
     return (model, paneIds)
 }
 
@@ -74,7 +74,7 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         previous = current
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneIds = allPaneIds(model.groups[0].tabs[0].rootNode)
+        let paneIds = allPaneIds(model.groups[0].tabs[0].paneTree.root)
         current = lightProjection(model)
         #expect(current != previous, "split structure and focused pane")
         previous = current
@@ -149,11 +149,11 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         //   remains fixed.
         var model = makeModel()
         createTab(&model)
-        let backgroundPane = model.groups[0].tabs[0].focusedPaneId
+        let backgroundPane = model.groups[0].tabs[0].paneTree.focusedPaneId
         createTab(&model)
-        let selectedPane = model.groups[0].tabs[1].focusedPaneId
+        let selectedPane = model.groups[0].tabs[1].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let searchPane = model.groups[0].tabs[1].focusedPaneId
+        let searchPane = model.groups[0].tabs[1].paneTree.focusedPaneId
         let baseline = lightProjection(model)
 
         update(&model, .toggleZoomPane(paneId: selectedPane))
@@ -280,8 +280,8 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         createTab(&model)
         createTab(&model)
         let tabs = model.groups[0].tabs
-        let survivingPane = tabs[0].focusedPaneId
-        let closingPane = tabs[1].focusedPaneId
+        let survivingPane = tabs[0].paneTree.focusedPaneId
+        let closingPane = tabs[1].paneTree.focusedPaneId
 
         let captureA = CheckpointCapture(
             snapshot: toSnapshot(model),
@@ -349,12 +349,12 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         model.groups[0].tabs[0].customTitle = "renamed"
         model.groups[0].tabs[0].color = .purple
         model.groups[0].tabs[0].todos = [TodoItem(id: UUID(), text: "tab todo", isDone: true)]
-        if case .leaf(var pane) = model.groups[0].tabs[0].rootNode {
+        if case .leaf(var pane) = model.groups[0].tabs[0].paneTree.root {
             pane.session?.title = "vim"
             pane.session?.cwd = "/tmp/work"
             pane.theme = "Dracula"
             pane.todos = [TodoItem(id: UUID(), text: "pane todo", isDone: false)]
-            model.groups[0].tabs[0].rootNode = .leaf(pane)
+            model.groups[0].tabs[0].paneTree = PaneTree(root: .leaf(pane))
         } else {
             Issue.record("a fresh tab should be a single leaf")
             return

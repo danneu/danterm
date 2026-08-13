@@ -74,12 +74,11 @@ import Testing
         let tabId = TabId()
         var model = makeModel()
         model.groups[0].tabs.append(
-            TabModel(id: tabId, focusedPaneId: paneId,
-                rootNode: .leaf(PaneModel(
+            TabModel(id: tabId, paneTree: PaneTree(root: .leaf(PaneModel(
                     id: paneId,
                     session: SessionModel(id: SessionId(), title: "T", cwd: Self.fakeHome + "/foo"),
                     theme: nil
-                ))))
+                )), focusedPaneId: paneId)))
         model.selectedTabId = tabId
 
         let snapshot = toSnapshot(model, home: Self.fakeHome)
@@ -148,11 +147,7 @@ import Testing
         let tabId = TabId()
         var model = makeModel()
         model.groups[0].tabs.append(
-            TabModel(
-                id: tabId,
-                focusedPaneId: paneId,
-                rootNode: .leaf(PaneModel(id: paneId, session: SessionModel(id: SessionId())))
-            ))
+            TabModel(id: tabId, paneTree: PaneTree(root: .leaf(PaneModel(id: paneId, session: SessionModel(id: SessionId()))), focusedPaneId: paneId)))
         model.selectedTabId = tabId
 
         _ = update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd(h + "/sentinel")), env: env)

@@ -47,7 +47,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let selectedTabId = model.groups[0].tabs[0].id
-        let selectedPaneId = model.groups[0].tabs[0].focusedPaneId
+        let selectedPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let beforePaneIds = Set(model.allPaneIds)
 
         let commands = createTab(&model, background: true)
@@ -78,7 +78,7 @@ import Testing
         //   second createTab's session command carries the same cwd.
         var model = makeModel()
         createTab(&model)
-        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
+        let firstPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.updatePane(firstPaneId) { $0.session?.cwd = "/tmp/test" }
         let commands = createTab(&model)
         let createEffect = commands.first(where: {
@@ -107,7 +107,7 @@ import Testing
 
         let commands = update(&model, .selectTab(id: firstTabId))
 
-        let secondPaneId = model.groups[0].tabs[1].focusedPaneId
+        let secondPaneId = model.groups[0].tabs[1].paneTree.focusedPaneId
         #expect(hasEffect(commands) {
             if case .focusSession(let pid, false) = $0, pid == secondPaneId { return true }
             return false
@@ -144,7 +144,7 @@ import Testing
         let tabAId = model.groups[0].tabs[0].id
         createTab(&model)
         let tabBId = model.groups[0].tabs[1].id
-        let tabBPaneId = model.groups[0].tabs[1].focusedPaneId
+        let tabBPaneId = model.groups[0].tabs[1].paneTree.focusedPaneId
 
         update(&model, .selectTab(id: tabAId))
 
@@ -169,7 +169,7 @@ import Testing
         let tabAId = model.groups[0].tabs[0].id
         createTab(&model)
         let tabBId = model.groups[0].tabs[1].id
-        let tabBPaneId = model.groups[0].tabs[1].focusedPaneId
+        let tabBPaneId = model.groups[0].tabs[1].paneTree.focusedPaneId
 
         update(&model, .selectTab(id: tabAId))
 
@@ -201,7 +201,7 @@ import Testing
         update(&model, .createGroup(name: "Work"))
         let workGroupId = model.groups[1].id
         let workTabId = model.groups[1].tabs[0].id
-        let workPaneId = model.groups[1].tabs[0].focusedPaneId
+        let workPaneId = model.groups[1].tabs[0].paneTree.focusedPaneId
         update(&model, .selectTab(id: generalTabId))
         update(&model, .toggleGroupCollapse(groupId: workGroupId))
 
@@ -227,7 +227,7 @@ import Testing
         // Scenario: spec-first last-pane close.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let commands = update(&model, .closePane(paneId: paneId))
         #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
@@ -694,7 +694,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
-        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
+        let firstPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let liveBefore = Set(model.allPaneIds)
 
         let commands = update(&model, .requestCloseTab(id: firstTabId))
@@ -942,7 +942,7 @@ import Testing
         update(&model, .selectTab(id: firstTabId))
         update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .addTodo(owner: .tab(secondTabId), text: "tab task"))
-        update(&model, .addTodo(owner: .pane(thirdTab.focusedPaneId), text: "pane task"))
+        update(&model, .addTodo(owner: .pane(thirdTab.paneTree.focusedPaneId), text: "pane task"))
 
         let commands = update(&model, .requestCloseTabs(ids: [firstTabId, secondTabId, thirdTab.id]))
 
@@ -1025,7 +1025,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let liveTabId = model.groups[0].tabs[0].id
-        let liveTabPaneId = model.groups[0].tabs[0].focusedPaneId
+        let liveTabPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let staleTabId = TabId()
         let liveBefore = Set(model.allPaneIds)
 
@@ -1236,7 +1236,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
-        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
+        let firstPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         let secondTabId = model.groups[0].tabs[1].id

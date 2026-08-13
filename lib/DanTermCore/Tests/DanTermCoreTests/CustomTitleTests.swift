@@ -27,7 +27,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         model.groups[0].tabs[0].customTitle = "My App"
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.updatePane(paneId) { $0.session?.title = "vim" }
         #expect(tabDisplayTitle(model.groups[0].tabs[0]) == "My App")
     }
@@ -40,7 +40,7 @@ import Testing
         // Scenario: spec-first fallback.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.updatePane(paneId) { $0.session?.title = "vim" }
         #expect(model.groups[0].tabs[0].customTitle == nil)
         #expect(tabDisplayTitle(model.groups[0].tabs[0]) == "vim")
@@ -132,7 +132,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .renameTab(id: tabId, name: "My App"))
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
@@ -153,7 +153,7 @@ import Testing
         update(&model, .renameTab(id: tabId, name: "My App"))
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneA = allPaneIds(model.groups[0].tabs[0].rootNode).first!
+        let paneA = allPaneIds(model.groups[0].tabs[0].paneTree.root).first!
         model.updatePane(paneA) { $0.session?.title = "zsh" }
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         #expect(model.groups[0].tabs[0].customTitle == "My App")
@@ -171,7 +171,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .renameTab(id: tabId, name: "Custom"))
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
@@ -374,7 +374,7 @@ import Testing
         // Scenario: spec-first chrome derivation match.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let home = NSHomeDirectory()
 
         model.updatePane(paneId) { $0.session?.title = "\(home)/world" }
@@ -391,25 +391,26 @@ import Testing
         #expect(tabSubtitle(tab) == "~/projects")
     }
 
-    @Test("a tab's chrome comes from its own tree, never from another tab's pane")
-    func testTabChromeIsTabLocal() {
-        // Intent: a tab whose focus names a pane it does not own reports the
-        //   neutral fallback, not the chrome of whichever tab holds that pane.
-        // Why it exists: the chrome helpers used to resolve the focused pane by
-        //   scanning every group and tab in the model, so a tab left pointing at
-        //   a pane that had moved away silently titled itself from a stranger.
-        //   Scanning the window was also quadratic in the sidebar projection.
-        // Scenario: spec-first. Two tabs; the first is left naming the second's
-        //   pane, which is the shape a moved pane leaves behind mid-update.
+    @Test("a pane tree normalizes foreign focus within its own leaves")
+    func testPaneTreeNormalizesForeignFocus() {
+        // Intent: constructing a pane tree with foreign focus repairs focus to
+        //   its first leaf, so tab chrome can never resolve another tab's pane.
+        // Why it exists: persisted or hand-built inputs may name a pane outside
+        //   the tree, but live model state must make that mismatch impossible.
+        // Scenario: spec-first. Two tabs; reconstruct the first tree with the
+        //   second tab's pane as its requested focus.
         var model = makeModel()
         createTab(&model)
         createTab(&model)
-        let strangerPaneId = model.groups[0].tabs[1].focusedPaneId
+        let strangerPaneId = model.groups[0].tabs[1].paneTree.focusedPaneId
         model.updatePane(strangerPaneId) { $0.session?.title = "stranger" }
-        model.groups[0].tabs[0].focusedPaneId = strangerPaneId
+        let firstRoot = model.groups[0].tabs[0].paneTree.root
+        model.groups[0].tabs[0].paneTree = PaneTree(
+            root: firstRoot, focusedPaneId: strangerPaneId)
 
         let tab = model.groups[0].tabs[0]
 
+        #expect(tab.paneTree.focusedPaneId == firstLeafId(firstRoot))
         #expect(tabTitle(tab) == "Terminal", "chrome must not resolve outside the tab's own tree")
         #expect(tabSubtitle(tab) == nil)
         #expect(tabChipKind(tab) == .terminal)
@@ -568,7 +569,7 @@ import Testing
         // Scenario: spec-first focus-restore.
         var model = makeModel()
         createTab(&model)
-        let focusedPaneId = model.groups[0].tabs[0].focusedPaneId
+        let focusedPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let commands = update(&model, .sidebarRenameEnded)
         #expect(commands.isEmpty)

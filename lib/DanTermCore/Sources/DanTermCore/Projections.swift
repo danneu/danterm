@@ -26,7 +26,9 @@ struct ThemeBrowserProjection: Equatable {
 /// the browser checkmark.
 func desiredThemeBrowser(in model: AppModel) -> ThemeBrowserProjection {
     ThemeBrowserProjection(
-        currentThemeName: selectedTab(in: model).flatMap { model.pane($0.focusedPaneId)?.theme }
+        currentThemeName: selectedTab(in: model).flatMap {
+            model.pane($0.paneTree.focusedPaneId)?.theme
+        }
     )
 }
 
@@ -162,7 +164,7 @@ func desiredTabTodoPopover(tabId: TabId, in model: AppModel) -> TabTodoPopoverPr
   return TabTodoPopoverProjection(
     tabId: tabId,
     rows: buildTabTodoRows(model: model, tabId: tabId),
-    paneOrder: allPaneIds(tab.rootNode),
+    paneOrder: allPaneIds(tab.paneTree.root),
     tabHasCompleted: tab.todos.contains(where: \.isDone)
   )
 }
@@ -230,7 +232,7 @@ enum PaneFocusTarget: Equatable {
 
 /// Project the selected tab's model-declared pane focus target.
 func desiredPaneFocus(in model: AppModel) -> PaneFocusTarget? {
-  guard let paneId = selectedTab(in: model)?.focusedPaneId else { return nil }
+  guard let paneId = selectedTab(in: model)?.paneTree.focusedPaneId else { return nil }
   if model.searchState[paneId]?.focusOwner == .field {
     return .searchField(paneId)
   }
@@ -241,10 +243,10 @@ func desiredPaneFocus(in model: AppModel) -> PaneFocusTarget? {
 /// Centralizes the focused-pane and lone-leaf rule so loops and convenience callers
 /// share one predicate body.
 func isFocusedAndVisible(_ paneId: PaneId, in tab: TabModel?) -> Bool {
-  guard let tab, tab.focusedPaneId == paneId else {
+  guard let tab, tab.paneTree.focusedPaneId == paneId else {
     return false
   }
-  if case .leaf = tab.rootNode { return false }
+  if case .leaf = tab.paneTree.root { return false }
   return true
 }
 
@@ -340,8 +342,8 @@ func desiredPaneToolbar(
   for group in model.groups {
     for tab in group.tabs {
       let hasSplits: Bool
-      if case .split = tab.rootNode { hasSplits = true } else { hasSplits = false }
-      for pane in panesInNode(tab.rootNode) {
+      if case .split = tab.paneTree.root { hasSplits = true } else { hasSplits = false }
+      for pane in panesInNode(tab.paneTree.root) {
         let session = pane.session
         let remoteSession: RemoteSession?
         if case .remote(let identity) = session?.connection ?? .local {
@@ -380,7 +382,7 @@ func desiredPaneToolbar(
           unreadAlertCount: tally.byPane[pane.id] ?? 0,
           totalTodoCount: pane.todos.count,
           uncompletedTodoCount: pane.todos.count { !$0.isDone },
-          isZoomed: tab.isZoomed && tab.focusedPaneId == pane.id,
+          isZoomed: tab.paneTree.isZoomed && tab.paneTree.focusedPaneId == pane.id,
           hasSplits: hasSplits
         )
       }

@@ -61,7 +61,7 @@ import Testing
         //   no incident to cite, and none should be invented.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.isAppActive = false
         update(&model, .sessionBell(sessionId: sessionId(for: paneId, in: model)))
 
@@ -84,7 +84,7 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.isAppActive = false
         update(&model, .sessionBell(sessionId: sessionId(for: paneId, in: model)))
 
@@ -107,9 +107,9 @@ import Testing
         //   invented.
         var model = makeModel()
         createTab(&model)
-        let backgroundPaneId = model.groups[0].tabs[0].focusedPaneId
+        let backgroundPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         createTab(&model)
-        let focusedPaneId = model.groups[0].tabs[1].focusedPaneId
+        let focusedPaneId = model.groups[0].tabs[1].paneTree.focusedPaneId
         model.isAppActive = false
 
         update(&model, .sessionBell(sessionId: sessionId(for: backgroundPaneId, in: model)))
@@ -132,7 +132,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
-        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
+        let firstPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -189,12 +189,12 @@ import Testing
         // Scenario: spec-first zoom-clear-on-activate.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == true)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true)
 
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
@@ -203,7 +203,7 @@ import Testing
         ), at: 0)
 
         _ = update(&model, .activateAlert(alertId: alertId))
-        #expect(model.groups[0].tabs[0].isZoomed == false, "zoom should clear when alert targets different pane")
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == false, "zoom should clear when alert targets different pane")
         #expect(desiredPaneFocus(in: model) == .terminal(paneA))
         _ = paneB
     }
@@ -219,7 +219,7 @@ import Testing
         createTab(&model)
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
 
         let alertId = AlertId()
@@ -229,7 +229,7 @@ import Testing
         ), at: 0)
 
         _ = update(&model, .activateAlert(alertId: alertId))
-        #expect(model.groups[0].tabs[0].isZoomed == true, "zoom should remain when alert targets same pane")
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true, "zoom should remain when alert targets same pane")
     }
 
     @Test("testTerminate")
@@ -334,7 +334,7 @@ import Testing
         // Scenario: spec-first cross-block (closePane vs terminate).
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let originalPanes = model.allPanes
         model.pendingConfirmation = .terminate
 

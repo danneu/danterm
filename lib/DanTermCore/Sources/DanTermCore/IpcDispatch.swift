@@ -210,7 +210,7 @@ private func dispatchIpc(
         guard let tab = tabForPane(paneId, in: model) else {
             throw IpcParamsError("pane not found")
         }
-        if allPaneIds(tab.rootNode).count == 1, wouldQuitFromClose(model) {
+        if allPaneIds(tab.paneTree.root).count == 1, wouldQuitFromClose(model) {
             throw IpcParamsError("cannot close the last pane")
         }
         let commands = update(&model, .closePane(paneId: paneId), env: env)
@@ -305,13 +305,13 @@ private func dispatchIpc(
         switch requested {
         case .on: target = true
         case .off: target = false
-        case .toggle: target = tab.isZoomed == false
+        case .toggle: target = tab.paneTree.isZoomed == false
         }
         // Route through `.toggleZoomPane` rather than writing `isZoomed` here, so the
         // scripted path and the menubar/context-menu paths cannot drift: the guard that
         // only a split tab may zoom lives there and is the reason a request can be
         // honoured and still report `isZoomed: false`.
-        if tab.isZoomed != target {
+        if tab.paneTree.isZoomed != target {
             _ = update(&model, .toggleZoomPane(paneId: paneId), env: env)
         }
         guard let pane = model.pane(paneId),
@@ -468,7 +468,7 @@ private func tabFocusResult(_ tab: TabModel?) -> JSONValue {
     return .object([
         "tab": .object([
             "id": .string(tab.id.rawValue.uuidString),
-            "focusedPaneId": .string(tab.focusedPaneId.rawValue.uuidString),
+            "focusedPaneId": .string(tab.paneTree.focusedPaneId.rawValue.uuidString),
         ])
     ])
 }

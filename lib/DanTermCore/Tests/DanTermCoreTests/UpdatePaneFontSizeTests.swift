@@ -18,9 +18,9 @@ import DanTermProtocol
     /// The two pane ids of a freshly split selected tab, in tree order.
     private func splitPaneIds(_ model: inout AppModel) -> (first: PaneId, second: PaneId) {
         createTab(&model)
-        let first = selectedTab(in: model)!.focusedPaneId
+        let first = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let second = selectedTab(in: model)!.focusedPaneId
+        let second = selectedTab(in: model)!.paneTree.focusedPaneId
         return (first, second)
     }
 
@@ -91,7 +91,7 @@ import DanTermProtocol
             for steps in [paneFontSizeStepRange.lowerBound, paneFontSizeStepRange.upperBound] {
                 var model = makeModel()
                 createTab(&model)
-                let paneId = selectedTab(in: model)!.focusedPaneId
+                let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
                 update(&model, .configLoaded(config(fontSize: configured), resolvedFontFamily: nil))
                 update(&model, .adjustPaneFontSize(paneId: paneId, steps: steps))
                 let projected = size(model, paneId)!
@@ -115,7 +115,7 @@ import DanTermProtocol
     func tinyConfiguredSizeStillProjectsRenderable() {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .configLoaded(config(fontSize: 1), resolvedFontFamily: nil))
         update(&model, .adjustPaneFontSize(paneId: paneId, steps: paneFontSizeStepRange.lowerBound))
         #expect(renderableFontSizeRange.contains(size(model, paneId)!))
@@ -132,7 +132,7 @@ import DanTermProtocol
         // Scenario: spec-first -- 50 decrements, then one increment.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         for _ in 0..<50 { update(&model, .adjustPaneFontSize(paneId: paneId, steps: -1)) }
         let floor = size(model, paneId)!
 
@@ -199,7 +199,7 @@ import DanTermProtocol
         //   and Int.min toward the other.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         update(&model, .adjustPaneFontSize(paneId: paneId, steps: paneFontSizeStepRange.lowerBound))
         #expect(model.pane(paneId)?.fontSizeSteps == paneFontSizeStepRange.lowerBound)
@@ -223,7 +223,7 @@ import DanTermProtocol
         // Scenario: spec-first -- save 200, then 4, with a pane on screen.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .preferencesOpened())
 
         update(&model, .prefSetFontSize("200"))
@@ -249,7 +249,7 @@ import DanTermProtocol
     func roundTripPreservesZoom() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .adjustPaneFontSize(paneId: paneId, steps: 3))
 
         let restored = try #require(validateAndBuild(toSnapshot(model)))
@@ -261,7 +261,7 @@ import DanTermProtocol
     func defaultZoomIsAbsentFromTheSnapshot() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let snapshot = toSnapshot(model)
         #expect(paneSnapshot(paneId.rawValue.uuidString, in: snapshot)?.fontSizeSteps == nil)
@@ -283,15 +283,15 @@ import DanTermProtocol
         //   swap the two panes of the original split.
         var model = makeModel()
         createTab(&model)
-        let source = selectedTab(in: model)!.focusedPaneId
+        let source = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .adjustPaneFontSize(paneId: source, steps: 2))
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let child = selectedTab(in: model)!.focusedPaneId
+        let child = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(size(model, child) == size(model, source), "the split inherits the source pane's zoom")
 
         createTab(&model)
-        let freshTabPane = selectedTab(in: model)!.focusedPaneId
+        let freshTabPane = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(size(model, freshTabPane) == DanTermConfig.default.resolvedFontSize)
 
         update(&model, .selectTab(id: model.groups[0].tabs[0].id))
@@ -307,7 +307,7 @@ import DanTermProtocol
     func noOpAdjustmentsReturnNoCommands() {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         #expect(update(&model, .resetPaneFontSize(paneId: paneId)).isEmpty)
 
@@ -327,9 +327,9 @@ import DanTermProtocol
         //   the background tab's pane by id.
         var model = makeModel()
         createTab(&model)
-        let backgroundPane = selectedTab(in: model)!.focusedPaneId
+        let backgroundPane = selectedTab(in: model)!.paneTree.focusedPaneId
         createTab(&model)
-        let focusedPane = selectedTab(in: model)!.focusedPaneId
+        let focusedPane = selectedTab(in: model)!.paneTree.focusedPaneId
         let baseline = DanTermConfig.default.resolvedFontSize
 
         update(&model, .adjustPaneFontSize(paneId: nil, steps: 1))

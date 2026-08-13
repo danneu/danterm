@@ -648,12 +648,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func closePane(_ sender: Any?) {
         guard let tab = selectedTab(in: runtime.model) else { return }
-        runtime.send(.requestClosePane(paneId: tab.focusedPaneId))
+        runtime.send(.requestClosePane(paneId: tab.paneTree.focusedPaneId))
     }
 
     @objc func openTodo(_ sender: Any?) {
         guard let tab = selectedTab(in: runtime.model) else { return }
-        runtime.send(.toggleTodoPopover(owner: .pane(tab.focusedPaneId)))
+        runtime.send(.toggleTodoPopover(owner: .pane(tab.paneTree.focusedPaneId)))
     }
 
     @objc func toggleTabTodoPopover(_ sender: Any?) {
@@ -683,7 +683,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func ackPaneAlerts(_ sender: Any?) {
         guard let tab = selectedTab(in: runtime.model) else { return }
-        runtime.send(.clearAlertsForPane(paneId: tab.focusedPaneId))
+        runtime.send(.clearAlertsForPane(paneId: tab.paneTree.focusedPaneId))
     }
 
     @objc func clearTabAlerts(_ sender: Any?) {

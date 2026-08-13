@@ -63,7 +63,7 @@ import Testing
 
         // allPaneIds == the tab tree's leaves (no separate dict).
         #expect(Set(model.allPaneIds) == Set([a, b]))
-        #expect(Set(model.allPaneIds) == Set(allPaneIds(model.groups[0].tabs[0].rootNode)))
+        #expect(Set(model.allPaneIds) == Set(allPaneIds(model.groups[0].tabs[0].paneTree.root)))
 
         // Re-encode and rebuild: persisted pane data round-trips identically while
         // restore deliberately mints fresh, unpersisted session identities.
@@ -94,7 +94,7 @@ import Testing
             ratio: 0.7
         )
         var model = makeModel()
-        model.groups[0].tabs.append(TabModel(id: TabId(), focusedPaneId: a, rootNode: root))
+        model.groups[0].tabs.append(TabModel(id: TabId(), paneTree: PaneTree(root: root, focusedPaneId: a)))
 
         model.updatePane(b) { $0.session?.title = "B-changed" }
 
@@ -105,7 +105,7 @@ import Testing
         #expect(model.allPaneIds == [a, b, c])
 
         // Split ids/directions/ratios identical.
-        guard case .split(let rid, .horizontal, _, let rsecond, let rratio) = model.groups[0].tabs[0].rootNode else {
+        guard case .split(let rid, .horizontal, _, let rsecond, let rratio) = model.groups[0].tabs[0].paneTree.root else {
             Issue.record("root should still be a horizontal split")
             return
         }
@@ -130,9 +130,9 @@ import Testing
         //   remains and the closed pane is gone from every projection.
         var model = makeModel()
         createTab(&model)
-        let original = selectedTab(in: model)!.focusedPaneId
+        let original = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let added = selectedTab(in: model)!.focusedPaneId
+        let added = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(added != original, "split should add a pane")
 
         update(&model, .closePane(paneId: added))
@@ -141,7 +141,7 @@ import Testing
         #expect(!model.allPaneIds.contains(added), "closed pane should be gone from allPaneIds")
         #expect(model.allPaneIds.contains(original), "surviving pane should remain")
         // Structural: allPaneIds equals the union of every tab tree's leaves.
-        let leaves = model.groups.flatMap { $0.tabs.flatMap { allPaneIds($0.rootNode) } }
+        let leaves = model.groups.flatMap { $0.tabs.flatMap { allPaneIds($0.paneTree.root) } }
         #expect(Set(model.allPaneIds) == Set(leaves))
     }
 
@@ -158,7 +158,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let sourceTabId = selectedTab(in: model)!.id
-        let movable = selectedTab(in: model)!.focusedPaneId
+        let movable = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))  // keep source tab alive after the move
 
         model.updatePane(movable) {
@@ -176,8 +176,8 @@ import Testing
         #expect(model.pane(movable)?.todos.count == 1)
         #expect(model.pane(movable)?.todos.first?.text == "carry me")
         // Lands in the target tree, leaves the source tree, appears exactly once.
-        #expect(allPaneIds(tabById(targetTabId, in: model)!.rootNode).contains(movable), "moved pane should be in target tab")
-        #expect(!allPaneIds(tabById(sourceTabId, in: model)!.rootNode).contains(movable), "moved pane should leave source tab")
+        #expect(allPaneIds(tabById(targetTabId, in: model)!.paneTree.root).contains(movable), "moved pane should be in target tab")
+        #expect(!allPaneIds(tabById(sourceTabId, in: model)!.paneTree.root).contains(movable), "moved pane should leave source tab")
         #expect(model.allPaneIds.filter { $0 == movable }.count == 1, "moved pane must not be duplicated")
     }
 
@@ -232,9 +232,9 @@ import Testing
         //   this is the test pinned against that fix.
         var model = makeModel()
         createTab(&model)
-        let target = selectedTab(in: model)!.focusedPaneId
+        let target = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .vertical))
-        let source = selectedTab(in: model)!.focusedPaneId
+        let source = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(source != target, "split should create a distinct source pane")
 
         model.updatePane(source) {
@@ -253,7 +253,7 @@ import Testing
         #expect(model.allPaneIds.filter { $0 == source }.count == 1, "moved pane must not be duplicated")
 
         // splitRight -> horizontal split with target on the left, source on the right.
-        guard case .split(_, .horizontal, .leaf(let left), .leaf(let right), _) = selectedTab(in: model)!.rootNode else {
+        guard case .split(_, .horizontal, .leaf(let left), .leaf(let right), _) = selectedTab(in: model)!.paneTree.root else {
             Issue.record("tab should be a horizontal split of two leaves")
             return
         }
@@ -277,9 +277,9 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let failingTabId = selectedTab(in: model)!.id
-        let paneA = selectedTab(in: model)!.focusedPaneId
+        let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = selectedTab(in: model)!.focusedPaneId
+        let paneB = selectedTab(in: model)!.paneTree.focusedPaneId
         createTab(&model)  // a second tab so removing the failing one doesn't terminate
 
         // Seed id-keyed side tables for both panes.
@@ -407,7 +407,7 @@ import Testing
         #expect(model.pane(minted)?.session?.title == "Minty", "title survives the mint")
         #expect(model.pane(minted)?.session?.cwd == "/x")
         #expect(model.pane(minted)?.theme == "Nord")
-        #expect(model.groups[0].tabs[0].focusedPaneId == minted, "focus defaults to the minted leaf")
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == minted, "focus defaults to the minted leaf")
     }
 
     @Test("restore chrome derives from the focused leaf's pane cwd and ignores siblings")
@@ -469,9 +469,9 @@ import Testing
         //   has scrollback and p2 still has nil.
         var model = makeModel()
         createTab(&model)
-        let p1 = selectedTab(in: model)!.focusedPaneId
+        let p1 = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let p2 = selectedTab(in: model)!.focusedPaneId
+        let p2 = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(p1 != p2, "split should add a second pane")
 
         let snapshot = toSnapshot(model)

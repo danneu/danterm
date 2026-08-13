@@ -38,12 +38,7 @@ func appPresentationLifecycleTests() {
         let groupId = GroupId()
         let session = TerminalView()
         let pane = PaneModel(id: paneId)
-        let tab = TabModel(
-            id: tabId,
-            customTitle: nil,
-            focusedPaneId: paneId,
-            rootNode: .leaf(pane)
-        )
+        let tab = TabModel(id: tabId, customTitle: nil, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
         runtime.model = AppModel(
             groups: [GroupModel(id: groupId, name: "General", tabs: [tab])]
         )

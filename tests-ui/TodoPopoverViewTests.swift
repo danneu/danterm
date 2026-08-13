@@ -528,7 +528,7 @@ private func makePaneTodoFixture(todos: [TodoItem]? = nil) -> PaneTodoFixture {
         TodoItem(id: doneId, text: "Pane done", isDone: true),
     ]
 
-    let tab = TabModel(id: tabId, customTitle: nil, focusedPaneId: paneId, rootNode: .leaf(pane))
+    let tab = TabModel(id: tabId, customTitle: nil, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
     let group = GroupModel(id: GroupId(), name: "Group", tabs: [tab])
     var model = AppModel(groups: [group])
     model.selectedTabId = tabId

@@ -16,7 +16,7 @@ import DanTermProtocol
     func paneKeyArmsCopyOnSelectByDefault() {
         var model = makeModel()
         _ = createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         #expect(desiredPaneConfig(in: model)[paneId]?.copyOnSelect == true)
     }
@@ -30,7 +30,7 @@ import DanTermProtocol
         // Scenario: spec-first; the user edits config.json and reloads.
         var model = makeModel()
         _ = createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let before = desiredPaneConfig(in: model)[paneId]
 
         var config = DanTermConfig.default

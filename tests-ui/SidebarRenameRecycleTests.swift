@@ -46,7 +46,8 @@ func sidebarRenameRecycleTests() {
             (groupA, "Primary", false, [(tab, "short")] + overflowTabs),
             (groupB, "Secondary", false, [(anchor, "anchor")]),
         ], selected: tab)
-        model.alerts = [renameRecycleBellAlert(paneId: model.groups[0].tabs[0].focusedPaneId)]
+        model.alerts = [renameRecycleBellAlert(
+            paneId: model.groups[0].tabs[0].paneTree.focusedPaneId)]
 
         let scroll = findRenameRecycleScrollView(in: sidebar)!
         scroll.scrollerStyle = .legacy
@@ -89,7 +90,8 @@ func sidebarRenameRecycleTests() {
             (groupA, "Primary", false, [(tab, "short")]),
             (groupB, "Secondary", false, [(anchor, "anchor")]),
         ], selected: tab)
-        model.alerts = [renameRecycleBellAlert(paneId: model.groups[0].tabs[0].focusedPaneId)]
+        model.alerts = [renameRecycleBellAlert(
+            paneId: model.groups[0].tabs[0].paneTree.focusedPaneId)]
         var projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         let scroll = findRenameRecycleScrollView(in: sidebar)!
         let cell: SidebarTabCellView = try renameRecycleCell(for: .tab(tab), in: outline)
@@ -764,7 +766,7 @@ func sidebarRenameRecycleTests() {
             (groupB, "B", false, [(anchor, "anchor"), (spawned, "fresh tab")]),
         ])
         spawnedModel.alerts = [renameRecycleBellAlert(
-            paneId: spawnedModel.groups[1].tabs[1].focusedPaneId)]
+            paneId: spawnedModel.groups[1].tabs[1].paneTree.focusedPaneId)]
         _ = applyRenameRecycleTransition(
             old: collapsedProjection, newModel: spawnedModel,
             to: sidebar, outline: outline, runtime: runtime)
@@ -819,7 +821,7 @@ private func renameRecycleModel(
                     let paneId = PaneId()
                     var pane = PaneModel(id: paneId)
                     pane.session = SessionModel(id: SessionId(), title: title)
-                    return TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(pane))
+                    return TabModel(id: tabId, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
                 }
             )
         },

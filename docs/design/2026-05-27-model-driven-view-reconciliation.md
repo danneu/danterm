@@ -102,9 +102,9 @@ reconciliation runs after pane chrome because active search may target a field
 that pass creates. Occlusion remains last because it reads the final
 visible/mounted session state.
 
-Pane focus is a single non-cached projection. The selected tab's
-`focusedPaneId` chooses the pane, and active search state records whether that
-pane's terminal or search field owns focus. The AppKit executor compares the
+Pane focus is a single non-cached projection. The selected tab's `PaneTree`
+chooses its focused pane, and active search state records whether that pane's
+terminal or search field owns focus. The AppKit executor compares the
 projection with the live first responder on every sweep so a tree patch that
 temporarily detaches a wrapper can be repaired even when the desired model value
 did not change. A deliberate non-pane claimant in the main window is preserved;

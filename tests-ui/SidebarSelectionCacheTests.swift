@@ -626,10 +626,7 @@ private func sidebarAlertModel(
                 id: groupId,
                 name: "Alerts",
                 tabs: zip(tabIds, paneIds).map { tabId, paneId in
-                    TabModel(
-                        id: tabId,
-                        focusedPaneId: paneId,
-                        rootNode: .leaf(PaneModel(id: paneId)))
+                    TabModel(id: tabId, paneTree: PaneTree(root: .leaf(PaneModel(id: paneId)), focusedPaneId: paneId))
                 }),
         ],
         selectedTabId: selectedTabId)
@@ -650,11 +647,7 @@ private func sidebarBellAlert(paneId: PaneId) -> AlertModel {
 
 private func sidebarSelectionTab(_ id: TabId) -> TabModel {
     let paneId = PaneId()
-    return TabModel(
-        id: id,
-        focusedPaneId: paneId,
-        rootNode: .leaf(PaneModel(id: paneId))
-    )
+    return TabModel(id: id, paneTree: PaneTree(root: .leaf(PaneModel(id: paneId)), focusedPaneId: paneId))
 }
 
 @MainActor

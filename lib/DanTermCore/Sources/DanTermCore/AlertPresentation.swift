@@ -49,7 +49,7 @@ func alertPresentation(
     }
 
     var location = tabDisplayTitle(tab)
-    let paneIds = allPaneIds(tab.rootNode)
+    let paneIds = allPaneIds(tab.paneTree.root)
     if paneIds.count > 1, let index = paneIds.firstIndex(of: paneId) {
         location += " - pane \(index + 1)"
     }

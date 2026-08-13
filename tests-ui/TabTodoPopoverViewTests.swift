@@ -451,12 +451,7 @@ private func makeTabTodoFixture(
         first: .leaf(firstPane),
         second: .leaf(secondPane),
         ratio: 0.5)
-    let tab = TabModel(
-        id: tabId,
-        customTitle: nil,
-        focusedPaneId: firstPaneId,
-        rootNode: rootNode,
-        todos: tabTodos ?? [
+    let tab = TabModel(id: tabId, customTitle: nil, paneTree: PaneTree(root: rootNode, focusedPaneId: firstPaneId), todos: tabTodos ?? [
             TodoItem(id: tabOpenId, text: "Tab alpha", isDone: false),
             TodoItem(id: tabDoneId, text: "Tab done", isDone: true),
         ])

@@ -215,7 +215,7 @@ func splitContainerViewTests() {
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
             ratio: 0.5
         )
-        let oldTab = TabModel(id: tabId, focusedPaneId: paneA, rootNode: oldRoot)
+        let oldTab = TabModel(id: tabId, paneTree: PaneTree(root: oldRoot, focusedPaneId: paneA))
         let runtime = AppRuntime(model: AppModel(
             groups: [GroupModel(id: GroupId(), name: "General", tabs: [oldTab])],
             selectedTabId: tabId
@@ -240,8 +240,8 @@ func splitContainerViewTests() {
         try uiExpect(runtime.paneFocusClaimant() == .none,
             "split should expose the stranded AppKit responder mechanism")
 
-        runtime.model.groups[0].tabs[0].rootNode = newRoot
-        runtime.model.groups[0].tabs[0].focusedPaneId = paneB
+        runtime.model.groups[0].tabs[0].paneTree = PaneTree(
+            root: newRoot, focusedPaneId: paneB)
         runtime.reconcilePaneFocus()
 
         try uiExpect(window.firstResponder === terminalB,
@@ -272,7 +272,7 @@ func splitContainerViewTests() {
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
             ratio: 0.5
         )
-        let tab = TabModel(id: tabId, focusedPaneId: paneA, rootNode: oldRoot)
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: oldRoot, focusedPaneId: paneA))
         var model = AppModel(
             groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
             selectedTabId: tabId
@@ -297,7 +297,7 @@ func splitContainerViewTests() {
         ) else { throw UITestFailure(message: "missing split patch") }
         container.applyTreePatch(patch, rootNode: newRoot)
         container.ensureLaidOut()
-        runtime.model.groups[0].tabs[0].rootNode = newRoot
+        runtime.model.groups[0].tabs[0].paneTree = PaneTree(root: newRoot)
         runtime.reconcilePaneFocus()
 
         try uiExpect(field.currentEditor() === window.firstResponder,
@@ -312,7 +312,7 @@ func splitContainerViewTests() {
         // Scenario: one window cycles through every claimant kind.
         let paneId = PaneId(), tabId = TabId()
         let root = SplitNodeModel.leaf(PaneModel(id: paneId))
-        let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: root)
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: root, focusedPaneId: paneId))
         var model = AppModel(
             groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
             selectedTabId: tabId

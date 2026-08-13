@@ -26,12 +26,12 @@ import Testing
         //   with two leaves.
         var model = makeModel()
         createTab(&model)
-        let originalPaneId = model.groups[0].tabs[0].focusedPaneId
+        let originalPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
         let tab = model.groups[0].tabs[0]
 
-        guard case .split(_, let direction, let first, let second, _) = tab.rootNode else {
+        guard case .split(_, let direction, let first, let second, _) = tab.paneTree.root else {
             Issue.record("root should be a split after splitting")
             return
         }
@@ -43,7 +43,7 @@ import Testing
             return
         }
         if case .leaf(let sid) = second {
-            #expect(sid.id == tab.focusedPaneId, "second child should be new focused pane")
+            #expect(sid.id == tab.paneTree.focusedPaneId, "second child should be new focused pane")
         } else {
             Issue.record("second child should be a leaf")
             return
@@ -61,16 +61,16 @@ import Testing
         //   pane in a two-pane tab; the original pane survives.
         var model = makeModel()
         createTab(&model)
-        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
+        let firstPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let newPaneId = model.groups[0].tabs[0].focusedPaneId
+        let newPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         #expect(newPaneId != firstPaneId, "split should create new pane")
 
         update(&model, .closePane(paneId: newPaneId))
         let updatedTab = model.groups[0].tabs[0]
         #expect(model.pane(newPaneId) == nil, "closed pane should be removed from panes dict")
-        if case .leaf(let remainingId) = updatedTab.rootNode {
+        if case .leaf(let remainingId) = updatedTab.paneTree.root {
             #expect(remainingId.id == firstPaneId)
         } else {
             Issue.record("root should be a leaf after closing one of two panes")
@@ -86,10 +86,10 @@ import Testing
         // Scenario: spec-first directional focus -- move left, then right.
         var model = makeModel()
         createTab(&model)
-        let leftPaneId = model.groups[0].tabs[0].focusedPaneId
+        let leftPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let rightPaneId = model.groups[0].tabs[0].focusedPaneId
+        let rightPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         #expect(rightPaneId != leftPaneId)
         model.alerts = [AlertModel(
             id: AlertId(), kind: .bell, paneId: leftPaneId,
@@ -98,13 +98,13 @@ import Testing
 
         let effectsLeft = update(&model, .focusDirection(direction: .horizontal, side: .first))
         #expect(effectsLeft.isEmpty)
-        #expect(model.groups[0].tabs[0].focusedPaneId == leftPaneId)
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == leftPaneId)
         #expect(model.alerts[0].isUnread == false,
             "directional focus should clear the target alert eagerly")
 
         let effectsRight = update(&model, .focusDirection(direction: .horizontal, side: .second))
         #expect(effectsRight.isEmpty)
-        #expect(model.groups[0].tabs[0].focusedPaneId == rightPaneId)
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == rightPaneId)
     }
 
     @Test("testSplitRatioChangedNoEffects")
@@ -117,7 +117,7 @@ import Testing
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
 
-        guard case .split(let splitId, _, _, _, _) = model.groups[0].tabs[0].rootNode else {
+        guard case .split(let splitId, _, _, _, _) = model.groups[0].tabs[0].paneTree.root else {
             Issue.record("should be a split")
             return
         }
@@ -125,7 +125,7 @@ import Testing
         let commands = update(&model, .splitRatioChanged(splitId: splitId, ratio: 0.3))
         #expect(commands.isEmpty)
 
-        guard case .split(_, _, _, _, let ratio) = model.groups[0].tabs[0].rootNode else {
+        guard case .split(_, _, _, _, let ratio) = model.groups[0].tabs[0].paneTree.root else {
             Issue.record("should still be a split")
             return
         }
@@ -146,7 +146,7 @@ import Testing
         let tabAId = model.groups[0].tabs[0].id
         update(&model, .splitFocusedPane(direction: .horizontal))
 
-        guard case .split(let tabASplitId, _, _, _, _) = model.groups[0].tabs[0].rootNode else {
+        guard case .split(let tabASplitId, _, _, _, _) = model.groups[0].tabs[0].paneTree.root else {
             Issue.record("tab A should have a split")
             return
         }
@@ -161,7 +161,7 @@ import Testing
             Issue.record("tab A should still exist")
             return
         }
-        guard case .split(_, _, _, _, let ratio) = tabA.rootNode else {
+        guard case .split(_, _, _, _, let ratio) = tabA.paneTree.root else {
             Issue.record("tab A should still have a split")
             return
         }
@@ -171,7 +171,7 @@ import Testing
             Issue.record("tab B should still be selected")
             return
         }
-        if case .leaf = tabB.rootNode {
+        if case .leaf = tabB.paneTree.root {
             // expected
         } else {
             Issue.record("selected tab B should remain a leaf")
@@ -205,13 +205,13 @@ import Testing
         // Scenario: spec-first inner-leaf close.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .vertical))
-        let paneC = model.groups[0].tabs[0].focusedPaneId
+        let paneC = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         #expect(model.allPaneIds.count == 3)
 
@@ -220,7 +220,7 @@ import Testing
         #expect(model.allPaneIds.count == 2)
 
         let tab = model.groups[0].tabs[0]
-        guard case .split(_, .horizontal, let first, let second, _) = tab.rootNode else {
+        guard case .split(_, .horizontal, let first, let second, _) = tab.paneTree.root else {
             Issue.record("root should be a horizontal split")
             return
         }
@@ -266,21 +266,21 @@ import Testing
         //   TL must still pick TR, not BR.
         var model = makeModel()
         createTab(&model)
-        let tl = model.groups[0].tabs[0].focusedPaneId
+        let tl = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let tr = model.groups[0].tabs[0].focusedPaneId
+        let tr = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .paneBecameFirstResponder(paneId: tl))
         update(&model, .splitFocusedPane(direction: .vertical))  // TL -> TL/BL, focus BL
         update(&model, .paneBecameFirstResponder(paneId: tr))
         update(&model, .splitFocusedPane(direction: .vertical))  // TR -> TR/BR, focus BR
-        let br = model.groups[0].tabs[0].focusedPaneId
+        let br = model.groups[0].tabs[0].paneTree.focusedPaneId
         // BR is now the most-recently focused pane in the right column.
 
         update(&model, .paneBecameFirstResponder(paneId: tl))
         let effects = update(&model, .focusDirection(direction: .horizontal, side: .second))
 
         #expect(effects.isEmpty)
-        #expect(selectedTab(in: model)?.focusedPaneId == tr,
+        #expect(selectedTab(in: model)?.paneTree.focusedPaneId == tr,
             "focus-right from TL must preserve the top row (-> TR), not jump to BR \(br)")
     }
 
@@ -297,22 +297,22 @@ import Testing
         //   BR, not TR.
         var model = makeModel()
         createTab(&model)
-        let tl = model.groups[0].tabs[0].focusedPaneId
+        let tl = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let tr = model.groups[0].tabs[0].focusedPaneId
+        let tr = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .paneBecameFirstResponder(paneId: tl))
         update(&model, .splitFocusedPane(direction: .vertical))  // TL -> TL/BL, focus BL
-        let bl = model.groups[0].tabs[0].focusedPaneId
+        let bl = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .paneBecameFirstResponder(paneId: tr))
         update(&model, .splitFocusedPane(direction: .vertical))  // TR -> TR/BR, focus BR
-        let br = model.groups[0].tabs[0].focusedPaneId
+        let br = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .paneBecameFirstResponder(paneId: tr))  // TR last-focused in right column
         update(&model, .paneBecameFirstResponder(paneId: bl))
         let effects = update(&model, .focusDirection(direction: .horizontal, side: .second))
 
         #expect(effects.isEmpty)
-        #expect(selectedTab(in: model)?.focusedPaneId == br,
+        #expect(selectedTab(in: model)?.paneTree.focusedPaneId == br,
             "focus-right from BL must preserve the bottom row (-> BR), not jump to TR \(tr)")
     }
 
@@ -326,10 +326,10 @@ import Testing
         //   focus to paneA; paneA's alert clears.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         model.updatePane(paneA) { $0.session?.title = "my-title" }
         model.updatePane(paneA) { $0.session?.cwd = "/tmp/foo" }
@@ -343,7 +343,7 @@ import Testing
         _ = paneB
 
         let tab = model.groups[0].tabs[0]
-        #expect(tab.focusedPaneId == paneA, "focused pane should change")
+        #expect(tab.paneTree.focusedPaneId == paneA, "focused pane should change")
         #expect(model.alerts[0].isUnread == false, "alert should be marked read")
         #expect(commands.isEmpty)
     }
@@ -355,7 +355,7 @@ import Testing
         // Scenario: spec-first idempotent callback.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let commands = update(&model, .paneBecameFirstResponder(paneId: paneId))
         #expect(commands.count == 0, "same pane should return no commands")
@@ -378,10 +378,10 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabAId = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
-        let tabBPane = model.groups[0].tabs[1].focusedPaneId
+        let tabBPane = model.groups[0].tabs[1].paneTree.focusedPaneId
 
         _ = update(&model, .selectTab(id: tabAId))
 
@@ -394,7 +394,7 @@ import Testing
 
         let tabA = tabById(tabAId, in: model)!
         #expect(model.selectedTabId == tabAId, "selection should be unchanged")
-        #expect(tabA.focusedPaneId == paneA, "selected tab focus must not adopt a foreign pane")
+        #expect(tabA.paneTree.focusedPaneId == paneA, "selected tab focus must not adopt a foreign pane")
         #expect(model.alerts[0].isUnread == true, "background tab's alert must stay unread")
         #expect(commands.isEmpty, "cross-tab callback should emit no commands")
     }
@@ -409,7 +409,7 @@ import Testing
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
 
@@ -433,17 +433,17 @@ import Testing
         //   close paneB; tab adopts paneA's chrome.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         model.updatePane(paneA) { $0.session?.title = "pane-a-title" }
         model.updatePane(paneA) { $0.session?.cwd = "/tmp/pane-a" }
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .closePane(paneId: paneB))
 
         let tab = model.groups[0].tabs[0]
-        #expect(tab.focusedPaneId == paneA)
+        #expect(tab.paneTree.focusedPaneId == paneA)
         #expect(tabTitle(tab) == "pane-a-title")
         #expect(tabSubtitle(tab) == "/tmp/pane-a")
     }
@@ -456,18 +456,18 @@ import Testing
         // Scenario: spec-first collapsed close.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         model.updatePane(paneA) { $0.session?.title = "pane-a-title" }
         model.groups[0].isCollapsed = true
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .closePane(paneId: paneB))
 
         #expect(model.pane(paneB) == nil, "paneB should be closed")
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneA, "paneA should refocus")
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == paneA, "paneA should refocus")
     }
 
     @Test("closePane with remaining panes rebuilds the visible tab")
@@ -479,8 +479,8 @@ import Testing
         var model = makeModel()
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneToClose = model.groups[0].tabs[0].focusedPaneId
-        let sibling = allPaneIds(model.groups[0].tabs[0].rootNode).first { $0 != paneToClose }!
+        let paneToClose = model.groups[0].tabs[0].paneTree.focusedPaneId
+        let sibling = allPaneIds(model.groups[0].tabs[0].paneTree.root).first { $0 != paneToClose }!
 
         update(&model, .closePane(paneId: paneToClose))
 
@@ -500,7 +500,7 @@ import Testing
         createTab(&model)
         let fallbackTabId = model.groups[0].tabs[0].id
         createTab(&model)
-        let closingPaneId = model.groups[0].tabs[1].focusedPaneId
+        let closingPaneId = model.groups[0].tabs[1].paneTree.focusedPaneId
         let liveBefore = Set(model.allPaneIds)
 
         update(&model, .closePane(paneId: closingPaneId))
@@ -523,7 +523,7 @@ import Testing
         update(&model, .splitFocusedPane(direction: .horizontal))
 
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == true)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true)
     }
 
     @Test("testToggleZoomOff")
@@ -537,7 +537,7 @@ import Testing
         update(&model, .toggleZoomPane(paneId: nil))
 
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == false)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == false)
     }
 
     @Test("testToggleZoomNoOpOnSinglePane")
@@ -550,7 +550,7 @@ import Testing
         createTab(&model)
 
         let commands = update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == false)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == false)
         #expect(commands.count == 0, "no commands on single pane")
     }
 
@@ -562,16 +562,16 @@ import Testing
         // Scenario: spec-first zoom-normalize.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == true)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true)
 
         update(&model, .closePane(paneId: paneB))
-        #expect(model.groups[0].tabs[0].isZoomed == false, "zoom should normalize when single pane remains")
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneA)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == false, "zoom should normalize when single pane remains")
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == paneA)
     }
 
     @Test("testCloseZoomedPaneClearsZoomWithMultiplePanesRemaining")
@@ -584,16 +584,16 @@ import Testing
         createTab(&model)
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .vertical))
-        let paneC = model.groups[0].tabs[0].focusedPaneId
+        let paneC = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == true)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true)
 
         update(&model, .closePane(paneId: paneC))
-        #expect(model.groups[0].tabs[0].isZoomed == false, "zoom should clear when zoomed pane is closed")
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneB, "focus should move to sibling")
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == false, "zoom should clear when zoomed pane is closed")
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == paneB, "focus should move to sibling")
     }
 
     @Test("testSplitWhileZoomedClearsZoom")
@@ -605,10 +605,10 @@ import Testing
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == true)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true)
 
         update(&model, .splitFocusedPane(direction: .vertical))
-        #expect(model.groups[0].tabs[0].isZoomed == false, "split should clear zoom")
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == false, "split should clear zoom")
     }
 
     @Test("testFocusDirectionWhileZoomedClearsZoom")
@@ -621,10 +621,10 @@ import Testing
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == true)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true)
 
         update(&model, .focusDirection(direction: .horizontal, side: .first))
-        #expect(model.groups[0].tabs[0].isZoomed == false, "focus direction should clear zoom")
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == false, "focus direction should clear zoom")
     }
 
     // MARK: - Pane-Scoped Tab Resolution Tests
@@ -643,7 +643,7 @@ import Testing
         update(&fx.model, .closePane(paneId: fx.a1))
 
         let tabA = fx.model.groups[0].tabs.first { $0.id == fx.tabA }!
-        if case .leaf(let survivor) = tabA.rootNode {
+        if case .leaf(let survivor) = tabA.paneTree.root {
             #expect(survivor.id == fx.a2, "tab A should collapse to its surviving sibling")
         } else {
             Issue.record("tab A's root should be a leaf after the background close")
@@ -691,7 +691,7 @@ import Testing
 
         #expect(fx.model.pane(fx.a1) == nil, "the dead pane must leave its tab's tree, not linger as a ghost")
         let tabB = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!
-        #expect(tabB.isZoomed == true, "selected tab's zoom must survive a background-tab session close")
+        #expect(tabB.paneTree.isZoomed == true, "selected tab's zoom must survive a background-tab session close")
     }
 
     @Test("toggleZoomPane(paneId:) toggles the pane's own tab; nil keeps selected-tab behavior")
@@ -708,12 +708,12 @@ import Testing
 
         let tabA = fx.model.groups[0].tabs.first { $0.id == fx.tabA }!
         let tabB = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!
-        #expect(tabA.isZoomed == true, "pane-scoped zoom should toggle the pane's own tab")
-        #expect(tabB.isZoomed == true, "selected tab's zoom must be untouched by a pane-scoped toggle")
+        #expect(tabA.paneTree.isZoomed == true, "pane-scoped zoom should toggle the pane's own tab")
+        #expect(tabB.paneTree.isZoomed == true, "selected tab's zoom must be untouched by a pane-scoped toggle")
 
         update(&fx.model, .toggleZoomPane(paneId: nil))
         let tabBAfterNil = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!
-        #expect(tabBAfterNil.isZoomed == false, "nil paneId should keep toggling the selected tab")
+        #expect(tabBAfterNil.paneTree.isZoomed == false, "nil paneId should keep toggling the selected tab")
     }
 
     @Test("closing a background-tab pane preserves the successor's unread alert")
@@ -768,11 +768,11 @@ import Testing
         //   pane B closes and pane C, B's successor, has an unread alert.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .vertical))
-        let paneC = model.groups[0].tabs[0].focusedPaneId
+        let paneC = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         model.alerts = [AlertModel(
             id: AlertId(), kind: .bell, paneId: paneC,
@@ -782,7 +782,7 @@ import Testing
 
         update(&model, .closePane(paneId: paneB))
 
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneA,
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == paneA,
                 "closing a non-focused pane must not steal focus")
         #expect(model.alerts[0].isUnread == true,
                 "the successor's alert must remain unread when focus did not move")
@@ -815,16 +815,16 @@ import Testing
         // Scenario: spec-first split-move.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .movePane(source: paneA, target: paneB, intent: .splitBottom))
         let tab = model.groups[0].tabs[0]
-        #expect(tab.focusedPaneId == paneA, "source should be focused after move")
-        #expect(tab.isZoomed == false, "zoom should be cleared")
-        let ids = allPaneIds(tab.rootNode)
+        #expect(tab.paneTree.focusedPaneId == paneA, "source should be focused after move")
+        #expect(tab.paneTree.isZoomed == false, "zoom should be cleared")
+        let ids = allPaneIds(tab.paneTree.root)
         #expect(ids.count == 2)
         #expect(ids.contains(paneA))
         #expect(ids.contains(paneB))
@@ -838,15 +838,15 @@ import Testing
         // Scenario: spec-first swap.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .movePane(source: paneA, target: paneB, intent: .swap))
         let tab = model.groups[0].tabs[0]
-        #expect(tab.focusedPaneId == paneA, "source should be focused after swap")
-        #expect(lastLeafId(tab.rootNode) == paneA, "A should now be last (swapped to right)")
+        #expect(tab.paneTree.focusedPaneId == paneA, "source should be focused after swap")
+        #expect(lastLeafId(tab.paneTree.root) == paneA, "A should now be last (swapped to right)")
     }
 
     @Test("testMovePaneSameSourceTarget")
@@ -857,7 +857,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let pane = model.groups[0].tabs[0].focusedPaneId
+        let pane = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let commands = update(&model, .movePane(source: pane, target: pane, intent: .swap))
         #expect(commands.count == 0, "same source/target is no-op")
@@ -883,11 +883,11 @@ import Testing
         var model = makeModel()
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == true)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true)
 
-        let paneB = allPaneIds(model.groups[0].tabs[0].rootNode).first(where: { $0 != paneA })!
+        let paneB = allPaneIds(model.groups[0].tabs[0].paneTree.root).first(where: { $0 != paneA })!
         let commands = update(&model, .movePane(source: paneA, target: paneB, intent: .swap))
         #expect(commands.count == 0, "zoomed tab is no-op")
     }
@@ -902,7 +902,7 @@ import Testing
         //   the drag's panes are still in the old tab while a different tab is
         //   now selected.
         var swap = makeTwoTabFixture()
-        swap.model.groups[0].tabs[1].isZoomed = false
+        swap.model.groups[0].tabs[1].paneTree.unzoom()
         let swapTarget = try #require(swap.a2, "fixture should provide a second pane in tab A")
         let beforeSwap = swap.model
 
@@ -912,7 +912,7 @@ import Testing
         #expect(swap.model == beforeSwap, "background-tab swap must not mutate the model")
 
         var split = makeTwoTabFixture()
-        split.model.groups[0].tabs[1].isZoomed = false
+        split.model.groups[0].tabs[1].paneTree.unzoom()
         let splitTarget = try #require(split.a2, "fixture should provide a second pane in tab A")
         let beforeSplit = split.model
 
@@ -931,16 +931,16 @@ import Testing
         //   id; outer split keeps direction; inner split appears under A.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         #expect(paneB != paneA)
 
         update(&model, .splitPane(paneId: paneA, direction: .vertical))
         let tab = model.groups[0].tabs[0]
 
-        guard case .split(_, .horizontal, let first, let second, _) = tab.rootNode else {
+        guard case .split(_, .horizontal, let first, let second, _) = tab.paneTree.root else {
             Issue.record("root should be horizontal split")
             return
         }
@@ -955,7 +955,7 @@ import Testing
             Issue.record("inner first should be a leaf")
             return
         }
-        let paneC = tab.focusedPaneId
+        let paneC = tab.paneTree.focusedPaneId
         if case .leaf(let sid) = innerSecond {
             #expect(sid.id == paneC, "inner second should be new pane C")
         } else {
@@ -982,7 +982,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let existingFocusedPaneId = model.groups[0].tabs[0].focusedPaneId
+        let existingFocusedPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let beforePaneIds = Set(model.allPaneIds)
 
         let commands = update(
@@ -993,8 +993,8 @@ import Testing
         let tab = tabById(tabId, in: model)!
 
         #expect(newPaneIds.count == 1, "background split should create one pane")
-        #expect(allPaneIds(tab.rootNode).contains(newPaneIds.first!), "tab tree should contain new pane")
-        #expect(tab.focusedPaneId == existingFocusedPaneId, "background split should preserve focused pane")
+        #expect(allPaneIds(tab.paneTree.root).contains(newPaneIds.first!), "tab tree should contain new pane")
+        #expect(tab.paneTree.focusedPaneId == existingFocusedPaneId, "background split should preserve focused pane")
         #expect(model.selectedTabId == tabId, "background split should not change selected tab")
         #expect(hasEffect(commands) {
             if case .createSession(_, let paneId, _, _, _) = $0 {
@@ -1002,7 +1002,7 @@ import Testing
             }
             return false
         }, "should create a session for the new pane")
-        #expect(allPaneIds(model.groups[0].tabs[0].rootNode).contains { newPaneIds.contains($0) },
+        #expect(allPaneIds(model.groups[0].tabs[0].paneTree.root).contains { newPaneIds.contains($0) },
             "new pane lands in the selected tab's tree (rendered on the rebuild)")
     }
 
@@ -1018,7 +1018,7 @@ import Testing
         let tabAId = model.groups[0].tabs[0].id
         createTab(&model)
         let tabBId = model.groups[0].tabs[1].id
-        let tabBFocusedPaneId = model.groups[0].tabs[1].focusedPaneId
+        let tabBFocusedPaneId = model.groups[0].tabs[1].paneTree.focusedPaneId
         _ = update(&model, .selectTab(id: tabAId))
         let beforePaneIds = Set(model.allPaneIds)
 
@@ -1030,8 +1030,8 @@ import Testing
         let tabB = tabById(tabBId, in: model)!
 
         #expect(newPaneIds.count == 1, "background split should create one pane")
-        #expect(allPaneIds(tabB.rootNode).contains(newPaneIds.first!), "background tab tree should contain new pane")
-        #expect(tabB.focusedPaneId == tabBFocusedPaneId, "background split should preserve target tab focus")
+        #expect(allPaneIds(tabB.paneTree.root).contains(newPaneIds.first!), "background tab tree should contain new pane")
+        #expect(tabB.paneTree.focusedPaneId == tabBFocusedPaneId, "background split should preserve target tab focus")
         #expect(model.selectedTabId == tabAId, "background split should not change selected tab")
         #expect(hasEffect(commands) {
             if case .createSession(_, let paneId, _, _, _) = $0 {
@@ -1049,7 +1049,7 @@ import Testing
         // Scenario: spec-first background-split-theme.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.updatePane(paneId) { $0.theme = "Tokyo Night" }
         let beforePaneIds = Set(model.allPaneIds)
 
@@ -1069,14 +1069,14 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let focusedPaneId = model.groups[0].tabs[0].focusedPaneId
+        let focusedPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let beforePaneIds = Set(model.allPaneIds)
 
         update(&model, .splitPane(paneId: focusedPaneId, direction: .horizontal))
         let newPaneId = Set(model.allPaneIds).subtracting(beforePaneIds).first!
         let tab = tabById(tabId, in: model)!
 
-        #expect(tab.focusedPaneId == newPaneId, "foreground split should focus new pane")
+        #expect(tab.paneTree.focusedPaneId == newPaneId, "foreground split should focus new pane")
     }
 
     @Test("focusDirection and responder callback converge idempotently")
@@ -1087,18 +1087,18 @@ import Testing
         // Scenario: spec-first focus convergence.
         var model = makeModel()
         createTab(&model)
-        let leftPaneId = model.groups[0].tabs[0].focusedPaneId
+        let leftPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let rightPaneId = model.groups[0].tabs[0].focusedPaneId
+        let rightPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         #expect(rightPaneId != leftPaneId)
 
         let focusEffects = update(&model, .focusDirection(direction: .horizontal, side: .first))
         #expect(focusEffects.isEmpty)
-        #expect(model.groups[0].tabs[0].focusedPaneId == leftPaneId)
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == leftPaneId)
 
         let callbackEffects = update(&model, .paneBecameFirstResponder(paneId: leftPaneId))
-        #expect(model.groups[0].tabs[0].focusedPaneId == leftPaneId)
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == leftPaneId)
         #expect(callbackEffects.isEmpty)
     }
 
@@ -1110,16 +1110,16 @@ import Testing
         // Scenario: spec-first swap-chrome.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("alpha")))
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneB, in: model), report: .title("beta")))
 
         update(&model, .movePane(source: paneA, target: paneB, intent: .swap))
 
         let tab = model.groups[0].tabs[0]
-        #expect(tab.focusedPaneId == paneA)
+        #expect(tab.paneTree.focusedPaneId == paneA)
         #expect(tabDisplayTitle(tab) == "alpha", "swapping focus to pane A should show pane A chrome")
     }
 
@@ -1137,11 +1137,11 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
-        let paneB = model.groups[0].tabs[1].focusedPaneId
+        let paneB = model.groups[0].tabs[1].paneTree.focusedPaneId
         let liveBefore = Set(model.allPaneIds)
 
         _ = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
@@ -1150,14 +1150,14 @@ import Testing
         #expect(model.groups[0].tabs[0].id == tab2Id, "remaining tab should be target")
 
         let targetTab = model.groups[0].tabs[0]
-        let targetPaneIds = allPaneIds(targetTab.rootNode)
+        let targetPaneIds = allPaneIds(targetTab.paneTree.root)
         #expect(targetPaneIds.count == 2, "target tab should have 2 panes")
         #expect(targetPaneIds.contains(paneA), "target should contain moved pane")
         #expect(targetPaneIds.contains(paneB), "target should contain original pane")
 
         #expect(model.selectedTabId == tab2Id, "should select target tab")
-        #expect(targetTab.focusedPaneId == paneA, "should focus moved pane")
-        #expect(targetTab.isZoomed == false, "target zoom should be cleared")
+        #expect(targetTab.paneTree.focusedPaneId == paneA, "should focus moved pane")
+        #expect(targetTab.paneTree.isZoomed == false, "target zoom should be cleared")
 
         #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model).isEmpty,
             "a cross-tab move tears down no sessions")
@@ -1175,32 +1175,32 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
-        let paneC = model.groups[0].tabs[1].focusedPaneId
+        let paneC = model.groups[0].tabs[1].paneTree.focusedPaneId
 
         update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
         #expect(model.groups[0].tabs.count == 2, "source tab should remain")
         let srcTab = model.groups[0].tabs.first(where: { $0.id == tab1Id })!
-        if case .leaf(let id) = srcTab.rootNode {
+        if case .leaf(let id) = srcTab.paneTree.root {
             #expect(id.id == paneB, "source tab should have paneB as leaf")
         } else {
             Issue.record("source tab should be a single leaf")
             return
         }
-        #expect(srcTab.focusedPaneId == paneB, "source tab should focus paneB")
+        #expect(srcTab.paneTree.focusedPaneId == paneB, "source tab should focus paneB")
 
         let dstTab = model.groups[0].tabs.first(where: { $0.id == tab2Id })!
-        let dstPaneIds = allPaneIds(dstTab.rootNode)
+        let dstPaneIds = allPaneIds(dstTab.paneTree.root)
         #expect(dstPaneIds.count == 2)
         #expect(dstPaneIds.contains(paneA))
         #expect(dstPaneIds.contains(paneC))
-        #expect(dstTab.focusedPaneId == paneA, "target tab should focus moved pane")
+        #expect(dstTab.paneTree.focusedPaneId == paneA, "target tab should focus moved pane")
         #expect(tabById(tab1Id, in: model) != nil, "surviving source tab is not removed")
     }
 
@@ -1214,10 +1214,10 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let sourceTabId = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("alpha")))
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneB, in: model), report: .title("beta")))
         update(&model, .paneBecameFirstResponder(paneId: paneA))
 
@@ -1227,7 +1227,7 @@ import Testing
         update(&model, .movePaneToTab(paneId: paneA, targetTabId: targetTabId))
 
         let sourceTab = tabById(sourceTabId, in: model)!
-        #expect(sourceTab.focusedPaneId == paneB)
+        #expect(sourceTab.paneTree.focusedPaneId == paneB)
         #expect(tabDisplayTitle(sourceTab) == "beta", "source tab should show the surviving focused pane")
     }
 
@@ -1240,7 +1240,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let commands = update(&model, .movePaneToTab(paneId: paneId, targetTabId: tabId))
         #expect(commands.count == 0, "same tab should be no-op")
@@ -1255,7 +1255,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
@@ -1274,12 +1274,12 @@ import Testing
         // Scenario: spec-first cross-group-prune.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .createGroup(name: "Work"))
         let group1Id = model.groups[1].id
         let tab2Id = model.groups[1].tabs[0].id
-        let paneB = model.groups[1].tabs[0].focusedPaneId
+        let paneB = model.groups[1].tabs[0].paneTree.focusedPaneId
 
         update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
@@ -1287,7 +1287,7 @@ import Testing
         #expect(model.groups[0].id == group1Id, "only Work group should remain")
 
         let targetTab = model.groups[0].tabs.first(where: { $0.id == tab2Id })!
-        let targetPanes = allPaneIds(targetTab.rootNode)
+        let targetPanes = allPaneIds(targetTab.paneTree.root)
         #expect(targetPanes.count == 2)
         #expect(targetPanes.contains(paneA))
         #expect(targetPanes.contains(paneB))
@@ -1301,11 +1301,11 @@ import Testing
         // Scenario: spec-first defocus-old-sessions.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
-        let paneB = model.groups[0].tabs[1].focusedPaneId
+        let paneB = model.groups[0].tabs[1].paneTree.focusedPaneId
 
         let commands = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
@@ -1322,7 +1322,7 @@ import Testing
         // Scenario: spec-first focus projection after a move.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
@@ -1340,18 +1340,18 @@ import Testing
         // Scenario: spec-first target-zoom-clear.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
         update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[1].isZoomed == true)
+        #expect(model.groups[0].tabs[1].paneTree.isZoomed == true)
 
         update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
         let targetTab = model.groups[0].tabs.first(where: { $0.id == tab2Id })!
-        #expect(targetTab.isZoomed == false, "target zoom should be cleared after move")
+        #expect(targetTab.paneTree.isZoomed == false, "target zoom should be cleared after move")
     }
 
     @Test("testMovePaneToTabZoomedSourceUnzooms")
@@ -1368,11 +1368,11 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let srcTabId = model.groups[0].tabs[0].id
-        let survivor = model.groups[0].tabs[0].focusedPaneId
+        let survivor = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let zoomedPane = model.groups[0].tabs[0].focusedPaneId
+        let zoomedPane = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == true)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true)
 
         createTab(&model)
         let targetTabId = model.groups[0].tabs[1].id
@@ -1380,11 +1380,11 @@ import Testing
         update(&model, .movePaneToTab(paneId: zoomedPane, targetTabId: targetTabId))
 
         let srcTab = tabById(srcTabId, in: model)!
-        #expect(srcTab.isZoomed == false, "source zoom should be cleared after move")
-        #expect(srcTab.focusedPaneId == survivor, "source focus should repoint to the survivor")
+        #expect(srcTab.paneTree.isZoomed == false, "source zoom should be cleared after move")
+        #expect(srcTab.paneTree.focusedPaneId == survivor, "source focus should repoint to the survivor")
 
         let targetTab = tabById(targetTabId, in: model)!
-        #expect(allPaneIds(targetTab.rootNode).contains(zoomedPane), "moved pane should land in the target")
+        #expect(allPaneIds(targetTab.paneTree.root).contains(zoomedPane), "moved pane should land in the target")
     }
 
     // MARK: - movePaneToNewTab Tests
@@ -1399,9 +1399,9 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         let groupId = model.groups[0].id
 
         _ = update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
@@ -1409,22 +1409,22 @@ import Testing
         #expect(model.groups[0].tabs.count == 2, "should have 2 tabs")
         let srcTab = model.groups[0].tabs[0]
         #expect(srcTab.id == tab1Id)
-        if case .leaf(let id) = srcTab.rootNode {
+        if case .leaf(let id) = srcTab.paneTree.root {
             #expect(id.id == paneB, "source tab should have paneB")
         } else {
             Issue.record("source tab should be a single leaf")
             return
         }
-        #expect(srcTab.focusedPaneId == paneB)
+        #expect(srcTab.paneTree.focusedPaneId == paneB)
 
         let newTab = model.groups[0].tabs[1]
-        if case .leaf(let id) = newTab.rootNode {
+        if case .leaf(let id) = newTab.paneTree.root {
             #expect(id.id == paneA, "new tab should have paneA")
         } else {
             Issue.record("new tab should be a single leaf")
             return
         }
-        #expect(newTab.focusedPaneId == paneA)
+        #expect(newTab.paneTree.focusedPaneId == paneA)
         #expect(model.selectedTabId == newTab.id, "new tab should be selected")
 
         #expect(desiredPaneFocus(in: model) == .terminal(paneA))
@@ -1446,24 +1446,24 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let srcTabId = model.groups[0].tabs[0].id
-        let survivor = model.groups[0].tabs[0].focusedPaneId
+        let survivor = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let zoomedPane = model.groups[0].tabs[0].focusedPaneId
+        let zoomedPane = model.groups[0].tabs[0].paneTree.focusedPaneId
         let groupId = model.groups[0].id
         update(&model, .toggleZoomPane(paneId: nil))
-        #expect(model.groups[0].tabs[0].isZoomed == true)
+        #expect(model.groups[0].tabs[0].paneTree.isZoomed == true)
 
         update(&model, .movePaneToNewTab(paneId: zoomedPane, inGroupId: groupId, atIndex: 1))
 
         #expect(model.groups[0].tabs.count == 2, "should have 2 tabs")
         let srcTab = tabById(srcTabId, in: model)!
-        #expect(srcTab.isZoomed == false, "source zoom should be cleared after move")
-        #expect(srcTab.focusedPaneId == survivor, "source focus should repoint to the survivor")
+        #expect(srcTab.paneTree.isZoomed == false, "source zoom should be cleared after move")
+        #expect(srcTab.paneTree.focusedPaneId == survivor, "source focus should repoint to the survivor")
 
         let newTab = model.groups[0].tabs.first(where: { $0.id != srcTabId })!
-        #expect(allPaneIds(newTab.rootNode).contains(zoomedPane), "moved pane should land in the new tab")
-        #expect(newTab.focusedPaneId == zoomedPane, "new tab should focus the moved pane")
-        #expect(newTab.isZoomed == false, "new tab should start unzoomed")
+        #expect(allPaneIds(newTab.paneTree.root).contains(zoomedPane), "moved pane should land in the new tab")
+        #expect(newTab.paneTree.focusedPaneId == zoomedPane, "new tab should focus the moved pane")
+        #expect(newTab.paneTree.isZoomed == false, "new tab should start unzoomed")
     }
 
     @Test("testMovePaneToNewTabPathA_SinglePaneMoveTab")
@@ -1476,7 +1476,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .setTabColors(tabIds: [tab1Id], color: .red))
         update(&model, .renameTab(id: tab1Id, name: "MyTab"))
 
@@ -1503,7 +1503,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let pane1 = model.groups[0].tabs[0].focusedPaneId
+        let pane1 = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         createTab(&model)
@@ -1525,7 +1525,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
 
         update(&model, .createGroup(name: "Work"))
@@ -1538,7 +1538,7 @@ import Testing
 
         #expect(model.groups[1].tabs.count == 2, "group1 should have 2 tabs")
         let newTab = model.groups[1].tabs[0]
-        if case .leaf(let id) = newTab.rootNode {
+        if case .leaf(let id) = newTab.paneTree.root {
             #expect(id.id == paneA)
         } else {
             Issue.record("new tab should be a leaf")
@@ -1554,7 +1554,7 @@ import Testing
         // Scenario: spec-first single-tab guard.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         let groupId = model.groups[0].id
 
         let commands = update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 0))
@@ -1570,15 +1570,15 @@ import Testing
         // Scenario: spec-first source-focus-update.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let groupId = model.groups[0].id
         update(&model, .movePaneToNewTab(paneId: paneB, inGroupId: groupId, atIndex: 1))
 
         let srcTab = model.groups[0].tabs[0]
-        #expect(srcTab.focusedPaneId == paneA, "source tab should focus remaining pane")
+        #expect(srcTab.paneTree.focusedPaneId == paneA, "source tab should focus remaining pane")
     }
 
     @Test("testMovePaneToNewTabUpdatesSourceTabChrome")
@@ -1591,10 +1591,10 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let sourceTabId = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("alpha")))
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneB, in: model), report: .title("beta")))
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         let groupId = model.groups[0].id
@@ -1602,7 +1602,7 @@ import Testing
         update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
 
         let sourceTab = tabById(sourceTabId, in: model)!
-        #expect(sourceTab.focusedPaneId == paneB)
+        #expect(sourceTab.paneTree.focusedPaneId == paneB)
         #expect(tabDisplayTitle(sourceTab) == "beta", "source tab should show the surviving focused pane")
     }
 
@@ -1614,7 +1614,7 @@ import Testing
         // Scenario: spec-first new-tab-chrome.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.updatePane(paneA) { $0.session?.title = "/Users/dan/projects" }
         model.updatePane(paneA) { $0.session?.cwd = "/Users/dan/projects" }
         update(&model, .splitFocusedPane(direction: .horizontal))
@@ -1636,7 +1636,7 @@ import Testing
         // Scenario: spec-first new-tab alert clear.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
         let groupId = model.groups[0].id
 
@@ -1661,14 +1661,14 @@ import Testing
         var model = makeModel()
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneA = allPaneIds(model.groups[0].tabs[0].rootNode).first!
+        let paneA = allPaneIds(model.groups[0].tabs[0].paneTree.root).first!
         let groupId = model.groups[0].id
 
         update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 0))
 
         #expect(model.groups[0].tabs.count == 2)
         let newTab = model.groups[0].tabs[0]
-        if case .leaf(let id) = newTab.rootNode {
+        if case .leaf(let id) = newTab.paneTree.root {
             #expect(id.id == paneA)
         } else {
             Issue.record("new tab should be a leaf with paneA")
@@ -1685,11 +1685,11 @@ import Testing
         // Scenario: spec-first move-alert clear.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
-        let paneB = model.groups[0].tabs[1].focusedPaneId
+        let paneB = model.groups[0].tabs[1].paneTree.focusedPaneId
 
         let alertA = AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
@@ -1749,14 +1749,11 @@ private func makeTwoTabFixture(tabAIsSplit: Bool = true) -> TwoTabFixture {
     } else {
         rootA = .leaf(pane(a1))
     }
-    let tabA = TabModel(id: tabAId, focusedPaneId: a1, rootNode: rootA)
+    let tabA = TabModel(id: tabAId, paneTree: PaneTree(root: rootA, focusedPaneId: a1))
 
-    var tabB = TabModel(
-        id: tabBId, focusedPaneId: b1,
-        rootNode: .split(
+    let tabB = TabModel(id: tabBId, paneTree: PaneTree(root: .split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(pane(b1)), second: .leaf(pane(PaneId())), ratio: 0.5))
-    tabB.isZoomed = true
+            first: .leaf(pane(b1)), second: .leaf(pane(PaneId())), ratio: 0.5), focusedPaneId: b1, isZoomed: true))
 
     model.groups[0].tabs = [tabA, tabB]
     model.selectedTabId = tabBId

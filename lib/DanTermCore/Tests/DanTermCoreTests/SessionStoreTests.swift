@@ -119,15 +119,11 @@ struct SessionStoreTests {
             ratio: 0.7
         )
         let firstGroup = GroupModel(id: GroupId(), name: "First", tabs: [
-            TabModel(id: TabId(), focusedPaneId: paneIds[0], rootNode: firstRoot),
-            TabModel(
-                id: TabId(),
-                focusedPaneId: paneIds[3],
-                rootNode: .leaf(PaneModel(id: paneIds[3]))
-            ),
+            TabModel(id: TabId(), paneTree: PaneTree(root: firstRoot, focusedPaneId: paneIds[0])),
+            TabModel(id: TabId(), paneTree: PaneTree(root: .leaf(PaneModel(id: paneIds[3])), focusedPaneId: paneIds[3])),
         ])
         let secondGroup = GroupModel(id: GroupId(), name: "Second", tabs: [
-            TabModel(id: TabId(), focusedPaneId: paneIds[4], rootNode: secondRoot),
+            TabModel(id: TabId(), paneTree: PaneTree(root: secondRoot, focusedPaneId: paneIds[4])),
         ])
         let model = AppModel(groups: [firstGroup, secondGroup])
 

@@ -138,7 +138,7 @@ private func makeGutterFixture(
 ) -> GutterFixture {
     let paneId = PaneId()
     let node = SplitNodeModel.leaf(PaneModel(id: paneId, session: SessionModel(id: SessionId())))
-    let tab = TabModel(id: TabId(), customTitle: nil, focusedPaneId: paneId, rootNode: node)
+    let tab = TabModel(id: TabId(), customTitle: nil, paneTree: PaneTree(root: node, focusedPaneId: paneId))
     let group = GroupModel(id: GroupId(), name: "g", tabs: [tab])
     var model = AppModel(groups: [group])
     model.selectedTabId = tab.id

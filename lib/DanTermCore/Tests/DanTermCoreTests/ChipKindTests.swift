@@ -49,7 +49,7 @@ struct ChipKindTests {
         var model = makeModel()
         createTab(&model)
         let tab = try #require(selectedTab(in: model))
-        let sessionId = try #require(model.pane(tab.focusedPaneId)?.session?.id)
+        let sessionId = try #require(model.pane(tab.paneTree.focusedPaneId)?.session?.id)
         let claude = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
 
         #expect(chipKind(of: tab.id, in: desiredSidebar(in: model)) == .terminal)
@@ -66,9 +66,9 @@ struct ChipKindTests {
         var model = makeModel()
         createTab(&model)
         let tab = try #require(selectedTab(in: model))
-        let originalPaneId = tab.focusedPaneId
+        let originalPaneId = tab.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: originalPaneId, direction: .horizontal))
-        let focusedPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        let focusedPaneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         #expect(focusedPaneId != originalPaneId)
         let sessionId = try #require(model.pane(originalPaneId)?.session?.id)
         let claude = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
@@ -82,7 +82,7 @@ struct ChipKindTests {
     func paneToolbarCarriesPaneChip() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         let codex = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
 
@@ -108,11 +108,11 @@ struct ChipKindTests {
     func splitTabStripListsPanesInOrder() throws {
         var model = makeModel()
         createTab(&model)
-        let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        let firstPaneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
-        let secondPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        let secondPaneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         update(&model, .splitPane(paneId: secondPaneId, direction: .vertical))
-        let thirdPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        let thirdPaneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
 
         let tab = try #require(selectedTab(in: model))
         let strip = tabPaneChips(tab, unreadByPane: [:])
@@ -128,7 +128,7 @@ struct ChipKindTests {
     func focusMoveReachesTheSidebarProjection() throws {
         var model = makeModel()
         createTab(&model)
-        let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        let firstPaneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
         let tab = try #require(selectedTab(in: model))
 
@@ -148,7 +148,7 @@ struct ChipKindTests {
     func stripReportsEachPanesOwnKind() throws {
         var model = makeModel()
         createTab(&model)
-        let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        let firstPaneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
         let sessionId = try #require(model.pane(firstPaneId)?.session?.id)
         let claude = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
@@ -200,7 +200,7 @@ struct ChipKindTests {
     func activityChangeReachesTheSidebarProjection() throws {
         var model = makeModel()
         createTab(&model)
-        let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        let firstPaneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
         let tab = try #require(selectedTab(in: model))
         let sessionId = try #require(model.pane(firstPaneId)?.session?.id)
@@ -228,7 +228,7 @@ struct ChipKindTests {
     func alertMarksOnlyItsOwnPane() throws {
         var model = makeModel()
         createTab(&model)
-        let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        let firstPaneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
         let tab = try #require(selectedTab(in: model))
         model.alerts.append(

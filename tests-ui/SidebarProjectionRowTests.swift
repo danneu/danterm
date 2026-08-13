@@ -316,7 +316,7 @@ private func projectionRowTab(
 ) -> TabModel {
     var pane = PaneModel(id: paneId)
     pane.session = SessionModel(id: SessionId(), title: title)
-    return TabModel(id: id, focusedPaneId: paneId, rootNode: .leaf(pane))
+    return TabModel(id: id, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
 }
 
 /// A tab whose panes are chained into a right-leaning split tree, so its row shows
@@ -332,7 +332,7 @@ private func projectionRowSplitTab(
     let root = leaves.dropFirst().reduce(leaves[0]) { accumulated, next in
         .split(id: SplitId(), direction: .horizontal, first: accumulated, second: next, ratio: 0.5)
     }
-    return TabModel(id: id, focusedPaneId: focused, rootNode: root)
+    return TabModel(id: id, paneTree: PaneTree(root: root, focusedPaneId: focused))
 }
 
 private func projectionRowBellAlert(paneId: PaneId) -> AlertModel {

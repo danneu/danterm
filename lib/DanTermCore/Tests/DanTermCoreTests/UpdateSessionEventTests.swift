@@ -21,7 +21,7 @@ import Testing
         //   incident to cite, and none should be invented.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let commands = update(&model, .sessionBell(sessionId: sessionId(for: paneId, in: model)))
         #expect(model.alerts.count == 0, "no alert for bell on focused pane")
@@ -38,7 +38,7 @@ import Testing
         //   and notification.
         var model = makeModel()
         createTab(&model)
-        let firstTabPaneId = model.groups[0].tabs[0].focusedPaneId
+        let firstTabPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -66,7 +66,7 @@ import Testing
         var model = makeModel()
         model.isAppActive = false
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let commands = update(&model, .sessionBell(sessionId: sessionId(for: paneId, in: model)))
         #expect(model.alerts.count == 1, "should create one alert")
@@ -89,7 +89,7 @@ import Testing
         //   created; app must terminate.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let liveSessionIds = Set(model.allPaneIds)
 
         let sessionId = model.pane(paneId)!.session!.id
@@ -116,9 +116,9 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
         createTab(&model)
         let fallbackTabId = model.groups[0].tabs[1].id
         update(&model, .selectTab(id: tabId))
@@ -148,7 +148,7 @@ import Testing
         // Scenario: spec-first throttle.
         var model = makeModel()
         createTab(&model)
-        let firstTabPaneId = model.groups[0].tabs[0].focusedPaneId
+        let firstTabPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -256,7 +256,7 @@ import Testing
         // Scenario: spec-first focused title.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
         #expect(model.pane(paneId)?.session?.title == "vim")
@@ -271,7 +271,7 @@ import Testing
         // Scenario: spec-first unfocused title.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
 
@@ -290,7 +290,7 @@ import Testing
         // Scenario: spec-first focused cwd.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd("/home/dan/projects")))
         #expect(model.pane(paneId)?.session?.cwd == "/home/dan/projects")
@@ -306,7 +306,7 @@ import Testing
         // Scenario: spec-first unfocused cwd.
         var model = makeModel()
         createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .splitFocusedPane(direction: .horizontal))
 
@@ -325,7 +325,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabAId = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         #expect(model.selectedTabId != tabAId, "Tab B should be selected")
@@ -344,7 +344,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabAId = model.groups[0].tabs[0].id
-        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
         #expect(model.selectedTabId != tabAId, "Tab B should be selected")
@@ -369,7 +369,7 @@ import Testing
         //   remote identity enter through the engine-to-pane admission tests.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let accepted = String(repeating: "a", count: 64 * 1024)
         let rejected = accepted + "b"
 
@@ -415,7 +415,7 @@ import Testing
         //   incident to cite, and none should be invented.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let commands = update(&model, .sessionNotification(
             sessionId: sessionId(for: paneId, in: model),
@@ -430,9 +430,9 @@ import Testing
     func agentWaitingAlertsOnlyForUnfocusedPane() throws {
         var model = makeModel()
         createTab(&model)
-        let backgroundPaneId = model.groups[0].tabs[0].focusedPaneId
+        let backgroundPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         createTab(&model)
-        let focusedPaneId = selectedTab(in: model)!.focusedPaneId
+        let focusedPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
         let backgroundSessionId = try #require(model.pane(backgroundPaneId)?.session?.id)
         let focusedSessionId = try #require(model.pane(focusedPaneId)?.session?.id)
@@ -476,14 +476,14 @@ import Testing
         let alertId = try #require(model.alerts.first?.id)
         _ = update(&model, .activateAlert(alertId: alertId))
         #expect(model.selectedTabId == tabForPane(backgroundPaneId, in: model)?.id)
-        #expect(tabForPane(backgroundPaneId, in: model)?.focusedPaneId == backgroundPaneId)
+        #expect(tabForPane(backgroundPaneId, in: model)?.paneTree.focusedPaneId == backgroundPaneId)
     }
 
     @Test("agent attention rejects unsupported live states")
     func agentAttentionRequiresAttachedWaitingState() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         createTab(&model)
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
 
@@ -503,7 +503,7 @@ import Testing
         var model = makeModel()
         model.isAppActive = false
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
@@ -532,7 +532,7 @@ import Testing
         var model = makeModel()
         model.isAppActive = false
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let commands = update(&model, .sessionNotification(
             sessionId: sessionId(for: paneId, in: model),
@@ -558,7 +558,7 @@ import Testing
         // Scenario: spec-first background OSC notification.
         var model = makeModel()
         createTab(&model)
-        let firstTabPaneId = model.groups[0].tabs[0].focusedPaneId
+        let firstTabPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -585,7 +585,7 @@ import Testing
         // Scenario: spec-first independent throttle.
         var model = makeModel()
         createTab(&model)
-        let firstTabPaneId = model.groups[0].tabs[0].focusedPaneId
+        let firstTabPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
@@ -624,7 +624,7 @@ import Testing
         // Scenario: spec-first progress set.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let commands = update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .progress(.set(percent: 50))))
         #expect(model.pane(paneId)?.session?.progress == .set(percent: 50))
@@ -638,7 +638,7 @@ import Testing
         // Scenario: spec-first progress clear.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .progress(.set(percent: 75))))
         #expect(model.pane(paneId)?.session?.progress == .set(percent: 75))
@@ -668,7 +668,7 @@ import Testing
         // Scenario: spec-first progress + title.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .progress(.indeterminate)))
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
@@ -684,7 +684,7 @@ import Testing
         // Scenario: spec-first progress + cwd.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .progress(.error(percent: 80))))
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd("/tmp")))
@@ -701,7 +701,7 @@ import Testing
         // Scenario: spec-first session-closed terminate.
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let sessionId = model.pane(paneId)!.session!.id
         let commands = update(&model, .sessionEnded(sessionId: sessionId))

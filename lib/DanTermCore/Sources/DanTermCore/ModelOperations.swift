@@ -219,10 +219,10 @@ func effectivePaneVisibility(in model: AppModel, windowVisible: Bool) -> [PaneId
   for group in model.groups {
     for tab in group.tabs {
       let tabIsSelected = tab.id == selectedTabId
-      for paneId in allPaneIds(tab.rootNode) {
+      for paneId in allPaneIds(tab.paneTree.root) {
         let visible = windowVisible
           && tabIsSelected
-          && !(tab.isZoomed && paneId != tab.focusedPaneId)
+          && !(tab.paneTree.isZoomed && paneId != tab.paneTree.focusedPaneId)
         result[paneId] = visible
       }
     }
@@ -549,7 +549,7 @@ func selectedTab(in model: AppModel) -> TabModel? {
 func tabForPane(_ paneId: PaneId, in model: AppModel) -> TabModel? {
   for group in model.groups {
     for tab in group.tabs {
-      if allPaneIds(tab.rootNode).contains(paneId) { return tab }
+      if allPaneIds(tab.paneTree.root).contains(paneId) { return tab }
     }
   }
   return nil
@@ -560,7 +560,7 @@ func tabForPane(_ paneId: PaneId, in model: AppModel) -> TabModel? {
 func tabForSplit(_ splitId: SplitId, in model: AppModel) -> TabModel? {
   for group in model.groups {
     for tab in group.tabs {
-      if containsSplit(tab.rootNode, splitId) { return tab }
+      if containsSplit(tab.paneTree.root, splitId) { return tab }
     }
   }
   return nil
@@ -572,7 +572,7 @@ func groupForTab(_ tabId: TabId, in model: AppModel) -> GroupModel? {
 
 func focusedPane(in model: AppModel) -> PaneModel? {
   guard let tab = selectedTab(in: model) else { return nil }
-  return model.pane(tab.focusedPaneId)
+  return model.pane(tab.paneTree.focusedPaneId)
 }
 
 func currentCwd(in model: AppModel) -> String? {
@@ -580,7 +580,7 @@ func currentCwd(in model: AppModel) -> String? {
   // Fall back to most recent tab with a known cwd
   let allTabs = model.groups.flatMap(\.tabs)
   for tab in allTabs.reversed() {
-    if let cwd = model.pane(tab.focusedPaneId)?.session?.cwd { return cwd }
+    if let cwd = model.pane(tab.paneTree.focusedPaneId)?.session?.cwd { return cwd }
   }
   return nil
 }
@@ -588,7 +588,7 @@ func currentCwd(in model: AppModel) -> String? {
 func paneIdsForTab(_ tabId: TabId, in model: AppModel) -> [PaneId] {
   for group in model.groups {
     if let tab = group.tabs.first(where: { $0.id == tabId }) {
-      return allPaneIds(tab.rootNode)
+      return allPaneIds(tab.paneTree.root)
     }
   }
   return []
@@ -612,7 +612,7 @@ func abbreviateHome(_ path: String, home: String = NSHomeDirectory()) -> String 
 /// or -- when the focus is stale -- a stranger's, and it costs a full walk of
 /// every group and tab to do it. `desiredSidebar` calls this once per row.
 func tabChrome(_ tab: TabModel) -> (title: String, subtitle: String?) {
-  guard let session = paneInNode(tab.rootNode, id: tab.focusedPaneId)?.session else {
+  guard let session = paneInNode(tab.paneTree.root, id: tab.paneTree.focusedPaneId)?.session else {
     return ("Terminal", nil)
   }
   return sessionChrome(session)
@@ -643,7 +643,7 @@ func tabSubtitle(_ tab: TabModel) -> String? {
 /// Returns the chip for one tab's row, taken from the focused pane like the
 /// rest of the row's chrome. An agent in an unfocused split does not show here.
 func tabChipKind(_ tab: TabModel) -> ChipKind {
-  ChipKind(agent: paneInNode(tab.rootNode, id: tab.focusedPaneId)?.session?.agent ?? .none)
+  ChipKind(agent: paneInNode(tab.paneTree.root, id: tab.paneTree.focusedPaneId)?.session?.agent ?? .none)
 }
 
 /// What a pane chip's single state dot says, if anything.
@@ -681,14 +681,14 @@ struct TabPaneChip: Equatable {
 /// `unreadByPane` is `UnreadAlertTally.byPane`, so the sidebar projection can
 /// pass the count it has already rolled up instead of rescanning the alerts.
 func tabPaneChips(_ tab: TabModel, unreadByPane: [PaneId: Int]) -> [TabPaneChip] {
-  let panes = panesInNode(tab.rootNode)
+  let panes = panesInNode(tab.paneTree.root)
   guard panes.count > 1 else { return [] }
   return panes.map { pane in
     let agent = pane.session?.agent ?? .none
     return TabPaneChip(
       paneId: pane.id,
       kind: ChipKind(agent: agent),
-      isFocused: pane.id == tab.focusedPaneId,
+      isFocused: pane.id == tab.paneTree.focusedPaneId,
       state: paneChipState(agent: agent, hasUnreadAlert: (unreadByPane[pane.id] ?? 0) > 0))
   }
 }
@@ -773,7 +773,7 @@ func emitCloseTabsConfirmation(_ model: inout AppModel, ids: [TabId]) -> [Comman
   var totalUncompletedTodos = 0
   for id in ids {
     guard let tab = tabById(id, in: model) else { continue }
-    totalPaneCount += allPaneIds(tab.rootNode).count
+    totalPaneCount += allPaneIds(tab.paneTree.root).count
     totalUncompletedTodos += tabTodoRollup(id, in: model).uncompleted
   }
 
@@ -792,7 +792,7 @@ func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncomplet
   guard let tab = tabById(tabId, in: model) else { return (0, 0) }
   var total = tab.todos.count
   var uncompleted = tab.todos.count { !$0.isDone }
-  for pane in panesInNode(tab.rootNode) {
+  for pane in panesInNode(tab.paneTree.root) {
     total += pane.todos.count
     uncompleted += pane.todos.count { !$0.isDone }
   }
@@ -884,7 +884,7 @@ func formatToolbarLabel(title: String, cwd: String?) -> String {
 }
 
 func unreadAlertCount(for tab: TabModel, alerts: [AlertModel]) -> Int {
-  let paneIds = Set(allPaneIds(tab.rootNode))
+  let paneIds = Set(allPaneIds(tab.paneTree.root))
   return alerts.filter { $0.isUnread && paneIds.contains($0.paneId) }.count
 }
 
@@ -933,7 +933,7 @@ func unreadAlertTally(for model: AppModel) -> UnreadAlertTally {
   for group in model.groups {
     var groupCount = 0
     for tab in group.tabs {
-      let tabCount = sumUnread(in: tab.rootNode, byPane: byPane)
+      let tabCount = sumUnread(in: tab.paneTree.root, byPane: byPane)
       byTab[tab.id] = tabCount
       groupCount += tabCount
     }
@@ -984,9 +984,9 @@ func containerShapeNode(_ node: SplitNodeModel) -> ContainerShapeNode {
 /// The container shape for one tab.
 func containerShape(of tab: TabModel) -> ContainerShape {
   ContainerShape(
-    tree: containerShapeNode(tab.rootNode),
-    isZoomed: tab.isZoomed,
-    zoomedLeaf: tab.isZoomed ? tab.focusedPaneId : nil
+    tree: containerShapeNode(tab.paneTree.root),
+    isZoomed: tab.paneTree.isZoomed,
+    zoomedLeaf: tab.paneTree.isZoomed ? tab.paneTree.focusedPaneId : nil
   )
 }
 
@@ -1066,7 +1066,7 @@ func reconcileTodoPopover(_ model: inout AppModel, previous: TodoPopoverStrandKe
   }
   switch previous.scope {
   case .pane(let paneId):
-    if !allPaneIds(tab.rootNode).contains(paneId) {
+    if !allPaneIds(tab.paneTree.root).contains(paneId) {
       model.todoPopover = nil
     }
   case .tab:

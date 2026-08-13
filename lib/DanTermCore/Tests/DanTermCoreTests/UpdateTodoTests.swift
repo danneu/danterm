@@ -30,7 +30,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
     createTab(&model)
     let tab = selectedTab(in: model)!
     let owner: TodoOwner = switch kind {
-    case .pane: .pane(tab.focusedPaneId)
+    case .pane: .pane(tab.paneTree.focusedPaneId)
     case .tab: .tab(tab.id)
     }
     return (model, owner)
@@ -123,7 +123,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first add.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "run tests"))
         #expect(model.pane(paneId)!.todos.count == 1)
         #expect(model.pane(paneId)!.todos[0].text == "run tests")
@@ -137,7 +137,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first trim.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "  hello  "))
         #expect(model.pane(paneId)!.todos[0].text == "hello")
     }
@@ -149,7 +149,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first reject empty.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: ""))
         update(&model, .addTodo(owner: .pane(paneId), text: "   "))
         #expect(model.pane(paneId)!.todos.count == 0)
@@ -164,7 +164,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first toggle round-trip.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "task"))
         let todoId = model.pane(paneId)!.todos[0].id
         update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: todoId))
@@ -184,7 +184,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         //   corresponding tab-owner behavior.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "task"))
         let todoId = model.pane(paneId)!.todos[0].id
 
@@ -204,7 +204,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first edit.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "old"))
         let todoId = model.pane(paneId)!.todos[0].id
         update(&model, .editTodoText(owner: .pane(paneId), todoId: todoId, text: "new"))
@@ -219,7 +219,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first edit reject.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "keep"))
         let todoId = model.pane(paneId)!.todos[0].id
         update(&model, .editTodoText(owner: .pane(paneId), todoId: todoId, text: ""))
@@ -238,7 +238,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first delete.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "A"))
         update(&model, .addTodo(owner: .pane(paneId), text: "B"))
         let idA = model.pane(paneId)!.todos[0].id
@@ -257,7 +257,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first reorder.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "A"))
         update(&model, .addTodo(owner: .pane(paneId), text: "B"))
         update(&model, .addTodo(owner: .pane(paneId), text: "C"))
@@ -274,7 +274,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first reorder no-op.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "A"))
         update(&model, .addTodo(owner: .pane(paneId), text: "B"))
         let idA = model.pane(paneId)!.todos[0].id
@@ -290,7 +290,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first reorder OOB.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "A"))
         update(&model, .addTodo(owner: .pane(paneId), text: "B"))
         let idA = model.pane(paneId)!.todos[0].id
@@ -308,7 +308,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first clear completed.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "done"))
         update(&model, .addTodo(owner: .pane(paneId), text: "pending"))
         update(&model, .addTodo(owner: .pane(paneId), text: "also done"))
@@ -332,7 +332,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first pane confirm.
         var model = makeModel()
         createTab(&model)
-        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        let firstPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
         update(&model, .addTodo(owner: .pane(firstPaneId), text: "incomplete task"))
         let commands = update(&model, .requestClosePane(paneId: firstPaneId))
@@ -355,7 +355,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         createTab(&model)
         createTab(&model)
         let tab = model.groups[0].tabs[0]
-        let paneId = tab.focusedPaneId
+        let paneId = tab.paneTree.focusedPaneId
         model.selectedTabId = tab.id
         update(&model, .addTodo(owner: .pane(paneId), text: "task"))
         let todoId = model.pane(paneId)!.todos[0].id
@@ -377,7 +377,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         createTab(&model)
         createTab(&model)
         let tab = model.groups[0].tabs[0]
-        let paneId = tab.focusedPaneId
+        let paneId = tab.paneTree.focusedPaneId
         model.selectedTabId = tab.id
         let liveBefore = Set(model.allPaneIds)
         update(&model, .requestClosePane(paneId: paneId))
@@ -396,7 +396,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first popover dismiss on close.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: paneId, direction: .horizontal))
         model.todoPopover = .pane(paneId)
         let commands = update(&model, .closePane(paneId: paneId))
@@ -417,7 +417,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first open + close.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let openEffects = update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == .pane(paneId))
         #expect(hasEffect(openEffects) {
@@ -443,10 +443,10 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first stale-close guard.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: paneId, direction: .horizontal))
         let tab = selectedTab(in: model)!
-        let paneB = tab.focusedPaneId
+        let paneB = tab.paneTree.focusedPaneId
         model.todoPopover = .pane(paneB)
         let paneA = paneId
         update(&model, .todoPopoverClosed(owner: .pane(paneA)))
@@ -467,7 +467,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
             let firstTab = selectedTab(in: model)!
             createTab(&model, background: true)
             let secondTab = model.groups[0].tabs.first { $0.id != firstTab.id }!
-            model.todoPopover = scopeFor(firstTab.id, firstTab.focusedPaneId)
+            model.todoPopover = scopeFor(firstTab.id, firstTab.paneTree.focusedPaneId)
 
             update(&model, .selectTab(id: secondTab.id))
 
@@ -488,7 +488,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var paneModel = makeModel()
         createTab(&paneModel)
         let paneTab = selectedTab(in: paneModel)!
-        let paneId = paneTab.focusedPaneId
+        let paneId = paneTab.paneTree.focusedPaneId
         paneModel.todoPopover = .pane(paneId)
 
         update(&paneModel, .splitPane(paneId: paneId, direction: .horizontal))
@@ -500,7 +500,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         let tab = selectedTab(in: tabModel)!
         tabModel.todoPopover = .tab(tab.id)
 
-        update(&tabModel, .splitPane(paneId: tab.focusedPaneId, direction: .horizontal))
+        update(&tabModel, .splitPane(paneId: tab.paneTree.focusedPaneId, direction: .horizontal))
 
         #expect(tabModel.todoPopover == nil)
     }
@@ -512,9 +512,9 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first same-tab focus.
         var model = makeModel()
         createTab(&model)
-        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        let firstPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
-        let secondPaneId = selectedTab(in: model)!.focusedPaneId
+        let secondPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .paneBecameFirstResponder(paneId: firstPaneId))
         model.todoPopover = .pane(firstPaneId)
 
@@ -534,12 +534,12 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         let selected = selectedTab(in: model)!
         createTab(&model, background: true)
         let background = model.groups[0].tabs.first { $0.id != selected.id }!
-        model.todoPopover = .pane(selected.focusedPaneId)
+        model.todoPopover = .pane(selected.paneTree.focusedPaneId)
 
-        update(&model, .splitPane(paneId: background.focusedPaneId, direction: .horizontal))
+        update(&model, .splitPane(paneId: background.paneTree.focusedPaneId, direction: .horizontal))
 
         #expect(model.selectedTabId == selected.id)
-        #expect(model.todoPopover == .pane(selected.focusedPaneId))
+        #expect(model.todoPopover == .pane(selected.paneTree.focusedPaneId))
     }
 
     @Test("reconcileTodoPopover preserves popover opened by the current message")
@@ -551,7 +551,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first open + survive.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         update(&model, .toggleTodoPopover(owner: .pane(paneId)))
 
@@ -568,11 +568,11 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         // Scenario: spec-first split empty todos.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneId), text: "parent task"))
         update(&model, .splitPane(paneId: paneId, direction: .horizontal))
         let tab = selectedTab(in: model)!
-        let newPaneId = tab.focusedPaneId
+        let newPaneId = tab.paneTree.focusedPaneId
         #expect(newPaneId != paneId, "new pane should have different ID")
         #expect(model.pane(newPaneId)!.todos.count == 0, "new pane should have empty todos")
         #expect(model.pane(paneId)!.todos.count == 1)

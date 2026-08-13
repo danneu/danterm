@@ -24,7 +24,7 @@ import Testing
         let tab = selectedTab(in: model)!
         let commands = update(&model, .startSearch)
         #expect(hasEffect(commands) {
-            if case .sendStartSearch(let pid) = $0 { return pid == tab.focusedPaneId }
+            if case .sendStartSearch(let pid) = $0 { return pid == tab.paneTree.focusedPaneId }
             return false
         }, "expected sendStartSearch")
         #expect(model.searchState.isEmpty, "should not create search state")
@@ -39,7 +39,7 @@ import Testing
         //   `.startSearch` does it.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "hit"))
 
         let commands = update(&model, .navigateFocusedSearch(direction: .previous))
@@ -72,7 +72,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab = selectedTab(in: model)!
-        let paneId = tab.focusedPaneId
+        let paneId = tab.paneTree.focusedPaneId
         let commands = update(&model, .searchStarted(paneId: paneId, needle: ""))
         #expect(model.searchState[paneId] != nil, "search state should exist")
         #expect(model.searchState[paneId]?.needle == "")
@@ -87,7 +87,7 @@ import Testing
         // Scenario: spec-first needle-on-start.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "hello"))
         #expect(model.searchState[paneId]?.needle == "hello")
     }
@@ -100,7 +100,7 @@ import Testing
         // Scenario: spec-first re-entry update.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "first"))
         update(&model, .paneBecameFirstResponder(paneId: paneId))
         let commands = update(&model, .searchStarted(paneId: paneId, needle: "second"))
@@ -118,7 +118,7 @@ import Testing
         // Scenario: spec-first needle change.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: ""))
         model.searchState[paneId]?.status = .matched(selected: 2, total: 5)
         let commands = update(&model, .searchNeedleChanged(paneId: paneId, needle: "new"))
@@ -137,7 +137,7 @@ import Testing
         // Scenario: spec-first navigate.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: ""))
         let commands = update(&model, .searchNavigate(paneId: paneId, direction: .next))
         #expect(hasEffect(commands) {
@@ -156,7 +156,7 @@ import Testing
         // Scenario: spec-first end search.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "test"))
         let commands = update(&model, .endSearch(paneId: paneId))
         #expect(model.searchState[paneId] == nil, "search state should be removed")
@@ -174,7 +174,7 @@ import Testing
         // Scenario: spec-first no-op end.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let commands = update(&model, .endSearch(paneId: paneId))
         #expect(commands.isEmpty, "should be no-op")
     }
@@ -190,7 +190,7 @@ import Testing
         //   new total would render a match index the new count no longer contains.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "x"))
 
         let commands = update(&model, .searchTotalReported(paneId: paneId, total: 42))
@@ -216,7 +216,7 @@ import Testing
         //   out-of-order callback from resurrecting that pair.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "x"))
 
         let orphan = update(&model, .searchSelectionReported(paneId: paneId, selected: 3))
@@ -241,7 +241,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "test"))
         #expect(model.searchState[paneId] != nil, "search state should exist before close")
         update(&model, .closePane(paneId: paneId))
@@ -258,7 +258,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let tabId = model.selectedTabId!
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "test"))
         update(&model, .closeTab(id: tabId))
         #expect(model.searchState[paneId] == nil, "search state should be cleaned up on tab close")
@@ -272,7 +272,7 @@ import Testing
         // Scenario: spec-first failure cleanup.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         model.searchState[paneId] = SearchModel(needle: "test")
         let sessionId = model.pane(paneId)!.session!.id
         update(&model, .sessionCreationFailed(sessionId: sessionId))
@@ -291,7 +291,7 @@ import Testing
         update(&model, .createGroup(name: "Second"))
         let group2Id = model.groups.first(where: { $0.id != group1Id })!.id
         let group2Tab = model.groups.first(where: { $0.id == group2Id })!.tabs[0]
-        let group2PaneId = group2Tab.focusedPaneId
+        let group2PaneId = group2Tab.paneTree.focusedPaneId
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: group2PaneId,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true

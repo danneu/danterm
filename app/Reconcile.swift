@@ -138,7 +138,7 @@ extension AppRuntime {
             case .patch(let tabId, let patch):
                 guard let tab = tabById(tabId, in: model),
                       let container = tabContainers[tabId] else { break }
-                container.applyTreePatch(patch, rootNode: tab.rootNode)
+                container.applyTreePatch(patch, rootNode: tab.paneTree.root)
             case .setZoomedPane(let tabId, let paneId):
                 tabContainers[tabId]?.setZoomedPane(paneId)
             case .setVisible(let tabId, let visible):

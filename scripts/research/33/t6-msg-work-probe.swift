@@ -68,9 +68,7 @@ func buildModel(_ layout: Layout, _ ids: inout IdFactory) -> AppModel {
             let root = buildTree(layout.panesPerTab, &ids)
             tabs.append(TabModel(
                 id: TabId(rawValue: ids.uuid()),
-                customTitle: nil,
-                focusedPaneId: allPaneIds(root)[0],
-                rootNode: root
+                paneTree: PaneTree(root: root, focusedPaneId: allPaneIds(root)[0])
             ))
         }
         groups.append(GroupModel(
@@ -220,7 +218,7 @@ func scenarios(for model: AppModel) -> [Scenario] {
         },
         // A pane click. Pane-scoped and structural in the focus sense only.
         Scenario(name: "paneBecameFirstResponder", namedPanes: 1) { model, i in
-            let panes = allPaneIds(selectedTab(in: model)!.rootNode)
+            let panes = allPaneIds(selectedTab(in: model)!.paneTree.root)
             return .paneBecameFirstResponder(paneId: panes[i % panes.count])
         },
         // A tab switch: genuinely model-wide, and the control for the pane-scoped rows.
@@ -247,7 +245,7 @@ func firstSplitIds(in model: AppModel) -> [SplitId] {
         }
     }
     guard let tab = selectedTab(in: model) else { return [] }
-    return walk(tab.rootNode)
+    return walk(tab.paneTree.root)
 }
 
 // MARK: - Measurement

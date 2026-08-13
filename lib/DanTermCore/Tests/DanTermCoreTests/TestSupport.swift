@@ -112,7 +112,7 @@ func makeMruModel(tabCount: Int) -> (model: AppModel, tabIds: [TabId]) {
         let paneId = PaneId()
         let tabId = TabId()
         ids.append(tabId)
-        model.groups[0].tabs.append(TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(PaneModel(id: paneId))))
+        model.groups[0].tabs.append(TabModel(id: tabId, paneTree: PaneTree(root: .leaf(PaneModel(id: paneId)), focusedPaneId: paneId)))
     }
     return (model, ids)
 }

@@ -590,7 +590,7 @@ class ToolbarDragHandleView: NSView, NSDraggingSource {
             // while zoomed, so those drops stay inert (PaneDragCoordinator skips nil frames).
             guard let tab = selectedTab(in: runtime.model) else { return }
             let hasSplits: Bool
-            if case .split = tab.rootNode { hasSplits = true } else { hasSplits = false }
+            if case .split = tab.paneTree.root { hasSplits = true } else { hasSplits = false }
             guard hasSplits || totalTabCount(runtime.model) > 1 else { return }
 
             // Install overlay + coordinator for pane-area drops

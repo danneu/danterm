@@ -76,7 +76,7 @@ import Testing
         //   it to "Menlo".
         var model = makeModel()
         _ = createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         var config = DanTermConfig.default
         config.fontFamily = "menlo"
 
@@ -89,7 +89,7 @@ import Testing
     func desiredPaneConfigKeyChangesWithResolvedFamily() {
         var model = makeModel()
         _ = createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let before = desiredPaneConfig(in: model)[paneId]
 
         var config = DanTermConfig.default
@@ -103,7 +103,7 @@ import Testing
     func unresolvedFamilyLeavesPaneKeyUnchanged() {
         var model = makeModel()
         _ = createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let before = desiredPaneConfig(in: model)[paneId]
 
         var config = DanTermConfig.default
@@ -225,7 +225,7 @@ import Testing
         // Scenario: spec-first; the user picks Menlo in Preferences and hits Save.
         var model = makeModel()
         _ = createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetFontFamily("menlo"))
 

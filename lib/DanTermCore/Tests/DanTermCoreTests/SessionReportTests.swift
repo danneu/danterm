@@ -9,7 +9,7 @@ struct SessionReportTests {
     func valueReportsReduceIntoSession() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)?.focusedPaneId)
+        let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         let sessionId = try #require(model.pane(paneId)?.session?.id)
 
         update(&model, .sessionReport(sessionId: sessionId, report: .title("vim")))
@@ -28,7 +28,7 @@ struct SessionReportTests {
     func lifecycleReportsReduceIntoSession() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)?.focusedPaneId)
+        let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         let sessionId = try #require(model.pane(paneId)?.session?.id)
 
         update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("swift test")))
@@ -56,7 +56,7 @@ struct SessionReportTests {
     func replacedSessionReportsAreDropped() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)?.focusedPaneId)
+        let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         let staleId = try #require(model.pane(paneId)?.session?.id)
         let replacementId = SessionId()
         model.updatePane(paneId) { $0.session = SessionModel(id: replacementId) }
@@ -75,7 +75,7 @@ struct SessionReportTests {
     func replacedSessionTitleReportIsDropped() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)?.focusedPaneId)
+        let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         let staleId = try #require(model.pane(paneId)?.session?.id)
         let replacementId = SessionId()
         model.updatePane(paneId) { $0.session = SessionModel(id: replacementId) }
@@ -160,7 +160,7 @@ struct SessionReportTests {
     func repeatedWaitingActivityEmitsOneAlert() throws {
         var model = makeModel()
         createTab(&model)
-        let backgroundPaneId = try #require(selectedTab(in: model)?.focusedPaneId)
+        let backgroundPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         let sessionId = try #require(model.pane(backgroundPaneId)?.session?.id)
         createTab(&model)
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
@@ -189,7 +189,7 @@ struct SessionReportTests {
         //   while the selected tab has two other live sessions.
         var model = makeModel()
         createTab(&model)
-        let targetPaneId = try #require(selectedTab(in: model)?.focusedPaneId)
+        let targetPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         let targetSessionId = try #require(model.pane(targetPaneId)?.session?.id)
         createTab(&model)
         update(&model, .splitFocusedPane(direction: .horizontal))
@@ -239,7 +239,7 @@ struct SessionReportTests {
     ) throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)?.focusedPaneId)
+        let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         let staleId = try #require(model.pane(paneId)?.session?.id)
         model.updatePane(paneId) { $0.session = SessionModel(id: SessionId()) }
         let before = model

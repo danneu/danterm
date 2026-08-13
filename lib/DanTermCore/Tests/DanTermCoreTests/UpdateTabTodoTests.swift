@@ -17,9 +17,9 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
-        let paneA = selectedTab(in: model)!.focusedPaneId
+        let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: paneA, direction: .horizontal))
-        let paneOrder = allPaneIds(selectedTab(in: model)!.rootNode)
+        let paneOrder = allPaneIds(selectedTab(in: model)!.paneTree.root)
         return (model, tabId, paneOrder[0], paneOrder[1])
     }
 
@@ -36,7 +36,7 @@ import Testing
         createTab(&model)
         let tabA = model.groups[0].tabs[0]
         let tabB = model.groups[0].tabs[1]
-        let paneA = tabA.focusedPaneId
+        let paneA = tabA.paneTree.focusedPaneId
 
         update(&model, .addTodo(owner: .pane(paneA), text: "pane task"))
         update(&model, .addTodo(owner: .tab(tabA.id), text: "tab task"))
@@ -352,7 +352,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab = selectedTab(in: model)!
-        let paneId = tab.focusedPaneId
+        let paneId = tab.paneTree.focusedPaneId
         update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == .pane(paneId))
 
@@ -397,7 +397,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tab = selectedTab(in: model)!
-        let paneId = tab.focusedPaneId
+        let paneId = tab.paneTree.focusedPaneId
         update(&model, .toggleTodoPopover(owner: .tab(tab.id)))
         #expect(model.todoPopover == .tab(tab.id))
 
@@ -421,7 +421,7 @@ import Testing
         // Scenario: spec-first same-pane close.
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         let commands = update(&model, .toggleTodoPopover(owner: .pane(paneId)))
         #expect(model.todoPopover == nil)
@@ -506,7 +506,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let firstTab = model.groups[0].tabs[0]
-        update(&model, .addTodo(owner: .pane(firstTab.focusedPaneId), text: "pane task"))
+        update(&model, .addTodo(owner: .pane(firstTab.paneTree.focusedPaneId), text: "pane task"))
 
         let commands = update(&model, .requestCloseTab(id: firstTab.id))
         #expect(hasEffect(commands) {
@@ -527,9 +527,9 @@ import Testing
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
         update(&model, .selectTab(id: firstTabId))
-        let paneA = selectedTab(in: model)!.focusedPaneId
+        let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: paneA, direction: .horizontal))
-        let paneB = selectedTab(in: model)!.focusedPaneId
+        let paneB = selectedTab(in: model)!.paneTree.focusedPaneId
 
         update(&model, .addTodo(owner: .tab(firstTabId), text: "tab one"))
         update(&model, .addTodo(owner: .tab(firstTabId), text: "tab two"))
@@ -581,7 +581,7 @@ import Testing
         let firstTab = model.groups[0].tabs[0]
         update(&model, .addTodo(owner: .tab(firstTab.id), text: "tab task"))
 
-        let commands = update(&model, .requestClosePane(paneId: firstTab.focusedPaneId))
+        let commands = update(&model, .requestClosePane(paneId: firstTab.paneTree.focusedPaneId))
         #expect(hasEffect(commands) {
             if case .showCloseTabConfirmation(let tid, _, let pc, _, let utc) = $0 {
                 return tid == firstTab.id && pc == 1 && utc == 1
@@ -592,7 +592,7 @@ import Testing
             if case .showClosePaneConfirmation = $0 { return true }
             return false
         }, "should not show pane-level confirmation")
-        #expect(model.pane(firstTab.focusedPaneId) != nil, "pane not yet removed")
+        #expect(model.pane(firstTab.paneTree.focusedPaneId) != nil, "pane not yet removed")
     }
 
     @Test("requestClosePane on non-last pane with no pane todos but tab todos closes silently")
@@ -606,9 +606,9 @@ import Testing
         createTab(&model)
         let firstTab = model.groups[0].tabs[0]
         update(&model, .selectTab(id: firstTab.id))
-        let paneA = firstTab.focusedPaneId
+        let paneA = firstTab.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: paneA, direction: .horizontal))
-        let paneB = selectedTab(in: model)!.focusedPaneId
+        let paneB = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .tab(firstTab.id), text: "tab task"))
 
         let commands = update(&model, .requestClosePane(paneId: paneB))
@@ -633,7 +633,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let firstTab = model.groups[0].tabs[0]
-        let paneA = firstTab.focusedPaneId
+        let paneA = firstTab.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .tab(firstTab.id), text: "tab task"))
         update(&model, .addTodo(owner: .pane(paneA), text: "pane task"))
 
@@ -658,7 +658,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let firstTab = model.groups[0].tabs[0]
-        let paneA = firstTab.focusedPaneId
+        let paneA = firstTab.paneTree.focusedPaneId
         update(&model, .addTodo(owner: .pane(paneA), text: "pane only"))
 
         let commands = update(&model, .requestClosePane(paneId: paneA))

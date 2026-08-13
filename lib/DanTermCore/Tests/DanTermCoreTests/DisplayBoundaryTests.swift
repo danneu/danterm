@@ -42,10 +42,10 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
     var model = makeModel()
     model.isAppActive = false
     createTab(&model)
-    let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+    let firstPaneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
     update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
     let tab = try #require(selectedTab(in: model))
-    let panes = allPaneIds(tab.rootNode)
+    let panes = allPaneIds(tab.paneTree.root)
 
     for paneId in panes {
         let sessionId = try #require(model.pane(paneId)?.session?.id)
@@ -140,7 +140,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
     func modelKeepsRawText() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
 
         update(&model, .sessionReport(sessionId: sessionId, report: .title("a\nb")))
@@ -158,7 +158,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
         var model = makeModel()
         createTab(&model)
         let tab = try #require(selectedTab(in: model))
-        let paneId = tab.focusedPaneId
+        let paneId = tab.paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .title("a\nb")))
 
@@ -176,7 +176,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
     func lsKeepsRawTitle() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .title("a\nb")))
 
@@ -190,12 +190,12 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
     func checkpointKeepsRawTitle() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .title("a\nb")))
 
         let rebuilt = try #require(validateAndBuild(toSnapshot(model)))
-        let restoredPane = try #require(paneInNode(rebuilt.groups[0].tabs[0].rootNode, id: paneId))
+        let restoredPane = try #require(paneInNode(rebuilt.groups[0].tabs[0].paneTree.root, id: paneId))
 
         #expect(restoredPane.session?.title == "a\nb")
         #expect(desiredSidebar(in: rebuilt).groups[0].tabs[0].displayTitle.text == "a b")
@@ -208,7 +208,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
         var model = makeModel()
         model.isAppActive = false
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
 
         let commands = update(&model, .sessionNotification(
@@ -227,7 +227,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
     func sidebarRowIsFlat() throws {
         var model = makeModel()
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .title("a\nb")))
         update(&model, .sessionReport(sessionId: sessionId, report: .cwd("/tmp\nx")))
@@ -241,11 +241,11 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
     func closeConfirmationIsFlat() throws {
         var model = makeModel()
         createTab(&model)
-        let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        let firstPaneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let tabId = try #require(selectedTab(in: model)).id
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
         // The tab's display title comes from the focused pane, which the split moved.
-        let focusedPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        let focusedPaneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let focusedSessionId = try #require(model.pane(focusedPaneId)?.session?.id)
         update(&model, .sessionReport(sessionId: focusedSessionId, report: .title("a\nb")))
 
@@ -262,7 +262,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
         var model = makeModel()
         model.isAppActive = false
         createTab(&model)
-        let paneId = try #require(selectedTab(in: model)).focusedPaneId
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .title("pane\ntitle")))
 

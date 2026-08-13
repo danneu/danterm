@@ -297,7 +297,7 @@ private func makeSinglePaneModel(
                  second: .leaf(PaneModel(id: PaneId(), session: SessionModel(id: SessionId()))),
                  ratio: 0.5)
         : .leaf(pane)
-    let tab = TabModel(id: TabId(), customTitle: nil, focusedPaneId: paneId, rootNode: rootNode)
+    let tab = TabModel(id: TabId(), customTitle: nil, paneTree: PaneTree(root: rootNode, focusedPaneId: paneId))
     let group = GroupModel(id: GroupId(), name: "g", tabs: [tab])
     var model = AppModel(groups: [group])
     model.selectedTabId = tab.id

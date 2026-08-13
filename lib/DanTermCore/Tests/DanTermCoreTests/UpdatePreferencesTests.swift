@@ -601,7 +601,7 @@ private func openPrefs(
     func prefSaveWithRemoteThemeChangeUpdatesRemoteProjection() {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let sessionId = model.pane(paneId)!.session!.id
         update(&model, .sessionReport(
             sessionId: sessionId,

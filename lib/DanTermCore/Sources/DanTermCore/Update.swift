@@ -70,7 +70,7 @@ func update(
         )
 
         // The leaf owns the pane content directly -- no separate dict write.
-        var tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(pane))
+        var tab = TabModel(id: tabId, paneTree: PaneTree(root: .leaf(pane)))
         tab.customTitle = launchTitle
 
         // .atGroupEnd always appends. .afterSelected and .afterTab insert
@@ -124,7 +124,7 @@ func update(
 
     case .requestCloseTab(let id):
         guard let tab = tabById(id, in: model) else { return [] }
-        let paneCount = allPaneIds(tab.rootNode).count
+        let paneCount = allPaneIds(tab.paneTree.root).count
         let uncompletedTodos = tabTodoRollup(id, in: model).uncompleted
 
         if paneCount > 1 || uncompletedTodos > 0 {
@@ -164,7 +164,7 @@ func update(
     // MARK: - Pane Management
 
     case .splitFocusedPane(let direction, let launch, let background):
-        guard let paneId = selectedTab(in: model)?.focusedPaneId else { return [] }
+        guard let paneId = selectedTab(in: model)?.paneTree.focusedPaneId else { return [] }
         return update(
             &model,
             .splitPane(
@@ -193,19 +193,14 @@ func update(
         newPane.theme = theme
         newPane.fontSizeSteps = fontSizeSteps
 
-        // splitLeaf embeds the new pane's payload directly into the leaf.
-        guard let newRoot = splitLeaf(
-            tab.rootNode, paneId: targetPaneId, direction: direction, newPane: newPane,
-            newSplitId: newSplitId
+        var paneTree = tab.paneTree
+        guard paneTree.split(
+            paneId: targetPaneId, direction: direction, newPane: newPane,
+            newSplitId: newSplitId, focusNewPane: !background
         ) else { return [] }
 
-        // Update the tab in place
         updateTab(tab.id, in: &model) { tab in
-            tab.rootNode = newRoot
-            if !background {
-                tab.focusedPaneId = newPaneId
-            }
-            tab.isZoomed = false
+            tab.paneTree = paneTree
         }
 
         let commands: [Command] = [
@@ -226,12 +221,10 @@ func update(
         // A pane in no tab (already closed) is a pure no-op.
         guard let tab = tabForPane(paneId, in: model) else { return [] }
 
-        // removeLeaf drops the leaf (and its pane payload) atomically; the close
-        // path discards the removed pane. Side-table cleanup stays here.
-        let focusMoved = tab.focusedPaneId == paneId
-        let (newTree, nextFocus, _) = removeLeaf(tab.rootNode, paneId: paneId)
+        var paneTree = tab.paneTree
+        guard let removal = paneTree.remove(paneId) else { return [] }
 
-        if newTree == nil && wouldQuitFromClose(model) {
+        if removal.emptiedTree && wouldQuitFromClose(model) {
             return emitTerminateConfirmation(&model)
         }
 
@@ -244,7 +237,7 @@ func update(
             commands.append(.dismissTodoPopover(owner: .pane(paneId)))
         }
 
-        guard let newRoot = newTree else {
+        if removal.emptiedTree {
             // Last pane — close the pane's own tab
             return update(&model, .closeTab(id: tab.id), env: env)
         }
@@ -252,16 +245,12 @@ func update(
         // Focus-mode alert clearing only applies when focus moves in the
         // selected tab. A background tab's survivor never gains user-visible
         // focus, and closing a non-focused pane does not move focus at all.
-        if focusMoved, model.config.alertClearMode == .focus, let next = nextFocus,
+        if removal.focusMoved, model.config.alertClearMode == .focus,
            tab.id == model.selectedTabId {
-            markAlertsReadForPane(next, in: &model)
+            markAlertsReadForPane(paneTree.focusedPaneId, in: &model)
         }
         updateTab(tab.id, in: &model) { tab in
-            tab.rootNode = newRoot
-            tab.isZoomed = false
-            if focusMoved, let next = nextFocus {
-                tab.focusedPaneId = next
-            }
+            tab.paneTree = paneTree
         }
 
         return commands
@@ -277,11 +266,12 @@ func update(
         // not looking at. Revisit if .movePane gains an IPC producer.
         guard source != target else { return [] }
         guard let tab = selectedTab(in: model) else { return [] }
-        guard !tab.isZoomed else { return [] }
+        guard !tab.paneTree.isZoomed else { return [] }
 
-        let newRoot: SplitNodeModel?
+        var paneTree = tab.paneTree
+        let didMove: Bool
         if intent == .swap {
-            newRoot = swapLeaves(tab.rootNode, source, target)
+            didMove = paneTree.swap(source: source, target: target)
         } else {
             let (direction, insertFirst): (SplitNodeModel.Direction, Bool) = {
                 switch intent {
@@ -293,17 +283,15 @@ func update(
                 }
             }()
             let newSplitId = SplitId(rawValue: env.newId())
-            newRoot = moveLeaf(
-                tab.rootNode, source: source, target: target, direction: direction,
+            didMove = paneTree.move(
+                source: source, target: target, direction: direction,
                 insertFirst: insertFirst, newSplitId: newSplitId
             )
         }
 
-        guard let newRoot = newRoot else { return [] }
+        guard didMove else { return [] }
         updateSelectedTab(&model) { tab in
-            tab.rootNode = newRoot
-            tab.focusedPaneId = source
-            tab.isZoomed = false
+            tab.paneTree = paneTree
         }
         return []
 
@@ -317,28 +305,19 @@ func update(
 
         // Remove pane from source tab's tree, capturing its full payload so cwd/
         // theme/todos physically travel to the target tab (no global-dict ref).
-        let (newSourceTree, nextFocus, removed) = removeLeaf(sourceTab.rootNode, paneId: paneId)
-        guard let movedPane = removed else { return [] }
+        var sourcePaneTree = sourceTab.paneTree
+        guard let removal = sourcePaneTree.remove(paneId) else { return [] }
 
         // Update target tab: wrap its root with the moved pane.
         updateTab(targetTabId, in: &model) { tab in
-            tab.rootNode = .split(
-                id: SplitId(rawValue: env.newId()), direction: .horizontal,
-                first: tab.rootNode, second: .leaf(movedPane), ratio: 0.5
-            )
-            tab.focusedPaneId = paneId
-            tab.isZoomed = false
+            tab.paneTree.adopt(removal.pane, splitId: SplitId(rawValue: env.newId()))
         }
 
         // Handle source tab
-        if let newRoot = newSourceTree {
+        if !removal.emptiedTree {
             // Source tab still has panes — update it
             updateTab(sourceTab.id, in: &model) { tab in
-                tab.rootNode = newRoot
-                tab.isZoomed = false
-                if tab.focusedPaneId == paneId, let next = nextFocus {
-                    tab.focusedPaneId = next
-                }
+                tab.paneTree = sourcePaneTree
             }
         } else {
             // Source tab is empty — remove it from its group
@@ -367,7 +346,7 @@ func update(
         guard let dstGroupIdx = model.groups.firstIndex(where: { $0.id == inGroupId }) else { return [] }
 
         let sourceHasOnlyThisPane: Bool = {
-            if case .leaf(let p) = sourceTab.rootNode { return p.id == paneId } else { return false }
+            if case .leaf(let p) = sourceTab.paneTree.root { return p.id == paneId } else { return false }
         }()
 
         // Guard: don't allow if this would leave zero tabs
@@ -397,20 +376,19 @@ func update(
             model.selectedTabId = tab.id
         } else {
             // Path B: Source tab has other panes — create new tab
-            let (newSourceTree, nextFocus, removed) = removeLeaf(sourceTab.rootNode, paneId: paneId)
-            guard let newRoot = newSourceTree, let movedPane = removed else { return [] }
+            var sourcePaneTree = sourceTab.paneTree
+            guard let removal = sourcePaneTree.remove(paneId), !removal.emptiedTree else { return [] }
 
             // Update source tab
             updateTab(sourceTab.id, in: &model) { tab in
-                tab.rootNode = newRoot
-                tab.isZoomed = false
-                if tab.focusedPaneId == paneId, let next = nextFocus {
-                    tab.focusedPaneId = next
-                }
+                tab.paneTree = sourcePaneTree
             }
 
             // Create new tab for the moved pane, carrying its full payload.
-            let newTab = TabModel(id: TabId(rawValue: env.newId()), focusedPaneId: paneId, rootNode: .leaf(movedPane))
+            let newTab = TabModel(
+                id: TabId(rawValue: env.newId()),
+                paneTree: PaneTree(root: .leaf(removal.pane))
+            )
             let clamped = max(0, min(atIndex, model.groups[dstGroupIdx].tabs.count))
             model.groups[dstGroupIdx].tabs.insert(newTab, at: clamped)
             model.selectedTabId = newTab.id
@@ -465,7 +443,7 @@ func update(
         return []
 
     case .adjustPaneFontSize(let paneId, let steps):
-        guard let targetId = paneId ?? selectedTab(in: model)?.focusedPaneId,
+        guard let targetId = paneId ?? selectedTab(in: model)?.paneTree.focusedPaneId,
               let pane = model.pane(targetId) else { return [] }
         // Bound the delta against the room this pane has left, not against the
         // step range: the latter saturates short (a pane at the floor jumped by
@@ -480,7 +458,7 @@ func update(
         return []
 
     case .resetPaneFontSize(let paneId):
-        guard let targetId = paneId ?? selectedTab(in: model)?.focusedPaneId,
+        guard let targetId = paneId ?? selectedTab(in: model)?.paneTree.focusedPaneId,
               let pane = model.pane(targetId), pane.fontSizeSteps != 0 else { return [] }
         model.updatePane(targetId) { $0.fontSizeSteps = 0 }
         return []
@@ -497,16 +475,21 @@ func update(
 
     case .focusDirection(let direction, let side):
         guard let tab = selectedTab(in: model) else { return [] }
-        if tab.isZoomed {
-            updateSelectedTab(&model) { t in t.isZoomed = false }
+        if tab.paneTree.isZoomed {
+            updateSelectedTab(&model) { $0.paneTree.unzoom() }
             return []
         }
-        guard let target = nearestLeaf(tab.rootNode, from: tab.focusedPaneId, direction: direction, side: side) else { return [] }
+        guard let target = nearestLeaf(
+            tab.paneTree.root,
+            from: tab.paneTree.focusedPaneId,
+            direction: direction,
+            side: side
+        ) else { return [] }
 
         if model.config.alertClearMode == .focus {
             markAlertsReadForPane(target, in: &model)
         }
-        updateSelectedTab(&model) { $0.focusedPaneId = target }
+        updateSelectedTab(&model) { $0.paneTree.focus(target) }
         return []
 
     case .paneBecameFirstResponder(let paneId):
@@ -514,12 +497,12 @@ func update(
         // Only adopt a pane that actually lives in the selected tab. A stray
         // becomeFirstResponder from a hidden/background session must not
         // corrupt this tab's focusedPaneId or clear the foreign pane's alerts.
-        guard allPaneIds(tab.rootNode).contains(paneId) else { return [] }
-        if paneId != tab.focusedPaneId {
+        guard allPaneIds(tab.paneTree.root).contains(paneId) else { return [] }
+        if paneId != tab.paneTree.focusedPaneId {
             if model.config.alertClearMode == .focus {
                 markAlertsReadForPane(paneId, in: &model)
             }
-            updateSelectedTab(&model) { $0.focusedPaneId = paneId }
+            updateSelectedTab(&model) { $0.paneTree.focus(paneId) }
         }
         model.searchState[paneId]?.focusOwner = .terminal
 
@@ -527,7 +510,7 @@ func update(
 
     case .searchFieldBecameFirstResponder(let paneId):
         guard let tab = selectedTab(in: model),
-              tab.focusedPaneId == paneId,
+              tab.paneTree.focusedPaneId == paneId,
               model.searchState[paneId] != nil else { return [] }
         model.searchState[paneId]?.focusOwner = .field
 
@@ -549,7 +532,7 @@ func update(
             return []
         case .agentActivityChanged(_, .waiting):
             guard mutation.didChange else { return [] }
-            guard selectedTab(in: model)?.focusedPaneId != mutation.paneId else { return [] }
+            guard selectedTab(in: model)?.paneTree.focusedPaneId != mutation.paneId else { return [] }
             return desktopAlertCommands(
                 model: &model,
                 paneId: mutation.paneId,
@@ -714,7 +697,7 @@ func update(
         guard let paneId = model.pane(owning: sessionId)?.id else { return [] }
         // No alert for the focused pane while the app is active; when inactive,
         // the focused pane is unseen and should follow the normal alert path.
-        if model.isAppActive, let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
+        if model.isAppActive, let tab = selectedTab(in: model), tab.paneTree.focusedPaneId == paneId {
             return []
         }
 
@@ -763,11 +746,13 @@ func update(
         // Session creation failure removes the whole containing tab, so every
         // sibling pane must be cleaned up as if the tab had been closed.
         for gi in model.groups.indices {
-            if let ti = model.groups[gi].tabs.firstIndex(where: { allPaneIds($0.rootNode).contains(paneId) }) {
+            if let ti = model.groups[gi].tabs.firstIndex(where: {
+                allPaneIds($0.paneTree.root).contains(paneId)
+            }) {
                 let tab = model.groups[gi].tabs[ti]
                 let tabId = tab.id
                 let groupId = model.groups[gi].id
-                for pid in allPaneIds(tab.rootNode) {
+                for pid in allPaneIds(tab.paneTree.root) {
                     // Session teardown is reconcileSessionExistence's (these panes leave the
                     // tree below); keep side-table cleanup via clearPaneSideTables.
                     clearPaneSideTables(pid, in: &model)
@@ -795,7 +780,7 @@ func update(
     case .appBecameActive:
         model.isAppActive = true
         if model.config.alertClearMode == .focus,
-           let focusedPaneId = selectedTab(in: model)?.focusedPaneId {
+           let focusedPaneId = selectedTab(in: model)?.paneTree.focusedPaneId {
             markAlertsReadForPane(focusedPaneId, in: &model)
         }
         return []
@@ -854,8 +839,8 @@ func update(
         }
 
         let currentTabId = currentTab.id
-        let currentFocusedPaneId = currentTab.focusedPaneId
-        let currentPaneIds = Set(allPaneIds(currentTab.rootNode))
+        let currentFocusedPaneId = currentTab.paneTree.focusedPaneId
+        let currentPaneIds = Set(allPaneIds(currentTab.paneTree.root))
         let liveUnreadAlerts = model.alerts.compactMap { alert -> (alert: AlertModel, tab: TabModel)? in
             guard alert.isUnread, let tab = tabForPane(alert.paneId, in: model) else { return nil }
             return (alert, tab)
@@ -951,7 +936,7 @@ func update(
         } else {
             // Close all tabs' sessions.
             for tab in group.tabs {
-                for pid in allPaneIds(tab.rootNode) {
+                for pid in allPaneIds(tab.paneTree.root) {
                     // Session teardown is reconcileSessionExistence's (these panes leave the
                     // tree below); keep side-table cleanup via clearPaneSideTables.
                     clearPaneSideTables(pid, in: &model)
@@ -1074,12 +1059,12 @@ func update(
             guard let found = selectedTab(in: model) else { return [] }
             tab = found
         }
-        if tab.isZoomed {
-            updateTab(tab.id, in: &model) { t in t.isZoomed = false }
+        if tab.paneTree.isZoomed {
+            updateTab(tab.id, in: &model) { $0.paneTree.unzoom() }
             return []
         }
-        if case .split = tab.rootNode {
-            updateTab(tab.id, in: &model) { t in t.isZoomed = true }
+        if case .split = tab.paneTree.root {
+            updateTab(tab.id, in: &model) { $0.paneTree.toggleZoom() }
             return []
         }
         return []
@@ -1092,7 +1077,7 @@ func update(
         // split's own tab instead of assuming the selected tab owns it.
         guard let tab = tabForSplit(splitId, in: model) else { return [] }
         updateTab(tab.id, in: &model) { tab in
-            tab.rootNode = setRatio(tab.rootNode, splitId: splitId, ratio: ratio)
+            tab.paneTree.updateRatio(splitId: splitId, ratio: ratio)
         }
         return []
 
@@ -1100,7 +1085,7 @@ func update(
 
     case .startSearch:
         guard let tab = selectedTab(in: model) else { return [] }
-        return [.sendStartSearch(paneId: tab.focusedPaneId)]
+        return [.sendStartSearch(paneId: tab.paneTree.focusedPaneId)]
 
     case .searchStarted(let paneId, let needle):
         if model.searchState[paneId] == nil {
@@ -1127,7 +1112,7 @@ func update(
         // The menu items stay enabled, so Cmd-G with no open overlay lands here and
         // must do nothing rather than drive engine search state invisibly.
         guard let tab = selectedTab(in: model) else { return [] }
-        return update(&model, .searchNavigate(paneId: tab.focusedPaneId, direction: direction), env: env)
+        return update(&model, .searchNavigate(paneId: tab.paneTree.focusedPaneId, direction: direction), env: env)
 
     case .endSearch(let paneId):
         guard model.searchState[paneId] != nil else { return [] }
@@ -1291,7 +1276,7 @@ func update(
         // the rollup subsumes per-pane todos at the last-pane boundary, so
         // there's no double-prompt with the per-pane sheet.
         if let tab = tabForPane(paneId, in: model),
-           allPaneIds(tab.rootNode).count == 1 {
+           allPaneIds(tab.paneTree.root).count == 1 {
             let rollup = tabTodoRollup(tab.id, in: model)
             if rollup.uncompleted > 0 {
                 let isLastTab = totalTabCount(model) == 1
@@ -1367,7 +1352,7 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Command] {
     }
     model.selectedTabId = id
     if model.config.alertClearMode == .focus, let tab = selectedTab(in: model) {
-        markAlertsReadForPane(tab.focusedPaneId, in: &model)
+        markAlertsReadForPane(tab.paneTree.focusedPaneId, in: &model)
     }
     // Selection is view-owned: reconcileSidebar reapplies it (replacing the deleted
     // .setSidebarSelection), and any cleared-alert bell badges update from the projection.
@@ -1471,18 +1456,18 @@ func navigateToPane(
     env: CoreEnv
 ) -> [Command] {
     guard let currentTab = tabForPane(paneId, in: model) else { return [] }
-    let wasZoomed = currentTab.isZoomed
-    let oldFocusedPaneId = currentTab.focusedPaneId
+    let wasZoomed = currentTab.paneTree.isZoomed
+    let oldFocusedPaneId = currentTab.paneTree.focusedPaneId
     let focusChanged = paneId != oldFocusedPaneId
     let commands = update(&model, .selectTab(id: currentTab.id), env: env)
     updateTab(currentTab.id, in: &model) { tab in
-        tab.focusedPaneId = paneId
+        tab.paneTree.focus(paneId)
     }
     if focusChanged && model.config.alertClearMode == .focus {
         markAlertsReadForPane(paneId, in: &model)
     }
     if wasZoomed, paneId != oldFocusedPaneId {
-        updateSelectedTab(&model) { t in t.isZoomed = false }
+        updateSelectedTab(&model) { $0.paneTree.unzoom() }
     }
     // No popover clear on same-tab navigation: the anchor button and the visible
     // container stay intact, so nothing is stranded (consistent with
@@ -1556,7 +1541,7 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
     guard let (groupIdx, tabIdx) = tabLocation(id, in: model) else { return [] }
     let tab = model.groups[groupIdx].tabs[tabIdx]
     let groupId = model.groups[groupIdx].id
-    let paneIds = allPaneIds(tab.rootNode)
+    let paneIds = allPaneIds(tab.paneTree.root)
 
     // Compute fallback selection: prefer predecessor, then successor in flattened order.
     let fallbackTabId: TabId? = {
@@ -1612,7 +1597,7 @@ private func desktopAlertCommands(
     guard senderTitle.fitsTerminalMetadataValueLimit,
           body.fitsTerminalMetadataValueLimit
     else { return [] }
-    if model.isAppActive, let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
+    if model.isAppActive, let tab = selectedTab(in: model), tab.paneTree.focusedPaneId == paneId {
         return []
     }
     guard tabForPane(paneId, in: model) != nil else { return [] }

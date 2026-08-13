@@ -382,9 +382,5 @@ private func sidebarStoreTab(_ id: TabId) -> TabModel {
         id: SessionId(),
         title: String(id.rawValue.uuidString.prefix(8))
     )
-    return TabModel(
-        id: id,
-        focusedPaneId: paneId,
-        rootNode: .leaf(pane)
-    )
+    return TabModel(id: id, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
 }
