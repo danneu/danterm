@@ -1,6 +1,7 @@
 # Model-Driven View Reconciliation
 
 - Status: Accepted
+- Amended: 2026-08-13 -- presentation with duration is always a projection
 - Date: 2026-05-27
 
 ## Context
@@ -52,11 +53,28 @@ New reconcile passes should follow the migration template:
 - delete the matching `Command` case, `perform` arm, and emission sites in the
   same change.
 
-Commands are for true side effects and transient imperative actions: PTY/session
-creation, session focus signaling, IPC replies, notifications, checkpoint/config
-writes, export, and popover presentation. Everything the view merely shows or
-synchronizes, including AppKit first responder, should be a projection of the
-model.
+Commands are for true side effects and one-shot transactions: PTY/session
+creation, session focus signaling, IPC replies, notifications,
+checkpoint/config writes, export, process termination, and interactions whose
+lifecycle AppKit owns end to end (menu tracking, drag sessions, system file
+panels). A command's effect is an event: it fires, completes, and no later model
+transition should refresh or retract it.
+
+Anything with duration on screen is state, not an event. If a surface can be
+shown, refreshed, and dismissed -- a panel, sheet, popover, or overlay -- its
+existence is a projection of a model slot, following the single-optional
+projection template. The test for a new case: ask what should happen if the
+model changes while the surface is visible. If the answer is "the surface
+updates or goes away", it is a projection. If its lifecycle cannot react and
+only its result matters, it is a command, and the result re-enters as a Msg.
+
+Hosts with native transitions (a transient popover's click-away close, the
+window close button, outline row collapse) share ownership with AppKit under
+one protocol: AppKit-initiated transitions report back as Msgs through a
+delegate or target-action; reconciler-initiated transitions are silent -- the
+executor cancels or detaches the reporting path before closing, because the
+model already knows. A reconcile pass must never synchronously re-enter
+`send()`.
 
 ## Pass Shapes
 
@@ -197,15 +215,11 @@ Commands remain true commands. Reintroducing a command whose only job is to make
 the view match the model is a design smell; it should normally be a pure
 projection plus a reconcile pass instead.
 
-Some conditions are expressed twice in layer-appropriate forms. For TODO
-popovers, `update()` clears `model.todoPopover` by comparing model state before
-and after a message, while `reconcileContainers` dismisses AppKit popovers from
-the live `ContainerOp` diff and the previously visible container. Both scopes
-dismiss when their tab is removed or loses visibility. A structural change to
-the still-visible tab dismisses only a tab-scoped popover; a pane-scoped popover
-survives while its pane remains in that tab because its runtime-owned wrapper and
-anchor survive. That duplication is accepted because each half reads the inputs
-its layer owns. Tests keep the behavioral boundary aligned.
+Popover and confirmation existence is a projection of `model.todoPopover` and
+`model.pendingConfirmation`. The pure invariant that these slots never outlive
+their subject (owner pane/tab alive and anchored) is maintained in `update()`
+and tested at the pure layer; reconcile passes rely on it and on pass ordering,
+and contain no stranding sweeps.
 
 The cost of this architecture is occasional extra model helpers, generation
 counters, host-lifetime invalidation, or explicit view-state inputs. The payoff is
