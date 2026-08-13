@@ -57,10 +57,12 @@ enum Command {
     // The title and subtitle are DanTerm's own derived presentation and land in
     // one-line notification slots; the body is the sender's text, kept verbatim.
     case sendNotification(alertId: AlertId, paneId: PaneId, title: DisplayLine, subtitle: DisplayLine?, body: String)
-    // `uncompletedTodoCount` rolls up the tab's own todos plus every pane's
-    // todos in that tab (the same number the chrome's tab-todo badge shows).
-    case showCloseTabConfirmation(tabId: TabId, tabTitle: DisplayLine, paneCount: Int, isLastTab: Bool, uncompletedTodoCount: Int)
-    case showCloseTabsConfirmation(tabIds: [TabId], tabCount: Int, totalPaneCount: Int, totalUncompletedTodos: Int, isQuit: Bool)
+    case showCloseConfirmation(
+        subject: ConfirmationSubject,
+        tabTitle: DisplayLine?,
+        quitAuthorized: Bool,
+        copy: CloseConfirmationCopy
+    )
     case terminate
     case activateApp
     case dismissAlertsPopover
@@ -78,7 +80,6 @@ enum Command {
     // TODO
     case showTodoPopover(owner: TodoOwner)
     case dismissTodoPopover(owner: TodoOwner)
-    case showClosePaneConfirmation(paneId: PaneId, uncompletedCount: Int)
     // The MRU tab switcher overlay is derived by reconcileSwitcher from model.mruCycle
     // after every send() (Stage 7); showSwitcherOverlay/hideSwitcherOverlay are gone.
 }

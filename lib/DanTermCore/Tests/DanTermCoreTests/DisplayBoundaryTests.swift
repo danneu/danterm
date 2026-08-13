@@ -17,6 +17,7 @@ private let hostileInputs = [
     "a\nb",
     "a\r\nb",
     "\u{001B}]0;half a sequence",
+    "left \u{202E}right",
     "  spread \t out \n across lines  ",
     "\n\n\n",
 ]
@@ -24,7 +25,9 @@ private let hostileInputs = [
 /// A string is flat when a fixed-height label can draw it: one line, and no
 /// control scalar that a text system would have to interpret.
 private func isFlat(_ value: String) -> Bool {
-    value.unicodeScalars.allSatisfy { $0.properties.generalCategory != .control }
+    value.unicodeScalars.allSatisfy {
+        $0.properties.generalCategory != .control && $0 != "\u{202E}"
+    }
 }
 
 private func expectFlat(_ line: DisplayLine, _ surface: String, input: String) {
@@ -51,7 +54,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .title(hostile)))
         update(&model, .sessionReport(sessionId: sessionId, report: .cwd("/tmp/\(hostile)")))
-        if runningCommand {
+        if runningCommand, paneId == panes[0] {
             update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted(hostile)))
         }
     }
@@ -124,8 +127,9 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
             var closeModel = model
             let closeCommands = update(&closeModel, .requestCloseTab(id: tabId))
             for command in closeCommands {
-                if case .showCloseTabConfirmation(_, let tabTitle, _, _, _) = command {
+                if case .showCloseConfirmation(.tab, let tabTitle?, _, let copy) = command {
                     expectFlat(tabTitle, "close-tab confirmation title", input: hostile)
+                    expectFlat(copy.commandDetail, "close confirmation command detail", input: hostile)
                 }
             }
         }
@@ -251,7 +255,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
 
         let commands = update(&model, .requestCloseTab(id: tabId))
         let titles = commands.compactMap { command -> DisplayLine? in
-            if case .showCloseTabConfirmation(_, let tabTitle, _, _, _) = command { return tabTitle }
+            if case .showCloseConfirmation(.tab, let tabTitle?, _, _) = command { return tabTitle }
             return nil
         }
         #expect(titles == ["a b"])

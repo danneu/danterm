@@ -123,16 +123,15 @@ func update(
         return applySelectTab(&model, id: id)
 
     case .requestCloseTab(let id):
-        guard let tab = tabById(id, in: model) else { return [] }
-        let paneCount = allPaneIds(tab.paneTree.root).count
-        let uncompletedTodos = tabTodoRollup(id, in: model).uncompleted
+        guard tabById(id, in: model) != nil else { return [] }
+        let subject = ConfirmationSubject.tab(id)
+        guard let impact = closeImpact(for: subject, in: model) else { return [] }
 
-        if paneCount > 1 || uncompletedTodos > 0 {
-            let isLastTab = totalTabCount(model) == 1
-            return emitCloseTabConfirmation(
-                &model, tabId: id, tabTitle: DisplayLine(tabDisplayTitle(tab)),
-                paneCount: paneCount, isLastTab: isLastTab,
-                uncompletedTodoCount: uncompletedTodos
+        if impact.panes.count > 1 || impact.hasWarning {
+            return emitConfirmation(
+                &model,
+                subject: subject,
+                quitAuthorized: totalTabCount(model) == 1
             )
         }
 
@@ -144,22 +143,14 @@ func update(
         guard normalized.count > 1 else {
             return update(&model, .requestCloseTab(id: normalized[0]), env: env)
         }
-        return emitCloseTabsConfirmation(&model, ids: normalized)
+        return emitConfirmation(
+            &model,
+            subject: .tabs(normalized),
+            quitAuthorized: normalized.count == totalTabCount(model)
+        )
 
     case .closeTab(let id):
-        guard tabLocation(id, in: model) != nil else { return [] }
-
-        if wouldQuitFromClose(model) {
-            return emitTerminateConfirmation(&model)
-        }
-
-        let commands = closeTabBody(&model, id: id)
-
-        // Check if all tabs gone
-        if !model.hasAnyTab {
-            return commands + [.terminate]
-        }
-        return commands
+        return closeTabBody(&model, id: id, quitAuthorized: false)
 
     // MARK: - Pane Management
 
@@ -215,49 +206,7 @@ func update(
         return commands
 
     case .closePane(let paneId):
-        // Resolve the pane's own tab (mirrors .splitPane): .sessionEnded routes
-        // background-tab shell exits here, and a stale context menu may fire after
-        // the selection changed -- both must act on the tab that owns the pane.
-        // A pane in no tab (already closed) is a pure no-op.
-        guard let tab = tabForPane(paneId, in: model) else { return [] }
-
-        var paneTree = tab.paneTree
-        guard let removal = paneTree.remove(paneId) else { return [] }
-
-        if removal.emptiedTree && wouldQuitFromClose(model) {
-            return emitTerminateConfirmation(&model)
-        }
-
-        // Session teardown is reconcileSessionExistence's now (paneId leaves the tree
-        // below, so the next reconcile tears its session down); keep side-table cleanup.
-        var commands = rejectPendingCreation(
-            for: paneId,
-            in: &model,
-            message: "pane closed before its process started"
-        )
-        clearPaneSideTables(paneId, in: &model)
-        if model.todoPopover == .pane(paneId) {
-            model.todoPopover = nil
-            commands.append(.dismissTodoPopover(owner: .pane(paneId)))
-        }
-
-        if removal.emptiedTree {
-            // Last pane — close the pane's own tab
-            return commands + update(&model, .closeTab(id: tab.id), env: env)
-        }
-
-        // Focus-mode alert clearing only applies when focus moves in the
-        // selected tab. A background tab's survivor never gains user-visible
-        // focus, and closing a non-focused pane does not move focus at all.
-        if removal.focusMoved, model.config.alertClearMode == .focus,
-           tab.id == model.selectedTabId {
-            markAlertsReadForPane(paneTree.focusedPaneId, in: &model)
-        }
-        updateTab(tab.id, in: &model) { tab in
-            tab.paneTree = paneTree
-        }
-
-        return commands
+        return closePaneBody(&model, paneId: paneId, quitAuthorized: false)
 
     case .movePane(let source, let target, let intent):
         // Selected-tab scoping is deliberate: unlike .closePane/.splitPane,
@@ -813,7 +762,7 @@ func update(
         return []
 
     case .requestQuit:
-        return emitTerminateConfirmation(&model)
+        return emitConfirmation(&model, subject: .app)
 
     // MARK: - Alerts
 
@@ -892,38 +841,10 @@ func update(
         markAlertsReadForPane(paneId, in: &model)
         return []   // bell badge reconciles via reconcileSidebar
 
-    case .confirmTerminate:
-        model.pendingConfirmation = nil
-        return [.terminate]
+    case .confirmConfirmation:
+        return confirmPendingConfirmation(&model, env: env)
 
-    case .cancelTerminate:
-        model.pendingConfirmation = nil
-        return []
-
-    case .confirmCloseTab(let id):
-        model.pendingConfirmation = nil
-        return update(&model, .closeTab(id: id), env: env)
-
-    case .cancelCloseTab:
-        model.pendingConfirmation = nil
-        return []
-
-    case .confirmCloseTabs(let ids):
-        model.pendingConfirmation = nil
-        let normalized = normalizedLiveTabIds(ids, in: model)
-        guard !normalized.isEmpty else { return [] }
-
-        var commands: [Command] = []
-        for id in normalized {
-            commands.append(contentsOf: closeTabBody(&model, id: id))
-        }
-
-        if !model.hasAnyTab {
-            return commands + [.terminate]
-        }
-        return commands
-
-    case .cancelCloseTabs:
+    case .cancelConfirmation:
         model.pendingConfirmation = nil
         return []
 
@@ -992,7 +913,7 @@ func update(
 
         let group = model.groups[idx]
         if !moveTabs && !group.tabs.isEmpty && totalTabCount(model) == group.tabs.count {
-            return emitTerminateConfirmation(&model)
+            return emitConfirmation(&model, subject: .app)
         }
         if moveTabs {
             guard let adjIdx = adjacentGroupIndex(deletingAt: idx, count: model.groups.count) else { return [] }
@@ -1339,7 +1260,7 @@ func update(
         return []
 
     case .requestClosePane(let paneId):
-        guard let pane = model.pane(paneId) else { return [] }
+        guard model.pane(paneId) != nil else { return [] }
         // If this is the only pane in its tab, the close cascades into closeTab
         // (destroying tab todos + every pane's todos). Route through the
         // close-tab confirmation when the full rollup has any uncompleted item;
@@ -1347,20 +1268,19 @@ func update(
         // there's no double-prompt with the per-pane sheet.
         if let tab = tabForPane(paneId, in: model),
            allPaneIds(tab.paneTree.root).count == 1 {
-            let rollup = tabTodoRollup(tab.id, in: model)
-            if rollup.uncompleted > 0 {
-                let isLastTab = totalTabCount(model) == 1
-                return emitCloseTabConfirmation(
-                    &model, tabId: tab.id, tabTitle: DisplayLine(tabDisplayTitle(tab)),
-                    paneCount: 1, isLastTab: isLastTab,
-                    uncompletedTodoCount: rollup.uncompleted
+            let subject = ConfirmationSubject.tab(tab.id)
+            if closeImpact(for: subject, in: model)?.hasWarning == true {
+                return emitConfirmation(
+                    &model,
+                    subject: subject,
+                    quitAuthorized: totalTabCount(model) == 1
                 )
             }
             return update(&model, .closePane(paneId: paneId), env: env)
         }
-        let uncompletedCount = pane.todos.count { !$0.isDone }
-        if uncompletedCount > 0 {
-            return [.showClosePaneConfirmation(paneId: paneId, uncompletedCount: uncompletedCount)]
+        let subject = ConfirmationSubject.pane(paneId)
+        if closeImpact(for: subject, in: model)?.hasWarning == true {
+            return emitConfirmation(&model, subject: subject)
         }
         return update(&model, .closePane(paneId: paneId), env: env)
 
@@ -1389,6 +1309,128 @@ func update(
     case .jumpModeCanceled:
         return jumpModeCancel(&model)
     }
+}
+
+/// Commits or refreshes the one pending transaction against the live model.
+private func confirmPendingConfirmation(_ model: inout AppModel, env: CoreEnv) -> [Command] {
+    guard let pending = model.pendingConfirmation else { return [] }
+    if pending.subject == .app {
+        model.pendingConfirmation = nil
+        return [.terminate]
+    }
+
+    if closeSubjectHasGrown(pending, in: model) {
+        model.pendingConfirmation = nil
+        switch pending.subject {
+        case .pane(let paneId):
+            return update(&model, .requestClosePane(paneId: paneId), env: env)
+        case .tab(let tabId):
+            return update(&model, .requestCloseTab(id: tabId), env: env)
+        case .tabs(let tabIds):
+            return update(&model, .requestCloseTabs(ids: tabIds), env: env)
+        case .app:
+            return []
+        }
+    }
+
+    model.pendingConfirmation = nil
+    switch pending.subject {
+    case .pane(let paneId):
+        return closePaneBody(&model, paneId: paneId, quitAuthorized: pending.quitAuthorized)
+    case .tab(let tabId):
+        return closeTabBody(&model, id: tabId, quitAuthorized: pending.quitAuthorized)
+    case .tabs(let tabIds):
+        let normalized = normalizedLiveTabIds(tabIds, in: model)
+        var commands: [Command] = []
+        for tabId in normalized {
+            commands.append(contentsOf: closeTabRemoval(&model, id: tabId))
+        }
+        guard model.hasAnyTab == false else { return commands }
+        if pending.quitAuthorized {
+            return commands + [.terminate]
+        }
+        return commands + emitConfirmation(&model, subject: .app)
+    case .app:
+        return [.terminate]
+    }
+}
+
+private func closeSubjectHasGrown(_ pending: PendingConfirmation, in model: AppModel) -> Bool {
+    guard let snapshot = pending.impact,
+          let current = closeImpact(for: pending.subject, in: model)
+    else { return false }
+
+    for pane in current.panes {
+        guard let prior = snapshot.panes.first(where: { $0.paneId == pane.paneId }) else {
+            return true
+        }
+        if let runningCommand = pane.runningCommand,
+           prior.runningCommand != runningCommand {
+            return true
+        }
+    }
+    return false
+}
+
+private func closeTabBody(
+    _ model: inout AppModel,
+    id: TabId,
+    quitAuthorized: Bool
+) -> [Command] {
+    guard tabLocation(id, in: model) != nil else { return [] }
+    if wouldQuitFromClose(model) {
+        guard quitAuthorized else {
+            return emitConfirmation(&model, subject: .app)
+        }
+        return closeTabRemoval(&model, id: id) + [.terminate]
+    }
+    let commands = closeTabRemoval(&model, id: id)
+    if model.hasAnyTab == false {
+        return commands + [.terminate]
+    }
+    return commands
+}
+
+private func closePaneBody(
+    _ model: inout AppModel,
+    paneId: PaneId,
+    quitAuthorized: Bool
+) -> [Command] {
+    // Resolve the pane's own tab because shell exits and stale menus can target
+    // a background pane after selection has changed.
+    guard let tab = tabForPane(paneId, in: model) else { return [] }
+    var paneTree = tab.paneTree
+    guard let removal = paneTree.remove(paneId) else { return [] }
+
+    if removal.emptiedTree {
+        if wouldQuitFromClose(model) {
+            guard quitAuthorized else {
+                return emitConfirmation(&model, subject: .app)
+            }
+            return closeTabRemoval(&model, id: tab.id) + [.terminate]
+        }
+        return closeTabRemoval(&model, id: tab.id)
+    }
+
+    var commands = rejectPendingCreation(
+        for: paneId,
+        in: &model,
+        message: "pane closed before its process started"
+    )
+    clearPaneSideTables(paneId, in: &model)
+    if model.todoPopover == .pane(paneId) {
+        model.todoPopover = nil
+        commands.append(.dismissTodoPopover(owner: .pane(paneId)))
+    }
+
+    if removal.focusMoved, model.config.alertClearMode == .focus,
+       tab.id == model.selectedTabId {
+        markAlertsReadForPane(paneTree.focusedPaneId, in: &model)
+    }
+    updateTab(tab.id, in: &model) { tab in
+        tab.paneTree = paneTree
+    }
+    return commands
 }
 
 /// Pure todo reorder shared by the pane and tab handlers: removes `todoId` and
@@ -1607,7 +1649,7 @@ private func normalizedLiveTabIds(_ ids: [TabId], in model: AppModel) -> [TabId]
 
 // Core tab removal shared by single and batch close. The caller owns the final
 // tail: terminate-if-empty vs. reload-sidebar-and-checkpoint.
-private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
+private func closeTabRemoval(_ model: inout AppModel, id: TabId) -> [Command] {
     guard let (groupIdx, tabIdx) = tabLocation(id, in: model) else { return [] }
     let tab = model.groups[groupIdx].tabs[tabIdx]
     let groupId = model.groups[groupIdx].id

@@ -467,7 +467,7 @@ import Testing
         let firstTabId = model.groups[0].tabs[0].id
         let commands = update(&model, .requestCloseTab(id: firstTabId))
         #expect(!hasEffect(commands) {
-            if case .showCloseTabConfirmation = $0 { return true }
+            if case .showCloseConfirmation = $0 { return true }
             return false
         }, "no confirmation for empty tab")
         #expect(model.groups[0].tabs.count == 1, "tab should be removed")
@@ -476,7 +476,7 @@ import Testing
     @Test("requestCloseTab on single-pane tab with uncompleted tab todos shows confirmation")
     func requestCloseTabSinglePaneTabTodosShowsConfirmation() {
         // Intent: a single-pane tab with uncompleted tab todos
-        //   surfaces showCloseTabConfirmation with utc=1.
+        //   surfaces the unified tab confirmation with one unfinished task.
         // Why it exists: pins the confirmation rollup for tab-level
         //   todos.
         // Scenario: spec-first tab todo confirm.
@@ -488,11 +488,12 @@ import Testing
 
         let commands = update(&model, .requestCloseTab(id: firstTabId))
         #expect(hasEffect(commands) {
-            if case .showCloseTabConfirmation(let tid, _, let pc, _, let utc) = $0 {
-                return tid == firstTabId && pc == 1 && utc == 1
+            if case .showCloseConfirmation(.tab(let tabId), _, _, let copy) = $0 {
+                return tabId == firstTabId
+                    && copy.informativeText == "This tab has 1 unfinished task."
             }
             return false
-        }, "expected confirmation with uncompletedTodoCount=1")
+        }, "expected confirmation with one unfinished task")
         #expect(model.groups[0].tabs.count == 2, "tab not yet removed")
     }
 
@@ -508,11 +509,9 @@ import Testing
         let firstTab = model.groups[0].tabs[0]
         update(&model, .addTodo(owner: .pane(firstTab.paneTree.focusedPaneId), text: "pane task"))
 
-        let commands = update(&model, .requestCloseTab(id: firstTab.id))
-        #expect(hasEffect(commands) {
-            if case .showCloseTabConfirmation(_, _, _, _, let utc) = $0 { return utc == 1 }
-            return false
-        }, "expected confirmation with rollup pane todos")
+        _ = update(&model, .requestCloseTab(id: firstTab.id))
+        #expect(model.pendingConfirmation?.impact?.uncompletedTodoCount == 1,
+            "expected confirmation with rollup pane todos")
     }
 
     @Test("requestCloseTab on multi-pane tab with mixed todos rolls up the count")
@@ -540,17 +539,14 @@ import Testing
         update(&model, .toggleTodoDone(owner: .pane(paneB), todoId: lastB))
 
         let commands = update(&model, .requestCloseTab(id: firstTabId))
-        #expect(hasEffect(commands) {
-            if case .showCloseTabConfirmation(_, _, let pc, _, let utc) = $0 {
-                return pc == 2 && utc == 4
-            }
-            return false
-        }, "expected paneCount=2 and uncompletedTodoCount=4")
+        #expect(commands.contains { if case .showCloseConfirmation = $0 { return true }; return false })
+        #expect(model.pendingConfirmation?.impact?.panes.count == 2)
+        #expect(model.pendingConfirmation?.impact?.uncompletedTodoCount == 4)
     }
 
-    @Test("confirmCloseTab on a tab with todos clears pending and closes")
-    func confirmCloseTabWithTodosClearsPendingAndCloses() {
-        // Intent: confirmCloseTab clears pendingConfirmation and
+    @Test("confirming a tab with todos clears pending and closes")
+    func confirmTabWithTodosClearsPendingAndCloses() {
+        // Intent: unified confirmation clears pendingConfirmation and
         //   removes the tab.
         // Why it exists: pins the confirm path with todos.
         // Scenario: spec-first confirm + remove.
@@ -560,9 +556,9 @@ import Testing
         let firstTabId = model.groups[0].tabs[0].id
         update(&model, .addTodo(owner: .tab(firstTabId), text: "pending"))
         update(&model, .requestCloseTab(id: firstTabId))
-        #expect(model.pendingConfirmation == .closeTab)
+        #expect(model.pendingConfirmation?.subject == .tab(firstTabId))
 
-        update(&model, .confirmCloseTab(id: firstTabId))
+        update(&model, .confirmConfirmation)
         #expect(model.pendingConfirmation == nil, "pending should clear")
         #expect(model.groups[0].tabs.count == 1, "tab should be removed")
     }
@@ -583,13 +579,14 @@ import Testing
 
         let commands = update(&model, .requestClosePane(paneId: firstTab.paneTree.focusedPaneId))
         #expect(hasEffect(commands) {
-            if case .showCloseTabConfirmation(let tid, _, let pc, _, let utc) = $0 {
-                return tid == firstTab.id && pc == 1 && utc == 1
+            if case .showCloseConfirmation(.tab(let tabId), _, _, _) = $0 {
+                return tabId == firstTab.id
             }
             return false
         }, "expected close-tab confirmation")
+        #expect(model.pendingConfirmation?.impact?.uncompletedTodoCount == 1)
         #expect(!hasEffect(commands) {
-            if case .showClosePaneConfirmation = $0 { return true }
+            if case .showCloseConfirmation(.pane, _, _, _) = $0 { return true }
             return false
         }, "should not show pane-level confirmation")
         #expect(model.pane(firstTab.paneTree.focusedPaneId) != nil, "pane not yet removed")
@@ -613,11 +610,11 @@ import Testing
 
         let commands = update(&model, .requestClosePane(paneId: paneB))
         #expect(!hasEffect(commands) {
-            if case .showCloseTabConfirmation = $0 { return true }
+            if case .showCloseConfirmation(.tab, _, _, _) = $0 { return true }
             return false
         }, "no close-tab confirmation: tab still alive")
         #expect(!hasEffect(commands) {
-            if case .showClosePaneConfirmation = $0 { return true }
+            if case .showCloseConfirmation(.pane, _, _, _) = $0 { return true }
             return false
         }, "no pane confirmation: pane has no todos")
         #expect(model.pane(paneB) == nil, "pane should be removed")
@@ -638,12 +635,11 @@ import Testing
         update(&model, .addTodo(owner: .pane(paneA), text: "pane task"))
 
         let commands = update(&model, .requestClosePane(paneId: paneA))
-        #expect(hasEffect(commands) {
-            if case .showCloseTabConfirmation(_, _, _, _, let utc) = $0 { return utc == 2 }
-            return false
-        }, "expected close-tab rollup of 2")
+        #expect(model.pendingConfirmation?.subject == .tab(firstTab.id))
+        #expect(model.pendingConfirmation?.impact?.uncompletedTodoCount == 2,
+            "expected close-tab rollup of 2")
         #expect(!hasEffect(commands) {
-            if case .showClosePaneConfirmation = $0 { return true }
+            if case .showCloseConfirmation(.pane, _, _, _) = $0 { return true }
             return false
         }, "should not also show pane confirmation")
     }
@@ -662,9 +658,8 @@ import Testing
         update(&model, .addTodo(owner: .pane(paneA), text: "pane only"))
 
         let commands = update(&model, .requestClosePane(paneId: paneA))
-        #expect(hasEffect(commands) {
-            if case .showCloseTabConfirmation(_, _, _, _, let utc) = $0 { return utc == 1 }
-            return false
-        }, "expected close-tab confirmation with rollup 1")
+        #expect(commands.contains { if case .showCloseConfirmation = $0 { return true }; return false })
+        #expect(model.pendingConfirmation?.impact?.uncompletedTodoCount == 1,
+            "expected close-tab confirmation with rollup 1")
     }
 }

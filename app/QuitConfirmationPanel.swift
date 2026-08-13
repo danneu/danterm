@@ -97,17 +97,17 @@ final class QuitConfirmationPanel: NSPanel, NSWindowDelegate {
 
     // NSWindowDelegate: closing the panel is an explicit quit cancellation.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        runtime?.send(.cancelTerminate)
+        runtime?.send(.cancelConfirmation)
         return true
     }
 
     // MARK: - Actions
 
     @objc private func confirmQuit(_ sender: Any?) {
-        runtime?.send(.confirmTerminate)
+        runtime?.send(.confirmConfirmation)
     }
 
     @objc private func cancelQuit(_ sender: Any?) {
-        runtime?.send(.cancelTerminate)
+        runtime?.send(.cancelConfirmation)
     }
 }

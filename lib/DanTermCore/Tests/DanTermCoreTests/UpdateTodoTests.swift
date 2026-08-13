@@ -326,7 +326,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
     @Test("requestClosePane with uncompleted todos on a non-last pane emits per-pane confirmation")
     func requestClosePaneNonLastWithTodosEmitsPerPaneConfirmation() {
         // Intent: a non-last pane close with uncompleted todos
-        //   emits showClosePaneConfirmation.
+        //   emits the unified close confirmation for that pane.
         // Why it exists: pins the per-pane confirmation path
         //   (distinct from the close-tab routing).
         // Scenario: spec-first pane confirm.
@@ -337,11 +337,12 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         update(&model, .addTodo(owner: .pane(firstPaneId), text: "incomplete task"))
         let commands = update(&model, .requestClosePane(paneId: firstPaneId))
         #expect(hasEffect(commands) {
-            if case .showClosePaneConfirmation(let pid, let count) = $0 {
-                return pid == firstPaneId && count == 1
+            if case .showCloseConfirmation(.pane(let paneId), _, _, let copy) = $0 {
+                return paneId == firstPaneId
+                    && copy.informativeText == "This pane has 1 unfinished task."
             }
             return false
-        }, "expected showClosePaneConfirmation with count 1")
+        }, "expected pane confirmation with count 1")
         #expect(model.pane(firstPaneId) != nil, "pane should not be removed")
     }
 

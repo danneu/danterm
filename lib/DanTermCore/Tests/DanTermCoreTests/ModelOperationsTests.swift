@@ -1480,7 +1480,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
     @Test("desiredQuitConfirmation projects terminate pane count only")
     func desiredQuitConfirmationProjectsTerminateOnly() {
         // Intent: desiredQuitConfirmation returns nil unless
-        //   pendingConfirmation == .terminate, then carries pane count.
+        //   the pending subject is the app, then carries pane count.
         // Why it exists: pins the per-confirmation gating that keeps
         //   the close-tab NSAlert path off the quit panel.
         // Scenario: spec-first projection -- nil with no confirmation,
@@ -1490,15 +1490,16 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
         #expect(desiredQuitConfirmation(in: model) == nil, "no pending confirmation -> nil projection")
 
-        model.pendingConfirmation = .closeTab
+        let tabId = model.groups[0].tabs[0].id
+        model.pendingConfirmation = pendingCloseConfirmation(for: .tab(tabId), in: model)
         #expect(desiredQuitConfirmation(in: model) == nil, "close-tab confirmation uses NSAlert, not the quit panel")
 
-        model.pendingConfirmation = .terminate
+        model.pendingConfirmation = pendingAppConfirmation()
         #expect(desiredQuitConfirmation(in: model) == QuitConfirmationProjection(paneCount: 1),
             "single-pane terminate confirmation projects pane count 1")
 
         var multi = makeMruModel(tabCount: 3).model
-        multi.pendingConfirmation = .terminate
+        multi.pendingConfirmation = pendingAppConfirmation()
         #expect(desiredQuitConfirmation(in: multi) == QuitConfirmationProjection(paneCount: 3),
             "multi-pane terminate confirmation projects the live pane count")
 
@@ -1518,7 +1519,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         createTab(&model)
         _ = update(&model, .splitFocusedPane(direction: .horizontal))
         #expect(model.allPaneIds.count == 2, "precondition: split created two panes")
-        model.pendingConfirmation = .terminate
+        model.pendingConfirmation = pendingAppConfirmation()
         #expect(desiredQuitConfirmation(in: model)?.paneCount == 2,
             "open quit panel starts with both panes")
 
@@ -1526,7 +1527,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         _ = update(&model, .closePane(paneId: paneId))
 
         #expect(model.allPaneIds.count == 1, "non-last pane close removes one pane")
-        #expect(model.pendingConfirmation == .terminate, "non-last pane close keeps quit confirmation pending")
+        #expect(model.pendingConfirmation?.subject == .app, "non-last pane close keeps quit confirmation pending")
         #expect(desiredQuitConfirmation(in: model)?.paneCount == 1,
             "projection reflects the decremented live pane count")
     }

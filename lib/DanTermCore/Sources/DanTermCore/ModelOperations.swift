@@ -735,52 +735,82 @@ func wouldQuitFromClose(_ model: AppModel) -> Bool {
   totalTabCount(model) == 1
 }
 
-// Single chokepoint for asking the user before quitting. Returns no commands
-// when any confirmation sheet is already in flight.
-func emitTerminateConfirmation(_ model: inout AppModel) -> [Command] {
-  guard model.pendingConfirmation == nil else { return [] }
-  model.pendingConfirmation = .terminate
-  return []
-}
+/// Computes the frozen close cost for one interactive close subject.
+func closeImpact(for subject: ConfirmationSubject, in model: AppModel) -> CloseImpact? {
+  let panes: [PaneModel]
+  let uncompletedTodoCount: Int
 
-// Single chokepoint for asking before closing a multi-pane tab. It guards the
-// same slot as quit confirmation so close-tab and quit sheets cannot stack.
-// `uncompletedTodoCount` is the full tab + pane rollup (see `tabTodoRollup`).
-func emitCloseTabConfirmation(
-  _ model: inout AppModel, tabId: TabId, tabTitle: DisplayLine, paneCount: Int, isLastTab: Bool,
-  uncompletedTodoCount: Int
-) -> [Command] {
-  guard model.pendingConfirmation == nil else { return [] }
-  model.pendingConfirmation = .closeTab
-  return [.showCloseTabConfirmation(
-    tabId: tabId,
-    tabTitle: tabTitle,
-    paneCount: paneCount,
-    isLastTab: isLastTab,
-    uncompletedTodoCount: uncompletedTodoCount
-  )]
-}
-
-// Single chokepoint for asking before closing a tab batch. It uses the same
-// pending-confirmation slot as single-tab close and quit confirmations.
-func emitCloseTabsConfirmation(_ model: inout AppModel, ids: [TabId]) -> [Command] {
-  guard model.pendingConfirmation == nil else { return [] }
-  model.pendingConfirmation = .closeTab
-
-  var totalPaneCount = 0
-  var totalUncompletedTodos = 0
-  for id in ids {
-    guard let tab = tabById(id, in: model) else { continue }
-    totalPaneCount += allPaneIds(tab.paneTree.root).count
-    totalUncompletedTodos += tabTodoRollup(id, in: model).uncompleted
+  switch subject {
+  case .pane(let paneId):
+    guard let pane = model.pane(paneId) else { return nil }
+    panes = [pane]
+    uncompletedTodoCount = pane.todos.count { $0.isDone == false }
+  case .tab(let tabId):
+    guard let tab = tabById(tabId, in: model) else { return nil }
+    panes = panesInNode(tab.paneTree.root)
+    uncompletedTodoCount = tabTodoRollup(tabId, in: model).uncompleted
+  case .tabs(let tabIds):
+    let tabs = tabIds.compactMap { tabById($0, in: model) }
+    panes = tabs.flatMap { panesInNode($0.paneTree.root) }
+    uncompletedTodoCount = tabs.reduce(into: 0) { total, tab in
+      total += tabTodoRollup(tab.id, in: model).uncompleted
+    }
+  case .app:
+    return nil
   }
 
-  return [.showCloseTabsConfirmation(
-    tabIds: ids,
-    tabCount: ids.count,
-    totalPaneCount: totalPaneCount,
-    totalUncompletedTodos: totalUncompletedTodos,
-    isQuit: ids.count == totalTabCount(model)
+  return CloseImpact(
+    panes: panes.map { pane in
+      let runningCommand: String?
+      if case .running(let command) = pane.session?.command {
+        runningCommand = command
+      } else {
+        runningCommand = nil
+      }
+      return CloseImpact.Pane(paneId: pane.id, runningCommand: runningCommand)
+    },
+    uncompletedTodoCount: uncompletedTodoCount
+  )
+}
+
+/// Emits the only confirmation transaction and blocks every overlapping request.
+func emitConfirmation(
+  _ model: inout AppModel,
+  subject: ConfirmationSubject,
+  quitAuthorized: Bool = false
+) -> [Command] {
+  guard model.pendingConfirmation == nil else { return [] }
+
+  if subject == .app {
+    model.pendingConfirmation = PendingConfirmation(
+      subject: .app,
+      impact: nil,
+      quitAuthorized: false
+    )
+    return []
+  }
+
+  guard let impact = closeImpact(for: subject, in: model) else { return [] }
+  model.pendingConfirmation = PendingConfirmation(
+    subject: subject,
+    impact: impact,
+    quitAuthorized: quitAuthorized
+  )
+  let title: DisplayLine?
+  if case .tab(let tabId) = subject, let tab = tabById(tabId, in: model) {
+    title = DisplayLine(tabDisplayTitle(tab))
+  } else {
+    title = nil
+  }
+  return [.showCloseConfirmation(
+    subject: subject,
+    tabTitle: title,
+    quitAuthorized: quitAuthorized,
+    copy: closeConfirmationCopy(
+      subject: subject,
+      impact: impact,
+      quitAuthorized: quitAuthorized
+    )
   )]
 }
 
@@ -797,48 +827,92 @@ func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncomplet
   return (total, uncompleted)
 }
 
-// Converts the AppKit close-tab alert response into an explicit Msg so both
-// confirm and cancel paths can clear pending confirmation state.
-func closeTabConfirmationResponse(isConfirm: Bool, tabId: TabId) -> Msg {
-  isConfirm ? .confirmCloseTab(id: tabId) : .cancelCloseTab
+/// Converts either confirmation UI response into the shared transaction message.
+func confirmationResponse(isConfirm: Bool) -> Msg {
+  isConfirm ? .confirmConfirmation : .cancelConfirmation
 }
 
-// Converts the AppKit close-tabs alert response into an explicit Msg so both
-// confirm and cancel paths can clear pending confirmation state.
-func closeTabsConfirmationResponse(isConfirm: Bool, ids: [TabId]) -> Msg {
-  isConfirm ? .confirmCloseTabs(ids: ids) : .cancelCloseTabs
-}
-
-/// Build the close-tabs confirmation copy. Mentions extra panes beyond one per
-/// tab and unfinished tasks, matching the details the tab badges advertise.
-func closeTabsConfirmationCopy(
-  tabCount: Int,
-  totalPaneCount: Int,
-  totalUncompletedTodos: Int,
-  isQuit: Bool
-) -> String {
+/// Builds alert body copy from the same impact value that opened the gate.
+func closeConfirmationCopy(
+  subject: ConfirmationSubject,
+  impact: CloseImpact,
+  quitAuthorized: Bool
+) -> CloseConfirmationCopy {
   var parts: [String] = []
-  if totalPaneCount > tabCount {
-    parts.append("\(totalPaneCount) terminal panes")
+  switch subject {
+  case .tab where impact.panes.count > 1:
+    parts.append("\(impact.panes.count) terminal panes")
+  case .tabs(let tabIds) where impact.panes.count > tabIds.count:
+    parts.append("\(impact.panes.count) terminal panes")
+  default:
+    break
   }
-  if totalUncompletedTodos > 0 {
-    let label = totalUncompletedTodos == 1 ? "1 unfinished task" : "\(totalUncompletedTodos) unfinished tasks"
+
+  let runningCommands = impact.panes.compactMap(\.runningCommand)
+  if runningCommands.count == 1 {
+    parts.append("a running command")
+  } else if runningCommands.count > 1 {
+    parts.append("\(runningCommands.count) running commands")
+  }
+
+  if impact.uncompletedTodoCount > 0 {
+    let label = impact.uncompletedTodoCount == 1
+      ? "1 unfinished task"
+      : "\(impact.uncompletedTodoCount) unfinished tasks"
     parts.append(label)
   }
 
-  let prefix: String
-  if parts.isEmpty {
-    prefix = "These tabs will be closed."
-  } else if parts.count == 1 {
-    prefix = "These tabs have \(parts[0])."
-  } else {
-    prefix = "These tabs have \(parts[0]) and \(parts[1])."
+  let noun: String
+  let verb: String
+  let fallback: String
+  switch subject {
+  case .pane:
+    noun = "This pane"
+    verb = "has"
+    fallback = "This pane will be closed."
+  case .tab:
+    noun = "This tab"
+    verb = "has"
+    fallback = "This tab will be closed."
+  case .tabs:
+    noun = "These tabs"
+    verb = "have"
+    fallback = "These tabs will be closed."
+  case .app:
+    preconditionFailure("app confirmations do not have frozen close copy")
   }
 
-  if isQuit {
-    return prefix + " Closing them will quit DanTerm."
+  let sentence: String
+  if parts.isEmpty {
+    sentence = fallback
+  } else if parts.count == 1 {
+    sentence = "\(noun) \(verb) \(parts[0])."
+  } else {
+    let head = parts.dropLast().joined(separator: ", ")
+    sentence = "\(noun) \(verb) \(head) and \(parts.last!)."
   }
-  return prefix
+
+  let informativeText: String
+  if quitAuthorized {
+    let pronoun = if case .tabs = subject { "them" } else { "it" }
+    informativeText = sentence + " Closing \(pronoun) will quit DanTerm."
+  } else {
+    informativeText = sentence
+  }
+
+  let commandDetail = runningCommands.count == 1
+    ? boundedCommandDetail(runningCommands[0])
+    : nil
+  return CloseConfirmationCopy(
+    informativeText: informativeText,
+    commandDetail: commandDetail
+  )
+}
+
+private func boundedCommandDetail(_ command: String) -> DisplayLine {
+  let normalized = DisplayLine(command)
+  guard normalized.text.count > 60 else { return normalized }
+  return DisplayLine(String(normalized.text.prefix(59)) + "\u{2026}")
 }
 
 // MARK: - Alert Helpers

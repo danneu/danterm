@@ -75,6 +75,25 @@ func hasEffect(_ commands: [Command], _ check: (Command) -> Bool) -> Bool {
     commands.contains(where: check)
 }
 
+func pendingAppConfirmation() -> PendingConfirmation {
+    PendingConfirmation(subject: .app, impact: nil, quitAuthorized: false)
+}
+
+func pendingCloseConfirmation(
+    for subject: ConfirmationSubject,
+    in model: AppModel,
+    quitAuthorized: Bool = false
+) -> PendingConfirmation {
+    guard let impact = closeImpact(for: subject, in: model) else {
+        preconditionFailure("close-confirmation test subject must be live")
+    }
+    return PendingConfirmation(
+        subject: subject,
+        impact: impact,
+        quitAuthorized: quitAuthorized
+    )
+}
+
 func sessionId(for paneId: PaneId, in model: AppModel) -> SessionId {
     guard let sessionId = model.pane(paneId)?.session?.id else {
         preconditionFailure("test pane has no terminal session")

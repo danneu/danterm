@@ -888,7 +888,7 @@ import DanTermProtocol
         }
     }
 
-    // This input drives `.deleteGroup` into emitTerminateConfirmation, which leaves
+    // This input drives `.deleteGroup` into the app confirmation, which leaves
     // the group open and strands a pending confirmation. The CLI never quits the app
     // as a side effect.
     @Test("group.close refuses a group holding every tab and strands no confirmation")
@@ -1149,7 +1149,7 @@ import DanTermProtocol
         #expect(tabById(closedTabId, in: model) == nil)
         #expect(model.pendingConfirmation == nil)
         #expect(!hasEffect(commands) {
-            if case .showCloseTabConfirmation = $0 { return true }
+            if case .showCloseConfirmation = $0 { return true }
             return false
         }, "CLI tab.close should not show a close-tab confirmation")
     }
@@ -1164,7 +1164,7 @@ import DanTermProtocol
         //   confirmation open from an earlier Cmd-Q.
         var model = makeModel()
         createTab(&model)
-        model.pendingConfirmation = .terminate
+        model.pendingConfirmation = pendingAppConfirmation()
         let env = makeTestEnv(
             instanceIdentity: try #require(DanTermInstanceIdentity(developmentSlot: 3))
         )
@@ -1173,7 +1173,7 @@ import DanTermProtocol
 
         _ = try requireIpcReply(commands)
         #expect(hasEffect(commands, isTerminate))
-        #expect(model.pendingConfirmation == .terminate)
+        #expect(model.pendingConfirmation?.subject == .app)
     }
 
     @Test(
@@ -1378,8 +1378,7 @@ import DanTermProtocol
         _ = try requireIpcReply(commands)
         #expect(model.pane(closedPaneId) == nil)
         #expect(hasEffect(commands) {
-            if case .showClosePaneConfirmation = $0 { return true }
-            if case .showCloseTabConfirmation = $0 { return true }
+            if case .showCloseConfirmation = $0 { return true }
             return false
         } == false)
 
@@ -1400,8 +1399,7 @@ import DanTermProtocol
         _ = try requireIpcReply(tabCommands)
         #expect(tabById(closedTabId, in: tabModel) == nil)
         #expect(hasEffect(tabCommands) {
-            if case .showClosePaneConfirmation = $0 { return true }
-            if case .showCloseTabConfirmation = $0 { return true }
+            if case .showCloseConfirmation = $0 { return true }
             return false
         } == false)
     }

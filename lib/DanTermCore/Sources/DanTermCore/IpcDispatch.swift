@@ -146,7 +146,7 @@ private func dispatchIpc(
 
     case .groupClose(let groupId, let moveTabs):
         // Both refusals mirror how tab.close refuses the last tab. `.deleteGroup`
-        // returns [] for the last group, and drives emitTerminateConfirmation for a
+        // returns [] for the last group, and drives the app confirmation for a
         // destructive close of the group holding every tab -- which would leave the
         // group open and strand a pending confirmation. Quitting is `quit`'s job,
         // never a side effect of closing a group.

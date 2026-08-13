@@ -183,7 +183,7 @@ import Testing
 
     @Test("testCloseConfirmUsesDisplayTitle")
     func testCloseConfirmUsesDisplayTitle() {
-        // Intent: showCloseTabConfirmation carries the displayTitle of
+        // Intent: the close confirmation carries the displayTitle of
         //   the closing tab (custom-title wins).
         // Why it exists: pins the per-tab display in close
         //   confirmations.
@@ -200,11 +200,11 @@ import Testing
 
         let commands = update(&model, .requestCloseTab(id: tabAId))
         let confirmEffect = commands.first(where: {
-            if case .showCloseTabConfirmation = $0 { return true }
+            if case .showCloseConfirmation = $0 { return true }
             return false
         })
         #expect(confirmEffect != nil, "should show confirmation")
-        if case .showCloseTabConfirmation(_, let tabTitle, _, _, _) = confirmEffect! {
+        if case .showCloseConfirmation(.tab, let tabTitle?, _, _) = confirmEffect! {
             #expect(tabTitle == "My Server", "confirmation should use displayTitle")
         }
     }

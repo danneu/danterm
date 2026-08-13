@@ -418,12 +418,42 @@ struct JumpModeState: Equatable {
     let keyMap: [TabId: Character]
 }
 
-// Ephemeral -- never serialized into AppModelSnapshot. Non-nil while a
-// confirmation sheet is in flight. Quit and close-tab confirmations share this
-// single slot so neither kind can stack a sheet on top of the other.
-enum PendingConfirmation: Equatable {
-    case terminate
-    case closeTab
+/// Identifies the exact user action a confirmation transaction can commit.
+enum ConfirmationSubject: Equatable {
+    case pane(PaneId)
+    case tab(TabId)
+    case tabs([TabId])
+    case app
+}
+
+/// Freezes the cost of a close by pane so later work cannot hide behind equal command text.
+struct CloseImpact: Equatable {
+    /// Couples one affected pane with the command named for it, if any.
+    struct Pane: Equatable {
+        let paneId: PaneId
+        let runningCommand: String?
+    }
+
+    let panes: [Pane]
+    let uncompletedTodoCount: Int
+
+    var hasWarning: Bool {
+        uncompletedTodoCount > 0 || panes.contains { $0.runningCommand != nil }
+    }
+}
+
+/// Carries pure alert copy and the separately rendered command detail.
+struct CloseConfirmationCopy: Equatable {
+    let informativeText: String
+    let commandDetail: DisplayLine?
+}
+
+/// Keeps one confirmation atomic across model changes while its UI is open.
+/// This state is ephemeral and never serialized into AppModelSnapshot.
+struct PendingConfirmation: Equatable {
+    let subject: ConfirmationSubject
+    let impact: CloseImpact?
+    let quitAuthorized: Bool
 }
 
 struct AppModel: Equatable {

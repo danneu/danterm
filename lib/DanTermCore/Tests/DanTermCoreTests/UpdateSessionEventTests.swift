@@ -803,6 +803,6 @@ import Testing
         let commands = update(&model, .sessionEnded(sessionId: sessionId))
         #expect(model.pane(paneId) != nil, "pane should still exist (confirmation pending)")
         #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
-        #expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
+        #expect(model.pendingConfirmation?.subject == .app, "quit confirmation should be pending")
     }
 }

@@ -1092,31 +1092,33 @@ class AppRuntime {
                 session: session
             )
 
-        case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab, let uncompletedTodoCount):
-            runConfirmation(
-                messageText: "Close tab \"\(tabTitle)\"?",
-                informativeText: closeTabConfirmationCopy(
-                    paneCount: paneCount,
-                    uncompletedTodoCount: uncompletedTodoCount,
-                    isLastTab: isLastTab
-                ),
-                confirmTitle: "Close Tab"
-            ) { [weak self] isConfirm in
-                self?.send(closeTabConfirmationResponse(isConfirm: isConfirm, tabId: tabId))
+        case .showCloseConfirmation(let subject, let tabTitle, let quitAuthorized, let copy):
+            let messageText: String
+            let confirmTitle: String
+            switch subject {
+            case .pane:
+                messageText = "Close pane?"
+                confirmTitle = "Close Pane"
+            case .tab:
+                guard let tabTitle else { return }
+                messageText = "Close tab \"\(tabTitle)\"?"
+                confirmTitle = "Close Tab"
+            case .tabs(let tabIds):
+                let tabCount = tabIds.count
+                messageText = quitAuthorized
+                    ? "Close \(tabCount) tabs and quit DanTerm?"
+                    : "Close \(tabCount) tabs?"
+                confirmTitle = "Close \(tabCount) Tabs"
+            case .app:
+                return
             }
-
-        case .showCloseTabsConfirmation(let tabIds, let tabCount, let totalPaneCount, let totalUncompletedTodos, let isQuit):
             runConfirmation(
-                messageText: isQuit ? "Close \(tabCount) tabs and quit DanTerm?" : "Close \(tabCount) tabs?",
-                informativeText: closeTabsConfirmationCopy(
-                    tabCount: tabCount,
-                    totalPaneCount: totalPaneCount,
-                    totalUncompletedTodos: totalUncompletedTodos,
-                    isQuit: isQuit
-                ),
-                confirmTitle: "Close \(tabCount) Tabs"
+                messageText: messageText,
+                informativeText: copy.informativeText,
+                commandDetail: copy.commandDetail,
+                confirmTitle: confirmTitle
             ) { [weak self] isConfirm in
-                self?.send(closeTabsConfirmationResponse(isConfirm: isConfirm, ids: tabIds))
+                self?.send(confirmationResponse(isConfirm: isConfirm))
             }
 
         case .saveDanTermConfig(let config):
@@ -1224,16 +1226,6 @@ class AppRuntime {
         case .dismissTodoPopover:
             dismissTodoPopoverPair()
 
-        case .showClosePaneConfirmation(let paneId, let uncompletedCount):
-            let tasks = uncompletedCount == 1 ? "1 uncompleted task" : "\(uncompletedCount) uncompleted tasks"
-            runConfirmation(
-                messageText: "Close pane?",
-                informativeText: "This pane has \(tasks).",
-                confirmTitle: "Close Pane"
-            ) { [weak self] isConfirm in
-                guard isConfirm else { return }
-                self?.sessions[paneId]?.requestClose()
-            }
         }
     }
 
@@ -1970,6 +1962,7 @@ class AppRuntime {
     private func runConfirmation(
         messageText: String,
         informativeText: String,
+        commandDetail: DisplayLine? = nil,
         confirmTitle: String,
         onResponse: @escaping (Bool) -> Void
     ) {
@@ -1980,6 +1973,20 @@ class AppRuntime {
         alert.addButton(withTitle: confirmTitle)
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
+        if let line = commandDetail {
+            let detail = NSTextField(labelWithString: line.text)
+            detail.isEditable = false
+            detail.isSelectable = false
+            detail.font = .monospacedSystemFont(
+                ofSize: NSFont.smallSystemFontSize,
+                weight: .regular
+            )
+            detail.lineBreakMode = .byTruncatingTail
+            detail.maximumNumberOfLines = 1
+            detail.sizeToFit()
+            detail.frame.size.width = min(detail.frame.width, 420)
+            alert.accessoryView = detail
+        }
         if let window = window {
             guard let callbackToken = schedulingLifecycle.arm(
                 .deferredCallback,
@@ -2121,32 +2128,6 @@ private final class TodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         runtime?.send(.todoPopoverClosed(owner: owner))
     }
-}
-
-/// Build the close-tab confirmation copy. Mentions panes when there is more
-/// than one, and unfinished tasks when the rollup is non-zero, so the warning
-/// matches what the chrome badge advertises.
-func closeTabConfirmationCopy(paneCount: Int, uncompletedTodoCount: Int, isLastTab: Bool) -> String {
-    var parts: [String] = []
-    if paneCount > 1 {
-        parts.append("\(paneCount) terminal panes")
-    }
-    if uncompletedTodoCount > 0 {
-        let label = uncompletedTodoCount == 1 ? "1 unfinished task" : "\(uncompletedTodoCount) unfinished tasks"
-        parts.append(label)
-    }
-    let prefix: String
-    if parts.isEmpty {
-        prefix = "This tab will be closed."
-    } else if parts.count == 1 {
-        prefix = "This tab has \(parts[0])."
-    } else {
-        prefix = "This tab has \(parts[0]) and \(parts[1])."
-    }
-    if isLastTab {
-        return prefix + " Closing it will quit DanTerm."
-    }
-    return prefix
 }
 
 private enum RestoreBuildError: Error {

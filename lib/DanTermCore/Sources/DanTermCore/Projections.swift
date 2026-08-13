@@ -1087,15 +1087,14 @@ func desiredSwitcher(in model: AppModel, tally: UnreadAlertTally) -> SwitcherPro
 }
 
 // The quit confirmation panel as pure data: non-nil only for the non-modal
-// terminate confirmation. Close-tab confirmation is a separate NSAlert path.
+// app confirmation. Close-subject confirmations use the NSAlert path.
 struct QuitConfirmationProjection: Equatable {
   let paneCount: Int
 }
 
 /// Project the non-modal quit confirmation panel from the model. Returns nil for
-/// no pending confirmation and for `.closeTab`, because close-tab confirmation is
-/// driven by modal NSAlert commands instead.
+/// no pending confirmation and for close subjects, which modal alerts present.
 func desiredQuitConfirmation(in model: AppModel) -> QuitConfirmationProjection? {
-  guard model.pendingConfirmation == .terminate else { return nil }
+  guard model.pendingConfirmation?.subject == .app else { return nil }
   return QuitConfirmationProjection(paneCount: model.allPaneIds.count)
 }

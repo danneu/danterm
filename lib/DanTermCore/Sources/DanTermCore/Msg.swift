@@ -75,10 +75,8 @@ enum Msg {
 
     // Internal (confirmed close — do not send from UI directly)
     case closeTab(id: TabId)
-    case confirmCloseTab(id: TabId)
-    case cancelCloseTab
-    case confirmCloseTabs(ids: [TabId])
-    case cancelCloseTabs
+    case confirmConfirmation
+    case cancelConfirmation
 
     // Export
     case exportState
@@ -139,8 +137,6 @@ enum Msg {
     case appBecameActive
     case appResignedActive
     case requestQuit
-    case confirmTerminate
-    case cancelTerminate
     case terminate
     case runtimeWillShutdown
 

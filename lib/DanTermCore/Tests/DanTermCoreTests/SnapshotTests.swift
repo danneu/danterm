@@ -210,11 +210,11 @@ import DanTermProtocol
         // Why it exists: pins the ephemerality guarantee so a stale
         //   confirmation dialog cannot resurrect on app restart.
         // Scenario: spec-first ephemerality check -- a model with
-        //   pendingConfirmation = .terminate must load back with
+        //   a pending app confirmation must load back with
         //   pendingConfirmation == nil.
         var model = makeModel()
         createTab(&model)
-        model.pendingConfirmation = .terminate
+        model.pendingConfirmation = pendingAppConfirmation()
 
         let data = try JSONEncoder().encode(toInitFile(model))
         let loaded = try loadValidatedInitFile(from: data)
