@@ -366,6 +366,202 @@ struct TerminalResizeTests {
         #expect(terminal.screenText == "abcd\nef  \n    ")
     }
 
+    @Test("a width round trip preserves a Codex composer viewport above the bottom")
+    func widthRoundTripPreservesCodexComposerViewport() throws {
+        // Intent: consecutive width changes preserve the primary viewport, cursor attachment,
+        //   and history/live seam when the cursor starts above the bottom row.
+        // Why it exists: the Codex composer incident showed that narrowing consumed unwritten
+        //   trailing rows, then widening pulled retained history into their place and left a
+        //   stale shifted composer after Codex redrew at its original coordinates.
+        // Scenario: a 10x6 viewport has retained transcript, two full live rows, a composer,
+        //   and three never-written rows before a 10 -> 5 -> 10 resize round trip.
+        var terminal = try #require(Terminal(columns: 10, rows: 6))
+        terminal.feed(Array("history-0\r\nhistory-1\r\nhistory-2\r\nhistory-3\r\nhistory-4\r\nhistory-5\r\n".utf8))
+        terminal.feed(Array("\u{001B}[2J".utf8))
+        terminal.moveCursor(row: 0, column: 0)
+        terminal.feed(Array("ABCDEFGHIJ".utf8))
+        terminal.moveCursor(row: 1, column: 0)
+        terminal.feed(Array("KLMNOPQRST".utf8))
+        terminal.moveCursor(row: 2, column: 0)
+        terminal.feed(Array("compose".utf8))
+
+        let viewport = terminal.screenText
+        let cursor = terminal.geometry.cursor
+        let scrollbackRows = terminal.scrollbackRowCount
+        let structure = terminal.rowStructure
+        let fullHistory = terminal.fullHistoryText
+        #expect(scrollbackRows > 0)
+
+        terminal.resize(columns: 5, rows: 6)
+        terminal.resize(columns: 10, rows: 6)
+
+        #expect(terminal.screenText == viewport)
+        #expect(terminal.geometry.cursor == cursor)
+        #expect(terminal.scrollbackRowCount == scrollbackRows)
+        #expect(terminal.rowStructure == structure)
+        #expect(terminal.fullHistoryText == fullHistory)
+        expectValidGrid(terminal)
+    }
+
+    @Test("a multi-step width series restores a trailing-padding cursor")
+    func multiStepWidthSeriesRestoresTrailingPaddingCursor() throws {
+        var terminal = try makeComposerFixture()
+        terminal.moveCursor(row: 2, column: 9)
+        let viewport = terminal.screenText
+        let cursor = terminal.geometry.cursor
+        let scrollbackRows = terminal.scrollbackRowCount
+        let fullHistory = terminal.fullHistoryText
+
+        for width in [7, 5, 8, 10] {
+            terminal.resize(columns: width, rows: 6)
+            #expect(terminal.fullHistoryText == fullHistory, "width \(width)")
+            #expect(terminal.viewportText.contains("compose"), "width \(width)")
+            #expect(terminal.geometry.cursor != nil, "width \(width)")
+            expectValidGrid(terminal)
+        }
+
+        #expect(terminal.screenText == viewport)
+        #expect(terminal.geometry.cursor == cursor)
+        #expect(terminal.scrollbackRowCount == scrollbackRows)
+    }
+
+    @Test("primary output ends a width series before the next width change")
+    func primaryOutputEndsWidthSeries() throws {
+        var terminal = try makeComposerFixture()
+        terminal.resize(columns: 5, rows: 6)
+        terminal.feed(Array("X".utf8))
+        let afterOutput = terminal.fullHistoryText
+        var explicitlyEnded = terminal
+        explicitlyEnded.scroll(byRows: 0)
+
+        terminal.resize(columns: 10, rows: 6)
+        explicitlyEnded.resize(columns: 10, rows: 6)
+
+        #expect(terminal == explicitlyEnded)
+        #expect(terminal.fullHistoryText == afterOutput)
+        #expect(terminal.viewportText.contains("composeX"))
+        expectValidGrid(terminal)
+    }
+
+    @Test("primary cursor motion ends a width series before the next width change")
+    func primaryCursorMotionEndsWidthSeries() throws {
+        var terminal = try makeComposerFixture()
+        terminal.resize(columns: 5, rows: 6)
+        terminal.feed(Array("\u{001B}[1;1H".utf8))
+        var explicitlyEnded = terminal
+        explicitlyEnded.scroll(byRows: 0)
+
+        terminal.resize(columns: 10, rows: 6)
+        explicitlyEnded.resize(columns: 10, rows: 6)
+
+        #expect(terminal == explicitlyEnded)
+        #expect(terminal.geometry.cursor?.column == 0)
+        expectValidGrid(terminal)
+    }
+
+    @Test("height then width establishes a new resize layout")
+    func heightChangeEndsWidthSeriesInCanonicalOrder() throws {
+        var combined = try makeComposerFixture()
+        combined.resize(columns: 5, rows: 6)
+        combined.resize(columns: 5, rows: 7)
+        var explicitlyEnded = combined
+        explicitlyEnded.scroll(byRows: 0)
+
+        combined.resize(columns: 10, rows: 7)
+        explicitlyEnded.resize(columns: 10, rows: 7)
+
+        #expect(combined == explicitlyEnded)
+        expectValidGrid(combined)
+    }
+
+    @Test("viewport navigation replaces the resize-series viewport anchor")
+    func viewportNavigationEndsWidthSeries() throws {
+        var terminal = try makeComposerFixture()
+        terminal.resize(columns: 5, rows: 6)
+        terminal.scroll(toTopRow: 0)
+        #expect(terminal.scrollProjection.isFollowing == false)
+
+        terminal.resize(columns: 10, rows: 6)
+
+        #expect(terminal.scrollProjection.isFollowing == false)
+        #expect(terminal.viewportText.contains("history-0"))
+        expectValidGrid(terminal)
+    }
+
+    @Test("reset prevents a later width from restoring the ended layout")
+    func resetEndsWidthSeries() throws {
+        for reset in [[UInt8](arrayLiteral: 0x1B, 0x63), Array("\u{001B}[!p".utf8)] {
+            var terminal = try makeComposerFixture()
+            terminal.resize(columns: 5, rows: 6)
+            terminal.feed(reset)
+            var explicitlyEnded = terminal
+            explicitlyEnded.scroll(byRows: 0)
+
+            terminal.resize(columns: 10, rows: 6)
+            explicitlyEnded.resize(columns: 10, rows: 6)
+
+            #expect(terminal == explicitlyEnded)
+            expectValidGrid(terminal)
+        }
+    }
+
+    @Test("a primary width series survives alternate-screen output")
+    func alternateOutputDoesNotEndPrimaryWidthSeries() throws {
+        var terminal = try makeComposerFixture()
+        let viewport = terminal.screenText
+        let cursor = terminal.geometry.cursor
+        let scrollbackRows = terminal.scrollbackRowCount
+        let fullHistory = terminal.fullHistoryText
+
+        terminal.feed(Array("\u{001B}[?1047h".utf8))
+        terminal.resize(columns: 5, rows: 6)
+        terminal.feed(Array("alternate output".utf8))
+        terminal.resize(columns: 10, rows: 6)
+        terminal.moveCursor(row: 2, column: 7)
+        terminal.feed(Array("\u{001B}[?1047l".utf8))
+
+        #expect(terminal.screenText == viewport)
+        #expect(terminal.geometry.cursor == cursor)
+        #expect(terminal.scrollbackRowCount == scrollbackRows)
+        #expect(terminal.fullHistoryText == fullHistory)
+        expectValidGrid(terminal)
+    }
+
+    @Test("screen transitions end an existing primary width series")
+    func screenTransitionEndsWidthSeries() throws {
+        var terminal = try makeComposerFixture()
+        terminal.resize(columns: 5, rows: 6)
+        let historyBeforeTransition = terminal.scrollbackRowCount
+        terminal.feed(Array("\u{001B}[?1047h".utf8))
+        terminal.moveCursor(row: 5, column: 0)
+        terminal.feed(Array("\u{001B}[?1047l".utf8))
+        var explicitlyEnded = terminal
+        explicitlyEnded.scroll(byRows: 0)
+
+        terminal.resize(columns: 10, rows: 6)
+        explicitlyEnded.resize(columns: 10, rows: 6)
+
+        #expect(terminal == explicitlyEnded)
+        #expect(terminal.geometry.cursor?.row == 3)
+        #expect(terminal.scrollbackRowCount < historyBeforeTransition)
+        expectValidGrid(terminal)
+    }
+
+    @Test("eviction clamps a width-series viewport to retained content")
+    func widthSeriesClampsAfterEviction() throws {
+        var terminal = try makeComposerFixture()
+        terminal.resize(columns: 3, rows: 6)
+        terminal.evictScrollbackRowsForTesting(Int.max)
+        let retainedHistory = terminal.fullHistoryText
+
+        terminal.resize(columns: 10, rows: 6)
+
+        #expect(terminal.fullHistoryText == retainedHistory)
+        #expect(terminal.viewportText.contains("compose"))
+        #expect(terminal.viewportText.contains("history-0") == false)
+        expectValidGrid(terminal)
+    }
+
     @Test("continuation growth above the cursor consumes its bottom-row distance")
     func widthShrinkCountsAllContinuationsAboveCursor() throws {
         // Intent: count reflow growth from every viewport line at or above
@@ -484,5 +680,18 @@ struct TerminalResizeTests {
             terminal.feed([0x18, 0x7C])
             #expect(terminal.screenText.contains("|"))
         }
+    }
+
+    private func makeComposerFixture() throws -> Terminal {
+        var terminal = try #require(Terminal(columns: 10, rows: 6))
+        terminal.feed(Array("history-0\r\nhistory-1\r\nhistory-2\r\nhistory-3\r\nhistory-4\r\nhistory-5\r\n".utf8))
+        terminal.feed(Array("\u{001B}[2J".utf8))
+        terminal.moveCursor(row: 0, column: 0)
+        terminal.feed(Array("ABCDEFGHIJ".utf8))
+        terminal.moveCursor(row: 1, column: 0)
+        terminal.feed(Array("KLMNOPQRST".utf8))
+        terminal.moveCursor(row: 2, column: 0)
+        terminal.feed(Array("compose".utf8))
+        return terminal
     }
 }
