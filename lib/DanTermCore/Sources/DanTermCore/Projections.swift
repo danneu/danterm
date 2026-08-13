@@ -1086,15 +1086,76 @@ func desiredSwitcher(in model: AppModel, tally: UnreadAlertTally) -> SwitcherPro
   return SwitcherProjection(rows: rows, cursorIndex: resolved.cursorIndex)
 }
 
-// The quit confirmation panel as pure data: non-nil only for the non-modal
-// app confirmation. Close-subject confirmations use the NSAlert path.
-struct QuitConfirmationProjection: Equatable {
-  let paneCount: Int
+/// Carries all copy and identity needed to render and answer one confirmation.
+struct ConfirmationProjection: Equatable {
+  let id: ConfirmationId
+  let title: DisplayLine
+  let informativeText: String
+  let commandDetail: DisplayLine?
+  let confirmTitle: DisplayLine
 }
 
-/// Project the non-modal quit confirmation panel from the model. Returns nil for
-/// no pending confirmation and for close subjects, which modal alerts present.
-func desiredQuitConfirmation(in model: AppModel) -> QuitConfirmationProjection? {
-  guard model.pendingConfirmation?.subject == .app else { return nil }
-  return QuitConfirmationProjection(paneCount: model.allPaneIds.count)
+/// Projects the single pending transaction into the shared non-modal panel.
+func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
+  guard let pending = model.pendingConfirmation else { return nil }
+  switch pending.subject {
+  case .app:
+    let paneCount = model.allPaneIds.count
+    let sessions = paneCount == 1 ? "1 terminal session" : "\(paneCount) terminal sessions"
+    return ConfirmationProjection(
+      id: pending.id,
+      title: "Quit DanTerm?",
+      informativeText: "This will close \(sessions).",
+      commandDetail: nil,
+      confirmTitle: "Quit"
+    )
+  case .pane:
+    guard let impact = pending.impact else { return nil }
+    let copy = closeConfirmationCopy(
+      subject: pending.subject,
+      impact: impact,
+      quitAuthorized: pending.quitAuthorized
+    )
+    return ConfirmationProjection(
+      id: pending.id,
+      title: "Close pane?",
+      informativeText: copy.informativeText,
+      commandDetail: copy.commandDetail,
+      confirmTitle: "Close Pane"
+    )
+  case .tab(let tabId):
+    guard tabById(tabId, in: model) != nil,
+          let tabTitle = pending.tabTitle,
+          let impact = pending.impact
+    else { return nil }
+    let copy = closeConfirmationCopy(
+      subject: pending.subject,
+      impact: impact,
+      quitAuthorized: pending.quitAuthorized
+    )
+    return ConfirmationProjection(
+      id: pending.id,
+      title: DisplayLine("Close tab \"\(tabTitle.text)\"?"),
+      informativeText: copy.informativeText,
+      commandDetail: copy.commandDetail,
+      confirmTitle: "Close Tab"
+    )
+  case .tabs(let tabIds):
+    guard let impact = pending.impact else { return nil }
+    let copy = closeConfirmationCopy(
+      subject: pending.subject,
+      impact: impact,
+      quitAuthorized: pending.quitAuthorized
+    )
+    let tabCount = tabIds.count
+    return ConfirmationProjection(
+      id: pending.id,
+      title: DisplayLine(pending.quitAuthorized
+        ? "Close \(tabCount) tabs and quit DanTerm?"
+        : "Close \(tabCount) tabs?"),
+      informativeText: copy.informativeText,
+      commandDetail: copy.commandDetail,
+      confirmTitle: DisplayLine("Close \(tabCount) Tabs")
+    )
+  }
 }

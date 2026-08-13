@@ -198,15 +198,10 @@ import Testing
         update(&model, .selectTab(id: tabAId))
         update(&model, .splitFocusedPane(direction: .horizontal))
 
-        let commands = update(&model, .requestCloseTab(id: tabAId))
-        let confirmEffect = commands.first(where: {
-            if case .showCloseConfirmation = $0 { return true }
-            return false
-        })
-        #expect(confirmEffect != nil, "should show confirmation")
-        if case .showCloseConfirmation(.tab, let tabTitle?, _, _) = confirmEffect! {
-            #expect(tabTitle == "My Server", "confirmation should use displayTitle")
-        }
+        _ = update(&model, .requestCloseTab(id: tabAId))
+        _ = update(&model, .renameTab(id: tabAId, name: "Changed Later"))
+        #expect(desiredConfirmation(in: model)?.title == "Close tab \"My Server\"?",
+            "confirmation should keep the transaction's frozen displayTitle")
     }
 
     // MARK: - Snapshot

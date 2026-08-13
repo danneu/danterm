@@ -151,8 +151,8 @@ class AppRuntime {
     var themeBrowserView: ThemeBrowserView?
     // internal (not private): the cross-file reconcilePreferencesPanel extension reads it.
     var preferencesPanel: PreferencesPanel?
-    // internal (not private): the cross-file reconcileQuitConfirmation extension reads it.
-    var quitConfirmationPanel: QuitConfirmationPanel?
+    // internal (not private): the cross-file reconcileConfirmation extension reads it.
+    var confirmationPanel: ConfirmationPanel?
     // internal (not private): the cross-file reconcileSwitcher extension reads it.
     var switcherPanel: SwitcherPanel?
     private var switcherEventMonitor: Any?
@@ -1092,35 +1092,6 @@ class AppRuntime {
                 session: session
             )
 
-        case .showCloseConfirmation(let subject, let tabTitle, let quitAuthorized, let copy):
-            let messageText: String
-            let confirmTitle: String
-            switch subject {
-            case .pane:
-                messageText = "Close pane?"
-                confirmTitle = "Close Pane"
-            case .tab:
-                guard let tabTitle else { return }
-                messageText = "Close tab \"\(tabTitle)\"?"
-                confirmTitle = "Close Tab"
-            case .tabs(let tabIds):
-                let tabCount = tabIds.count
-                messageText = quitAuthorized
-                    ? "Close \(tabCount) tabs and quit DanTerm?"
-                    : "Close \(tabCount) tabs?"
-                confirmTitle = "Close \(tabCount) Tabs"
-            case .app:
-                return
-            }
-            runConfirmation(
-                messageText: messageText,
-                informativeText: copy.informativeText,
-                commandDetail: copy.commandDetail,
-                confirmTitle: confirmTitle
-            ) { [weak self] isConfirm in
-                self?.send(confirmationResponse(isConfirm: isConfirm))
-            }
-
         case .saveDanTermConfig(let config):
             do {
                 try configStore.save(config)
@@ -1820,8 +1791,8 @@ class AppRuntime {
         // for the first post-restore reconcile. Restored models carry no draft.
         preferencesPanel?.close()
         preferencesPanel = nil
-        quitConfirmationPanel?.orderOut(nil)
-        quitConfirmationPanel = nil
+        confirmationPanel?.orderOut(nil)
+        confirmationPanel = nil
 
         for tabId in Array(tabContainers.keys) {
             removeTabContainer(tabId)
@@ -1953,53 +1924,6 @@ class AppRuntime {
             return "Unsupported state file version: \(version)."
         case .invalidSnapshot:
             return "The selected state file failed snapshot validation."
-        }
-    }
-
-    /// Run a two-button confirm/cancel alert and report both outcomes through one
-    /// completion. This centralizes the sheet-vs-modal split and confirm-button
-    /// mapping so close-confirmation callers keep their cancel cleanup paths.
-    private func runConfirmation(
-        messageText: String,
-        informativeText: String,
-        commandDetail: DisplayLine? = nil,
-        confirmTitle: String,
-        onResponse: @escaping (Bool) -> Void
-    ) {
-        guard schedulingLifecycle.isActive else { return }
-        let alert = NSAlert()
-        alert.messageText = messageText
-        alert.informativeText = informativeText
-        alert.addButton(withTitle: confirmTitle)
-        alert.addButton(withTitle: "Cancel")
-        alert.alertStyle = .warning
-        if let line = commandDetail {
-            let detail = NSTextField(labelWithString: line.text)
-            detail.isEditable = false
-            detail.isSelectable = false
-            detail.font = .monospacedSystemFont(
-                ofSize: NSFont.smallSystemFontSize,
-                weight: .regular
-            )
-            detail.lineBreakMode = .byTruncatingTail
-            detail.maximumNumberOfLines = 1
-            detail.sizeToFit()
-            detail.frame.size.width = min(detail.frame.width, 420)
-            alert.accessoryView = detail
-        }
-        if let window = window {
-            guard let callbackToken = schedulingLifecycle.arm(
-                .deferredCallback,
-                cancel: { window.endSheet(alert.window, returnCode: .abort) }
-            ) else { return }
-            alert.beginSheetModal(for: window) { [weak self] response in
-                guard let self else { return }
-                self.schedulingLifecycle.run(callbackToken) {
-                    onResponse(response == .alertFirstButtonReturn)
-                }
-            }
-        } else {
-            onResponse(alert.runModal() == .alertFirstButtonReturn)
         }
     }
 

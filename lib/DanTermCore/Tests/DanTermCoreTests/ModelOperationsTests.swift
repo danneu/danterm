@@ -1477,38 +1477,30 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(desiredSwitcher(in: model) == nil, "cycle ended -> nil projection (orderOut)")
     }
 
-    @Test("desiredQuitConfirmation projects terminate pane count only")
-    func desiredQuitConfirmationProjectsTerminateOnly() {
-        // Intent: desiredQuitConfirmation returns nil unless
-        //   the pending subject is the app, then carries pane count.
-        // Why it exists: pins the per-confirmation gating that keeps
-        //   the close-tab NSAlert path off the quit panel.
-        // Scenario: spec-first projection -- nil with no confirmation,
-        //   nil for close-tab, non-nil for terminate with paneCount.
+    @Test("desiredConfirmation projects close and quit transactions")
+    func desiredConfirmationProjectsEverySubject() {
         var model = makeModel()
         createTab(&model)
 
-        #expect(desiredQuitConfirmation(in: model) == nil, "no pending confirmation -> nil projection")
+        #expect(desiredConfirmation(in: model) == nil, "no pending confirmation -> nil projection")
 
         let tabId = model.groups[0].tabs[0].id
         model.pendingConfirmation = pendingCloseConfirmation(for: .tab(tabId), in: model)
-        #expect(desiredQuitConfirmation(in: model) == nil, "close-tab confirmation uses NSAlert, not the quit panel")
+        #expect(desiredConfirmation(in: model)?.confirmTitle == "Close Tab")
 
         model.pendingConfirmation = pendingAppConfirmation()
-        #expect(desiredQuitConfirmation(in: model) == QuitConfirmationProjection(paneCount: 1),
-            "single-pane terminate confirmation projects pane count 1")
+        #expect(desiredConfirmation(in: model)?.informativeText == "This will close 1 terminal session.")
 
         var multi = makeMruModel(tabCount: 3).model
         multi.pendingConfirmation = pendingAppConfirmation()
-        #expect(desiredQuitConfirmation(in: multi) == QuitConfirmationProjection(paneCount: 3),
-            "multi-pane terminate confirmation projects the live pane count")
+        #expect(desiredConfirmation(in: multi)?.informativeText == "This will close 3 terminal sessions.")
 
         multi.pendingConfirmation = nil
-        #expect(desiredQuitConfirmation(in: multi) == nil, "cleared confirmation -> nil projection")
+        #expect(desiredConfirmation(in: multi) == nil, "cleared confirmation -> nil projection")
     }
 
-    @Test("desiredQuitConfirmation decrements as panes close while pending")
-    func desiredQuitConfirmationDecrementsWithPanes() {
+    @Test("desiredConfirmation decrements quit copy as panes close while pending")
+    func desiredConfirmationDecrementsQuitCopyWithPanes() {
         // Intent: the paneCount field reflects live panes while a quit
         //   confirmation is pending.
         // Why it exists: pins the live-rollup so the user sees the
@@ -1520,7 +1512,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         _ = update(&model, .splitFocusedPane(direction: .horizontal))
         #expect(model.allPaneIds.count == 2, "precondition: split created two panes")
         model.pendingConfirmation = pendingAppConfirmation()
-        #expect(desiredQuitConfirmation(in: model)?.paneCount == 2,
+        #expect(desiredConfirmation(in: model)?.informativeText == "This will close 2 terminal sessions.",
             "open quit panel starts with both panes")
 
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
@@ -1528,7 +1520,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
         #expect(model.allPaneIds.count == 1, "non-last pane close removes one pane")
         #expect(model.pendingConfirmation?.subject == .app, "non-last pane close keeps quit confirmation pending")
-        #expect(desiredQuitConfirmation(in: model)?.paneCount == 1,
+        #expect(desiredConfirmation(in: model)?.informativeText == "This will close 1 terminal session.",
             "projection reflects the decremented live pane count")
     }
 

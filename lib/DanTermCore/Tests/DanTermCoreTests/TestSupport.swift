@@ -76,7 +76,13 @@ func hasEffect(_ commands: [Command], _ check: (Command) -> Bool) -> Bool {
 }
 
 func pendingAppConfirmation() -> PendingConfirmation {
-    PendingConfirmation(subject: .app, impact: nil, quitAuthorized: false)
+    PendingConfirmation(
+        id: ConfirmationId(),
+        subject: .app,
+        tabTitle: nil,
+        impact: nil,
+        quitAuthorized: false
+    )
 }
 
 func pendingCloseConfirmation(
@@ -87,11 +93,37 @@ func pendingCloseConfirmation(
     guard let impact = closeImpact(for: subject, in: model) else {
         preconditionFailure("close-confirmation test subject must be live")
     }
+    let tabTitle: DisplayLine?
+    if case .tab(let tabId) = subject, let tab = tabById(tabId, in: model) {
+        tabTitle = DisplayLine(tabDisplayTitle(tab))
+    } else {
+        tabTitle = nil
+    }
     return PendingConfirmation(
+        id: ConfirmationId(),
         subject: subject,
+        tabTitle: tabTitle,
         impact: impact,
         quitAuthorized: quitAuthorized
     )
+}
+
+@discardableResult
+func confirmPending(_ model: inout AppModel) -> [Command] {
+    guard let id = model.pendingConfirmation?.id else {
+        Issue.record("expected a pending confirmation")
+        return []
+    }
+    return update(&model, .confirmConfirmation(id: id))
+}
+
+@discardableResult
+func cancelPending(_ model: inout AppModel) -> [Command] {
+    guard let id = model.pendingConfirmation?.id else {
+        Issue.record("expected a pending confirmation")
+        return []
+    }
+    return update(&model, .cancelConfirmation(id: id))
 }
 
 func sessionId(for paneId: PaneId, in model: AppModel) -> SessionId {

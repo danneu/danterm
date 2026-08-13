@@ -773,17 +773,18 @@ func closeImpact(for subject: ConfirmationSubject, in model: AppModel) -> CloseI
   )
 }
 
-/// Emits the only confirmation transaction and blocks every overlapping request.
+/// Replaces the confirmation transaction so the most recent request owns the panel.
 func emitConfirmation(
   _ model: inout AppModel,
   subject: ConfirmationSubject,
-  quitAuthorized: Bool = false
+  quitAuthorized: Bool = false,
+  env: CoreEnv
 ) -> [Command] {
-  guard model.pendingConfirmation == nil else { return [] }
-
   if subject == .app {
     model.pendingConfirmation = PendingConfirmation(
+      id: ConfirmationId(rawValue: env.newId()),
       subject: .app,
+      tabTitle: nil,
       impact: nil,
       quitAuthorized: false
     )
@@ -791,27 +792,20 @@ func emitConfirmation(
   }
 
   guard let impact = closeImpact(for: subject, in: model) else { return [] }
+  let tabTitle: DisplayLine?
+  if case .tab(let tabId) = subject, let tab = tabById(tabId, in: model) {
+    tabTitle = DisplayLine(tabDisplayTitle(tab))
+  } else {
+    tabTitle = nil
+  }
   model.pendingConfirmation = PendingConfirmation(
+    id: ConfirmationId(rawValue: env.newId()),
     subject: subject,
+    tabTitle: tabTitle,
     impact: impact,
     quitAuthorized: quitAuthorized
   )
-  let title: DisplayLine?
-  if case .tab(let tabId) = subject, let tab = tabById(tabId, in: model) {
-    title = DisplayLine(tabDisplayTitle(tab))
-  } else {
-    title = nil
-  }
-  return [.showCloseConfirmation(
-    subject: subject,
-    tabTitle: title,
-    quitAuthorized: quitAuthorized,
-    copy: closeConfirmationCopy(
-      subject: subject,
-      impact: impact,
-      quitAuthorized: quitAuthorized
-    )
-  )]
+  return []
 }
 
 /// Total + uncompleted count for a tab's own to-dos plus every pane's
@@ -828,8 +822,8 @@ func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncomplet
 }
 
 /// Converts either confirmation UI response into the shared transaction message.
-func confirmationResponse(isConfirm: Bool) -> Msg {
-  isConfirm ? .confirmConfirmation : .cancelConfirmation
+func confirmationResponse(id: ConfirmationId, isConfirm: Bool) -> Msg {
+  isConfirm ? .confirmConfirmation(id: id) : .cancelConfirmation(id: id)
 }
 
 /// Builds alert body copy from the same impact value that opened the gate.

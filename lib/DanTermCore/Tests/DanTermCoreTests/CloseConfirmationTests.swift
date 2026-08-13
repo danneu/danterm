@@ -4,6 +4,95 @@ import Testing
 @testable import DanTermCore
 
 struct CloseConfirmationTests {
+    @Test("confirmation projection follows every pending subject")
+    func confirmationProjectionFollowsPendingSubject() throws {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        setRunning("npm run dev", in: paneId, model: &model)
+
+        #expect(desiredConfirmation(in: model) == nil)
+
+        _ = update(&model, .requestCloseTab(id: tabId))
+        let close = try #require(desiredConfirmation(in: model))
+        #expect(close.id == model.pendingConfirmation?.id)
+        #expect(close.title == "Close tab \"Terminal\"?")
+        #expect(close.informativeText == "This tab has a running command.")
+        #expect(close.commandDetail == "npm run dev")
+        #expect(close.confirmTitle == "Close Tab")
+
+        _ = update(&model, .requestQuit)
+        let quit = try #require(desiredConfirmation(in: model))
+        #expect(quit.id == model.pendingConfirmation?.id)
+        #expect(quit.title == "Quit DanTerm?")
+        #expect(quit.informativeText == "This will close 2 terminal sessions.")
+        #expect(quit.commandDetail == nil)
+        #expect(quit.confirmTitle == "Quit")
+    }
+
+    @Test("a newer request replaces the pending confirmation")
+    func newerRequestReplacesPendingConfirmation() throws {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        setRunning("first", in: model.groups[0].tabs[0].paneTree.focusedPaneId, model: &model)
+        setRunning("second", in: model.groups[0].tabs[1].paneTree.focusedPaneId, model: &model)
+        _ = update(&model, .requestCloseTab(id: firstTabId))
+        let firstId = try #require(model.pendingConfirmation?.id)
+
+        let commands = update(&model, .requestCloseTab(id: secondTabId))
+
+        #expect(commands.isEmpty)
+        #expect(model.pendingConfirmation?.subject == .tab(secondTabId))
+        #expect(model.pendingConfirmation?.id != firstId)
+    }
+
+    @Test("answers for a replaced transaction cannot affect its replacement")
+    func staleAnswersCannotAffectReplacement() throws {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        setRunning("first", in: model.groups[0].tabs[0].paneTree.focusedPaneId, model: &model)
+        setRunning("second", in: model.groups[0].tabs[1].paneTree.focusedPaneId, model: &model)
+        _ = update(&model, .requestCloseTab(id: firstTabId))
+        let staleId = try #require(model.pendingConfirmation?.id)
+        _ = update(&model, .requestCloseTab(id: secondTabId))
+        let replacement = try #require(model.pendingConfirmation)
+
+        #expect(update(&model, .confirmConfirmation(id: staleId)).isEmpty)
+        #expect(model.pendingConfirmation == replacement)
+        #expect(tabById(firstTabId, in: model) != nil)
+        #expect(tabById(secondTabId, in: model) != nil)
+
+        #expect(update(&model, .cancelConfirmation(id: staleId)).isEmpty)
+        #expect(model.pendingConfirmation == replacement)
+    }
+
+    @Test("confirmation retracts when its subject dies and survives unrelated changes")
+    func confirmationValidityFollowsSubjectLifetime() throws {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let subjectTabId = model.groups[0].tabs[0].id
+        let otherTabId = model.groups[0].tabs[1].id
+        setRunning("sleep 300", in: model.groups[0].tabs[0].paneTree.focusedPaneId, model: &model)
+        _ = update(&model, .requestCloseTab(id: subjectTabId))
+        let pending = try #require(model.pendingConfirmation)
+
+        _ = update(&model, .selectTab(id: otherTabId))
+        #expect(model.pendingConfirmation == pending)
+
+        _ = update(&model, .closeTab(id: subjectTabId))
+        #expect(model.pendingConfirmation == nil)
+        #expect(desiredConfirmation(in: model) == nil)
+    }
+
     @Test("impact records running commands by pane and rolls up tab tasks")
     func impactRecordsCommandsAndTasks() throws {
         var model = makeModel()
@@ -46,9 +135,9 @@ struct CloseConfirmationTests {
         let subjectPaneId = try #require(selectedTab(in: paneModel)?.paneTree.focusedPaneId)
         setRunning("sleep 300", in: subjectPaneId, model: &paneModel)
 
-        let paneCommands = update(&paneModel, .requestClosePane(paneId: subjectPaneId))
+        _ = update(&paneModel, .requestClosePane(paneId: subjectPaneId))
 
-        #expect(closeConfirmation(in: paneCommands)?.subject == .pane(subjectPaneId))
+        #expect(closeConfirmation(in: paneModel)?.subject == .pane(subjectPaneId))
         #expect(paneModel.pane(subjectPaneId) != nil)
 
         var tabModel = makeModel()
@@ -58,9 +147,9 @@ struct CloseConfirmationTests {
         let runningPaneId = tabModel.groups[0].tabs[0].paneTree.focusedPaneId
         setRunning("npm run dev", in: runningPaneId, model: &tabModel)
 
-        let tabCommands = update(&tabModel, .requestCloseTab(id: runningTabId))
+        _ = update(&tabModel, .requestCloseTab(id: runningTabId))
 
-        #expect(closeConfirmation(in: tabCommands)?.subject == .tab(runningTabId))
+        #expect(closeConfirmation(in: tabModel)?.subject == .tab(runningTabId))
         #expect(tabById(runningTabId, in: tabModel) != nil)
     }
 
@@ -75,9 +164,9 @@ struct CloseConfirmationTests {
         update(&paneModel, .splitPane(paneId: firstPaneId, direction: .horizontal))
         let idlePaneId = try #require(selectedTab(in: paneModel)?.paneTree.focusedPaneId)
 
-        let paneCommands = update(&paneModel, .requestClosePane(paneId: idlePaneId))
+        _ = update(&paneModel, .requestClosePane(paneId: idlePaneId))
 
-        #expect(closeConfirmation(in: paneCommands) == nil)
+        #expect(closeConfirmation(in: paneModel) == nil)
         #expect(paneModel.pane(idlePaneId) == nil)
 
         var tabModel = makeModel()
@@ -85,9 +174,9 @@ struct CloseConfirmationTests {
         createTab(&tabModel)
         let idleTabId = tabModel.groups[0].tabs[0].id
 
-        let tabCommands = update(&tabModel, .requestCloseTab(id: idleTabId))
+        _ = update(&tabModel, .requestCloseTab(id: idleTabId))
 
-        #expect(closeConfirmation(in: tabCommands) == nil)
+        #expect(closeConfirmation(in: tabModel) == nil)
         #expect(tabById(idleTabId, in: tabModel) == nil)
     }
 
@@ -100,7 +189,7 @@ struct CloseConfirmationTests {
         update(&model, .splitPane(paneId: paneId, direction: .horizontal))
         _ = update(&model, .requestCloseTab(id: tabId))
 
-        let commands = update(&model, .confirmConfirmation)
+        let commands = confirmPending(&model)
 
         #expect(commands.count(where: { if case .terminate = $0 { true } else { false } }) == 1)
         #expect(model.hasAnyTab == false)
@@ -120,7 +209,7 @@ struct CloseConfirmationTests {
         let survivorPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         setRunning("rsync source dest", in: survivorPaneId, model: &model)
 
-        let commands = update(&model, .confirmConfirmation)
+        let commands = confirmPending(&model)
 
         #expect(commands.contains { if case .terminate = $0 { true } else { false } } == false)
         #expect(tabById(subjectTabId, in: model) == nil)
@@ -141,7 +230,7 @@ struct CloseConfirmationTests {
         _ = update(&model, .requestCloseTab(id: subjectTabId))
         _ = update(&model, .closeTab(id: otherTabId))
 
-        let commands = update(&model, .confirmConfirmation)
+        let commands = confirmPending(&model)
 
         #expect(commands.contains { if case .terminate = $0 { true } else { false } } == false)
         #expect(tabById(subjectTabId, in: model) != nil)
@@ -156,7 +245,7 @@ struct CloseConfirmationTests {
         _ = update(&model, .requestQuit)
         setRunning("while true; do work; done", in: paneId, model: &model)
 
-        let commands = update(&model, .confirmConfirmation)
+        let commands = confirmPending(&model)
 
         #expect(commands.contains { if case .terminate = $0 { true } else { false } })
         #expect(model.pendingConfirmation == nil)
@@ -176,10 +265,10 @@ struct CloseConfirmationTests {
         let newPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         setRunning("sleep 300", in: newPaneId, model: &model)
 
-        let commands = update(&model, .confirmConfirmation)
+        _ = confirmPending(&model)
 
         #expect(tabById(tabId, in: model) != nil)
-        let refreshed = try #require(closeConfirmation(in: commands))
+        let refreshed = try #require(closeConfirmation(in: model))
         #expect(refreshed.subject == .tab(tabId))
         #expect(refreshed.copy.informativeText == "This tab has 2 terminal panes and 2 running commands.")
     }
@@ -196,10 +285,10 @@ struct CloseConfirmationTests {
         _ = update(&model, .requestCloseTab(id: tabId))
         update(&model, .splitPane(paneId: paneId, direction: .horizontal))
 
-        let commands = update(&model, .confirmConfirmation)
+        _ = confirmPending(&model)
 
         #expect(tabById(tabId, in: model) != nil)
-        #expect(closeConfirmation(in: commands) != nil)
+        #expect(closeConfirmation(in: model) != nil)
     }
 
     @Test("a covered command finishing does not refresh the alert")
@@ -213,14 +302,14 @@ struct CloseConfirmationTests {
         _ = update(&model, .requestCloseTab(id: tabId))
         model.updatePane(paneId) { $0.session?.command = .idle }
 
-        let commands = update(&model, .confirmConfirmation)
+        let commands = confirmPending(&model)
 
         #expect(commands.isEmpty)
         #expect(tabById(tabId, in: model) == nil)
     }
 
-    @Test("one pending transaction blocks another confirmation surface")
-    func pendingTransactionBlocksStacking() throws {
+    @Test("quit replaces a pending close confirmation")
+    func quitReplacesPendingCloseConfirmation() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
@@ -230,8 +319,8 @@ struct CloseConfirmationTests {
         let commands = update(&model, .requestQuit)
 
         #expect(commands.isEmpty)
-        #expect(model.pendingConfirmation?.subject != .app)
-        #expect(desiredQuitConfirmation(in: model) == nil)
+        #expect(model.pendingConfirmation?.subject == .app)
+        #expect(desiredConfirmation(in: model)?.id == model.pendingConfirmation?.id)
     }
 
     @Test("a running last pane routes through a quit-authorized tab subject")
@@ -242,9 +331,9 @@ struct CloseConfirmationTests {
         let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         setRunning("sleep 300", in: paneId, model: &model)
 
-        let commands = update(&model, .requestClosePane(paneId: paneId))
+        _ = update(&model, .requestClosePane(paneId: paneId))
 
-        #expect(closeConfirmation(in: commands)?.subject == .tab(tabId))
+        #expect(closeConfirmation(in: model)?.subject == .tab(tabId))
         #expect(model.pendingConfirmation?.quitAuthorized == true)
     }
 
@@ -259,7 +348,7 @@ struct CloseConfirmationTests {
         _ = update(&paneModel, .requestClosePane(paneId: subjectPaneId))
         _ = update(&paneModel, .closePane(paneId: firstPaneId))
 
-        let paneCommands = update(&paneModel, .confirmConfirmation)
+        let paneCommands = confirmPending(&paneModel)
 
         #expect(paneCommands.contains { if case .terminate = $0 { true } else { false } } == false)
         #expect(paneModel.pane(subjectPaneId) != nil)
@@ -274,7 +363,7 @@ struct CloseConfirmationTests {
         _ = update(&batchModel, .requestCloseTabs(ids: subjectIds))
         _ = update(&batchModel, .closeTab(id: outsideId))
 
-        let batchCommands = update(&batchModel, .confirmConfirmation)
+        let batchCommands = confirmPending(&batchModel)
 
         #expect(batchCommands.contains { if case .terminate = $0 { true } else { false } } == false)
         #expect(batchModel.hasAnyTab == false)
@@ -293,10 +382,10 @@ struct CloseConfirmationTests {
         _ = update(&tabModel, .requestCloseTab(id: tabId))
         setRunning("make test", in: firstPaneId, model: &tabModel)
 
-        let tabCommands = update(&tabModel, .confirmConfirmation)
+        _ = confirmPending(&tabModel)
 
         #expect(tabById(tabId, in: tabModel) != nil)
-        #expect(closeConfirmation(in: tabCommands)?.copy.commandDetail == "make test")
+        #expect(closeConfirmation(in: tabModel)?.copy.commandDetail == "make test")
 
         var batchModel = makeModel()
         createTab(&batchModel)
@@ -307,11 +396,11 @@ struct CloseConfirmationTests {
         _ = update(&batchModel, .requestCloseTabs(ids: subjectIds))
         setRunning("rsync source dest", in: paneId, model: &batchModel)
 
-        let batchCommands = update(&batchModel, .confirmConfirmation)
+        _ = confirmPending(&batchModel)
 
         #expect(subjectIds.allSatisfy { tabById($0, in: batchModel) != nil })
-        #expect(closeConfirmation(in: batchCommands)?.subject == .tabs(subjectIds))
-        #expect(closeConfirmation(in: batchCommands)?.copy.commandDetail == "rsync source dest")
+        #expect(closeConfirmation(in: batchModel)?.subject == .tabs(subjectIds))
+        #expect(closeConfirmation(in: batchModel)?.copy.commandDetail == "rsync source dest")
     }
 
     @Test("pane confirm closes and pane cancel leaves it intact")
@@ -327,7 +416,7 @@ struct CloseConfirmationTests {
         setRunning("sleep 300", in: paneId, model: &confirmModel)
         _ = update(&confirmModel, .requestClosePane(paneId: paneId))
 
-        _ = update(&confirmModel, .confirmConfirmation)
+        _ = confirmPending(&confirmModel)
 
         #expect(confirmModel.pane(paneId) == nil)
         #expect(confirmModel.pendingConfirmation == nil)
@@ -343,7 +432,7 @@ struct CloseConfirmationTests {
         setRunning("sleep 300", in: cancelPaneId, model: &cancelModel)
         _ = update(&cancelModel, .requestClosePane(paneId: cancelPaneId))
 
-        _ = update(&cancelModel, .cancelConfirmation)
+        _ = cancelPending(&cancelModel)
 
         #expect(cancelModel.pane(cancelPaneId) != nil)
         #expect(cancelModel.pendingConfirmation == nil)
@@ -460,12 +549,15 @@ private func setRunning(_ command: String, in paneId: PaneId, model: inout AppMo
 }
 
 private func closeConfirmation(
-    in commands: [Command]
+    in model: AppModel
 ) -> (subject: ConfirmationSubject, copy: CloseConfirmationCopy)? {
-    for command in commands {
-        if case .showCloseConfirmation(let subject, _, _, let copy) = command {
-            return (subject, copy)
-        }
-    }
-    return nil
+    guard let pending = model.pendingConfirmation, let impact = pending.impact else { return nil }
+    return (
+        pending.subject,
+        closeConfirmationCopy(
+            subject: pending.subject,
+            impact: impact,
+            quitAuthorized: pending.quitAuthorized
+        )
+    )
 }

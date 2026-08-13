@@ -19,6 +19,7 @@ func update(
     defer {
         reconcileMru(&model)
         reconcileTodoPopover(&model, previous: strandedPopoverPrev)
+        reconcilePendingConfirmation(&model)
     }
 
     switch msg {
@@ -131,7 +132,8 @@ func update(
             return emitConfirmation(
                 &model,
                 subject: subject,
-                quitAuthorized: totalTabCount(model) == 1
+                quitAuthorized: totalTabCount(model) == 1,
+                env: env
             )
         }
 
@@ -146,11 +148,12 @@ func update(
         return emitConfirmation(
             &model,
             subject: .tabs(normalized),
-            quitAuthorized: normalized.count == totalTabCount(model)
+            quitAuthorized: normalized.count == totalTabCount(model),
+            env: env
         )
 
     case .closeTab(let id):
-        return closeTabBody(&model, id: id, quitAuthorized: false)
+        return closeTabBody(&model, id: id, quitAuthorized: false, env: env)
 
     // MARK: - Pane Management
 
@@ -206,7 +209,7 @@ func update(
         return commands
 
     case .closePane(let paneId):
-        return closePaneBody(&model, paneId: paneId, quitAuthorized: false)
+        return closePaneBody(&model, paneId: paneId, quitAuthorized: false, env: env)
 
     case .movePane(let source, let target, let intent):
         // Selected-tab scoping is deliberate: unlike .closePane/.splitPane,
@@ -762,7 +765,7 @@ func update(
         return []
 
     case .requestQuit:
-        return emitConfirmation(&model, subject: .app)
+        return emitConfirmation(&model, subject: .app, env: env)
 
     // MARK: - Alerts
 
@@ -841,10 +844,11 @@ func update(
         markAlertsReadForPane(paneId, in: &model)
         return []   // bell badge reconciles via reconcileSidebar
 
-    case .confirmConfirmation:
-        return confirmPendingConfirmation(&model, env: env)
+    case .confirmConfirmation(let id):
+        return confirmPendingConfirmation(&model, id: id, env: env)
 
-    case .cancelConfirmation:
+    case .cancelConfirmation(let id):
+        guard model.pendingConfirmation?.id == id else { return [] }
         model.pendingConfirmation = nil
         return []
 
@@ -913,7 +917,7 @@ func update(
 
         let group = model.groups[idx]
         if !moveTabs && !group.tabs.isEmpty && totalTabCount(model) == group.tabs.count {
-            return emitConfirmation(&model, subject: .app)
+            return emitConfirmation(&model, subject: .app, env: env)
         }
         if moveTabs {
             guard let adjIdx = adjacentGroupIndex(deletingAt: idx, count: model.groups.count) else { return [] }
@@ -1273,14 +1277,15 @@ func update(
                 return emitConfirmation(
                     &model,
                     subject: subject,
-                    quitAuthorized: totalTabCount(model) == 1
+                    quitAuthorized: totalTabCount(model) == 1,
+                    env: env
                 )
             }
             return update(&model, .closePane(paneId: paneId), env: env)
         }
         let subject = ConfirmationSubject.pane(paneId)
         if closeImpact(for: subject, in: model)?.hasWarning == true {
-            return emitConfirmation(&model, subject: subject)
+            return emitConfirmation(&model, subject: subject, env: env)
         }
         return update(&model, .closePane(paneId: paneId), env: env)
 
@@ -1312,8 +1317,12 @@ func update(
 }
 
 /// Commits or refreshes the one pending transaction against the live model.
-private func confirmPendingConfirmation(_ model: inout AppModel, env: CoreEnv) -> [Command] {
-    guard let pending = model.pendingConfirmation else { return [] }
+private func confirmPendingConfirmation(
+    _ model: inout AppModel,
+    id: ConfirmationId,
+    env: CoreEnv
+) -> [Command] {
+    guard let pending = model.pendingConfirmation, pending.id == id else { return [] }
     if pending.subject == .app {
         model.pendingConfirmation = nil
         return [.terminate]
@@ -1336,9 +1345,19 @@ private func confirmPendingConfirmation(_ model: inout AppModel, env: CoreEnv) -
     model.pendingConfirmation = nil
     switch pending.subject {
     case .pane(let paneId):
-        return closePaneBody(&model, paneId: paneId, quitAuthorized: pending.quitAuthorized)
+        return closePaneBody(
+            &model,
+            paneId: paneId,
+            quitAuthorized: pending.quitAuthorized,
+            env: env
+        )
     case .tab(let tabId):
-        return closeTabBody(&model, id: tabId, quitAuthorized: pending.quitAuthorized)
+        return closeTabBody(
+            &model,
+            id: tabId,
+            quitAuthorized: pending.quitAuthorized,
+            env: env
+        )
     case .tabs(let tabIds):
         let normalized = normalizedLiveTabIds(tabIds, in: model)
         var commands: [Command] = []
@@ -1349,7 +1368,7 @@ private func confirmPendingConfirmation(_ model: inout AppModel, env: CoreEnv) -
         if pending.quitAuthorized {
             return commands + [.terminate]
         }
-        return commands + emitConfirmation(&model, subject: .app)
+        return commands + emitConfirmation(&model, subject: .app, env: env)
     case .app:
         return [.terminate]
     }
@@ -1372,15 +1391,36 @@ private func closeSubjectHasGrown(_ pending: PendingConfirmation, in model: AppM
     return false
 }
 
+/// Retracts a transaction once any subject it can commit no longer exists.
+private func reconcilePendingConfirmation(_ model: inout AppModel) {
+    guard let pending = model.pendingConfirmation else { return }
+    let isAlive: Bool
+    switch pending.subject {
+    case .pane(let paneId):
+        isAlive = model.pane(paneId) != nil
+    case .tab(let tabId):
+        isAlive = tabById(tabId, in: model) != nil
+    case .tabs(let tabIds):
+        isAlive = tabIds.isEmpty == false
+            && tabIds.allSatisfy { tabById($0, in: model) != nil }
+    case .app:
+        isAlive = true
+    }
+    if isAlive == false {
+        model.pendingConfirmation = nil
+    }
+}
+
 private func closeTabBody(
     _ model: inout AppModel,
     id: TabId,
-    quitAuthorized: Bool
+    quitAuthorized: Bool,
+    env: CoreEnv
 ) -> [Command] {
     guard tabLocation(id, in: model) != nil else { return [] }
     if wouldQuitFromClose(model) {
         guard quitAuthorized else {
-            return emitConfirmation(&model, subject: .app)
+            return emitConfirmation(&model, subject: .app, env: env)
         }
         return closeTabRemoval(&model, id: id) + [.terminate]
     }
@@ -1394,7 +1434,8 @@ private func closeTabBody(
 private func closePaneBody(
     _ model: inout AppModel,
     paneId: PaneId,
-    quitAuthorized: Bool
+    quitAuthorized: Bool,
+    env: CoreEnv
 ) -> [Command] {
     // Resolve the pane's own tab because shell exits and stale menus can target
     // a background pane after selection has changed.
@@ -1405,7 +1446,7 @@ private func closePaneBody(
     if removal.emptiedTree {
         if wouldQuitFromClose(model) {
             guard quitAuthorized else {
-                return emitConfirmation(&model, subject: .app)
+                return emitConfirmation(&model, subject: .app, env: env)
             }
             return closeTabRemoval(&model, id: tab.id) + [.terminate]
         }

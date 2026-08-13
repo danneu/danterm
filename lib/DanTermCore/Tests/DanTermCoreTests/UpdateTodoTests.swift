@@ -335,14 +335,10 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         let firstPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
         update(&model, .addTodo(owner: .pane(firstPaneId), text: "incomplete task"))
-        let commands = update(&model, .requestClosePane(paneId: firstPaneId))
-        #expect(hasEffect(commands) {
-            if case .showCloseConfirmation(.pane(let paneId), _, _, let copy) = $0 {
-                return paneId == firstPaneId
-                    && copy.informativeText == "This pane has 1 unfinished task."
-            }
-            return false
-        }, "expected pane confirmation with count 1")
+        _ = update(&model, .requestClosePane(paneId: firstPaneId))
+        #expect(model.pendingConfirmation?.subject == .pane(firstPaneId))
+        #expect(desiredConfirmation(in: model)?.informativeText ==
+            "This pane has 1 unfinished task.")
         #expect(model.pane(firstPaneId) != nil, "pane should not be removed")
     }
 

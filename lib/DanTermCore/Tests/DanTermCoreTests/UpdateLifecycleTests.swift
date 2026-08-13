@@ -291,19 +291,18 @@ import Testing
         #expect(model.pendingConfirmation?.subject == .app, "quit confirmation should be pending")
     }
 
-    @Test("testRequestQuitWhileQuitPendingIsNoOp")
-    func testRequestQuitWhileQuitPendingIsNoOp() {
-        // Intent: a second requestQuit while one is already pending is a
-        //   no-op.
-        // Why it exists: pins the no-overlap guard.
-        // Scenario: spec-first overlap guard.
+    @Test("a repeated quit request replaces the transaction")
+    func repeatedQuitRequestReplacesTransaction() throws {
         var model = makeModel()
         createTab(&model)
         _ = update(&model, .requestQuit)
+        let firstId = try #require(model.pendingConfirmation?.id)
 
         let commands = update(&model, .requestQuit)
 
-        #expect(commands.count == 0, "second requestQuit should not emit another confirmation")
+        #expect(commands.isEmpty)
+        #expect(model.pendingConfirmation?.subject == .app)
+        #expect(model.pendingConfirmation?.id != firstId)
     }
 
     @Test("testCloseTabLastTabWhileQuitPendingIsNoOp")
@@ -374,7 +373,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         model.pendingConfirmation = pendingAppConfirmation()
-        let commands = update(&model, .confirmConfirmation)
+        let commands = confirmPending(&model)
         #expect(commands.count == 1)
         #expect(hasEffect(commands) {
             if case .terminate = $0 { return true }
@@ -392,7 +391,7 @@ import Testing
         createTab(&model)
         model.pendingConfirmation = pendingAppConfirmation()
 
-        let commands = update(&model, .confirmConfirmation)
+        let commands = confirmPending(&model)
 
         #expect(commands.count == 1)
         if case .terminate = commands[0] {
@@ -411,7 +410,7 @@ import Testing
         // Scenario: spec-first cancel.
         var model = makeModel()
         createTab(&model)
-        let commands = update(&model, .cancelConfirmation)
+        let commands = update(&model, .cancelConfirmation(id: ConfirmationId()))
         #expect(commands.count == 0, "cancel should produce no commands")
     }
 
@@ -424,7 +423,7 @@ import Testing
         createTab(&model)
         model.pendingConfirmation = pendingAppConfirmation()
 
-        let commands = update(&model, .cancelConfirmation)
+        let commands = cancelPending(&model)
 
         #expect(commands.count == 0, "cancel should produce no commands")
         #expect(model.pendingConfirmation == nil, "cancel should clear pending confirmation")
@@ -439,7 +438,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         _ = update(&model, .requestQuit)
-        _ = update(&model, .cancelConfirmation)
+        _ = cancelPending(&model)
 
         let commands = update(&model, .requestQuit)
 
@@ -447,12 +446,8 @@ import Testing
         #expect(model.pendingConfirmation?.subject == .app, "quit confirmation should be pending")
     }
 
-    @Test("testRequestQuitWhileCloseTabPendingIsNoOp")
-    func testRequestQuitWhileCloseTabPendingIsNoOp() {
-        // Intent: requestQuit is blocked while a closeTab confirmation is
-        //   pending.
-        // Why it exists: pins the cross-confirmation no-overlap guard.
-        // Scenario: spec-first quit-blocked-by-closeTab.
+    @Test("a quit request replaces a pending close-tab transaction")
+    func quitRequestReplacesPendingCloseTab() {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
@@ -460,7 +455,8 @@ import Testing
 
         let commands = update(&model, .requestQuit)
 
-        #expect(commands.count == 0, "requestQuit should be blocked by pending close-tab confirmation")
+        #expect(commands.isEmpty)
+        #expect(model.pendingConfirmation?.subject == .app)
     }
 
     @Test("testCloseTabConfirmationResponseConfirm")
@@ -470,10 +466,11 @@ import Testing
         // Why it exists: pins the dispatcher-side shim that converts an
         //   NSAlert response into a Msg.
         // Scenario: spec-first response confirm.
-        let msg = confirmationResponse(isConfirm: true)
+        let id = ConfirmationId()
+        let msg = confirmationResponse(id: id, isConfirm: true)
 
-        if case .confirmConfirmation = msg {
-            // good
+        if case .confirmConfirmation(let answerId) = msg {
+            #expect(answerId == id)
         } else {
             Issue.record("expected confirmConfirmation")
             return
@@ -486,10 +483,11 @@ import Testing
         //   the unified cancel message.
         // Why it exists: pins the cancel branch of the shim.
         // Scenario: spec-first response cancel.
-        let msg = confirmationResponse(isConfirm: false)
+        let id = ConfirmationId()
+        let msg = confirmationResponse(id: id, isConfirm: false)
 
-        if case .cancelConfirmation = msg {
-            // good
+        if case .cancelConfirmation(let answerId) = msg {
+            #expect(answerId == id)
         } else {
             Issue.record("expected cancelConfirmation")
             return
@@ -503,10 +501,11 @@ import Testing
         // Why it exists: pins the dispatcher-side shim that converts an
         //   NSAlert response into a Msg for batch tab close confirmations.
         // Scenario: spec-first batch response confirm.
-        let msg = confirmationResponse(isConfirm: true)
+        let id = ConfirmationId()
+        let msg = confirmationResponse(id: id, isConfirm: true)
 
-        if case .confirmConfirmation = msg {
-            // good
+        if case .confirmConfirmation(let answerId) = msg {
+            #expect(answerId == id)
         } else {
             Issue.record("expected confirmConfirmation")
             return
@@ -519,10 +518,11 @@ import Testing
         //   the unified cancel message for batch alerts too.
         // Why it exists: pins the cancel branch of the batch confirmation shim.
         // Scenario: spec-first batch response cancel.
-        let msg = confirmationResponse(isConfirm: false)
+        let id = ConfirmationId()
+        let msg = confirmationResponse(id: id, isConfirm: false)
 
-        if case .cancelConfirmation = msg {
-            // good
+        if case .cancelConfirmation(let answerId) = msg {
+            #expect(answerId == id)
         } else {
             Issue.record("expected cancelConfirmation")
             return

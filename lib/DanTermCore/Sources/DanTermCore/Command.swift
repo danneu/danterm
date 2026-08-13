@@ -2,7 +2,7 @@
 //
 // `update()` is pure and returns ONLY commands -- real imperatives / external side
 // effects (PTY create/text/key, focus moves, notifications,
-// IPC reply/error/read, checkpoint, config persistence, modal confirmations, TODO
+// IPC reply/error/read, checkpoint, config persistence, TODO
 // popovers, export). Everything the view *shows* is a projection derived by
 // `reconcile()` after every `send()`, so no view-sync/projection case lives here.
 // The type name declares that invariant: it was renamed from `Effect` once the last
@@ -57,12 +57,6 @@ enum Command {
     // The title and subtitle are DanTerm's own derived presentation and land in
     // one-line notification slots; the body is the sender's text, kept verbatim.
     case sendNotification(alertId: AlertId, paneId: PaneId, title: DisplayLine, subtitle: DisplayLine?, body: String)
-    case showCloseConfirmation(
-        subject: ConfirmationSubject,
-        tabTitle: DisplayLine?,
-        quitAuthorized: Bool,
-        copy: CloseConfirmationCopy
-    )
     case terminate
     case activateApp
     case dismissAlertsPopover

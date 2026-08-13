@@ -125,12 +125,10 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
             }
 
             var closeModel = model
-            let closeCommands = update(&closeModel, .requestCloseTab(id: tabId))
-            for command in closeCommands {
-                if case .showCloseConfirmation(.tab, let tabTitle?, _, let copy) = command {
-                    expectFlat(tabTitle, "close-tab confirmation title", input: hostile)
-                    expectFlat(copy.commandDetail, "close confirmation command detail", input: hostile)
-                }
+            _ = update(&closeModel, .requestCloseTab(id: tabId))
+            if let projection = desiredConfirmation(in: closeModel) {
+                expectFlat(projection.title, "close-tab confirmation title", input: hostile)
+                expectFlat(projection.commandDetail, "close confirmation command detail", input: hostile)
             }
         }
     }
@@ -253,12 +251,8 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
         let focusedSessionId = try #require(model.pane(focusedPaneId)?.session?.id)
         update(&model, .sessionReport(sessionId: focusedSessionId, report: .title("a\nb")))
 
-        let commands = update(&model, .requestCloseTab(id: tabId))
-        let titles = commands.compactMap { command -> DisplayLine? in
-            if case .showCloseConfirmation(.tab, let tabTitle?, _, _) = command { return tabTitle }
-            return nil
-        }
-        #expect(titles == ["a b"])
+        _ = update(&model, .requestCloseTab(id: tabId))
+        #expect(desiredConfirmation(in: model)?.title == "Close tab \"a b\"?")
     }
 
     @Test("a hostile title reaches the alert presentation flat")

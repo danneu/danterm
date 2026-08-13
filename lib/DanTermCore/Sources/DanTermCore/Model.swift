@@ -15,11 +15,15 @@ typealias TodoOwner = DanTermProtocol.TodoOwner
 enum SessionTag {}
 enum SplitTag {}
 enum AlertTag {}
+/// Separates panel answers from every replaced confirmation transaction.
+enum ConfirmationTag {}
 
 /// Identifies one terminal lifetime so late reports cannot target its replacement.
 typealias SessionId = TypedId<SessionTag>
 typealias SplitId = TypedId<SplitTag>
 typealias AlertId = TypedId<AlertTag>
+/// Names the exact confirmation transaction a panel answer belongs to.
+typealias ConfirmationId = TypedId<ConfirmationTag>
 
 enum AlertKind: Hashable {
     case bell
@@ -451,7 +455,9 @@ struct CloseConfirmationCopy: Equatable {
 /// Keeps one confirmation atomic across model changes while its UI is open.
 /// This state is ephemeral and never serialized into AppModelSnapshot.
 struct PendingConfirmation: Equatable {
+    let id: ConfirmationId
     let subject: ConfirmationSubject
+    let tabTitle: DisplayLine?
     let impact: CloseImpact?
     let quitAuthorized: Bool
 }
@@ -485,7 +491,7 @@ struct AppModel: Equatable {
     var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
-    var pendingConfirmation: PendingConfirmation? = nil  // ephemeral -- non-nil while a confirmation sheet is active
+    var pendingConfirmation: PendingConfirmation? = nil  // ephemeral -- non-nil while the confirmation panel is active
     var pendingSessionCreations: [SessionId: PendingSessionCreation] = [:]
     var pendingInputRequests: [UUID: PendingInputRequest] = [:]
     var pendingInputSubmissions: [InputSubmissionId: UUID] = [:]

@@ -1148,10 +1148,8 @@ import DanTermProtocol
         _ = try requireIpcReply(commands)
         #expect(tabById(closedTabId, in: model) == nil)
         #expect(model.pendingConfirmation == nil)
-        #expect(!hasEffect(commands) {
-            if case .showCloseConfirmation = $0 { return true }
-            return false
-        }, "CLI tab.close should not show a close-tab confirmation")
+        #expect(model.pendingConfirmation == nil,
+            "CLI tab.close should not show a close-tab confirmation")
     }
 
     @Test("quit terminates a launcher pool slot whatever the model is holding")
@@ -1377,10 +1375,7 @@ import DanTermProtocol
 
         _ = try requireIpcReply(commands)
         #expect(model.pane(closedPaneId) == nil)
-        #expect(hasEffect(commands) {
-            if case .showCloseConfirmation = $0 { return true }
-            return false
-        } == false)
+        #expect(model.pendingConfirmation == nil)
 
         var tabModel = makeModel()
         createTab(&tabModel)
@@ -1398,10 +1393,7 @@ import DanTermProtocol
 
         _ = try requireIpcReply(tabCommands)
         #expect(tabById(closedTabId, in: tabModel) == nil)
-        #expect(hasEffect(tabCommands) {
-            if case .showCloseConfirmation = $0 { return true }
-            return false
-        } == false)
+        #expect(tabModel.pendingConfirmation == nil)
     }
 
     @Test("pane.close requires a valid explicit pane and never falls back to context")

@@ -278,7 +278,7 @@ manual-QA per the ADR.
 
 - [x] 1. docs(design): amend the reconciliation ADR -- presentation with
       duration is always a projection (D7; wording from the scratch doc)
-- [ ] 2. feat(confirm): project the confirmation panel for every subject
+- [x] 2. feat(confirm): project the confirmation panel for every subject
       (D1, D2, D3; I1, I2, I5, I6; PO1, PO2, PO4 -- deletes
       `showCloseConfirmation`, `runConfirmation`, the `runModal` fallback)
 - [ ] 3. feat(confirm): route delete-group confirmation through the model
