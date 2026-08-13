@@ -1,6 +1,11 @@
 // Socket-and-pipe coverage for the CLI's unbuffered pane-tape JSON Lines renderer.
+//
+// The renderer reads through a DanTermClient session now, so the socket half of each
+// fixture only exists to feed that session real bytes at the moment the test chooses --
+// which is what the flushing assertions need.
 import Foundation
 import Testing
+import DanTermClient
 import DanTermProtocol
 import Darwin
 @testable import DanTermCLI
@@ -22,7 +27,7 @@ struct PaneTapeStreamTests {
         DispatchQueue.global().async {
             do {
                 completion.finish(try renderPaneTapeStream(
-                    socket: socket.connection,
+                    session: tapeSession(socket.connection),
                     output: output.write,
                     requestId: "R1"
                 ))
@@ -63,7 +68,7 @@ struct PaneTapeStreamTests {
         Darwin.close(socket.peer)
 
         #expect(try renderPaneTapeStream(
-            socket: socket.connection,
+            session: tapeSession(socket.connection),
             output: output.write,
             requestId: "R1"
         ) == .init(termination: .eof, capture: .follow))
@@ -87,7 +92,7 @@ struct PaneTapeStreamTests {
         )
 
         #expect(try renderPaneTapeStream(
-            socket: socket.connection,
+            session: tapeSession(socket.connection),
             output: output.write,
             requestId: "R1"
         ) == .init(termination: .brokenPipe, capture: .follow))
@@ -117,7 +122,7 @@ struct PaneTapeStreamTests {
         Darwin.close(socket.peer)
 
         #expect(try renderPaneTapeStream(
-            socket: socket.connection,
+            session: tapeSession(socket.connection),
             output: output.write,
             requestId: "R1"
         ) == .init(termination: .eof, capture: .snapshot))
@@ -141,7 +146,7 @@ struct PaneTapeStreamTests {
         Darwin.close(socket.peer)
 
         #expect(try renderPaneTapeStream(
-            socket: socket.connection,
+            session: tapeSession(socket.connection),
             output: output.write,
             requestId: "R1"
         ) == .init(termination: .eof, capture: nil))
@@ -190,7 +195,7 @@ struct PaneTapeStreamTests {
         Darwin.close(socket.peer)
 
         #expect(try renderPaneTapeStream(
-            socket: socket.connection,
+            session: tapeSession(socket.connection),
             output: output.write,
             requestId: "R1",
             transform: paneTapeInspectRecord
@@ -202,6 +207,11 @@ struct PaneTapeStreamTests {
             "capture": .string("follow"),
             "format": .string("inspect"),
             "initial": .object(["columns": .number(80), "rows": .number(24)]),
+            "cursor": .object([
+                "sequence": .number(0),
+                "feedByteOffset": .number(0),
+                "writeByteOffset": .number(0),
+            ]),
         ]))
         #expect(try readDescriptorRecord(output.read) == .object([
             "kind": .string("event"),
@@ -220,13 +230,7 @@ struct PaneTapeStreamTests {
     }
 
     private func replayStartRecord() -> JSONValue {
-        .object([
-            "kind": .string("start"),
-            "version": .number(Double(paneTapeStreamVersion)),
-            "capture": .string("follow"),
-            "format": .string(PaneTapeFormat.replay.rawValue),
-            "initial": .object(["columns": .number(80), "rows": .number(24)]),
-        ])
+        startRecord(capture: "follow")
     }
 
     private func replayEventRecord() -> JSONValue {
@@ -247,11 +251,21 @@ struct PaneTapeStreamTests {
         .object(["kind": .string(kind)])
     }
 
+    /// A start record with every field the producer states. The renderer decodes it rather
+    /// than picking one key out of it, so a fixture missing the cursor baseline would be
+    /// malformed here in the same way it would be malformed on the wire.
     private func startRecord(capture: String) -> JSONValue {
         .object([
             "kind": .string("start"),
-            "version": .number(2),
+            "version": .number(Double(paneTapeStreamVersion)),
             "capture": .string(capture),
+            "format": .string(PaneTapeFormat.replay.rawValue),
+            "initial": .object(["columns": .number(80), "rows": .number(24)]),
+            "cursor": .object([
+                "sequence": .number(0),
+                "feedByteOffset": .number(0),
+                "writeByteOffset": .number(0),
+            ]),
         ])
     }
 
@@ -264,6 +278,41 @@ struct PaneTapeStreamTests {
             ])
         )
     }
+}
+
+/// Feeds a client session from a raw descriptor, so these fixtures can keep writing frames
+/// one at a time into a real socket and still exercise the renderer's actual input path.
+private final class DescriptorTransport: DanTermClientTransport {
+    private let descriptor: Int32
+
+    init(_ descriptor: Int32) {
+        self.descriptor = descriptor
+    }
+
+    func send(_ bytes: Data) throws {
+        try writeDescriptorData(bytes, to: descriptor)
+    }
+
+    func receive() throws -> Data {
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { raw in
+                Darwin.read(descriptor, raw.baseAddress, raw.count)
+            }
+            if count == 0 { return Data() }
+            if count < 0 {
+                if errno == EINTR { continue }
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            return Data(buffer[0..<count])
+        }
+    }
+
+    func close() {}
+}
+
+private func tapeSession(_ descriptor: Int32) -> DanTermClientSession {
+    DanTermClientSession(transport: DescriptorTransport(descriptor))
 }
 
 private struct DescriptorPair: @unchecked Sendable {
