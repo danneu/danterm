@@ -149,7 +149,7 @@ in itself.
 |        | [S03](#s03) | 20    | 4   | 5   | build          | medium | Collapse the duplicated bundle assembly in dev-build.sh and build-app.sh                                                |
 |        | [S04](#s04) | 20    | 4   | 5   | build          | small  | Replace the four hand-copied bundle-layout assertion lists with one script                                              |
 |        | [S05](#s05) | 20    | 4   | 5   | core-model     | medium | Make a tab's focus and zoom part of its tree, not two loose fields                                                      |
-|        | [S06](#s06) | 20    | 4   | 5   | core-model     | small  | Give sessions one tree-walking mutator instead of five whole-model traversals per report                                |
+| 31c8d71d | [S06](#s06) | 20    | 4   | 5   | core-model     | small  | Give sessions one tree-walking mutator instead of five whole-model traversals per report                                |
 | 3b95df8f | [S07](#s07) | 20    | 4   | 5   | core-reducer   | large  | Collapse the duplicated pane/tab TODO surface onto one owner type                                               |
 |        | [S08](#s08) | 20    | 4   | 5   | docs           | small  | Design-doc statuses lie: superseded notes say `Status: Accepted` and the index shows no status                          |
 |        | [S09](#s09) | 20    | 4   | 5   | docs           | medium | Delete plan-terminal-engine/: 2,232 tracked lines that declare themselves normative and the engine ADR says it replaced |
