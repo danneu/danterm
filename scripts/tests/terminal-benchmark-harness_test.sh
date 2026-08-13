@@ -32,7 +32,7 @@ grep -q 'Benchmark path escaped isolated runtime' "$HARNESS"
 grep -q '"geometry"' "$PRODUCER"
 grep -q 'displayScale' "$HARNESS"
 grep -q 'DANTERM_TERMINAL_BENCHMARK >&2' "$HARNESS"
-grep -q 'bundle-theme-resources.sh.*>&2' "$HARNESS"
+grep -q '^assemble_benchmark_bundle()' "$HARNESS"
 grep -q 'deadline=$((SECONDS + 20))' "$HARNESS"
 grep -q 'front_owned_app "$APP_PID"' "$HARNESS"
 grep -q 'DANTERM_BENCHMARK_MODE' "$HARNESS"
@@ -107,7 +107,7 @@ grep -q 'record_phase "launch-complete"' "$HARNESS"
 grep -q 'record_phase "app-ready"' "$HARNESS"
 grep -q 'record_phase "converge-complete"' "$HARNESS"
 grep -q 'record_phase "teardown-complete"' "$HARNESS"
-grep -q 'BUNDLE_ID="com.danneu.danterm-terminal-benchmark${BUNDLE_SUFFIX}"' "$HARNESS"
+grep -q '"$layout_tool" benchmark "$bundle_suffix"' "$HARNESS"
 grep -q 'terminal-benchmark-state.py' "$HARNESS"
 grep -q 'DANTERM_TERMINAL_BENCHMARK_STATE_RESULT' "$HARNESS"
 grep -q 'event: "block-invalidated"' "$HARNESS"
@@ -238,5 +238,63 @@ if grep -q '179x66' "$PROFILE"; then
     exit 1
 fi
 grep -q 'geometry_label=' "$PROFILE"
+
+# The sourceable packaging phase is tested with command shims so a successful
+# launch cannot hide a missing verifier call, and both failures propagate.
+TEST_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TEST_ROOT"' EXIT
+# shellcheck disable=SC1090
+source "$HARNESS"
+mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/products"
+for command in DanTermBundleLayoutTool assemble-app-bundle.sh codesign verify-bundle-layout.sh; do
+    cat >"$TEST_ROOT/bin/$command" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s\n' "${0##*/}" >> "$DANTERM_TEST_CALLS"
+if [[ "${0##*/}" == "DanTermBundleLayoutTool" ]]; then
+    printf '{}\n'
+elif [[ "${0##*/}" == "assemble-app-bundle.sh" ]]; then
+    mkdir -p "$1"
+fi
+SHIM
+    chmod +x "$TEST_ROOT/bin/$command"
+done
+export DANTERM_TEST_CALLS="$TEST_ROOT/calls"
+PATH="$TEST_ROOT/bin:/usr/bin:/bin" assemble_benchmark_bundle \
+    "$TEST_ROOT/test.app" "$TEST_ROOT/layout.json" "$ROOT" \
+    "$TEST_ROOT/bin/DanTermBundleLayoutTool" "$TEST_ROOT/products/gui" \
+    "$TEST_ROOT/products/cli" "$TEST_ROOT/products/bootstrap" ".a"
+[[ "$(tr '\n' ' ' < "$DANTERM_TEST_CALLS")" == \
+    "DanTermBundleLayoutTool assemble-app-bundle.sh codesign verify-bundle-layout.sh " ]] || {
+    echo "benchmark bundle phase did not emit, assemble, sign, then verify" >&2
+    exit 1
+}
+cat >"$TEST_ROOT/bin/verify-bundle-layout.sh" <<'SHIM'
+#!/usr/bin/env bash
+exit 71
+SHIM
+chmod +x "$TEST_ROOT/bin/verify-bundle-layout.sh"
+if PATH="$TEST_ROOT/bin:/usr/bin:/bin" assemble_benchmark_bundle \
+    "$TEST_ROOT/test.app" "$TEST_ROOT/layout.json" "$ROOT" \
+    "$TEST_ROOT/bin/DanTermBundleLayoutTool" "$TEST_ROOT/products/gui" \
+    "$TEST_ROOT/products/cli" "$TEST_ROOT/products/bootstrap" ""; then
+    echo "benchmark bundle phase swallowed verifier failure" >&2
+    exit 1
+fi
+cat >"$TEST_ROOT/bin/verify-bundle-layout.sh" <<'SHIM'
+#!/usr/bin/env bash
+exit 0
+SHIM
+cat >"$TEST_ROOT/bin/assemble-app-bundle.sh" <<'SHIM'
+#!/usr/bin/env bash
+exit 72
+SHIM
+chmod +x "$TEST_ROOT/bin/verify-bundle-layout.sh" "$TEST_ROOT/bin/assemble-app-bundle.sh"
+if PATH="$TEST_ROOT/bin:/usr/bin:/bin" assemble_benchmark_bundle \
+    "$TEST_ROOT/test.app" "$TEST_ROOT/layout.json" "$ROOT" \
+    "$TEST_ROOT/bin/DanTermBundleLayoutTool" "$TEST_ROOT/products/gui" \
+    "$TEST_ROOT/products/cli" "$TEST_ROOT/products/bootstrap" ""; then
+    echo "benchmark bundle phase swallowed assembler failure" >&2
+    exit 1
+fi
 
 echo "terminal benchmark harness contract: ok"

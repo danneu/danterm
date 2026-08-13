@@ -77,16 +77,19 @@ private struct SourcePayload: Encodable {
     }
 }
 
-guard CommandLine.arguments.count == 2,
-      let variant = BundleLayout.Variant(rawValue: CommandLine.arguments[1])
+guard (2...3).contains(CommandLine.arguments.count),
+      let variant = BundleLayout.Variant(rawValue: CommandLine.arguments[1]),
+      variant == .benchmark || CommandLine.arguments.count == 2
 else {
-    fputs("usage: DanTermBundleLayoutTool <release|development>\n", stderr)
+    fputs("usage: DanTermBundleLayoutTool <release|development|viability> | benchmark [bundle-suffix]\n", stderr)
     exit(2)
 }
 
 let layout: BundleLayout = switch variant {
 case .release: .release
 case .development: .development
+case .benchmark: .benchmark(bundleSuffix: CommandLine.arguments.count == 3 ? CommandLine.arguments[2] : "")
+case .viability: .viability
 }
 let encoder = JSONEncoder()
 encoder.outputFormatting = [.sortedKeys]

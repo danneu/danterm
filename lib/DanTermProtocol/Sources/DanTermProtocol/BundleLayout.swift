@@ -9,6 +9,12 @@ public struct BundleLayout: Equatable, Sendable {
 
         /// The canonical local development bundle.
         case development
+
+        /// The optimized app used for isolated terminal performance measurements.
+        case benchmark
+
+        /// The opt-in app used for end-to-end terminal behavior checks.
+        case viability
     }
 
     /// Carries every plist identity field together with the matching executable name.
@@ -223,6 +229,32 @@ public struct BundleLayout: Equatable, Sendable {
         includesIdentityTool: true
     )
 
+    /// Declares a benchmark bundle while preserving the harness's stable A/B suffix.
+    public static func benchmark(bundleSuffix: String) -> BundleLayout {
+        makeHarnessLayout(
+            variant: .benchmark,
+            identity: Identity(
+                bundleIdentifier: "com.danneu.danterm-terminal-benchmark\(bundleSuffix)",
+                name: "DanTerm Benchmark",
+                displayName: "DanTerm Benchmark",
+                executableName: "DanTerm Benchmark",
+                iconName: nil
+            )
+        )
+    }
+
+    /// Declares the isolated bundle used by the opt-in terminal viability harness.
+    public static let viability = makeHarnessLayout(
+        variant: .viability,
+        identity: Identity(
+            bundleIdentifier: "com.danneu.danterm-terminal-viability",
+            name: "DanTerm Terminal Viability",
+            displayName: "DanTerm Terminal Viability",
+            executableName: "DanTerm Terminal Viability",
+            iconName: nil
+        )
+    )
+
     private static func makeShippingLayout(
         variant: Variant,
         identity: Identity,
@@ -315,6 +347,64 @@ public struct BundleLayout: Equatable, Sendable {
                 "Contents/MacOS",
                 "Contents/Helpers",
                 Paths.agentHooksDirectory,
+            ]
+        )
+    }
+
+    private static func makeHarnessLayout(
+        variant: Variant,
+        identity: Identity
+    ) -> BundleLayout {
+        BundleLayout(
+            variant: variant,
+            identity: identity,
+            entries: [
+                Entry(
+                    id: .appExecutable,
+                    relativePath: "Contents/MacOS/\(identity.executableName)",
+                    mode: 0o755,
+                    source: .product("DanTerm")
+                ),
+                Entry(
+                    id: .commandLineExecutable,
+                    relativePath: Paths.commandLineExecutable,
+                    mode: 0o755,
+                    source: .product("DanTermCLI")
+                ),
+                Entry(
+                    id: .ptySessionBootstrap,
+                    relativePath: Paths.ptySessionBootstrap,
+                    mode: 0o755,
+                    source: .product("PTYSessionBootstrap")
+                ),
+                Entry(
+                    id: .infoPlist,
+                    relativePath: Paths.infoPlist,
+                    mode: 0o644,
+                    source: .propertyListTemplate("app/Info.plist")
+                ),
+                Entry(
+                    id: .themeCatalog,
+                    relativePath: Paths.themeCatalog,
+                    mode: 0o644,
+                    source: .generatedThemeCatalog("themes")
+                ),
+                Entry(
+                    id: .symbolsFont,
+                    relativePath: "\(Paths.symbolsDirectory)/SymbolsNerdFontMono-Regular.ttf",
+                    mode: 0o644,
+                    source: .repositoryFile("lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf")
+                ),
+                Entry(
+                    id: .symbolsLicense,
+                    relativePath: "\(Paths.symbolsDirectory)/LICENSE",
+                    mode: 0o644,
+                    source: .repositoryFile("lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/LICENSE")
+                ),
+            ],
+            exactSetDirectories: [
+                "Contents/MacOS",
+                "Contents/Helpers",
             ]
         )
     }

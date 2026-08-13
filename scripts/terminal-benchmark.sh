@@ -24,6 +24,27 @@ front_owned_app() {
         "tell application \"System Events\" to set frontmost of first process whose unix id is $pid to true"
 }
 
+assemble_benchmark_bundle() {
+    local app_path="$1"
+    local layout_plan="$2"
+    local repo_root="$3"
+    local layout_tool="$4"
+    local app_product="$5"
+    local cli_product="$6"
+    local bootstrap_product="$7"
+    local bundle_suffix="$8"
+
+    "$layout_tool" benchmark "$bundle_suffix" >"$layout_plan" || return
+    assemble-app-bundle.sh "$app_path" "$layout_plan" "$repo_root" \
+        --product "DanTerm=$app_product" \
+        --product "DanTermCLI=$cli_product" \
+        --product "PTYSessionBootstrap=$bootstrap_product" >&2 || return
+    codesign --force --deep --sign - \
+        --entitlements "$repo_root/scripts/terminal-benchmark-entitlements.plist" \
+        "$app_path" >/dev/null || return
+    verify-bundle-layout.sh "$app_path" "$layout_plan" "$repo_root"
+}
+
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
@@ -71,7 +92,7 @@ if [[ ! "$TARGET_COLUMNS" =~ ^[1-9][0-9]*$ || ! "$TARGET_ROWS" =~ ^[1-9][0-9]*$ 
     exit 2
 fi
 
-for command in codesign jq plutil swift; do
+for command in codesign jq swift; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
 done
 # Closed set, not a glob: the producer emits stimulus only for these five draw
@@ -178,23 +199,14 @@ BOOTSTRAP_BIN_PATH="$(swift build --package-path "$REPO_ROOT/lib/TerminalPTY" \
     --build-path "$BUILD_PATH/TerminalPTY" --configuration release --show-bin-path)"
 record_phase "build-complete"
 
-mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Helpers" "$APP_PATH/Contents/Resources"
-cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/DanTerm Benchmark"
-cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/Helpers/danterm"
-cp "$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap" "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
-chmod +x "$APP_PATH/Contents/MacOS/DanTerm Benchmark" "$APP_PATH/Contents/Helpers/danterm" \
-    "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
-cp "$REPO_ROOT/app/Info.plist" "$APP_PATH/Contents/Info.plist"
 # Keep stable benchmark-only A/B identities; never suffix with the run PID. The
 # stable identities avoid repeated first-launch privacy prompts, while isolated
 # homes and bundle-specific cache paths keep concurrent A/B sockets separate.
-BUNDLE_ID="com.danneu.danterm-terminal-benchmark${BUNDLE_SUFFIX}"
-plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP_PATH/Contents/Info.plist"
-plutil -replace CFBundleName -string "DanTerm Benchmark" "$APP_PATH/Contents/Info.plist"
-plutil -replace CFBundleExecutable -string "DanTerm Benchmark" "$APP_PATH/Contents/Info.plist"
-plutil -remove CFBundleIconName "$APP_PATH/Contents/Info.plist" 2>/dev/null || true
-"$SCRIPT_DIR/bundle-theme-resources.sh" "$REPO_ROOT" "$APP_PATH" >&2
-codesign --force --deep --sign - --entitlements "$SCRIPT_DIR/terminal-benchmark-entitlements.plist" "$APP_PATH" >/dev/null
+LAYOUT_PLAN="$RUN_ROOT/bundle-layout.json"
+PATH="$PATH:$SCRIPT_DIR" assemble_benchmark_bundle \
+    "$APP_PATH" "$LAYOUT_PLAN" "$REPO_ROOT" "$BIN_PATH/DanTermBundleLayoutTool" \
+    "$BIN_PATH/DanTerm" "$BIN_PATH/DanTermCLI" \
+    "$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap" "$BUNDLE_SUFFIX"
 codesign -d --entitlements :- "$APP_PATH" 2>&1 | grep -q '<key>com.apple.security.get-task-allow</key>' || {
     echo "Benchmark app is missing the get-task-allow profiling entitlement" >&2
     exit 1

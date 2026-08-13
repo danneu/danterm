@@ -16,6 +16,10 @@ swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/swift-build" \
     DanTermBundleLayoutTool release > "$TEST_ROOT/release.json"
 swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/swift-build" \
     DanTermBundleLayoutTool development > "$TEST_ROOT/development.json"
+swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/swift-build" \
+    DanTermBundleLayoutTool benchmark .a > "$TEST_ROOT/benchmark.json"
+swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/swift-build" \
+    DanTermBundleLayoutTool viability > "$TEST_ROOT/viability.json"
 
 mkdir -p "$TEST_ROOT/products"
 for product in DanTerm DanTermCLI DanTermInstanceIdentityTool PTYSessionBootstrap; do
@@ -26,9 +30,9 @@ done
 # Intent: assembly follows every emitted source binding without a second entry list.
 # Why it exists: a complete-looking bundle can still fail at runtime when a producer
 #   writes the wrong built product into a declared executable slot.
-# Scenario: assemble both shipping variants from distinct fake products, then compare
+# Scenario: assemble every producer variant from distinct fake products, then compare
 #   every product-backed destination with the product named by the declaration.
-for variant in release development; do
+for variant in release development benchmark viability; do
     bundle="$TEST_ROOT/assembled-$variant.app"
     "$ROOT_DIR/scripts/assemble-app-bundle.sh" \
         "$bundle" "$TEST_ROOT/$variant.json" "$ROOT_DIR" \
@@ -73,7 +77,7 @@ import plistlib
 import sys
 
 test_root = Path(sys.argv[1])
-for variant in ("release", "development"):
+for variant in ("release", "development", "benchmark", "viability"):
     with (test_root / f"{variant}.json").open() as stream:
         plan = json.load(stream)
     bundle = test_root / f"assembled-{variant}.app"

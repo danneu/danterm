@@ -257,7 +257,7 @@ Behavioral, run locally:
 - [x] Add `scripts/assemble-app-bundle.sh`; both producers become compile +
       assemble + verify. Deletes their inline assertions and `dev-build.sh`'s five
       plutil literals. Fixes the dev fixture's identical-binaries shim.
-- [ ] Declare the benchmark and viability variants, preserving the identities
+- [x] Declare the benchmark and viability variants, preserving the identities
       they have today; both harnesses assemble and verify through the shared path
       instead of literal ones. The slot clone verifies after its
       rename-and-resign.

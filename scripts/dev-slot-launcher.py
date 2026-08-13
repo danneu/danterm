@@ -257,8 +257,10 @@ def stage_slot_bundle(
     source: Path,
     destination: Path,
     identity: Mapping[str, object],
+    source_layout_plan: Path,
+    repository_root: Path,
 ) -> None:
-    """Stages and signs a clone only after its global slot has been claimed."""
+    """Stages, signs, and verifies a clone only after its slot has been claimed."""
 
     slot = int(identity["slot"])
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -282,7 +284,23 @@ def stage_slot_bundle(
         })
         with plist_path.open("wb") as stream:
             plistlib.dump(info, stream, sort_keys=False)
-        repository_root = source.parent.parent
+        with source_layout_plan.open("r", encoding="utf-8") as stream:
+            slot_layout = json.load(stream)
+        slot_layout["identity"].update({
+            "bundleIdentifier": str(identity["bundleId"]),
+            "name": str(identity["displayName"]),
+            "displayName": str(identity["displayName"]),
+            "executableName": name,
+        })
+        app_entry = next(
+            entry for entry in slot_layout["entries"] if entry["id"] == "appExecutable"
+        )
+        app_entry["path"] = f"Contents/MacOS/{name}"
+        slot_layout_plan = temporary_root / "bundle-layout.json"
+        slot_layout_plan.write_text(
+            json.dumps(slot_layout, separators=(",", ":")),
+            encoding="utf-8",
+        )
         subprocess.run([
             "/usr/bin/codesign",
             "--force",
@@ -293,6 +311,12 @@ def stage_slot_bundle(
             str(repository_root / "dev-entitlements.plist"),
             str(temporary),
         ], check=True, stdout=sys.stderr)
+        subprocess.run([
+            str(repository_root / "scripts" / "verify-bundle-layout.sh"),
+            str(temporary),
+            str(slot_layout_plan),
+            str(repository_root),
+        ], check=True)
         if destination.exists():
             shutil.rmtree(destination)
         temporary.rename(destination)
@@ -644,7 +668,13 @@ def main(arguments: list[str]) -> int:
         )
         app_name = str(identity["displayName"])
         app_path = slot_root / "apps" / f"{app_name}.app"
-        stage_slot_bundle(source_app, app_path, identity)
+        stage_slot_bundle(
+            source_app,
+            app_path,
+            identity,
+            repository_root / ".build" / "bundle-layout-development.json",
+            repository_root,
+        )
 
     executable = app_path / "Contents" / "MacOS" / str(identity["executableName"])
     try:

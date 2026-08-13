@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import plistlib
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -37,6 +38,61 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             "executableName": name,
             "socketPath": f"/Users/test/Library/Caches/{bundle_id}/control.sock",
         }
+
+    @staticmethod
+    def write_bundle_fixture(root: Path) -> tuple[Path, Path]:
+        source = root / "DanTerm Dev.app"
+        app = source / "Contents" / "MacOS" / "DanTerm Dev"
+        cli = source / "Contents" / "Helpers" / "danterm"
+        app.parent.mkdir(parents=True)
+        cli.parent.mkdir(parents=True)
+        app.write_bytes(b"gui fixture")
+        cli.write_bytes(b"cli fixture")
+        app.chmod(0o755)
+        cli.chmod(0o755)
+        plist_path = source / "Contents" / "Info.plist"
+        info = {
+            "CFBundleIdentifier": "com.danneu.danterm-dev",
+            "CFBundleName": "DanTerm Dev",
+            "CFBundleDisplayName": "DanTerm Dev",
+            "CFBundleExecutable": "DanTerm Dev",
+        }
+        with plist_path.open("wb") as stream:
+            plistlib.dump(info, stream)
+        plan = root / "development-layout.json"
+        plan.write_text(json.dumps({
+            "schemaVersion": 1,
+            "variant": "development",
+            "identity": {
+                "bundleIdentifier": "com.danneu.danterm-dev",
+                "name": "DanTerm Dev",
+                "displayName": "DanTerm Dev",
+                "executableName": "DanTerm Dev",
+                "iconName": None,
+            },
+            "exactSetDirectories": ["Contents/MacOS", "Contents/Helpers"],
+            "entries": [
+                {
+                    "id": "appExecutable",
+                    "path": "Contents/MacOS/DanTerm Dev",
+                    "mode": 0o755,
+                    "source": {"kind": "product", "value": "DanTerm"},
+                },
+                {
+                    "id": "commandLineExecutable",
+                    "path": "Contents/Helpers/danterm",
+                    "mode": 0o755,
+                    "source": {"kind": "product", "value": "DanTermCLI"},
+                },
+                {
+                    "id": "infoPlist",
+                    "path": "Contents/Info.plist",
+                    "mode": 0o644,
+                    "source": {"kind": "propertyListTemplate", "value": "app/Info.plist"},
+                },
+            ],
+        }), encoding="utf-8")
+        return source, plan
 
     def test_concurrent_claims_use_distinct_nonzero_slots(self) -> None:
         # Intent: overlapping launcher processes can never select slot zero or the same slot.
@@ -424,22 +480,13 @@ time.sleep(30)
     def test_stage_clone_applies_slot_identity_and_signs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "DanTerm Dev.app"
-            executable = source / "Contents" / "MacOS" / "DanTerm Dev"
-            executable.parent.mkdir(parents=True)
-            executable.write_bytes(b"fixture")
-            plist_path = source / "Contents" / "Info.plist"
-            with plist_path.open("wb") as stream:
-                plistlib.dump({
-                    "CFBundleIdentifier": "com.danneu.danterm-dev",
-                    "CFBundleName": "DanTerm Dev",
-                    "CFBundleDisplayName": "DanTerm Dev",
-                    "CFBundleExecutable": "DanTerm Dev",
-                }, stream)
+            source, plan = self.write_bundle_fixture(root)
             destination = root / "DanTerm Dev (3).app"
 
             with mock.patch.object(launcher.subprocess, "run") as run:
-                launcher.stage_slot_bundle(source, destination, self.identity(3))
+                launcher.stage_slot_bundle(
+                    source, destination, self.identity(3), plan, ROOT
+                )
 
             with (destination / "Contents" / "Info.plist").open("rb") as stream:
                 info = plistlib.load(stream)
@@ -447,8 +494,35 @@ time.sleep(30)
             self.assertEqual(info["CFBundleDisplayName"], "DanTerm Dev (3)")
             self.assertEqual(info["CFBundleExecutable"], "DanTerm Dev (3)")
             self.assertTrue((destination / "Contents" / "MacOS" / "DanTerm Dev (3)").exists())
-            run.assert_called_once()
-            self.assertIn("Apple Development", run.call_args.args[0])
+            self.assertEqual(len(run.call_args_list), 2)
+            self.assertIn("Apple Development", run.call_args_list[0].args[0])
+            self.assertIn("verify-bundle-layout.sh", run.call_args_list[1].args[0][0])
+
+    def test_stage_clone_rejects_post_sign_executable_identity_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, plan = self.write_bundle_fixture(root)
+            destination = root / "DanTerm Dev (3).app"
+            real_run = subprocess.run
+
+            def sign_then_verify(arguments, **kwargs):
+                if arguments[0] == "/usr/bin/codesign":
+                    plist_path = Path(arguments[-1]) / "Contents" / "Info.plist"
+                    with plist_path.open("rb") as stream:
+                        info = plistlib.load(stream)
+                    info["CFBundleExecutable"] = "Wrong Executable"
+                    with plist_path.open("wb") as stream:
+                        plistlib.dump(info, stream)
+                    return subprocess.CompletedProcess(arguments, 0)
+                return real_run(arguments, **kwargs)
+
+            with mock.patch.object(launcher.subprocess, "run", side_effect=sign_then_verify):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    launcher.stage_slot_bundle(
+                        source, destination, self.identity(3), plan, ROOT
+                    )
+
+            self.assertFalse(destination.exists())
 
     def test_identity_resolution_uses_the_app_launch_environment(self) -> None:
         app_environment = {"HOME": "/Users/test", "SSH_AUTH_SOCK": "/gui/socket"}

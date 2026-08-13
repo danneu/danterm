@@ -1,4 +1,4 @@
-// Behavioral coverage for the canonical release and development bundle declarations.
+// Behavioral coverage for every declared app bundle variant.
 import Testing
 @testable import DanTermProtocol
 
@@ -49,5 +49,53 @@ struct BundleLayoutTests {
             source: .product("DanTermInstanceIdentityTool")
         ))
         #expect(layout.entries.count == BundleLayout.release.entries.count + 1)
+    }
+
+    @Test(
+        "benchmark layout preserves every accepted stable bundle suffix",
+        arguments: ["", ".a", ".b", ".bystander", ".isolation"]
+    )
+    func benchmarkLayoutPreservesStableIdentity(bundleSuffix: String) throws {
+        let layout = BundleLayout.benchmark(bundleSuffix: bundleSuffix)
+
+        #expect(layout.variant == .benchmark)
+        #expect(layout.identity == BundleLayout.Identity(
+            bundleIdentifier: "com.danneu.danterm-terminal-benchmark\(bundleSuffix)",
+            name: "DanTerm Benchmark",
+            displayName: "DanTerm Benchmark",
+            executableName: "DanTerm Benchmark",
+            iconName: nil
+        ))
+        #expect(try #require(layout.entry(.appExecutable)).relativePath ==
+            "Contents/MacOS/DanTerm Benchmark")
+        #expect(layout.entry(.iconAssets) == nil)
+        #expect(layout.entry(.commandSkill) == nil)
+        #expect(layout.entry(.shellIntegration) == nil)
+    }
+
+    @Test("viability layout preserves its isolated identity and reduced entry set")
+    func viabilityLayoutPreservesIdentity() throws {
+        let layout = BundleLayout.viability
+
+        #expect(layout.variant == .viability)
+        #expect(layout.identity == BundleLayout.Identity(
+            bundleIdentifier: "com.danneu.danterm-terminal-viability",
+            name: "DanTerm Terminal Viability",
+            displayName: "DanTerm Terminal Viability",
+            executableName: "DanTerm Terminal Viability",
+            iconName: nil
+        ))
+        #expect(try #require(layout.entry(.appExecutable)).relativePath ==
+            "Contents/MacOS/DanTerm Terminal Viability")
+        let expectedIDs: Set<BundleLayout.EntryID> = [
+            .appExecutable,
+            .commandLineExecutable,
+            .ptySessionBootstrap,
+            .infoPlist,
+            .themeCatalog,
+            .symbolsFont,
+            .symbolsLicense,
+        ]
+        #expect(Set(layout.entries.map(\.id)) == expectedIDs)
     }
 }

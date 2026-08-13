@@ -90,6 +90,24 @@ assert_unix_socket_path_fits() {
     (( byte_count < 104 ))
 }
 
+assemble_viability_bundle() {
+    local app_path="$1"
+    local layout_plan="$2"
+    local repo_root="$3"
+    local layout_tool="$4"
+    local app_product="$5"
+    local cli_product="$6"
+    local bootstrap_product="$7"
+
+    "$layout_tool" viability >"$layout_plan" || return
+    assemble-app-bundle.sh "$app_path" "$layout_plan" "$repo_root" \
+        --product "DanTerm=$app_product" \
+        --product "DanTermCLI=$cli_product" \
+        --product "PTYSessionBootstrap=$bootstrap_product" || return
+    codesign --force --deep --sign - "$app_path" >/dev/null || return
+    verify-bundle-layout.sh "$app_path" "$layout_plan" "$repo_root"
+}
+
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
@@ -99,7 +117,7 @@ if [[ "${DANTERM_TERMINAL_ENGINE_TEST_ALLOW_APP_CONTROL:-}" != "1" ]]; then
     exit 2
 fi
 
-for command in awk codesign defaults dscacheutil id jq less osascript pgrep plutil pmset ps swift xcrun; do
+for command in awk codesign defaults dscacheutil id jq less osascript pgrep pmset ps swift xcrun; do
     command -v "$command" >/dev/null 2>&1 || {
         echo "Missing required command: $command" >&2
         exit 1
@@ -281,23 +299,11 @@ xcrun swiftc \
     "${REPLAY_OBJECTS[@]}" \
     -o "$RUN_ROOT/terminal-recording-replay"
 
-mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Helpers" \
-    "$APP_PATH/Contents/Resources"
-cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/$VIABILITY_APP_NAME"
-cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/Helpers/danterm"
-cp "$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap" "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
-chmod +x "$APP_PATH/Contents/MacOS/$VIABILITY_APP_NAME" \
-    "$APP_PATH/Contents/Helpers/danterm" \
-    "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
-cp "$REPO_ROOT/app/Info.plist" "$APP_PATH/Contents/Info.plist"
-plutil -replace CFBundleIdentifier -string "$VIABILITY_BUNDLE_ID" "$APP_PATH/Contents/Info.plist"
-plutil -replace CFBundleName -string "$VIABILITY_APP_NAME" "$APP_PATH/Contents/Info.plist"
-plutil -replace CFBundleDisplayName -string "$VIABILITY_APP_NAME" "$APP_PATH/Contents/Info.plist"
-plutil -replace CFBundleExecutable -string "$VIABILITY_APP_NAME" "$APP_PATH/Contents/Info.plist"
-plutil -remove CFBundleIconName "$APP_PATH/Contents/Info.plist" 2>/dev/null || true
-
-"$SCRIPT_DIR/bundle-theme-resources.sh" "$REPO_ROOT" "$APP_PATH"
-codesign --force --deep --sign - "$APP_PATH" >/dev/null
+LAYOUT_PLAN="$RUN_ROOT/bundle-layout.json"
+PATH="$PATH:$SCRIPT_DIR" assemble_viability_bundle \
+    "$APP_PATH" "$LAYOUT_PLAN" "$REPO_ROOT" "$BIN_PATH/DanTermBundleLayoutTool" \
+    "$BIN_PATH/DanTerm" "$BIN_PATH/DanTermCLI" \
+    "$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap"
 
 echo "Launching $VIABILITY_APP_NAME in $RUN_ROOT..."
 env \
