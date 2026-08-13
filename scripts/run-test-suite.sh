@@ -76,6 +76,7 @@ STEPS=(
     'python3 ./scripts/tests/terminal_benchmark_candidate_screen_test.py'
     './scripts/core-purity-lint.sh'
     './scripts/research-index-lint.sh'
+    './scripts/tests/just-clean_test.sh'
     './scripts/kitty-parity-lint.py'
     './scripts/tests/kitty-parity-lint_test.sh'
     './scripts/alacritty-parity-lint.py'

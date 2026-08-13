@@ -4,9 +4,13 @@ _current_version := `git tag -l 'v*' | sed 's/^v//' | sort -V | tail -1 || echo 
 default:
     @just --list
 
-# Remove build artifacts
+# Remove build artifacts. Scratch trees are matched by name, not listed, so a gate
+# step that picks a new --scratch-path is cleaned without a second list to keep in
+# step. Pinned reference checkouts are inputs rather than output, so they are pruned.
 clean:
-    rm -rf .spm-build .build lib/DanTermProtocol/.build lib/DanTermCore/.build lib/DanTermSupport/.build lib/TerminalCore/.build lib/TerminalPTY/.build
+    find . -maxdepth 3 \( -name references -o -name .git \) -prune -o \
+        -type d \( -name .spm-build -o -name .build -o -name .build-gate \
+        -o -name .build-app-tests \) -prune -exec rm -rf {} +
 
 # Link cached external prerequisites from the primary checkout into this worktree.
 provision-worktree:
