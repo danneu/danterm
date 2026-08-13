@@ -277,7 +277,7 @@ Pure-layer obligations are Swift Testing in
 - [x] 3. refactor(sidebar): one projection-fed group painter
       (D5; I6; PO4 -- deletes `applyGroupCollapseState` and its two delegate
       calls)
-- [ ] 4. docs(audit): close the sidebar thread
+- [x] 4. docs(audit): close the sidebar thread
       (D6 -- records the shas of commits 1-3 in the S33, S58 and S44 rows,
       adds each section's Status note, and rewrites the "Settle these first"
       sidebar bullet)

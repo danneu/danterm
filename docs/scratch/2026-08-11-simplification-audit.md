@@ -138,7 +138,11 @@ in itself.
 
 - Test seams in production: 'Move test-only state and fault injection out of the production PTY actor' argues test-driven branches in shipping paths are the defect, while 'Stop forking a PTY child...' wants deliverOutputForTesting to become the normal way to drive a host, and 'The Command interpreter... has no automated coverage' wants a Ports seam threaded through AppRuntime. These reconcile only under an explicit rule -- constructor-injected collaborators yes, conditional test-only branches no -- which should be stated before any of the three is implemented, or the PTY cleanup and the AppRuntime refactor will be argued against each other.
 
-- Sidebar data flow: settled by `8c34a41f`. The interaction path reads the last-applied `SidebarProjection`, not `runtime.model` or a stored `AppModel`. S33 and S44 remain compatible follow-on work: one driver should own the pipeline, and group chrome should have one projection-fed painter.
+- Sidebar data flow: closed by `8c34a41f`, `b0952f47`, `e4dd79e1`, and
+  `8fa415e7`. The interaction path reads the last-applied
+  `SidebarProjection`, one driver owns the reconcile pipeline, the store
+  returns each outline mutation, and group chrome has one projection-fed
+  painter.
 
 - Recorded decisions are contradicted without being amended: the popover contradiction was settled by `1447b04d`, which amended the 2026-05-27 ADR before the presentation migration landed. The other conflict remains: 'Nest per-pane search and notification state in PaneModel' reverses D2 of the 2026-08-10 session-owned-facts ADR and is not safe to land without amending that decision in the same change.
 
@@ -182,7 +186,7 @@ in itself.
 |        | [S30](#s30) | 15    | 3   | 5   | pty            | small  | Replace the fence operation/output enum pair with typed fence methods                                                   |
 |        | [S31](#s31) | 15    | 3   | 5   | scrollback     | medium | Give the record side tables one owner that maintains its own byte charge                                                |
 |        | [S32](#s32) | 15    | 3   | 5   | scrollback     | small  | Collapse the seven copy-pasted task-local counters and move them out of the store file                                  |
-|        | [S33](#s33) | 15    | 3   | 5   | sidebar        | medium | Give the sidebar reconcile pipeline one implementation the UI tests drive                                               |
+| b0952f47 | [S33](#s33) | 15    | 3   | 5   | sidebar        | medium | Give the sidebar reconcile pipeline one implementation the UI tests drive                                               |
 | cfcbb40f | [S34](#s34) | 15    | 3   | 5   | terminal-core  | medium | Give anchored ranges one registry instead of six hand-written enumerations                                            |
 |        | [S35](#s35) | 15    | 3   | 5   | terminal-views | medium | Stop re-implementing grid and cell geometry in the UI-test shim                                                         |
 |        | [S36](#s36) | 15    | 3   | 5   | tests          | small  | Retire the whole-AppModel golden snapshot; it ratchets on behavior-preserving refactors                                 |
@@ -193,7 +197,7 @@ in itself.
 |        | [S41](#s41) | 12    | 3   | 4   | core-reducer   | small  | Drop @discardableResult from update() so nested calls cannot silently swallow commands                                  |
 | 17e54263 | [S42](#s42) | 12    | 3   | 4   | core-reducer   | medium | Give all three confirmations one representation instead of half-model, half-command                                     |
 |        | [S43](#s43) | 12    | 3   | 4   | docs           | small  | AGENTS.md maps three of the seven places a document can live                                                            |
-|        | [S44](#s44) | 12    | 3   | 4   | sidebar        | small  | Delete applyGroupCollapseState; paint the group row from its own projection                                             |
+| 8fa415e7 | [S44](#s44) | 12    | 3   | 4   | sidebar        | small  | Delete applyGroupCollapseState; paint the group row from its own projection                                             |
 | 8c34a41f | [S45](#s45) | 12    | 3   | 4   | sidebar        | small  | Drop SidebarView.currentModel; read the runtime's model                                                                 |
 |        | [S46](#s46) | 12    | 3   | 4   | terminal-views | medium | Let the swapchain own its construction inputs instead of mirroring them in the view                                     |
 | c38ace17 | [S47](#s47) | 10    | 2   | 5   | build          | small  | `just clean` misses two of the five build trees it is supposed to remove                                                |
@@ -207,7 +211,7 @@ in itself.
 |        | [S55](#s55) | 10    | 2   | 5   | tests          | small  | Split ModelOperationsTests along the boundary its name claims                                                           |
 |        | [S56](#s56) | 8     | 2   | 4   | core-model     | small  | Unify the three divergent "the selected tab died" fixups                                                                |
 |        | [S57](#s57) | 8     | 2   | 4   | pty            | medium | Read into one reusable buffer through a single read loop                                                                |
-|        | [S58](#s58) | 8     | 2   | 4   | sidebar        | medium | Make SidebarItemStore return the outline mutation instead of a Bool the executor re-switches on                         |
+| e4dd79e1 | [S58](#s58) | 8     | 2   | 4   | sidebar        | medium | Make SidebarItemStore return the outline mutation instead of a Bool the executor re-switches on                         |
 |        | [S59](#s59) | 8     | 2   | 4   | terminal-views | small  | Drop the vestigial optionality in TerminalSessionState.scrollPosition                                                   |
 |        | [S60](#s60) | 5     | 1   | 5   | app-runtime    | small  | Drop the unused runRepeating and captureOwnerCensus lifecycle API                                                       |
 | 58ffeec1 | [S61](#s61) | 5     | 1   | 5   | build          | small  | Delete the unreferenced scripts/cursor-color-rainbow.sh                                                                 |
@@ -746,6 +750,10 @@ presentation shape described below no longer exist.
 
 `app/Reconcile.swift#reconcileSidebar`, `tests-ui/SidebarProjectionRowTests.swift#applyProjectionRowTransition`, `tests-ui/SidebarRenameRecycleTests.swift#applyRenameRecycleTransitionResult`, `tests-ui/SidebarSelectionCacheTests.swift#applySidebarTransitionResult`
 
+**Status note.** `b0952f47` added one production reconcile driver that owns
+the projection cache and full pipeline. Production and UI tests now drive that
+value, and the test-side pipeline copies were deleted.
+
 **Problem.** Three UI test files each re-implement reconcileSidebar's five-step pipeline -- desiredSidebar, computeSidebarRowOps, guardSidebarRenameOps, clear the sidecar, applySidebarOps, advanceSidebarCache -- as their own private helper, and each carries its own byte-identical materialize-rows and row-lookup helpers. The pipeline's step order and its cache-retention wiring are exactly what the recent rework changed, and they are the part most likely to change again. If production's ordering changes, all three copies keep testing the old pipeline and stay green.
 
 **Evidence.** app/Reconcile.swift#reconcileSidebar (lines 247-271) is mirrored by SidebarProjectionRowTests.swift#applyProjectionRowTransition, SidebarRenameRecycleTests.swift#applyRenameRecycleTransitionResult (whose doc comment says outright "Mirror reconcileSidebar's production pipeline"), and SidebarSelectionCacheTests.swift#applySidebarTransitionResult -- which notably omits the guard step entirely, so the three copies already differ. materializeProjectionRows, materializeRenameRecycleRows, and materializeSidebarRows are three copies of the same four-line loop; renameRecycleRow and sidebarRow are two copies of the same row lookup. SidebarContextMenuTests adds a fourth partial copy of the initial apply.
@@ -932,6 +940,10 @@ not include.
 `sidebar` &middot; duplication &middot; impact 3, confidence 4 &middot; effort small
 
 `app/SidebarView.swift#applyGroupCollapseState`, `app/SidebarView.swift#configureGroupCell`, `app/SidebarView.swift#applyRowOp`, `app/SidebarView.swift#outlineViewItemDidCollapse`, `app/SidebarView.swift#outlineViewItemDidExpand`
+
+**Status note.** `8fa415e7` deleted the separate collapse painter and its
+delegate calls. Collapse mutations now use the normal group painter, fed by
+the stored projection, and retain a missed visible paint for retry.
 
 **Problem.** applyGroupCollapseState repaints the caret glyph, the bell badge, and the tab-count badge from a `collapsed: Bool` parameter -- the same three assignments configureGroupCell already makes from `group.isCollapsed`. This is exactly the second derivation that commit 247f8dc8 removed for tab and group cells, left standing for collapse chrome. It is also redundant work: on the delegate path the `.toggleGroupCollapse` send reconciles synchronously, emits a setGroupCollapsed op, and applyRowOp has already repainted the row before the delegate's own call runs.
 
@@ -1166,6 +1178,10 @@ behind Msgs, and rename initiation became projected model state.
 `sidebar` &middot; accidental-complexity &middot; impact 2, confidence 4 &middot; effort medium
 
 `lib/DanTermCore/Sources/DanTermCore/SidebarItemStore.swift#apply`, `app/SidebarView.swift#applyRowOp`, `app/SidebarView.swift#updateTabRow`, `app/SidebarView.swift#updateGroupRow`
+
+**Status note.** `e4dd79e1` made `SidebarItemStore.apply` return the complete
+outline mutation. The executor now obeys that result without re-deriving its
+parent, index, or group mode, and reload operations write each item once.
 
 **Problem.** The row-op executor switches over all eight SidebarRowOp cases, and SidebarItemStore.apply switches over the same eight again. The store answers only "should the AppKit mutation run?" as a Bool, so the executor has to re-derive the parent item, the index, and the single-vs-multi-group branch that the store already decided with. The reload cases also update the store twice: applyRowOp calls store.apply, which calls updateTabItem, and then updateTabRow calls store.updateTabItem for the same id.
 
