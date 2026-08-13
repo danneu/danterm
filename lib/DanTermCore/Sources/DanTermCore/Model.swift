@@ -427,6 +427,7 @@ enum ConfirmationSubject: Equatable {
     case pane(PaneId)
     case tab(TabId)
     case tabs([TabId])
+    case deleteGroup(GroupId)
     case app
 }
 
@@ -452,6 +453,12 @@ struct CloseConfirmationCopy: Equatable {
     let commandDetail: DisplayLine?
 }
 
+/// Freezes the tabs and destination named by a delete-group confirmation.
+struct DeleteGroupConfirmation: Equatable {
+    let tabIds: [TabId]
+    let destinationGroupId: GroupId
+}
+
 /// Keeps one confirmation atomic across model changes while its UI is open.
 /// This state is ephemeral and never serialized into AppModelSnapshot.
 struct PendingConfirmation: Equatable {
@@ -459,6 +466,7 @@ struct PendingConfirmation: Equatable {
     let subject: ConfirmationSubject
     let tabTitle: DisplayLine?
     let impact: CloseImpact?
+    let deleteGroup: DeleteGroupConfirmation?
     let quitAuthorized: Bool
 }
 

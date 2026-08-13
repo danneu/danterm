@@ -888,60 +888,6 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(abbreviateHome(home) == "~")
     }
 
-    // MARK: - deleteGroupAction
-
-    @Test("testDeleteGroupActionEmptyGroup")
-    func testDeleteGroupActionEmptyGroup() {
-        // Intent: deleting an empty group skips confirmation
-        //   (.deleteImmediately).
-        // Why it exists: pins the no-tabs branch that bypasses the user
-        //   prompt.
-        // Scenario: spec-first no-tabs check -- a directly constructed empty
-        //   group resolves to .deleteImmediately.
-        var model = makeModel()
-        createTab(&model)
-        let workGroupId = GroupId()
-        model.groups.append(GroupModel(id: workGroupId, name: "Work"))
-        let action = deleteGroupAction(for: workGroupId, in: model)
-        guard case .deleteImmediately(let gid) = action else {
-            Issue.record("expected .deleteImmediately, got \(String(describing: action))")
-            return
-        }
-        #expect(gid == workGroupId)
-    }
-
-    @Test("testDeleteGroupActionGroupWithTabs")
-    func testDeleteGroupActionGroupWithTabs() {
-        // Intent: deleting a group with tabs surfaces a confirm action
-        //   carrying the group id, name, and tab count.
-        // Why it exists: pins the data the confirm panel renders.
-        // Scenario: spec-first confirmation payload -- a group with one
-        //   auto-created tab resolves to .confirm(name="Work", count=1).
-        var model = makeModel()
-        update(&model, .createGroup(name: "Work"))
-        let workGroup = model.groups.first(where: { $0.name == "Work" })!
-        let action = deleteGroupAction(for: workGroup.id, in: model)
-        guard case .confirm(let gid, let name, let tabCount) = action else {
-            Issue.record("expected .confirm, got \(String(describing: action))")
-            return
-        }
-        #expect(gid == workGroup.id)
-        #expect(name == "Work")
-        #expect(tabCount == 1)
-    }
-
-    @Test("testDeleteGroupActionLastGroup")
-    func testDeleteGroupActionLastGroup() {
-        // Intent: deleting the last remaining group returns nil (no-op).
-        // Why it exists: pins the invariant that the model always has at
-        //   least one group.
-        // Scenario: spec-first last-group guard.
-        let model = makeModel()
-        let onlyGroup = model.groups[0]
-        let action = deleteGroupAction(for: onlyGroup.id, in: model)
-        #expect(action == nil, "last remaining group should return nil")
-    }
-
     // MARK: - Pane side-table cleanup
 
     @Test("clearPaneSideTables prunes every pane-keyed side table")

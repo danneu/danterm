@@ -1093,6 +1093,7 @@ struct ConfirmationProjection: Equatable {
   let informativeText: String
   let commandDetail: DisplayLine?
   let confirmTitle: DisplayLine
+  let secondaryTitle: DisplayLine?
 }
 
 /// Projects the single pending transaction into the shared non-modal panel.
@@ -1107,7 +1108,8 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       title: "Quit DanTerm?",
       informativeText: "This will close \(sessions).",
       commandDetail: nil,
-      confirmTitle: "Quit"
+      confirmTitle: "Quit",
+      secondaryTitle: nil
     )
   case .pane:
     guard let impact = pending.impact else { return nil }
@@ -1121,7 +1123,8 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       title: "Close pane?",
       informativeText: copy.informativeText,
       commandDetail: copy.commandDetail,
-      confirmTitle: "Close Pane"
+      confirmTitle: "Close Pane",
+      secondaryTitle: nil
     )
   case .tab(let tabId):
     guard tabById(tabId, in: model) != nil,
@@ -1138,7 +1141,8 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       title: DisplayLine("Close tab \"\(tabTitle.text)\"?"),
       informativeText: copy.informativeText,
       commandDetail: copy.commandDetail,
-      confirmTitle: "Close Tab"
+      confirmTitle: "Close Tab",
+      secondaryTitle: nil
     )
   case .tabs(let tabIds):
     guard let impact = pending.impact else { return nil }
@@ -1155,7 +1159,23 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
         : "Close \(tabCount) tabs?"),
       informativeText: copy.informativeText,
       commandDetail: copy.commandDetail,
-      confirmTitle: DisplayLine("Close \(tabCount) Tabs")
+      confirmTitle: DisplayLine("Close \(tabCount) Tabs"),
+      secondaryTitle: nil
+    )
+  case .deleteGroup(let groupId):
+    guard let frozen = pending.deleteGroup,
+          let group = model.groups.first(where: { $0.id == groupId }),
+          let destination = model.groups.first(where: {
+            $0.id == frozen.destinationGroupId
+          })
+    else { return nil }
+    return ConfirmationProjection(
+      id: pending.id,
+      title: DisplayLine("Delete group \"\(group.name)\"?"),
+      informativeText: "This group has \(frozen.tabIds.count) tab(s).",
+      commandDetail: nil,
+      confirmTitle: DisplayLine("Move to \(destination.name)"),
+      secondaryTitle: "Close Tabs"
     )
   }
 }

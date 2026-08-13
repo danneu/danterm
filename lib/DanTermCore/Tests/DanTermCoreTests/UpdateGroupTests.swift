@@ -14,6 +14,138 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct UpdateGroupTests {
+    @Test("requestDeleteGroup applies immediate, confirmation, and refusal policy")
+    func requestDeleteGroupPolicy() throws {
+        var emptyModel = makeModel()
+        createTab(&emptyModel)
+        let emptyId = GroupId()
+        emptyModel.groups.append(GroupModel(id: emptyId, name: "Empty"))
+        _ = update(&emptyModel, .requestDeleteGroup(id: emptyId))
+        #expect(emptyModel.groups.contains { $0.id == emptyId } == false)
+        #expect(emptyModel.pendingConfirmation == nil)
+
+        var populatedModel = makeModel()
+        createTab(&populatedModel)
+        _ = update(&populatedModel, .createGroup(name: "Work"))
+        let work = try #require(populatedModel.groups.first { $0.name == "Work" })
+        let destination = populatedModel.groups[0]
+        _ = update(&populatedModel, .requestDeleteGroup(id: work.id))
+        let pending = try #require(populatedModel.pendingConfirmation)
+        #expect(pending.subject == .deleteGroup(work.id))
+        #expect(pending.deleteGroup?.tabIds == work.tabs.map(\.id))
+        #expect(pending.deleteGroup?.destinationGroupId == destination.id)
+        #expect(desiredConfirmation(in: populatedModel)?.title == "Delete group \"Work\"?")
+        #expect(desiredConfirmation(in: populatedModel)?.confirmTitle == "Move to General")
+        #expect(desiredConfirmation(in: populatedModel)?.secondaryTitle == "Close Tabs")
+
+        var lastModel = makeModel()
+        createTab(&lastModel)
+        let lastId = lastModel.groups[0].id
+        _ = update(&lastModel, .requestDeleteGroup(id: lastId))
+        #expect(lastModel.groups.count == 1)
+        #expect(lastModel.pendingConfirmation == nil)
+    }
+
+    @Test("stale delete-group choices cannot affect a replacement")
+    func staleDeleteGroupChoicesCannotAffectReplacement() throws {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .createGroup(name: "Work"))
+        let workId = try #require(model.groups.first { $0.name == "Work" }?.id)
+        _ = update(&model, .requestDeleteGroup(id: workId))
+        let staleId = try #require(model.pendingConfirmation?.id)
+        _ = update(&model, .requestQuit)
+        let replacement = try #require(model.pendingConfirmation)
+
+        #expect(update(&model, .chooseDeleteGroupConfirmation(id: staleId, moveTabs: true)).isEmpty)
+        #expect(model.pendingConfirmation == replacement)
+        #expect(model.groups.contains { $0.id == workId })
+        #expect(update(&model, .chooseDeleteGroupConfirmation(id: staleId, moveTabs: false)).isEmpty)
+        #expect(model.pendingConfirmation == replacement)
+    }
+
+    @Test("delete-group choice refreshes when the affected tab set grows")
+    func deleteGroupChoiceRefreshesForGrowth() throws {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .createGroup(name: "Work"))
+        let workId = try #require(model.groups.first { $0.name == "Work" }?.id)
+        _ = update(&model, .requestDeleteGroup(id: workId))
+        let firstId = try #require(model.pendingConfirmation?.id)
+        _ = update(&model, .createTab(inGroupId: workId))
+        let currentIds = try #require(model.groups.first { $0.id == workId }?.tabs.map(\.id))
+
+        _ = update(&model, .chooseDeleteGroupConfirmation(id: firstId, moveTabs: false))
+
+        #expect(model.groups.contains { $0.id == workId })
+        #expect(model.pendingConfirmation?.id != firstId)
+        #expect(model.pendingConfirmation?.deleteGroup?.tabIds == currentIds)
+    }
+
+    @Test("delete-group destination refreshes if the frozen group disappears")
+    func deleteGroupDestinationRefreshes() throws {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .createGroup(name: "Work"))
+        _ = update(&model, .createGroup(name: "Archive"))
+        let generalId = model.groups[0].id
+        let workId = model.groups[1].id
+        let archiveId = model.groups[2].id
+        _ = update(&model, .requestDeleteGroup(id: workId))
+        let firstId = try #require(model.pendingConfirmation?.id)
+        #expect(model.pendingConfirmation?.deleteGroup?.destinationGroupId == generalId)
+
+        _ = update(&model, .deleteGroup(id: generalId, moveTabs: true))
+
+        #expect(model.pendingConfirmation?.id != firstId)
+        #expect(model.pendingConfirmation?.deleteGroup?.destinationGroupId == archiveId)
+        #expect(desiredConfirmation(in: model)?.confirmTitle == "Move to Archive")
+    }
+
+    @Test("move choice uses the frozen destination after group reordering")
+    func deleteGroupMoveUsesFrozenDestination() throws {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .createGroup(name: "Work"))
+        _ = update(&model, .createGroup(name: "Archive"))
+        let generalId = model.groups[0].id
+        let workId = model.groups[1].id
+        let archiveId = model.groups[2].id
+        let workTabIds = model.groups[1].tabs.map(\.id)
+        _ = update(&model, .requestDeleteGroup(id: workId))
+        let confirmationId = try #require(model.pendingConfirmation?.id)
+        _ = update(&model, .reorderGroup(groupId: generalId, toIndex: 2))
+
+        _ = update(&model, .chooseDeleteGroupConfirmation(id: confirmationId, moveTabs: true))
+
+        #expect(model.groups.contains { $0.id == workId } == false)
+        #expect(workTabIds.allSatisfy { tabId in
+            model.groups.first { $0.id == generalId }?.tabs.contains { $0.id == tabId } == true
+        })
+        #expect(workTabIds.allSatisfy { tabId in
+            model.groups.first { $0.id == archiveId }?.tabs.contains { $0.id == tabId } == false
+        })
+    }
+
+    @Test("close choice deletes the requested group and its tabs")
+    func deleteGroupCloseChoiceDeletesGroup() throws {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .createGroup(name: "Work"))
+        let work = try #require(model.groups.first { $0.name == "Work" })
+        _ = update(&model, .requestDeleteGroup(id: work.id))
+        let confirmationId = try #require(model.pendingConfirmation?.id)
+
+        let commands = update(
+            &model,
+            .chooseDeleteGroupConfirmation(id: confirmationId, moveTabs: false)
+        )
+
+        #expect(model.groups.contains { $0.id == work.id } == false)
+        #expect(model.pendingConfirmation == nil)
+        #expect(commands.isEmpty)
+    }
+
     @Test("testCreateGroupAndMoveTab")
     func testCreateGroupAndMoveTab() {
         // Intent: createGroup adds a group with an auto-created tab; a

@@ -281,7 +281,7 @@ manual-QA per the ADR.
 - [x] 2. feat(confirm): project the confirmation panel for every subject
       (D1, D2, D3; I1, I2, I5, I6; PO1, PO2, PO4 -- deletes
       `showCloseConfirmation`, `runConfirmation`, the `runModal` fallback)
-- [ ] 3. feat(confirm): route delete-group confirmation through the model
+- [x] 3. feat(confirm): route delete-group confirmation through the model
       (D4; PO5 -- deletes the SidebarView NSAlert)
 - [ ] 4. feat(todo): project TODO popover existence (D5; I1-I4; PO1, PO3 --
       deletes both popover Commands and both stranding sweeps; fixes the

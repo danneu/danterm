@@ -1157,36 +1157,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     @objc private func contextDeleteGroup(_ sender: NSMenuItem) {
         guard let rawId = sender.representedObject as? UUID else { return }
-        let groupId = GroupId(rawValue: rawId)
-        guard let model = currentModel else { return }
-
-        switch deleteGroupAction(for: groupId, in: model) {
-        case .deleteImmediately(let gid):
-            runtime?.send(.deleteGroup(id: gid, moveTabs: false))
-        case .confirm(let gid, let name, let tabCount):
-            let alert = NSAlert()
-            alert.messageText = "Delete group \"\(name)\"?"
-            alert.informativeText = "This group has \(tabCount) tab(s)."
-            let groupIdx = model.groups.firstIndex(where: { $0.id == gid })!
-            let adjIdx = adjacentGroupIndex(deletingAt: groupIdx, count: model.groups.count)!
-            let destName = model.groups[adjIdx].name
-            alert.addButton(withTitle: "Move to \(destName)")
-            alert.addButton(withTitle: "Close Tabs")
-            alert.addButton(withTitle: "Cancel")
-            guard let window = window else { return }
-            alert.beginSheetModal(for: window) { [weak self] response in
-                switch response {
-                case .alertFirstButtonReturn:
-                    self?.runtime?.send(.deleteGroup(id: gid, moveTabs: true))
-                case .alertSecondButtonReturn:
-                    self?.runtime?.send(.deleteGroup(id: gid, moveTabs: false))
-                default:
-                    break
-                }
-            }
-        case nil:
-            break
-        }
+        runtime?.send(.requestDeleteGroup(id: GroupId(rawValue: rawId)))
     }
 
     /// Toggle-off: re-applying a color that every targeted tab already has

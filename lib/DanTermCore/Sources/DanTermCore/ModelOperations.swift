@@ -757,6 +757,8 @@ func closeImpact(for subject: ConfirmationSubject, in model: AppModel) -> CloseI
     }
   case .app:
     return nil
+  case .deleteGroup:
+    return nil
   }
 
   return CloseImpact(
@@ -786,6 +788,7 @@ func emitConfirmation(
       subject: .app,
       tabTitle: nil,
       impact: nil,
+      deleteGroup: nil,
       quitAuthorized: false
     )
     return []
@@ -803,6 +806,7 @@ func emitConfirmation(
     subject: subject,
     tabTitle: tabTitle,
     impact: impact,
+    deleteGroup: nil,
     quitAuthorized: quitAuthorized
   )
   return []
@@ -874,6 +878,8 @@ func closeConfirmationCopy(
     fallback = "These tabs will be closed."
   case .app:
     preconditionFailure("app confirmations do not have frozen close copy")
+  case .deleteGroup:
+    preconditionFailure("delete-group confirmations do not have close copy")
   }
 
   let sentence: String
@@ -1058,26 +1064,9 @@ func containerShape(of tab: TabModel) -> ContainerShape {
 
 // MARK: - Delete Group
 
-// Determines whether deleting a group requires user confirmation.
-enum DeleteGroupAction {
-  case deleteImmediately(groupId: GroupId)
-  case confirm(groupId: GroupId, name: String, tabCount: Int)
-}
-
 func adjacentGroupIndex(deletingAt idx: Int, count: Int) -> Int? {
   guard count > 1 else { return nil }
   return idx > 0 ? idx - 1 : 1
-}
-
-func deleteGroupAction(for groupId: GroupId, in model: AppModel) -> DeleteGroupAction? {
-  guard let group = model.groups.first(where: { $0.id == groupId }),
-    model.groups.count > 1
-  else { return nil }
-  if group.tabs.isEmpty {
-    return .deleteImmediately(groupId: groupId)
-  } else {
-    return .confirm(groupId: groupId, name: group.name, tabCount: group.tabs.count)
-  }
 }
 
 /// How send() should drive reconcile() for a translated message.

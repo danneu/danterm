@@ -8,6 +8,7 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
     private let headingLabel = NSTextField(labelWithString: "")
     private let bodyLabel = NSTextField(labelWithString: "")
     private let commandLabel = NSTextField(labelWithString: "")
+    private let secondaryButton = NSButton(title: "", target: nil, action: nil)
     private let confirmButton = NSButton(title: "", target: nil, action: nil)
 
     init(runtime: AppRuntime) {
@@ -59,7 +60,11 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
         confirmButton.bezelStyle = .push
         confirmButton.keyEquivalent = "\r"
 
-        let buttonStack = NSStackView(views: [cancelButton, confirmButton])
+        secondaryButton.target = self
+        secondaryButton.action = #selector(chooseCloseTabs(_:))
+        secondaryButton.bezelStyle = .push
+
+        let buttonStack = NSStackView(views: [cancelButton, secondaryButton, confirmButton])
         buttonStack.translatesAutoresizingMaskIntoConstraints = false
         buttonStack.orientation = .horizontal
         buttonStack.spacing = 8
@@ -99,6 +104,8 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
         commandLabel.stringValue = projection.commandDetail?.text ?? ""
         commandLabel.isHidden = projection.commandDetail == nil
         confirmButton.title = projection.confirmTitle.text
+        secondaryButton.title = projection.secondaryTitle?.text ?? ""
+        secondaryButton.isHidden = projection.secondaryTitle == nil
     }
 
     /// Position the panel centered over the main app window when possible.
@@ -130,7 +137,16 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
 
     @objc private func confirm(_ sender: Any?) {
         guard let transactionId else { return }
-        runtime?.send(.confirmConfirmation(id: transactionId))
+        if secondaryButton.isHidden {
+            runtime?.send(.confirmConfirmation(id: transactionId))
+        } else {
+            runtime?.send(.chooseDeleteGroupConfirmation(id: transactionId, moveTabs: true))
+        }
+    }
+
+    @objc private func chooseCloseTabs(_ sender: Any?) {
+        guard let transactionId else { return }
+        runtime?.send(.chooseDeleteGroupConfirmation(id: transactionId, moveTabs: false))
     }
 
     @objc private func cancel(_ sender: Any?) {

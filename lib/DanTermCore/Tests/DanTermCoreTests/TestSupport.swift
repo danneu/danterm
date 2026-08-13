@@ -81,6 +81,7 @@ func pendingAppConfirmation() -> PendingConfirmation {
         subject: .app,
         tabTitle: nil,
         impact: nil,
+        deleteGroup: nil,
         quitAuthorized: false
     )
 }
@@ -104,6 +105,7 @@ func pendingCloseConfirmation(
         subject: subject,
         tabTitle: tabTitle,
         impact: impact,
+        deleteGroup: nil,
         quitAuthorized: quitAuthorized
     )
 }

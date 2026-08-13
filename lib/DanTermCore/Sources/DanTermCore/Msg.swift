@@ -43,6 +43,7 @@ enum Msg {
     case closePane(paneId: PaneId)
     case focusDirection(direction: SplitNodeModel.Direction, side: SplitNodeModel.Side)
     case createGroup(name: String, launch: LaunchSpec? = nil, background: Bool = false)
+    case requestDeleteGroup(id: GroupId)
     case deleteGroup(id: GroupId, moveTabs: Bool)
     case renameGroup(id: GroupId, name: String)
     case moveTabs(tabIds: [TabId], toGroupId: GroupId, atIndex: Int)
@@ -77,6 +78,7 @@ enum Msg {
     case closeTab(id: TabId)
     case confirmConfirmation(id: ConfirmationId)
     case cancelConfirmation(id: ConfirmationId)
+    case chooseDeleteGroupConfirmation(id: ConfirmationId, moveTabs: Bool)
 
     // Export
     case exportState

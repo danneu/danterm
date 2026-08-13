@@ -1,8 +1,8 @@
 # Model-Driven View Reconciliation
 
 - Status: Accepted
-- Amended: 2026-08-13 -- presentation with duration is always a projection
 - Date: 2026-05-27
+- Amended: 2026-08-13 -- presentation with duration is always a projection
 
 ## Context
 
