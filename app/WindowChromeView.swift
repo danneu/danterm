@@ -68,11 +68,10 @@ class WindowChromeView: NSView {
         tabTodoButton.toolTip = "Tab To-Dos"
 
         // Title label
-        titleLabel = NSTextField(labelWithString: "")
+        titleLabel = SingleLineLabel.make(truncating: .byTruncatingMiddle)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         titleLabel.textColor = NSColor.secondaryLabelColor
-        titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // Drag view (background, enables window dragging)

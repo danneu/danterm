@@ -35,6 +35,7 @@ struct UITestRunner {
         todoPopoverViewTests()
         alertsPopoverViewTests()
         preferencesPanelTests()
+        singleLineLabelTests()
 
         print("\n\(uiTotal - uiFailures)/\(uiTotal) passed")
         if uiFailures > 0 { exit(1) }

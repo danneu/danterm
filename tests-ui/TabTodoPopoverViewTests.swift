@@ -5,6 +5,19 @@ import Cocoa
 func tabTodoPopoverViewTests() {
     print("TabTodoPopoverView")
 
+    uiTest("a pane section header lays out one line and truncates") {
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+
+        let rows = materializedTabTodoRows(fx)
+        guard let header = rows.first(where: { $0.identifier?.rawValue == "PaneTodoHeader" }),
+              let title = header.subviews.compactMap({ $0 as? NSTextField })
+                  .first(where: { $0.stringValue == "Left pane" }) else {
+            throw UITestFailure(message: "expected a pane section header showing its pane title")
+        }
+        try assertSingleLine(title, "tab-todo pane section header")
+    }
+
     uiTest("apply renders populated tab and pane sections in row order") {
         // Intent: the popover renders the projection's flattened tab/pane row
         //   sequence with the expected AppKit row identifiers and titles.

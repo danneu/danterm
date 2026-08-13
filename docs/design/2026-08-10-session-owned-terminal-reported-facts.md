@@ -96,6 +96,28 @@ a fresh session id and seeds its report values and recovery memo while leaving
 live lifecycle attachments at their defaults. Engine-owned scrollback remains
 an enriched checkpoint graft because it is not terminal-reported model state.
 
+D6. **Terminal-reported text is stored verbatim; normalization happens once,
+where a render-ready payload is built.**
+
+The model, IPC JSON, and checkpoints hold a reported title, cwd, command, and
+remote identity byte for byte. They are functional data: a new pane inherits
+`cwd`, IPC clients target panes by exact `cwd` and `title`, and a checkpoint
+must reproduce what was captured. Rewriting them where they are stored would
+corrupt values that are not only displayed.
+
+A program can put a newline or a raw control character into any of them with
+one escape sequence, and a label in a fixed-height row wraps rather than
+truncates. So the single-line invariant lives at the one boundary where model
+state becomes a display string: the projection layer. `DisplayLine`
+(`lib/DanTermCore/Sources/DanTermCore/DisplayLine.swift`) is a value type whose
+only initializer normalizes, and it is the declared type of every render-ready
+field -- projections, display-bearing `Command`s, and stored derived
+presentation such as `AlertModel.title`. Shared model and IPC helpers keep
+returning `String`; their projection call sites wrap.
+
+The exception is text that is deliberately not one line: an alert body is the
+sender's message and may legitimately wrap, and it stays raw.
+
 ## Proofs
 
 P1. **Session-end cleanup is structural.** The only live `SessionModel` is the

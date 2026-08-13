@@ -13,8 +13,8 @@ import Foundation
 /// stored `AlertModel` and the `.sendNotification` command, so the alerts
 /// popover and the macOS banner can't drift apart.
 struct AlertPresentation: Equatable {
-    let title: String
-    let subtitle: String?
+    let title: DisplayLine
+    let subtitle: DisplayLine?
 }
 
 /// Resolve the title and subtitle for an alert raised by `paneId`.
@@ -45,7 +45,7 @@ func alertPresentation(
     }
 
     guard let tab = tabForPane(paneId, in: model) else {
-        return AlertPresentation(title: title, subtitle: nil)
+        return AlertPresentation(title: DisplayLine(title), subtitle: nil)
     }
 
     var location = tabDisplayTitle(tab)
@@ -54,5 +54,8 @@ func alertPresentation(
         location += " - pane \(index + 1)"
     }
 
-    return AlertPresentation(title: title, subtitle: location == title ? nil : location)
+    return AlertPresentation(
+        title: DisplayLine(title),
+        subtitle: location == title ? nil : DisplayLine(location)
+    )
 }

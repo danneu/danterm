@@ -197,13 +197,12 @@ extension AppRuntime {
             &caches.paneToolbar,
             apply: { paneId, render in
             findPaneWrapper(for: paneId)?.updateToolbar(
-                title: render.title,
-                cwd: render.cwd,
-                command: render.command,
+                label: render.label,
                 progress: render.progress,
                 isRemote: render.isRemote,
-                remoteSession: render.remoteSession,
-                agentSession: render.agentSession,
+                remoteLabel: render.remoteLabel,
+                agentLabel: render.agentLabel,
+                chipTooltip: render.chipTooltip,
                 chipKind: render.chipKind,
                 unreadAlertCount: render.unreadAlertCount,
                 totalTodoCount: render.totalTodoCount,
@@ -269,8 +268,8 @@ extension AppRuntime {
     func reconcileWindowChrome(tally: UnreadAlertTally) {
         let new = desiredWindowChrome(in: model, tally: tally)
         guard caches.windowChrome != new else { return }
-        window?.title = new.windowTitle
-        chromeView?.updateTitle(new.contentTitle)
+        window?.title = new.windowTitle.text
+        chromeView?.updateTitle(new.contentTitle.text)
         chromeView?.updateBellBadge(count: new.unreadCount)
         NSApp.dockTile.badgeLabel = new.unreadCount > 0 ? "\(new.unreadCount)" : nil
         NSApp.dockTile.display()

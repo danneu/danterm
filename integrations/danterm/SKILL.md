@@ -549,7 +549,13 @@ For the originating pane inside DanTerm:
 
 For broader discovery:
 
-    danterm ls | jq -r '.. | objects | select(.type == "leaf") | .pane | "\(.id)\t\(.title // "")\t\(.cwd // "")"'
+    danterm ls | jq -r '.. | objects | select(.type == "leaf") | .pane | [.id, .title // "", .cwd // ""] | @tsv'
+
+`title` and `cwd` are reported by the terminal verbatim, so they can contain
+newlines and control characters -- any program can put one there with a single
+escape sequence. A script that needs one record per pane must use `@tsv` as
+above, which escapes them; string interpolation would let one hostile title
+split a record in two.
 
 `ls` returns `{groups, selectedTabId}`. Each pane lives inline at a split-tree
 leaf: `groups[].tabs[].rootNode` is the per-tab tree, and every

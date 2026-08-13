@@ -2028,9 +2028,9 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(rows == [
             .tabSectionHeader,
             .tabEmptyPlaceholder,
-            .paneSectionHeader(paneId: paneA, title: model.pane(paneA)!.session?.title ?? "Terminal"),
+            .paneSectionHeader(paneId: paneA, title: DisplayLine(model.pane(paneA)!.session?.title ?? "Terminal")),
             .paneEmptyPlaceholder(paneId: paneA),
-            .paneSectionHeader(paneId: paneB, title: model.pane(paneB)!.session?.title ?? "Terminal"),
+            .paneSectionHeader(paneId: paneB, title: DisplayLine(model.pane(paneB)!.session?.title ?? "Terminal")),
             .paneEmptyPlaceholder(paneId: paneB),
         ])
     }
@@ -3014,13 +3014,12 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(
             desiredPaneToolbar(in: model)[paneId] ==
             PaneToolbarRender(
-                title: "vim",
-                cwd: "/work/proj",
-                command: nil,
+                label: "vim \u{2013} /work/proj",
                 progress: .set(percent: 42),
                 isRemote: false,
-                remoteSession: nil,
-                agentSession: nil,
+                remoteLabel: nil,
+                agentLabel: nil,
+                chipTooltip: nil,
                 chipKind: .terminal,
                 unreadAlertCount: 2,
                 totalTodoCount: 3,
@@ -3067,7 +3066,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
         let render = desiredPaneToolbar(in: model)[paneId]
 
-        #expect(render?.command == "swift test")
+        #expect(render?.label == "swift test")
     }
 
     @Test("desiredPaneToolbar reads every lifecycle chip from immutable pane snapshots")
@@ -3089,21 +3088,21 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         model.updatePane(paneId) { $0.session = nil }
         let absent = desiredPaneToolbar(in: model)[paneId]
 
-        #expect(populated?.command == "swift test")
+        #expect(populated?.label == "swift test")
         #expect(populated?.isRemote == true)
-        #expect(populated?.remoteSession == remote)
-        #expect(populated?.agentSession == agent)
-        #expect(absent?.command == nil)
+        #expect(populated?.remoteLabel == DisplayLine(remote.displayString))
+        #expect(populated?.chipTooltip == "claude session session-1")
+        #expect(absent?.label == "Terminal")
         #expect(absent?.isRemote == false)
-        #expect(absent?.remoteSession == nil)
-        #expect(absent?.agentSession == nil)
+        #expect(absent?.remoteLabel == nil)
+        #expect(absent?.chipTooltip == nil)
 
         model.updatePane(paneId) {
             $0.session = SessionModel(id: SessionId(), connection: .remote(identity: nil))
         }
         let unidentifiedRemote = desiredPaneToolbar(in: model)[paneId]
         #expect(unidentifiedRemote?.isRemote == true)
-        #expect(unidentifiedRemote?.remoteSession == nil)
+        #expect(unidentifiedRemote?.remoteLabel == nil)
     }
 
     @Test("desiredPaneToolbar: keyed over every live pane")
