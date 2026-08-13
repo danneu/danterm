@@ -196,4 +196,4 @@ are deleted in the same step as the witness that replaces them.
 - [x] 2. refactor(pty): inject child-exit probing
 - [x] 3. refactor(pty): inject source and descriptor lifecycle
 - [x] 4. refactor(pty): inject deterministic spawning
-- [ ] 5. docs(audit): close S12 production fault-injection finding
+- [x] 5. docs(audit): close S12 production fault-injection finding
