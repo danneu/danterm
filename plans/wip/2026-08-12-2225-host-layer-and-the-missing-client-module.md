@@ -45,10 +45,19 @@ to a scratch copy and restored, so the tree is unchanged.
   for macOS and both iOS triples with `DanTermProtocol` as its only dependency.
   It references nothing in `DanTermSupport`.
 - With the F2 font seam applied, a package-level iOS pin on `lib/TerminalCore`
-  is false for exactly two of its targets: `GlyphPreview` (`no such module
+  is false for two of its executable targets: `GlyphPreview` (`no such module
   'AppKit'`) and `TerminalMemoryProbe` (`cannot find 'Process' in scope`). Every
-  other target in that package, including `TerminalRenderExecution` and all the
-  other benchmark and probe executables, builds for the iOS device triple.
+  other executable target in that package, including `TerminalRenderExecution`
+  and all the other benchmark and probe executables, builds for the iOS device
+  triple.
+- That probe enumerated executable targets only, so it did not establish the
+  claim I1 makes. Two test targets are also host-bound today, each at a single
+  point: `TerminalRenderExecutionTests` calls
+  `NSFont.monospacedSystemFont` in `RenderMetricsTests.swift`, and
+  `TerminalCoreTests` shells out to `/usr/bin/vmmap` through `Process` in
+  `TerminalLogicalLineEvictionProbe.swift`. The `import AppKit` lines in
+  `RenderMetricsTests.swift` and `TextExecutionTests.swift` are otherwise
+  serving CoreText, which is portable.
 - `TerminalRenderExecution` builds for macOS and both iOS triples behind a
   `PlatformFont` typealias guarded by `#if canImport(AppKit)`, confirming F2's
   shape: one import block and one call site.
@@ -77,10 +86,17 @@ Concretely, the work has four parts:
 3. The F2 font seam lands in `TerminalRenderExecution`.
 4. iOS platform pins land only on packages where every target builds for iOS.
    `DanTermProtocol` and the new client package qualify today. `TerminalCore`
-   qualifies once its host-only tooling leaves it: the coherent line is that
-   `TerminalCore` holds the engine and the tooling targets move to a sibling
-   package, which also removes the two failures above. `DanTermSupport` and
-   `TerminalPTY` get no pin.
+   qualifies once its host-only entry points leave it. The line is
+   iOS-compatible engine and measurement targets versus genuinely host-only
+   entry points: `GlyphPreview`, its test target, and `TerminalMemoryProbe`
+   move to a sibling host-tools package, and every other benchmark, probe, and
+   support target stays in `TerminalCore` because it already builds for the
+   iOS device triple. The two host-bound test targets stay in `TerminalCore`:
+   the font identity assertion moves onto the same `PlatformFont` seam F2
+   introduces, and the `vmmap` dump -- the one genuinely host-only fragment --
+   is guarded so the probe reports it as unavailable off the Mac. Neither
+   target loses coverage on macOS. `DanTermSupport` and `TerminalPTY` get no
+   pin.
 
 The client module's surface is `public`. The annotation tax recorded against a
 `DanTermCore` module split does not transfer: that objection is about
@@ -92,8 +108,11 @@ three `package` declarations.
 ## Invariants
 
 - **I1.** A package that declares `.iOS` in `platforms:` has every one of its
-  targets build for the iOS device triple. This is the invariant T14 enforces,
-  and it is why a pin is a claim about a package rather than a target.
+  manifest targets build for the iOS device triple, test targets included. This
+  is the invariant T14 enforces, and it is why a pin is a claim about a package
+  rather than a target. Test targets are not carved out: a carve-out by
+  category is the same unchecked claim as an allowlist by name, and the tests
+  here are portable at the cost of two guarded fragments.
 - **I2.** There is one implementation of the client end of the DanTerm
   conversation: line framing, the hello handshake, request/reply correlation,
   and notification delivery. A second copy inside `cli/` is the defect this plan
@@ -113,14 +132,20 @@ three `package` declarations.
 
 ## Proof obligations
 
-- **PO1** (I1): the cross-compile that establishes the pins runs as a gate, not
-  as a research script. Every pinned package builds every target for the iOS
-  device triple, and adding an iOS-hostile target to a pinned package fails.
-- **PO2** (I2, I6): the CLI behaves identically against a live app after the
-  rewiring -- including the three connection-failure messages, which are the
-  part a transport refactor is most likely to lose. The existing CLI tests plus
-  a live-slot run carry this; new tests are needed only where a message has no
-  current coverage.
+- **PO1** (I1): the local gate cross-compiles every manifest target of every
+  iOS-pinned package -- test targets included, which means the build enables
+  them rather than taking SwiftPM's default of skipping them -- for the iOS
+  device triple. A static manifest or import check does not
+  discharge this, and neither does a periodic build: adding `Process()` to an
+  existing pinned target must fail the gate on the change that adds it, not on a
+  later scheduled run. The build may be optimized for speed; it may not be
+  substituted.
+- **PO2** (I2, I6): black-box characterization tests of the `danterm`
+  executable, written against the current CLI before any rewiring, and run
+  unchanged after it. Each asserts exit status, stdout, and stderr against a
+  controlled endpoint: connection refused, no socket present, receive timeout,
+  malformed hello, unsupported protocol version, a representative ordinary
+  reply, and tape output. A live-slot run is corroboration, not coverage.
 - **PO3** (I3): every record the producer builds decodes to the value it was
   built from -- start, gap, event with and without an origin stamp and with and
   without a payload span, and each end reason. This obligation requires a test
@@ -133,6 +158,12 @@ three `package` declarations.
   the seam applied, and the module builds for macOS and both iOS triples.
 - **PO7** (I5): `DanTermSupport` has no iOS pin, and the lint that enforces I1
   says so rather than leaving it to inspection.
+- **PO8** (I2): notifications that arrive while a request is awaiting its
+  correlated reply are delivered once and in order. The test interleaves
+  notifications before the reply and between two replies, and it sends a reply
+  the caller is not waiting for: the pending request is not satisfied by it, and
+  no frame is dropped. A loop that discards every frame that is not the awaited
+  response fails this.
 
 ## Non-goals
 
@@ -151,10 +182,9 @@ three `package` declarations.
   without it. No iOS client has been built. If one turns out to want
   `Debouncer` or `FontAvailability` -- the only two files with no Mac-specific
   meaning -- each is under 80 lines and moves or is rewritten then.
-- **AR2.** Moving host-only tooling out of `TerminalCore` touches the benchmark
-  and probe entry points that
+- **AR2.** `TerminalMemoryProbe`'s invocation path changes, so the entry point
   [agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md)
-  documents. Their invocation paths change even though their behavior does not.
+  documents for it must be updated even though its behavior does not change.
 
 ## Rejected ideas
 
@@ -173,12 +203,3 @@ three `package` declarations.
   "iOS, except where a list says otherwise", which is the unchecked claim F1
   declined to land. The package is the unit of the platform claim; an allowlist
   hides that rather than resolving it.
-
-## Implementation discretion
-
-- The partition of `TerminalCore`'s tooling: whether every benchmark, probe, and
-  preview target leaves, or only enough of them to satisfy I1. The coherent line
-  is engine versus tooling; the minimum is the two verified failures.
-- Whether the I1 gate is a full cross-compile of every pinned package or a
-  cheaper static check backed by a periodic build, provided a violation fails
-  the gate rather than a review.
