@@ -28,7 +28,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics (needs interactive sudo) |
 | 32 | [Post-resize repaint loss](32-post-resize-repaint-loss/README.md) | Rows present in the grid that no frame paints after a resize | Fixed by `D1`; owes an instrument for the resize cost that fix adds |
 | 33 | [By-construction perf survey](33-by-construction-perf-survey/README.md) | Work done per iteration whose inputs vary per change, across all six verticals | Phase 2: `T8`+`T7` and `T10` landed; `T9` direction set (`D7`), unstarted |
-| 35 | [iOS remote client](35-ios-remote-client/README.md) | The viable path to an iOS thin client driving a remote DanTerm | Phase 1 spikes: iOS engine build, presentation path, Mac-to-Mac tape client |
+| 35 | [iOS remote client](35-ios-remote-client/README.md) | The viable path to an iOS thin client driving a remote DanTerm | Phase 1 spikes: render execution on iOS, presentation path, Mac-to-Mac tape client |
 
 ## Closed
 

@@ -4,6 +4,8 @@ Research started: 2026-08-12.
 
 - [findings.md](findings.md) -- the append-only evidence chain.
 - [decisions.md](decisions.md) -- the auditable decision log.
+- [ios-cross-compile.sh](ios-cross-compile.sh) -- the F1 reproduction: builds
+  each candidate portable module for both iOS triples and prints pass/fail.
 - [briefing.md](briefing.md) -- the initiating brainstorm dump: repo census, IPC
   surface, portability inference, candidate directions. Census-grade evidence;
   every claim that carries weight is re-verified by a Phase 1 task before a
@@ -58,9 +60,12 @@ spine that is already verifiable against the tree:
   resume, no server-side buffering. Mobile clients disconnect constantly, so
   this is a known protocol gap, not a maybe.
 - Every `lib/*/Package.swift` pins `platforms: [.macOS(.v26)]` and nothing
-  else. The import census says most of the stack is iOS-clean and that the one
-  known macOS-only mechanism is IOSurface-to-`CALayer.contents` presentation
-  (briefing.md sec. 4) -- unverified by any build.
+  else. F1 has since replaced the import census with builds: with a pin added,
+  `TerminalCore`, `TerminalCoreRecording`, `TerminalRenderPlanning`,
+  `TerminalSpriteGeometry`, `DanTermProtocol`, and `DanTermCore` compile for
+  both iOS triples untouched, `DanTermSupport` needs two host-only files
+  removed, and `TerminalRenderExecution` stops at `import AppKit`. The pins
+  themselves stay out of the tree until T16, D2, and T14 make them true.
 - 34/D2 pinned the exact agent activity transitions (working, waiting, idle,
   detach) that a push-notification sender would consume; that plumbing exists
   and needs no new inference.
@@ -79,9 +84,14 @@ and the phone can join the tailnet.
 `DanTermProtocol`, `DanTermCore`, and `DanTermSupport` build for an iOS triple
 after adding `.iOS` platform pins; `TerminalRenderExecution` additionally needs
 an `NSFont`/`UIFont` seam and a decision about the IOSurface-backed swapchain.
-Supported only by the import census in briefing.md sec. 4. T1 and T2 confirm it
-or itemize the failures. Rejection would reshape the whole doc, which is why
-these tasks run first.
+
+Confirmed in part by F1, at compile time only -- nothing here has run on a
+device. The first five modules build for both iOS triples with nothing but a
+platform pin, and no code is conditionally compiled out. `DanTermSupport` builds
+on both triples once two host-only files leave the module (`CLIPathInstaller`,
+`DoctorProber`), which is a file split, not a port. The
+`TerminalRenderExecution` half is still open: the module stops at `import
+AppKit` before it can say what else it needs, which is T2's subject.
 
 ### H2 -- CPU-composed frames present acceptably on iOS without IOSurface
 
@@ -137,11 +147,15 @@ Provisional shape; every leg has a gate in the ledger.
 
 ### Phase 1 -- rendering and engine viability (gates everything)
 
-- **T1 RESEARCH** -- Cross-compile the candidate portable set for iOS: on a
-  scratch branch, add iOS platform pins and build `TerminalCore`,
-  `TerminalRenderPlanning`, `TerminalSpriteGeometry`, `DanTermProtocol`,
-  `DanTermCore`, and `DanTermSupport` for a simulator and a device triple.
-  Record pass/fail per module and every failing symbol in F1.
+- **T1 DONE** (F1) -- Cross-compiled the candidate portable set for iOS:
+  `TerminalCore`, `TerminalRenderPlanning`, `TerminalSpriteGeometry`,
+  `DanTermProtocol`, `DanTermCore`, and `DanTermSupport`, for a simulator and a
+  device triple, with iOS platform pins applied. Five of the six pass untouched
+  on both triples; `DanTermSupport` fails on two host-only files and passes
+  without them. The pins stay out of the tree, and
+  [ios-cross-compile.sh](ios-cross-compile.sh) applies and restores them per
+  run, so the result is re-derived rather than asserted by a manifest. T16
+  carries the split the failure implies.
 - **T2 RESEARCH** -- `TerminalRenderExecution` on iOS: itemize what it actually
   needs (the `NSFont` call, `NSAttributedString` status, whether
   `TerminalFrameBackingStore`/`TerminalFrameSwapchain` are ported, stubbed, or
@@ -211,6 +225,16 @@ Provisional shape; every leg has a gate in the ledger.
   capability.
 - **T14 TODO** -- Extend `scripts/core-purity-lint.sh` into a platform-layering
   lint once iOS pins exist, so boundary violations fail at the seam.
+- **T16 TODO** -- Separate the host-only half of `DanTermSupport` from the
+  portable half, so the module a client links carries no Mac-host role. F1
+  fixed the boundary at file granularity: `CLIPathInstaller` and `DoctorProber`
+  are the only two files that fail to compile, and `ControlSocketListener`,
+  `RecoveryStore`, `CheckpointWriter`, `DanTermConfigPaths`, and
+  `FontAvailability` compile while meaning something different on a phone.
+  Settle at the same time what access level the client needs, since the module
+  exports nothing today: every declaration is `internal` except three `package`
+  ones in `DoctorProber.swift`. Landing the iOS platform pins is part of this
+  task, not of T1.
 
 ### Phase 6 -- push notifications and quick replies (after milestone 1)
 

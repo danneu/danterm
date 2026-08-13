@@ -135,6 +135,11 @@ Key limitation: tape subscriptions are bound to the connection lifetime and torn
 
 ## 4. Portability findings (import census, verified against source)
 
+Superseded by [findings.md](findings.md) F1, which builds these modules for two
+iOS triples instead of reading their imports. The table below stands only where
+F1 does not contradict it: this section's "all available on iOS" row for
+`DanTermSupport` is wrong, because two files in that module do not compile.
+
 Every `Package.swift` currently declares `platforms: [.macOS(.v26)]` and nothing else. But the
 actual platform coupling is far lighter than those pins suggest:
 
