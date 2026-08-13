@@ -10,6 +10,102 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct UpdateSessionEventTests {
+    @Test("a pending creation replies only when its process starts")
+    func pendingCreationRepliesAtProcessStart() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        let requestId = UUID()
+        model.pendingSessionCreations[sessionId] = PendingSessionCreation(
+            requestId: requestId,
+            result: .object(["pane": .object(["id": .string(paneId.rawValue.uuidString)])])
+        )
+
+        let commands = update(&model, .sessionProcessStarted(sessionId: sessionId))
+
+        #expect(model.pane(paneId)?.session?.processPhase == .running)
+        #expect(model.pendingSessionCreations[sessionId] == nil)
+        #expect(commands.contains {
+            if case .ipcReply(let id, _) = $0 { return id == requestId }
+            return false
+        })
+    }
+
+    @Test("creation failure rejects its pending reply before removing the pane")
+    func creationFailureRejectsPendingReply() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        let requestId = UUID()
+        model.pendingSessionCreations[sessionId] = PendingSessionCreation(
+            requestId: requestId,
+            result: .null
+        )
+
+        let commands = update(&model, .sessionCreationFailed(sessionId: sessionId))
+
+        #expect(commands.contains {
+            if case .ipcError(let id, _, _) = $0 { return id == requestId }
+            return false
+        })
+        #expect(model.pendingSessionCreations[sessionId] == nil)
+        #expect(model.pane(paneId) == nil)
+    }
+
+    @Test("close during spawn rejects the pending creation exactly once")
+    func closeDuringSpawnRejectsPendingCreationExactlyOnce() throws {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let paneId = model.groups[0].tabs[1].paneTree.focusedPaneId
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        let requestId = UUID()
+        model.pendingSessionCreations[sessionId] = PendingSessionCreation(
+            requestId: requestId,
+            result: .null
+        )
+
+        let closeCommands = update(&model, .closePane(paneId: paneId))
+        let lateCommands = update(&model, .sessionCreationFailed(sessionId: sessionId))
+
+        #expect(closeCommands.count {
+            if case .ipcError(let id, _, _) = $0 { return id == requestId }
+            return false
+        } == 1)
+        #expect(lateCommands.contains {
+            if case .ipcError(let id, _, _) = $0 { return id == requestId }
+            return false
+        } == false)
+    }
+
+    @Test("runtime shutdown rejects pending creation and input requests")
+    func runtimeShutdownRejectsEveryPendingPaneEffect() {
+        var model = makeModel()
+        let creationRequestId = UUID()
+        let inputRequestId = UUID()
+        let sessionId = SessionId()
+        let submissionId = InputSubmissionId()
+        model.pendingSessionCreations[sessionId] = PendingSessionCreation(
+            requestId: creationRequestId,
+            result: .null
+        )
+        model.pendingInputRequests[inputRequestId] = PendingInputRequest(
+            remaining: [submissionId]
+        )
+
+        let commands = update(&model, .runtimeWillShutdown)
+
+        let rejected = Set(commands.compactMap { command -> UUID? in
+            if case .ipcError(let id, _, _) = command { return id }
+            return nil
+        })
+        #expect(rejected == [creationRequestId, inputRequestId])
+        #expect(model.pendingSessionCreations.isEmpty)
+        #expect(model.pendingInputRequests.isEmpty)
+    }
+
     @Test("testBellOnFocusedPaneIsIgnored")
     func testBellOnFocusedPaneIsIgnored() {
         // Intent: a bell from the selected tab's focused pane is ignored while

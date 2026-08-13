@@ -26,6 +26,35 @@ enum AlertKind: Hashable {
     case desktopNotification
 }
 
+/// Tracks the app-visible child phase without depending on shell integration.
+enum SessionProcessPhase: String, Equatable {
+    case spawning
+    case running
+}
+
+/// Identifies one IPC input item until its PTY submission reaches a terminal result.
+enum InputSubmissionTag {}
+
+/// Prevents one input submission identity from being confused with another entity ID.
+typealias InputSubmissionId = TypedId<InputSubmissionTag>
+
+/// Restates PTY delivery as the only distinction the pure reply reducer needs.
+enum InputSubmissionResult: Equatable {
+    case delivered
+    case rejected
+}
+
+/// Holds a creation reply until the identified session reaches a terminating spawn edge.
+struct PendingSessionCreation: Equatable {
+    let requestId: UUID
+    let result: JSONValue
+}
+
+/// Owns every submission that must finish before one pane input request can reply.
+struct PendingInputRequest: Equatable {
+    var remaining: Set<InputSubmissionId>
+}
+
 struct AlertModel: Equatable {
     let id: AlertId
     let kind: AlertKind
@@ -126,6 +155,7 @@ struct TodoItem: Equatable, Codable {
 /// bounded by this identified terminal session.
 struct SessionModel: Equatable {
     let id: SessionId
+    var processPhase: SessionProcessPhase = .spawning
     var title: String = "Terminal"
     var cwd: String?
     var progress: ProgressState?
@@ -426,6 +456,9 @@ struct AppModel: Equatable {
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
     var pendingConfirmation: PendingConfirmation? = nil  // ephemeral -- non-nil while a confirmation sheet is active
+    var pendingSessionCreations: [SessionId: PendingSessionCreation] = [:]
+    var pendingInputRequests: [UUID: PendingInputRequest] = [:]
+    var pendingInputSubmissions: [InputSubmissionId: UUID] = [:]
 
     /// Whether any group holds at least one tab. Short-circuits on the first
     /// non-empty group without materializing `groups.flatMap(\.tabs)`, which

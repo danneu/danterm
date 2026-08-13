@@ -234,7 +234,7 @@ creation, and add the process phase to the pane response table.
 ## Commit progress
 
 - [x] 1. feat(pty): make input submissions bounded and observable
-- [ ] 2. fix(ipc): reply when pane effects complete
+- [x] 2. fix(ipc): reply when pane effects complete
 - [ ] 3. test(app): prove pre-spawn GUI input and document readiness
 
 ## Implementation notes
@@ -242,3 +242,6 @@ creation, and add the process phase to the pane response table.
 - The PTY path uses one 8 MiB per-pane pending-input bound. Launch input consumes
   the same budget and fails launch when it alone exceeds the bound. Later input
   is admitted or rejected as a whole submission.
+- An input submission that encodes to no bytes completes successfully without
+  changing the viewport. It has no PTY bytes left to deliver and preserves the
+  existing empty-paste behavior.

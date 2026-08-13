@@ -136,10 +136,13 @@ private func dispatchIpc(
         let group = model.groups.first(where: { groupsBefore.contains($0.id) == false })
         let tab = newestTabId(excluding: tabsBefore, in: model).flatMap { tabById($0, in: model) }
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
-        return commands + [.ipcReply(
-            reqId: reqId,
-            result: encoder.tabNew(tab: tab, group: group, in: model)
-        )]
+        return deferCreationReply(
+            commands,
+            requestId: reqId,
+            result: encoder.tabNew(tab: tab, group: group, in: model),
+            paneId: tab?.paneTree.focusedPaneId,
+            model: &model
+        )
 
     case .groupClose(let groupId, let moveTabs):
         // Both refusals mirror how tab.close refuses the last tab. `.deleteGroup`
@@ -203,7 +206,13 @@ private func dispatchIpc(
         )
         let newPaneId = model.allPaneIds.first(where: { !before.contains($0) })
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
-        return commands + [.ipcReply(reqId: reqId, result: encoder.paneReference(newPaneId.flatMap(model.pane)))]
+        return deferCreationReply(
+            commands,
+            requestId: reqId,
+            result: encoder.paneReference(newPaneId.flatMap(model.pane)),
+            paneId: newPaneId,
+            model: &model
+        )
 
     case .paneClose(let paneId):
         try requirePane(paneId, in: model)
@@ -253,10 +262,13 @@ private func dispatchIpc(
         let tab = tabId.flatMap { tabById($0, in: model) }
         let group = model.groups.first(where: { $0.id == groupId })
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
-        return commands + [.ipcReply(
-            reqId: reqId,
-            result: encoder.tabNew(tab: tab, group: group, in: model)
-        )]
+        return deferCreationReply(
+            commands,
+            requestId: reqId,
+            result: encoder.tabNew(tab: tab, group: group, in: model),
+            paneId: tab?.paneTree.focusedPaneId,
+            model: &model
+        )
 
     case .paneFocus(let paneId):
         try requirePane(paneId, in: model)
@@ -271,26 +283,47 @@ private func dispatchIpc(
 
     case .paneInput(let paneId, let input):
         try requirePane(paneId, in: model)
+        var commands: [Command] = []
+        var submissionIds: [InputSubmissionId] = []
         switch input {
         case .text(let text):
-            return [
-                .sendText(paneId: paneId, text: text),
-                .ipcReply(reqId: reqId, result: okResult()),
-            ]
+            let submissionId = InputSubmissionId(rawValue: env.newId())
+            submissionIds.append(submissionId)
+            commands.append(.sendText(
+                paneId: paneId,
+                text: text,
+                submissionId: submissionId
+            ))
         case .events(let events):
-            var commands: [Command] = []
-            commands.reserveCapacity(events.count + 1)
+            commands.reserveCapacity(events.count)
             for event in events {
+                let submissionId = InputSubmissionId(rawValue: env.newId())
+                submissionIds.append(submissionId)
                 switch event {
                 case .text(let text):
-                    commands.append(.sendInputText(paneId: paneId, text: text))
+                    commands.append(.sendInputText(
+                        paneId: paneId,
+                        text: text,
+                        submissionId: submissionId
+                    ))
                 case .key(let key, let mods):
-                    commands.append(.sendInputKey(paneId: paneId, key: key, mods: mods))
+                    commands.append(.sendInputKey(
+                        paneId: paneId,
+                        key: key,
+                        mods: mods,
+                        submissionId: submissionId
+                    ))
                 }
             }
-            commands.append(.ipcReply(reqId: reqId, result: okResult()))
-            return commands
         }
+        guard submissionIds.isEmpty == false else {
+            return [.ipcReply(reqId: reqId, result: okResult())]
+        }
+        model.pendingInputRequests[reqId] = PendingInputRequest(remaining: Set(submissionIds))
+        for submissionId in submissionIds {
+            model.pendingInputSubmissions[submissionId] = reqId
+        }
+        return commands
 
     case .paneRead(let paneId, let lineLimit):
         try requirePane(paneId, in: model)
@@ -396,6 +429,28 @@ private func dispatchIpc(
         ]
 
     }
+}
+
+/// Stores one creation reply beside the session whose process decides its result.
+private func deferCreationReply(
+    _ commands: [Command],
+    requestId: UUID,
+    result: JSONValue,
+    paneId: PaneId?,
+    model: inout AppModel
+) -> [Command] {
+    guard let paneId, let sessionId = model.pane(paneId)?.session?.id else {
+        return commands + [.ipcError(
+            reqId: requestId,
+            code: -32603,
+            message: "session creation did not produce a pane"
+        )]
+    }
+    model.pendingSessionCreations[sessionId] = PendingSessionCreation(
+        requestId: requestId,
+        result: result
+    )
+    return commands
 }
 
 private func ipcInvalidParams(_ reqId: UUID, _ message: String) -> [Command] {

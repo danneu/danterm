@@ -162,6 +162,9 @@ struct IpcEntityEncoder {
         if includeLifecycles {
             let lifecycleFields = paneLifecycleInspectionFields(pane.session)
             object.merge(lifecycleFields) { _, lifecycle in lifecycle }
+            object["processPhase"] = .string(
+                pane.session?.processPhase.rawValue ?? SessionProcessPhase.spawning.rawValue
+            )
         }
         if let cwd {
             object["cwd"] = .string(cwd)

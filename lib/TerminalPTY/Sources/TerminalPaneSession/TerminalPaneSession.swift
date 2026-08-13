@@ -256,6 +256,8 @@ public final class TerminalPaneSessionController {
     private var isTornDown = false
     private var didChildExit = false
     private var didEmitSessionEnded = false
+    private var didEmitProcessStarted = false
+    package var didReportProcessStartedForTesting: Bool { didEmitProcessStarted }
     private var completedRecordingEvents: [NeutralTerminalRecordingEvent]?
     private var lastEmittedViewportState: TerminalPaneViewportState?
     private var lastEmittedSearchStatus: TerminalSearchStatus?
@@ -300,6 +302,9 @@ public final class TerminalPaneSessionController {
 
     /// Receives the first child-originated lifecycle result on the main actor.
     public var onSessionEnded: ((PaneProcessLifecycleResult) -> Void)?
+
+    /// Reports the one transition from spawning to a running child process.
+    public var onProcessStarted: (() -> Void)?
 
     /// Receives scrollbar-relevant state only when its projection or screen availability changes.
     public var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
@@ -533,6 +538,10 @@ public final class TerminalPaneSessionController {
     }
 
     private func deliverUrgent(_ signal: TerminalPTYUpdateSignal) {
+        if signal.processStarted, didEmitProcessStarted == false {
+            didEmitProcessStarted = true
+            onProcessStarted?()
+        }
         if let clipboardWrite = signal.clipboardWrite {
             onClipboardWrite?(clipboardWrite)
         }
@@ -606,30 +615,67 @@ public final class TerminalPaneSessionController {
     /// otherwise assert that claim silently -- and a tape would under-report the app-owned
     /// span between the event and the completed write, which is the one thing it exists to
     /// measure. Stating `origin: nil` is how a caller says it genuinely has no earlier moment.
-    public func sendText(_ text: String, origin: UInt64?) {
-        send(Array(text.utf8), origin: origin)
+    public func sendText(
+        _ text: String,
+        origin: UInt64?,
+        onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
+    ) {
+        send(Array(text.utf8), origin: origin, onCompletion: onCompletion)
     }
 
     /// Sends already encoded terminal bytes without introducing an ordering-opaque Task.
-    public func send(_ bytes: [UInt8], origin: UInt64?) {
-        guard isTornDown == false, bytes.isEmpty == false else { return }
-        host.send(bytes, origin: origin)
+    public func send(
+        _ bytes: [UInt8],
+        origin: UInt64?,
+        onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
+    ) {
+        guard isTornDown == false else {
+            Self.deliverInputCompletion(onCompletion, .rejected(.processEnded))
+            return
+        }
+        host.send(bytes, origin: origin) { result in
+            Self.deliverInputCompletion(onCompletion, result)
+        }
     }
 
     /// Forwards one normalized key for atomic owner-side mode lookup and encoding.
     public func sendKey(
         _ key: TerminalInputKey,
         modifiers: TerminalKeyModifiers,
-        origin: UInt64?
+        origin: UInt64?,
+        onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
-        guard isTornDown == false else { return }
-        host.sendKey(key, modifiers: modifiers, origin: origin)
+        guard isTornDown == false else {
+            Self.deliverInputCompletion(onCompletion, .rejected(.processEnded))
+            return
+        }
+        host.sendKey(key, modifiers: modifiers, origin: origin) { result in
+            Self.deliverInputCompletion(onCompletion, result)
+        }
     }
 
     /// Forwards paste text so sanitizing and bracket-mode lookup occur on the owner queue.
-    public func sendPaste(_ text: String, origin: UInt64?) {
-        guard isTornDown == false else { return }
-        host.sendPaste(text, origin: origin)
+    public func sendPaste(
+        _ text: String,
+        origin: UInt64?,
+        onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
+    ) {
+        guard isTornDown == false else {
+            Self.deliverInputCompletion(onCompletion, .rejected(.processEnded))
+            return
+        }
+        host.sendPaste(text, origin: origin) { result in
+            Self.deliverInputCompletion(onCompletion, result)
+        }
+    }
+
+    nonisolated private static func deliverInputCompletion(
+        _ completion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void,
+        _ result: PaneInputSubmissionResult
+    ) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { completion(result) }
+        }
     }
 
     /// Forwards focus state so the owner gates its report against authoritative mode 1004.
@@ -1003,6 +1049,7 @@ public final class TerminalPaneSessionController {
         onClipboardWrite = nil
         onSemanticEvents = nil
         onSessionEnded = nil
+        onProcessStarted = nil
         onViewportStateChange = nil
         onPrimaryHistoryMutation = nil
         onPaneMenu = nil

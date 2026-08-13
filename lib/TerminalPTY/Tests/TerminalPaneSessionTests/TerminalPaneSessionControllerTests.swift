@@ -14,6 +14,35 @@ import TerminalPTYWaitSupport
 @MainActor
 @Suite(.serialized)
 struct TerminalPaneSessionControllerTests {
+    @Test("a successful spawn reports process started exactly once")
+    func successfulSpawnReportsProcessStartedExactlyOnce() async throws {
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exit 0")
+        )
+        let starts = AsyncStream.makeStream(of: Void.self)
+        let ends = AsyncStream.makeStream(of: Void.self)
+        var startIterator = starts.stream.makeAsyncIterator()
+        var endIterator = ends.stream.makeAsyncIterator()
+        var startCount = 0
+        controller.onProcessStarted = {
+            startCount += 1
+            starts.continuation.yield()
+        }
+        controller.onSessionEnded = { _ in ends.continuation.yield() }
+
+        _ = await startIterator.next()
+        _ = await endIterator.next()
+
+        #expect(controller.didReportProcessStartedForTesting)
+        #expect(startCount == 1)
+        starts.continuation.finish()
+        ends.continuation.finish()
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("every controller fence is timed, attributed, and matched by the host")
     func everyControllerFenceIsAccounted() async throws {
         // Intent: initialization, delivery, checkpoint, diagnostic, and teardown

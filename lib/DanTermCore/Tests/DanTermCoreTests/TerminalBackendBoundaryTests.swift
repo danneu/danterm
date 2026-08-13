@@ -99,6 +99,18 @@ struct TerminalBackendBoundaryTests {
             if case .paneBecameFirstResponder(let id) = $0 { return id == paneId }
             return false
         }
+        assertSessionMessage(.processStarted, sessionId: sessionId, paneId: paneId) {
+            if case .sessionProcessStarted(let id) = $0 { return id == sessionId }
+            return false
+        }
+        assertSessionMessage(.processExited, sessionId: sessionId, paneId: paneId) {
+            if case .sessionProcessExited(let id) = $0 { return id == sessionId }
+            return false
+        }
+        assertSessionMessage(.processLaunchFailed, sessionId: sessionId, paneId: paneId) {
+            if case .sessionCreationFailed(let id) = $0 { return id == sessionId }
+            return false
+        }
         assertSessionMessage(.closeRequested, sessionId: sessionId, paneId: paneId) {
             if case .sessionEnded(let id) = $0 { return id == sessionId }
             return false

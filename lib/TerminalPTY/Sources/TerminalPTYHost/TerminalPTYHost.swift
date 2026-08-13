@@ -44,6 +44,8 @@ public struct TerminalPTYFrameState: Equatable, Sendable {
 /// (research 33/D8). Deliberately carries no terminal and no damage: a payload
 /// that carried a frame would reopen the flood the consumer's deadline bounds.
 package struct TerminalPTYUpdateSignal: Sendable {
+    /// True only on the update turn that transitions the child into running.
+    package let processStarted: Bool
     /// The newest completed OSC 52 write drained in the signaling owner turn.
     package let clipboardWrite: String?
     /// Ordered semantic output drained in the signaling owner turn.
@@ -56,11 +58,13 @@ package struct TerminalPTYUpdateSignal: Sendable {
     package let result: PaneProcessLifecycleResult?
 
     package init(
+        processStarted: Bool,
         clipboardWrite: String?,
         semanticEvents: [TerminalSemanticEvent],
         primaryHistoryGeneration: UInt64,
         result: PaneProcessLifecycleResult?
     ) {
+        self.processStarted = processStarted
         self.clipboardWrite = clipboardWrite
         self.semanticEvents = semanticEvents
         self.primaryHistoryGeneration = primaryHistoryGeneration
@@ -71,6 +75,7 @@ package struct TerminalPTYUpdateSignal: Sendable {
     /// the newest clipboard write, and the newest generation and result.
     package func merging(newer: TerminalPTYUpdateSignal) -> TerminalPTYUpdateSignal {
         TerminalPTYUpdateSignal(
+            processStarted: processStarted || newer.processStarted,
             clipboardWrite: newer.clipboardWrite ?? clipboardWrite,
             semanticEvents: semanticEvents + newer.semanticEvents,
             primaryHistoryGeneration: max(
@@ -289,6 +294,7 @@ public actor TerminalPTYHost {
     private var capturedInputWrites: [[UInt8]] = []
     private var capturedReplyWrites: [[UInt8]] = []
     private var reportedResult: PaneProcessLifecycleResult?
+    private var pendingProcessStarted = false
     private var teardownFinished = false
     private let applicationExitBound: DispatchTimeInterval
     private var shutdownRequested = false
@@ -398,6 +404,10 @@ public actor TerminalPTYHost {
                 return
             }
             self.assumeIsolated { owner in
+                guard bytes.isEmpty == false else {
+                    onCompletion(.delivered)
+                    return
+                }
                 owner.applyViewportNavigation(.scrollToBottom, publishUpdate: false)
                 owner.submitInput(bytes, origin: origin, onCompletion: onCompletion)
             }
@@ -417,19 +427,39 @@ public actor TerminalPTYHost {
     nonisolated public func sendKey(
         _ key: TerminalInputKey,
         modifiers: TerminalKeyModifiers,
-        origin: UInt64? = nil
+        origin: UInt64? = nil,
+        onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
         queueClosingResizeRun().async { [weak self] in
-            self?.assumeIsolated { owner in
-                owner.applyKey(key, modifiers: modifiers, origin: origin)
+            guard let self else {
+                onCompletion(.rejected(.processEnded))
+                return
+            }
+            self.assumeIsolated { owner in
+                owner.applyKey(
+                    key,
+                    modifiers: modifiers,
+                    origin: origin,
+                    onCompletion: onCompletion
+                )
             }
         }
     }
 
     /// Enqueues unsanitized text for owner-side safe-paste policy and atomic marker generation.
-    nonisolated public func sendPaste(_ text: String, origin: UInt64? = nil) {
+    nonisolated public func sendPaste(
+        _ text: String,
+        origin: UInt64? = nil,
+        onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
+    ) {
         queueClosingResizeRun().async { [weak self] in
-            self?.assumeIsolated { owner in owner.applyPaste(text, origin: origin) }
+            guard let self else {
+                onCompletion(.rejected(.processEnded))
+                return
+            }
+            self.assumeIsolated { owner in
+                owner.applyPaste(text, origin: origin, onCompletion: onCompletion)
+            }
         }
     }
 
@@ -1222,23 +1252,40 @@ public actor TerminalPTYHost {
     private func applyKey(
         _ key: TerminalInputKey,
         modifiers: TerminalKeyModifiers,
-        origin: UInt64?
+        origin: UInt64?,
+        onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void
     ) {
-        guard teardownFinished == false else { return }
+        guard teardownFinished == false else {
+            onCompletion(.rejected(.processEnded))
+            return
+        }
         if captureTransitions { appliedTransitions.append(.input(key: key, modifiers: modifiers)) }
         let bytes = encodeTerminalKey(key, modifiers: modifiers, modes: terminal.inputModes)
-        guard bytes.isEmpty == false else { return }
+        guard bytes.isEmpty == false else {
+            onCompletion(.delivered)
+            return
+        }
         applyViewportNavigation(.scrollToBottom, publishUpdate: false)
-        submitInput(bytes, origin: origin)
+        submitInput(bytes, origin: origin, onCompletion: onCompletion)
     }
 
-    private func applyPaste(_ text: String, origin: UInt64?) {
-        guard teardownFinished == false else { return }
+    private func applyPaste(
+        _ text: String,
+        origin: UInt64?,
+        onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void
+    ) {
+        guard teardownFinished == false else {
+            onCompletion(.rejected(.processEnded))
+            return
+        }
         if captureTransitions { appliedTransitions.append(.paste(text)) }
         let bytes = encodeTerminalPaste(text, modes: terminal.inputModes)
-        guard bytes.isEmpty == false else { return }
+        guard bytes.isEmpty == false else {
+            onCompletion(.delivered)
+            return
+        }
         applyViewportNavigation(.scrollToBottom, publishUpdate: false)
-        submitInput(bytes, origin: origin)
+        submitInput(bytes, origin: origin, onCompletion: onCompletion)
     }
 
     private func applyFocus(_ focused: Bool, origin: UInt64?) {
@@ -1293,6 +1340,8 @@ public actor TerminalPTYHost {
             spawn(spec)
         case .activateIO:
             activateIO()
+            pendingProcessStarted = true
+            markUpdatePending()
         case .writeInput(let bytes, let origin, let submissionId):
             if captureTransitions {
                 capturedInputWrites.append(bytes)
@@ -2185,11 +2234,13 @@ public actor TerminalPTYHost {
             // frame-state drain observes them already empty.
             if let updateHandler {
                 updateHandler(TerminalPTYUpdateSignal(
+                    processStarted: pendingProcessStarted,
                     clipboardWrite: terminal.drainPendingClipboardWrite(),
                     semanticEvents: terminal.drainSemanticEvents(),
                     primaryHistoryGeneration: terminal.primaryHistoryGeneration,
                     result: reportedResult
                 ))
+                pendingProcessStarted = false
             }
             testUpdateHandler?(reportedResult)
             emittedUpdateSignalCount += 1

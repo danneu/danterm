@@ -17,6 +17,7 @@ AppModel(
                   id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000001)),
                   session: SessionModel(
                     id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002)),
+                    processPhase: .spawning,
                     title: "Terminal",
                     cwd: nil,
                     progress: nil,
@@ -37,6 +38,7 @@ AppModel(
                   id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000004)),
                   session: SessionModel(
                     id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000005)),
+                    processPhase: .spawning,
                     title: "Terminal",
                     cwd: nil,
                     progress: nil,
@@ -79,6 +81,7 @@ AppModel(
                   id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000008)),
                   session: SessionModel(
                     id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000009)),
+                    processPhase: .spawning,
                     title: "Terminal",
                     cwd: nil,
                     progress: nil,
@@ -99,6 +102,7 @@ AppModel(
                   id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000B)),
                   session: SessionModel(
                     id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000C)),
+                    processPhase: .spawning,
                     title: "Terminal",
                     cwd: nil,
                     progress: nil,
@@ -165,5 +169,21 @@ AppModel(
   ],
   mruCycle: nil,
   jumpMode: nil,
-  pendingConfirmation: nil
+  pendingConfirmation: nil,
+  pendingSessionCreations: [
+    TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000C)): PendingSessionCreation(
+      requestId: UUID(11111111-1111-1111-1111-111111111111),
+      result: .object(
+        [
+          "pane": .object(
+            [
+              "id": .string("00000000-0000-0000-0000-00000000000B")
+            ]
+          )
+        ]
+      )
+    )
+  ],
+  pendingInputRequests: [:],
+  pendingInputSubmissions: [:]
 )

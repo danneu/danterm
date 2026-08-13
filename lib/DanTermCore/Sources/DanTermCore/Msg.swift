@@ -89,6 +89,9 @@ enum Msg {
     case sessionNotification(sessionId: SessionId, title: String, body: String)
     case sessionEnded(sessionId: SessionId)
     case sessionCreationFailed(sessionId: SessionId)
+    case sessionProcessStarted(sessionId: SessionId)
+    case sessionProcessExited(sessionId: SessionId)
+    case inputSubmissionCompleted(id: InputSubmissionId, result: InputSubmissionResult)
 
     // Alerts
     case markAlertRead(alertId: AlertId)
@@ -139,6 +142,7 @@ enum Msg {
     case confirmTerminate
     case cancelTerminate
     case terminate
+    case runtimeWillShutdown
 
     // View
     case splitRatioChanged(splitId: SplitId, ratio: CGFloat)

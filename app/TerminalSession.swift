@@ -36,6 +36,12 @@ struct TerminalSessionState: Equatable {
     let background: CGColor
 }
 
+/// Restates whether one app-submitted input item crossed the PTY boundary.
+enum TerminalInputSubmissionResult: Equatable {
+    case delivered
+    case rejected
+}
+
 /// Retains only the terminal owner needed to disarm one recorder append edge safely.
 @MainActor
 struct PaneTapeFollowNoticeRegistration {
@@ -123,6 +129,19 @@ protocol TerminalSession: AnyObject {
     func sendText(_ text: String)
     func sendInputText(_ text: String)
     func sendInputKey(_ key: KeyName, modifiers: KeyMods)
+    func sendText(
+        _ text: String,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    )
+    func sendInputText(
+        _ text: String,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    )
+    func sendInputKey(
+        _ key: KeyName,
+        modifiers: KeyMods,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    )
     func setFocused(_ focused: Bool)
     func setVisible(_ visible: Bool)
     func setRenderingAvailable(_ available: Bool)
@@ -179,6 +198,37 @@ protocol TerminalSession: AnyObject {
 /// Every terminal pane records, so these defaults exist only for a session with no terminal
 /// behind it -- the UI-test shim. A live terminal pane always overrides them with a real tape.
 extension TerminalSession {
+    func sendText(
+        _ text: String,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    ) {
+        sendText(text)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { onCompletion(.delivered) }
+        }
+    }
+
+    func sendInputText(
+        _ text: String,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    ) {
+        sendInputText(text)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { onCompletion(.delivered) }
+        }
+    }
+
+    func sendInputKey(
+        _ key: KeyName,
+        modifiers: KeyMods,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    ) {
+        sendInputKey(key, modifiers: modifiers)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { onCompletion(.delivered) }
+        }
+    }
+
     func paneTapeDump() -> (@Sendable () throws -> PaneTapeDump)? { nil }
     func paneTapeFollowStart(
         fromNow: Bool

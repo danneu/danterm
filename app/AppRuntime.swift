@@ -45,6 +45,12 @@ func recordTerminalCharacterizationEvent(_ event: TerminalSessionEvent) {
         description = "session.searchSelected:\(String(describing: selected))"
     case .becameFirstResponder:
         description = "session.becameFirstResponder"
+    case .processStarted:
+        description = "session.processStarted"
+    case .processExited:
+        description = "session.processExited"
+    case .processLaunchFailed:
+        description = "session.processLaunchFailed"
     case .closeRequested:
         description = "session.closeRequested"
     }
@@ -197,7 +203,8 @@ class AppRuntime {
     init(
         terminalBackend: SwiftTerminalBackend,
         configStore: DanTermConfigStore = DanTermConfigStore(),
-        notificationAuthorizationPolicy: NotificationAuthorizationPolicy = .requestIfNeeded
+        notificationAuthorizationPolicy: NotificationAuthorizationPolicy = .requestIfNeeded,
+        startsApplicationServices: Bool = true
     ) {
         self.terminalBackend = terminalBackend
         self.configStore = configStore
@@ -223,28 +230,32 @@ class AppRuntime {
         // Build the MRU switcher panel eagerly — pay first-frame cost at
         // launch instead of on every cmd-shift-i. Keep it offscreen until
         // reconcileSwitcher orders it front (mruCycle becomes non-nil).
-        self.switcherPanel = SwitcherPanel()
+        self.switcherPanel = startsApplicationServices ? SwitcherPanel() : nil
 
         // Install the local NSEvent monitor that drives ephemeral keyboard modes.
         // It reads model flags to know whether a mode is active, but never mutates
         // the model directly; mutations go through send().
-        installSwitcherEventMonitor()
+        if startsApplicationServices {
+            installSwitcherEventMonitor()
+        }
 
-        do {
-            let server = try IpcServer(socketPath: controlSocketPath(), runtime: self)
-            self.ipcServer = server
-            self.ipcServerToken = schedulingLifecycle.arm(.ipcServer) {
-                server.stop()
+        if startsApplicationServices {
+            do {
+                let server = try IpcServer(socketPath: controlSocketPath(), runtime: self)
+                self.ipcServer = server
+                self.ipcServerToken = schedulingLifecycle.arm(.ipcServer) {
+                    server.stop()
+                }
+                let startToken = schedulingLifecycle.arm(.deferredCallback, cancel: {})
+                Task { [weak self, weak server] in
+                    guard let self, let startToken else { return }
+                    guard self.schedulingLifecycle.run(startToken, action: {}) else { return }
+                    await server?.start()
+                }
+            } catch {
+                self.ipcServer = nil
+                print("Failed to start DanTerm IPC server: \(error)")
             }
-            let startToken = schedulingLifecycle.arm(.deferredCallback, cancel: {})
-            Task { [weak self, weak server] in
-                guard let self, let startToken else { return }
-                guard self.schedulingLifecycle.run(startToken, action: {}) else { return }
-                await server?.start()
-            }
-        } catch {
-            self.ipcServer = nil
-            print("Failed to start DanTerm IPC server: \(error)")
         }
     }
 
@@ -831,6 +842,10 @@ class AppRuntime {
     func shutdown() {
         guard schedulingLifecycle.isActive else { return }
 
+        for command in update(&model, .runtimeWillShutdown) {
+            perform(command)
+        }
+
         // App teardown, not a stream ending: closing the socket is what gives a follower the
         // EOF the CLI contract documents for an abrupt exit.
         for subscriptionId in paneTapeFollowSubscriptions.removeAll() {
@@ -890,14 +905,53 @@ class AppRuntime {
             }
             installTerminalSession(session, paneId: paneId)
 
-        case .sendText(let paneId, let text):
-            sessions[paneId]?.sendText(text)
+        case .sendText(let paneId, let text, let submissionId):
+            guard let submissionId else {
+                sessions[paneId]?.sendText(text)
+                break
+            }
+            guard let session = sessions[paneId] else {
+                send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
+                break
+            }
+            session.sendText(text) { [weak self] result in
+                self?.send(.inputSubmissionCompleted(
+                    id: submissionId,
+                    result: result == .delivered ? .delivered : .rejected
+                ))
+            }
 
-        case .sendInputText(let paneId, let text):
-            sessions[paneId]?.sendInputText(text)
+        case .sendInputText(let paneId, let text, let submissionId):
+            guard let submissionId else {
+                sessions[paneId]?.sendInputText(text)
+                break
+            }
+            guard let session = sessions[paneId] else {
+                send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
+                break
+            }
+            session.sendInputText(text) { [weak self] result in
+                self?.send(.inputSubmissionCompleted(
+                    id: submissionId,
+                    result: result == .delivered ? .delivered : .rejected
+                ))
+            }
 
-        case .sendInputKey(let paneId, let key, let mods):
-            sessions[paneId]?.sendInputKey(key, modifiers: mods)
+        case .sendInputKey(let paneId, let key, let mods, let submissionId):
+            guard let submissionId else {
+                sessions[paneId]?.sendInputKey(key, modifiers: mods)
+                break
+            }
+            guard let session = sessions[paneId] else {
+                send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
+                break
+            }
+            session.sendInputKey(key, modifiers: mods) { [weak self] result in
+                self?.send(.inputSubmissionCompleted(
+                    id: submissionId,
+                    result: result == .delivered ? .delivered : .rejected
+                ))
+            }
 
         case .focusSession(let paneId, let focused):
             sessions[paneId]?.setFocused(focused)

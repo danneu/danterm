@@ -230,7 +230,11 @@ func update(
 
         // Session teardown is reconcileSessionExistence's now (paneId leaves the tree
         // below, so the next reconcile tears its session down); keep side-table cleanup.
-        var commands: [Command] = []
+        var commands = rejectPendingCreation(
+            for: paneId,
+            in: &model,
+            message: "pane closed before its process started"
+        )
         clearPaneSideTables(paneId, in: &model)
         if model.todoPopover == .pane(paneId) {
             model.todoPopover = nil
@@ -239,7 +243,7 @@ func update(
 
         if removal.emptiedTree {
             // Last pane — close the pane's own tab
-            return update(&model, .closeTab(id: tab.id), env: env)
+            return commands + update(&model, .closeTab(id: tab.id), env: env)
         }
 
         // Focus-mode alert clearing only applies when focus moves in the
@@ -737,7 +741,17 @@ func update(
             env: env
         )
 
-    case .sessionEnded(let sessionId):
+    case .sessionProcessStarted(let sessionId):
+        guard let paneId = model.pane(owning: sessionId)?.id else { return [] }
+        model.updatePane(paneId) { pane in
+            pane.session?.processPhase = .running
+        }
+        guard let pending = model.pendingSessionCreations.removeValue(forKey: sessionId) else {
+            return []
+        }
+        return [.ipcReply(reqId: pending.requestId, result: pending.result)]
+
+    case .sessionProcessExited(let sessionId), .sessionEnded(let sessionId):
         guard let paneId = model.pane(owning: sessionId)?.id else { return [] }
         return update(&model, .closePane(paneId: paneId), env: env)
 
@@ -752,7 +766,13 @@ func update(
                 let tab = model.groups[gi].tabs[ti]
                 let tabId = tab.id
                 let groupId = model.groups[gi].id
+                var commands: [Command] = []
                 for pid in allPaneIds(tab.paneTree.root) {
+                    commands.append(contentsOf: rejectPendingCreation(
+                        for: pid,
+                        in: &model,
+                        message: "pane process failed to start"
+                    ))
                     // Session teardown is reconcileSessionExistence's (these panes leave the
                     // tree below); keep side-table cleanup via clearPaneSideTables.
                     clearPaneSideTables(pid, in: &model)
@@ -765,9 +785,9 @@ func update(
                     model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
                 }
                 if !model.hasAnyTab {
-                    return [.terminate]
+                    return commands + [.terminate]
                 }
-                return []
+                return commands
             }
         }
         // A pane in no tree cannot exist now, so this fallback is just defensive
@@ -910,6 +930,50 @@ func update(
     case .terminate:
         return [.terminate]
 
+    case .runtimeWillShutdown:
+        let creationErrors = model.pendingSessionCreations.values.map {
+            Command.ipcError(
+                reqId: $0.requestId,
+                code: -32603,
+                message: "application shut down before the pane process started"
+            )
+        }
+        let inputErrors = model.pendingInputRequests.keys.map {
+            Command.ipcError(
+                reqId: $0,
+                code: -32603,
+                message: "application shut down before pane input was delivered"
+            )
+        }
+        model.pendingSessionCreations.removeAll()
+        model.pendingInputRequests.removeAll()
+        model.pendingInputSubmissions.removeAll()
+        return creationErrors + inputErrors
+
+    case .inputSubmissionCompleted(let submissionId, let result):
+        guard let requestId = model.pendingInputSubmissions.removeValue(forKey: submissionId),
+              var request = model.pendingInputRequests[requestId]
+        else { return [] }
+        request.remaining.remove(submissionId)
+        switch result {
+        case .delivered where request.remaining.isEmpty == false:
+            model.pendingInputRequests[requestId] = request
+            return []
+        case .delivered:
+            model.pendingInputRequests.removeValue(forKey: requestId)
+            return [.ipcReply(reqId: requestId, result: .object(["ok": .bool(true)]))]
+        case .rejected:
+            model.pendingInputRequests.removeValue(forKey: requestId)
+            for pendingId in request.remaining {
+                model.pendingInputSubmissions.removeValue(forKey: pendingId)
+            }
+            return [.ipcError(
+                reqId: requestId,
+                code: -32603,
+                message: "pane input was not delivered"
+            )]
+        }
+
     // MARK: - Group Management
 
     case .createGroup(let name, let launch, let background):
@@ -935,8 +999,14 @@ func update(
             model.groups[adjIdx].tabs.append(contentsOf: group.tabs)
         } else {
             // Close all tabs' sessions.
+            var commands: [Command] = []
             for tab in group.tabs {
                 for pid in allPaneIds(tab.paneTree.root) {
+                    commands.append(contentsOf: rejectPendingCreation(
+                        for: pid,
+                        in: &model,
+                        message: "pane closed before its process started"
+                    ))
                     // Session teardown is reconcileSessionExistence's (these panes leave the
                     // tree below); keep side-table cleanup via clearPaneSideTables.
                     clearPaneSideTables(pid, in: &model)
@@ -944,14 +1014,14 @@ func update(
             }
             model.groups.remove(at: idx)
             if !model.hasAnyTab {
-                return [.terminate]
+                return commands + [.terminate]
             }
             // Fix selection if needed
             if let selId = model.selectedTabId,
                !model.groups.flatMap(\.tabs).contains(where: { $0.id == selId }) {
                 model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
             }
-            return []
+            return commands
         }
 
         model.groups.remove(at: idx)
@@ -1555,6 +1625,11 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
 
     var commands: [Command] = []
     for pid in paneIds {
+        commands.append(contentsOf: rejectPendingCreation(
+            for: pid,
+            in: &model,
+            message: "pane closed before its process started"
+        ))
         // Session teardown is reconcileSessionExistence's (these panes leave the tree
         // below); keep side-table cleanup + per-pane popover dismiss here.
         clearPaneSideTables(pid, in: &model)
@@ -1580,6 +1655,18 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
         model.selectedTabId = newId
     }
     return commands
+}
+
+/// Removes and rejects the creation request owned by one pane, if it still waits on spawn.
+private func rejectPendingCreation(
+    for paneId: PaneId,
+    in model: inout AppModel,
+    message: String
+) -> [Command] {
+    guard let sessionId = model.pane(paneId)?.session?.id,
+          let pending = model.pendingSessionCreations.removeValue(forKey: sessionId)
+    else { return [] }
+    return [.ipcError(reqId: pending.requestId, code: -32603, message: message)]
 }
 
 /// Throttle macOS notification delivery: one per pane per kind every 1 second.

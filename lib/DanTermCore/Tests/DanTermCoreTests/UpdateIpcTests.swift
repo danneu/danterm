@@ -191,12 +191,14 @@ import DanTermProtocol
 
         let result = try requireIpcReply(commands)
         let neutralLifecycles: [String: JSONValue] = [
+            "processPhase": .string("spawning"),
             "integration": .object(["state": .string("neverReported")]),
             "command": .object(["state": .string("idle")]),
             "connection": .object(["state": .string("local")]),
             "agent": .object(["state": .string("none")]),
         ]
         let runningLifecycles: [String: JSONValue] = [
+            "processPhase": .string("spawning"),
             "integration": .object(["state": .string("neverReported")]),
             "command": .object(["state": .string("running"), "text": .string("swift test")]),
             "connection": .object(["state": .string("local")]),
@@ -370,6 +372,7 @@ import DanTermProtocol
                 "command": .object(["state": .string("idle")]),
                 "connection": .object(["state": .string("local")]),
                 "agent": .object(["state": .string("none")]),
+                "processPhase": .string("spawning"),
             ]),
             "tab": .object([
                 "id": .string(tab.id.rawValue.uuidString),
@@ -2941,9 +2944,83 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(hasEffect(commands) {
-            if case .sendText(let pid, let text) = $0 { return pid == paneId && text == "echo hi" }
+            if case .sendText(let pid, let text, _) = $0 { return pid == paneId && text == "echo hi" }
             return false
         }, "expected sendText command")
+    }
+
+    @Test("pane.input defers success until every submission is delivered")
+    func paneInputDefersSuccessUntilEverySubmissionIsDelivered() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        let requestId = UUID()
+        let request = try IpcRequest.decode(
+            method: IpcRequestMethod.paneInput.rawValue,
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "input": .array([
+                    .object(["text": .string("ls")]),
+                    .object(["key": .string("Enter")]),
+                ]),
+            ])
+        )
+
+        let commands = update(&model, .ipcRequest(reqId: requestId, request: request))
+        let submissions = commands.compactMap { command -> InputSubmissionId? in
+            switch command {
+            case .sendInputText(_, _, let id), .sendInputKey(_, _, _, let id): id
+            default: nil
+            }
+        }
+        #expect(submissions.count == 2)
+        #expect(commands.contains { if case .ipcReply = $0 { true } else { false } } == false)
+
+        let first = update(
+            &model,
+            .inputSubmissionCompleted(id: submissions[0], result: .delivered)
+        )
+        #expect(first.isEmpty)
+        let second = update(
+            &model,
+            .inputSubmissionCompleted(id: submissions[1], result: .delivered)
+        )
+        #expect(try requireIpcReply(second)["ok"]?.asBool == true)
+    }
+
+    @Test("pane.input rejects once when any submission is undeliverable")
+    func paneInputRejectsOnceWhenAnySubmissionFails() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        let requestId = UUID()
+        let request = try IpcRequest.decode(
+            method: IpcRequestMethod.paneInput.rawValue,
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "input": .array([
+                    .object(["text": .string("a")]),
+                    .object(["text": .string("b")]),
+                ]),
+            ])
+        )
+        let commands = update(&model, .ipcRequest(reqId: requestId, request: request))
+        let submissions = commands.compactMap { command -> InputSubmissionId? in
+            if case .sendInputText(_, _, let id) = command { return id }
+            return nil
+        }
+
+        let failed = update(
+            &model,
+            .inputSubmissionCompleted(id: submissions[0], result: .rejected)
+        )
+        let late = update(
+            &model,
+            .inputSubmissionCompleted(id: submissions[1], result: .delivered)
+        )
+
+        #expect(try requireIpcError(failed).code == -32603)
+        #expect(late.isEmpty)
     }
 
     @Test("pane.input input array emits ordered Effects via the key path")
@@ -2967,24 +3044,21 @@ import DanTermProtocol
             ]),
             pane: paneId
         )
-        #expect(commands.count == 3)
-        guard case .sendInputText(let p0, let t0) = commands[0] else {
+        #expect(commands.count == 2)
+        guard case .sendInputText(let p0, let t0, _) = commands[0] else {
             Issue.record("expected first command = sendInputText")
             return
         }
         #expect(p0 == paneId)
         #expect(t0 == "ls")
-        guard case .sendInputKey(let p1, let key1, let mods1) = commands[1] else {
+        guard case .sendInputKey(let p1, let key1, let mods1, _) = commands[1] else {
             Issue.record("expected second command = sendInputKey")
             return
         }
         #expect(p1 == paneId)
         #expect(key1 == KeyName.named(.enter))
         #expect(mods1 == KeyMods())
-        guard case .ipcReply = commands[2] else {
-            Issue.record("expected third command = ipcReply")
-            return
-        }
+        #expect(commands.contains { if case .ipcReply = $0 { true } else { false } } == false)
         #expect(!hasEffect(commands) {
             if case .sendText = $0 { return true }
             return false
@@ -3013,7 +3087,7 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(hasEffect(commands) {
-            if case .sendInputKey(let p, let k, let m) = $0 {
+            if case .sendInputKey(let p, let k, let m, _) = $0 {
                 return p == paneId && k == .named(.enter) && m == KeyMods()
             }
             return false
@@ -3070,7 +3144,7 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(hasEffect(commands) {
-            if case .sendInputKey(let p, let k, let m) = $0 {
+            if case .sendInputKey(let p, let k, let m, _) = $0 {
                 return p == paneId && k == .letter("c") && m == [.ctrl]
             }
             return false
@@ -3261,7 +3335,7 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(commands.contains { command in
-            if case .sendInputKey(let target, .named(.tab), let modifiers) = command {
+            if case .sendInputKey(let target, .named(.tab), let modifiers, _) = command {
                 return target == paneId && modifiers == [.shift]
             }
             return false
@@ -3288,7 +3362,7 @@ import DanTermProtocol
             pane: foregroundPaneId
         )
         #expect(hasEffect(commands) {
-            if case .sendInputText(let p, let t) = $0 {
+            if case .sendInputText(let p, let t, _) = $0 {
                 return p == backgroundPaneId && t == "hi"
             }
             return false
@@ -3613,7 +3687,7 @@ private func sendIpc(
     }
     let reqId = UUID()
     do {
-        return update(
+        let commands = update(
             &model,
             .ipcRequest(
                 reqId: reqId,
@@ -3621,6 +3695,11 @@ private func sendIpc(
             ),
             env: env
         )
+        let completionCommands = commands.flatMap { command -> [Command] in
+            guard case .createSession(let sessionId, _, _, _, _) = command else { return [] }
+            return update(&model, .sessionProcessStarted(sessionId: sessionId), env: env)
+        }
+        return commands + completionCommands
     } catch let error as IpcRequestDecodeError {
         return update(&model, .ipcRequestDecodeFailed(reqId: reqId, error: error), env: env)
     } catch {
@@ -3850,5 +3929,69 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
 
         let after = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.paneInfo.rawValue, pane: context))
         #expect(after["tab"]?["isZoomed"]?.asBool == true)
+    }
+
+    @Test("pane.info reports spawning then running without shell integration")
+    func paneInfoReportsProcessPhaseWithoutIntegration() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+
+        let spawning = try requireIpcReply(sendIpc(
+            &model,
+            method: IpcRequestMethod.paneInfo.rawValue,
+            pane: paneId
+        ))
+        _ = update(&model, .sessionProcessStarted(sessionId: sessionId))
+        let running = try requireIpcReply(sendIpc(
+            &model,
+            method: IpcRequestMethod.paneInfo.rawValue,
+            pane: paneId
+        ))
+
+        #expect(spawning["pane"]?["processPhase"]?.asString == "spawning")
+        #expect(running["pane"]?["processPhase"]?.asString == "running")
+        #expect(running["pane"]?["integration"]?["state"]?.asString == "neverReported")
+    }
+
+    @Test("every creation method defers its reply until process start")
+    func everyCreationMethodDefersReplyUntilProcessStart() throws {
+        for surface in ["group.new", "tab.new", "pane.split"] {
+            var model = makeModel()
+            createTab(&model)
+            let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+            let groupId = model.groups[0].id
+            let params: JSONValue
+            switch surface {
+            case "group.new":
+                params = .object(["name": .string("Builds")])
+            case "tab.new":
+                params = .object(["group": .string(groupId.rawValue.uuidString)])
+            default:
+                params = .object([
+                    "pane": .string(paneId.rawValue.uuidString),
+                    "direction": .string("horizontal"),
+                ])
+            }
+            let request = try IpcRequest.decode(method: surface, params: params)
+            let requestId = UUID()
+
+            let commands = update(
+                &model,
+                .ipcRequest(reqId: requestId, request: request)
+            )
+            let sessionId = try #require(commands.compactMap { command -> SessionId? in
+                if case .createSession(let id, _, _, _, _) = command { return id }
+                return nil
+            }.first)
+
+            #expect(commands.contains { if case .ipcReply = $0 { true } else { false } } == false)
+            let completed = update(&model, .sessionProcessStarted(sessionId: sessionId))
+            #expect(completed.contains {
+                if case .ipcReply(let id, _) = $0 { return id == requestId }
+                return false
+            })
+        }
     }
 }

@@ -289,9 +289,17 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller.onSearchStatus = { [weak self] status in
             self?.publish(status)
         }
+        controller.onProcessStarted = { [weak self] in
+            self?.callbackGate.emit(.processStarted)
+        }
         controller.onSessionEnded = { [weak self] result in
             onSessionEnded?(result)
-            self?.callbackGate.emit(.closeRequested)
+            switch result {
+            case .exited:
+                self?.callbackGate.emit(.processExited)
+            case .launchFailed:
+                self?.callbackGate.emit(.processLaunchFailed)
+            }
         }
     }
 
@@ -832,10 +840,28 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller.sendPaste(text, origin: PaneInputOrigin.appEntry())
     }
 
+    func sendText(
+        _ text: String,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    ) {
+        controller.sendPaste(text, origin: PaneInputOrigin.appEntry()) {
+            onCompletion(Self.inputResult($0))
+        }
+    }
+
     // TerminalSessionView: `Command.sendInputText`, structured `input` text. Deliberately raw --
     // vim and htop must see the characters as if typed, so paste semantics must not apply.
     func sendInputText(_ text: String) {
         controller.sendText(text, origin: PaneInputOrigin.appEntry())
+    }
+
+    func sendInputText(
+        _ text: String,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    ) {
+        controller.sendText(text, origin: PaneInputOrigin.appEntry()) {
+            onCompletion(Self.inputResult($0))
+        }
     }
 
     func sendInputKey(_ key: KeyName, modifiers: KeyMods) {
@@ -845,6 +871,35 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             modifiers: Self.terminalModifiers(modifiers),
             origin: PaneInputOrigin.appEntry()
         )
+    }
+
+    func sendInputKey(
+        _ key: KeyName,
+        modifiers: KeyMods,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    ) {
+        guard let key = Self.terminalKey(for: key) else {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { onCompletion(.rejected) }
+            }
+            return
+        }
+        controller.sendKey(
+            key,
+            modifiers: Self.terminalModifiers(modifiers),
+            origin: PaneInputOrigin.appEntry()
+        ) {
+            onCompletion(Self.inputResult($0))
+        }
+    }
+
+    private static func inputResult(
+        _ result: PaneInputSubmissionResult
+    ) -> TerminalInputSubmissionResult {
+        switch result {
+        case .delivered: .delivered
+        case .rejected: .rejected
+        }
     }
 
     func setFocused(_ focused: Bool) {

@@ -11,6 +11,9 @@ enum TerminalSessionEvent: Equatable {
     case searchTotal(Int?)
     case searchSelected(Int?)
     case becameFirstResponder
+    case processStarted
+    case processExited
+    case processLaunchFailed
     case closeRequested
 }
 
@@ -35,6 +38,12 @@ func terminalMessages(
         return [.searchSelectionReported(paneId: paneId, selected: selected)]
     case .becameFirstResponder:
         return [.paneBecameFirstResponder(paneId: paneId)]
+    case .processStarted:
+        return [.sessionProcessStarted(sessionId: sessionId)]
+    case .processExited:
+        return [.sessionProcessExited(sessionId: sessionId)]
+    case .processLaunchFailed:
+        return [.sessionCreationFailed(sessionId: sessionId)]
     case .closeRequested:
         return [.sessionEnded(sessionId: sessionId)]
     }

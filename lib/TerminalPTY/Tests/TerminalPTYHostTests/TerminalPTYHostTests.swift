@@ -12,6 +12,20 @@ import TerminalCoreRecording
 /// Exercises the native owner only through real PTYs and controlled child behavior.
 @Suite(.serialized)
 struct TerminalPTYHostTests {
+    @Test("encoded key and paste submissions complete after PTY delivery", .timeLimit(.minutes(1)))
+    func encodedInputSubmissionsCompleteAfterDelivery() async throws {
+        let host = try makeHost()
+        await host.start(makeLaunchInput(command: "stty -echo; exec cat > /dev/null"))
+        let completions = InputCompletionRecorder(expecting: 2)
+
+        host.sendKey(.returnKey, modifiers: []) { completions.signal($0) }
+        host.sendPaste("hello") { completions.signal($0) }
+
+        #expect(completions.waitForAll(within: .seconds(20)))
+        #expect(completions.results == [.delivered, .delivered])
+        await host.close()
+    }
+
     @Test("input submitted before spawn completes after crossing the PTY", .timeLimit(.minutes(1)))
     func preSpawnInputCompletesAfterDelivery() async throws {
         // Intent: pre-spawn input stays pending, then completes only after its last byte writes.
