@@ -1284,6 +1284,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first tab-toggle -- one unread + one read; rows
         //   shrink to {unread} then expand to both.
         var model = makeModel()
+        model.alertsPopoverOpen = true
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let unread = AlertModel(
@@ -1294,12 +1295,12 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             title: "Read", body: "osc", createdAt: Date(timeIntervalSince1970: 20), isUnread: false)
         model.alerts = [unread, read]
 
-        var proj = desiredAlertsPopover(in: model)
+        var proj = desiredAlertsPopover(in: model)!
         #expect(proj.rows.map(\.id) == [unread.id], "unread tab shows only unread alerts")
         #expect(proj.showAll == false, "projection carries the show-all flag")
 
         model.showAllAlerts = true
-        proj = desiredAlertsPopover(in: model)
+        proj = desiredAlertsPopover(in: model)!
         #expect(proj.rows.map(\.id) == [unread.id, read.id], "show-all tab shows all alerts")
         #expect(proj.showAll == true, "projection carries the show-all flag")
     }
@@ -1313,6 +1314,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first mark-all -- in show-all mode, mark-all is
         //   visible until the last unread alert is marked read.
         var model = makeModel()
+        model.alertsPopoverOpen = true
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         let read = AlertModel(
@@ -1324,13 +1326,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         model.showAllAlerts = true
         model.alerts = [read, unread]
 
-        var proj = desiredAlertsPopover(in: model)
+        var proj = desiredAlertsPopover(in: model)!
         #expect(proj.rows.map(\.id) == [read.id, unread.id], "show-all keeps read rows visible")
         #expect(proj.markAllVisible == true, "any unread alert shows the mark-all button")
 
         unread.isUnread = false
         model.alerts = [read, unread]
-        proj = desiredAlertsPopover(in: model)
+        proj = desiredAlertsPopover(in: model)!
         #expect(proj.rows.map(\.id) == [read.id, unread.id], "show-all rows remain after all alerts are read")
         #expect(proj.markAllVisible == false, "no unread alerts hides the mark-all button")
     }
@@ -1344,20 +1346,21 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first empty-state -- inspect emptyText across
         //   tab toggles and after inserting an alert.
         var model = makeModel()
+        model.alertsPopoverOpen = true
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
-        var proj = desiredAlertsPopover(in: model)
+        var proj = desiredAlertsPopover(in: model)!
         #expect(proj.emptyText == "No unread alerts", "empty unread tab uses unread copy")
 
         model.showAllAlerts = true
-        proj = desiredAlertsPopover(in: model)
+        proj = desiredAlertsPopover(in: model)!
         #expect(proj.emptyText == "No alerts", "empty history tab uses history copy")
 
         model.alerts = [AlertModel(
             id: AlertId(), kind: .bell, paneId: paneId,
             title: "DanTerm", body: "x", createdAt: Date(timeIntervalSince1970: 10), isUnread: true)]
-        proj = desiredAlertsPopover(in: model)
+        proj = desiredAlertsPopover(in: model)!
         #expect(proj.emptyText == nil, "rows present means no empty text")
     }
 
@@ -1371,15 +1374,16 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first insertion-detected -- proj0 != proj1 after
         //   an unread alert is prepended.
         var model = makeModel()
+        model.alertsPopoverOpen = true
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
-        let proj0 = desiredAlertsPopover(in: model)
+        let proj0 = desiredAlertsPopover(in: model)!
         let alert = AlertModel(
             id: AlertId(), kind: .bell, paneId: paneId,
             title: "DanTerm", body: "build", createdAt: Date(timeIntervalSince1970: 10), isUnread: true)
         model.alerts.insert(alert, at: 0)
-        let proj1 = desiredAlertsPopover(in: model)
+        let proj1 = desiredAlertsPopover(in: model)!
 
         #expect(proj0 != proj1, "inserted alert changes the projection")
         #expect(proj1.rows.first?.id == alert.id, "new alert is the first rendered row")

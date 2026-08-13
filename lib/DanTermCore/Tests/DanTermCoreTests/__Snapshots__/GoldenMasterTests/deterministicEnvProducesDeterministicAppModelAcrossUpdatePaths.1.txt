@@ -149,6 +149,7 @@ AppModel(
   ],
   searchState: [:],
   showAllAlerts: false,
+  alertsPopoverOpen: false,
   config: DanTermConfig(
     defaultTheme: nil,
     remoteTheme: "Purplepeter",

@@ -779,14 +779,23 @@ func update(
         for i in model.alerts.indices { model.alerts[i].isUnread = false }
         return []   // bell badges reconcile via reconcileSidebar
 
+    case .toggleAlertsPopover:
+        model.alertsPopoverOpen.toggle()
+        return []
+
+    case .alertsPopoverClosed:
+        model.alertsPopoverOpen = false
+        return []
+
     case .activateAlert(let alertId):
+        model.alertsPopoverOpen = false
         guard let alert = model.alerts.first(where: { $0.id == alertId }) else { return [] }
         // Stale alert: pane no longer exists — just mark read, no navigation
         guard model.pane(alert.paneId) != nil else {
             if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
                 model.alerts[idx].isUnread = false
             }
-            return [.dismissAlertsPopover]
+            return []
         }
         // Mark read (unless manual mode — user must ack explicitly)
         if model.config.alertClearMode != .manual,
@@ -795,7 +804,6 @@ func update(
         }
         var commands = navigateToPane(alert.paneId, in: &model, env: env)
         commands.append(.activateApp)
-        commands.append(.dismissAlertsPopover)
         return commands
 
     case .goToMostRecentAlertPane:

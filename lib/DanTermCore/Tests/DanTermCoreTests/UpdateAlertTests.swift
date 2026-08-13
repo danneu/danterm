@@ -16,6 +16,29 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct UpdateAlertTests {
+    @Test("alerts popover toggle and close echo own one projected slot")
+    func alertsPopoverToggleAndCloseEcho() {
+        var model = makeModel()
+
+        #expect(update(&model, .toggleAlertsPopover).isEmpty)
+        #expect(model.alertsPopoverOpen)
+        #expect(desiredAlertsPopover(in: model) != nil)
+
+        #expect(update(&model, .toggleAlertsPopover).isEmpty)
+        #expect(model.alertsPopoverOpen == false)
+        #expect(desiredAlertsPopover(in: model) == nil)
+
+        _ = update(&model, .toggleAlertsPopover)
+        _ = update(&model, .alertsPopoverClosed)
+        #expect(model.alertsPopoverOpen == false)
+        #expect(update(&model, .alertsPopoverClosed).isEmpty)
+
+        _ = update(&model, .toggleAlertsPopover)
+        _ = update(&model, .activateAlert(alertId: AlertId()))
+        #expect(model.alertsPopoverOpen == false)
+        #expect(update(&model, .alertsPopoverClosed).isEmpty)
+    }
+
     @Test("testMarkAlertRead")
     func testMarkAlertRead() {
         // Intent: markAlertRead flips isUnread on the targeted alert.
@@ -99,6 +122,7 @@ import Testing
             id: alertId, kind: .bell, paneId: paneId,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
+        model.alertsPopoverOpen = true
 
         let commands = update(&model, .activateAlert(alertId: alertId))
         #expect(model.selectedTabId == tabId, "should navigate to alert's tab")
@@ -108,10 +132,7 @@ import Testing
             if case .activateApp = $0 { return true }
             return false
         }, "should activate app")
-        #expect(hasEffect(commands) {
-            if case .dismissAlertsPopover = $0 { return true }
-            return false
-        }, "should dismiss popover")
+        #expect(model.alertsPopoverOpen == false, "should dismiss popover")
     }
 
     @Test("testActivateAlertSameTabShowsSelectedTab")
@@ -210,13 +231,11 @@ import Testing
             id: alertId, kind: .bell, paneId: stalePaneId,
             title: "DanTerm", body: "stale", createdAt: Date(), isUnread: true
         ), at: 0)
+        model.alertsPopoverOpen = true
 
-        let commands = update(&model, .activateAlert(alertId: alertId))
+        _ = update(&model, .activateAlert(alertId: alertId))
         #expect(model.alerts[0].isUnread == false, "should mark read")
-        #expect(hasEffect(commands) {
-            if case .dismissAlertsPopover = $0 { return true }
-            return false
-        }, "should dismiss popover")
+        #expect(model.alertsPopoverOpen == false, "should dismiss popover")
     }
 
     @Test("testAlertHistoryCappedAt100")

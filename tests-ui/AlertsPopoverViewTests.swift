@@ -181,7 +181,8 @@ func alertsPopoverViewTests() {
             makeAlert(paneId: paneId, title: "Read three", body: "Third", isUnread: false, ageSeconds: 150),
         ]
         model.showAllAlerts = true
-        fx.vc.apply(desiredAlertsPopover(in: model))
+        model.alertsPopoverOpen = true
+        fx.vc.apply(desiredAlertsPopover(in: model)!)
         settleAlertsFixture(fx)
 
         let checkbox = try onlyAlertButton(titled: "Show all", in: fx.vc.view)
@@ -232,6 +233,7 @@ private func makeAlertsFixture(
     model.selectedTabId = tabId
     model.alerts = alerts
     model.showAllAlerts = showAll
+    model.alertsPopoverOpen = true
 
     let runtime = AppRuntime(model: model)
     let vc = AlertsPopoverViewController()
@@ -242,7 +244,7 @@ private func makeAlertsFixture(
         backing: .buffered,
         defer: false)
     window.contentView = vc.view
-    vc.apply(desiredAlertsPopover(in: model))
+    vc.apply(desiredAlertsPopover(in: model)!)
     window.layoutIfNeeded()
     vc.view.layoutSubtreeIfNeeded()
     let table = findAlertTable(in: vc.view)!

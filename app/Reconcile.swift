@@ -341,15 +341,32 @@ extension AppRuntime {
         caches.preferencesPanel = new
     }
 
-    /// Push the current alert-feed projection into the popover while it is shown.
-    /// The popover itself is AppKit-owned, so a closed popover projects as nil.
+    /// Creates, refreshes, or silently closes the model-projected alerts popover.
     func reconcileAlertsPopover() {
-        let shown = alertsPopover?.isShown ?? false
-        let new: AlertsPopoverProjection? = shown ? desiredAlertsPopover(in: model) : nil
+        let new = desiredAlertsPopover(in: model)
         guard caches.alertsPopover != new else { return }
-        if let proj = new,
-           let vc = alertsPopover?.contentViewController as? AlertsPopoverViewController {
-            vc.apply(proj)
+        let wasOpen = caches.alertsPopover != nil
+        if let projection = new {
+            if wasOpen == false || alertsPopover == nil {
+                dismissAlertsPopoverSilently()
+                guard let anchor = chromeView?.bellButton else {
+                    preconditionFailure("alerts popover anchor is missing")
+                }
+                let viewController = AlertsPopoverViewController()
+                viewController.runtime = self
+                viewController.loadViewIfNeeded()
+                viewController.apply(projection)
+                alertsPopover = presentTransientPopover(
+                    viewController,
+                    delegate: alertsPopoverDelegate,
+                    from: anchor
+                )
+            } else {
+                (alertsPopover?.contentViewController as? AlertsPopoverViewController)?
+                    .apply(projection)
+            }
+        } else {
+            dismissAlertsPopoverSilently()
         }
         caches.alertsPopover = new
     }

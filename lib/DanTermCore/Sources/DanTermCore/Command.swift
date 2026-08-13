@@ -2,8 +2,8 @@
 //
 // `update()` is pure and returns ONLY commands -- real imperatives / external side
 // effects (PTY create/text/key, focus moves, notifications,
-// IPC reply/error/read, checkpoint, config persistence, TODO
-// popovers, export). Everything the view *shows* is a projection derived by
+// IPC reply/error/read, checkpoint, config persistence, export). Everything the view
+// *shows* is a projection derived by
 // `reconcile()` after every `send()`, so no view-sync/projection case lives here.
 // The type name declares that invariant: it was renamed from `Effect` once the last
 // projection case was gone, so the compiler now rejects reintroducing one.
@@ -59,7 +59,6 @@ enum Command {
     case sendNotification(alertId: AlertId, paneId: PaneId, title: DisplayLine, subtitle: DisplayLine?, body: String)
     case terminate
     case activateApp
-    case dismissAlertsPopover
     // The dock + toolbar-bell unread badges are derived by reconcileWindowChrome (Stage 6).
 
     // Config persistence

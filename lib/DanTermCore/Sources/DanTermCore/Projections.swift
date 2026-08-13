@@ -206,7 +206,8 @@ struct AlertsPopoverProjection: Equatable {
 }
 
 /// Project the alert feed rows and controls for an open alerts popover.
-func desiredAlertsPopover(in model: AppModel) -> AlertsPopoverProjection {
+func desiredAlertsPopover(in model: AppModel) -> AlertsPopoverProjection? {
+  guard model.alertsPopoverOpen else { return nil }
   let tab: AlertTab = model.showAllAlerts ? .history : .unread
   let displayed = filteredAlerts(model.alerts, tab: tab)
   return AlertsPopoverProjection(

@@ -724,7 +724,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func toggleAlerts(_ sender: Any?) {
-        runtime.toggleAlertsPopover()
+        runtime.send(.toggleAlertsPopover)
     }
 
     // Collapse/uncollapse the sidebar in the NSSplitView and sync the chrome.

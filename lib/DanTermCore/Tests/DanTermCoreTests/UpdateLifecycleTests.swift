@@ -141,6 +141,7 @@ import Testing
             id: alertId, kind: .bell, paneId: firstPaneId,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
+        model.alertsPopoverOpen = true
 
         let commands = update(&model, .activateAlert(alertId: alertId))
         #expect(model.selectedTabId == firstTabId, "should select the alert's tab")
@@ -150,10 +151,7 @@ import Testing
             if case .activateApp = $0 { return true }
             return false
         }, "should activate app")
-        #expect(hasEffect(commands) {
-            if case .dismissAlertsPopover = $0 { return true }
-            return false
-        }, "should dismiss alerts popover")
+        #expect(model.alertsPopoverOpen == false, "should dismiss alerts popover")
     }
 
     @Test("testActivateAlertStalePane")
@@ -171,13 +169,11 @@ import Testing
             id: alertId, kind: .bell, paneId: stalePaneId,
             title: "DanTerm", body: "stale", createdAt: Date(), isUnread: true
         ), at: 0)
+        model.alertsPopoverOpen = true
 
-        let commands = update(&model, .activateAlert(alertId: alertId))
+        _ = update(&model, .activateAlert(alertId: alertId))
         #expect(model.alerts[0].isUnread == false, "stale alert should be marked read")
-        #expect(hasEffect(commands) {
-            if case .dismissAlertsPopover = $0 { return true }
-            return false
-        }, "should still dismiss popover")
+        #expect(model.alertsPopoverOpen == false, "should still dismiss popover")
     }
 
     @Test("testActivateAlertWhileZoomedClearsZoom")

@@ -286,7 +286,7 @@ manual-QA per the ADR.
 - [x] 4. feat(todo): project TODO popover existence (D5; I1-I4; PO1, PO3 --
       deletes both popover Commands and both stranding sweeps; fixes the
       double-press bug)
-- [ ] 5. feat(alerts): project alerts popover existence (D5; PO6 -- deletes
+- [x] 5. feat(alerts): project alerts popover existence (D5; PO6 -- deletes
       `toggleAlertsPopover` and `dismissAlertsPopover`)
 - [ ] 6. refactor(sidebar): interaction path reads the applied projection
       (D6; I7; PO7 -- deletes `currentModel`)

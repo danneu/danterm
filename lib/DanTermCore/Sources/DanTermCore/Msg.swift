@@ -96,6 +96,8 @@ enum Msg {
     // Alerts
     case markAlertRead(alertId: AlertId)
     case markAllAlertsRead
+    case toggleAlertsPopover
+    case alertsPopoverClosed
     case activateAlert(alertId: AlertId)
     case goToMostRecentAlertPane
     case setShowAllAlerts(Bool)

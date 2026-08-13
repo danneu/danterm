@@ -111,6 +111,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
             }
 
             var alertModel = model
+            alertModel.alertsPopoverOpen = true
             let notifiedSessionId = try #require(alertModel.pane(panes[1])?.session?.id)
             let commands = update(&alertModel, .sessionNotification(
                 sessionId: notifiedSessionId, title: hostile, body: hostile))
@@ -120,7 +121,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
                     expectFlat(subtitle, "sendNotification subtitle", input: hostile)
                 }
             }
-            for row in desiredAlertsPopover(in: alertModel).rows {
+            for row in desiredAlertsPopover(in: alertModel)!.rows {
                 expectFlat(row.title, "alerts popover row title", input: hostile)
             }
 
@@ -266,9 +267,10 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
 
         update(&model, .sessionNotification(
             sessionId: sessionId, title: "sender\ntitle", body: "body"))
+        model.alertsPopoverOpen = true
 
         #expect(model.alerts.first?.title.text == "sender title")
-        #expect(desiredAlertsPopover(in: model).rows.first?.title.text == "sender title")
+        #expect(desiredAlertsPopover(in: model)!.rows.first?.title.text == "sender title")
     }
 }
 

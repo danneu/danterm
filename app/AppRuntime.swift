@@ -144,7 +144,8 @@ class AppRuntime {
     weak var contentArea: NSView?
     weak var chromeView: WindowChromeView?
     var alertsPopover: NSPopover?
-    private lazy var alertsPopoverDelegate = AlertsPopoverDelegateAdapter(runtime: self)
+    /// Reports click-away closure for the cross-file alerts-popover existence pass.
+    lazy var alertsPopoverDelegate = AlertsPopoverDelegateAdapter(runtime: self)
     var todoPopover: NSPopover?
     /// Retains the reporting delegate while the projected TODO popover is open.
     var todoPopoverDelegate: TodoPopoverDelegateAdapter?
@@ -1127,10 +1128,6 @@ class AppRuntime {
             NSApp.activate(ignoringOtherApps: true)
             window?.makeKeyAndOrderFront(nil)
 
-        case .dismissAlertsPopover:
-            alertsPopover?.performClose(nil)
-            alertsPopover = nil
-
         // Search commands
 
         case .sendStartSearch(let paneId):
@@ -1761,8 +1758,7 @@ class AppRuntime {
     private func tearDownCurrentSession() {
         cancelPaneDrag()
         dismissTodoPopoverSilently()
-        alertsPopover?.performClose(nil)
-        alertsPopover = nil
+        dismissAlertsPopoverSilently()
         model.todoPopover = nil  // session teardown bypasses the reconciler; clear directly
         // Hide/destroy before resetting caches so nil keeps meaning "already hidden"
         // for the first post-restore reconcile. Restored models carry no draft.
@@ -1965,35 +1961,25 @@ class AppRuntime {
         container.removeFromSuperview()
     }
 
-    // MARK: - Alerts Popover
-
-    func toggleAlertsPopover() {
-        if let popover = alertsPopover, popover.isShown {
-            popover.performClose(nil)
-            alertsPopover = nil
-            return
-        }
-        guard let anchor = chromeView?.bellButton else { return }
-        let vc = AlertsPopoverViewController()
-        vc.runtime = self
-        vc.loadViewIfNeeded()
-        vc.apply(desiredAlertsPopover(in: model))
-        alertsPopover = presentTransientPopover(vc, delegate: alertsPopoverDelegate, from: anchor)
+    /// Detaches close reporting before reconciliation closes the alerts popover.
+    func dismissAlertsPopoverSilently() {
+        alertsPopover?.delegate = nil
+        alertsPopover?.performClose(nil)
+        alertsPopover = nil
     }
 }
 
-/// NSPopoverDelegate adapter for the alerts popover. Alerts popover visibility is
-/// AppKit-owned, so close events only clear the retained popover handle.
-private final class AlertsPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
+/// Reports AppKit-initiated alerts-popover closure back to the model slot.
+final class AlertsPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
     weak var runtime: AppRuntime?
 
     init(runtime: AppRuntime?) {
         self.runtime = runtime
     }
 
-    /// NSPopoverDelegate: release the popover handle after click-away or programmatic close.
+    /// NSPopoverDelegate: click-away clears projected existence through update().
     func popoverDidClose(_ notification: Notification) {
-        runtime?.alertsPopover = nil
+        runtime?.send(.alertsPopoverClosed)
     }
 }
 
