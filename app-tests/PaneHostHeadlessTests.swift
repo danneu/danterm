@@ -1,0 +1,74 @@
+// Headless construction proof for the runtime-owned session and pane-chrome lifetime root.
+import Cocoa
+import DanTermProtocol
+import Testing
+@testable import DanTerm
+
+@Suite struct PaneHostHeadlessTests {
+    @Test("pane host constructs without a WindowServer-backed window")
+    @MainActor
+    func constructsHeadlessly() {
+        let absentConfig = FileManager.default.temporaryDirectory
+            .appendingPathComponent("danterm-no-config-\(UUID().uuidString)")
+        let runtime = AppRuntime(
+            terminalBackend: SwiftTerminalBackend(),
+            configStore: DanTermConfigStore(url: absentConfig),
+            startsApplicationServices: false
+        )
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        let session = HeadlessPaneHostSession()
+
+        let host = PaneHost(paneId: paneId, session: session, runtime: runtime)
+
+        #expect(host.session === session)
+        #expect(host.wrapper.terminalSession === session)
+        #expect(session.paneWrapper === host.wrapper)
+    }
+}
+
+/// Supplies the stable session boundary while the test exercises only PaneHost's AppKit chrome.
+@MainActor
+private final class HeadlessPaneHostSession: NSView, TerminalSession {
+    weak var paneWrapper: PaneWrapperView?
+    var hostView: NSView { self }
+    var state = TerminalSessionState(
+        scrollbarEnabled: true,
+        cellHeight: 0,
+        scrollPosition: nil,
+        background: NSColor.black.cgColor
+    )
+    weak var stateObserver: (any TerminalSessionStateObserver)?
+    var onEvent: ((TerminalSessionEvent) -> Void)?
+    var onPrimaryHistoryMutation: (() -> Void)?
+    var hasSelection = false
+
+    func sendText(_ text: String) {}
+    func sendInputText(_ text: String) {}
+    func sendInputKey(_ key: KeyName, modifiers: KeyMods) {}
+    func setFocused(_ focused: Bool) {}
+    func setVisible(_ visible: Bool) {}
+    func setRenderingAvailable(_ available: Bool) {}
+    func refreshBackingProperties() {}
+    func applyTheme(_ themeName: String) {}
+    func clearTheme() {}
+    func setFontSize(_ size: Double) {}
+    func setFontFamily(_ family: String?) {}
+    func setCopyOnSelect(_ enabled: Bool) {}
+    func startSearch() {}
+    func setSearchNeedle(_ needle: String) {}
+    func navigateSearch(_ direction: SearchDirection) {}
+    func endSearch() {}
+    func readViewportText() -> String? { nil }
+    func readRowStructure() -> [TerminalSessionRowStructure]? { nil }
+    func readFullHistoryText() -> String? { nil }
+    func readPrimaryHistoryText() -> String? { nil }
+    func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? { nil }
+    func primaryHistoryTailReader() -> CheckpointScrollbackRead? { nil }
+    func scroll(toRow row: Int) {}
+    func copySelection() {}
+    func pasteClipboard() {}
+    func requestClose() {}
+    func fenceForApplicationExit() {}
+    func tearDown() {}
+}
