@@ -41,7 +41,7 @@ and skips those rows when the app is unavailable.
     danterm pane read --pane <pane-id> [--lines <n>]
     danterm pane zoom --pane <pane-id> on|off|toggle
     danterm pane rows --pane <pane-id>
-    danterm pane tape --pane <pane-id> [--follow] [--from-now]
+    danterm pane tape --pane <pane-id> [--follow] [--from-now] [--format replay|inspect]
     danterm theme set --pane <pane-id> <name>|--clear
     danterm agent attach --pane <pane-id> --kind <kind> --id <session-id>
     danterm agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>
@@ -446,9 +446,12 @@ whole recording, and a reader can act on each record as it arrives.
     danterm pane tape --pane "$PANE_ID" > tape.jsonl
     danterm pane tape --pane "$PANE_ID" --follow > tape.jsonl
     danterm pane tape --pane "$PANE_ID" --follow --from-now > tape.jsonl
+    danterm pane tape --pane "$PANE_ID" --format inspect
 
 `--from-now` skips the backlog and waits for the next live event. Redirect the
-stream when evidence must survive an app crash.
+stream when evidence must survive an app crash. `--format replay` is the default
+and keeps the exact bytes; `--format inspect` is the readable view described
+below.
 
 Every stream opens with `start` and closes with `end` when the producer can
 state a clean end. In between come `event` records in order, and a `gap` record
@@ -458,7 +461,7 @@ that falls behind can be told at any point, so a followed capture may carry a
 `gap` between two events.
 
 - `start` opens every stream:
-  `{"kind":"start","version":2,"capture":"snapshot"|"follow","format":"replay",`
+  `{"kind":"start","version":2,"capture":"snapshot"|"follow","format":"replay"|"inspect",`
   `"provenance":{...},"initial":{"columns":N,"rows":N},`
   `"cursor":{"sequence":N,"feedByteOffset":N,"writeByteOffset":N}}`.
   The `cursor` is the baseline every later byte offset is read against, so a
@@ -529,6 +532,55 @@ and `jq -s` slurps the whole stream into an array:
 
 JSON-RPC notifications are socket transport only and are not a persisted
 recording format.
+
+### Read a capture with --format inspect
+
+`--format inspect` derives a readable view of the same stream, for when you want
+to read what a pane did rather than replay it. DanTerm always records and sends
+the exact bytes; the CLI derives this view locally, one record at a time, so
+nothing about the recording changes.
+
+    {"kind":"start","version":2,"capture":"snapshot","format":"inspect","initial":{"columns":80,"rows":24},"cursor":{"sequence":0,"feedByteOffset":0,"writeByteOffset":0},"provenance":{...}}
+    {"kind":"event","sequence":1,"elapsedNanoseconds":123652792,"byteOffset":0,"byteLength":41,"event":{"type":"feed","spans":[{"control":"ESC"},{"text":"]1337;DanTermShell=3;integration-ready"},{"control":"ESC"},{"text":"\\"}]}}
+
+A `start` record changes only its `format` field; its version, capture,
+provenance, geometry, and cursor are unchanged. An `event` record replaces
+`base64` inside the event object with `spans`, and every field outside that
+payload -- `sequence`, `elapsedNanoseconds`, `originElapsedNanoseconds`,
+`byteOffset`, `byteLength` -- is identical to the replay record. `gap` and `end`
+records pass through unchanged.
+
+Spans account for every payload byte exactly once, in order, under three keys:
+
+- `{"text":"..."}` is a run of decodable characters. Only C0 and DEL leave it, so
+  a C1 control or a zero-width character rides inside a text span.
+- `{"control":"ESC"}` is one C0 byte or DEL, named individually.
+- `{"hex":"ff fe"}` is a run of bytes that decode as nothing, lowercase and
+  space separated.
+
+An empty payload gives `"spans": []`. The separate keys are what keep the view
+unambiguous: the three literal characters `ESC` are `{"text":"ESC"}` while the
+escape byte is `{"control":"ESC"}`, so a reader never has to guess which one the
+pane produced.
+
+Bytes are classified within the one event that recorded them. A character split
+across two recorded transfers stays split and shows as hex in each event,
+because that is what the pane actually did.
+
+Two limits to know before you rely on this view. Inspect does not interpret CSI,
+OSC, DCS, or any other terminal sequence: each one reads as an ESC control span
+followed by its literal text, the way the OSC in the example above does. And inspect output is not
+replayable and is not acceptable fixture evidence -- the fixture converter
+rejects it. Capture with the default `replay` format for anything you will
+convert or replay.
+
+    # The text the child printed, in order, with control bytes left out.
+    jq -r 'select(.kind == "event" and .event.type == "feed") | .event.spans[].text // empty' \
+        tape.jsonl
+
+    # Events carrying bytes that decode as nothing.
+    jq -c 'select(.kind == "event" and ((.event.spans // []) | any(.hex)))
+           | {sequence, byteOffset, spans: .event.spans}' tape.jsonl
 
 ### Send keys to another pane
 
@@ -665,6 +717,7 @@ else prints nothing on success and exits 0.
 | `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
 | `pane tape --pane <pane-id>` | JSON Lines: one `start` record, an optional `gap`, one record per event, then `end` with reason `snapshot-complete` |
 | `pane tape --pane <pane-id> --follow [--from-now]` | The same JSON Lines stream, with `capture: "follow"`, held open for live events |
+| `pane tape --pane <pane-id> [--format replay\|inspect]` | Same stream either way. `replay` (the default) carries exact `base64` payloads; `inspect` carries readable `spans` and is neither replayable nor fixture evidence |
 
 The `agent attach`, `agent activity`, and `agent detach` commands are silent
 mutations: no stdout on success. Activity accepts only `working`, `waiting`, or

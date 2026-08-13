@@ -63,10 +63,14 @@ struct DanTermCLI {
                                       Print each display row's line structure as
                                       JSON: wrap claim, content end, and width.
           pane tape --pane <pane-id> [--follow] [--from-now]
+                    [--format replay|inspect]
                                       Print the pane's flight recording as JSON
                                       Lines: one start record, then one record per
                                       event. --follow keeps the stream open for
                                       live events; --from-now skips the backlog.
+                                      --format inspect replaces each payload with
+                                      readable spans; replay (the default) keeps
+                                      the exact bytes.
           theme set --pane <pane-id> <name>|--clear
                                       Set or clear a pane theme
           agent attach --pane <pane-id> --kind <kind> --id <session-id>
@@ -143,9 +147,9 @@ struct DanTermCLI {
             )
             // Every tape capture is a record stream, finite or followed alike, so none of them
             // go through the single-result request path below.
-            if command.method == IpcRequestMethod.paneTape.rawValue {
+            if case .tapeStream(let format) = command.outputMode {
                 signal(SIGPIPE, SIG_IGN)
-                try requestPaneTape(command, socketPath: socketPath)
+                try requestPaneTape(command, socketPath: socketPath, format: format)
                 exit(0)
             }
             let response = try request(command, socketPath: socketPath, environment: environment)
@@ -197,7 +201,8 @@ struct DanTermCLI {
     /// pace, so a timeout here would cut a healthy capture short.
     private static func requestPaneTape(
         _ command: CLICommand,
-        socketPath: String
+        socketPath: String,
+        format: PaneTapeFormat
     ) throws {
         let fd = try connectSocket(path: socketPath, receiveTimeout: false)
         defer { Darwin.close(fd) }
@@ -212,7 +217,8 @@ struct DanTermCLI {
         let outcome = try renderPaneTapeStream(
             socket: fd,
             output: STDOUT_FILENO,
-            requestId: requestId
+            requestId: requestId,
+            transform: format == .inspect ? paneTapeInspectRecord : { $0 }
         )
         if let failure = paneTapeStreamFailure(for: outcome) {
             throw failure
@@ -430,6 +436,11 @@ struct DanTermCLI {
                 throw CLIError("malformed response")
             }
             FileHandle.standardOutput.write(Data(text.utf8))
+        case .tapeStream:
+            // A stream is rendered record by record before any single result exists, so
+            // `main` routes it away from here. Stated rather than defaulted, so adding a
+            // mode is a compile error instead of a silent no-op.
+            throw CLIError("pane tape is rendered as a record stream, not a single result")
         }
     }
 

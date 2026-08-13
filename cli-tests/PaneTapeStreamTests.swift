@@ -166,6 +166,83 @@ struct PaneTapeStreamTests {
         ) == nil)
     }
 
+    @Test("the renderer applies its transform to every record it writes")
+    func rendererAppliesItsTransformToEveryRecord() throws {
+        // Intent: the start record and the event records that follow it are both written in the
+        //   form the transform returned, not the form they arrived in.
+        // Why it exists: a transform applied to only part of a stream would emit a stream that
+        //   states one format and carries another, and a reader keying off the start record
+        //   would decode the rest wrong.
+        // Scenario: an agent asks for the inspect view of a followed pane.
+        let socket = try descriptorPair()
+        let output = try descriptorPipe()
+        defer {
+            Darwin.close(socket.connection)
+            Darwin.close(output.read)
+            Darwin.close(output.write)
+        }
+
+        try writeFrame(
+            JsonRpcResponse(id: .string("R1"), result: replayStartRecord()),
+            to: socket.peer
+        )
+        try writeFrame(notification(replayEventRecord()), to: socket.peer)
+        Darwin.close(socket.peer)
+
+        #expect(try renderPaneTapeStream(
+            socket: socket.connection,
+            output: output.write,
+            requestId: "R1",
+            transform: paneTapeInspectRecord
+        ) == .init(termination: .eof, capture: .follow))
+
+        #expect(try readDescriptorRecord(output.read) == .object([
+            "kind": .string("start"),
+            "version": .number(Double(paneTapeStreamVersion)),
+            "capture": .string("follow"),
+            "format": .string("inspect"),
+            "initial": .object(["columns": .number(80), "rows": .number(24)]),
+        ]))
+        #expect(try readDescriptorRecord(output.read) == .object([
+            "kind": .string("event"),
+            "sequence": .number(4),
+            "elapsedNanoseconds": .number(900),
+            "byteOffset": .number(0),
+            "byteLength": .number(3),
+            "event": .object([
+                "type": .string("feed"),
+                "spans": .array([
+                    .object(["text": .string("hi")]),
+                    .object(["control": .string("ESC")]),
+                ]),
+            ]),
+        ]))
+    }
+
+    private func replayStartRecord() -> JSONValue {
+        .object([
+            "kind": .string("start"),
+            "version": .number(Double(paneTapeStreamVersion)),
+            "capture": .string("follow"),
+            "format": .string(PaneTapeFormat.replay.rawValue),
+            "initial": .object(["columns": .number(80), "rows": .number(24)]),
+        ])
+    }
+
+    private func replayEventRecord() -> JSONValue {
+        .object([
+            "kind": .string("event"),
+            "sequence": .number(4),
+            "elapsedNanoseconds": .number(900),
+            "byteOffset": .number(0),
+            "byteLength": .number(3),
+            "event": .object([
+                "type": .string("feed"),
+                "base64": .string(Data("hi\u{1B}".utf8).base64EncodedString()),
+            ]),
+        ])
+    }
+
     private func record(_ kind: String) -> JSONValue {
         .object(["kind": .string(kind)])
     }

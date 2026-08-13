@@ -137,7 +137,7 @@ contract.
       Non-green until slice 4: `scripts/tests/danterm-cli_test.sh` still asserts
       `jq -e '.events'` against the version 1 single-document output. `just test`
       stays green; only `just test-cli` fails, and only on that one assertion.
-- [ ] 3. Add `pane tape --format inspect` with structured payload spans
+- [x] 3. Add `pane tape --format inspect` with structured payload spans
 - [ ] 4. Convert version 2 replay streams into neutral fixtures
 
 ## Implementation notes
@@ -167,3 +167,14 @@ contract.
   workaround rather than a boundary: this view is the adapter between the
   recorder vocabulary and the portable stream vocabulary, so naming both sides
   is its job.
+- The inspect span classifier decodes UTF-8 itself instead of asking Foundation.
+  A string decoder is free to normalize what it reads, and Foundation's swallows
+  a byte-order mark: `String(bytes: [0xEF, 0xBB, 0xBF], encoding: .utf8)` returns
+  an empty string, so three real payload bytes disappeared and the spans stopped
+  accounting for every byte. The explicit decoder was checked against a reference
+  UTF-8 decoder over every one-, two-, and three-byte sequence, sampled four-byte
+  sequences, and every truncated prefix.
+- The inspect transform lives in `DanTermProtocol` rather than in `cli/`, even
+  though only the CLI applies it. It is a pure record-to-record function, and
+  putting it beside the stream vocabulary makes it testable in a fast package
+  suite instead of only through a socket.

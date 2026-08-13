@@ -5,6 +5,10 @@ public enum CLIOutputMode: Equatable {
     case none
     case json
     case text
+    /// A record stream rather than a single result: the CLI writes each record as its own
+    /// line as it arrives, in the named format. The format is a client-side rendering choice
+    /// and is not part of the request.
+    case tapeStream(PaneTapeFormat)
 }
 
 public struct CLICommand: Equatable {
@@ -540,7 +544,10 @@ private func parsePaneRowsCommand(_ args: [String]) throws -> CLICommand {
 }
 
 private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now]"
+    let usage = """
+        usage: danterm pane tape --pane <pane-id> [--follow] [--from-now] \
+        [--format replay|inspect]
+        """
     let parsed: ParsedTapePane
     do {
         parsed = try parseTapePaneArgs(args)
@@ -550,6 +557,10 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
             throw CLIParseError(usage)
         case .fromNowRequiresFollow:
             throw CLIParseError("--from-now requires --follow\n\(usage)")
+        case .missingFormatArg:
+            throw CLIParseError("--format requires replay or inspect\n\(usage)")
+        case .invalidFormat(let value):
+            throw CLIParseError("unknown format: \(value)\n\(usage)")
         case .unknownFlag(let flag):
             throw CLIParseError("unknown flag: \(flag)")
         case .unexpectedArgument(let argument):
@@ -562,7 +573,7 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
             follow: parsed.follow,
             fromNow: parsed.fromNow
         ),
-        outputMode: .json
+        outputMode: .tapeStream(parsed.format)
     )
 }
 
