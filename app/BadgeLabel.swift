@@ -1,4 +1,4 @@
-// NSTextField extension for red-circle badge labels used in the toolbar button and sidebar.
+// Shared construction and count painting for the app's badge labels.
 import Cocoa
 
 extension NSTextField {
@@ -26,18 +26,4 @@ extension NSTextField {
         stringValue = "\(count)"
         isHidden = count == 0
     }
-}
-
-/// Returns the visible alert badge in a tab cell, or nil.
-/// Looks for an NSStackView with identifier "tabAccessoryStack" containing
-/// an unhidden badge with identifier "bellDot".
-@MainActor
-func visibleAlertBadge(in cell: NSView) -> NSView? {
-    let stackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
-    let badgeId = NSUserInterfaceItemIdentifier("bellDot")
-    guard let stack = cell.subviews.first(where: { $0.identifier == stackId }) as? NSStackView,
-          let badge = stack.arrangedSubviews.first(where: { $0.identifier == badgeId }),
-          !badge.isHidden
-    else { return nil }
-    return badge
 }

@@ -665,10 +665,12 @@ private func sidebarBadgeCount(
     line: Int = #line
 ) throws -> Int {
     let row = try sidebarRow(for: tabId, in: outline, file: file, line: line)
-    guard let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView
+    guard let cell = outline.view(
+        atColumn: 0, row: row,
+        makeIfNecessary: false) as? SidebarTabCellView
     else { throw UITestFailure(message: "missing cell for tab \(tabId) (\(file):\(line))") }
-    guard let badge = visibleAlertBadge(in: cell) as? NSTextField else { return 0 }
-    return Int(badge.stringValue) ?? -1
+    guard cell.alertBadge.isHidden == false else { return 0 }
+    return Int(cell.alertBadge.stringValue) ?? -1
 }
 
 private func assertSidebarRowOffScreen(

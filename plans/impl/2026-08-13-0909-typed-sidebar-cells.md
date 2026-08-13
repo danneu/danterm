@@ -217,9 +217,17 @@ and only the first is behavior. `cell.alertBadge` asserts the first alone.
   sidebar in a window. Green against unmodified production code -- the point of
   the separate commit is that this assertion is proven to be asserting something
   real before the lookup it depends on is replaced.
-- [ ] **2. The refactor.** Cell classes, `SidebarView`, `BadgeLabel`,
+- [x] **2. The refactor.** Cell classes, `SidebarView`, `BadgeLabel`,
   `test-ui.sh`, and all test rewiring. The UI harness compiles production and
   test files as one module, so this cannot be sliced smaller and stay green.
+
+## Implementation notes
+
+- Live slot verification covered row creation, group and tab rename repainting,
+  alert-badge rendering, and the resulting sidebar geometry. The control API
+  does not expose caret clicks, jump mode, badge clicks, or divider drags, so
+  the AppKit harness covered those interactions instead of expanding this
+  refactor into new IPC commands.
 
 ## Follow Up
 

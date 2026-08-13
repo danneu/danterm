@@ -21,7 +21,6 @@ struct UITestRunner {
         chipViewTests()
         paneStripViewTests()
         splitContainerViewTests()
-        sidebarBadgeTests()
         menuCommandPolicyTests()
         todoInputViewTests()
         sidebarSelectionCacheTests()

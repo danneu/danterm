@@ -57,15 +57,17 @@ func sidebarRenameRecycleTests() {
             window.setContentSize(NSSize(width: width, height: 140))
             materializeRenameRecycleRows(sidebar, outline: outline)
 
-            let groupCell = try renameRecycleCell(for: .group(groupA), in: outline)
-            let tabCell = try renameRecycleCell(for: .tab(tab), in: outline)
+            let groupCell: SidebarGroupCellView = try renameRecycleCell(
+                for: .group(groupA), in: outline)
+            let tabCell: SidebarTabCellView = try renameRecycleCell(
+                for: .tab(tab), in: outline)
             try expectCellFillsVisibleContent(groupCell, scroll: scroll, label: "group at \(width)")
             try expectCellFillsVisibleContent(tabCell, scroll: scroll, label: "tab at \(width)")
             try expectAccessoryTrailingInset(
-                in: groupCell, identifier: "groupCaretButton", inset: 2,
+                groupCell.caretButton, inset: 2,
                 scroll: scroll, label: "group at \(width)")
             try expectAccessoryTrailingInset(
-                in: tabCell, identifier: "bellDot", inset: 2,
+                tabCell.alertBadge, inset: 2,
                 scroll: scroll, label: "tab at \(width)")
         }
     }
@@ -90,14 +92,12 @@ func sidebarRenameRecycleTests() {
         model.alerts = [renameRecycleBellAlert(paneId: model.groups[0].tabs[0].focusedPaneId)]
         var projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         let scroll = findRenameRecycleScrollView(in: sidebar)!
-        let cell = try renameRecycleCell(for: .tab(tab), in: outline)
-        guard let titleField = cell.textField else {
-            throw UITestFailure(message: "tab cell should have a title field")
-        }
+        let cell: SidebarTabCellView = try renameRecycleCell(for: .tab(tab), in: outline)
+        let titleField = cell.titleField
 
         try expectTabTitlePrecedesAccessory(in: cell)
         try expectAccessoryTrailingInset(
-            in: cell, identifier: "bellDot", inset: 2,
+            cell.alertBadge, inset: 2,
             scroll: scroll, label: "short display title")
 
         sidebar.beginRenamingTab(tab)
@@ -109,7 +109,7 @@ func sidebarRenameRecycleTests() {
         window.contentView?.layoutSubtreeIfNeeded()
         try expectTabTitlePrecedesAccessory(in: cell)
         try expectAccessoryTrailingInset(
-            in: cell, identifier: "bellDot", inset: 2,
+            cell.alertBadge, inset: 2,
             scroll: scroll, label: "long rename draft")
         guard let commitEditor = titleField.currentEditor() as? NSTextView else {
             throw UITestFailure(message: "rename should install a field editor")
@@ -126,7 +126,7 @@ func sidebarRenameRecycleTests() {
             "committed long title should reach display mode")
         try expectTabTitlePrecedesAccessory(in: cell)
         try expectAccessoryTrailingInset(
-            in: cell, identifier: "bellDot", inset: 2,
+            cell.alertBadge, inset: 2,
             scroll: scroll, label: "after rename commit")
 
         sidebar.beginRenamingTab(tab)
@@ -142,7 +142,7 @@ func sidebarRenameRecycleTests() {
             "rename cancellation should restore the committed title")
         try expectTabTitlePrecedesAccessory(in: cell)
         try expectAccessoryTrailingInset(
-            in: cell, identifier: "bellDot", inset: 2,
+            cell.alertBadge, inset: 2,
             scroll: scroll, label: "after rename cancellation")
 
         model.groups[0].tabs[0].customTitle = "changed"
@@ -151,7 +151,7 @@ func sidebarRenameRecycleTests() {
             to: sidebar, outline: outline, runtime: runtime)
         materializeRenameRecycleRows(sidebar, outline: outline)
         try expectAccessoryTrailingInset(
-            in: cell, identifier: "bellDot", inset: 2,
+            cell.alertBadge, inset: 2,
             scroll: scroll, label: "after title change")
     }
 
@@ -175,20 +175,21 @@ func sidebarRenameRecycleTests() {
         _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
 
         sidebar.beginRenamingTab(tab)
-        let tabCell = try renameRecycleCell(for: .tab(tab), in: outline)
-        tabCell.textField?.frame.size.width = 0
-        tabCell.textField?.invalidateIntrinsicContentSize()
+        let tabCell: SidebarTabCellView = try renameRecycleCell(for: .tab(tab), in: outline)
+        tabCell.titleField.frame.size.width = 0
+        tabCell.titleField.invalidateIntrinsicContentSize()
         window.contentView?.layoutSubtreeIfNeeded()
-        try uiExpect((tabCell.textField?.frame.width ?? 0) > 80,
+        try uiExpect(tabCell.titleField.frame.width > 80,
             "editable tab title should retain useful width beside its jump badge")
 
         window.makeFirstResponder(nil)
         sidebar.beginRenamingGroup(groupA)
-        let groupCell = try renameRecycleCell(for: .group(groupA), in: outline)
-        groupCell.textField?.frame.size.width = 0
-        groupCell.textField?.invalidateIntrinsicContentSize()
+        let groupCell: SidebarGroupCellView = try renameRecycleCell(
+            for: .group(groupA), in: outline)
+        groupCell.titleField.frame.size.width = 0
+        groupCell.titleField.invalidateIntrinsicContentSize()
         window.contentView?.layoutSubtreeIfNeeded()
-        try uiExpect((groupCell.textField?.frame.width ?? 0) > 80,
+        try uiExpect(groupCell.titleField.frame.width > 80,
             "editable group title should retain useful width beside its accessories")
     }
 
@@ -207,8 +208,8 @@ func sidebarRenameRecycleTests() {
             selected: tab)
         _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         sidebar.beginRenamingTab(tab)
-        let cell = try renameRecycleCell(for: .tab(tab), in: outline)
-        cell.textField?.stringValue = "renamed"
+        let cell: SidebarTabCellView = try renameRecycleCell(for: .tab(tab), in: outline)
+        cell.titleField.stringValue = "renamed"
 
         sidebar.finishActiveRenameForPointerInteraction()
 
@@ -222,7 +223,7 @@ func sidebarRenameRecycleTests() {
             "pointer click-away should dispatch exactly one rename message")
         try uiExpect(sidebar.activeRenameTarget == nil,
             "pointer click-away should synchronously clear rename ownership")
-        try uiExpect(cell.textField?.isEditable == false,
+        try uiExpect(cell.titleField.isEditable == false,
             "pointer click-away should return the title field to display state")
     }
 
@@ -242,7 +243,9 @@ func sidebarRenameRecycleTests() {
             (groupB, "B", false, [(tabB, "beta")]),
         ])
         _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
-        let field = try renameRecycleCell(for: .group(groupA), in: outline).textField!
+        let groupCell: SidebarGroupCellView = try renameRecycleCell(
+            for: .group(groupA), in: outline)
+        let field = groupCell.titleField
 
         sidebar.beginRenamingGroup(groupA)
         field.stringValue = "committed"
@@ -313,10 +316,10 @@ func sidebarRenameRecycleTests() {
             selected: tab)
         let projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         sidebar.beginRenamingTab(tab)
-        let cell = try renameRecycleCell(for: .tab(tab), in: outline)
-        cell.textField?.stringValue = "stale draft"
-        cell.textField?.abortEditing()
-        try uiExpect(cell.textField?.currentEditor() == nil,
+        let cell: SidebarTabCellView = try renameRecycleCell(for: .tab(tab), in: outline)
+        cell.titleField.stringValue = "stale draft"
+        cell.titleField.abortEditing()
+        try uiExpect(cell.titleField.currentEditor() == nil,
             "precondition: AppKit should have discarded the field editor")
 
         _ = applyRenameRecycleTransition(
@@ -325,9 +328,9 @@ func sidebarRenameRecycleTests() {
 
         try uiExpect(sidebar.activeRenameTarget == nil,
             "abandoned editor should clear the authoritative rename target")
-        try uiExpect(cell.textField?.isEditable == false,
+        try uiExpect(cell.titleField.isEditable == false,
             "abandoned editor should return the title field to display state")
-        try uiExpect(cell.textField?.stringValue == "alpha",
+        try uiExpect(cell.titleField.stringValue == "alpha",
             "abandoned editor should restore the model title instead of stale draft text")
     }
 
@@ -356,8 +359,10 @@ func sidebarRenameRecycleTests() {
 
         sidebar.beginRenamingTab(edited)
         let editedRow = try renameRecycleRow(for: edited, in: outline)
-        let editedCell = outline.view(atColumn: 0, row: editedRow, makeIfNecessary: false) as! NSTableCellView
-        try uiExpect(editedCell.textField?.currentEditor() != nil,
+        let editedCell = outline.view(
+            atColumn: 0, row: editedRow,
+            makeIfNecessary: false) as! SidebarTabCellView
+        try uiExpect(editedCell.titleField.currentEditor() != nil,
             "precondition: rename should attach a live field editor")
         try uiExpect(sidebar.activeRenameTarget == .tab(edited),
             "precondition: the view should own the tab rename")
@@ -381,12 +386,14 @@ func sidebarRenameRecycleTests() {
             to: sidebar, outline: outline, runtime: runtime)
 
         let row = try renameRecycleRow(for: edited, in: outline)
-        let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as! NSTableCellView
-        try uiExpect(cell.textField?.isEditable == false,
+        let cell = outline.view(
+            atColumn: 0, row: row,
+            makeIfNecessary: true) as! SidebarTabCellView
+        try uiExpect(cell.titleField.isEditable == false,
             "re-shown row must not still be editable after collapse ended its rename")
-        try uiExpect(cell.textField?.currentEditor() == nil,
+        try uiExpect(cell.titleField.currentEditor() == nil,
             "re-shown row must not have a live field editor")
-        try uiExpect(cell.textField?.stringValue == "alpha",
+        try uiExpect(cell.titleField.stringValue == "alpha",
             "re-shown row must display the model title")
     }
 
@@ -417,8 +424,10 @@ func sidebarRenameRecycleTests() {
 
         sidebar.beginRenamingTab(edited)
         let editedRow = try renameRecycleRow(for: edited, in: outline)
-        let editedCell = outline.view(atColumn: 0, row: editedRow, makeIfNecessary: false) as! NSTableCellView
-        try uiExpect(editedCell.textField?.currentEditor() != nil,
+        let editedCell = outline.view(
+            atColumn: 0, row: editedRow,
+            makeIfNecessary: false) as! SidebarTabCellView
+        try uiExpect(editedCell.titleField.currentEditor() != nil,
             "precondition: rename should attach a live field editor")
 
         // Cmd-T: new tab appended, selection moves to it.
@@ -429,7 +438,7 @@ func sidebarRenameRecycleTests() {
             old: initialProjection, newModel: afterCmdT,
             to: sidebar, outline: outline, runtime: runtime)
 
-        try uiExpect(editedCell.textField?.isEditable == false,
+        try uiExpect(editedCell.titleField.isEditable == false,
             "selection moving away must end the rename, not strand an editable cell")
         try uiExpect(sidebar.activeRenameTarget == nil,
             "selection moving away must clear rename ownership")
@@ -455,8 +464,10 @@ func sidebarRenameRecycleTests() {
 
         sidebar.beginRenamingTab(edited)
         let editedRow = try renameRecycleRow(for: edited, in: outline)
-        let editedCell = outline.view(atColumn: 0, row: editedRow, makeIfNecessary: false) as! NSTableCellView
-        try uiExpect(editedCell.textField?.currentEditor() != nil,
+        let editedCell = outline.view(
+            atColumn: 0, row: editedRow,
+            makeIfNecessary: false) as! SidebarTabCellView
+        try uiExpect(editedCell.titleField.currentEditor() != nil,
             "precondition: rename should attach a live field editor")
         try uiExpect(sidebar.activeRenameTarget == .tab(edited),
             "precondition: the view should own the tab rename")
@@ -465,7 +476,7 @@ func sidebarRenameRecycleTests() {
             old: projection, newModel: model,
             to: sidebar, outline: outline, runtime: runtime)
 
-        try uiExpect(editedCell.textField?.currentEditor() != nil,
+        try uiExpect(editedCell.titleField.currentEditor() != nil,
             "cosmetic sweep should leave the live field editor attached")
         try uiExpect(sidebar.activeRenameTarget == .tab(edited),
             "cosmetic sweep should preserve rename ownership")
@@ -490,8 +501,10 @@ func sidebarRenameRecycleTests() {
 
         sidebar.beginRenamingTab(edited)
         let editedRow = try renameRecycleRow(for: edited, in: outline)
-        let editedCell = outline.view(atColumn: 0, row: editedRow, makeIfNecessary: false) as! NSTableCellView
-        try uiExpect(editedCell.textField?.currentEditor() != nil,
+        let editedCell = outline.view(
+            atColumn: 0, row: editedRow,
+            makeIfNecessary: false) as! SidebarTabCellView
+        try uiExpect(editedCell.titleField.currentEditor() != nil,
             "precondition: rename should attach a live field editor")
 
         let afterCmdT = renameRecycleModel(
@@ -506,7 +519,7 @@ func sidebarRenameRecycleTests() {
             "rename resync should report the dropped edited tab")
         try uiExpect(sidebar.activeRenameTarget == nil,
             "selection-moving reconcile should still clear rename ownership")
-        try uiExpect(editedCell.textField?.stringValue == "alpha",
+        try uiExpect(editedCell.titleField.stringValue == "alpha",
             "dropped resync should leave the old edited-row title visible")
 
         let repainted = applyRenameRecycleTransitionResult(
@@ -514,10 +527,12 @@ func sidebarRenameRecycleTests() {
             to: sidebar, outline: outline, runtime: runtime)
 
         let updatedRow = try renameRecycleRow(for: edited, in: outline)
-        let updatedCell = outline.view(atColumn: 0, row: updatedRow, makeIfNecessary: false) as! NSTableCellView
+        let updatedCell = outline.view(
+            atColumn: 0, row: updatedRow,
+            makeIfNecessary: false) as! SidebarTabCellView
         try uiExpect(repainted.droppedTabs.isEmpty,
             "retry should fetch and paint the edited tab row")
-        try uiExpect(updatedCell.textField?.stringValue == "alpha updated",
+        try uiExpect(updatedCell.titleField.stringValue == "alpha updated",
             "retry should repaint the edited row from the live model")
     }
 
@@ -545,7 +560,9 @@ func sidebarRenameRecycleTests() {
             let projection = applyRenameRecycleModel(
                 initial, to: sidebar, outline: outline, old: nil)
             sidebar.beginRenamingGroup(groupA)
-            let field = try renameRecycleCell(for: .group(groupA), in: outline).textField!
+            let cell: SidebarGroupCellView = try renameRecycleCell(
+                for: .group(groupA), in: outline)
+            let field = cell.titleField
             field.stringValue = "stale draft"
 
             let next: AppModel
@@ -599,7 +616,9 @@ func sidebarRenameRecycleTests() {
             selected: first)
         _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         sidebar.beginRenamingTab(first)
-        let firstField = try renameRecycleCell(for: .tab(first), in: outline).textField!
+        let firstCell: SidebarTabCellView = try renameRecycleCell(
+            for: .tab(first), in: outline)
+        let firstField = firstCell.titleField
         firstField.stringValue = "first draft"
         var targetDuringPriorDispatch: RenameTarget?
         runtime.onSend = { msg in
@@ -650,23 +669,24 @@ func sidebarRenameRecycleTests() {
         let model = renameRecycleModel([(group, "G", false, [(tab, "alpha")])])
         _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         sidebar.beginRenamingTab(tab)
-        let cell = try renameRecycleCell(for: .tab(tab), in: outline)
-        cell.textField?.abortEditing()
+        let cell: SidebarTabCellView = try renameRecycleCell(for: .tab(tab), in: outline)
+        cell.titleField.abortEditing()
 
         sidebar.testResetRecycledRenameState(cell)
 
         try uiExpect(sidebar.activeRenameTarget == nil,
             "reuse reset should clear ownership of the discarded editor")
-        try uiExpect(cell.textField?.isEditable == false,
+        try uiExpect(cell.titleField.isEditable == false,
             "reuse reset should restore display state")
     }
 
-    uiTest("a reconfigured group caret acts on its latest typed group") {
-        // Intent: a reused group row's caret expands or collapses the group assigned by
-        //   its latest configuration.
-        // Why it exists: reusable controls must not retain action identity from a prior row.
-        // Scenario: a cell first paints group A, is reconfigured for group B, then its
-        //   caret is invoked.
+    uiTest("a recycled group caret acts on the group in its new row") {
+        // Intent: a reused group row's caret expands or collapses the group that
+        //   the outline row now represents.
+        // Why it exists: reusable controls must not retain action identity from a
+        //   prior row or from a projection copied into the view.
+        // Scenario: group A's cell is reapplied and reparented onto group B's real
+        //   row, then its caret is invoked.
         let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
         defer { window.close() }
 
@@ -676,25 +696,29 @@ func sidebarRenameRecycleTests() {
             (groupA, "A", false, [(tabA, "alpha")]),
             (groupB, "B", false, [(tabB, "beta")]),
         ])
-        let projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
-        let cell = try renameRecycleCell(for: .group(groupA), in: outline)
+        let projection = applyRenameRecycleModel(
+            model, to: sidebar, outline: outline, old: nil)
+        let oldCell: SidebarGroupCellView = try renameRecycleCell(
+            for: .group(groupA), in: outline)
+        let replacedCell: SidebarGroupCellView = try renameRecycleCell(
+            for: .group(groupB), in: outline)
         let groupBProjection = projection.groups.first { $0.id == groupB }!
-
-        sidebar.testConfigureGroupCell(cell, group: groupBProjection)
-        guard let stack = cell.subviews.first(where: {
-            $0.identifier?.rawValue == "groupAccessoryStack"
-        }) as? NSStackView,
-        let caret = stack.arrangedSubviews.first(where: {
-            $0.identifier?.rawValue == "groupCaretButton"
-        }) as? NSButton else {
-            throw UITestFailure(message: "group cell should contain a caret")
+        let groupBRow = outline.row(for: replacedCell)
+        guard let rowView = outline.rowView(
+            atRow: groupBRow, makeIfNecessary: false) as? SidebarRowView else {
+            throw UITestFailure(message: "group B should have a materialized row")
         }
-        caret.performClick(nil)
+        replacedCell.removeFromSuperview()
+        oldCell.removeFromSuperview()
+        oldCell.apply(groupBProjection, isEditingTitle: false)
+        rowView.addSubview(oldCell)
+        oldCell.frame = rowView.bounds
+        oldCell.caretButton.performClick(nil)
 
         try uiExpect(runtime.sentMessages.contains {
             if case .toggleGroupCollapse(let id) = $0 { return id == groupB }
             return false
-        }, "reconfigured caret should act on group B")
+        }, "recycled caret should act on the group in its new row")
     }
 
     uiTest("a tab row inserted after a collapse-stranded rename shows its title") {
@@ -719,8 +743,10 @@ func sidebarRenameRecycleTests() {
 
         sidebar.beginRenamingTab(edited)
         let editedRow = try renameRecycleRow(for: edited, in: outline)
-        let editedCell = outline.view(atColumn: 0, row: editedRow, makeIfNecessary: false) as! NSTableCellView
-        try uiExpect(editedCell.textField?.currentEditor() != nil,
+        let editedCell = outline.view(
+            atColumn: 0, row: editedRow,
+            makeIfNecessary: false) as! SidebarTabCellView
+        try uiExpect(editedCell.titleField.currentEditor() != nil,
             "precondition: rename should attach a live field editor")
 
         let collapsed = renameRecycleModel([
@@ -744,19 +770,21 @@ func sidebarRenameRecycleTests() {
             to: sidebar, outline: outline, runtime: runtime)
 
         let row = try renameRecycleRow(for: spawned, in: outline)
-        let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as! NSTableCellView
+        let cell = outline.view(
+            atColumn: 0, row: row,
+            makeIfNecessary: true) as! SidebarTabCellView
         try uiExpect(cell === editedCell,
             "precondition: the inserted row should reuse the edited cell")
-        try uiExpect(cell.textField?.isEditable == false,
+        try uiExpect(cell.titleField.isEditable == false,
             "freshly inserted tab row must not inherit rename editability from a recycled cell")
-        try uiExpect(cell.textField?.currentEditor() == nil,
+        try uiExpect(cell.titleField.currentEditor() == nil,
             "freshly inserted tab row must not have a live field editor")
-        try uiExpect(cell.textField?.stringValue == "fresh tab",
+        try uiExpect(cell.titleField.stringValue == "fresh tab",
             "freshly inserted tab row must display the model title")
         let scroll = findRenameRecycleScrollView(in: sidebar)!
         try expectCellFillsVisibleContent(cell, scroll: scroll, label: "recycled tab")
         try expectAccessoryTrailingInset(
-            in: cell, identifier: "bellDot", inset: 2,
+            cell.alertBadge, inset: 2,
             scroll: scroll, label: "recycled tab")
     }
 }
@@ -887,12 +915,12 @@ private func renameRecycleRow(
     throw UITestFailure(message: "missing row for tab \(tabId) (\(file):\(line))")
 }
 
-private func renameRecycleCell(
+private func renameRecycleCell<Cell: NSTableCellView>(
     for target: RenameTarget,
     in outline: NSOutlineView,
     file: String = #file,
     line: Int = #line
-) throws -> NSTableCellView {
+) throws -> Cell {
     for row in 0..<outline.numberOfRows {
         guard let item = outline.item(atRow: row) as? SidebarItem else { continue }
         let matches: Bool = {
@@ -904,7 +932,7 @@ private func renameRecycleCell(
         }()
         guard matches,
               let cell = outline.view(
-                atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView
+                atColumn: 0, row: row, makeIfNecessary: true) as? Cell
         else { continue }
         return cell
     }
@@ -967,17 +995,11 @@ private func expectCellFillsVisibleContent(
 
 /// Verifies a cell-relative accessory keeps its production trailing inset from the clip view.
 private func expectAccessoryTrailingInset(
-    in cell: NSTableCellView,
-    identifier: String,
+    _ accessory: NSView,
     inset: CGFloat,
     scroll: NSScrollView,
     label: String
 ) throws {
-    guard let accessory = findRenameRecycleDescendant(
-        in: cell, identifier: NSUserInterfaceItemIdentifier(identifier))
-    else {
-        throw UITestFailure(message: "missing \(identifier)")
-    }
     let clip = scroll.contentView
     let frame = clip.convert(accessory.bounds, from: accessory)
     let actualInset = clip.bounds.maxX - frame.maxX
@@ -985,29 +1007,8 @@ private func expectAccessoryTrailingInset(
         "\(label) accessory should keep inset \(inset), got \(actualInset)")
 }
 
-/// Finds an identified control inside the cell's nested stack-view hierarchy.
-private func findRenameRecycleDescendant(
-    in view: NSView,
-    identifier: NSUserInterfaceItemIdentifier
-) -> NSView? {
-    if view.identifier == identifier { return view }
-    for subview in view.subviews {
-        if let found = findRenameRecycleDescendant(in: subview, identifier: identifier) {
-            return found
-        }
-    }
-    return nil
-}
-
 /// Pins truncation behavior without depending on the title's exact rendered width.
-private func expectTabTitlePrecedesAccessory(in cell: NSTableCellView) throws {
-    guard let leading = cell.subviews.first(where: {
-        $0.identifier?.rawValue == "tabLeadingStack"
-    }), let accessory = cell.subviews.first(where: {
-        $0.identifier?.rawValue == "tabAccessoryStack"
-    }) else {
-        throw UITestFailure(message: "missing tab title or accessory lane")
-    }
-    try uiExpect(leading.frame.maxX <= accessory.frame.minX + 0.5,
+private func expectTabTitlePrecedesAccessory(in cell: SidebarTabCellView) throws {
+    try uiExpect(cell.leadingStack.frame.maxX <= cell.accessoryStack.frame.minX + 0.5,
         "tab title lane should truncate before the accessory lane")
 }

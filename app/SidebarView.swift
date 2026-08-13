@@ -78,10 +78,8 @@ final class SidebarRowView: NSTableRowView {
     /// rings match the row instead of a fixed neutral that reads as a halo.
     private func refreshHostedPaneStrips() {
         let background = selectionBackground
-        for cell in subviews.compactMap({ $0 as? NSTableCellView }) {
-            for strip in cell.subviews.compactMap({ $0 as? PaneStripView }) {
-                strip.rowBackground = background
-            }
+        for cell in subviews.compactMap({ $0 as? SidebarTabCellView }) {
+            cell.paneStrip.rowBackground = background
         }
     }
 
@@ -139,11 +137,13 @@ class SidebarOutlineView: NSOutlineView {
         guard clickedRow >= 0,
               let sidebarItem = item(atRow: clickedRow) as? SidebarItem,
               case .tab(let tab) = sidebarItem.kind,
-              let cell = view(atColumn: 0, row: clickedRow, makeIfNecessary: false),
-              let badge = visibleAlertBadge(in: cell)
+              let cell = view(
+                atColumn: 0, row: clickedRow,
+                makeIfNecessary: false) as? SidebarTabCellView,
+              !cell.alertBadge.isHidden
         else { return nil }
-        let badgePoint = badge.convert(point, from: self)
-        return badge.bounds.contains(badgePoint) ? tab.id : nil
+        let badgePoint = cell.alertBadge.convert(point, from: self)
+        return cell.alertBadge.bounds.contains(badgePoint) ? tab.id : nil
     }
 
     // NSResponder: routes alert-badge clicks to .clearAlertsForTabs, and pre-empts
@@ -178,11 +178,6 @@ class SidebarOutlineView: NSOutlineView {
 override var acceptsFirstResponder: Bool { false }
 }
 
-/// Carries the typed identity assigned by the latest group-cell configuration.
-private final class SidebarGroupCaretButton: NSButton {
-    var groupId: GroupId?
-}
-
 // MARK: - SidebarView
 
 class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
@@ -208,15 +203,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     var testForceNextNilCellTabIds: Set<TabId> = []
     var testForceNextNilCellGroupIds: Set<GroupId> = []
 
-    func testResetRecycledRenameState(_ cell: NSTableCellView) {
+    func testResetRecycledRenameState(_ cell: SidebarTabCellView) {
         resetRecycledRenameState(cell)
-    }
-
-    func testConfigureGroupCell(
-        _ cell: NSTableCellView,
-        group: SidebarGroupProjection
-    ) {
-        configureGroupCell(cell, group: group)
     }
 #endif
 
@@ -293,9 +281,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    @objc private func caretClicked(_ sender: SidebarGroupCaretButton) {
-        guard let groupId = sender.groupId else { return }
-        guard let item = groupItemCache[groupId] else { return }
+    @objc private func caretClicked(_ sender: NSButton) {
+        let row = outlineView.row(for: sender)
+        guard row >= 0,
+              let item = outlineView.item(atRow: row) as? SidebarItem,
+              case .group = item.kind else { return }
         if outlineView.isItemExpanded(item) {
             outlineView.collapseItem(item)
         } else {
@@ -628,11 +618,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             return isVisible
         }
 #endif
-        guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView
+        guard let cell = outlineView.view(
+            atColumn: 0, row: row,
+            makeIfNecessary: false) as? SidebarTabCellView
         else { return isVisible }
         guard case .tab(let tab) = item.kind else { return false }
-        let isEditing = cell.textField?.currentEditor() != nil
-        configureTabCell(cell, tab: tab, skipTitle: isEditing)
+        let isEditing = cell.titleField.currentEditor() != nil
+        cell.apply(tab, isEditingTitle: isEditing)
         return false
     }
 
@@ -648,11 +640,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             return isVisible
         }
 #endif
-        guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView
+        guard let cell = outlineView.view(
+            atColumn: 0, row: row,
+            makeIfNecessary: false) as? SidebarGroupCellView
         else { return isVisible }
         guard case .group(let group) = item.kind else { return false }
-        let isEditing = cell.textField?.currentEditor() != nil
-        configureGroupCell(cell, group: group, skipTitle: isEditing)
+        let isEditing = cell.titleField.currentEditor() != nil
+        cell.apply(group, isEditingTitle: isEditing)
         return false
     }
 
@@ -788,24 +782,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     private func applyGroupCollapseState(for sidebarItem: SidebarItem, collapsed: Bool) {
-        guard case .group(let group) = sidebarItem.kind else { return }
+        guard case .group(var group) = sidebarItem.kind else { return }
         let row = outlineView.row(forItem: sidebarItem)
         guard row >= 0,
-              let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
-        if let stack = cell.subviews.first(where: { $0.identifier?.rawValue == "groupAccessoryStack" }) as? NSStackView {
-            if let caretButton = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
-                let symbolName = collapsed ? "chevron.right" : "chevron.down"
-                caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
-            }
-            if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
-                bellBadge.updateBadge(count: group.unreadAlertCount)
-                if !collapsed { bellBadge.isHidden = true }
-            }
-            if let tabCountBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupTabCountBadge" }) as? NSTextField {
-                tabCountBadge.stringValue = "\(group.tabCount)"
-                tabCountBadge.isHidden = !collapsed
-            }
-        }
+              let cell = outlineView.view(
+                atColumn: 0, row: row,
+                makeIfNecessary: false) as? SidebarGroupCellView else { return }
+        group.isCollapsed = collapsed
+        cell.apply(group, isEditingTitle: cell.titleField.currentEditor() != nil)
     }
 
     // MARK: - Drag & Drop
@@ -1266,290 +1250,37 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     // MARK: - Cell Factories
 
     private func makeGroupCell(for group: SidebarGroupProjection) -> NSView {
-        let cellId = NSUserInterfaceItemIdentifier("GroupCell")
-
-        if let existing = outlineView.makeView(withIdentifier: cellId, owner: nil) as? NSTableCellView {
+        if let existing = outlineView.makeView(
+            withIdentifier: SidebarGroupCellView.reuseIdentifier,
+            owner: nil) as? SidebarGroupCellView
+        {
             resetRecycledRenameState(existing)
-            configureGroupCell(existing, group: group)
+            existing.apply(group, isEditingTitle: false)
             return existing
         }
 
-        let cell = NSTableCellView()
-        cell.identifier = cellId
-
-        let textField = SingleLineLabel.make()
-        textField.translatesAutoresizingMaskIntoConstraints = false
-        textField.font = .preferredFont(forTextStyle: .headline)
-        textField.isEditable = false
-        textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        textField.delegate = self
-        cell.addSubview(textField)
-        cell.textField = textField
-
-        let bellBadge = NSTextField.makeBadge()
-        bellBadge.identifier = NSUserInterfaceItemIdentifier("groupBellBadge")
-
-        let tabCountBadge = NSTextField.makeBadge(color: .systemGray)
-        tabCountBadge.identifier = NSUserInterfaceItemIdentifier("groupTabCountBadge")
-
-        let caretButton = SidebarGroupCaretButton(
-            image: NSImage(
-                systemSymbolName: "chevron.right",
-                accessibilityDescription: "Toggle Group")!,
-            target: self,
-            action: #selector(caretClicked(_:)))
-        caretButton.translatesAutoresizingMaskIntoConstraints = false
-        caretButton.bezelStyle = .accessoryBarAction
-        caretButton.isBordered = false
-        caretButton.imageScaling = .scaleProportionallyDown
-        caretButton.contentTintColor = .tertiaryLabelColor
-        caretButton.identifier = NSUserInterfaceItemIdentifier("groupCaretButton")
-
-        let accessoryStack = NSStackView(views: [bellBadge, tabCountBadge, caretButton])
-        accessoryStack.translatesAutoresizingMaskIntoConstraints = false
-        accessoryStack.orientation = .horizontal
-        accessoryStack.alignment = .centerY
-        accessoryStack.spacing = 2
-        accessoryStack.identifier = NSUserInterfaceItemIdentifier("groupAccessoryStack")
-        accessoryStack.setHuggingPriority(.required, for: .horizontal)
-        accessoryStack.setContentCompressionResistancePriority(.required, for: .horizontal)
-        cell.addSubview(accessoryStack)
-
-        // Thin separator line at top edge, hidden for the first group
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        separator.identifier = NSUserInterfaceItemIdentifier("groupSeparator")
-        cell.addSubview(separator)
-
-        NSLayoutConstraint.activate([
-            separator.topAnchor.constraint(equalTo: cell.topAnchor),
-            separator.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
-            separator.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
-            textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
-            textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            textField.trailingAnchor.constraint(equalTo: accessoryStack.leadingAnchor, constant: -4),
-            accessoryStack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2),
-            accessoryStack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            caretButton.widthAnchor.constraint(equalToConstant: 16),
-            caretButton.heightAnchor.constraint(equalToConstant: 16),
-        ])
-
-        configureGroupCell(cell, group: group)
+        let cell = SidebarGroupCellView(
+            textFieldDelegate: self,
+            caretTarget: self,
+            caretAction: #selector(caretClicked(_:)))
+        cell.apply(group, isEditingTitle: false)
         return cell
-    }
-
-    /// Apply current group state to an existing cell's subviews. Shared by
-    /// makeGroupCell (initial population) and updateGroupRow (in-place refresh).
-    /// skipTitle protects the field editor during inline group rename.
-    private func configureGroupCell(
-        _ cell: NSTableCellView, group: SidebarGroupProjection, skipTitle: Bool = false
-    ) {
-        if !skipTitle {
-            cell.textField?.stringValue = group.name.text
-        }
-        // Hide separator for the first group
-        if let separator = cell.subviews.first(where: { $0.identifier?.rawValue == "groupSeparator" }) {
-            separator.isHidden = group.isFirst
-        }
-        if let stack = cell.subviews.first(where: { $0.identifier?.rawValue == "groupAccessoryStack" }) as? NSStackView {
-            if let caretButton = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? SidebarGroupCaretButton {
-                let symbolName = group.isCollapsed ? "chevron.right" : "chevron.down"
-                caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
-                caretButton.groupId = group.id
-            }
-            if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
-                bellBadge.updateBadge(count: group.unreadAlertCount)
-                if !group.isCollapsed { bellBadge.isHidden = true }
-            }
-            if let tabCountBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupTabCountBadge" }) as? NSTextField {
-                tabCountBadge.stringValue = "\(group.tabCount)"
-                tabCountBadge.isHidden = !group.isCollapsed
-            }
-        }
     }
 
     private func makeTabCell(for tab: SidebarTabProjection) -> NSView {
-        let cellId = NSUserInterfaceItemIdentifier("TabCell")
-        let subtitleId = NSUserInterfaceItemIdentifier("subtitle")
-        let bellDotId = NSUserInterfaceItemIdentifier("bellDot")
-        let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
-        let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
-        let leadingStackId = NSUserInterfaceItemIdentifier("tabLeadingStack")
-        let chipId = NSUserInterfaceItemIdentifier("tabChip")
-        let paneStripId = NSUserInterfaceItemIdentifier("tabPaneStrip")
-
-        let cell: NSTableCellView
-        if let existing = outlineView.makeView(withIdentifier: cellId, owner: nil) as? NSTableCellView {
+        let cell: SidebarTabCellView
+        if let existing = outlineView.makeView(
+            withIdentifier: SidebarTabCellView.reuseIdentifier,
+            owner: nil) as? SidebarTabCellView
+        {
             resetRecycledRenameState(existing)
             cell = existing
         } else {
-            cell = NSTableCellView()
-            cell.identifier = cellId
-
-            // Color stripe: 3px vertical bar on the left edge
-            let colorStripe = NSView()
-            colorStripe.identifier = colorStripeId
-            colorStripe.translatesAutoresizingMaskIntoConstraints = false
-            colorStripe.wantsLayer = true
-            colorStripe.isHidden = true
-            cell.addSubview(colorStripe)
-
-            let textField = SingleLineLabel.make()
-            textField.translatesAutoresizingMaskIntoConstraints = false
-            textField.font = .systemFont(ofSize: NSFont.systemFontSize)
-            textField.isEditable = false
-            textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            textField.delegate = self
-            cell.textField = textField
-
-            let chip = ChipView(kind: .terminal, edge: ChipArtwork.sidebarSize)
-            chip.identifier = chipId
-
-            let leadingStack = NSStackView(views: [chip, textField])
-            leadingStack.translatesAutoresizingMaskIntoConstraints = false
-            leadingStack.orientation = .horizontal
-            leadingStack.alignment = .centerY
-            leadingStack.spacing = 4
-            leadingStack.identifier = leadingStackId
-            leadingStack.setHuggingPriority(.defaultLow, for: .horizontal)
-            cell.addSubview(leadingStack)
-
-            let subtitleField = SingleLineLabel.make(truncating: .byTruncatingMiddle)
-            subtitleField.identifier = subtitleId
-            subtitleField.translatesAutoresizingMaskIntoConstraints = false
-            subtitleField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-            subtitleField.textColor = .secondaryLabelColor
-            cell.addSubview(subtitleField)
-
-            // Occupies the subtitle's line, and only one of the two is ever shown.
-            let paneStrip = PaneStripView()
-            paneStrip.identifier = paneStripId
-            paneStrip.isHidden = true
-            cell.addSubview(paneStrip)
-
-            let bellBadge = NSTextField.makeBadge()
-            bellBadge.identifier = bellDotId
-            let accessoryStack = NSStackView(views: [bellBadge])
-            accessoryStack.translatesAutoresizingMaskIntoConstraints = false
-            accessoryStack.orientation = .horizontal
-            accessoryStack.alignment = .top
-            accessoryStack.spacing = 3
-            accessoryStack.identifier = accessoryStackId
-            accessoryStack.setHuggingPriority(.required, for: .horizontal)
-            accessoryStack.setContentCompressionResistancePriority(.required, for: .horizontal)
-            cell.addSubview(accessoryStack)
-
-            NSLayoutConstraint.activate([
-                colorStripe.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
-                colorStripe.topAnchor.constraint(equalTo: cell.topAnchor),
-                colorStripe.bottomAnchor.constraint(equalTo: cell.bottomAnchor),
-                colorStripe.widthAnchor.constraint(equalToConstant: 5),
-                accessoryStack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
-                accessoryStack.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
-                leadingStack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
-                leadingStack.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
-                leadingStack.trailingAnchor.constraint(equalTo: accessoryStack.leadingAnchor, constant: -4),
-                subtitleField.leadingAnchor.constraint(equalTo: textField.leadingAnchor),
-                subtitleField.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
-                subtitleField.topAnchor.constraint(equalTo: textField.bottomAnchor, constant: 1),
-                paneStrip.leadingAnchor.constraint(equalTo: textField.leadingAnchor),
-                // Equal, not <=: the strip has no intrinsic width and fits itself
-                // to whatever it is given, so it needs a definite one.
-                paneStrip.trailingAnchor.constraint(
-                    equalTo: accessoryStack.leadingAnchor, constant: -4),
-                paneStrip.topAnchor.constraint(equalTo: textField.bottomAnchor, constant: 2),
-            ])
+            cell = SidebarTabCellView(textFieldDelegate: self)
         }
 
-        configureTabCell(cell, tab: tab)
+        cell.apply(tab, isEditingTitle: false)
         return cell
-    }
-
-    /// Apply current tab state to an existing cell's subviews. Shared by
-    /// makeTabCell (initial population) and updateTabRow (in-place refresh).
-    /// When skipTitle is true the text field is left untouched so the field
-    /// editor isn't clobbered during inline rename.
-    private func configureTabCell(
-        _ cell: NSTableCellView, tab: SidebarTabProjection, skipTitle: Bool = false
-    ) {
-        let subtitleId = NSUserInterfaceItemIdentifier("subtitle")
-        let bellDotId = NSUserInterfaceItemIdentifier("bellDot")
-        let jumpBadgeId = NSUserInterfaceItemIdentifier("jumpModeBadge")
-        let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
-        let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
-        let leadingStackId = NSUserInterfaceItemIdentifier("tabLeadingStack")
-        let chipId = NSUserInterfaceItemIdentifier("tabChip")
-        let paneStripId = NSUserInterfaceItemIdentifier("tabPaneStrip")
-
-        if !skipTitle {
-            cell.textField?.stringValue = tab.displayTitle.text
-        }
-        // A multi-pane tab spends its second line enumerating its panes; only a
-        // single-pane tab shows a cwd there.
-        if let subtitleField = cell.subviews.first(where: { $0.identifier == subtitleId }) as? NSTextField {
-            subtitleField.stringValue = tab.subtitle?.text ?? ""
-            subtitleField.isHidden = tab.subtitle == nil || !tab.paneChips.isEmpty
-        }
-        if let paneStrip = cell.subviews.first(where: { $0.identifier == paneStripId }) as? PaneStripView {
-            paneStrip.chips = tab.paneChips
-            paneStrip.isHidden = tab.paneChips.isEmpty
-        }
-        if let stack = cell.subviews.first(where: { $0.identifier == accessoryStackId }) as? NSStackView {
-            if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier == bellDotId }) as? NSTextField {
-                bellBadge.updateBadge(count: tab.unreadAlertCount)
-            }
-        }
-        if let leadingStack = cell.subviews.first(where: { $0.identifier == leadingStackId }) as? NSStackView,
-           let chip = leadingStack.arrangedSubviews.first(where: { $0.identifier == chipId }) as? ChipView
-        {
-            // Outside the skipTitle guard: an inline rename owns the title field,
-            // not the chip, and the pane can attach an agent mid-rename.
-            chip.kind = tab.chipKind
-        }
-        if !skipTitle,
-           let leadingStack = cell.subviews.first(where: { $0.identifier == leadingStackId }) as? NSStackView
-        {
-            let existingJumpBadge = leadingStack.arrangedSubviews.first(where: { $0.identifier == jumpBadgeId }) as? NSTextField
-            if let key = tab.jumpKey {
-                let badge = existingJumpBadge ?? makeJumpModeBadge(identifier: jumpBadgeId)
-                badge.stringValue = String(key).uppercased()
-                badge.isHidden = false
-                if existingJumpBadge == nil {
-                    leadingStack.insertArrangedSubview(badge, at: 0)
-                }
-            } else if let existingJumpBadge {
-                leadingStack.removeArrangedSubview(existingJumpBadge)
-                existingJumpBadge.removeFromSuperview()
-            }
-        }
-        if let stripe = cell.subviews.first(where: { $0.identifier == colorStripeId }) {
-            if let color = tab.color {
-                stripe.layer?.backgroundColor = color.nsColor.cgColor
-                stripe.isHidden = false
-            } else {
-                stripe.isHidden = true
-            }
-        }
-    }
-
-    private func makeJumpModeBadge(identifier: NSUserInterfaceItemIdentifier) -> NSTextField {
-        let label = NSTextField(labelWithString: "")
-        label.identifier = identifier
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        label.textColor = .alternateSelectedControlTextColor
-        label.alignment = .center
-        label.wantsLayer = true
-        label.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
-        label.layer?.cornerRadius = 5
-        label.layer?.masksToBounds = true
-        label.setContentCompressionResistancePriority(.required, for: .horizontal)
-        NSLayoutConstraint.activate([
-            label.widthAnchor.constraint(greaterThanOrEqualToConstant: 22),
-            label.heightAnchor.constraint(equalToConstant: 20),
-        ])
-        return label
     }
 
     /// Returns true if the drag cursor is in empty space below all outline view rows.
@@ -1576,16 +1307,20 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             guard let item = tabItemCache[tabId] else { return }
             let row = outlineView.row(forItem: item)
             guard row >= 0,
-                  let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
+                  let cell = outlineView.view(
+                    atColumn: 0, row: row,
+                    makeIfNecessary: false) as? SidebarTabCellView,
                   case .tab(let tab) = item.kind else { return }
-            configureTabCell(cell, tab: tab)
+            cell.apply(tab, isEditingTitle: false)
         case .group(let groupId):
             guard let item = groupItemCache[groupId] else { return }
             let row = outlineView.row(forItem: item)
             guard row >= 0,
-                  let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
+                  let cell = outlineView.view(
+                    atColumn: 0, row: row,
+                    makeIfNecessary: false) as? SidebarGroupCellView,
                   case .group(let group) = item.kind else { return }
-            configureGroupCell(cell, group: group)
+            cell.apply(group, isEditingTitle: false)
         }
     }
 

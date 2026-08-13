@@ -7,7 +7,7 @@
 import Cocoa
 
 // The runner calls this from `@MainActor main()`, so the body is main-actor in
-// fact. Saying so lets the closures below reach `visibleAlertBadge(in:)`.
+// fact. Saying so lets the closures below reach AppKit cell state.
 @MainActor
 func sidebarProjectionRowTests() {
     print("SidebarProjectionRow")
@@ -33,10 +33,10 @@ func sidebarProjectionRowTests() {
         model.alerts = [projectionRowBellAlert(paneId: pane)]
         let alertedProjection = applyProjectionRowModel(model, to: sidebar, outline: outline)
 
-        let cell = try projectionRowCell(for: .tab(tab), in: outline)
-        guard let badge = visibleAlertBadge(in: cell) else {
-            throw UITestFailure(message: "alerted tab should have a visible badge")
-        }
+        let cell: SidebarTabCellView = try projectionRowCell(for: .tab(tab), in: outline)
+        try uiExpect(cell.alertBadge.isHidden == false,
+            "alerted tab should have a visible badge")
+        let badge = cell.alertBadge
         let badgePoint = outline.convert(
             NSPoint(x: badge.bounds.midX, y: badge.bounds.midY), from: badge)
         try uiExpect(outline.tabForBadgeHit(at: badgePoint) == tab,
@@ -49,6 +49,117 @@ func sidebarProjectionRowTests() {
 
         try uiExpect(outline.tabForBadgeHit(at: badgePoint) == nil,
             "the badge point should resolve nothing after the badge is hidden")
+    }
+
+    uiTest("clearing a jump key restores its title lane after rename") {
+        // Intent: a hidden stored jump badge reserves no width, while an active
+        //   rename keeps its current title lane until the deferred repaint lands.
+        // Why it exists: storing the badge permanently is safe only if hiding it
+        //   collapses its arranged-subview width without resizing a live editor.
+        // Scenario: spec-first -- jump mode ends normally, then ends again while
+        //   the user is renaming the same tab.
+        let (sidebar, outline, window, runtime) = makeProjectionRowHarness()
+        defer { window.close() }
+
+        let group = GroupId()
+        let tab = TabId()
+        var model = AppModel(
+            groups: [GroupModel(id: group, name: "G", tabs: [
+                projectionRowTab(id: tab, title: "a title with useful width"),
+            ])],
+            selectedTabId: tab)
+        model.jumpMode = JumpModeState(keyMap: [tab: "a"])
+        var projection = applyProjectionRowModel(model, to: sidebar, outline: outline)
+        let cell: SidebarTabCellView = try projectionRowCell(for: .tab(tab), in: outline)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let badgedWidth = projectionRowTitleLaneWidth(cell)
+
+        model.jumpMode = nil
+        projection = applyProjectionRowTransition(
+            old: projection, newModel: model,
+            to: sidebar, outline: outline, runtime: runtime)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let clearedWidth = projectionRowTitleLaneWidth(cell)
+        try uiExpect(clearedWidth >= badgedWidth + 20,
+            "clearing the jump key should return the badge width to the title lane")
+
+        model.jumpMode = JumpModeState(keyMap: [tab: "a"])
+        projection = applyProjectionRowTransition(
+            old: projection, newModel: model,
+            to: sidebar, outline: outline, runtime: runtime)
+        sidebar.beginRenamingTab(tab)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let editingWidth = projectionRowTitleLaneWidth(cell)
+
+        model.jumpMode = nil
+        let suppressed = applyProjectionRowTransition(
+            old: projection, newModel: model,
+            to: sidebar, outline: outline, runtime: runtime)
+        window.contentView?.layoutSubtreeIfNeeded()
+        try uiExpect(abs(projectionRowTitleLaneWidth(cell) - editingWidth) <= 0.5,
+            "clearing the jump key during rename should not resize the title lane")
+
+        guard let editor = cell.titleField.currentEditor() as? NSTextView else {
+            throw UITestFailure(message: "rename should still own the field editor")
+        }
+        _ = sidebar.control(
+            cell.titleField, textView: editor,
+            doCommandBy: #selector(NSResponder.cancelOperation(_:)))
+        _ = applyProjectionRowTransition(
+            old: suppressed, newModel: model,
+            to: sidebar, outline: outline, runtime: runtime)
+        window.contentView?.layoutSubtreeIfNeeded()
+        try uiExpect(projectionRowTitleLaneWidth(cell) >= editingWidth + 20,
+            "the deferred repaint should return the badge width after rename ends")
+    }
+
+    uiTest("a materialized tab paints every scalar projection field") {
+        // Intent: one apply paints the tab title, subtitle, chip, alert badge,
+        //   jump badge, and color stripe from the supplied projection.
+        // Why it exists: typed access removes silent lookup failures only if each
+        //   stored child remains part of the cell's single total paint path.
+        // Scenario: spec-first -- a row arrives with every scalar decoration set.
+        let (sidebar, outline, window, _) = makeProjectionRowHarness()
+        defer { window.close() }
+
+        let group = GroupId()
+        let tab = TabId()
+        let model = AppModel(groups: [
+            GroupModel(id: group, name: "G", tabs: [
+                projectionRowTab(id: tab, title: "model title"),
+            ]),
+        ])
+        var projection = desiredSidebar(in: model)
+        projection.groups[0].tabs[0].displayTitle = DisplayLine("painted title")
+        projection.groups[0].tabs[0].subtitle = DisplayLine("painted subtitle")
+        projection.groups[0].tabs[0].unreadAlertCount = 3
+        projection.groups[0].tabs[0].jumpKey = "q"
+        projection.groups[0].tabs[0].color = .purple
+        projection.groups[0].tabs[0].chipKind = .codex
+        sidebar.applySidebarOps(
+            computeSidebarRowOps(old: nil, new: projection),
+            model: model, projection: projection, renameTargetToEnd: nil)
+        materializeProjectionRows(sidebar, outline: outline)
+
+        let cell: SidebarTabCellView = try projectionRowCell(for: .tab(tab), in: outline)
+        try uiExpect(cell.titleField.stringValue == "painted title",
+            "the title should come from the projection")
+        try uiExpect(
+            cell.subtitleField.isHidden == false
+                && cell.subtitleField.stringValue == "painted subtitle",
+            "the subtitle should come from the projection")
+        try uiExpect(cell.chip.kind == .codex,
+            "the chip should come from the projection")
+        try uiExpect(
+            cell.alertBadge.isHidden == false && cell.alertBadge.stringValue == "3",
+            "the alert badge should come from the projection")
+        try uiExpect(
+            cell.jumpBadge.isHidden == false && cell.jumpBadge.stringValue == "Q",
+            "the jump badge should come from the projection")
+        try uiExpect(
+            cell.colorStripe.isHidden == false
+                && cell.colorStripe.layer?.backgroundColor == TabColor.purple.nsColor.cgColor,
+            "the color stripe should come from the projection")
     }
 
     uiTest("a reload suppressed by rename leaves the whole row on its old projection") {
@@ -75,12 +186,12 @@ func sidebarProjectionRowTests() {
             selectedTabId: edited)
         let initial = applyProjectionRowModel(model, to: sidebar, outline: outline)
 
-        let cell = try projectionRowCell(for: .tab(edited), in: outline)
+        let cell: SidebarTabCellView = try projectionRowCell(for: .tab(edited), in: outline)
         try uiExpect(cell.textField?.stringValue == "alpha",
             "precondition: the row should start on the old title")
-        try uiExpect(visibleAlertBadge(in: cell) == nil,
+        try uiExpect(cell.alertBadge.isHidden,
             "precondition: the row should start with no visible alert badge")
-        try uiExpect(try projectionRowStrip(in: cell).chips.map(\.state) == [.quiet, .quiet],
+        try uiExpect(cell.paneStrip.chips.map(\.state) == [.quiet, .quiet],
             "precondition: neither pane should start marked")
 
         sidebar.beginRenamingTab(edited)
@@ -106,20 +217,22 @@ func sidebarProjectionRowTests() {
 
         try uiExpect(cell.textField?.stringValue == "alpha",
             "a reconfigure after a suppressed reload must redraw the old title")
-        try uiExpect(visibleAlertBadge(in: cell) == nil,
+        try uiExpect(cell.alertBadge.isHidden,
             "a reconfigure after a suppressed reload must not paint the newer badge")
-        try uiExpect(try projectionRowStrip(in: cell).chips.map(\.state) == [.quiet, .quiet],
+        try uiExpect(cell.paneStrip.chips.map(\.state) == [.quiet, .quiet],
             "a reconfigure after a suppressed reload must not paint the newer strip")
 
         _ = applyProjectionRowTransition(
             old: suppressed, newModel: model, to: sidebar, outline: outline, runtime: runtime)
 
-        let converged = try projectionRowCell(for: .tab(edited), in: outline)
+        let converged: SidebarTabCellView = try projectionRowCell(
+            for: .tab(edited), in: outline)
         try uiExpect(converged.textField?.stringValue == "alpha updated",
             "the retained projection should re-fire the reload and converge the title")
-        try uiExpect((visibleAlertBadge(in: converged) as? NSTextField)?.stringValue == "1",
+        try uiExpect(
+            converged.alertBadge.isHidden == false && converged.alertBadge.stringValue == "1",
             "the retained projection should re-fire the reload and converge the badge")
-        try uiExpect(try projectionRowStrip(in: converged).chips.map(\.state) == [.quiet, .attention],
+        try uiExpect(converged.paneStrip.chips.map(\.state) == [.quiet, .attention],
             "the retained projection should re-fire the reload and converge the strip")
     }
 
@@ -153,6 +266,7 @@ func sidebarProjectionRowTests() {
 
         try assertProjectionRowGroup(
             groupA, in: outline, caret: "chevron.down",
+            title: "A", hidesSeparator: true,
             bell: nil, tabCount: nil, label: "initial expanded group")
 
         model.groups[0].isCollapsed = true
@@ -165,6 +279,7 @@ func sidebarProjectionRowTests() {
 
         try assertProjectionRowGroup(
             groupA, in: outline, caret: "chevron.right",
+            title: "A", hidesSeparator: true,
             bell: "1", tabCount: "3", label: "collapsed group")
 
         model.groups[0].isCollapsed = false
@@ -174,6 +289,7 @@ func sidebarProjectionRowTests() {
 
         try assertProjectionRowGroup(
             groupA, in: outline, caret: "chevron.down",
+            title: "A", hidesSeparator: true,
             bell: nil, tabCount: nil, label: "re-expanded group")
     }
 }
@@ -277,12 +393,16 @@ private func materializeProjectionRows(_ sidebar: SidebarView, outline: NSOutlin
     }
 }
 
-private func projectionRowCell(
+private func projectionRowTitleLaneWidth(_ cell: SidebarTabCellView) -> CGFloat {
+    cell.leadingStack.bounds.maxX - cell.titleField.frame.minX
+}
+
+private func projectionRowCell<Cell: NSTableCellView>(
     for target: RenameTarget,
     in outline: NSOutlineView,
     file: String = #file,
     line: Int = #line
-) throws -> NSTableCellView {
+) throws -> Cell {
     for row in 0..<outline.numberOfRows {
         guard let item = outline.item(atRow: row) as? SidebarItem else { continue }
         let matches: Bool = {
@@ -294,22 +414,11 @@ private func projectionRowCell(
         }()
         guard matches,
               let cell = outline.view(
-                atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView
+                atColumn: 0, row: row, makeIfNecessary: true) as? Cell
         else { continue }
         return cell
     }
     throw UITestFailure(message: "missing cell for \(target) (\(file):\(line))")
-}
-
-private func projectionRowStrip(
-    in cell: NSTableCellView,
-    file: String = #file,
-    line: Int = #line
-) throws -> PaneStripView {
-    guard let strip = cell.subviews.compactMap({ $0 as? PaneStripView }).first else {
-        throw UITestFailure(message: "tab cell should host a pane strip (\(file):\(line))")
-    }
-    return strip
 }
 
 /// Assert a group row's three projection-driven accessories at once. `bell` and
@@ -318,38 +427,31 @@ private func assertProjectionRowGroup(
     _ groupId: GroupId,
     in outline: NSOutlineView,
     caret: String,
+    title: String,
+    hidesSeparator: Bool,
     bell: String?,
     tabCount: String?,
     label: String,
     file: String = #file,
     line: Int = #line
 ) throws {
-    let cell = try projectionRowCell(for: .group(groupId), in: outline, file: file, line: line)
-    guard let stack = cell.subviews.first(
-        where: { $0.identifier?.rawValue == "groupAccessoryStack" }) as? NSStackView else {
-        throw UITestFailure(message: "group cell should host its accessory stack (\(file):\(line))")
-    }
-
-    let caretButton = stack.arrangedSubviews.first {
-        $0.identifier?.rawValue == "groupCaretButton"
-    } as? NSButton
+    let cell: SidebarGroupCellView = try projectionRowCell(
+        for: .group(groupId), in: outline, file: file, line: line)
+    try uiExpect(cell.titleField.stringValue == title,
+        "\(label): title should show \(title)", file: file, line: line)
+    try uiExpect(cell.separator.isHidden == hidesSeparator,
+        "\(label): separator visibility should match the row position", file: file, line: line)
     // SF Symbol images carry no readable name and do not compare equal, so the
     // caret direction is checked against a reference symbol's rendered bitmap.
     let expectedCaret = NSImage(systemSymbolName: caret, accessibilityDescription: "Toggle Group")
-    try uiExpect(caretButton?.image?.tiffRepresentation == expectedCaret?.tiffRepresentation,
+    try uiExpect(cell.caretButton.image?.tiffRepresentation == expectedCaret?.tiffRepresentation,
         "\(label): caret should show \(caret)", file: file, line: line)
 
-    let bellBadge = stack.arrangedSubviews.first {
-        $0.identifier?.rawValue == "groupBellBadge"
-    } as? NSTextField
-    let shownBell = (bellBadge?.isHidden ?? true) ? nil : bellBadge?.stringValue
+    let shownBell = cell.alertBadge.isHidden ? nil : cell.alertBadge.stringValue
     try uiExpect(shownBell == bell,
         "\(label): bell badge should show \(bell ?? "nothing")", file: file, line: line)
 
-    let tabCountBadge = stack.arrangedSubviews.first {
-        $0.identifier?.rawValue == "groupTabCountBadge"
-    } as? NSTextField
-    let shownCount = (tabCountBadge?.isHidden ?? true) ? nil : tabCountBadge?.stringValue
+    let shownCount = cell.tabCountBadge.isHidden ? nil : cell.tabCountBadge.stringValue
     try uiExpect(shownCount == tabCount,
         "\(label): tab-count badge should show \(tabCount ?? "nothing")", file: file, line: line)
 }

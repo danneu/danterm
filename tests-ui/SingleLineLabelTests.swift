@@ -15,16 +15,14 @@ func singleLineLabelTests() {
         let (sidebar, outline, window) = makeSingleLineSidebar()
         defer { window.close() }
 
-        let groupCell = try singleLineCell(for: .group(sidebarFixtureGroupId), in: outline)
-        try assertSingleLine(try requireField(groupCell.textField), "sidebar group header")
+        let groupCell: SidebarGroupCellView = try singleLineCell(
+            for: .group(sidebarFixtureGroupId), in: outline)
+        try assertSingleLine(groupCell.titleField, "sidebar group header")
 
-        let tabCell = try singleLineCell(for: .tab(sidebarFixtureTabId), in: outline)
-        try assertSingleLine(try requireField(tabCell.textField), "sidebar tab title")
-        let subtitleId = NSUserInterfaceItemIdentifier("subtitle")
-        guard let subtitle = tabCell.subviews.first(where: { $0.identifier == subtitleId }) as? NSTextField else {
-            throw UITestFailure(message: "tab cell should have a subtitle field")
-        }
-        try assertSingleLine(subtitle, "sidebar tab subtitle")
+        let tabCell: SidebarTabCellView = try singleLineCell(
+            for: .tab(sidebarFixtureTabId), in: outline)
+        try assertSingleLine(tabCell.titleField, "sidebar tab title")
+        try assertSingleLine(tabCell.subtitleField, "sidebar tab subtitle")
         _ = sidebar
     }
 
@@ -67,8 +65,9 @@ func singleLineLabelTests() {
         let (sidebar, outline, window) = makeSingleLineSidebar()
         defer { window.close() }
 
-        let cell = try singleLineCell(for: .tab(sidebarFixtureTabId), in: outline)
-        let titleField = try requireField(cell.textField)
+        let cell: SidebarTabCellView = try singleLineCell(
+            for: .tab(sidebarFixtureTabId), in: outline)
+        let titleField = cell.titleField
         sidebar.beginRenamingTab(sidebarFixtureTabId)
         guard let editor = titleField.currentEditor() as? NSTextView else {
             throw UITestFailure(message: "rename should install a field editor")
@@ -162,7 +161,10 @@ private func makeSingleLinePaneWrapper() -> PaneWrapperView {
 }
 
 @MainActor
-private func singleLineCell(for target: RenameTarget, in outline: NSOutlineView) throws -> NSTableCellView {
+private func singleLineCell<Cell: NSTableCellView>(
+    for target: RenameTarget,
+    in outline: NSOutlineView
+) throws -> Cell {
     for row in 0..<outline.numberOfRows {
         guard let item = outline.item(atRow: row) as? SidebarItem else { continue }
         let matches: Bool = {
@@ -173,7 +175,7 @@ private func singleLineCell(for target: RenameTarget, in outline: NSOutlineView)
             }
         }()
         guard matches,
-              let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView
+              let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? Cell
         else { continue }
         return cell
     }
