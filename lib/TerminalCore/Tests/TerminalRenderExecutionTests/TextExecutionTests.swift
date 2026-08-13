@@ -1,7 +1,7 @@
 // Pixel-level proofs for per-cell CoreText shaping, traits, fallback, clipping, and orientation.
-import AppKit
 import CoreGraphics
 import CoreText
+import Foundation
 import Testing
 
 import TerminalCore

@@ -19,6 +19,16 @@ depends on two local packages, `lib/TerminalCore` and `lib/TerminalPTY`, which
 carry the terminal engine; the app target links only Cocoa, QuartzCore,
 CoreText, and UniformTypeIdentifiers.
 
+`lib/TerminalHostTools` is a third local package that nothing links. It holds the
+two engine entry points that only run on a Mac -- `GlyphPreview`, an AppKit
+window, and `TerminalMemoryProbe`, which shells out to `/usr/bin/vmmap`. They
+live outside `lib/TerminalCore` because that package declares iOS support, and a
+`platforms:` pin is a claim about every target in a package rather than the ones
+someone checked. `scripts/ios-portability-gate.sh` holds that claim up on every
+`just test` run: it finds the pinned packages by reading the manifests and
+cross-compiles each one whole, test targets included. A target that cannot build
+for iOS belongs in `TerminalHostTools`; it never belongs on an exemption list.
+
 - `dev-build.sh` -- debug mode by default (fast incremental rebuilds), or
   SwiftPM release mode with `--release`. Both modes use dev icons, the dev
   bundle ID, and development signing. The default installs to `~/Applications`;

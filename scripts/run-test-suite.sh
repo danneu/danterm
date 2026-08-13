@@ -24,6 +24,7 @@ export CLANG_MODULE_CACHE_PATH="$REPO_ROOT/.build/clang-module-cache"
 # the long poles in front keeps the tail from being one slow step finishing alone.
 STEPS=(
     'swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate -Xswiftc -Xfrontend -Xswiftc -warn-long-function-bodies=500'
+    './scripts/ios-portability-gate.sh'
     './scripts/test-terminal-pty.sh'
     './scripts/tests/terminal-capture-api-gate_test.sh'
     './scripts/tests/terminal-capture-api-gate-cache_test.sh'
@@ -42,6 +43,8 @@ STEPS=(
     'swift test --scratch-path .build-app-tests'
     './scripts/tests/core-purity-lint_test.sh'
     './scripts/tests/run-test-suite_test.sh'
+    './scripts/tests/ios-portability-gate_test.sh'
+    'swift test --package-path lib/TerminalHostTools --scratch-path lib/TerminalHostTools/.build-gate'
     './scripts/tests/provision-worktree_test.sh'
     './scripts/tests/test-ui-harness_test.sh'
     './scripts/tests/research-index-lint_test.sh'

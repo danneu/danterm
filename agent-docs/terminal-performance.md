@@ -660,6 +660,15 @@ just terminal-memory-probe "--payload scrollback-plain --vmmap"   # dirty alloca
 just terminal-memory-probe "--chunk 0"                    # single-shot feed: parse spike, not resident cost
 ```
 
+The probe executable lives in `lib/TerminalHostTools`, not `lib/TerminalCore`. It
+shells out to `/usr/bin/vmmap` through `Process`, which does not exist off the
+Mac, and `TerminalCore` declares iOS support for every target it holds. Its
+measuring code -- `TerminalMemoryProbeSupport`, which is what the numbers come
+from -- stayed in `TerminalCore` and is unchanged. Only the package path moved:
+`just terminal-memory-probe` is still the entry point, and a direct build is
+`swift build -c release --package-path lib/TerminalHostTools --product
+TerminalMemoryProbe`.
+
 It reports cell bytes, bytes per cell, row allocations, and the content shape
 that sizes representation work -- styled cells, distinct styles, multi-scalar
 spills, hyperlink cells, and content identities.

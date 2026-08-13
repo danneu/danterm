@@ -28,7 +28,7 @@ import subprocess
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-PROBE = REPO / "lib/TerminalCore/.build/release/TerminalMemoryProbe"
+PROBE = REPO / "lib/TerminalHostTools/.build/release/TerminalMemoryProbe"
 
 # The control geometries. The arena is budget-derived, so its cost must be flat across these;
 # per-cell storage is the known term that may move with geometry.
@@ -37,7 +37,7 @@ GEOMETRIES = [(179, 66), (80, 24), (40, 10)]
 
 def build():
     subprocess.run(
-        ["swift", "build", "-c", "release", "--package-path", "lib/TerminalCore",
+        ["swift", "build", "-c", "release", "--package-path", "lib/TerminalHostTools",
          "--product", "TerminalMemoryProbe"],
         cwd=REPO, check=True,
     )

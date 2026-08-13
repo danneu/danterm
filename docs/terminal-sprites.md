@@ -274,7 +274,7 @@ Practice TDD and keep each step at the layer that owns its behavior:
    executor rejects sub-floor scalars before routing, so an unregistered family
    below it renders from the font instead of its sprite, silently.
 5. Add the implemented scalars to `implementedRanges` in
-   [`GlyphPreviewLayout.swift`](../lib/TerminalCore/Sources/GlyphPreview/GlyphPreviewLayout.swift)
+   [`GlyphPreviewLayout.swift`](../lib/TerminalHostTools/Sources/GlyphPreview/GlyphPreviewLayout.swift)
    and update its corpus test.
 6. Run the focused geometry and execution tests, the preview corpus test, the
    full `TerminalCore` suite, redraw-equivalence coverage, and

@@ -551,7 +551,12 @@ func settleAllocator() {
 ///
 /// Dumped rather than parsed, which is the probe's own rule: vmmap's format is not a contract and
 /// a wrong parse produces a confident number.
+///
+/// `/usr/bin/vmmap` is a Mac tool, and `Process` -- the only way to reach it -- does not exist off
+/// the Mac. Rather than make the whole suite host-bound for this one reading, the probe reports the
+/// reading as unavailable there; the caller already prints whatever comes back verbatim.
 func vmmapSummaryLines() -> [String] {
+    #if os(macOS)
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/vmmap")
     process.arguments = ["--summary", String(ProcessInfo.processInfo.processIdentifier)]
@@ -565,6 +570,9 @@ func vmmapSummaryLines() -> [String] {
     return text.split(separator: "\n", omittingEmptySubsequences: false)
         .filter { $0.contains("MALLOC") || $0.contains("VIRTUAL") || $0.contains("TOTAL") }
         .map(String.init)
+    #else
+    return ["vmmap is unavailable off macOS"]
+    #endif
 }
 
 // MARK: - The probe

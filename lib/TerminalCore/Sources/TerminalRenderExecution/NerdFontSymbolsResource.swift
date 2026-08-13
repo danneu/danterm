@@ -8,13 +8,18 @@ import Foundation
 /// `@unchecked` bridges CoreText's unannotated immutable descriptor into the
 /// module's `Sendable` render values. The descriptor and source URL never change
 /// after initialization, and CoreText font objects are safe for concurrent reads.
-package final class NerdFontSymbolsResource: @unchecked Sendable {
+///
+/// The type, `packaged`, and `face(pointSize:)` are `public` rather than `package`
+/// because `GlyphPreview` compares this face against the system one and now lives
+/// in `TerminalHostTools`, a different package. Everything else here stays
+/// `package`: a caller outside this module picks a face, it does not load one.
+public final class NerdFontSymbolsResource: @unchecked Sendable {
     package static let directoryName = "NerdFontsSymbolsOnly"
     package static let fontName = "SymbolsNerdFontMono-Regular"
 
     /// The lazily initialized process-wide packaged resource, or nil when the
     /// application resource is absent or unreadable.
-    package static let packaged = load(at: packagedURL())
+    public static let packaged = load(at: packagedURL())
 
     /// The resource location retained for diagnostics and font-set equality.
     package let sourceURL: URL
@@ -71,7 +76,7 @@ package final class NerdFontSymbolsResource: @unchecked Sendable {
     }
 
     /// Projects the parsed resource to one point size without decoding it again.
-    package func face(pointSize: CGFloat) -> CTFont {
+    public func face(pointSize: CGFloat) -> CTFont {
         CTFontCreateWithFontDescriptor(descriptor, pointSize, nil)
     }
 }
