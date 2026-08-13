@@ -111,6 +111,9 @@ public struct BundleLayout: Equatable, Sendable {
         /// One byte-identical directory tree relative to the repository root.
         case repositoryTree(String)
 
+        /// A repository plist template transformed with the selected bundle identity.
+        case propertyListTemplate(String)
+
         /// A theme source tree transformed into the runtime catalog.
         case generatedThemeCatalog(String)
     }
@@ -183,11 +186,20 @@ public struct BundleLayout: Equatable, Sendable {
     /// The complete ordered entry set for this variant.
     public let entries: [Entry]
 
+    /// Directories whose immediate children must match the declared entry set exactly.
+    public let exactSetDirectories: [String]
+
     /// Creates a variant from its complete identity and declared entry set.
-    public init(variant: Variant, identity: Identity, entries: [Entry]) {
+    public init(
+        variant: Variant,
+        identity: Identity,
+        entries: [Entry],
+        exactSetDirectories: [String]
+    ) {
         self.variant = variant
         self.identity = identity
         self.entries = entries
+        self.exactSetDirectories = exactSetDirectories
     }
 
     /// Finds a destination by semantic role so callers do not search by path text.
@@ -236,7 +248,12 @@ public struct BundleLayout: Equatable, Sendable {
                 mode: 0o755,
                 source: .product("PTYSessionBootstrap")
             ),
-            Entry(id: .infoPlist, relativePath: Paths.infoPlist, mode: 0o644, source: .repositoryFile("app/Info.plist")),
+            Entry(
+                id: .infoPlist,
+                relativePath: Paths.infoPlist,
+                mode: 0o644,
+                source: .propertyListTemplate("app/Info.plist")
+            ),
             Entry(id: .iconAssets, relativePath: Paths.iconAssets, mode: 0o644, source: .repositoryFile(iconSource)),
             Entry(id: .commandSkill, relativePath: Paths.commandSkill, mode: 0o644, source: .repositoryFile("integrations/danterm/SKILL.md")),
             Entry(
@@ -290,6 +307,15 @@ public struct BundleLayout: Equatable, Sendable {
                 source: .product("DanTermInstanceIdentityTool")
             ))
         }
-        return BundleLayout(variant: variant, identity: identity, entries: entries)
+        return BundleLayout(
+            variant: variant,
+            identity: identity,
+            entries: entries,
+            exactSetDirectories: [
+                "Contents/MacOS",
+                "Contents/Helpers",
+                Paths.agentHooksDirectory,
+            ]
+        )
     }
 }

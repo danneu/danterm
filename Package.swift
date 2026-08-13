@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .executable(name: "DanTerm", targets: ["DanTerm"]),
         .executable(name: "DanTermCLI", targets: ["DanTermCLI"]),
+        .executable(name: "DanTermBundleLayoutTool", targets: ["DanTermBundleLayoutTool"]),
         .executable(name: "DanTermInstanceIdentityTool", targets: ["DanTermInstanceIdentityTool"]),
         .library(name: "DanTermProtocol", targets: ["DanTermProtocol"]),
         .library(name: "DanTermClient", targets: ["DanTermClient"]),
@@ -73,6 +74,14 @@ let package = Package(
             name: "DanTermCLI",
             dependencies: ["DanTermClient", "DanTermProtocol", "DanTermSupport"],
             path: "cli",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
+        .executableTarget(
+            name: "DanTermBundleLayoutTool",
+            dependencies: ["DanTermProtocol"],
+            path: "tools/DanTermBundleLayoutTool",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]

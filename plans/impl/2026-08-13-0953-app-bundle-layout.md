@@ -106,15 +106,17 @@ is a non-goal below.
   `Contents/Resources/danterm-hooks` contain exactly the variant's declared
   entries and nothing else. A release bundle rejects dev-only entries, and a dev
   bundle is rejected by release verification.
-- **I4.** Every declared entry with a repo source is byte-identical to it, and
+- **I4.** Every declared entry with a byte-identical repo source is
+  byte-identical to it, and
   `Contents/Resources/shell-integration` is tree-identical to
   `integrations/shell-integration` -- so a newly added integration asset needs no
-  assertion edit. Declared *executables* have no repo source and are never
-  byte-compared: codesign rewrites them, so byte-identity could only hold before
-  signing, and one contract that holds everywhere is worth more than a stronger
-  one that forces a reduced mode at half the sites. Their correctness rests on
-  I2, I3, I5, and the build-provenance assertions the producer contract tests
-  already make.
+  assertion edit. The plist source is a template because identity and version
+  stamping transform it. Declared *executables* have no repo source and are
+  never byte-compared: codesign rewrites them, so byte-identity could only hold
+  before signing, and one contract that holds everywhere is worth more than a
+  stronger one that forces a reduced mode at half the sites. Their correctness
+  rests on I2, I3, I5, and the build-provenance assertions the producer contract
+  tests already make.
 - **I5.** The GUI and CLI binaries are distinct by inode and by content, on every
   variant and at every site.
 - **I6.** `Assets.car` comes from the variant's own icon source.
@@ -130,7 +132,8 @@ is a non-goal below.
 
 - **PO1** (I1, I3, I4) -- For every entry the declaration emits, removing it or
   clearing its required mode fails verification and names the entry; for every
-  entry that has a repo source, perturbing its bytes fails as well. The test
+  entry that has a byte-identical repo source, perturbing its bytes fails as
+  well. The test
   enumerates from the declaration, so a newly declared entry cannot arrive
   unguarded and no test edit is needed to cover it.
 - **PO2** (I1) -- Executables have no repo source, so their provenance is proven
@@ -249,7 +252,7 @@ Behavioral, run locally:
 
 - [x] Declare `BundleLayout` and re-point the four Swift runtime call sites at
       it. No build-script change yet; the gate stays green on its own terms.
-- [ ] Add the emitter product and `scripts/verify-bundle-layout.sh`, plus its
+- [x] Add the emitter product and `scripts/verify-bundle-layout.sh`, plus its
       test in `run-test-suite.sh`. Nothing calls the verifier in anger yet.
 - [ ] Add `scripts/assemble-app-bundle.sh`; both producers become compile +
       assemble + verify. Deletes their inline assertions and `dev-build.sh`'s five
@@ -261,3 +264,9 @@ Behavioral, run locally:
 - [ ] Workflows: delete the two redundant verify blocks, add verifier calls at
       the signing and round-trip sites, retarget the meta-test at the verifier
       invocation, update `agent-docs/build-details.md` and `docs/ci.md`.
+
+## Implementation notes
+
+- `Info.plist` uses a distinct template source kind. Bundle identity and version
+  stamping transform it, so it cannot satisfy the byte-identical repository
+  source rule that applies to copied files.

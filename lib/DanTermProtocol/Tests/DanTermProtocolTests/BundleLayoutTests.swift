@@ -21,6 +21,11 @@ struct BundleLayoutTests {
         #expect(appExecutable.source == .product("DanTerm"))
         #expect(Set(layout.entries.map(\.id)).count == layout.entries.count)
         #expect(Set(layout.entries.map(\.relativePath)).count == layout.entries.count)
+        #expect(layout.exactSetDirectories == [
+            "Contents/MacOS",
+            "Contents/Helpers",
+            "Contents/Resources/danterm-hooks",
+        ])
     }
 
     @Test("development layout changes identity, icon, executable, and build-only helper")

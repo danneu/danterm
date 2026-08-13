@@ -62,6 +62,7 @@ STEPS=(
     './scripts/core-purity-lint.sh --allow-imports DequeModule lib/TerminalCore/Sources/TerminalCore'
     './scripts/core-purity-lint.sh lib/TerminalCore/Sources/TerminalCore'
     './scripts/tests/bundle-theme-resources_test.sh'
+    './scripts/tests/verify-bundle-layout_test.sh'
     './scripts/tests/terminal-fence-accounting-lint_test.sh'
     './scripts/tests/terminal-exit-concurrency-lint_test.sh'
     './scripts/tests/checkpoint-off-main-lint_test.sh'
