@@ -187,6 +187,10 @@ background behavior dominates. T5 and T9 test with a real phone.
 
 ### H5 -- the split is decided by derivability, not by a smart/dumb dial
 
+Adopted by D3: its invariant is now the rule later placement questions are
+checked against, not a hypothesis waiting on evidence. The three things it does
+not settle, listed at the end of this section, stay open and D3 repeats them.
+
 The question this hypothesis answers: how much work belongs on the phone versus
 the Mac, and whether a simpler client would cost less network traffic.
 
@@ -236,9 +240,10 @@ as settled:
   the probes, and no wire-format or policy change may cite this section as
   evidence until they report.
 
-## Candidate direction, pending evidence
+## Direction
 
-Provisional shape; every leg has a gate in the ledger.
+The client leg is settled by D3; the rest is provisional and each leg has a gate
+in the ledger.
 
 - **Client: a real terminal from day one.** The iOS app links `TerminalCore` +
   `TerminalRenderPlanning` + `TerminalSpriteGeometry` and drives a local engine
@@ -318,12 +323,23 @@ Provisional shape; every leg has a gate in the ledger.
   on F3's numbers, which agree but are support. The client owns the swapchain's
   contract, including retrying a coalesced publish, so it is not free. D2
   records what selecting it declines.
-- **D3 gate** -- confirm or restate the day-one-engine direction after F1-F4;
-  reopening the rejected text renderer requires these spikes to have failed. When
-  it is restated, adopt H5's invariant by name -- single-owner replicated state
-  over the terminal's own protocol -- so that later placement questions (who
-  encodes input, who answers queries, who owns geometry, whether the client
-  predicts) are checked against one rule instead of argued one at a time.
+- **D3 DECIDED** ([decisions.md](decisions.md)) -- the client is a replica
+  engine, confirming D1's provisional direction. The gate's condition for
+  reopening the text renderer was that Phase 1 fail, and every leg passed: the
+  port cost platform pins, one typealias, and one file split. D3 adopts H5's
+  invariant by name -- single-owner replicated state over the terminal's own
+  protocol -- so later placement questions (who encodes input, who answers
+  queries, who owns geometry, whether the client predicts) are checked against
+  one rule instead of argued one at a time. It narrows two words of H5 on
+  adoption ("originates nothing" becomes "originates no authoritative state",
+  and the Mac's authority over "input semantics" is dropped, because that
+  phrasing would silently decide T11), states that the invariant places state
+  and does not resolve races, and records what the replica costs plus what
+  would reopen it.
+
+Phase 1 is closed. Every leg passed in isolation and the composition has never
+run: no iOS binary links `DanTermClient`, and no engine on a phone has been fed
+by a tape stream. T23 owns closing that.
 
 ### Phase 2 -- transport, authentication, security
 
@@ -340,6 +356,21 @@ Provisional shape; every leg has a gate in the ledger.
   architectural and safe to adopt now; a binary tape framing is not, because
   deflate over JSON envelopes and base64 may erase most of that tax for no
   protocol change. T19 decides whether any framing work is left.
+- **T23 TODO** -- On-device integration smoke, and the first Phase 2 client
+  work. Every Phase 1 leg was proven alone: F1 and F2 are compiles, F3 drove a
+  local engine on the phone with a synthetic workload, F4 converged from a tape
+  stream on a Mac. Nothing has composed them, so link `DanTermClient` into an
+  iOS binary, feed a real pane's tape stream to a real engine on the phone, and
+  present it through the D2 swapchain. This is the residual D3 closed over, and
+  it is a smoke test rather than the client: it fails or passes, it does not
+  design anything.
+- **T24 TODO** -- Version skew between the two engines. D3 accepts that the
+  client only works against engines whose behavior it agrees with, and the
+  deployment model gives no atomic upgrade -- the Mac replaces its app, the
+  phone updates through TestFlight, so the ends skew in normal use. There is no
+  version field in the hello handshake and no mismatch detection. Decide what
+  the handshake carries and what a mismatched client does: refuse, degrade, or
+  warn. Wanted before the client ships, not before the smoke.
 - **T6 VETTING** -- Pairing and auth model: compare tailnet-identity-only,
   pinned client certificates, and a pairing token; decide where the method
   allowlist, rate limits, and audit log live. Also weigh the ideal alternative
@@ -512,8 +543,9 @@ rendered as attributed text). Rejected: milestone 1 is a full interactive
 terminal (D1), the render seam already ends in a platform-neutral
 `RenderFramePlan`, and an interim text renderer would be thrown away while
 misrepresenting wide characters, colors, and mouse-mode programs the whole
-time. Reopen only if Phase 1 shows the engine stack cannot reasonably build or
-present on iOS (D3 gate).
+time. The reopen condition was that Phase 1 show the engine stack cannot
+reasonably build or present on iOS; F1-F4 showed the opposite, so D3 closed the
+gate in the confirming direction and this stays rejected.
 
 ### A fixed server-side coalescing window on the tape stream
 

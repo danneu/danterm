@@ -1,8 +1,7 @@
 # Findings -- iOS remote client
 
-Append-only evidence chain for doc 35. F3 and F5 are still reserved by the task
-ledger in [README.md](README.md): F3 for the presentation-path measurement (T3),
-and F5 for the bridge prototype over the tailnet (T5).
+Append-only evidence chain for doc 35. F5 is still reserved by the task ledger
+in [README.md](README.md), for the bridge prototype over the tailnet (T5).
 
 F2 and F4 outgrew this file and live beside it, per the promotion rule in
 [FORMAT.md](../FORMAT.md). The entries here carry the result and the pointer;
