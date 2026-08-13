@@ -164,6 +164,7 @@ AppModel(
   installedFontFamilies: [],
   availableThemeNames: [],
   todoPopover: nil,
+  sidebarRenameTarget: nil,
   mruOrder: [
     [0]: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000003)),
     [1]: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000A))

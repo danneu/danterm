@@ -486,14 +486,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func newGroup(_ sender: Any?) {
-        let existingIds = Set(runtime.model.groups.map(\.id))
-        runtime.send(.createGroup(name: "New group"))
-        if let newGroup = runtime.model.groups.first(where: { !existingIds.contains($0.id) }) {
-            let groupId = newGroup.id
-            DispatchQueue.main.async { [weak self] in
-                self?.sidebarView.beginRenamingGroup(groupId)
-            }
-        }
+        runtime.send(.createGroupInteractively(name: "New group"))
     }
 
     @objc func splitRight(_ sender: Any?) {

@@ -561,6 +561,7 @@ struct SidebarTabProjection: Equatable {
   var unreadAlertCount: Int
   var jumpKey: Character?   // model.jumpMode?.keyMap[tab.id]
   var color: TabColor?
+  var hasCustomTitle: Bool = false
   // The row speaks for the focused pane, like displayTitle and subtitle do.
   var chipKind: ChipKind = .terminal
   // The second line's pane enumeration, empty for a single-pane tab. Carried in
@@ -586,11 +587,15 @@ struct SidebarGroupProjection: Equatable {
 }
 
 /// The full sidebar outline as a pure value: ordered groups -> ordered tabs, every
-/// rendered attribute, collapse state, and the per-tab jump badge -- but NOT selection.
+/// rendered attribute, collapse state, and sidebar interaction facts.
 /// `isSingleGroupMode` (one group) hides group rows and promotes tabs to roots; a flip
 /// of this flag restructures the whole outline, so `computeSidebarRowOps` rebuilds.
 struct SidebarProjection: Equatable {
   var isSingleGroupMode: Bool
+  var selectedTabId: TabId?
+  var singleGroupDropTargetId: GroupId?
+  var canDeleteGroups: Bool = false
+  var renameTarget: RenameTarget?
   var groups: [SidebarGroupProjection]
 
   /// The row payload `SidebarItemStore` mounts for an inserted or reloaded group.
@@ -614,8 +619,9 @@ func desiredSidebar(in model: AppModel) -> SidebarProjection {
   desiredSidebar(in: model, tally: unreadAlertTally(for: model))
 }
 
-/// Project the sidebar outline from the model. Selection is excluded by design
-/// (view-owned). The jump badge comes from `model.jumpMode?.keyMap[tab.id]`.
+/// Project the sidebar outline and the facts its interaction handlers need.
+/// NSOutlineView still owns the multi-selection; `selectedTabId` identifies its
+/// focused row. The jump badge comes from `model.jumpMode?.keyMap[tab.id]`.
 func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProjection {
   let firstGroupId = model.groups.first?.id
   let groups = model.groups.map { group in
@@ -634,13 +640,20 @@ func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProje
           unreadAlertCount: tally.byTab[tab.id] ?? 0,
           jumpKey: model.jumpMode?.keyMap[tab.id],
           color: tab.color,
+          hasCustomTitle: tab.customTitle != nil,
           chipKind: tabChipKind(tab),
           paneChips: tabPaneChips(tab, unreadByPane: tally.byPane)
         )
       }
     )
   }
-  return SidebarProjection(isSingleGroupMode: model.groups.count == 1, groups: groups)
+  return SidebarProjection(
+    isSingleGroupMode: model.groups.count == 1,
+    selectedTabId: model.selectedTabId,
+    singleGroupDropTargetId: model.groups.count == 1 ? model.groups[0].id : nil,
+    canDeleteGroups: model.groups.count > 1,
+    renameTarget: model.sidebarRenameTarget,
+    groups: groups)
 }
 
 /// A single ordered NSOutlineView mutation. The list `computeSidebarRowOps` returns is

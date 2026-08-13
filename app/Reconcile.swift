@@ -233,7 +233,7 @@ extension AppRuntime {
             renameTarget: renameTarget,
             new: new)
         let unapplied = sidebarView.applySidebarOps(
-            guarded.ops, model: model, projection: new,
+            guarded.ops, projection: new,
             renameTargetToEnd: guarded.clearRename ? renameTarget : nil)
         // Advance the cache. If a reload was suppressed for the still-editing row,
         // or could not paint a visible row, retain its prior projection so the deferred

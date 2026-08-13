@@ -94,7 +94,7 @@ private func makeSidebarRightClickHarness() -> (SidebarView, NSOutlineView, NSWi
     let projection = desiredSidebar(in: model)
     sidebar.applySidebarOps(
         computeSidebarRowOps(old: nil, new: projection),
-        model: model, projection: projection, renameTargetToEnd: nil)
+        projection: projection, renameTargetToEnd: nil)
 
     let outline = findSidebarOutlineView(in: sidebar)!
     sidebar.layoutSubtreeIfNeeded()
@@ -123,7 +123,6 @@ private func makeSidebarContextMenuHarness(groupCount: Int) -> (SidebarView, App
     let projection = desiredSidebar(in: model)
     sidebar.applySidebarOps(
         computeSidebarRowOps(old: nil, new: projection),
-        model: model,
         projection: projection,
         renameTargetToEnd: nil)
     return (sidebar, model)

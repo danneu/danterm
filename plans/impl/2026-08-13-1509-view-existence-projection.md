@@ -288,5 +288,5 @@ manual-QA per the ADR.
       double-press bug)
 - [x] 5. feat(alerts): project alerts popover existence (D5; PO6 -- deletes
       `toggleAlertsPopover` and `dismissAlertsPopover`)
-- [ ] 6. refactor(sidebar): interaction path reads the applied projection
+- [x] 6. refactor(sidebar): interaction path reads the applied projection
       (D6; I7; PO7 -- deletes `currentModel`)

@@ -14,6 +14,49 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct UpdateGroupTests {
+    @Test("interactive group creation requests one inline rename")
+    func interactiveCreateRequestsRename() throws {
+        var model = makeModel()
+        createTab(&model)
+
+        _ = update(&model, .createGroupInteractively(name: "New group"))
+
+        let created = try #require(model.groups.last)
+        #expect(model.sidebarRenameTarget == .group(created.id))
+        _ = update(&model, .sidebarRenameEnded)
+        #expect(model.sidebarRenameTarget == nil)
+    }
+
+    @Test("domain group creation does not request inline rename")
+    func domainCreateDoesNotRequestRename() {
+        var model = makeModel()
+        createTab(&model)
+
+        _ = update(&model, .createGroup(name: "Domain group"))
+
+        #expect(model.sidebarRenameTarget == nil)
+    }
+
+    @Test("interactive extraction requests rename only after creating a group")
+    func interactiveExtractRequestsRename() throws {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let extractedId = model.groups[0].tabs[0].id
+
+        _ = update(&model, .extractTabsToNewGroupInteractively(
+            tabIds: [extractedId], groupName: "New group"))
+
+        let created = try #require(model.groups.last)
+        #expect(model.sidebarRenameTarget == .group(created.id))
+
+        model.sidebarRenameTarget = nil
+        let remainingIds = model.groups[0].tabs.map(\.id)
+        _ = update(&model, .extractTabsToNewGroup(
+            tabIds: [remainingIds[0]], groupName: "Domain group"))
+        #expect(model.sidebarRenameTarget == nil)
+    }
+
     @Test("requestDeleteGroup applies immediate, confirmation, and refusal policy")
     func requestDeleteGroupPolicy() throws {
         var emptyModel = makeModel()

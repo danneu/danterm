@@ -19,6 +19,7 @@ func update(
         reconcileMru(&model)
         reconcileTodoPopover(&model)
         reconcilePendingConfirmation(&model, env: env)
+        reconcileSidebarRenameTarget(&model)
     }
 
     switch msg {
@@ -357,8 +358,8 @@ func update(
 
     case .setTabColors(let tabIds, let color):
         // Apply the chosen color to every requested tab. No toggle-off
-        // semantics here -- the cmd-1-on-red-clears UX is resolved at the
-        // dispatcher via resolveColorForBatch before this Msg is sent.
+        // semantics here -- the cmd-1-on-red-clears UX is resolved before
+        // this replacement Msg is sent.
         let validIds = normalizedLiveTabIds(tabIds, in: model)
         guard !validIds.isEmpty else { return [] }
         for id in validIds {
@@ -366,6 +367,12 @@ func update(
         }
         // The color stripe updates via reconcileSidebar (color is in the projection).
         return []
+
+    case .requestSetTabColors(let tabIds, let requested):
+        let resolved = resolveColorForBatch(
+            tabIds: tabIds, requested: requested, in: model)
+        return update(
+            &model, .setTabColors(tabIds: tabIds, color: resolved), env: env)
 
     case .clearCustomTitles(let tabIds):
         let validIds = normalizedLiveTabIds(tabIds, in: model)
@@ -426,6 +433,7 @@ func update(
         return []
 
     case .sidebarRenameEnded:
+        model.sidebarRenameTarget = nil
         return []
 
     case .focusDirection(let direction, let side):
@@ -921,6 +929,13 @@ func update(
             env: env
         )
 
+    case .createGroupInteractively(let name):
+        let commands = update(&model, .createGroup(name: name), env: env)
+        if let groupId = model.groups.last?.id {
+            model.sidebarRenameTarget = .group(groupId)
+        }
+        return commands
+
     case .requestDeleteGroup(let id):
         return requestDeleteGroup(&model, id: id, env: env)
 
@@ -1004,6 +1019,17 @@ func update(
         // reconcileSidebar.
         _ = update(&model, .moveTabs(tabIds: validIds, toGroupId: newGroupId, atIndex: 0), env: env)
         return []
+
+    case .extractTabsToNewGroupInteractively(let tabIds, let groupName):
+        let priorLastGroupId = model.groups.last?.id
+        let commands = update(
+            &model,
+            .extractTabsToNewGroup(tabIds: tabIds, groupName: groupName),
+            env: env)
+        if let groupId = model.groups.last?.id, groupId != priorLastGroupId {
+            model.sidebarRenameTarget = .group(groupId)
+        }
+        return commands
 
     case .reorderGroup(let groupId, let toIndex):
         guard let currentIdx = model.groups.firstIndex(where: { $0.id == groupId }) else { return [] }
@@ -1285,6 +1311,21 @@ func update(
 
     case .jumpModeCanceled:
         return jumpModeCancel(&model)
+    }
+}
+
+/// Retracts a projected rename request when another action removes its row.
+private func reconcileSidebarRenameTarget(_ model: inout AppModel) {
+    guard let target = model.sidebarRenameTarget else { return }
+    let isLive: Bool
+    switch target {
+    case .tab(let id):
+        isLive = tabById(id, in: model) != nil
+    case .group(let id):
+        isLive = model.groups.contains { $0.id == id }
+    }
+    if !isLive {
+        model.sidebarRenameTarget = nil
     }
 }
 

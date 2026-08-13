@@ -705,6 +705,8 @@ import DanTermProtocol
         let created = try #require(model.groups.first(where: { $0.id != existingGroupId }))
         #expect(created.name == "Builds")
         #expect(created.tabs.count == 1)
+        #expect(model.sidebarRenameTarget == nil,
+            "remote creation must not request AppKit focus")
         #expect(reply["group"]?["id"]?.asString == created.id.rawValue.uuidString)
         #expect(reply["group"]?["name"]?.asString == "Builds")
         #expect(reply["tab"]?["id"]?.asString == created.tabs[0].id.rawValue.uuidString)

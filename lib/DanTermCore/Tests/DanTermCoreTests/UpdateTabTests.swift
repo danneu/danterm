@@ -1209,7 +1209,7 @@ import Testing
     @Test("testSetTabColorReplaceDifferent")
     func testSetTabColorReplaceDifferent() {
         // Intent: setting a different color replaces the existing one
-        //   (Msg layer always replaces; toggle-off is dispatcher-side).
+        //   (The replacement Msg always replaces; a request resolves toggle-off.)
         // Why it exists: pins the always-replace semantics against the
         //   removed Msg-layer toggle.
         // Scenario: spec-first replace different.
@@ -1308,6 +1308,20 @@ import Testing
 
     // MARK: - setTabColors (batch from multi-select context menu)
 
+    @Test("color request resolves toggle-off inside update")
+    func requestSetTabColorsResolvesToggle() {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        model.groups[0].tabs[0].color = .red
+
+        update(&model, .requestSetTabColors(tabIds: [tabId], requested: .red))
+        #expect(model.groups[0].tabs[0].color == nil)
+
+        update(&model, .requestSetTabColors(tabIds: [tabId], requested: .blue))
+        #expect(model.groups[0].tabs[0].color == .blue)
+    }
+
     @Test("testSetTabColorsAppliesToAll")
     func testSetTabColorsAppliesToAll() {
         // Intent: batch setTabColors applies the color to every id.
@@ -1331,7 +1345,7 @@ import Testing
         // Intent: re-applying the same color via the batch replaces
         //   (never toggles off at the Msg layer).
         // Why it exists: pins the always-replace contract against the
-        //   dispatcher-side toggle override.
+        //   request-side toggle override.
         // Scenario: spec-first re-apply replace.
         var model = makeModel()
         createTab(&model)

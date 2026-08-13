@@ -497,6 +497,7 @@ struct AppModel: Equatable {
     // panel-scoped for the same reason as `installedFontFamilies`.
     var availableThemeNames: [String] = []
     var todoPopover: TodoOwner? = nil  // ephemeral -- which TODO popover (pane or tab) is open
+    var sidebarRenameTarget: RenameTarget? = nil  // ephemeral -- one projected request to begin inline editing
     var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active

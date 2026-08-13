@@ -289,10 +289,11 @@ func sidebarRenameRecycleTests() {
         let clickStart = runtime.sentMessages.count
         sidebar.finishActiveRenameForPointerInteraction()
         let clickMessages = Array(runtime.sentMessages[clickStart...])
-        try uiExpect(clickMessages.count == 1,
-            "group click-away should dispatch exactly once")
-        guard case .renameGroup(let clickedId, let clickedName) = clickMessages[0] else {
-            throw UITestFailure(message: "group click-away should send renameGroup")
+        try uiExpect(clickMessages.count == 2,
+            "group click-away should send one rename and one ownership end")
+        guard case .renameGroup(let clickedId, let clickedName) = clickMessages[0],
+              case .sidebarRenameEnded = clickMessages[1] else {
+            throw UITestFailure(message: "group click-away sent the wrong messages")
         }
         try uiExpect(clickedId == groupA && clickedName == "click away",
             "group click-away should commit its draft")
@@ -589,9 +590,22 @@ func sidebarRenameRecycleTests() {
             _ = applyRenameRecycleTransition(
                 old: projection, newModel: next,
                 to: sidebar, outline: outline, runtime: runtime)
+            let renameEndDeadline = Date(timeIntervalSinceNow: 0.1)
+            while !runtime.sentMessages.contains(where: {
+                if case .sidebarRenameEnded = $0 { return true }
+                return false
+            }), Date() < renameEndDeadline {
+                RunLoop.current.run(
+                    mode: .default,
+                    before: Date(timeIntervalSinceNow: 0.005))
+            }
 
             try uiExpect(sidebar.activeRenameTarget == nil,
                 "\(exit) should clear the group rename session")
+            try uiExpect(runtime.sentMessages.contains {
+                if case .sidebarRenameEnded = $0 { return true }
+                return false
+            }, "\(exit) should clear projected rename ownership")
             try uiExpect(field.isEditable == false,
                 "\(exit) should restore the group field to display state")
             try uiExpect(field.currentEditor() == nil,
@@ -839,7 +853,6 @@ private func applyRenameRecycleModel(
     let projection = desiredSidebar(in: model)
     sidebar.applySidebarOps(
         computeSidebarRowOps(old: old, new: projection),
-        model: model,
         projection: projection,
         renameTargetToEnd: nil)
     materializeRenameRecycleRows(sidebar, outline: outline)
@@ -881,7 +894,7 @@ private func applyRenameRecycleTransitionResult(
         renameTarget: sidebar.activeRenameTarget,
         new: newProjection)
     let dropped = sidebar.applySidebarOps(
-        guarded.ops, model: newModel, projection: newProjection,
+        guarded.ops, projection: newProjection,
         renameTargetToEnd: guarded.clearRename ? sidebar.activeRenameTarget : nil)
     materializeRenameRecycleRows(sidebar, outline: outline)
     let advanced = advanceSidebarCache(

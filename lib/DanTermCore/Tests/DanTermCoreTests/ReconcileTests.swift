@@ -858,6 +858,11 @@ private func sbProj(_ single: Bool, _ groups: [SidebarGroupProjection]) -> Sideb
 /// be flipped by a setGroupCollapsed op -- exactly what the executor relies on.
 private func applySidebarRowOps(_ ops: [SidebarRowOp], to old: SidebarProjection, new: SidebarProjection) -> SidebarProjection {
     var work = old
+    work.isSingleGroupMode = new.isSingleGroupMode
+    work.selectedTabId = new.selectedTabId
+    work.singleGroupDropTargetId = new.singleGroupDropTargetId
+    work.canDeleteGroups = new.canDeleteGroups
+    work.renameTarget = new.renameTarget
     func newGroup(_ id: GroupId) -> SidebarGroupProjection { new.groups.first { $0.id == id }! }
     func newTab(_ id: TabId) -> SidebarTabProjection { new.groups.flatMap(\.tabs).first { $0.id == id }! }
     func groupIndex(_ id: GroupId) -> Int { work.groups.firstIndex { $0.id == id }! }

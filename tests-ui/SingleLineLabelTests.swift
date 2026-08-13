@@ -142,7 +142,7 @@ private func makeSingleLineSidebar() -> (SidebarView, NSOutlineView, NSWindow) {
     let projection = desiredSidebar(in: model)
     sidebar.applySidebarOps(
         computeSidebarRowOps(old: nil, new: projection),
-        model: model, projection: projection, renameTargetToEnd: nil)
+        projection: projection, renameTargetToEnd: nil)
     outline.layoutSubtreeIfNeeded()
     window.layoutIfNeeded()
     return (sidebar, outline, window)

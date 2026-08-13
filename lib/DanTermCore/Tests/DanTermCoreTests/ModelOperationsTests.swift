@@ -3150,20 +3150,41 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(!proj.groups[1].isFirst, "second group not first")
     }
 
-    @Test("desiredSidebar: projection excludes selection (independent of selectedTabId)")
-    func desiredSidebarExcludesSelection() {
-        // Intent: the sidebar projection is independent of
-        //   selectedTabId.
-        // Why it exists: pins the view-owned selection rule so the
-        //   projection doesn't churn on selection changes.
-        // Scenario: spec-first selection-independence -- swap
-        //   selectedTabId, projection unchanged.
+    @Test("desiredSidebar: interaction facts follow the model")
+    func desiredSidebarCarriesInteractionFacts() {
+        // Intent: the applied sidebar projection carries selection, drop,
+        //   deletion, context-menu, and requested-rename facts.
+        // Why it exists: sidebar handlers must describe the rows they display
+        //   without reading AppModel through the runtime.
+        // Scenario: spec-first interaction projection -- one custom-titled,
+        //   colored tab in a single group with a pending group rename.
         let (model, ids) = makeMruModel(tabCount: 3)
-        var other = model
-        other.selectedTabId = ids[2]
-        #expect(model.selectedTabId != other.selectedTabId, "precondition: selection differs")
-        #expect(desiredSidebar(in: model) == desiredSidebar(in: other),
-            "selection is view-owned -> not in the projection")
+        var projectedModel = model
+        projectedModel.groups[0].tabs[0].customTitle = "Pinned"
+        projectedModel.groups[0].tabs[0].color = .green
+        projectedModel.selectedTabId = ids[2]
+        projectedModel.sidebarRenameTarget = .group(projectedModel.groups[0].id)
+
+        let projection = desiredSidebar(in: projectedModel)
+
+        #expect(projection.selectedTabId == ids[2])
+        #expect(projection.singleGroupDropTargetId == projectedModel.groups[0].id)
+        #expect(!projection.canDeleteGroups)
+        #expect(projection.renameTarget == .group(projectedModel.groups[0].id))
+        #expect(projection.groups[0].tabs[0].hasCustomTitle)
+        #expect(projection.groups[0].tabs[0].color == .green)
+    }
+
+    @Test("desiredSidebar: multiple groups enable deletion and have no root drop target")
+    func desiredSidebarMultipleGroupInteractionFacts() {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .createGroup(name: "Work"))
+
+        let projection = desiredSidebar(in: model)
+
+        #expect(projection.singleGroupDropTargetId == nil)
+        #expect(projection.canDeleteGroups)
     }
 
     @Test("desiredSidebar: one group is single-group mode")

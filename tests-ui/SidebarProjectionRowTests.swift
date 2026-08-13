@@ -138,7 +138,7 @@ func sidebarProjectionRowTests() {
         projection.groups[0].tabs[0].chipKind = .codex
         sidebar.applySidebarOps(
             computeSidebarRowOps(old: nil, new: projection),
-            model: model, projection: projection, renameTargetToEnd: nil)
+            projection: projection, renameTargetToEnd: nil)
         materializeProjectionRows(sidebar, outline: outline)
 
         let cell: SidebarTabCellView = try projectionRowCell(for: .tab(tab), in: outline)
@@ -350,7 +350,6 @@ private func applyProjectionRowModel(
     let projection = desiredSidebar(in: model)
     sidebar.applySidebarOps(
         computeSidebarRowOps(old: nil, new: projection),
-        model: model,
         projection: projection,
         renameTargetToEnd: nil)
     materializeProjectionRows(sidebar, outline: outline)
@@ -374,7 +373,7 @@ private func applyProjectionRowTransition(
         renameTarget: sidebar.activeRenameTarget,
         new: newProjection)
     let dropped = sidebar.applySidebarOps(
-        guarded.ops, model: newModel, projection: newProjection,
+        guarded.ops, projection: newProjection,
         renameTargetToEnd: guarded.clearRename ? sidebar.activeRenameTarget : nil)
     materializeProjectionRows(sidebar, outline: outline)
     return advanceSidebarCache(

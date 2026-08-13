@@ -1352,7 +1352,7 @@ func resolveContextTargets(
 
 // Resolves the TabColor to apply when a user-initiated color action targets
 // `tabIds`. Single source of truth for the dispatcher's toggle-off policy,
-// shared by AppDelegate (keyboard/menu) and SidebarView (right-click).
+// shared by AppDelegate (keyboard/menu) and the reducer's sidebar request path.
 //
 // Rule: re-applying a color that EVERY targeted tab already has clears them
 // all (toggle-off). Otherwise, set every tab to `requested`. This unifies

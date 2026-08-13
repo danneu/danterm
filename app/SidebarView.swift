@@ -191,7 +191,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private var groupItemCache: [GroupId: SidebarItem] { store.groupItemCache }
     private var rootItems: [SidebarItem] { store.rootItems }
     private var childItems: [GroupId: [SidebarItem]] { store.childItems }
-    private var currentModel: AppModel?
+    private var appliedProjection: SidebarProjection?
     private var activeRenameSession: (target: RenameTarget, textField: NSTextField)?
 
     /// Identifies the row whose exact field owns the live inline rename session.
@@ -209,10 +209,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 #endif
 
     /// Row structure of the last applied projection: single-group mode promotes
-    /// tabs to root rows and shows no group rows. Stored rather than re-derived
-    /// from `currentModel` so the data source and the drop handlers describe the
-    /// rows that are actually mounted, and so this fact has one source.
-    private var isSingleGroupMode = false
+    /// tabs to root rows and shows no group rows.
+    private var isSingleGroupMode: Bool {
+        appliedProjection?.isSingleGroupMode ?? false
+    }
 
     // Drag types
     private static let tabDragType = NSPasteboard.PasteboardType("com.danterm.tab")
@@ -303,21 +303,19 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// op list rather than a full reloadData -- so the field editor and unchanged rows
     /// survive (an empty op list is a pure selection refresh).
     ///
-    /// `projection` is what the rows are painted from; `model` serves the interaction
-    /// path (context menus, drag and drop, selection) alone. Both come from one
-    /// reconcile instant, so they cannot disagree.
+    /// `projection` paints the rows and supplies every interaction fact, so handlers
+    /// always describe the same state that NSOutlineView currently displays.
     @discardableResult
     func applySidebarOps(
         _ ops: [SidebarRowOp],
-        model: AppModel,
         projection: SidebarProjection,
         renameTargetToEnd: RenameTarget?
     ) -> (tabs: Set<TabId>, groups: Set<GroupId>) {
         isReloading = true
         defer { isReloading = false }
-        let priorFocusedTabId = currentModel?.selectedTabId
-        currentModel = model
-        isSingleGroupMode = projection.isSingleGroupMode
+        let priorFocusedTabId = appliedProjection?.selectedTabId
+        let priorRenameTarget = appliedProjection?.renameTarget
+        appliedProjection = projection
         var unappliedTabIds = Set<TabId>()
         var unappliedGroupIds = Set<GroupId>()
 
@@ -344,27 +342,32 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         // refresh the forced-accent emphasis on the surviving rows.
         let restoreSet = resolveReloadSelection(
             priorSelectedTabIds: priorSelectedTabIds,
-            liveTabIds: liveTabIds(in: model),
-            selectedTabId: model.selectedTabId)
+            liveTabIds: Set(projection.groups.flatMap(\.tabs).map(\.id)),
+            selectedTabId: projection.selectedTabId)
         applyRestoreSelection(
             restoreSet,
-            selectedTabId: model.selectedTabId,
+            selectedTabId: projection.selectedTabId,
             projection: projection,
             unappliedTabIds: &unappliedTabIds,
             unappliedGroupIds: &unappliedGroupIds)
         // Empty-op cosmetic sweeps can leave already-visible row emphasis alone.
         // New/reused rows get their flag when NSOutlineView asks for a row view.
-        if !ops.isEmpty || priorFocusedTabId != model.selectedTabId {
-            refreshRowEmphasis(focusedTabId: model.selectedTabId)
+        if !ops.isEmpty || priorFocusedTabId != projection.selectedTabId {
+            refreshRowEmphasis(focusedTabId: projection.selectedTabId)
         }
 
         // Reveal only on real focus changes; cosmetic reconcile sweeps must not
         // fight a user who has manually scrolled the focused row off-screen.
-        if let selectedTabId = model.selectedTabId,
+        if let selectedTabId = projection.selectedTabId,
            selectedTabId != priorFocusedTabId,
            let item = tabItemCache[selectedTabId] {
             let row = outlineView.row(forItem: item)
             if row >= 0 { outlineView.scrollRowToVisible(row) }
+        }
+        if let target = projection.renameTarget,
+           target != priorRenameTarget,
+           activeRenameTarget != target {
+            beginRenaming(target: target)
         }
         return (unappliedTabIds, unappliedGroupIds)
     }
@@ -490,9 +493,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             let name: String? = newName.isEmpty ? nil : newName
             runtime?.send(.renameTab(id: id, name: name))
         case .group(let id):
-            guard !newName.isEmpty else { return }
-            runtime?.send(.renameGroup(id: id, name: newName))
+            if !newName.isEmpty {
+                runtime?.send(.renameGroup(id: id, name: newName))
+            }
         }
+        runtime?.send(.sidebarRenameEnded)
     }
 
     /// Ends the matching view-owned session before a structural operation invalidates it.
@@ -501,6 +506,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         activeRenameSession = nil
         if session.textField.currentEditor() != nil { session.textField.abortEditing() }
         finishInlineRename(textField: session.textField, target: target)
+        DispatchQueue.main.async { [weak self] in
+            self?.runtime?.send(.sidebarRenameEnded)
+        }
     }
 
     /// Repairs AppKit silently discarding the owned field editor before delegate cleanup.
@@ -509,6 +517,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
               session.textField.currentEditor() == nil else { return }
         activeRenameSession = nil
         finishInlineRename(textField: session.textField, target: session.target)
+        DispatchQueue.main.async { [weak self] in
+            self?.runtime?.send(.sidebarRenameEnded)
+        }
     }
 
     /// Restore AppKit selection so multi-selection stays live while the focused
@@ -739,7 +750,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }()
         rowView.forceEmphasizedSelection = shouldForceSidebarRowEmphasis(
             rowTabId: rowTabId,
-            focusedTabId: currentModel?.selectedTabId)
+            focusedTabId: appliedProjection?.selectedTabId)
         return rowView
     }
 
@@ -760,7 +771,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         guard row >= 0,
               let sidebarItem = outlineView.item(atRow: row) as? SidebarItem,
               case .tab(let tab) = sidebarItem.kind else { return }
-        if tab.id != currentModel?.selectedTabId {
+        if tab.id != appliedProjection?.selectedTabId {
             runtime?.send(.selectTab(id: tab.id))
         }
     }
@@ -893,8 +904,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         if !tabIds.isEmpty {
             let targetGroupId: GroupId
             if isSingleGroupMode {
-                guard let model = currentModel else { return false }
-                targetGroupId = model.groups[0].id
+                guard let projectedId = appliedProjection?.singleGroupDropTargetId else { return false }
+                targetGroupId = projectedId
             } else if let sidebarItem = item as? SidebarItem, case .group(let group) = sidebarItem.kind {
                 targetGroupId = group.id
             } else {
@@ -926,8 +937,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             // Drop between tabs → create new tab at insertion index
             let groupId: GroupId
             if isSingleGroupMode {
-                guard let model = currentModel else { return false }
-                groupId = model.groups[0].id
+                guard let projectedId = appliedProjection?.singleGroupDropTargetId else { return false }
+                groupId = projectedId
             } else if let sidebarItem = item as? SidebarItem, case .group(let group) = sidebarItem.kind {
                 groupId = group.id
             } else {
@@ -942,8 +953,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     // MARK: - Context Menus
 
-    /// Interaction path: takes the row's id and reads enablement off the live
-    /// model, so the menu never depends on what the row last painted.
+    /// Interaction path: takes the row's id and reads enablement from the
+    /// projection that supplied the mounted row.
     func contextMenu(forGroupId groupId: GroupId) -> NSMenu? {
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -963,7 +974,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let deleteItem = NSMenuItem(title: "Delete Group", action: #selector(contextDeleteGroup(_:)), keyEquivalent: "")
         deleteItem.target = self
         deleteItem.representedObject = groupId.rawValue
-        deleteItem.isEnabled = (currentModel?.groups.count ?? 0) > 1
+        deleteItem.isEnabled = appliedProjection?.canDeleteGroups ?? false
         menu.addItem(deleteItem)
 
         return menu
@@ -1017,15 +1028,15 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// `Rename Tab` action is singular-only and always targets the
     /// clicked row.
     func contextMenu(forTabId tabId: TabId, clickedRow: Int) -> NSMenu? {
-        guard let model = currentModel else { return nil }
+        guard let projection = appliedProjection else { return nil }
 
         let targetIds = contextTargetTabIds(clickedRow: clickedRow)
         guard !targetIds.isEmpty else { return nil }
 
-        // Look up live TabModels in visual order, dropping stale ids.
+        // Look up projected tabs in visual order, dropping stale ids.
         let targetSet = Set(targetIds)
-        var targetTabs: [TabModel] = []
-        for g in model.groups {
+        var targetTabs: [SidebarTabProjection] = []
+        for g in projection.groups {
             for t in g.tabs where targetSet.contains(t.id) {
                 targetTabs.append(t)
             }
@@ -1046,7 +1057,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         menu.addItem(renameItem)
 
         // Clear Custom Title — show if any selected tab has one.
-        if targetTabs.contains(where: { $0.customTitle != nil }) {
+        if targetTabs.contains(where: \.hasCustomTitle) {
             let item = NSMenuItem(
                 title: "Clear Custom Title\(suffix)",
                 action: #selector(contextClearCustomTitles(_:)),
@@ -1100,9 +1111,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         menu.addItem(colorItem)
 
         // Clear Alerts — show if any selected tab has unread alerts.
-        let anyHasAlerts = targetTabs.contains {
-            unreadAlertCount(for: $0, alerts: model.alerts) > 0
-        }
+        let anyHasAlerts = targetTabs.contains { $0.unreadAlertCount > 0 }
         if anyHasAlerts {
             menu.addItem(NSMenuItem.separator())
             let item = NSMenuItem(
@@ -1118,7 +1127,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         // Move to New Group — same no-op rule as before: hide when the
         // action would extract every live tab (rejected by update).
-        let totalTabs = model.groups.reduce(0) { $0 + $1.tabs.count }
+        let totalTabs = projection.groups.reduce(0) { $0 + $1.tabs.count }
         let isAllLiveTabs = totalTabs > 0 && targetIds.count == totalTabs
         if !isAllLiveTabs {
             let item = NSMenuItem(
@@ -1160,17 +1169,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         runtime?.send(.requestDeleteGroup(id: GroupId(rawValue: rawId)))
     }
 
-    /// Toggle-off: re-applying a color that every targeted tab already has
-    /// clears them all. Resolved at the dispatcher before sending; the Msg
-    /// layer always replaces. The policy lives in `resolveColorForBatch`
-    /// and is shared with the keyboard/menu path in AppDelegate.
+    /// Ask the reducer to resolve toggle-off against its current domain state.
     @objc private func contextSetTabColors(_ sender: NSMenuItem) {
         guard let info = sender.representedObject as? SetTabColorsInfo,
-              !info.tabIds.isEmpty,
-              let model = runtime?.model else { return }
-        let resolved = resolveColorForBatch(
-            tabIds: info.tabIds, requested: info.color, in: model)
-        runtime?.send(.setTabColors(tabIds: info.tabIds, color: resolved))
+              !info.tabIds.isEmpty else { return }
+        runtime?.send(.requestSetTabColors(
+            tabIds: info.tabIds, requested: info.color))
     }
 
     @objc private func contextRenameTab(_ sender: NSMenuItem) {
@@ -1200,22 +1204,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         runtime?.send(.requestCloseTabs(ids: box.ids))
     }
 
-    /// Mirrors AppDelegate.newGroup: send the action, then begin inline
-    /// rename on the freshly-created group (diffed via group-id snapshot
-    /// against currentModel, which reconcileSidebar refreshed during send).
+    /// Ask the reducer to extract the tabs and project one inline-rename request.
     @objc private func contextExtractTabs(_ sender: NSMenuItem) {
         guard let box = sender.representedObject as? TabIdsBox,
               !box.ids.isEmpty else { return }
-        let existingIds = Set(currentModel?.groups.map(\.id) ?? [])
-        runtime?.send(.extractTabsToNewGroup(
+        runtime?.send(.extractTabsToNewGroupInteractively(
             tabIds: box.ids, groupName: "New group"))
-        if let newGroup = currentModel?.groups.first(
-            where: { !existingIds.contains($0.id) }) {
-            let groupId = newGroup.id
-            DispatchQueue.main.async { [weak self] in
-                self?.beginRenamingGroup(groupId)
-            }
-        }
     }
 
     // MARK: - Cell Factories
@@ -1343,12 +1337,14 @@ extension SidebarView: NSTextFieldDelegate {
             let name: String? = newName.isEmpty ? nil : newName
             DispatchQueue.main.async { [weak self] in
                 self?.runtime?.send(.renameTab(id: tabId, name: name))
+                self?.runtime?.send(.sidebarRenameEnded)
             }
         case .group(let groupId):
-            if !newName.isEmpty {
-                DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                if !newName.isEmpty {
                     self?.runtime?.send(.renameGroup(id: groupId, name: newName))
                 }
+                self?.runtime?.send(.sidebarRenameEnded)
             }
         }
 
