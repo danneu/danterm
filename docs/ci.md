@@ -55,17 +55,23 @@ exit with a failure status.
 The release bundle ships two nested executables under
 `DanTerm.app/Contents/Helpers/`: the `danterm` CLI, and `PTYSessionBootstrap`
 (the terminal backend reports itself not ready without it, so a bundle missing
-it launches and then fails to open a session). CI signs both nested executables
-*before* signing the outer `.app` -- signing the container seals whatever
-signatures the helpers already carry, so a helper signed afterwards invalidates
-the app -- then verifies the full bundle with
-`codesign --verify --deep --strict --verbose=2`.
+it launches and then fails to open a session).
 
 The build emits `.spm-build/bundle-layout-release.json` from the Swift
-`BundleLayout` declaration. Both workflows run
-`scripts/verify-bundle-layout.sh` against that plan after signing and after each
-ZIP round-trip. This checks the complete layout, including both helpers, instead
-of repeating a reduced list of paths in workflow YAML.
+`BundleLayout` declaration, and the two transformations that can change a bundle
+after its producer checked it own their own verification:
+
+- `scripts/sign-app-bundle.sh` signs every nested executable the plan declares
+  *before* signing the outer `.app` -- signing the container seals whatever
+  signatures the helpers already carry, so a helper signed afterwards
+  invalidates the app -- then runs `codesign --verify --deep --strict` and
+  re-checks the bundle against the plan.
+- `scripts/unpack-app-zip.sh` unzips a published archive and runs the same two
+  checks on the round-tripped bundle.
+
+Both take the plan rather than a list of paths, so no workflow repeats a reduced
+list of bundle contents in YAML, and neither transformation can be performed
+without the check that follows it.
 
 The agent hook scripts live at `DanTerm.app/Contents/Resources/danterm-hooks/`,
 not `Contents/Helpers/`. They are executable shell scripts, not Mach-O nested

@@ -31,6 +31,7 @@ mkdir -p "$BUILD_ROOT/lib/TerminalPTY" \
 ln -s "$ROOT_DIR/dev-build.sh" "$BUILD_ROOT/dev-build.sh"
 cp "$ROOT_DIR/scripts/assemble-app-bundle.sh" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/scripts/verify-bundle-layout.sh" "$BUILD_ROOT/scripts/"
+cp "$ROOT_DIR/scripts/sign-app-bundle.sh" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/scripts/pack-theme-catalog.py" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/themes/0x96f.json" "$BUILD_ROOT/themes/"
 : > "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf"

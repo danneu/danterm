@@ -39,10 +39,8 @@ assemble_benchmark_bundle() {
         --product "DanTerm=$app_product" \
         --product "DanTermCLI=$cli_product" \
         --product "PTYSessionBootstrap=$bootstrap_product" >&2 || return
-    codesign --force --deep --sign - \
-        --entitlements "$repo_root/scripts/terminal-benchmark-entitlements.plist" \
-        "$app_path" >/dev/null || return
-    verify-bundle-layout.sh "$app_path" "$layout_plan" "$repo_root"
+    sign-app-bundle.sh "$app_path" "$layout_plan" "$repo_root" - \
+        --entitlements "$repo_root/scripts/terminal-benchmark-entitlements.plist" >&2
 }
 
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then

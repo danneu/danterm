@@ -171,7 +171,14 @@ class AssemblerContractTests(unittest.TestCase):
             with self.subTest(producer=producer.name):
                 source = producer.read_text(encoding="utf-8")
                 self.assertEqual(source.count("assemble-app-bundle.sh"), 1)
-                self.assertEqual(source.count("verify-bundle-layout.sh"), 1)
+                # Verification happens once, either directly or inside the signer,
+                # which verifies what it signed.
+                self.assertEqual(
+                    source.count("verify-bundle-layout.sh")
+                    + source.count("sign-app-bundle.sh"),
+                    1,
+                )
+                self.assertNotIn("codesign --force", source)
                 self.assertNotIn("bundle-theme-resources.sh", source)
                 self.assertNotIn("import-themes.py", source)
                 self.assertNotIn("cp -R \"$REPO_ROOT/lib/ghostty-themes\"", source)

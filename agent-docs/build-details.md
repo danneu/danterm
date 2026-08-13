@@ -78,8 +78,13 @@ modes, copy sources, and exact-set directories. `DanTermBundleLayoutTool` emits
 that declaration as JSON. `scripts/assemble-app-bundle.sh` consumes the plan for
 release, development, benchmark, and viability bundles, and
 `scripts/verify-bundle-layout.sh` checks the result against the same plan. Both
-shipping producers verify after assembly. CI and release workflows verify again
-after signing and after a ZIP round-trip.
+shipping producers verify after assembly. The two transformations that can change
+a bundle afterwards carry the same check inside them:
+`scripts/sign-app-bundle.sh` (nested code first, then the container, then verify)
+and `scripts/unpack-app-zip.sh` (unzip, then verify). Every signer in the tree --
+both workflows, `dev-build.sh`, the slot launcher, and the benchmark and
+viability harnesses -- goes through the signing script, so none of them can sign
+without re-verifying.
 
 The declaration covers `Contents/Resources`: the icon `Assets.car`, the three
 agent hook scripts under `danterm-hooks/` (raw scripts, so `jq` -- and `danterm`

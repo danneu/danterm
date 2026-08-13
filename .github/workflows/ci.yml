@@ -129,9 +129,8 @@ jobs:
 
       - name: Codesign (ad-hoc)
         run: |
-          codesign --force --deep --sign - build/DanTerm.app
-          scripts/verify-bundle-layout.sh \
-            build/DanTerm.app .spm-build/bundle-layout-release.json .
+          scripts/sign-app-bundle.sh \
+            build/DanTerm.app .spm-build/bundle-layout-release.json . -
 
   release-build-check:
     runs-on: macos-26
@@ -146,16 +145,10 @@ jobs:
           APP_PATH="build/DanTerm.app"
           VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Contents/Info.plist")
           [ "$VERSION" = "0.0.0-test" ] || { echo "Version mismatch: $VERSION"; exit 1; }
-          codesign --force --deep --sign - "$APP_PATH"
-          codesign -v "$APP_PATH"
-          scripts/verify-bundle-layout.sh \
-            "$APP_PATH" .spm-build/bundle-layout-release.json .
-          ZIP_WORK="$RUNNER_TEMP/release-build-ziptest"
-          rm -rf "$ZIP_WORK"
-          mkdir -p "$ZIP_WORK"
+          scripts/sign-app-bundle.sh \
+            "$APP_PATH" .spm-build/bundle-layout-release.json . -
           ( cd build && zip -qr DanTerm-test.zip DanTerm.app )
-          unzip -q build/DanTerm-test.zip -d "$ZIP_WORK"
-          codesign --verify --deep --strict --verbose=2 "$ZIP_WORK/DanTerm.app"
-          scripts/verify-bundle-layout.sh \
-            "$ZIP_WORK/DanTerm.app" .spm-build/bundle-layout-release.json .
+          scripts/unpack-app-zip.sh build/DanTerm-test.zip \
+            "$RUNNER_TEMP/release-build-ziptest" \
+            .spm-build/bundle-layout-release.json .
           echo "Release build validation passed"

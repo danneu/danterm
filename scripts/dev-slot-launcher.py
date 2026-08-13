@@ -302,21 +302,14 @@ def stage_slot_bundle(
             encoding="utf-8",
         )
         subprocess.run([
-            "/usr/bin/codesign",
-            "--force",
-            "--deep",
-            "--sign",
-            "Apple Development",
-            "--entitlements",
-            str(repository_root / "dev-entitlements.plist"),
-            str(temporary),
-        ], check=True, stdout=sys.stderr)
-        subprocess.run([
-            str(repository_root / "scripts" / "verify-bundle-layout.sh"),
+            str(repository_root / "scripts" / "sign-app-bundle.sh"),
             str(temporary),
             str(slot_layout_plan),
             str(repository_root),
-        ], check=True)
+            "Apple Development",
+            "--entitlements",
+            str(repository_root / "dev-entitlements.plist"),
+        ], check=True, stdout=sys.stderr)
         if destination.exists():
             shutil.rmtree(destination)
         temporary.rename(destination)

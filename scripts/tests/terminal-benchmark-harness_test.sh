@@ -246,7 +246,7 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
 # shellcheck disable=SC1090
 source "$HARNESS"
 mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/products"
-for command in DanTermBundleLayoutTool assemble-app-bundle.sh codesign verify-bundle-layout.sh; do
+for command in DanTermBundleLayoutTool assemble-app-bundle.sh sign-app-bundle.sh; do
     cat >"$TEST_ROOT/bin/$command" <<'SHIM'
 #!/usr/bin/env bash
 printf '%s\n' "${0##*/}" >> "$DANTERM_TEST_CALLS"
@@ -264,23 +264,23 @@ PATH="$TEST_ROOT/bin:/usr/bin:/bin" assemble_benchmark_bundle \
     "$TEST_ROOT/bin/DanTermBundleLayoutTool" "$TEST_ROOT/products/gui" \
     "$TEST_ROOT/products/cli" "$TEST_ROOT/products/bootstrap" ".a"
 [[ "$(tr '\n' ' ' < "$DANTERM_TEST_CALLS")" == \
-    "DanTermBundleLayoutTool assemble-app-bundle.sh codesign verify-bundle-layout.sh " ]] || {
-    echo "benchmark bundle phase did not emit, assemble, sign, then verify" >&2
+    "DanTermBundleLayoutTool assemble-app-bundle.sh sign-app-bundle.sh " ]] || {
+    echo "benchmark bundle phase did not emit, assemble, then sign-and-verify" >&2
     exit 1
 }
-cat >"$TEST_ROOT/bin/verify-bundle-layout.sh" <<'SHIM'
+cat >"$TEST_ROOT/bin/sign-app-bundle.sh" <<'SHIM'
 #!/usr/bin/env bash
 exit 71
 SHIM
-chmod +x "$TEST_ROOT/bin/verify-bundle-layout.sh"
+chmod +x "$TEST_ROOT/bin/sign-app-bundle.sh"
 if PATH="$TEST_ROOT/bin:/usr/bin:/bin" assemble_benchmark_bundle \
     "$TEST_ROOT/test.app" "$TEST_ROOT/layout.json" "$ROOT" \
     "$TEST_ROOT/bin/DanTermBundleLayoutTool" "$TEST_ROOT/products/gui" \
     "$TEST_ROOT/products/cli" "$TEST_ROOT/products/bootstrap" ""; then
-    echo "benchmark bundle phase swallowed verifier failure" >&2
+    echo "benchmark bundle phase swallowed signer failure" >&2
     exit 1
 fi
-cat >"$TEST_ROOT/bin/verify-bundle-layout.sh" <<'SHIM'
+cat >"$TEST_ROOT/bin/sign-app-bundle.sh" <<'SHIM'
 #!/usr/bin/env bash
 exit 0
 SHIM
@@ -288,7 +288,7 @@ cat >"$TEST_ROOT/bin/assemble-app-bundle.sh" <<'SHIM'
 #!/usr/bin/env bash
 exit 72
 SHIM
-chmod +x "$TEST_ROOT/bin/verify-bundle-layout.sh" "$TEST_ROOT/bin/assemble-app-bundle.sh"
+chmod +x "$TEST_ROOT/bin/sign-app-bundle.sh" "$TEST_ROOT/bin/assemble-app-bundle.sh"
 if PATH="$TEST_ROOT/bin:/usr/bin:/bin" assemble_benchmark_bundle \
     "$TEST_ROOT/test.app" "$TEST_ROOT/layout.json" "$ROOT" \
     "$TEST_ROOT/bin/DanTermBundleLayoutTool" "$TEST_ROOT/products/gui" \

@@ -158,10 +158,10 @@ if assert_hidden_trace "$TEST_ROOT/bad-events.log" "$pane_id"; then
     fail "hidden-pane plan delivery was accepted"
 fi
 
-# Intent: the harness cannot report a usable bundle without assembly and
-#   post-sign verification both succeeding.
+# Intent: the harness cannot report a usable bundle without assembly and the
+#   signer -- which verifies what it signed -- both succeeding.
 mkdir -p "$TEST_ROOT/package-bin" "$TEST_ROOT/products"
-for command in DanTermBundleLayoutTool assemble-app-bundle.sh codesign verify-bundle-layout.sh; do
+for command in DanTermBundleLayoutTool assemble-app-bundle.sh sign-app-bundle.sh; do
     cat >"$TEST_ROOT/package-bin/$command" <<'SHIM'
 #!/usr/bin/env bash
 printf '%s\n' "${0##*/}" >> "$DANTERM_TEST_CALLS"
@@ -179,8 +179,8 @@ PATH="$TEST_ROOT/package-bin:/usr/bin:/bin" assemble_viability_bundle \
     "$TEST_ROOT/package-bin/DanTermBundleLayoutTool" "$TEST_ROOT/products/gui" \
     "$TEST_ROOT/products/cli" "$TEST_ROOT/products/bootstrap"
 [[ "$(tr '\n' ' ' < "$DANTERM_TEST_CALLS")" == \
-    "DanTermBundleLayoutTool assemble-app-bundle.sh codesign verify-bundle-layout.sh " ]] \
-    || fail "viability bundle phase did not emit, assemble, sign, then verify"
+    "DanTermBundleLayoutTool assemble-app-bundle.sh sign-app-bundle.sh " ]] \
+    || fail "viability bundle phase did not emit, assemble, then sign-and-verify"
 cat >"$TEST_ROOT/package-bin/assemble-app-bundle.sh" <<'SHIM'
 #!/usr/bin/env bash
 exit 72
@@ -196,17 +196,17 @@ cat >"$TEST_ROOT/package-bin/assemble-app-bundle.sh" <<'SHIM'
 #!/usr/bin/env bash
 exit 0
 SHIM
-cat >"$TEST_ROOT/package-bin/verify-bundle-layout.sh" <<'SHIM'
+cat >"$TEST_ROOT/package-bin/sign-app-bundle.sh" <<'SHIM'
 #!/usr/bin/env bash
 exit 71
 SHIM
 chmod +x "$TEST_ROOT/package-bin/assemble-app-bundle.sh" \
-    "$TEST_ROOT/package-bin/verify-bundle-layout.sh"
+    "$TEST_ROOT/package-bin/sign-app-bundle.sh"
 if PATH="$TEST_ROOT/package-bin:/usr/bin:/bin" assemble_viability_bundle \
     "$TEST_ROOT/viability.app" "$TEST_ROOT/layout.json" "$SCRIPT_DIR/.." \
     "$TEST_ROOT/package-bin/DanTermBundleLayoutTool" "$TEST_ROOT/products/gui" \
     "$TEST_ROOT/products/cli" "$TEST_ROOT/products/bootstrap"; then
-    fail "viability bundle phase swallowed verifier failure"
+    fail "viability bundle phase swallowed signer failure"
 fi
 
 echo "terminal viability harness tests passed"

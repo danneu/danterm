@@ -63,18 +63,9 @@ jobs:
 
       - name: Codesign app
         run: |
-          APP_PATH="build/${{ env.APP_NAME }}.app"
-          # Nested code first: signing the container seals whatever signatures the
-          # helpers already carry, so a helper signed afterwards invalidates the app.
-          codesign --force --options runtime \
-            --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH/Contents/Helpers/danterm"
-          codesign --force --options runtime \
-            --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
-          codesign --force --deep --options runtime \
-            --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH"
-          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-          scripts/verify-bundle-layout.sh \
-            "$APP_PATH" .spm-build/bundle-layout-release.json .
+          scripts/sign-app-bundle.sh \
+            "build/${{ env.APP_NAME }}.app" .spm-build/bundle-layout-release.json . \
+            "${{ env.SIGNING_IDENTITY }}" --options runtime
 
       - name: Create DMG
         run: |
@@ -92,13 +83,8 @@ jobs:
 
       - name: Verify ZIP round-trip signature
         run: |
-          WORK="$RUNNER_TEMP/ziptest"
-          rm -rf "$WORK"
-          mkdir -p "$WORK"
-          unzip -q "build/${{ env.ZIP_NAME }}" -d "$WORK"
-          codesign --verify --deep --strict --verbose=2 "$WORK/${{ env.APP_NAME }}.app"
-          scripts/verify-bundle-layout.sh \
-            "$WORK/${{ env.APP_NAME }}.app" .spm-build/bundle-layout-release.json .
+          scripts/unpack-app-zip.sh "build/${{ env.ZIP_NAME }}" "$RUNNER_TEMP/ziptest" \
+            .spm-build/bundle-layout-release.json .
 
       - name: Notarize DMG
         env:

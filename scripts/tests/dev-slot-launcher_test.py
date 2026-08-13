@@ -494,9 +494,9 @@ time.sleep(30)
             self.assertEqual(info["CFBundleDisplayName"], "DanTerm Dev (3)")
             self.assertEqual(info["CFBundleExecutable"], "DanTerm Dev (3)")
             self.assertTrue((destination / "Contents" / "MacOS" / "DanTerm Dev (3)").exists())
-            self.assertEqual(len(run.call_args_list), 2)
+            self.assertEqual(len(run.call_args_list), 1)
+            self.assertIn("sign-app-bundle.sh", run.call_args_list[0].args[0][0])
             self.assertIn("Apple Development", run.call_args_list[0].args[0])
-            self.assertIn("verify-bundle-layout.sh", run.call_args_list[1].args[0][0])
 
     def test_stage_clone_rejects_post_sign_executable_identity_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -505,15 +505,26 @@ time.sleep(30)
             destination = root / "DanTerm Dev (3).app"
             real_run = subprocess.run
 
+            # Stand in for a signer that rewrites the identity it was given, then
+            # run the real verification the signer performs on what it produced.
             def sign_then_verify(arguments, **kwargs):
-                if arguments[0] == "/usr/bin/codesign":
-                    plist_path = Path(arguments[-1]) / "Contents" / "Info.plist"
+                if arguments[0].endswith("sign-app-bundle.sh"):
+                    bundle, layout_plan, repo_root = arguments[1:4]
+                    plist_path = Path(bundle) / "Contents" / "Info.plist"
                     with plist_path.open("rb") as stream:
                         info = plistlib.load(stream)
                     info["CFBundleExecutable"] = "Wrong Executable"
                     with plist_path.open("wb") as stream:
                         plistlib.dump(info, stream)
-                    return subprocess.CompletedProcess(arguments, 0)
+                    return real_run(
+                        [
+                            str(ROOT / "scripts" / "verify-bundle-layout.sh"),
+                            bundle,
+                            layout_plan,
+                            repo_root,
+                        ],
+                        check=True,
+                    )
                 return real_run(arguments, **kwargs)
 
             with mock.patch.object(launcher.subprocess, "run", side_effect=sign_then_verify):

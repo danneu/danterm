@@ -64,9 +64,9 @@ PATH="$PATH:$SCRIPT_DIR/scripts" assemble-app-bundle.sh \
     --product "DanTermInstanceIdentityTool=$BIN_PATH/DanTermInstanceIdentityTool" \
     --product "PTYSessionBootstrap=$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap"
 
-codesign --force --deep --sign "Apple Development" --entitlements "$SCRIPT_DIR/dev-entitlements.plist" "$APP_PATH"
-PATH="$PATH:$SCRIPT_DIR/scripts" verify-bundle-layout.sh \
-    "$APP_PATH" "$LAYOUT_PLAN" "$SCRIPT_DIR"
+PATH="$PATH:$SCRIPT_DIR/scripts" sign-app-bundle.sh \
+    "$APP_PATH" "$LAYOUT_PLAN" "$SCRIPT_DIR" "Apple Development" \
+    --entitlements "$SCRIPT_DIR/dev-entitlements.plist"
 
 # Quit a running instance at the last possible moment -- after the compile, just
 # before the install replaces the bundle out from under it. Waiting for the
