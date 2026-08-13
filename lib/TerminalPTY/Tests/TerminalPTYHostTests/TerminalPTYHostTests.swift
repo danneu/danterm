@@ -272,16 +272,16 @@ struct TerminalPTYHostTests {
         await host.start(makeLaunchInput(command: command))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         _ = host.fencedFrameState()
-        let baseline = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
         #expect(await host.waitForOutput(containing: Array("\u{1B}]52;c;aGVs".utf8)))
-        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == baseline)
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == baseline)
         let incomplete = host.fencedFrameState()
         #expect(incomplete.damage == .none)
         #expect(incomplete.clipboardWrite == nil)
 
         #expect(await host.waitForOutput(containing: Array("bG8=\u{7}".utf8)))
-        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == baseline + 1)
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == baseline + 1)
         let complete = host.fencedFrameState()
         #expect(complete.damage == .none)
         #expect(complete.clipboardWrite == "hello")
@@ -546,7 +546,7 @@ struct TerminalPTYHostTests {
         }
         #expect(observedResult == .exited(.exited(0)))
         while await updates.next() != nil {}
-        #expect((await host.resourceSnapshot()).updateSignalsAfterTermination == 0)
+        #expect((await host.resourceSnapshot()).census.updateSignalsAfterTermination == 0)
     }
 
     @Test("an unchanged terminal emits no update work", .timeLimit(.minutes(1)))
@@ -556,12 +556,12 @@ struct TerminalPTYHostTests {
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        let signalsBefore = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let signalsBefore = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
         host.resize(.init(columns: 80, rows: 24))
         _ = await host.snapshot()
 
-        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == signalsBefore)
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == signalsBefore)
         await host.close()
     }
 
@@ -580,12 +580,12 @@ struct TerminalPTYHostTests {
         while await updates.next() != nil {
             if (await host.snapshot()).screenText.contains("__QUERY_READY__") { break }
         }
-        let signalsBeforeQuery = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let signalsBeforeQuery = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         let inputBaseline = await host.inputWrites().count
 
         host.send(Array("query\n".utf8))
         #expect(await host.waitForOutput(containing: Array("\u{1B}[6n".utf8)))
-        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == signalsBeforeQuery)
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == signalsBeforeQuery)
         host.send(Array("USER".utf8))
 
         let result = await host.waitForResult()
@@ -665,7 +665,7 @@ struct TerminalPTYHostTests {
         #expect(await updates.next() == nil)
         #expect(await host.result() == .exited(.exited(0)))
         #expect((await host.snapshot()).fullHistoryText.contains("__FRAGMENTED_DONE__"))
-        #expect((await host.resourceSnapshot()).updateSignalsAfterTermination == 0)
+        #expect((await host.resourceSnapshot()).census.updateSignalsAfterTermination == 0)
     }
 
     @Test("a result-only drain emits its final update token", .timeLimit(.minutes(1)))
@@ -680,7 +680,7 @@ struct TerminalPTYHostTests {
         var updates = host.updates.makeAsyncIterator()
         #expect(await updates.next() != nil)
         #expect(await updates.next() == nil)
-        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == 1)
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == 1)
     }
 
     @Test("closing a live pane resolves result waiters with nil", .timeLimit(.minutes(1)))
@@ -1030,7 +1030,7 @@ struct TerminalPTYHostTests {
         await warmup.close()
         let warmupSnapshot = await warmup.resourceSnapshot()
         #expect(warmupSnapshot.isReleased)
-        #expect(warmupSnapshot.forcedQuiescenceCount == 0)
+        #expect(warmupSnapshot.census.forcedQuiescenceCount == 0)
         let descriptorsBefore = try openFileDescriptorCount()
 
         for iteration in 0..<16 {
@@ -1053,7 +1053,7 @@ struct TerminalPTYHostTests {
                 }
                 let snapshot = await host.resourceSnapshot()
                 #expect(snapshot.isReleased)
-                #expect(snapshot.forcedQuiescenceCount == 0)
+                #expect(snapshot.census.forcedQuiescenceCount == 0)
             }
             for _ in 0..<40 where releasedHost != nil {
                 try await Task.sleep(for: .milliseconds(50))
@@ -1095,7 +1095,7 @@ struct TerminalPTYHostTests {
         let snapshot = await host.resourceSnapshot()
         #expect(elapsed < .seconds(1))
         #expect(snapshot.isReleased)
-        #expect(snapshot.forcedQuiescenceCount == 0)
+        #expect(snapshot.census.forcedQuiescenceCount == 0)
 
         let leader = try #require(await host.lastLaunchedLeaderPID())
         var status: Int32 = 0
@@ -1204,7 +1204,7 @@ struct TerminalPTYHostTests {
         for host in hosts {
             let snapshot = await host.resourceSnapshot()
             #expect(snapshot.isReleased)
-            #expect(snapshot.forcedQuiescenceCount == 0)
+            #expect(snapshot.census.forcedQuiescenceCount == 0)
         }
     }
 
@@ -1241,7 +1241,7 @@ struct TerminalPTYHostTests {
         // Settles so any source that outlived teardown would have a turn to fire.
         try await Task.sleep(for: .milliseconds(200))
         let snapshot = await host.resourceSnapshot()
-        #expect(snapshot.forcedQuiescenceCount == 1)
+        #expect(snapshot.census.forcedQuiescenceCount == 1)
         #expect(snapshot.isReleased)
     }
 
@@ -1320,7 +1320,7 @@ struct TerminalPTYHostTests {
         #expect(completion.waitForAll(within: .seconds(20)))
         #expect(await waitForProcessExit(pid))
         let finished = await host.resourceSnapshot()
-        #expect(finished.forcedQuiescenceCount == 1)
+        #expect(finished.census.forcedQuiescenceCount == 1)
         #expect(finished.isReleased)
     }
 
@@ -1463,7 +1463,7 @@ struct TerminalPTYHostTests {
         host.requestShutdown { recorder.signal() }
         #expect(recorder.waitForAll(within: .seconds(20)))
         #expect(start.duration(to: clock.now) < .seconds(1))
-        #expect((await host.resourceSnapshot()).forcedQuiescenceCount == 0)
+        #expect((await host.resourceSnapshot()).census.forcedQuiescenceCount == 0)
     }
 
     @Test("quiescence observation neither starts shutdown nor misses later completion", .timeLimit(.minutes(1)))
@@ -1562,13 +1562,13 @@ struct TerminalPTYHostTests {
         )
         let atCompletion = await host.resourceSnapshot()
         #expect(atCompletion.isReleased)
-        #expect(atCompletion.forcedQuiescenceCount == 1)
+        #expect(atCompletion.census.forcedQuiescenceCount == 1)
 
         // Nothing arrives afterward either: the launch is not adopted late.
         try await Task.sleep(for: .seconds(1))
         let snapshot = await host.resourceSnapshot()
         #expect(snapshot.isReleased, "the abandoned launch was adopted after teardown")
-        #expect(snapshot.callbacksAfterTeardown == 0)
+        #expect(snapshot.census.callbacksAfterTeardown == 0)
         #expect(directChildProcessIDs().contains(launched) == false)
     }
 
@@ -1966,19 +1966,19 @@ struct TerminalPTYHostTests {
         let host = try makeHost(captureTransitions: false)
         await host.start(makeLaunchInput(command: try scrollbackCommand()))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        let baseline = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         let writeBaseline = await host.inputWrites().count
 
         host.scroll(toTopRow: -100)
         let top = host.fencedSnapshot()
-        let afterChange = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let afterChange = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         host.scroll(toTopRow: -100)
         _ = host.fencedSnapshot()
 
         #expect(top.scrollProjection.topRow == 0)
         #expect(top.scrollProjection.isFollowing == false)
         #expect(afterChange == baseline + 1)
-        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == afterChange)
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterChange)
         #expect(await host.inputWrites().count == writeBaseline)
 
         host.scrollToBottom()
@@ -2002,27 +2002,27 @@ struct TerminalPTYHostTests {
         let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
         var iterator = statuses.stream.makeAsyncIterator()
         let report: @Sendable (TerminalSearchStatus?) -> Void = { statuses.continuation.yield($0) }
-        let baseline = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
         host.beginSearch("hit", onStatus: report)
         #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 2))
-        let afterBegin = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let afterBegin = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         #expect(afterBegin == baseline + 1)
         #expect(host.fencedSnapshot().activeSearchMatchRange != nil)
 
         host.searchNext(onStatus: report)
         #expect(try #require(await iterator.next()) == .matched(selected: 1, total: 2))
-        let afterNext = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let afterNext = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         #expect(afterNext == afterBegin + 1)
 
         host.searchPrevious(onStatus: report)
         #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 2))
-        let afterPrevious = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let afterPrevious = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         #expect(afterPrevious == afterNext + 1)
 
         host.clearSearch(onStatus: report)
         #expect(await iterator.next() == .some(nil))
-        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == afterPrevious + 1)
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterPrevious + 1)
         #expect(host.fencedSnapshot().activeSearchMatchRange == nil)
         await host.close()
     }
@@ -2047,19 +2047,19 @@ struct TerminalPTYHostTests {
 
         host.beginSearch("zzz", onStatus: report)
         #expect(try #require(await iterator.next()) == .empty)
-        let afterFirstMiss = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let afterFirstMiss = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
         host.beginSearch("zzz", onStatus: report)
         #expect(try #require(await iterator.next()) == .empty)
-        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == afterFirstMiss)
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterFirstMiss)
 
         host.beginSearch("hit", onStatus: report)
         #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 1))
-        let afterHit = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let afterHit = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
         host.searchNext(onStatus: report)
         #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 1))
-        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == afterHit)
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterHit)
         await host.close()
     }
 

@@ -137,6 +137,17 @@ enum TerminalPTYSubmittedTransition: Equatable, Sendable {
     case resize(TerminalDimensions)
 }
 
+/// Groups passive lifecycle observations so the resource snapshot separates
+/// teardown ownership from counters that record how the host reached it.
+struct TerminalPTYLifecycleCensus: Equatable, Sendable {
+    let callbacksAfterTeardown: Int
+    /// How many times the teardown ladder failed to converge inside the host's own
+    /// bound and quiescence had to be forced. Zero on every ordinary teardown.
+    let forcedQuiescenceCount: Int
+    let emittedUpdateSignalCount: Int
+    let updateSignalsAfterTermination: Int
+}
+
 /// Test-support census of resources that must be absent once teardown returns.
 struct TerminalPTYResourceSnapshot: Equatable, Sendable {
     let hasOpenMaster: Bool
@@ -150,12 +161,7 @@ struct TerminalPTYResourceSnapshot: Equatable, Sendable {
     let hasLeader: Bool
     let hasSession: Bool
     let pendingInputByteCount: Int
-    let callbacksAfterTeardown: Int
-    /// How many times the teardown ladder failed to converge inside the host's own
-    /// bound and quiescence had to be forced. Zero on every ordinary teardown.
-    let forcedQuiescenceCount: Int
-    let emittedUpdateSignalCount: Int
-    let updateSignalsAfterTermination: Int
+    let census: TerminalPTYLifecycleCensus
 
     var isReleased: Bool {
         hasOpenMaster == false
@@ -164,8 +170,8 @@ struct TerminalPTYResourceSnapshot: Equatable, Sendable {
             && hasLeader == false
             && hasSession == false
             && pendingInputByteCount == 0
-            && callbacksAfterTeardown == 0
-            && updateSignalsAfterTermination == 0
+            && census.callbacksAfterTeardown == 0
+            && census.updateSignalsAfterTermination == 0
     }
 }
 
@@ -1082,10 +1088,12 @@ public actor TerminalPTYHost {
             hasLeader: leaderPID != nil,
             hasSession: sessionID != nil,
             pendingInputByteCount: max(pendingInput.count - pendingInputOffset, 0),
-            callbacksAfterTeardown: callbacksAfterTeardown,
-            forcedQuiescenceCount: forcedQuiescenceCount,
-            emittedUpdateSignalCount: emittedUpdateSignalCount,
-            updateSignalsAfterTermination: updateSignalsAfterTermination
+            census: TerminalPTYLifecycleCensus(
+                callbacksAfterTeardown: callbacksAfterTeardown,
+                forcedQuiescenceCount: forcedQuiescenceCount,
+                emittedUpdateSignalCount: emittedUpdateSignalCount,
+                updateSignalsAfterTermination: updateSignalsAfterTermination
+            )
         )
     }
 
