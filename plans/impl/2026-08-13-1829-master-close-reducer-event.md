@@ -186,7 +186,7 @@ hash.
 ## Commit progress
 
 - [x] 1. refactor(pty): model master close completion as a reducer event
-- [ ] 2. docs(audit): mark S17 master close reducer work complete
+- [x] 2. docs(audit): mark S17 master close reducer work complete
 
 ## Implementation notes
 

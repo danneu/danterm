@@ -170,7 +170,7 @@ in itself.
 | a8eefabc | [S14](#s14) | 20    | 4   | 5   | terminal-core  | medium | Store both screens as ScreenState instead of one boxed and one loose                                                  |
 | d3574ddb | [S15](#s15) | 20    | 4   | 5   | terminal-core  | medium | Replace the four hand-branched mode switches with one mode registry                                                   |
 | 9f0742c3 | [S16](#s16) | 20    | 4   | 5   | terminal-core  | large  | Unify the two search matchers and lift search out of Terminal                                                         |
-|        | [S17](#s17) | 16    | 4   | 4   | pty            | medium | Model master-close asynchrony in the reducer instead of deferring a command tail                                        |
+| cafc46a7 | [S17](#s17) | 16    | 4   | 4   | pty            | medium | Model master-close asynchrony in the reducer instead of deferring a command tail                                        |
 |        | [S18](#s18) | 16    | 4   | 4   | scrollback     | medium | Derive the grand row/content totals from the block index instead of storing them                                        |
 |        | [S19](#s19) | 16    | 4   | 4   | terminal-views | small  | Collapse the two presentation-input change detectors into one entry point                                               |
 |        | [S20](#s20) | 16    | 4   | 4   | tests          | medium | Stop forking a PTY child for tests that only exercise engine policy                                                     |
