@@ -298,3 +298,64 @@ agent, command, and connection, with no geometry, modes, or screen state;
 `pane.rows` gives per-row width and structure but no attributes; `pane.read`
 gives text. The closest thing to a snapshot today is `pane.rows` plus
 `pane.read`, which carries no attributes, no cursor, and no modes.
+
+### F6 -- the client module ships, and the platform claim is now gated
+
+Discharges T17, T18, and T14. Plan:
+[plans/wip/2026-08-12-2225-host-layer-and-the-missing-client-module.md](../../../plans/wip/2026-08-12-2225-host-layer-and-the-missing-client-module.md).
+
+- Status: implemented and on master, gated by `just test`.
+- Date and investigator: 2026-08-13, two agents working in parallel worktrees.
+- Environment: Xcode 26.6, Swift 6.3.3, iOS 26.5 SDKs.
+- Commands, inputs, or reproduction: `just test`. 81 steps.
+- Result: `lib/DanTermClient` exists and owns the client end of the
+  conversation -- a transport seam naming no socket kind, the framed
+  request/reply/notification loop over `IpcLineFramer`, the hello handshake, and
+  a pane-tape record decoder. It depends on `DanTermProtocol` alone. The CLI's
+  two hand-rolled transport copies are deleted and rewired onto it, so the
+  module is exercised by the existing gate rather than shipped untested.
+- Result: `lib/TerminalHostTools` now holds `GlyphPreview`, its test target, and
+  `TerminalMemoryProbe`, which is what makes the `TerminalCore` iOS pin true
+  rather than allowlisted. Pins are on `TerminalCore`, `DanTermProtocol`, and
+  `DanTermClient`.
+- Result: `scripts/ios-portability-gate.sh` cross-compiles every manifest target
+  of every pinned package for the iOS device triple, test targets included, as a
+  suite step. It discovers pinned packages by reading the manifests, so a
+  package is covered the moment it is pinned. It carries a fixture self-test
+  that is also a suite step.
+- Observation: the plan's requirement that a reader survive an unknown record
+  kind is satisfied by making `unknown(kind:)` a case of the record type rather
+  than a decode failure, and an unknown end reason still reads as an end. Both
+  are what let T8 add a `sync` record without breaking an older client.
+- Observation: two test fragments could not be made portable and were guarded
+  rather than exempted -- a `/usr/bin/vmmap` shell-out, and a Swift Testing exit
+  test, which is unavailable on iOS because it spawns a child process. Both are
+  instruments rather than behaviors under test, and macOS keeps the coverage.
+  The second was invisible to T16's evidence, which enumerated executable
+  targets only.
+- Inference: a compile boundary is not a role boundary, and this finding is the
+  constructive half of that correction. F1 established which files compile for
+  iOS; T16 established that the answer did not describe a module a client could
+  use; F6 builds the module that was actually missing.
+- Uncertainty: nothing here has run on a device, and no iOS client links
+  `DanTermClient` yet. The module is proven to build and to behave against
+  in-memory and socket transports, not to work from a phone.
+- Uncertainty: the gate links test bundles against the macOS sysroot, which
+  clang warns about. Compilation is faithful to the iOS triple, so a host-only
+  import or call still fails the gate, but the link step is not a full iOS link.
+- Next action: T3 remains Phase 1's only open task, and it needs a physical
+  device. T8 implements against the vocabulary this module reads.
+
+#### The T16 probe is deleted, not archived
+
+`t16-probe.sh` and `t16-probe/` established that a client module could build for
+both iOS triples with `DanTermProtocol` as its only dependency. They are removed
+because that claim is now enforced continuously against the real module by the
+suite step above, which is stronger evidence than a script nobody runs.
+
+Deleting them also removes a trap. The probe named `GlyphPreview` and
+`TerminalMemoryProbe` at paths T18 moved, its request loop discarded every frame
+that was not the awaited reply -- the exact defect the plan's notification
+obligation exists to catch -- and its decoder returned nil for an unknown record
+kind, which would not survive T8 adding one. The plan cites it as evidence, which
+is correct and stays correct; nobody should copy from it.

@@ -24,8 +24,13 @@ stack build and present on iOS, what transport and authentication cross the
 machines, how subscriptions survive mobile disconnects, what remote geometry
 means for a pane the Mac window still owns, and which refactors in the existing
 codebase the client justifies. The first daily-use milestone is a full
-interactive, engine-rendered terminal on the phone (D1). The doc converges
-toward one or more plan files; it does not implement.
+interactive, engine-rendered terminal on the phone (D1).
+
+The doc converges toward plan files. Its Phase 1 to 4 tasks investigate and do
+not implement; a spike is thrown away once the gate it feeds has chosen. Phase 5
+is the exception, because the refactors there are the product of a decision this
+doc already made: those tasks graduate to a plan and then land, and the finding
+records what shipped. F6 is the first of those.
 
 ## Investigation rules
 
@@ -70,13 +75,12 @@ spine that is already verifiable against the tree:
   `pane.info` carries no geometry, modes, or screen state; `pane.rows` carries
   no attributes; `pane.read` carries text. F4 established that this is the same
   gap as the missing `pane.snapshot`, seen from the control surface.
-- Every `lib/*/Package.swift` pins `platforms: [.macOS(.v26)]` and nothing
-  else. F1 has since replaced the import census with builds: with a pin added,
-  `TerminalCore`, `TerminalCoreRecording`, `TerminalRenderPlanning`,
-  `TerminalSpriteGeometry`, `DanTermProtocol`, and `DanTermCore` compile for
-  both iOS triples untouched, `DanTermSupport` needs two host-only files
-  removed, and `TerminalRenderExecution` stops at `import AppKit`. The pins
-  themselves stay out of the tree until T16, D2, and T14 make them true.
+- The iOS platform pins are in the tree, on `TerminalCore`, `DanTermProtocol`,
+  and `DanTermClient`, and a suite step proves each one on every run (T14, T17,
+  T18). F1 established the claim by building rather than by an import census;
+  T16 corrected what that proved, since compiling for iOS is not the same as
+  having a role a client would call. `DanTermSupport` and `TerminalPTY` carry no
+  pin by design: they are the Mac host's layer.
 - 34/D2 pinned the exact agent activity transitions (working, waiting, idle,
   detach) that a push-notification sender would consume; that plumbing exists
   and needs no new inference.
@@ -187,10 +191,11 @@ Provisional shape; every leg has a gate in the ledger.
   `DanTermProtocol`, `DanTermCore`, and `DanTermSupport`, for a simulator and a
   device triple, with iOS platform pins applied. Five of the six pass untouched
   on both triples; `DanTermSupport` fails on two host-only files and passes
-  without them. The pins stay out of the tree, and
-  [ios-cross-compile.sh](ios-cross-compile.sh) applies and restores them per
-  run, so the result is re-derived rather than asserted by a manifest. T16
-  carries the split the failure implies.
+  without them. The pins stayed out of the tree at the time, and
+  [ios-cross-compile.sh](ios-cross-compile.sh) applied and restored them per
+  run, so the result was re-derived rather than asserted by a manifest. T14 has
+  since replaced that script's role with a suite step, and T16 corrected what
+  the `DanTermSupport` result proved.
 - **T2 DONE** (F2) -- `TerminalRenderExecution` on iOS. The `import AppKit`
   hid one symbol: `NSFont.monospacedSystemFont` on line 90, which `UIFont`
   answers identically, so the seam is one `typealias` behind
@@ -198,7 +203,7 @@ Provisional shape; every leg has a gate in the ledger.
   `TerminalFrameBackingStore` and `TerminalFrameSwapchain` port unchanged --
   IOSurface is public on iOS -- and a simulator spike showed CoreAnimation there
   honors the swapchain's attach-to-publish protocol. H2 is restated as a result.
-  The font seam stays uncommitted and lands with the pins in T16.
+  The font seam landed with the pins in T18.
 - **T3 RESEARCH** -- Presentation-path measurement on a real device. First,
   confirm on hardware what F2 saw only in the simulator: that an IOSurface
   displays as `layer.contents` and that in-place mutation does not reach the
@@ -305,15 +310,19 @@ Provisional shape; every leg has a gate in the ledger.
   view-owning half; implement `RemoteTerminalSession` as a peer so T4's spike
   can graduate into supported code and Mac-to-Mac attach becomes a product
   capability.
-- **T14 TODO** -- Extend `scripts/core-purity-lint.sh` into a platform-layering
-  lint once iOS pins exist, so boundary violations fail at the seam. T16 stated
-  the invariant to enforce: *a package that declares `.iOS` in `platforms:` has
-  every one of its targets build for the iOS device triple.* The package is the
-  unit of the platform claim, which is exactly why the pin was dishonest. T16
-  rejected the alternative of an allowlist of exempt targets, because that makes
-  the pin mean "iOS, except where a list says otherwise", which is the unchecked
-  claim F1 declined to land. Open: whether the gate is a full cross-compile or a
-  cheaper static check backed by a periodic build.
+- **T14 DONE** (F6) -- The platform-layering lint exists as
+  `scripts/ios-portability-gate.sh`, a step in `scripts/run-test-suite.sh`. It
+  enforces the invariant T16 stated: *a package that declares `.iOS` in
+  `platforms:` has every one of its manifest targets build for the iOS device
+  triple, test targets included.* The open question is closed in favour of a
+  full cross-compile: a static check cannot see a host-only call inside a
+  compiled target, and a periodic build reports the breakage after the change
+  that caused it. The gate discovers pinned packages by reading the manifests
+  rather than from a list, so a package is covered the moment it is pinned. It
+  carries its own fixture self-test
+  (`scripts/tests/ios-portability-gate_test.sh`), also a suite step. It did not
+  extend `core-purity-lint.sh` as the task first imagined -- a purity lint reads
+  source for forbidden imports, and this claim is only settled by a compiler.
 - **T16 DONE as investigation** -- The task asked to separate the host-only half
   of `DanTermSupport` from the portable half. There is no portable half to
   separate. Of the ten files that compile for iOS, four are the *producer* end
@@ -328,35 +337,21 @@ Provisional shape; every leg has a gate in the ledger.
   that a compile boundary is not a role boundary. The work T16 was reaching for
   is T17. Plan:
   [plans/wip/2026-08-12-2225-host-layer-and-the-missing-client-module.md](../../../plans/wip/2026-08-12-2225-host-layer-and-the-missing-client-module.md).
-- **T17 TODO** -- Create the client end of the control socket, which exists
-  nowhere and is written three times: `cli/main.swift` (connect, framed read and
-  write, hello), `cli/PaneTapeStream.swift` (a second copy), and the T4 spike (a
-  third, about 85 lines). The pane-tape record shape has a producer and no
-  reader -- the vocabulary is public in `DanTermProtocol`, but `kind`,
-  `sequence`, and `byteOffset` are spelled out inside each reader separately,
-  which is the direct reason T2's spike had to drive a local `Terminal` with
-  literal bytes. Scope: a transport seam, the framed request/reply/notification
-  loop over the existing `IpcLineFramer`, the hello handshake, and a tape record
-  decoder. Rewire `cli/` onto it as the first consumer so `just test` gates it
-  rather than it shipping untested. The module is `public` by construction, and
-  `DanTermSupport` gains zero annotations -- the symlink doc's annotation-tax
-  objection is about `DanTermCore`'s field-bearing model structs and does not
-  transfer to a handful of behavioral types designed as an API. A candidate
-  module already builds for macOS and both iOS triples with `DanTermProtocol`
-  as its only dependency, referencing nothing in `DanTermSupport`
-  ([t16-probe.sh](t16-probe.sh)). `DanTermSupport` itself stays whole, is named
-  the Mac host's side-effect layer, and gets no iOS pin.
-- **T18 TODO** -- Land F2's font seam and the iOS platform pins that F1 and T16
-  deferred. The seam is a `PlatformFont` typealias behind
-  `#if canImport(AppKit)`, one import block and one call site, after which
-  `TerminalRenderExecution` builds for macOS and both iOS triples. The pin
-  question then has a precise answer: a package-level iOS pin on
-  `lib/TerminalCore` is false for exactly two of its roughly 26 targets,
-  `GlyphPreview` (no AppKit on iOS) and `TerminalMemoryProbe` (no `Process`).
-  Every other target builds for the device triple, including
-  `TerminalDrawBenchmarkSupport`. So the honest pin costs moving host-only
-  tooling out of the engine package, not a port. `lib/DanTermProtocol` is a
-  single portable target and its pin is honest as-is.
+- **T17 DONE** (F6) -- `lib/DanTermClient` is the single owner of the client end
+  of the conversation: a transport seam that names no socket kind, the framed
+  request/reply/notification loop over `IpcLineFramer`, the hello handshake, and
+  a pane-tape record decoder. It depends on `DanTermProtocol` and nothing else,
+  is pinned for iOS, and the CLI's two hand-rolled transport copies are deleted
+  and rewired onto it. `DanTermSupport` stays whole, is named the Mac host's
+  side-effect layer, and gets no iOS pin.
+- **T18 DONE** (F6) -- The font seam and the pins landed with T17. The seam is a
+  `PlatformFont` typealias behind `#if canImport(AppKit)`, one import block and
+  one call site. Pins are on `TerminalCore`, `DanTermProtocol`, and
+  `DanTermClient`. Making the `TerminalCore` pin honest cost a new
+  `lib/TerminalHostTools` package holding `GlyphPreview`, its test target, and
+  `TerminalMemoryProbe`, plus two guarded fragments in test targets that stayed:
+  the `vmmap` shell-out and a Swift Testing exit test, both instruments rather
+  than behaviors, neither losing macOS coverage.
 
 ### Phase 6 -- push notifications and quick replies (after milestone 1)
 
