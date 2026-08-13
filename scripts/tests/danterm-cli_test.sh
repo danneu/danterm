@@ -8,7 +8,14 @@ launch_output="$(mktemp)"
 launch_error="$(mktemp)"
 smoke_output="$(mktemp)"
 smoke_error="$(mktemp)"
+tape_output="$(mktemp)"
+inspect_output="$(mktemp)"
+tape_fixture="$(mktemp)"
 launcher_pid=""
+# The app the launcher spawns outlives it, and it is not a child of this script, so ending
+# the run means ending this pid. Without it a failed run leaks its slot, and the pool of
+# eight is shared with every other checkout on the machine.
+app_pid=""
 
 # `reap_pid` bounds the waits on the launcher below. A bare `wait` parks for good on
 # a child that blocks SIGTERM, and one of those waits is in the EXIT trap -- so the
@@ -24,7 +31,11 @@ cleanup() {
         kill -TERM "$launcher_pid" 2>/dev/null || true
         reap_pid "$launcher_pid"
     fi
-    rm -f "$launch_output" "$launch_error" "$smoke_output" "$smoke_error"
+    if [[ "$app_pid" =~ ^[0-9]+$ ]]; then
+        kill -TERM "$app_pid" 2>/dev/null || true
+    fi
+    rm -f "$launch_output" "$launch_error" "$smoke_output" "$smoke_error" \
+        "$tape_output" "$inspect_output" "$tape_fixture"
     exit "$status"
 }
 trap cleanup EXIT INT TERM
@@ -55,7 +66,13 @@ reported_pid="$(printf '%s\n' "$handle" | jq -er '.pid')"
 slot="$(printf '%s\n' "$handle" | jq -er '.slot')"
 [[ "$slot" -ge 1 && "$slot" -le 8 ]]
 [[ "$bundle_id" == "com.danneu.danterm-dev.$slot" ]]
-[[ "$reported_pid" == "$launcher_pid" ]]
+# The handle reports the app the launcher spawned, not the launcher itself, so the two pids
+# are never equal. What the handle owes is a live app to talk to, which is what this checks.
+# Comparing the two pids instead made every assertion below unreachable.
+[[ "$reported_pid" =~ ^[0-9]+$ ]]
+[[ "$reported_pid" != "$launcher_pid" ]]
+kill -0 "$reported_pid"
+app_pid="$reported_pid"
 [[ "$socket" == "$HOME/Library/Caches/$bundle_id/control.sock" ]]
 
 # Asserts a string is absent from the given files.
@@ -111,7 +128,7 @@ grep -qF 'pane close --pane <pane-id>' "$err"
 grep -qF 'agent attach --pane <pane-id> --kind <kind> --id <session-id>' "$err"
 grep -qF 'agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>' "$err"
 grep -qF 'agent detach --pane <pane-id> --kind <kind> --id <session-id>' "$err"
-grep -qF 'todo clear-completed --pane <pane-id>' "$err"
+grep -qF 'todo clear-completed (--pane <pane-id> | --tab <tab-id>)' "$err"
 grep -qE '^ *doctor +Check DanTerm integration health' "$err"
 grep -qE '^ *skill +Print DanTerm' "$err"
 refute 'doctor [--all|-v]' "$err"
@@ -142,7 +159,7 @@ for help_arg in help --help -h; do
     grep -qF 'agent attach --pane <pane-id> --kind <kind> --id <session-id>' "$out"
     grep -qF 'agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>' "$out"
     grep -qF 'agent detach --pane <pane-id> --kind <kind> --id <session-id>' "$out"
-    grep -qF 'todo clear-completed --pane <pane-id>' "$out"
+    grep -qF 'todo clear-completed (--pane <pane-id> | --tab <tab-id>)' "$out"
     grep -qE '^ *doctor +Check DanTerm integration health' "$out"
     grep -qE '^ *skill +Print DanTerm' "$out"
     refute 'doctor [--all|-v]' "$out"
@@ -279,7 +296,30 @@ fi
 
 printf '%s\n' "$model" | jq .groups >/dev/null
 export DANTERM_PANE="$pane_id"
-slot_cli pane tape --pane "$pane_id" | jq -e '.events' >/dev/null
+# A tape is only worth asserting on once the shell in the pane has produced output, so
+# poll for the first feed event rather than reading a tape that is legitimately empty.
+for _ in $(seq 1 30); do
+    slot_cli pane tape --pane "$pane_id" >"$tape_output"
+    if jq -e -s '[.[] | select(.kind == "event" and .event.type == "feed")] | length > 0' \
+        "$tape_output" >/dev/null; then
+        break
+    fi
+    sleep 1
+done
+jq -e -s '(.[0] | .kind == "start" and .version == 2 and .capture == "snapshot"
+             and .format == "replay")
+    and (last | .kind == "end" and .reason == "snapshot-complete")
+    and ([.[] | select(.kind == "event" and .event.type == "feed")] | length > 0)' \
+    "$tape_output" >/dev/null
+slot_cli pane tape --pane "$pane_id" --format inspect >"$inspect_output"
+jq -e -s '(.[0] | .kind == "start" and .version == 2 and .format == "inspect")
+    and ([.[] | select(.kind == "event" and (.event.spans | type) == "array")] | length > 0)
+    and ([.[] | select(.event.base64 != null)] | length == 0)' \
+    "$inspect_output" >/dev/null
+python3 "$SCRIPT_DIR/scripts/terminal-tape-to-fixture.py" "$tape_output" "$tape_fixture" \
+    --keep-identifiers --test TerminalCliSmokeTests >/dev/null
+jq -e '.version == 1 and .provenance.source == "danterm" and (.events | length) > 0' \
+    "$tape_fixture" >/dev/null
 slot_cli focus | jq -e --arg pane "$pane_id" \
     '. == {"focus": {"type": "terminal", "paneId": $pane}}' >/dev/null
 
@@ -414,10 +454,16 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         raise SystemExit("no response for unknown method")
 PY
 
-kill -TERM "$launcher_pid"
+# The launcher exits once it has spawned its app and printed the handle, so by now it is
+# usually gone already. Tolerate that, the way the EXIT trap does: a launcher that finished
+# its job is not a failure of the run it launched. Quitting the run means ending the app,
+# which is the pid the handle reported.
+kill -TERM "$launcher_pid" 2>/dev/null || true
 reap_pid "$launcher_pid"
 launcher_pid=""
-for _ in $(seq 1 10); do
+kill -TERM "$app_pid" 2>/dev/null || true
+app_pid=""
+for _ in $(seq 1 40); do
     [[ ! -S "$socket" ]] && break
     sleep 0.5
 done

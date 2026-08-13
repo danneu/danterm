@@ -136,9 +136,11 @@ contract.
 - [x] 2. Emit version 2 pane-tape JSON Lines for finite and followed captures
       Non-green until slice 4: `scripts/tests/danterm-cli_test.sh` still asserts
       `jq -e '.events'` against the version 1 single-document output. `just test`
-      stays green; only `just test-cli` fails, and only on that one assertion.
+      stays green; only `just test-cli` fails. (In fact that script aborted even
+      earlier, on a pre-existing break slice 4 had to repair before the tape
+      assertion was reachable at all.)
 - [x] 3. Add `pane tape --format inspect` with structured payload spans
-- [ ] 4. Convert version 2 replay streams into neutral fixtures
+- [x] 4. Convert version 2 replay streams into neutral fixtures
 
 ## Implementation notes
 
@@ -174,6 +176,17 @@ contract.
   accounting for every byte. The explicit decoder was checked against a reference
   UTF-8 decoder over every one-, two-, and three-byte sequence, sampled four-byte
   sequences, and every truncated prefix.
+- Slice 4 also repairs four pre-existing breaks in
+  `scripts/tests/danterm-cli_test.sh`: it compared the handle's app pid to the
+  launcher's pid (never equal, so the script aborted there and everything after
+  it had been dead for a long time), a help grep expected a `todo` usage string
+  the CLI no longer prints, teardown killed an already-exited launcher, and
+  teardown never killed the app, so every failed run leaked one of the eight
+  shared dev slots. Splitting those repairs into their own commit was tried and
+  rejected: with the repairs alone the script reaches the old `jq -e '.events'`
+  tape assertion, which slice 2 already invalidated, so a repair-only commit
+  cannot be green at that point in history. The repairs and the new tape
+  assertions are what make `just test-cli` pass, and neither half does alone.
 - The inspect transform lives in `DanTermProtocol` rather than in `cli/`, even
   though only the CLI applies it. It is a pure record-to-record function, and
   putting it beside the stream vocabulary makes it testable in a fast package

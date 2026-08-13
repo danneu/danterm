@@ -504,8 +504,12 @@ The output is unscrubbed; redirect it to a file, then run the repository's
 fixture converter before committing it. The converter refuses every stream that
 reports a `gap`, because its surviving geometry and event sequence cannot be
 trusted. There is no truncation override. A truncated finite dump still
-succeeds and reports its loss as that `gap` record. Every pane records, in
-production as well as in a dev build, so this always answers for a live pane.
+succeeds and reports its loss as that `gap` record. It also refuses a stream
+whose sequences or per-direction byte offsets do not continue, and a finite dump
+that stops without its `end` record, because neither is the whole run of bytes
+the pane saw. A followed capture that stops at EOF is accepted as evidence up to
+that point. Every pane records, in production as well as in a dev build, so this
+always answers for a live pane.
 
     scripts/terminal-tape-to-fixture.py tape.jsonl \
         lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json \
@@ -541,7 +545,7 @@ the exact bytes; the CLI derives this view locally, one record at a time, so
 nothing about the recording changes.
 
     {"kind":"start","version":2,"capture":"snapshot","format":"inspect","initial":{"columns":80,"rows":24},"cursor":{"sequence":0,"feedByteOffset":0,"writeByteOffset":0},"provenance":{...}}
-    {"kind":"event","sequence":1,"elapsedNanoseconds":123652792,"byteOffset":0,"byteLength":41,"event":{"type":"feed","spans":[{"control":"ESC"},{"text":"]1337;DanTermShell=3;integration-ready"},{"control":"ESC"},{"text":"\\"}]}}
+    {"kind":"event","sequence":0,"elapsedNanoseconds":123652792,"byteOffset":0,"byteLength":41,"event":{"type":"feed","spans":[{"control":"ESC"},{"text":"]1337;DanTermShell=3;integration-ready"},{"control":"ESC"},{"text":"\\"}]}}
 
 A `start` record changes only its `format` field; its version, capture,
 provenance, geometry, and cursor are unchanged. An `event` record replaces
