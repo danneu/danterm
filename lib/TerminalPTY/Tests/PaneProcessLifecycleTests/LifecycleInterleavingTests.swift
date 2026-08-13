@@ -30,18 +30,27 @@ import Testing
     private func checkSpawnRace(with outcome: PaneProcessLifecycleEvent) {
         for events in permutations(.requestClose, outcome) {
             var reducer = PaneProcessLifecycleReducer()
-            var commands = reducer.handle(.start(lifecycleInput()))
+            var masterClosedSeen = false
+            var commands = reduce(
+                .start(lifecycleInput()),
+                with: &reducer,
+                masterClosedSeen: &masterClosedSeen
+            )
             var closeSeen = false
 
             for event in events {
                 closeSeen = closeSeen || event == .requestClose
-                let emitted = reducer.handle(event)
+                let emitted = reduce(
+                    event,
+                    with: &reducer,
+                    masterClosedSeen: &masterClosedSeen
+                )
                 if closeSeen {
                     #expect(!emitted.contains { if case .spawn = $0 { true } else { false } })
                 }
                 commands += emitted
             }
-            commands += converge(&reducer)
+            commands += converge(&reducer, masterClosedSeen: &masterClosedSeen)
             assertInvariants(commands, reducer: reducer)
         }
     }
@@ -51,16 +60,21 @@ import Testing
             var reducer = runningReducer()
             var commands: [PaneProcessLifecycleCommand] = []
             var closeSeen = false
+            var masterClosedSeen = false
 
             for event in events {
-                let emitted = reducer.handle(event)
+                let emitted = reduce(
+                    event,
+                    with: &reducer,
+                    masterClosedSeen: &masterClosedSeen
+                )
                 if closeSeen {
                     #expect(!emitted.contains { if case .deliverOutput = $0 { true } else { false } })
                 }
                 commands += emitted
                 closeSeen = closeSeen || event == .requestClose
             }
-            commands += converge(&reducer)
+            commands += converge(&reducer, masterClosedSeen: &masterClosedSeen)
             assertInvariants(commands, reducer: reducer)
         }
     }
@@ -68,9 +82,20 @@ import Testing
     private func checkGraceExitRace() {
         for events in permutations(.graceElapsed(.hangup), .childExited(.exited(12))) {
             var reducer = runningReducer()
-            var commands = reducer.handle(.requestClose)
-            for event in events { commands += reducer.handle(event) }
-            commands += converge(&reducer)
+            var masterClosedSeen = false
+            var commands = reduce(
+                .requestClose,
+                with: &reducer,
+                masterClosedSeen: &masterClosedSeen
+            )
+            for event in events {
+                commands += reduce(
+                    event,
+                    with: &reducer,
+                    masterClosedSeen: &masterClosedSeen
+                )
+            }
+            commands += converge(&reducer, masterClosedSeen: &masterClosedSeen)
             assertInvariants(commands, reducer: reducer)
         }
     }
@@ -79,27 +104,70 @@ import Testing
         for events in permutations(.outputEOF, .childExited(.exited(3))) {
             var reducer = runningReducer()
             var commands: [PaneProcessLifecycleCommand] = []
-            for event in events { commands += reducer.handle(event) }
-            commands += converge(&reducer)
+            var masterClosedSeen = false
+            for event in events {
+                commands += reduce(
+                    event,
+                    with: &reducer,
+                    masterClosedSeen: &masterClosedSeen
+                )
+            }
+            commands += converge(&reducer, masterClosedSeen: &masterClosedSeen)
             assertInvariants(commands, reducer: reducer)
             #expect(commands.filter { if case .report = $0 { true } else { false } }.count == 1)
         }
     }
 
-    private func converge(_ reducer: inout PaneProcessLifecycleReducer) -> [PaneProcessLifecycleCommand] {
+    private func converge(
+        _ reducer: inout PaneProcessLifecycleReducer,
+        masterClosedSeen: inout Bool
+    ) -> [PaneProcessLifecycleCommand] {
         var commands: [PaneProcessLifecycleCommand] = []
         switch reducer.phase {
         case .spawning:
-            commands += reducer.handle(.spawnFailed(.systemError(99)))
+            commands += reduce(
+                .spawnFailed(.systemError(99)),
+                with: &reducer,
+                masterClosedSeen: &masterClosedSeen
+            )
         case .running:
-            commands += reducer.handle(.requestClose)
+            commands += reduce(
+                .requestClose,
+                with: &reducer,
+                masterClosedSeen: &masterClosedSeen
+            )
         case .drainingOutput:
-            commands += reducer.handle(.outputEOF)
+            commands += reduce(
+                .outputEOF,
+                with: &reducer,
+                masterClosedSeen: &masterClosedSeen
+            )
         case .idle, .tearingDown, .finished:
             break
         }
-        commands += reducer.handle(.sessionDrained)
+        commands += reduce(
+            .sessionDrained,
+            with: &reducer,
+            masterClosedSeen: &masterClosedSeen
+        )
         return commands
+    }
+
+    private func reduce(
+        _ event: PaneProcessLifecycleEvent,
+        with reducer: inout PaneProcessLifecycleReducer,
+        masterClosedSeen: inout Bool
+    ) -> [PaneProcessLifecycleCommand] {
+        let commands = reducer.handle(event)
+        let emittedSignal = commands.contains {
+            if case .signalSession = $0 { true } else { false }
+        }
+        #expect(emittedSignal == false || masterClosedSeen)
+        guard commands.contains(.closeMaster) else { return commands }
+        #expect(commands.last == .closeMaster)
+
+        masterClosedSeen = true
+        return commands + reducer.handle(.masterClosed)
     }
 
     private func assertInvariants(_ commands: [PaneProcessLifecycleCommand], reducer: PaneProcessLifecycleReducer) {

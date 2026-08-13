@@ -240,7 +240,7 @@ public actor TerminalPTYHost {
     private var nextSourceID = 0
     private var descriptorOwnershipSealed = false
     private var masterCloseRequested = false
-    private var deferredCommandsAfterMasterClose: [PaneProcessLifecycleCommand] = []
+    private var reducerAwaitsMasterClose = false
     private var forcedCleanupAfterMasterClose = false
     private var teardownFinalizationRequested = false
     /// Bumped by every new launch and by teardown. A returning spawn compares the
@@ -731,6 +731,7 @@ public actor TerminalPTYHost {
         guard teardownFinished == false else { return }
         forcedQuiescenceCount += 1
         forcedCleanupAfterMasterClose = true
+        reducerAwaitsMasterClose = false
         cancelExitBound()
         cancelGrace()
         cancelSessionPoll()
@@ -744,7 +745,6 @@ public actor TerminalPTYHost {
     private func performForcedCleanupAfterMasterClose() {
         guard forcedCleanupAfterMasterClose else { return }
         forcedCleanupAfterMasterClose = false
-        deferredCommandsAfterMasterClose.removeAll()
         killOwnedSession()
         reapLeaderAfterKill()
         // Last: a launch that has not come back yet owns a child this host cannot
@@ -1332,19 +1332,7 @@ public actor TerminalPTYHost {
     }
 
     private func execute(_ commands: [PaneProcessLifecycleCommand]) {
-        for (index, command) in commands.enumerated() {
-            if command == .closeMaster {
-                closeMaster()
-                if masterFD >= 0 {
-                    deferredCommandsAfterMasterClose.append(
-                        contentsOf: commands.dropFirst(index + 1)
-                    )
-                    return
-                }
-                continue
-            }
-            execute(command)
-        }
+        for command in commands { execute(command) }
     }
 
     private func execute(_ command: PaneProcessLifecycleCommand) {
@@ -1370,9 +1358,8 @@ public actor TerminalPTYHost {
         case .drainOutput:
             drainCommittedOutput()
         case .closeMaster:
-            preconditionFailure(
-                "closeMaster is handled by execute(_ commands:) so its tail can be deferred"
-            )
+            reducerAwaitsMasterClose = true
+            closeMaster()
         case .reapLeader:
             reapLeader()
         case .signalSession(let stage):
@@ -1940,24 +1927,9 @@ public actor TerminalPTYHost {
             performForcedCleanupAfterMasterClose()
             return
         }
-        resumeCommandsAfterMasterClose()
-    }
-
-    private func resumeCommandsAfterMasterClose() {
-        guard deferredCommandsAfterMasterClose.isEmpty == false else { return }
-        let commands = deferredCommandsAfterMasterClose
-        deferredCommandsAfterMasterClose.removeAll()
-        precondition(isReducing == false)
-        isReducing = true
-        defer {
-            publishPendingUpdate()
-            isReducing = false
-        }
-        execute(commands)
-        while pendingEvents.isEmpty == false {
-            let next = pendingEvents.removeFirst()
-            execute(reducer.handle(next))
-        }
+        guard reducerAwaitsMasterClose else { return }
+        reducerAwaitsMasterClose = false
+        process(.masterClosed)
     }
 
     private func cancelReadSource() {

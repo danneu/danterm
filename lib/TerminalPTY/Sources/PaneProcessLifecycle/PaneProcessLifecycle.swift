@@ -91,6 +91,7 @@ public enum PaneProcessLifecycleEvent: Equatable, Sendable {
     case outputEOF
     case childExited(ChildExitStatus)
     case requestClose
+    case masterClosed
     case graceElapsed(TeardownStage)
     case sessionDrained
 }
@@ -361,13 +362,17 @@ public struct PaneProcessLifecycleReducer: Sendable {
                 return [.reapLeader] + finishTeardown(next)
             }
             return [.reapLeader]
-        case .sessionDrained where !next.sessionDrained:
+        case .masterClosed where next.masterClosed == false:
+            next.masterClosed = true
+            storage = .tearingDown(next)
+            return [.signalSession(.hangup), .scheduleGrace(.hangup)]
+        case .sessionDrained where next.masterClosed && !next.sessionDrained:
             next.sessionDrained = true
             if next.leaderStatus != nil {
                 return finishTeardown(next)
             }
             return [.reapLeader] + finishTeardown(next)
-        case .graceElapsed(let stage) where stage == next.stage:
+        case .graceElapsed(let stage) where next.masterClosed && stage == next.stage:
             switch stage {
             case .hangup:
                 next.stage = .terminate
@@ -405,11 +410,12 @@ public struct PaneProcessLifecycleReducer: Sendable {
             stage: .hangup,
             result: result,
             leaderStatus: leaderStatus,
-            sessionDrained: false
+            sessionDrained: false,
+            masterClosed: false
         ))
         var commands: [PaneProcessLifecycleCommand] = []
         if reapLeader { commands.append(.reapLeader) }
-        commands += [.closeMaster, .signalSession(.hangup), .scheduleGrace(.hangup)]
+        commands.append(.closeMaster)
         return commands
     }
 
@@ -452,6 +458,7 @@ private struct TeardownContext: Sendable {
     let result: PaneProcessLifecycleResult?
     var leaderStatus: ChildExitStatus?
     var sessionDrained: Bool
+    var masterClosed: Bool
 }
 
 /// Internal states keep race bookkeeping private while `phase` exposes stable policy state.

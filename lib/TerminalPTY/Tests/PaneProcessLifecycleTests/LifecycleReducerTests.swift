@@ -156,6 +156,7 @@ import Testing
 
         #expect(reducer.handle(.outputEOF).isEmpty)
         #expect(reducer.handle(.childExited(status)) == beginSelfExitCommands)
+        #expect(reducer.handle(.masterClosed) == masterClosedCommands)
         #expect(reducer.handle(.sessionDrained) == finishCommands(for: .exited(status)))
         #expect(reducer.phase == .finished)
     }
@@ -170,6 +171,7 @@ import Testing
             .deliverOutput([0x66, 0x69, 0x6e, 0x61, 0x6c]),
         ])
         #expect(reducer.handle(.outputEOF) == beginSelfExitCommands)
+        #expect(reducer.handle(.masterClosed) == masterClosedCommands)
         #expect(reducer.handle(.sessionDrained) == finishCommands(for: .exited(status)))
     }
 
@@ -178,6 +180,7 @@ import Testing
         var reducer = runningReducer()
 
         #expect(reducer.handle(.requestClose) == beginCloseCommands)
+        #expect(reducer.handle(.masterClosed) == masterClosedCommands)
         #expect(reducer.handle(.output([0x6c, 0x61, 0x74, 0x65])).isEmpty)
         #expect(reducer.handle(.graceElapsed(.hangup)) == [
             .signalSession(.terminate),
@@ -186,6 +189,68 @@ import Testing
         #expect(reducer.handle(.graceElapsed(.terminate)) == [.signalSession(.kill)])
         #expect(reducer.handle(.childExited(.signaled(9))) == [.reapLeader])
         #expect(reducer.handle(.sessionDrained) == finishCancelledCommands)
+    }
+
+    @Test("master close completion starts the teardown ladder exactly once")
+    func masterCloseCompletionStartsTeardownLadder() {
+        var reducer = runningReducer()
+
+        #expect(reducer.handle(.requestClose) == [.closeMaster])
+        #expect(reducer.handle(.masterClosed) == [
+            .signalSession(.hangup),
+            .scheduleGrace(.hangup),
+        ])
+        #expect(reducer.handle(.masterClosed).isEmpty)
+    }
+
+    @Test("teardown progress waits for master close completion")
+    func teardownProgressWaitsForMasterClose() {
+        var reducer = runningReducer()
+
+        _ = reducer.handle(.requestClose)
+        #expect(reducer.handle(.graceElapsed(.hangup)).isEmpty)
+        #expect(reducer.handle(.sessionDrained).isEmpty)
+        #expect(reducer.handle(.masterClosed) == [
+            .signalSession(.hangup),
+            .scheduleGrace(.hangup),
+        ])
+        #expect(reducer.handle(.graceElapsed(.hangup)) == [
+            .signalSession(.terminate),
+            .scheduleGrace(.terminate),
+        ])
+        #expect(reducer.handle(.graceElapsed(.terminate)) == [.signalSession(.kill)])
+    }
+
+    @Test("master close completion is inert outside active teardown")
+    func masterCloseCompletionIsPhaseBound() {
+        var idle = PaneProcessLifecycleReducer()
+        #expect(idle.handle(.masterClosed).isEmpty)
+        #expect(idle.phase == .idle)
+
+        var spawning = PaneProcessLifecycleReducer()
+        _ = spawning.handle(.start(lifecycleInput()))
+        #expect(spawning.handle(.masterClosed).isEmpty)
+        #expect(spawning.phase == .spawning)
+
+        var closingWhileSpawning = PaneProcessLifecycleReducer()
+        _ = closingWhileSpawning.handle(.start(lifecycleInput()))
+        _ = closingWhileSpawning.handle(.requestClose)
+        #expect(closingWhileSpawning.handle(.masterClosed).isEmpty)
+        #expect(closingWhileSpawning.phase == .spawning)
+
+        var running = runningReducer()
+        #expect(running.handle(.masterClosed).isEmpty)
+        #expect(running.phase == .running)
+
+        var draining = runningReducer()
+        _ = draining.handle(.childExited(.exited(1)))
+        #expect(draining.handle(.masterClosed).isEmpty)
+        #expect(draining.phase == .drainingOutput)
+
+        var finished = PaneProcessLifecycleReducer()
+        _ = finished.handle(.requestClose)
+        #expect(finished.handle(.masterClosed).isEmpty)
+        #expect(finished.phase == .finished)
     }
 
     @Test("a drained session reaps and finishes without child-exit observation")
@@ -199,6 +264,7 @@ import Testing
         var reducer = runningReducer()
 
         _ = reducer.handle(.requestClose)
+        _ = reducer.handle(.masterClosed)
         #expect(reducer.handle(.sessionDrained) == [
             .reapLeader,
             .cancelGrace,
@@ -222,6 +288,7 @@ import Testing
         for events in orderings {
             var reducer = runningReducer()
             var commands = reducer.handle(.requestClose)
+            commands += reducer.handle(.masterClosed)
             for event in events {
                 commands += reducer.handle(event)
             }
@@ -246,6 +313,7 @@ import Testing
         _ = reducer.handle(.start(input))
         #expect(reducer.handle(.requestClose).isEmpty)
         #expect(reducer.handle(.spawnSucceeded) == beginCloseCommands)
+        #expect(reducer.handle(.masterClosed) == masterClosedCommands)
         #expect(reducer.handle(.sessionDrained) == [
             .reapLeader,
             .cancelGrace,
@@ -277,7 +345,7 @@ import Testing
             .spawnFailed(.systemError(1)),
             .resize(TerminalDimensions(columns: 1, rows: 1)), .output([2]),
             .outputEOF, .childExited(.exited(0)), .requestClose,
-            .graceElapsed(.hangup), .sessionDrained,
+            .masterClosed, .graceElapsed(.hangup), .sessionDrained,
         ]
         for event in events {
             #expect(reducer.handle(event).isEmpty)
@@ -317,13 +385,14 @@ import Testing
 
 let beginCloseCommands: [PaneProcessLifecycleCommand] = [
     .closeMaster,
-    .signalSession(.hangup),
-    .scheduleGrace(.hangup),
 ]
 
 let beginSelfExitCommands: [PaneProcessLifecycleCommand] = [
     .reapLeader,
     .closeMaster,
+]
+
+let masterClosedCommands: [PaneProcessLifecycleCommand] = [
     .signalSession(.hangup),
     .scheduleGrace(.hangup),
 ]

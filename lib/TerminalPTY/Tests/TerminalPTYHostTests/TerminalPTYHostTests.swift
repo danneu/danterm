@@ -1297,8 +1297,8 @@ struct TerminalPTYHostTests {
     func forcedShutdownWaitsForDescriptorJoin() async throws {
         // Intent: the forced path leaves the child and master owned until the
         //   descriptor-source barrier opens, then completes the whole cleanup.
-        // Why it exists: resuming forced reap from closeMaster() itself can block
-        //   before cancellation callbacks run or replay superseded ladder commands.
+        // Why it exists: starting forced reap from closeMaster() itself can block
+        //   before cancellation callbacks run or restart the superseded ladder.
         // Scenario: application exit forces a live pane while its source
         //   cancellation acknowledgements are deterministically paused.
         let lifecycle = ControlledTerminalPTYResourceLifecycle()
@@ -1332,6 +1332,41 @@ struct TerminalPTYHostTests {
         #expect(completion.waitForAll(within: .seconds(20)))
         #expect(await waitForProcessExit(pid))
         let finished = await host.resourceSnapshot()
+        #expect(finished.census.forcedQuiescenceCount == 1)
+        #expect(finished.isReleased)
+    }
+
+    @Test("forced cleanup does not resume a result-bearing reducer", .timeLimit(.minutes(1)))
+    func forcedCleanupSupersedesResultBearingReducer() async throws {
+        // Intent: forced cleanup consumes the pending close without reporting the
+        //   parked child result or restarting the normal teardown ladder.
+        // Why it exists: a close-completion event emitted after forced cleanup
+        //   would revive the reducer that the host bypassed and publish stale state.
+        // Scenario: a child exits with status 7 while the descriptor join is held;
+        //   the host forces cleanup before that join is released.
+        let lifecycle = ControlledTerminalPTYResourceLifecycle()
+        let cancellationReached = ExitCompletionRecorder(expecting: 1)
+        lifecycle.holdSourceCancellationAcknowledgements {
+            cancellationReached.signal()
+        }
+        let host = try makeHost(
+            applicationExitBound: .seconds(30),
+            resourceLifecycle: lifecycle
+        )
+        let completion = ExitCompletionRecorder(expecting: 1)
+        host.whenQuiescent { completion.signal() }
+
+        await host.start(makeLaunchInput(command: "printf '__READY__'; exit 7"))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        #expect(cancellationReached.waitForAll(within: .seconds(20)))
+        #expect(await host.result() == nil)
+
+        await host.forceExitBoundForTesting()
+        lifecycle.releaseSourceCancellationAcknowledgements()
+        #expect(completion.waitForAll(within: .seconds(20)))
+
+        let finished = await host.resourceSnapshot()
+        #expect(await host.result() == nil)
         #expect(finished.census.forcedQuiescenceCount == 1)
         #expect(finished.isReleased)
     }
