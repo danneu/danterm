@@ -214,10 +214,11 @@ Inside DanTerm, derive the originating pane, tab, and group:
     TAB_ID=$(jq -r '.tab.id' <<<"$INFO")
     GROUP_ID=$(jq -r '.group.id' <<<"$INFO")
 
-Each pane projects four typed current lifecycle objects:
+Each pane projects its process phase and four typed current lifecycle objects:
 
     {
       "pane": {
+        "processPhase": "spawning" | "running",
         "integration": {"state": "neverReported" | "ready"},
         "command": {"state": "idle"} | {"state": "running", "text": "..."},
         "connection": {"state": "local"} |
@@ -267,6 +268,11 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "show DanTerm's agent instructions" | `skill` |
 
 ## Recipes
+
+`group new`, `tab new`, and `pane split` return success only after the new
+pane's process is running. Creation or launch failure exits non-zero. If the
+CLI instead reports `DanTerm is not responding`, the outcome is indeterminate:
+the process can still start after the receive timeout.
 
 ### Create a group
 
@@ -383,8 +389,9 @@ Orientation:
 - `-h` = horizontal split = side by side. The new pane opens to the right.
 - `-v` = vertical split = stacked. The new pane opens below.
 
-Prefer `--cmd` over splitting and then sending keys; it avoids the
-shell-prompt race.
+Splitting and then using `pane input` is ordered safely even while the process
+is still spawning. Prefer `--cmd` when the new program can flush terminal input
+at startup, because that program can discard bytes typed before it starts.
 
     danterm pane split --pane "$PANE_ID" -h --cmd 'just test' --title tests
     danterm pane split --pane "$PANE_ID" -h --foreground --cmd 'just test' --title tests
@@ -724,6 +731,10 @@ to edit the tab-level list.
 sent as a separate event; there is no implicit space-joining. Quote a single
 arg when spaces or newlines must be preserved.
 
+Input submitted while the pane is spawning stays buffered in order. The
+command returns success only after every submission has crossed the PTY master;
+spawn, process, or write failure returns an error instead.
+
 - Bare words (`"ls"`, `"cargo"`) are typed as text.
 - Named keys are key presses: `Enter`, `Tab`, `BSpace`, `Escape`, `Up`,
   `Down`, `Left`, `Right`, `Home`, `End`, `PgUp`, `PgDn`, `Delete`, `F1`
@@ -752,9 +763,9 @@ else prints nothing on success and exits 0.
 | Command | Stdout |
 |---|---|
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
-| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with current `command`, `connection`, `agent`, and `integration` objects in the same encoding as `pane info`) |
+| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with current `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`) |
 | `focus` | JSON: `{focus: {type: "terminal"|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"|"none"}}` |
-| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, command, connection, agent, integration}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
+| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, processPhase, command, connection, agent, integration}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `group new --name <name>` | Same JSON shape as `tab new`, naming the new group and its first tab |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |
@@ -776,10 +787,10 @@ a stale hook cannot mutate a replacement session.
 
 - Never `pane input` into your own pane (`$DANTERM_PANE`) without an explicit
   user request; you would be typing into your own input stream.
-- Prefer `tab new --group <group-id> --cmd` and
-  `pane split --pane <pane-id> --cmd` over the
-  split-then-`pane input` pattern. `--cmd` seeds the command at session
-  creation time and avoids racing the shell prompt.
+- Split-then-`pane input` is safe while the pane process spawns. Prefer
+  `tab new --group <group-id> --cmd` and `pane split --pane <pane-id> --cmd`
+  when the new program can flush terminal input at startup; `--cmd` supplies
+  the command as launch input instead.
 - To launch Claude with an initial prompt, keep its stdout attached to the
   terminal. For serious agent work (implementing a plan, verifying an issue,
   reviewing a plan, reviewing an implementation, etc.), use `claude --effort

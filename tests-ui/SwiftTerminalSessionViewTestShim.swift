@@ -4,6 +4,13 @@ import IOSurface
 
 enum PaneProcessLifecycleResult {
     case exited
+    case launchFailed
+}
+
+/// Matches the production controller's terminal result for one bounded input submission.
+enum PaneInputSubmissionResult {
+    case delivered
+    case rejected
 }
 
 enum TerminalCellKind {
@@ -435,6 +442,7 @@ final class TerminalPaneSessionController {
     var onClipboardWrite: ((String) -> Void)?
     var onSelectionCopy: ((String) -> Void)?
     var onSemanticEvents: (([TerminalSemanticEvent]) -> Void)?
+    var onProcessStarted: (() -> Void)?
     var onSessionEnded: ((PaneProcessLifecycleResult) -> Void)?
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
     var onPaneMenu: ((TerminalViewportCell) -> Void)?
@@ -459,6 +467,8 @@ final class TerminalPaneSessionController {
     private(set) var scrolledTopRows: [Int] = []
     private(set) var textInputs: [String] = []
     private(set) var inputBytes: [[UInt8]] = []
+    private(set) var deliveredTextInputs: [String] = []
+    private(set) var deliveredInputBytes: [[UInt8]] = []
     /// Origin stamps in submission order, so a test can assert which moment the pane view
     /// attributed its input to. The real controller forwards these to the flight recorder.
     private(set) var inputOrigins: [UInt64?] = []
@@ -478,6 +488,8 @@ final class TerminalPaneSessionController {
     var linkForCommandClick: TerminalHyperlink?
     private var cachedHoveredLink: TerminalHyperlink?
     private var linkClickArmed = false
+    private var processIsRunning: Bool
+    private var pendingInputDeliveries: [() -> Void] = []
     var inputModes = TerminalInputModes.default
 
     init(
@@ -486,28 +498,83 @@ final class TerminalPaneSessionController {
             projection: .init(totalRows: 30, topRow: 10, windowRows: 20, isFollowing: false)
         ),
         theme: RenderTheme = .dark,
-        currentPlan: RenderFramePlan? = nil
+        currentPlan: RenderFramePlan? = nil,
+        processIsRunning: Bool = true
     ) {
         self.viewportState = viewportState
         renderTheme = theme
         self.currentPlan = currentPlan
+        self.processIsRunning = processIsRunning
     }
 
     func sendText(_ text: String, origin: UInt64?) {
+        sendText(text, origin: origin, onCompletion: nil)
+    }
+    func sendText(
+        _ text: String,
+        origin: UInt64?,
+        onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?
+    ) {
         textInputs.append(text)
         inputOrigins.append(origin)
+        deliverOrBuffer { [weak self] in
+            self?.deliveredTextInputs.append(text)
+            Self.complete(onCompletion, with: .delivered)
+        }
     }
     func sendKey(
         _ key: TerminalInputKey,
         modifiers: TerminalKeyModifiers,
-        origin: UInt64?
+        origin: UInt64?,
+        onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
     ) {
-        inputBytes.append(encodeTerminalKey(key, modifiers: modifiers, modes: inputModes))
+        let bytes = encodeTerminalKey(key, modifiers: modifiers, modes: inputModes)
+        inputBytes.append(bytes)
         inputOrigins.append(origin)
+        deliverOrBuffer { [weak self] in
+            self?.deliveredInputBytes.append(bytes)
+            Self.complete(onCompletion, with: .delivered)
+        }
     }
-    func sendPaste(_ text: String, origin: UInt64?) {
-        inputBytes.append(encodeTerminalPaste(text, modes: inputModes))
+    func sendPaste(
+        _ text: String,
+        origin: UInt64?,
+        onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
+    ) {
+        let bytes = encodeTerminalPaste(text, modes: inputModes)
+        inputBytes.append(bytes)
         inputOrigins.append(origin)
+        deliverOrBuffer { [weak self] in
+            self?.deliveredInputBytes.append(bytes)
+            Self.complete(onCompletion, with: .delivered)
+        }
+    }
+
+    func emitProcessStarted() {
+        guard processIsRunning == false else { return }
+        processIsRunning = true
+        onProcessStarted?()
+        let deliveries = pendingInputDeliveries
+        pendingInputDeliveries = []
+        for delivery in deliveries { delivery() }
+    }
+
+    private func deliverOrBuffer(_ delivery: @escaping () -> Void) {
+        if processIsRunning {
+            delivery()
+        } else {
+            pendingInputDeliveries.append(delivery)
+        }
+    }
+
+    private static func complete(
+        _ completion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?,
+        with result: PaneInputSubmissionResult
+    ) {
+        guard let completion else { return }
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { completion(result) }
+        }
     }
     func beginSearch(_ query: String) { searchQueries.append(query) }
     func searchNext() { searchNextRequests += 1 }

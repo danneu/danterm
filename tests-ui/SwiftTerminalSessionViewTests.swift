@@ -1291,6 +1291,27 @@ func swiftTerminalSessionViewTests() {
                      "input lost the event's own time: \(controller.inputOrigins)")
     }
 
+    uiTest("a GUI keystroke submitted before spawn is delivered after process start") {
+        // Intent: the real AppKit key route accepts input while the pane process is spawning,
+        //   then delivers it when that process starts.
+        // Why it exists: GUI input shares the lifecycle path with IPC input, and the old
+        //   pre-running reducer arm silently discarded keystrokes.
+        // Scenario: a deterministic spawning controller receives K before its process-start edge.
+        let controller = TerminalPaneSessionController(processIsRunning: false)
+        let pane = SwiftTerminalSessionView(controller: controller)
+
+        pane.keyDown(with: try makeKeyEvent(keyCode: 40, modifiers: [], characters: "k"))
+
+        try uiExpect(controller.textInputs == ["k"], "AppKit input did not reach the controller")
+        try uiExpect(controller.deliveredTextInputs.isEmpty,
+                     "spawning controller delivered the keystroke before process start")
+
+        controller.emitProcessStarted()
+
+        try uiExpect(controller.deliveredTextInputs == ["k"],
+                     "process start did not deliver the buffered GUI keystroke exactly once")
+    }
+
     uiTest("input the app originates carries the time it entered the pane") {
         // Intent: input with no system event behind it -- the IPC text and key entries -- still
         // reports an origin, taken as it enters the pane.

@@ -235,7 +235,7 @@ creation, and add the process phase to the pane response table.
 
 - [x] 1. feat(pty): make input submissions bounded and observable
 - [x] 2. fix(ipc): reply when pane effects complete
-- [ ] 3. test(app): prove pre-spawn GUI input and document readiness
+- [x] 3. test(app): prove pre-spawn GUI input and document readiness
 
 ## Implementation notes
 
