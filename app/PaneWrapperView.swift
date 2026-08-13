@@ -50,7 +50,7 @@ class PaneWrapperView: NSView {
         // Terminal view wrapped in scroll view for native scrollbar support
         self.scrollWrapper = ScrollableTerminalView(terminalSession: terminalView)
         self.toolbar = NSView()
-        self.toolbarLabel = NonHitTestingLabel(labelWithString: "")
+        self.toolbarLabel = NonHitTestingLabel.make(truncating: .byTruncatingMiddle)
         self.isZoomed = isZoomed
         self.hasSplits = hasSplits
         self.runtime = runtime
@@ -58,9 +58,9 @@ class PaneWrapperView: NSView {
         self.progressIndicator = ProgressIndicatorView()
         self.remoteAccessory = NSView()
         self.remoteIcon = NSImageView()
-        self.remoteSessionLabel = NonHitTestingLabel(labelWithString: "")
+        self.remoteSessionLabel = NonHitTestingLabel.make()
         self.agentAccessory = NSView()
-        self.agentSessionLabel = NonHitTestingLabel(labelWithString: "")
+        self.agentSessionLabel = NonHitTestingLabel.make()
         self.paneChip = ChipView(kind: .terminal, edge: ChipArtwork.toolbarSize)
         self.leadingStack = NSStackView()
 
@@ -127,8 +127,6 @@ class PaneWrapperView: NSView {
         remoteSessionLabel.translatesAutoresizingMaskIntoConstraints = false
         remoteSessionLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         remoteSessionLabel.textColor = .white
-        remoteSessionLabel.lineBreakMode = .byTruncatingTail
-        remoteSessionLabel.usesSingleLineMode = true
         remoteSessionLabel.isHidden = true
         remoteSessionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         remoteAccessory.addSubview(remoteSessionLabel)
@@ -165,8 +163,6 @@ class PaneWrapperView: NSView {
         agentSessionLabel.translatesAutoresizingMaskIntoConstraints = false
         agentSessionLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         agentSessionLabel.textColor = .white
-        agentSessionLabel.lineBreakMode = .byTruncatingTail
-        agentSessionLabel.usesSingleLineMode = true
         agentSessionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         agentAccessory.addSubview(agentSessionLabel)
 
@@ -189,7 +185,6 @@ class PaneWrapperView: NSView {
         toolbarLabel.translatesAutoresizingMaskIntoConstraints = false
         toolbarLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         toolbarLabel.textColor = NSColor.secondaryLabelColor
-        toolbarLabel.lineBreakMode = .byTruncatingMiddle
         toolbarLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // Leading stack: arranges [alertBadge, remoteAccessory, progressIndicator, label] horizontally
@@ -292,17 +287,16 @@ class PaneWrapperView: NSView {
         scrollWrapper.setFocusRing(focused: focused, hasBell: hasBell)
     }
 
-    func updateToolbar(title: String, cwd: String?, command: String? = nil, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, agentSession: AgentSession? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0, isZoomed: Bool? = nil, hasSplits: Bool? = nil) {
-        toolbarLabel.stringValue = paneCommandChromeText(
-            title: title,
-            cwd: cwd,
-            command: command
-        )
+    /// Every string arrives composed by `desiredPaneToolbar`; this method only
+    /// reads values out into labels. Composing text here would put untrusted
+    /// terminal-reported values back together inside the view.
+    func updateToolbar(label: DisplayLine, progress: ProgressState? = nil, isRemote: Bool = false, remoteLabel: DisplayLine? = nil, agentLabel: DisplayLine? = nil, chipTooltip: DisplayLine? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0, isZoomed: Bool? = nil, hasSplits: Bool? = nil) {
+        toolbarLabel.stringValue = label.text
         applyProgressState(progress)
         remoteAccessory.isHidden = !isRemote
-        remoteSessionLabel.stringValue = remoteSession?.displayString ?? ""
-        remoteSessionLabel.isHidden = remoteSession == nil
-        let expanded = remoteSession != nil
+        remoteSessionLabel.stringValue = remoteLabel?.text ?? ""
+        remoteSessionLabel.isHidden = remoteLabel == nil
+        let expanded = remoteLabel != nil
         if expanded != remoteExpanded {
             remoteExpanded = expanded
             if expanded {
@@ -316,13 +310,9 @@ class PaneWrapperView: NSView {
         paneChip.kind = chipKind
         // The chip's tooltip carries the session id, so it survives the pill
         // being hidden for an agent the chip can name on its own.
-        paneChip.toolTip = agentSession.map { "\($0.kind) session \($0.sessionId)" }
-        // `.agent` is the mark for an agent DanTerm cannot name, so the pill has
-        // to supply the name the chip is missing. Every other kind either names
-        // the agent itself or means there is no agent.
-        let needsAgentLabel = chipKind == .agent
-        agentAccessory.isHidden = !needsAgentLabel
-        agentSessionLabel.stringValue = needsAgentLabel ? (agentSession?.toolbarLabel ?? "") : ""
+        paneChip.toolTip = chipTooltip?.text
+        agentAccessory.isHidden = agentLabel == nil
+        agentSessionLabel.stringValue = agentLabel?.text ?? ""
         alertBadge.updateBadge(count: unreadAlertCount)
         todoButton.update(totalCount: totalTodoCount, uncompletedCount: uncompletedTodoCount)
         if let isZoomed {
@@ -655,7 +645,7 @@ class ToolbarDragHandleView: NSView, NSDraggingSource {
 
 /// NSTextField subclass that never intercepts mouse events.
 /// Used for the toolbar label so the drag handle underneath receives hits.
-class NonHitTestingLabel: NSTextField {
+class NonHitTestingLabel: SingleLineLabel {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 

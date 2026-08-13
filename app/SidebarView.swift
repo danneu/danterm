@@ -1277,10 +1277,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let cell = NSTableCellView()
         cell.identifier = cellId
 
-        let textField = NSTextField(labelWithString: "")
+        let textField = SingleLineLabel.make()
         textField.translatesAutoresizingMaskIntoConstraints = false
         textField.font = .preferredFont(forTextStyle: .headline)
-        textField.lineBreakMode = .byTruncatingTail
         textField.isEditable = false
         textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textField.delegate = self
@@ -1347,7 +1346,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         _ cell: NSTableCellView, group: SidebarGroupProjection, skipTitle: Bool = false
     ) {
         if !skipTitle {
-            cell.textField?.stringValue = group.name
+            cell.textField?.stringValue = group.name.text
         }
         // Hide separator for the first group
         if let separator = cell.subviews.first(where: { $0.identifier?.rawValue == "groupSeparator" }) {
@@ -1396,10 +1395,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             colorStripe.isHidden = true
             cell.addSubview(colorStripe)
 
-            let textField = NSTextField(labelWithString: "")
+            let textField = SingleLineLabel.make()
             textField.translatesAutoresizingMaskIntoConstraints = false
             textField.font = .systemFont(ofSize: NSFont.systemFontSize)
-            textField.lineBreakMode = .byTruncatingTail
             textField.isEditable = false
             textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             textField.delegate = self
@@ -1417,12 +1415,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             leadingStack.setHuggingPriority(.defaultLow, for: .horizontal)
             cell.addSubview(leadingStack)
 
-            let subtitleField = NSTextField(labelWithString: "")
+            let subtitleField = SingleLineLabel.make(truncating: .byTruncatingMiddle)
             subtitleField.identifier = subtitleId
             subtitleField.translatesAutoresizingMaskIntoConstraints = false
             subtitleField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
             subtitleField.textColor = .secondaryLabelColor
-            subtitleField.lineBreakMode = .byTruncatingMiddle
             cell.addSubview(subtitleField)
 
             // Occupies the subtitle's line, and only one of the two is ever shown.
@@ -1486,12 +1483,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let paneStripId = NSUserInterfaceItemIdentifier("tabPaneStrip")
 
         if !skipTitle {
-            cell.textField?.stringValue = tab.displayTitle
+            cell.textField?.stringValue = tab.displayTitle.text
         }
         // A multi-pane tab spends its second line enumerating its panes; only a
         // single-pane tab shows a cwd there.
         if let subtitleField = cell.subviews.first(where: { $0.identifier == subtitleId }) as? NSTextField {
-            subtitleField.stringValue = tab.subtitle ?? ""
+            subtitleField.stringValue = tab.subtitle?.text ?? ""
             subtitleField.isHidden = tab.subtitle == nil || !tab.paneChips.isEmpty
         }
         if let paneStrip = cell.subviews.first(where: { $0.identifier == paneStripId }) as? PaneStripView {

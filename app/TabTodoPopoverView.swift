@@ -82,10 +82,9 @@ extension TabTodoDragPayload.Source: Codable {
 /// The pane variant is a button: clicking the header focuses the pane.
 private final class TabTodoHeaderRowView: NSView {
     let titleLabel: NSTextField = {
-        let tf = NSTextField(labelWithString: "")
+        let tf = SingleLineLabel.make()
         tf.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
         tf.textColor = .secondaryLabelColor
-        tf.lineBreakMode = .byTruncatingTail
         return tf
     }()
 
@@ -408,7 +407,7 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
     private func paneTitle(for paneId: PaneId) -> String? {
         for row in rows {
             if case .paneSectionHeader(let rowPaneId, let title) = row, rowPaneId == paneId {
-                return title
+                return title.text
             }
         }
         return nil
@@ -477,7 +476,7 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
         case .paneSectionHeader(_, let title):
             let view = (tableView.makeView(withIdentifier: paneHeaderRowId, owner: self) as? TabTodoHeaderRowView) ?? TabTodoHeaderRowView()
             view.identifier = paneHeaderRowId
-            view.configure(title: title)
+            view.configure(title: title.text)
             return view
 
         case .paneItem(_, let item):

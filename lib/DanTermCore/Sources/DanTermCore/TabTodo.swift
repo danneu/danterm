@@ -16,7 +16,7 @@ enum TabTodoRow: Equatable {
   case tabSectionHeader
   case tabItem(tabId: TabId, item: TodoItem)
   case tabEmptyPlaceholder
-  case paneSectionHeader(paneId: PaneId, title: String)
+  case paneSectionHeader(paneId: PaneId, title: DisplayLine)
   case paneItem(paneId: PaneId, item: TodoItem)
   case paneEmptyPlaceholder(paneId: PaneId)
 }
@@ -146,7 +146,7 @@ func buildTabTodoRows(model: AppModel, tabId: TabId) -> [TabTodoRow] {
     guard let pane = model.pane(paneId) else { continue }
     rows.append(.paneSectionHeader(
       paneId: paneId,
-      title: pane.session?.title ?? "Terminal"
+      title: DisplayLine(pane.session?.title ?? "Terminal")
     ))
     if pane.todos.isEmpty {
       rows.append(.paneEmptyPlaceholder(paneId: paneId))

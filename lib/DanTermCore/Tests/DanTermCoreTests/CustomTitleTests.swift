@@ -177,7 +177,7 @@ import Testing
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
         let chrome = desiredWindowChrome(in: model)
         #expect(chrome.contentTitle == "Custom", "content title uses the custom display title")
-        #expect(chrome.windowTitle.contains("Custom"),
+        #expect(chrome.windowTitle.text.contains("Custom"),
             "window title contains the custom display title, got: \(chrome.windowTitle)")
     }
 

@@ -130,7 +130,7 @@ func update(
         if paneCount > 1 || uncompletedTodos > 0 {
             let isLastTab = totalTabCount(model) == 1
             return emitCloseTabConfirmation(
-                &model, tabId: id, tabTitle: tabDisplayTitle(tab),
+                &model, tabId: id, tabTitle: DisplayLine(tabDisplayTitle(tab)),
                 paneCount: paneCount, isLastTab: isLastTab,
                 uncompletedTodoCount: uncompletedTodos
             )
@@ -1296,7 +1296,7 @@ func update(
             if rollup.uncompleted > 0 {
                 let isLastTab = totalTabCount(model) == 1
                 return emitCloseTabConfirmation(
-                    &model, tabId: tab.id, tabTitle: tabDisplayTitle(tab),
+                    &model, tabId: tab.id, tabTitle: DisplayLine(tabDisplayTitle(tab)),
                     paneCount: 1, isLastTab: isLastTab,
                     uncompletedTodoCount: rollup.uncompleted
                 )
@@ -1651,7 +1651,7 @@ private func desktopAlertCommands(
 /// Throttle macOS notification delivery: one per pane per kind every throttle interval.
 private func throttledNotification(
     alertId: AlertId, kind: AlertKind, paneId: PaneId,
-    title: String, subtitle: String?, body: String, model: inout AppModel, now: Date
+    title: DisplayLine, subtitle: DisplayLine?, body: String, model: inout AppModel, now: Date
 ) -> [Command] {
     let shouldNotify: Bool
     if let last = model.lastNotificationTime[paneId]?[kind] {

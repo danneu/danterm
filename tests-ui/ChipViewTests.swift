@@ -21,7 +21,7 @@ func chipViewTests() {
         let wrapper = makeChipWrapper()
 
         for kind in ChipKind.allCases {
-            wrapper.updateToolbar(title: "t", cwd: nil, chipKind: kind)
+            wrapper.updateToolbar(label: "t", chipKind: kind)
             let chip = try onlyChipView(in: wrapper)
             try uiExpect(chip.kind == kind, "expected \(kind), got \(chip.kind)")
         }
@@ -34,10 +34,9 @@ func chipViewTests() {
         //   kind, so showing both is redundancy the chip was meant to remove.
         //   Spec-first.
         let wrapper = makeChipWrapper()
-        let session = AgentSession(kind: "claude", sessionId: "abc123")
 
         wrapper.updateToolbar(
-            title: "t", cwd: nil, agentSession: session, chipKind: .claude)
+            label: "t", agentLabel: nil, chipTooltip: "claude session abc123", chipKind: .claude)
 
         try uiExpect(try onlyChipView(in: wrapper).kind == .claude, "chip should be claude")
         try uiExpect(
@@ -52,10 +51,9 @@ func chipViewTests() {
         //   are normal, not exceptional. The generic chip says a pane is running
         //   *an* agent; only the text can say which one. Spec-first.
         let wrapper = makeChipWrapper()
-        let session = AgentSession(kind: "aider", sessionId: "abc123")
 
         wrapper.updateToolbar(
-            title: "t", cwd: nil, agentSession: session, chipKind: .agent)
+            label: "t", agentLabel: "aider", chipTooltip: "aider session abc123", chipKind: .agent)
 
         try uiExpect(try onlyChipView(in: wrapper).kind == .agent, "chip should be the generic agent")
         try uiExpect(
@@ -70,10 +68,9 @@ func chipViewTests() {
         //   now hidden for every kind that has a chip -- so without moving it
         //   the session id would have become unreachable for claude and codex.
         let wrapper = makeChipWrapper()
-        let session = AgentSession(kind: "claude", sessionId: "abc123")
 
         wrapper.updateToolbar(
-            title: "t", cwd: nil, agentSession: session, chipKind: .claude)
+            label: "t", agentLabel: nil, chipTooltip: "claude session abc123", chipKind: .claude)
 
         let chip = try onlyChipView(in: wrapper)
         try uiExpect(
@@ -87,11 +84,10 @@ func chipViewTests() {
         // Why it exists: updateToolbar is a diffed push, so a field only ever
         //   cleared on the attach path would strand the old value forever.
         let wrapper = makeChipWrapper()
-        let session = AgentSession(kind: "aider", sessionId: "abc123")
         wrapper.updateToolbar(
-            title: "t", cwd: nil, agentSession: session, chipKind: .agent)
+            label: "t", agentLabel: "aider", chipTooltip: "aider session abc123", chipKind: .agent)
 
-        wrapper.updateToolbar(title: "t", cwd: nil, agentSession: nil, chipKind: .terminal)
+        wrapper.updateToolbar(label: "t", agentLabel: nil, chipTooltip: nil, chipKind: .terminal)
 
         let chip = try onlyChipView(in: wrapper)
         try uiExpect(chip.toolTip == nil, "tooltip should clear, got \(String(describing: chip.toolTip))")

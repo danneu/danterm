@@ -42,6 +42,7 @@ echo "Compiling UI tests..."
         -I "$PROTO_BUILD" \
         -L "$PROTO_BUILD" \
         -lDanTermProtocol \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DisplayLine.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/AgentSession.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ChipKind.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Model.swift" \
@@ -69,6 +70,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/PaneInputOrigin.swift" \
         "$SCRIPT_DIR/app/TerminalLinkURL.swift" \
         "$SCRIPT_DIR/app/DragDropPasteboard.swift" \
+        "$SCRIPT_DIR/app/SingleLineLabel.swift" \
         "$SCRIPT_DIR/app/BadgeLabel.swift" \
         "$SCRIPT_DIR/app/ChipArtwork.swift" \
         "$SCRIPT_DIR/app/ChipRenderer.swift" \
@@ -109,6 +111,10 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/PaneFocusReconciliation.swift" \
         "$SCRIPT_DIR/app/TableContextMenuHighlight.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \
+        "$SCRIPT_DIR/app/SwitcherPanel.swift" \
+        "$SCRIPT_DIR/app/BellToolbarButton.swift" \
+        "$SCRIPT_DIR/app/TitlebarDragView.swift" \
+        "$SCRIPT_DIR/app/WindowChromeView.swift" \
         "$SCRIPT_DIR/app/PaneStripView.swift" \
         "$SCRIPT_DIR/app/ThemeCatalog.swift" \
         "$SCRIPT_DIR/app/ThemeRenderBridge.swift" \
@@ -142,6 +148,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/IOSurfaceLayerContentsTests.swift" \
         "$SCRIPT_DIR/tests-ui/AlertsPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PreferencesPanelTests.swift" \
+        "$SCRIPT_DIR/tests-ui/SingleLineLabelTests.swift" \
         -framework Cocoa
 )
 echo "Running UI tests..."

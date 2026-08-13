@@ -18,7 +18,7 @@ struct AlertPresentationTests {
         title: String,
         body: String,
         command: String? = nil
-    ) -> (title: String, subtitle: String?, body: String)? {
+    ) -> (title: DisplayLine, subtitle: DisplayLine?, body: String)? {
         if let command, let sessionId = model.pane(paneId)?.session?.id {
             update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted(command)))
         }

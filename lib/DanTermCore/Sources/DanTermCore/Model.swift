@@ -30,7 +30,10 @@ struct AlertModel: Equatable {
     let id: AlertId
     let kind: AlertKind
     let paneId: PaneId
-    let title: String
+    /// Derived presentation, normalized once when the alert is raised: it is
+    /// rendered straight into a one-line label. The body is not -- see
+    /// AlertPresentation.swift.
+    let title: DisplayLine
     let body: String
     let createdAt: Date
     var isUnread: Bool

@@ -172,7 +172,7 @@ func desiredTabTodoPopover(tabId: TabId, in model: AppModel) -> TabTodoPopoverPr
 struct AlertRowProjection: Equatable {
   let id: AlertId
   let kind: AlertKind
-  let title: String
+  let title: DisplayLine
   let body: String
   let createdAt: Date
   let isUnread: Bool
@@ -288,14 +288,25 @@ func desiredFocusBorders(in model: AppModel, tally: UnreadAlertTally) -> [PaneId
 /// Pane-toolbar render the reconciler diffs and pushes to a PaneWrapperView's
 /// toolbar. Live lifecycle fields come only from the pane owner's immutable
 /// snapshot. Equatable lets the diff skip panes whose inputs are unchanged.
+///
+/// Every string here is already composed. The view receives no raw model value
+/// and no domain object, so no untrusted terminal-reported text -- a title, a
+/// cwd, a remote user and host -- is assembled inside AppKit.
 struct PaneToolbarRender: Equatable {
-  let title: String
-  let cwd: String?
-  let command: String?
+  /// The running command while one is live, otherwise the title and cwd.
+  let label: DisplayLine
   let progress: ProgressState?
+  /// Whether the pane is on a remote host at all. Independent of `remoteLabel`,
+  /// which is nil until the remote declares who it is.
   let isRemote: Bool
-  let remoteSession: RemoteSession?
-  let agentSession: AgentSession?
+  /// The remote pill's text, nil when there is no pill to show.
+  let remoteLabel: DisplayLine?
+  /// The agent pill's text, nil when there is no pill to show -- which includes
+  /// every agent whose chip already names it.
+  let agentLabel: DisplayLine?
+  /// The chip's tooltip, which names the attached agent and its full session id.
+  /// Nil when no agent is attached.
+  let chipTooltip: DisplayLine?
   let chipKind: ChipKind
   let unreadAlertCount: Int
   let totalTodoCount: Int
@@ -350,15 +361,22 @@ func desiredPaneToolbar(
         } else {
           command = nil
         }
+        let chipKind = ChipKind(agent: session?.agent ?? .none)
         result[pane.id] = PaneToolbarRender(
-          title: session?.title ?? "Terminal",
-          cwd: session?.cwd,
-          command: command,
+          label: DisplayLine(paneCommandChromeText(
+            title: session?.title ?? "Terminal",
+            cwd: session?.cwd,
+            command: command
+          )),
           progress: session?.progress,
           isRemote: remoteSession != nil || (session?.connection ?? .local) != .local,
-          remoteSession: remoteSession,
-          agentSession: agentSession,
-          chipKind: ChipKind(agent: session?.agent ?? .none),
+          remoteLabel: remoteSession.map { DisplayLine($0.displayString) },
+          // `.agent` is the mark for an agent DanTerm cannot name, so the pill
+          // has to supply the name the chip is missing. Every other kind either
+          // names the agent itself or means there is no agent.
+          agentLabel: chipKind == .agent ? agentSession.map { DisplayLine($0.toolbarLabel) } : nil,
+          chipTooltip: agentSession.map { DisplayLine("\($0.kind) session \($0.sessionId)") },
+          chipKind: chipKind,
           unreadAlertCount: tally.byPane[pane.id] ?? 0,
           totalTodoCount: pane.todos.count,
           uncompletedTodoCount: pane.todos.count { !$0.isDone },
@@ -474,8 +492,8 @@ func windowTitle(for tab: TabModel) -> String {
 /// chrome content title (which differ when a subtitle is present), the unread
 /// dock/toolbar-bell badge count, and the tab-todo button's rollup counts.
 struct WindowChromeProjection: Equatable {
-  let windowTitle: String       // window?.title (display title + optional " — subtitle")
-  let contentTitle: String      // chromeView content title (bare display title)
+  let windowTitle: DisplayLine  // window?.title (display title + optional " — subtitle")
+  let contentTitle: DisplayLine // chromeView content title (bare display title)
   let unreadCount: Int          // dock + toolbar bell badge
   let tabTodoTotal: Int         // tab-todo button total
   let tabTodoUncompleted: Int   // tab-todo button uncompleted
@@ -494,8 +512,8 @@ func desiredWindowChrome(in model: AppModel, tally: UnreadAlertTally) -> WindowC
   let tab = selectedTab(in: model)
   let rollup = tab.map { tabTodoRollup($0.id, in: model) } ?? (total: 0, uncompleted: 0)
   return WindowChromeProjection(
-    windowTitle: tab.map { windowTitle(for: $0) } ?? "",
-    contentTitle: tab.map { tabDisplayTitle($0) } ?? "",
+    windowTitle: DisplayLine(tab.map { windowTitle(for: $0) } ?? ""),
+    contentTitle: DisplayLine(tab.map { tabDisplayTitle($0) } ?? ""),
     unreadCount: tally.total,
     tabTodoTotal: rollup.total,
     tabTodoUncompleted: rollup.uncompleted
@@ -517,8 +535,8 @@ struct SidebarTabProjection: Equatable {
   // Non-id fields are `var` so the row-op model-apply test can transform a working
   // copy of the old projection in place (and the executor can mirror it). They never
   // change identity, only rendered content.
-  var displayTitle: String
-  var subtitle: String?
+  var displayTitle: DisplayLine
+  var subtitle: DisplayLine?
   var unreadAlertCount: Int
   var jumpKey: Character?   // model.jumpMode?.keyMap[tab.id]
   var color: TabColor?
@@ -539,7 +557,7 @@ struct SidebarTabProjection: Equatable {
 struct SidebarGroupProjection: Equatable {
   let id: GroupId
   var isCollapsed: Bool
-  var name: String
+  var name: DisplayLine
   var unreadAlertCount: Int
   var tabCount: Int
   var isFirst: Bool        // first group draws no top separator
@@ -583,15 +601,15 @@ func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProje
     SidebarGroupProjection(
       id: group.id,
       isCollapsed: group.isCollapsed,
-      name: group.name,
+      name: DisplayLine(group.name),
       unreadAlertCount: tally.byGroup[group.id] ?? 0,
       tabCount: group.tabs.count,
       isFirst: group.id == firstGroupId,
       tabs: group.tabs.map { tab in
         SidebarTabProjection(
           id: tab.id,
-          displayTitle: tabDisplayTitle(tab),
-          subtitle: tabSubtitle(tab),
+          displayTitle: DisplayLine(tabDisplayTitle(tab)),
+          subtitle: tabSubtitle(tab).map { DisplayLine($0) },
           unreadAlertCount: tally.byTab[tab.id] ?? 0,
           jumpKey: model.jumpMode?.keyMap[tab.id],
           color: tab.color,
@@ -1021,7 +1039,7 @@ func sessionsToTearDown(liveSessionIds: Set<PaneId>, model: AppModel) -> Set<Pan
 // the view layer reads it back to render a row.
 struct SwitcherRow: Equatable {
   let tabId: TabId
-  let name: String
+  let name: DisplayLine
   let color: TabColor?
   let alertCount: Int
 }
@@ -1058,7 +1076,7 @@ func desiredSwitcher(in model: AppModel, tally: UnreadAlertTally) -> SwitcherPro
     guard let tab = tabById(tabId, in: model) else { return nil }
     return SwitcherRow(
       tabId: tabId,
-      name: tabDisplayTitle(tab),
+      name: DisplayLine(tabDisplayTitle(tab)),
       color: tab.color,
       alertCount: tally.byTab[tabId] ?? 0
     )

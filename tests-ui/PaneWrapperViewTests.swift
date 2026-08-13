@@ -200,7 +200,7 @@ func paneWrapperViewTests() {
             "unzoomed toolbar should collapse the button below one point, got \(unzoomButton.frame.width)")
 
         fx.wrapper.updateToolbar(
-            title: "Terminal", cwd: nil, isZoomed: true, hasSplits: true)
+            label: "Terminal", isZoomed: true, hasSplits: true)
         unzoomButton.superview?.needsLayout = true
         unzoomButton.superview?.layoutSubtreeIfNeeded()
         let unzoom = try onlyItem(fx.wrapper.makePaneMenu(), titled: "Unzoom Pane")
@@ -210,7 +210,7 @@ func paneWrapperViewTests() {
             "zoomed toolbar should restore the button to at least 15 points, got \(unzoomButton.frame.width)")
 
         fx.wrapper.updateToolbar(
-            title: "Terminal", cwd: nil, isZoomed: false, hasSplits: false)
+            label: "Terminal", isZoomed: false, hasSplits: false)
         unzoomButton.superview?.needsLayout = true
         unzoomButton.superview?.layoutSubtreeIfNeeded()
         let zoom = try onlyItem(fx.wrapper.makePaneMenu(), titled: "Zoom Pane")

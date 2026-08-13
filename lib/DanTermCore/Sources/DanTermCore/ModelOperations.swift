@@ -718,7 +718,7 @@ func emitTerminateConfirmation(_ model: inout AppModel) -> [Command] {
 // same slot as quit confirmation so close-tab and quit sheets cannot stack.
 // `uncompletedTodoCount` is the full tab + pane rollup (see `tabTodoRollup`).
 func emitCloseTabConfirmation(
-  _ model: inout AppModel, tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool,
+  _ model: inout AppModel, tabId: TabId, tabTitle: DisplayLine, paneCount: Int, isLastTab: Bool,
   uncompletedTodoCount: Int
 ) -> [Command] {
   guard model.pendingConfirmation == nil else { return [] }

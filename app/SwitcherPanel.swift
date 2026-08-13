@@ -136,11 +136,10 @@ final class SwitcherRowView: NSView {
     private let highlightLayer: CALayer
 
     override init(frame frameRect: NSRect) {
-        nameLabel = NSTextField(labelWithString: "")
+        nameLabel = SingleLineLabel.make()
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
         nameLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         nameLabel.textColor = .labelColor
-        nameLabel.lineBreakMode = .byTruncatingTail
 
         badgeLabel = NSTextField(labelWithString: "")
         badgeLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -189,7 +188,7 @@ final class SwitcherRowView: NSView {
     }
 
     func apply(row: SwitcherRow, isCursor: Bool) {
-        nameLabel.stringValue = row.name
+        nameLabel.stringValue = row.name.text
         if row.alertCount > 0 {
             badgeLabel.stringValue = "\u{2022} \(row.alertCount)"
             badgeLabel.isHidden = false
