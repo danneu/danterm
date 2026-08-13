@@ -147,7 +147,7 @@ in itself.
 |        | [S01](#s01) | 25    | 5   | 5   | build          | small  | Make CI run the local gate instead of running no tests at all                                                           |
 | part 3b95df8f | [S02](#s02) | 20    | 4   | 5   | app-runtime    | medium | Make TODO/alerts popover existence a reconcile pass, not four commands                                     |
 | ce093e2e | [S03](#s03) | 20    | 4   | 5   | build          | medium | Collapse the duplicated bundle assembly in dev-build.sh and build-app.sh                                                |
-| ce093e2e | [S04](#s04) | 20    | 4   | 5   | build          | small  | Replace the four hand-copied bundle-layout assertion lists with one script                                              |
+| ce093e2e 9947118a | [S04](#s04) | 20    | 4   | 5   | build          | small  | Replace the four hand-copied bundle-layout assertion lists with one script                                              |
 |        | [S05](#s05) | 20    | 4   | 5   | core-model     | medium | Make a tab's focus and zoom part of its tree, not two loose fields                                                      |
 | 31c8d71d | [S06](#s06) | 20    | 4   | 5   | core-model     | small  | Give sessions one tree-walking mutator instead of five whole-model traversals per report                                |
 | 3b95df8f | [S07](#s07) | 20    | 4   | 5   | core-reducer   | large  | Collapse the duplicated pane/tab TODO surface onto one owner type                                               |
@@ -190,7 +190,7 @@ in itself.
 |        | [S44](#s44) | 12    | 3   | 4   | sidebar        | small  | Delete applyGroupCollapseState; paint the group row from its own projection                                             |
 |        | [S45](#s45) | 12    | 3   | 4   | sidebar        | small  | Drop SidebarView.currentModel; read the runtime's model                                                                 |
 |        | [S46](#s46) | 12    | 3   | 4   | terminal-views | medium | Let the swapchain own its construction inputs instead of mirroring them in the view                                     |
-|        | [S47](#s47) | 10    | 2   | 5   | build          | small  | `just clean` misses two of the five build trees it is supposed to remove                                                |
+| c38ace17 | [S47](#s47) | 10    | 2   | 5   | build          | small  | `just clean` misses two of the five build trees it is supposed to remove                                                |
 |        | [S48](#s48) | 10    | 2   | 5   | build          | small  | Stop running DanTermProtocolTests twice in the gate                                                                     |
 |        | [S49](#s49) | 10    | 2   | 5   | core-model     | small  | Delete the three unread-alert reference implementations no render path calls                                            |
 | 5a296702 | [S50](#s50) | 10    | 2   | 5   | core-reducer   | small  | Move the IPC dispatcher out of Update.swift; the file is two subsystems                                               |
@@ -204,7 +204,7 @@ in itself.
 |        | [S58](#s58) | 8     | 2   | 4   | sidebar        | medium | Make SidebarItemStore return the outline mutation instead of a Bool the executor re-switches on                         |
 |        | [S59](#s59) | 8     | 2   | 4   | terminal-views | small  | Drop the vestigial optionality in TerminalSessionState.scrollPosition                                                   |
 |        | [S60](#s60) | 5     | 1   | 5   | app-runtime    | small  | Drop the unused runRepeating and captureOwnerCensus lifecycle API                                                       |
-|        | [S61](#s61) | 5     | 1   | 5   | build          | small  | Delete the unreferenced scripts/cursor-color-rainbow.sh                                                                 |
+| 58ffeec1 | [S61](#s61) | 5     | 1   | 5   | build          | small  | Delete the unreferenced scripts/cursor-color-rainbow.sh                                                                 |
 
 ## Findings in detail
 
