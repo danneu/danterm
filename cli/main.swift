@@ -23,9 +23,9 @@ struct CLIError: Error {
 struct DanTermCLI {
     private static let socketTimeoutSeconds = 5
 
-    // Top-level help text. Kept in sync by hand with `parseCLI` and
-    // the `EnvVars` constants used in `request(...)` -- there is no
-    // automated check, so any change to either touches this string too.
+    // Top-level help text. Kept in sync by hand with `parseCLI` and the `EnvVars`
+    // constants read by `selectControlSocketPath(...)` -- there is no automated check,
+    // so any change to either touches this string too.
     private static let usageText: String = """
         danterm -- control DanTerm from the shell
 
@@ -166,7 +166,7 @@ struct DanTermCLI {
             }
             // A nil reply means the app closed the connection and the method
             // expected that -- a quit it honored exits before it can answer.
-            if let response = try request(command, socketPath: socketPath, environment: environment) {
+            if let response = try request(command, socketPath: socketPath) {
                 if let error = response.error {
                     throw CLIError(error.message)
                 }
@@ -189,8 +189,7 @@ struct DanTermCLI {
     /// under the request because that is what the request asked for.
     private static func request(
         _ command: CLICommand,
-        socketPath: String,
-        environment: [String: String]
+        socketPath: String
     ) throws -> JsonRpcResponse? {
         let session = try openSession(socketPath: socketPath, receiveTimeout: true)
         defer { session.close() }
@@ -337,7 +336,7 @@ struct DanTermCLI {
             method: .doctorPermissions
         ) else { return .unavailable }
         let command = CLICommand(request: .doctorPermissions, outputMode: .none)
-        let reply = try? request(command, socketPath: socketPath, environment: environment)
+        let reply = try? request(command, socketPath: socketPath)
         guard let response = reply ?? nil,
               response.error == nil,
               let result = response.result,
