@@ -193,7 +193,7 @@ are deleted in the same step as the witness that replaces them.
 ## Commit progress
 
 - [x] 1. refactor(pty): group lifecycle census observations
-- [ ] 2. refactor(pty): inject child-exit probing
+- [x] 2. refactor(pty): inject child-exit probing
 - [ ] 3. refactor(pty): inject source and descriptor lifecycle
 - [ ] 4. refactor(pty): inject deterministic spawning
 - [ ] 5. docs(audit): close S12 production fault-injection finding

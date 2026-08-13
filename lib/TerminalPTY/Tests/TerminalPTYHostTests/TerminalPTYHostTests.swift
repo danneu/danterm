@@ -1,6 +1,7 @@
 // Real-system PTY tests for launch ownership, ordered IO, resize, and exit convergence.
 import Darwin
 import Foundation
+import Synchronization
 import Testing
 @testable import TerminalPTYHost
 import TerminalPTYTestSupport
@@ -2108,8 +2109,10 @@ struct TerminalPTYHostTests {
         // Scenario: the 2026-07-22 parallel stress-run hang; the lifecycle trace
         //   showed "processSourceFired" then "waitid rc=0 errno=0 si_pid=0" and
         //   no further child events.
-        let host = try makeHost(captureTransitions: false)
-        await host.injectTransientChildWaits(3)
+        let host = try makeHost(
+            captureTransitions: false,
+            childExitProbe: TransientChildExitProbe(notYetWaitableCount: 3)
+        )
         await host.start(makeLaunchInput(command: "\(printMarker("READY")); exit 7"))
 
         let result = await value(
@@ -2452,14 +2455,35 @@ private extension TerminalPTYHost {
 
 private func makeHost(
     captureTransitions: Bool = true,
-    applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound
+    applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound,
+    childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe()
 ) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
         bootstrapExecutable: bootstrapExecutable(),
         captureTransitions: captureTransitions,
-        applicationExitBound: applicationExitBound
+        applicationExitBound: applicationExitBound,
+        childExitProbe: childExitProbe
     )
+}
+
+private final class TransientChildExitProbe: TerminalPTYChildExitProbing {
+    private let production = SystemTerminalPTYChildExitProbe()
+    private let remainingNotYetWaitableCount: Mutex<Int>
+
+    init(notYetWaitableCount: Int) {
+        remainingNotYetWaitableCount = Mutex(notYetWaitableCount)
+    }
+
+    func probe(_ leaderPID: pid_t) -> TerminalPTYChildExitProbeResult {
+        let shouldReportNotYetWaitable = remainingNotYetWaitableCount.withLock { remaining in
+            guard remaining > 0 else { return false }
+            remaining -= 1
+            return true
+        }
+        guard shouldReportNotYetWaitable == false else { return .notYetWaitable }
+        return production.probe(leaderPID)
+    }
 }
 
 /// Collects host exit completions the way the exit path does -- a dispatch signal

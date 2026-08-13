@@ -217,6 +217,7 @@ public actor TerminalPTYHost {
     private let initialDimensions: TerminalDimensions
     package nonisolated let captureTransitions: Bool
     private let bootstrapExecutable: String
+    private let childExitProbe: any TerminalPTYChildExitProbing
 
     private var masterFD: Int32 = -1
     private var leaderPID: pid_t?
@@ -307,7 +308,6 @@ public actor TerminalPTYHost {
     private var quiescenceObservers: [@Sendable () -> Void] = []
     private var exitBoundSource: (any DispatchSourceTimer)?
     private var forcedQuiescenceCount = 0
-    private var transientChildWaitInjections = 0
     private var callbacksAfterTeardown = 0
     private var updatePending = false
     private var shouldFinishUpdates = false
@@ -356,7 +356,8 @@ public actor TerminalPTYHost {
         flightTapeClock: @escaping @Sendable () -> UInt64 = {
             DispatchTime.now().uptimeNanoseconds
         },
-        applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound
+        applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound,
+        childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe()
     ) throws {
         guard let terminal = Terminal(
             columns: initialDimensions.columns,
@@ -373,6 +374,7 @@ public actor TerminalPTYHost {
         self.bootstrapExecutable = bootstrapExecutable
         self.captureTransitions = captureTransitions
         self.applicationExitBound = applicationExitBound
+        self.childExitProbe = childExitProbe
         flightTape = TerminalFlightRecorder(
             initialDimensions: initialDimensions,
             configuration: flightTapeConfiguration,
@@ -1819,44 +1821,24 @@ public actor TerminalPTYHost {
         }
     }
 
-    /// Test-support fault injection replicating macOS publishing NOTE_EXIT
-    /// before the child's wait status is readable: the next `count` exit checks
-    /// behave as that transient regardless of the real waitid answer.
-    package func injectTransientChildWaits(_ count: Int) {
-        transientChildWaitInjections = count
-    }
-
     private func childExited() {
         guard let leaderPID else { return }
-        var info = siginfo_t()
-        var rc = waitid(P_PID, id_t(leaderPID), &info, WEXITED | WNOHANG | WNOWAIT)
-        if transientChildWaitInjections > 0 {
-            transientChildWaitInjections -= 1
-            rc = 0
-            info.si_pid = 0
-        }
-        guard rc == 0, info.si_pid == leaderPID
-        else {
+        switch childExitProbe.probe(leaderPID) {
+        case .notYetWaitable:
             // macOS can publish NOTE_EXIT before the wait status is readable
             // (waitid succeeds with si_pid == 0). The process source is a
             // one-shot notification for an event that already happened, so
             // dropping this fire would lose the exit forever: poll the dead
             // child until it becomes waitable. Hard waitid errors stay final.
-            if rc == 0, info.si_pid == 0 {
-                installChildExitPollIfNeeded()
-            }
+            installChildExitPollIfNeeded()
             return
+        case .failed:
+            return
+        case .exited(let status):
+            cancelChildExitPoll()
+            cancelProcessSource()
+            process(.childExited(status))
         }
-        cancelChildExitPoll()
-        let status: ChildExitStatus
-        switch info.si_code {
-        case CLD_EXITED:
-            status = .exited(info.si_status)
-        default:
-            status = .signaled(info.si_status)
-        }
-        cancelProcessSource()
-        process(.childExited(status))
     }
 
     private func installChildExitPollIfNeeded() {
