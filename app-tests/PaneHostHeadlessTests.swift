@@ -11,7 +11,7 @@ import Testing
         let absentConfig = FileManager.default.temporaryDirectory
             .appendingPathComponent("danterm-no-config-\(UUID().uuidString)")
         let runtime = AppRuntime(
-            terminalBackend: SwiftTerminalBackend(),
+            ports: .live(terminalBackend: SwiftTerminalBackend()),
             configStore: DanTermConfigStore(url: absentConfig),
             startsApplicationServices: false
         )

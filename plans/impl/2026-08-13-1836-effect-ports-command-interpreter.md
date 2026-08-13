@@ -207,6 +207,6 @@ app-tests automatically); targeted iteration via
 ## Commit progress
 
 - [x] 1. test(app): prove pane hosts construct headlessly
-- [ ] 2. refactor(app): inject ambient-effect ports into the command interpreter
+- [x] 2. refactor(app): inject ambient-effect ports into the command interpreter
 - [ ] 3. test(app): cover session and scheduling command dispatch
 - [ ] 4. test(app): cover IPC dispatch, re-entry, and command ordering

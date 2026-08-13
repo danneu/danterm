@@ -44,8 +44,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
         // Create runtime
         runtime = AppRuntime(
-            terminalBackend: terminalBackend,
-            notificationAuthorizationPolicy: launchPolicy.notificationAuthorization
+            ports: .live(
+                terminalBackend: terminalBackend,
+                notificationAuthorizationPolicy: launchPolicy.notificationAuthorization
+            )
         )
         installWorkspaceLifecycleObserver()
 

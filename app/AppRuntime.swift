@@ -122,9 +122,8 @@ class AppRuntime {
 
     var model: AppModel
     private let configStore: DanTermConfigStore
-    private let notificationAuthorizationPolicy: NotificationAuthorizationPolicy
+    private let ports: AppRuntimePorts
     private var pendingConfigError: Error?
-    let terminalBackend: SwiftTerminalBackend
     var sessions: [PaneId: any TerminalSession] = [:]
     // Runtime lifetime roots for pane chrome. A container only reparents wrappers.
     var paneHosts: [PaneId: PaneHost] = [:]
@@ -180,12 +179,12 @@ class AppRuntime {
     private var coalescedReconcileTimer: DispatchSourceTimer?   // rate-limited whole-model sweep
     private var coalescedReconcileTimerToken: AppRuntimeSchedulingToken?
     // Serializes checkpoint encode+write work and gives sync flushes one fence for pending I/O.
-    private static let checkpointWriter = CheckpointWriter()
+    private let checkpointWriter = CheckpointWriter()
     // Export gets its own queue rather than sharing the checkpoint one. Nothing orders an export
     // against a checkpoint -- it goes to a path the user just picked -- and sharing would put a
     // multi-megabyte export inside the fence the quit checkpoint drains, so quitting mid-export
     // would wait on it.
-    private static let exportWriter = CheckpointWriter(label: "danterm.export.io")
+    private let exportWriter = CheckpointWriter(label: "danterm.export.io")
     private var searchDebouncers: [PaneId: Debouncer] = [:]
     private var searchDebouncerTokens: [PaneId: AppRuntimeSchedulingToken] = [:]
     private var ipcConnections: [UUID: IpcConnection] = [:]
@@ -206,14 +205,12 @@ class AppRuntime {
     private static let reconcileCoalesceInterval: TimeInterval = 0.075
 
     init(
-        terminalBackend: SwiftTerminalBackend,
+        ports: AppRuntimePorts,
         configStore: DanTermConfigStore = DanTermConfigStore(),
-        notificationAuthorizationPolicy: NotificationAuthorizationPolicy = .requestIfNeeded,
         startsApplicationServices: Bool = true
     ) {
-        self.terminalBackend = terminalBackend
+        self.ports = ports
         self.configStore = configStore
-        self.notificationAuthorizationPolicy = notificationAuthorizationPolicy
         // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
         self.model = AppModel(
             groups: [GroupModel(id: GroupId(rawValue: CoreEnv.live.newId()), name: "General")]
@@ -883,7 +880,7 @@ class AppRuntime {
 
     // MARK: - Command Performer
 
-    private func perform(_ command: Command) {
+    func perform(_ command: Command) {
         switch command {
         case .createSession(let sessionId, let paneId, let cwd, let command, let launchCommand):
             let envVars = terminalLaunchEnvironment(
@@ -977,7 +974,7 @@ class AppRuntime {
                 content: content,
                 trigger: nil
             )
-            enqueueNotificationRequest(request)
+            ports.deliverNotification(request)
 
         case .exportState(let snapshot):
             // Only the capture belongs on the main actor: it fences each pane's scrollback at
@@ -989,14 +986,12 @@ class AppRuntime {
                 scrollbackReads: captureScrollbackReads(keeping: .checkpoint),
                 retention: .checkpoint
             )
-            let panel = NSSavePanel()
-            panel.nameFieldStringValue = "danterm-state.json"
-            panel.allowedContentTypes = [.json]
-            panel.canCreateDirectories = true
             guard let window = window else { return }
-            panel.beginSheetModal(for: window) { response in
-                guard response == .OK, let url = panel.url else { return }
-                Self.exportWriter.write(
+            let exportWriter = exportWriter
+            let presentAlert = ports.presentAlert
+            ports.selectExportDestination(window) { url in
+                guard let url else { return }
+                exportWriter.write(
                     to: url,
                     async: true,
                     encode: capture.encoder(prettyPrinted: true)
@@ -1004,10 +999,7 @@ class AppRuntime {
                     guard case .failed(let description) = outcome else { return }
                     // The writer's completion already arrives a main-queue turn after the sheet
                     // dismissed, so this modal cannot open inside the panel's completion.
-                    let alert = NSAlert()
-                    alert.messageText = "Export Failed"
-                    alert.informativeText = description
-                    alert.runModal()
+                    presentAlert("Export Failed", description)
                 }
             }
 
@@ -1020,8 +1012,9 @@ class AppRuntime {
             connection.writeError(reqId: reqId, code: code, message: message)
 
         case .readDoctorPermissions(let reqId):
+            let readDoctorPermissions = ports.readDoctorPermissions
             Task { [weak self] in
-                let permissions = await DoctorPermissionProber().gather()
+                let permissions = await readDoctorPermissions()
                 guard let self,
                       let connection = self.takeIpcConnection(for: reqId)
                 else { return }
@@ -1112,7 +1105,7 @@ class AppRuntime {
             send(.fontFamilyResolved(resolveConfiguredFontFamily(config)))
 
         case .terminate:
-            // Follow teardown is not repeated here: `NSApp.terminate` reaches
+            // Follow teardown is not repeated here: application termination reaches
             // `applicationWillTerminate`, and `shutdown()` is its single owner.
             cancelCoalescedReconcile()
             schedulingLifecycle.cancel(lightCheckpointTimerToken)
@@ -1124,11 +1117,10 @@ class AppRuntime {
             for paneId in replayFiles.keys {
                 cleanupReplayFile(for: paneId)
             }
-            (NSApp.delegate as? AppDelegate)?.quitConfirmed = true
-            NSApp.terminate(nil)
+            ports.terminateApp()
 
         case .activateApp:
-            NSApp.activate(ignoringOtherApps: true)
+            ports.activateApp()
             window?.makeKeyAndOrderFront(nil)
 
         // Search commands
@@ -1173,44 +1165,6 @@ class AppRuntime {
             searchDebouncers.removeValue(forKey: paneId)
             sessions[paneId]?.endSearch()
 
-        }
-    }
-
-    // Deliver notifications only after checking authorization state so the
-    // first real alert can recover if the launch-time prompt was skipped.
-    // Both completion closures run off the main actor (the center dispatches
-    // them on a background queue), so keep them free of main-actor state --
-    // no model/view mutation here without hopping back to main.
-    private func enqueueNotificationRequest(_ request: UNNotificationRequest) {
-        let center = UNUserNotificationCenter.current()
-        let permitsAuthorizationRequest = notificationAuthorizationPolicy.permitsRequest
-        center.getNotificationSettings { settings in
-            switch settings.authorizationStatus {
-            case .authorized, .provisional, .ephemeral:
-                center.add(request) { error in
-                    if let error {
-                        print("Failed to enqueue notification: \(error)")
-                    }
-                }
-            case .notDetermined:
-                guard permitsAuthorizationRequest else { return }
-                center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-                    if let error {
-                        print("Notification authorization request failed: \(error)")
-                        return
-                    }
-                    guard granted else { return }
-                    center.add(request) { error in
-                        if let error {
-                            print("Failed to enqueue notification: \(error)")
-                        }
-                    }
-                }
-            case .denied:
-                break
-            @unknown default:
-                break
-            }
         }
     }
 
@@ -1417,11 +1371,11 @@ class AppRuntime {
             current: projection,
             baseline: lightCheckpointBaseline
         ) else {
-            if !async { Self.checkpointWriter.drain() }
+            if !async { checkpointWriter.drain() }
             return
         }
         lightCheckpointBaseline = projection
-        Self.checkpointWriter.write(
+        checkpointWriter.write(
             to: lightCheckpointURL(),
             async: async,
             encode: capture.encoder()
@@ -1476,7 +1430,7 @@ class AppRuntime {
     ) {
         guard schedulingLifecycle.isActive else { return }
         let capture = captureEnrichedCheckpoint()
-        Self.checkpointWriter.write(
+        checkpointWriter.write(
             to: enrichedCheckpointURL(),
             async: async,
             encode: capture.encoder(),
@@ -1626,12 +1580,10 @@ class AppRuntime {
     }
 
     private func presentConfigError(_ error: Error) {
-        let alert = NSAlert()
-        alert.messageText = "DanTerm Config Error"
-        alert.informativeText = (error as? LocalizedError)?.errorDescription
-            ?? error.localizedDescription
-        alert.alertStyle = .warning
-        alert.runModal()
+        ports.presentAlert(
+            "DanTerm Config Error",
+            (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        )
     }
 
     // MARK: - Theme Browser
@@ -1856,7 +1808,7 @@ class AppRuntime {
             fontSize: fontSize,
             fontFamily: fontFamily
         )
-        guard let session = terminalBackend.createSession(request) else { return nil }
+        guard let session = ports.createTerminalSession(request) else { return nil }
         session.onEvent = { [weak self, weak session] event in
             #if DANTERM_TERMINAL_CHARACTERIZATION
             recordTerminalCharacterizationEvent(event)
@@ -1905,10 +1857,7 @@ class AppRuntime {
     }
 
     private func showImportError(message: String) {
-        let alert = NSAlert()
-        alert.messageText = "Import Failed"
-        alert.informativeText = message
-        alert.runModal()
+        ports.presentAlert("Import Failed", message)
     }
 
     // MARK: - Pane Toolbars
