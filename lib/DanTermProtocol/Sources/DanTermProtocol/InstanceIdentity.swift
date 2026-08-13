@@ -6,6 +6,12 @@ public struct DanTermInstanceIdentity: Equatable, Sendable {
     /// Slot zero is the user's canonical development app; launchers may claim slots 1 through 8.
     public static let developmentSlotRange = 0...8
 
+    /// The canonical production identity used by shipping bundle declarations.
+    public static let production = DanTermInstanceIdentity(bundleIdentifier: productionBundleIdentifier)
+
+    /// The canonical slot-zero development identity used by local bundle declarations.
+    public static let development = DanTermInstanceIdentity(bundleIdentifier: developmentBundleIdentifier)
+
     /// The bundle identifier that namespaces OS registration and process-owned state.
     public let bundleIdentifier: String
 

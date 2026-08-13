@@ -26,7 +26,7 @@ final class CLIPathInstaller: Sendable {
                 destinationURL: URL(fileURLWithPath: "/usr/local/bin/danterm"),
                 sourceURL: {
                     return Bundle.main.bundleURL
-                        .appendingPathComponent("Contents/Helpers/danterm", isDirectory: false)
+                        .appendingPathComponent(BundleLayout.Paths.commandLineExecutable, isDirectory: false)
                 },
                 bundleURL: { Bundle.main.bundleURL },
                 privilegedRunner: Self.runPrivilegedShellCommand(_:)

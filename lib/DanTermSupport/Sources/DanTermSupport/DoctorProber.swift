@@ -250,7 +250,7 @@ private func isNixOrProfilePath(_ path: String) -> Bool {
 /// Recognizes helpers from manual app installs in `/Applications` or the user's
 /// `~/Applications` directory.
 private func isManualAppHelperPath(_ path: String, homeDirectory: URL) -> Bool {
-    guard path.hasSuffix(".app/Contents/Helpers/danterm") else {
+    guard path.hasSuffix(".app/\(BundleLayout.Paths.commandLineExecutable)") else {
         return false
     }
 
@@ -275,7 +275,7 @@ private func fileStatus(at url: URL, fileManager: FileManager) -> (exists: Bool,
 /// Recognizes DanTerm hook commands by bundled hook directory or script
 /// basename, matching the documented v1 hook identification rule.
 private func isDanTermHookCommand(_ command: String) -> Bool {
-    if command.contains("/danterm-hooks/") {
+    if command.contains("/\(BundleLayout.Paths.agentHooksDirectoryName)/") {
         return true
     }
     guard let token = firstShellToken(command),
@@ -428,7 +428,7 @@ private func bundledHookDir(forResolvedExecutable path: String?) -> String? {
     var url = URL(fileURLWithPath: path)
     while url.path != "/" {
         if url.pathExtension == "app" {
-            return url.appendingPathComponent("Contents/Resources/danterm-hooks").path
+            return url.appendingPathComponent(BundleLayout.Paths.agentHooksDirectory).path
         }
         url.deleteLastPathComponent()
     }

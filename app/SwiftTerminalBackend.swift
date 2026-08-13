@@ -28,7 +28,7 @@ final class SwiftTerminalBackend {
     init(bundle: Bundle = .main) {
         self.bundle = bundle
         bootstrapExecutable = bundle.bundleURL
-            .appendingPathComponent("Contents/Helpers/PTYSessionBootstrap")
+            .appendingPathComponent(BundleLayout.Paths.ptySessionBootstrap)
             .path
         #if DANTERM_TERMINAL_CHARACTERIZATION
         if let path = ProcessInfo.processInfo.environment["DANTERM_PTY_RECORDING_DIR"],
@@ -159,7 +159,7 @@ final class SwiftTerminalBackend {
             .map(EnvironmentEntry.init(name:value:))
         let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
         let shellIntegrationDirectory = bundle.bundleURL
-            .appendingPathComponent("Contents/Resources/shell-integration", isDirectory: true)
+            .appendingPathComponent(BundleLayout.Paths.shellIntegrationDirectory, isDirectory: true)
             .path
         let locale = Locale.current
         let localeFallback = localeFallbackEnabled ? Self.localeFallback(
