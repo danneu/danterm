@@ -31,10 +31,10 @@ reading the cited code. Every finding states the ideal fix first, per the
 design bar in AGENTS.md, with the cheaper fallback named as a trade-off
 rather than a default.
 
-Two findings are live defects rather than cleanups, both consequences of
-the missing-registry theme (T3): DEC private mode 12 and ANSI mode 12
-(SRM) are unreachable though the state they set exists, and anchored
-ranges carry mismatched eviction policy.
+The two live defects originally identified under the missing-registry theme
+have landed: `d3574ddb` made DEC private mode 12 and ANSI mode 12 reachable,
+and `cfcbb40f` unified anchored-range eviction policy. Blank findings still
+need re-verification against the current tree before implementation.
 
 ## Themes
 
@@ -64,7 +64,7 @@ Symptoms: S12, S20, S21, S33, S35, S36, S37, S49
 
 _Impact 4/5 -- 5 findings are symptoms._
 
-**Root cause.** Several concepts are represented as a set of members (terminal modes, anchored ranges, preference fields, per-screen fields, TODO owners) with no single declaration. Each lifecycle pass over the set is a separately hand-written enumeration, so adding a member means editing 4-6 disjoint lists and omitting one produces a member that can be set but not reported, or created but not cleaned up. Two of these gaps are already live defects (DEC mode 12 / SRM unreachable; anchored ranges with mismatched eviction policy).
+**Root cause.** Several concepts are represented as a set of members (terminal modes, anchored ranges, preference fields, per-screen fields, TODO owners) with no single declaration. Each lifecycle pass over the set is a separately hand-written enumeration, so adding a member means editing 4-6 disjoint lists and omitting one produces a member that can be set but not reported, or created but not cleaned up. The two live defects this caused at audit time (DEC mode 12 / SRM unreachable; anchored ranges with mismatched eviction policy) landed in `d3574ddb` and `cfcbb40f`.
 
 **Combined fix.** For each set, declare it once as data -- a static table of (code, keypath) for modes, a policy table for anchored ranges, an enum of preference fields with a draft/config codec, one `TodoOwner` enum -- and make every pass (set, report, reset, capture, restate, clean up, project) a fold over that table. The one-off members that genuinely differ (modes 6/1047/1048/1049, hover-vs-arm damage recording, fontSize's String mapping) stay as explicit arms layered on top, which is the correct residue rather than a reason to keep the enumerations.
 
@@ -94,11 +94,17 @@ Symptoms: S07, S08, S09, S11, S37, S39, S59, S60, S61
 
 _Impact 4/5 -- 4 findings are symptoms._
 
+**Status.** Retired by `1447b04d`, `17e54263`, `1d37f23c`, and
+`508a403e`. All surfaces with duration now project existence from model
+slots. `8c34a41f` also settled the adjacent sidebar source question in
+favor of the applied projection. S44 remains open, but it is duplicate row
+painting rather than presentation-existence work.
+
 **Root cause.** The Elm loop's reconcile passes are the app's stated model for view existence -- `reconcileQuitConfirmation` and `reconcilePreferencesPanel` create, show, refresh and tear down from a single optional projection with no command. Popovers and two of three confirmation sheets instead push existence through Commands while also writing model state, which yields two truths, stranding paths, and a documented double-press bug. Both findings reverse the same recorded ADR decision.
 
 **Combined fix.** Treat 'a view exists' as a projection everywhere, matching the quit-confirmation shape: model slot carries the full payload, the reconcile pass owns create/show/refresh/teardown, and the only view-to-model edge is genuine user input (click-away closing a popover). Delete the six show/dismiss Commands, the stranding sweeps, and the second derivations. This requires amending the 2026-05-27 ADR in the same change, and the one real constraint to settle first is whether a modal NSAlert may be run inside the reconcile sweep -- if not, that is the honest argument for keeping the two close sheets command-driven, and it should be written into the ADR rather than left implicit.
 
-Symptoms: S02, S42, S44, S45
+Symptoms: S02, S42
 
 ### T7. Cross-artifact inventories duplicated in prose and YAML with no generator or checker
 
@@ -132,9 +138,9 @@ in itself.
 
 - Test seams in production: 'Move test-only state and fault injection out of the production PTY actor' argues test-driven branches in shipping paths are the defect, while 'Stop forking a PTY child...' wants deliverOutputForTesting to become the normal way to drive a host, and 'The Command interpreter... has no automated coverage' wants a Ports seam threaded through AppRuntime. These reconcile only under an explicit rule -- constructor-injected collaborators yes, conditional test-only branches no -- which should be stated before any of the three is implemented, or the PTY cleanup and the AppRuntime refactor will be argued against each other.
 
-- Sidebar data flow: 'Drop SidebarView.currentModel; read the runtime's model' has the view reach into the runtime's authoritative model on the interaction path, while 'Give the sidebar reconcile pipeline one implementation the UI tests drive' and 'Delete applyGroupCollapseState' push toward the view being a pure renderer fed only by projections. Both cannot be the target shape; the driver-owns-the-pipeline direction argues the interaction path should read its own projection, not a whole AppModel from either source.
+- Sidebar data flow: settled by `8c34a41f`. The interaction path reads the last-applied `SidebarProjection`, not `runtime.model` or a stored `AppModel`. S33 and S44 remain compatible follow-on work: one driver should own the pipeline, and group chrome should have one projection-fed painter.
 
-- Recorded decisions are contradicted without being amended: 'Make TODO/alerts popover existence a reconcile pass' reverses the 2026-05-27 ADR listing popover presentation as a legitimate Command, and 'Nest per-pane search and notification state in PaneModel' reverses D2 of the 2026-08-10 session-owned-facts ADR. Both auditors flag it; neither fix is safe to land without the ADR edit in the same change, and the docs-status theme shows the register is already unreliable about supersession.
+- Recorded decisions are contradicted without being amended: the popover contradiction was settled by `1447b04d`, which amended the 2026-05-27 ADR before the presentation migration landed. The other conflict remains: 'Nest per-pane search and notification state in PaneModel' reverses D2 of the 2026-08-10 session-owned-facts ADR and is not safe to land without amending that decision in the same change.
 
 - Terminal.swift restructuring order: the screens (ScreenState), modes (registry), anchors (registry), search (lift out), and file-split findings all rewrite overlapping regions of one 7,778-line file. They are individually sound and jointly a merge conflict; the search lift should go first (it removes ~1,000 lines and eight nested types), then the storage changes, then the file split, or the split's file boundaries will be drawn around the old shape.
 
@@ -145,7 +151,7 @@ in itself.
 | Status | #           | Score | I   | C   | Area           | Effort | Finding                                                                                                                 |
 | ------ | ----------- | ----- | --- | --- | -------------- | ------ | ----------------------------------------------------------------------------------------------------------------------- |
 |        | [S01](#s01) | 25    | 5   | 5   | build          | small  | Make CI run the local gate instead of running no tests at all                                                           |
-| part 3b95df8f | [S02](#s02) | 20    | 4   | 5   | app-runtime    | medium | Make TODO/alerts popover existence a reconcile pass, not four commands                                     |
+| 3b95df8f 1447b04d 1d37f23c 508a403e | [S02](#s02) | 20    | 4   | 5   | app-runtime    | medium | Make TODO/alerts popover existence a reconcile pass, not four commands                                     |
 | de143358 ccaa146a | [S03](#s03) | 20    | 4   | 5   | build          | medium | Collapse the duplicated bundle assembly in dev-build.sh and build-app.sh                                                |
 | ce093e2e 9947118a | [S04](#s04) | 20    | 4   | 5   | build          | small  | Replace the four hand-copied bundle-layout assertion lists with one script                                              |
 | 28d99823 471befb4 348d8121 | [S05](#s05) | 20    | 4   | 5   | core-model     | medium | Make a tab's focus and zoom part of its tree, not two loose fields                                                      |
@@ -185,10 +191,10 @@ in itself.
 |        | [S39](#s39) | 12    | 3   | 4   | build          | small  | Drop .build-gate by deleting the unenforced -warn-long-function-bodies flag                                             |
 |        | [S40](#s40) | 12    | 3   | 4   | core-model     | medium | Nest per-pane search and notification state in PaneModel so cleanup is structural                                       |
 |        | [S41](#s41) | 12    | 3   | 4   | core-reducer   | small  | Drop @discardableResult from update() so nested calls cannot silently swallow commands                                  |
-|        | [S42](#s42) | 12    | 3   | 4   | core-reducer   | medium | Give all three confirmations one representation instead of half-model, half-command                                     |
+| 17e54263 | [S42](#s42) | 12    | 3   | 4   | core-reducer   | medium | Give all three confirmations one representation instead of half-model, half-command                                     |
 |        | [S43](#s43) | 12    | 3   | 4   | docs           | small  | AGENTS.md maps three of the seven places a document can live                                                            |
 |        | [S44](#s44) | 12    | 3   | 4   | sidebar        | small  | Delete applyGroupCollapseState; paint the group row from its own projection                                             |
-|        | [S45](#s45) | 12    | 3   | 4   | sidebar        | small  | Drop SidebarView.currentModel; read the runtime's model                                                                 |
+| 8c34a41f | [S45](#s45) | 12    | 3   | 4   | sidebar        | small  | Drop SidebarView.currentModel; read the runtime's model                                                                 |
 |        | [S46](#s46) | 12    | 3   | 4   | terminal-views | medium | Let the swapchain own its construction inputs instead of mirroring them in the view                                     |
 | c38ace17 | [S47](#s47) | 10    | 2   | 5   | build          | small  | `just clean` misses two of the five build trees it is supposed to remove                                                |
 |        | [S48](#s48) | 10    | 2   | 5   | build          | small  | Stop running DanTermProtocolTests twice in the gate                                                                     |
@@ -230,7 +236,11 @@ in itself.
 
 `app/AppRuntime.swift#perform`, `app/Reconcile.swift#reconcilePaneTodoPopover`, `app/Reconcile.swift#reconcileTabTodoPopover`, `app/Reconcile.swift#reconcileQuitConfirmation`, `lib/DanTermCore/Sources/DanTermCore/Update.swift#update`, `lib/DanTermCore/Sources/DanTermCore/Command.swift#Command`
 
-**Status note.** `3b95df8f` merged the four commands into two owner-parameterized ones, `showTodoPopover(owner:)` and `dismissTodoPopover(owner:)`, and `model.todoPopover` is now one `TodoOwner?` slot rather than a scope enum. Nothing else here landed: existence is still command-owned with two sources of truth, the `.showTodoPopover` arm still early-returns after `update()` committed the model, `dismissStrandedPopovers` / `dismissStrandedTabPopover` still exist, the content passes still gate on `handle?.isShown`, and the alerts popover still has no model state. Read the four-commands wording below as two; the double-truth problem is untouched.
+**Status note.** `3b95df8f` first unified TODO ownership. `1447b04d`
+amended the governing ADR, `1d37f23c` projected TODO popover existence and
+deleted its presentation commands and stranding sweeps, and `508a403e`
+projected alerts popover existence. The double-press state and the two-truth
+presentation shape described below no longer exist.
 
 **Problem.** Whether a TODO popover is open is stored twice: in `model.todoPopover` and in the runtime's `todoPopover` / `tabTodoPopover` NSPopover handles. Four commands (`showTodoPopover`, `dismissTodoPopover`, `showTodoPopoverForTab`, `dismissTodoPopoverForTab`) push one onto the other, delegate adapters push messages back the other way, a pure `reconcileTodoPopover(&model, previous:)` stranding pass and an AppKit-side `dismissStrandedPopovers()` keep the two halves from drifting when a tab disappears, and the two content passes then gate on `handle?.isShown` rather than on the model. When the two disagree nothing repairs it: the `.showTodoPopover` arm early-returns if `findPaneWrapper(for:)` or `desiredPaneTodoPopover` returns nil, leaving `model.todoPopover == .pane(paneId)` with no popover on screen, so the next Cmd-Shift-' is consumed as a "dismiss" and the user has to press it twice. The alerts popover is the mirror image: no model state at all, an imperative `toggleAlertsPopover()`, plus a `.dismissAlertsPopover` command to poke it from the core.
 
@@ -884,6 +894,13 @@ in itself.
 
 `lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift#emitTerminateConfirmation`, `lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift#emitCloseTabConfirmation`, `lib/DanTermCore/Sources/DanTermCore/Projections.swift#desiredQuitConfirmation`, `lib/DanTermCore/Sources/DanTermCore/Model.swift#PendingConfirmation`
 
+**Status note.** `17e54263` replaced the split model/Command shape with one
+identified `PendingConfirmation` transaction projected through the shared
+non-modal panel. Replacement, stale-answer rejection, subject retraction,
+and growth revalidation now live in the model. `80225131` extended the same
+representation to delete-group choices, a surface the original finding did
+not include.
+
 **Problem.** `PendingConfirmation` is a mutex slot for three sheets, but only one of the three is actually driven by it. The terminate case sets the slot and returns no command -- the panel is a projection. The two close cases set the slot AND emit a `.showClose*Confirmation` command carrying a second copy of the same pending state plus its display payload. So the model can say a close-tab sheet is pending while the view knows nothing, and the invariant "the slot is nil again" depends entirely on the AppKit alert callback always sending confirm-or-cancel. If any dismissal path ever bypasses that callback the slot strands at `.closeTab` and every future confirmation -- including quit -- is silently swallowed by the `guard model.pendingConfirmation == nil` at the top of all three emitters. The IPC `tabClose` arm already had to special-case this hazard.
 
 **Evidence.** Read ModelOperations.swift:699-704 (`emitTerminateConfirmation` sets `.terminate`, returns `[]`) against 708-723 and 725-745 (`emitCloseTabConfirmation`/`emitCloseTabsConfirmation` set `.closeTab` and also return a command). Read Projections.swift:1048-1059: `desiredQuitConfirmation` explicitly returns nil for `.closeTab` with the comment "close-tab confirmation is driven by modal NSAlert commands instead." Read Update.swift:1523-1530, whose comment says routing the last tab through `.closeTab` would "leave the tab open, and strand pendingConfirmation" -- the hazard named in the source. Read AppRuntime.swift:1065-1090: both alert handlers do currently always send a response.
@@ -931,6 +948,12 @@ in itself.
 `sidebar` &middot; duplication &middot; impact 3, confidence 4 &middot; effort small
 
 `app/SidebarView.swift#applySidebarOps`, `app/SidebarView.swift#contextMenu(forTabId:clickedRow:)`, `app/SidebarView.swift#contextSetTabColors`, `app/SidebarView.swift#contextExtractTabs`, `app/SidebarView.swift#outlineViewSelectionDidChange`
+
+**Status note.** `8c34a41f` deleted `currentModel`, but did not take the
+finding's proposed `runtime.model` route. Every interaction fact now comes
+from the last-applied `SidebarProjection`, which is the only source
+consistent with the rows NSOutlineView displays. Domain decisions moved
+behind Msgs, and rename initiation became projected model state.
 
 **Problem.** SidebarView keeps a whole AppModel copy refreshed on every applySidebarOps, purely to serve the interaction path. The runtime already holds the authoritative model and the view already holds a reference to the runtime, so this is a second copy of the app state whose freshness depends on reconcileSidebar having run. The file itself is inconsistent about which one to read, and one handler's correctness is documented in terms of the mirror being refreshed mid-send rather than in terms of the model being current.
 
