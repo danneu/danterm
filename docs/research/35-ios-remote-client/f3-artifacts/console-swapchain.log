@@ -1,0 +1,9 @@
+17:03:46  Acquired tunnel connection to device.
+17:03:46  Enabling developer disk image services.
+17:03:46  Acquired usage assertion.
+Launched application with com.danneu.danterm.ios-render-spike bundle identifier.
+Waiting for the application to terminate…
+SPIKE displayScale=3.0
+SPIKE metrics cell=(7.0, 13.333333333333334) pixels=21x40
+SPIKE PROBE-F swapchain allocated depth=3
+SPIKE PROBE-F stopped after frame 99; nothing further is published

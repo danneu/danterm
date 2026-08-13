@@ -73,6 +73,30 @@ private func makeSecondPlan(columns: Int, rows: Int) -> RenderFramePlan? {
     )
 }
 
+/// One frame of probe F's animation: a whole-screen repaint whose background
+/// color and counter both change every frame, so a stale presentation is
+/// unmistakable rather than a subtle difference.
+private func makeCounterPlan(columns: Int, rows: Int, index: Int) -> RenderFramePlan? {
+    guard var terminal = Terminal(columns: columns, rows: rows) else { return nil }
+    let background = 41 + (index % 6)
+    var input = "\u{1B}[2J\u{1B}[H"
+    for row in 1...rows {
+        // No trailing newline on the last row: one would scroll the frame and
+        // put a blank line where the counter should be.
+        input += "\u{1B}[\(background);30m FRAME \(index) row \(row) \u{1B}[0m"
+        if row < rows { input += "\r\n" }
+    }
+    terminal.feed(Array(input.utf8))
+    return planFrame(
+        for: terminal,
+        presentation: RenderPresentation(
+            theme: .dark,
+            isCursorVisible: false,
+            cursorShape: .block
+        )
+    )
+}
+
 /// Wraps the store's pixels as a CGImage the same way `blit` does, so probe A
 /// and probe C differ only in who rasterizes.
 private func makeImage(from store: TerminalFrameBackingStore) -> CGImage? {
@@ -129,6 +153,115 @@ private func inkPixelCount(of image: CGImage) -> Int {
 }
 
 final class SpikeViewController: UIViewController {
+    // Probes D and E in order, each returning the banner text for the stage it
+    // just produced. On a device the user drives them by tapping, so a
+    // screenshot can be taken with the stage named on screen; the simulator
+    // keeps the timers the scripted run screenshots against.
+    private var pendingStages: [() -> String] = []
+    private var stageBanner: UILabel?
+
+    // Recolored by a tap in ablation mode purely to force a compositing pass.
+    private var compositeTriggerMarker: UIView?
+
+    // Probe F's state. The run loop owns the timer, so it outlives this
+    // controller; its block holds `self` weakly and invalidates the timer the
+    // first time it fires with `self` gone, which is the whole teardown path.
+    private var swapchain: TerminalFrameSwapchain?
+    private var swapchainView: UIView?
+    private var swapchainTimer: Timer?
+    private var swapchainFrameIndex = 0
+
+    /// Probe F -- the positive control for the ablation. Drives a layer from
+    /// the real `TerminalFrameSwapchain`, which never mutates an attached
+    /// buffer: it renders into a detached one and then attaches it. If the
+    /// indeterminate presentation the ablation produced is caused by mutating
+    /// an attached surface, this path must be stable instead.
+    ///
+    /// Runs alone on screen, without probes A through E, so nothing else can be
+    /// mistaken for its output.
+    private func runSwapchainProbe(
+        metrics: TerminalRenderMetrics,
+        columns: Int,
+        rows: Int,
+        scale: CGFloat,
+        banner: UILabel
+    ) {
+        guard let swapchain = TerminalFrameSwapchain(
+            columns: columns,
+            rows: rows,
+            metrics: metrics
+        ) else {
+            log("PROBE-F FAIL TerminalFrameSwapchain returned nil")
+            banner.text = "F: swapchain allocation FAILED"
+            return
+        }
+        self.swapchain = swapchain
+        log("PROBE-F swapchain allocated depth=\(TerminalFrameSwapchain.defaultDepth)")
+
+        let panel = UIView(frame: CGRect(
+            x: 8,
+            y: banner.frame.maxY + 12,
+            width: CGFloat(metrics.cellWidthPixels * columns) / scale,
+            height: CGFloat(metrics.cellHeightPixels * rows) / scale
+        ))
+        panel.layer.contentsScale = scale
+        panel.layer.magnificationFilter = .nearest
+        view.addSubview(panel)
+        swapchainView = panel
+
+        banner.text = "F: swapchain driving the layer"
+        // 100 frames at 10Hz, then a deliberate stop. The animation shows
+        // whether every published frame reaches the screen; the stop shows
+        // whether the last one stays there, which is where the ablation's
+        // stale frame reappeared.
+        swapchainTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.1,
+            repeats: true
+        ) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            guard self.swapchainFrameIndex < 100 else {
+                timer.invalidate()
+                self.swapchainTimer = nil
+                let last = self.swapchainFrameIndex - 1
+                log("PROBE-F stopped after frame \(last); nothing further is published")
+                banner.text = "F: STOPPED at frame \(last) -- watch for reversion"
+                return
+            }
+            guard let plan = makeCounterPlan(
+                columns: columns,
+                rows: rows,
+                index: self.swapchainFrameIndex
+            ) else { return }
+            if let store = swapchain.publish(plan: plan, damage: .full) {
+                self.swapchainView?.layer.contents = store.ioSurface
+            } else {
+                log("PROBE-F frame \(self.swapchainFrameIndex) coalesced; no buffer acquirable")
+            }
+            self.swapchainFrameIndex += 1
+        }
+    }
+
+    @objc private func handleTap() {
+        advanceStage()
+    }
+
+    @objc private func handleAblationTap() {
+        guard let marker = compositeTriggerMarker else { return }
+        marker.backgroundColor = marker.backgroundColor == .cyan ? .magenta : .cyan
+        log("TAP composite trigger: recolored the marker, touched nothing else")
+    }
+
+    private func advanceStage() {
+        guard !pendingStages.isEmpty else { return }
+        stageBanner?.text = pendingStages.removeFirst()()
+        if pendingStages.isEmpty {
+            stageBanner?.text = (stageBanner?.text ?? "") + " -- last stage"
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemPink
@@ -144,6 +277,24 @@ final class SpikeViewController: UIViewController {
 
         let columns = max(20, Int(view.bounds.width / metrics.cellSize.width))
         let rows = 12
+
+        #if !targetEnvironment(simulator)
+        if ProcessInfo.processInfo.environment["SPIKE_MODE"] == "swapchain" {
+            let banner = UILabel(frame: CGRect(x: 8, y: 64, width: 400, height: 16))
+            banner.font = .systemFont(ofSize: 12, weight: .bold)
+            banner.textColor = .yellow
+            view.addSubview(banner)
+            runSwapchainProbe(
+                metrics: metrics,
+                columns: columns,
+                rows: rows,
+                scale: scale,
+                banner: banner
+            )
+            return
+        }
+        #endif
+
         guard let plan = makeSamplePlan(columns: columns, rows: rows) else {
             log("FAIL Terminal(columns:rows:) returned nil")
             return
@@ -187,6 +338,15 @@ final class SpikeViewController: UIViewController {
             y += 18
         }
 
+        // Names the stage on screen, so a screenshot carries which probe
+        // produced it instead of relying on when it was taken.
+        let banner = UILabel(frame: CGRect(x: 8, y: y, width: 400, height: 16))
+        banner.font = .systemFont(ofSize: 12, weight: .bold)
+        banner.textColor = .yellow
+        view.addSubview(banner)
+        stageBanner = banner
+        y += 22
+
         // Probe A -- CGImage as layer contents.
         label("A: CALayer.contents = CGImage")
         let a = UIView(frame: CGRect(origin: CGPoint(x: 8, y: y), size: pointSize))
@@ -226,27 +386,67 @@ final class SpikeViewController: UIViewController {
         // Probe D -- mutate the store's pixels in place and touch nothing else.
         // Probes A and C hold copies, so only B can change; if it does,
         // CoreAnimation is sampling the surface live rather than at assignment.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
-            guard self != nil else { return }
+        let probeD: () -> String = {
             guard let second = makeSecondPlan(columns: columns, rows: rows) else {
                 log("PROBE-D FAIL could not build the second plan")
-                return
+                return "D FAILED"
             }
             store.renderFull(second)
             log("PROBE-D rendered a second plan into the same store; nothing reattached")
             log("PROBE-INUSE while attached, ioSurface.isInUse=\(store.ioSurface.isInUse)")
+            return "D: mutated in place, NOTHING reattached"
         }
 
         // Probe E -- reassign the same surface as contents. This is what the
         // macOS swapchain's publish actually does (render into a detached
         // buffer, then attach it), so this, not probe D, is the test of whether
         // the swapchain protocol carries to iOS at all.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak b] in
-            guard let b else { return }
+        let probeE: () -> String = { [weak b] in
+            guard let b else { return "E: view gone" }
             b.layer.contents = nil
             b.layer.contents = store.ioSurface
             log("PROBE-E reattached the same IOSurface as layer.contents")
+            return "E: same surface REATTACHED"
         }
+
+        #if targetEnvironment(simulator)
+        // The scripted simulator run screenshots on a clock, so keep the clock.
+        banner.text = "C: first frame (timed run)"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { _ = probeD() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { _ = probeE() }
+        #else
+        // On a device there is no scripted screenshot, so the run is driven by
+        // hand. Two modes, because the tap that advances a stage is itself a
+        // composite trigger and would otherwise be confounded with the mutation
+        // it is supposed to reveal.
+        if ProcessInfo.processInfo.environment["SPIKE_MODE"] == "ablate" {
+            // Probe D fires on a clock, and nothing else on screen changes with
+            // it: no banner update, no touch. So if panel B changes on its own,
+            // an in-place mutation reaches the display with no compositing pass
+            // that this app asked for. The tap here deliberately does NOT run a
+            // stage -- it recolors one unrelated square, which dirties the
+            // window and forces a composite while leaving the store and panel
+            // B's contents alone.
+            banner.text = "ABLATION: do not touch. D fires at 8s."
+            let marker = UIView(frame: CGRect(x: 320, y: 64, width: 24, height: 24))
+            marker.backgroundColor = .cyan
+            view.addSubview(marker)
+            compositeTriggerMarker = marker
+            view.addGestureRecognizer(
+                UITapGestureRecognizer(target: self, action: #selector(handleAblationTap))
+            )
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                _ = probeD()
+                log("PROBE-D-ABLATION fired on a timer; no banner update, no touch")
+            }
+        } else {
+            banner.text = "C: first frame -- TAP to advance"
+            pendingStages = [probeD, probeE]
+            view.addGestureRecognizer(
+                UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            )
+        }
+        #endif
 
         log("DONE")
     }

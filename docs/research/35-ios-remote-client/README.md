@@ -113,25 +113,50 @@ is T3's first job.
 
 ### H2 -- the existing swapchain is the iOS presentation path, not a substitute
 
-Restated after F2. The original H2 asked whether CPU-composed frames present
-acceptably *without* IOSurface, and named `CVPixelBuffer`/`CAMetalLayer` as the
-closer analogue to the N-buffer swapchain. That framing is dead: F2 shows
-`TerminalFrameSwapchain` and `TerminalFrameBackingStore` compile and run on iOS
-unchanged, and that CoreAnimation there honors the same attach-to-publish
-protocol the swapchain already speaks -- an in-place pixel rewrite does not
-reach the screen, and reassigning the same surface does.
+Restated after F2, and corrected on hardware by F3. The original H2 asked
+whether CPU-composed frames present acceptably *without* IOSurface, and named
+`CVPixelBuffer`/`CAMetalLayer` as the closer analogue to the N-buffer swapchain.
+That framing is dead: `TerminalFrameSwapchain` and `TerminalFrameBackingStore`
+compile and run on iOS unchanged, and an IOSurface displays as `layer.contents`
+on a real device, not just in the simulator.
 
-So the live question is narrower: does the real `TerminalFrameSwapchain` beat
+F2 went one step further and said CoreAnimation honors the same attach-to-publish
+protocol the swapchain speaks, on the evidence that an in-place pixel rewrite
+does not reach the screen while reassigning the same surface does. On device
+that is wrong, and F3 replaces it. Mutating a surface while it is attached
+presents *indeterminately*: from a single render, with nothing reattached, the
+screen flashed the new frame, reverted, and then alternated between the two
+frames indefinitely. The simulator's clean result was one sample of that, not a
+rule. The real swapchain, which renders into a detached buffer and then attaches
+it, published 100 consecutive frames with no coalescing and then held the last
+one indefinitely.
+
+So attach-to-publish is not a protocol iOS happens to share -- it is what makes
+presentation deterministic there for a *reused* surface. This does not
+disqualify the alternative, and it is worth being exact about why:
+CGImage-copy-per-frame is deterministic by construction, because each frame is a
+new immutable image rather than a mutation of an attached one, so the hazard F3
+found cannot arise there. Probe A held its frame through every run, including
+the ablation.
+
+What separates the two arms is therefore cost, not correctness.
+CGImage-copy-per-frame pays a full-frame copy and an allocation every frame --
+at F3's grid the surface is 1113x480 px, about 2.1 MB, so roughly 128 MB/s of
+copying at 60Hz -- and the swapchain pays none. On a phone that reads as an
+energy question first and a throughput question second.
+
+The live question is therefore: does the real `TerminalFrameSwapchain` beat
 CGImage-copy-per-frame on a phone, at phone-scale grids, under a full-repaint
-scroll workload, in frame timing and energy? T3 measures those two; D2 selects
-between them. The substitute paths are candidates only if the device disconfirms
-the simulator result below.
+scroll workload, in frame timing and energy? T3's measurement half answers that;
+D2 selects between them, with the swapchain the favorite and the copy path the
+fallback. The substitute paths (`CAMetalLayer`/`CVPixelBuffer`) are no longer
+candidates for the presentation mechanism, since the surface path is confirmed
+on device; they would return only if the measurements show the swapchain cannot
+hold a frame rate.
 
-Competing explanation, and the one thing that could reopen the wider question:
-simulator CoreAnimation runs against the Mac's render server, so F2's
-presentation result may be a simulator affordance. On a device the surface path
-could fail outright, which would put `CAMetalLayer`/`CVPixelBuffer` back on the
-table.
+Open, and not needed for D2: what actually drives the re-sampling behind the
+alternation. It is not app-requested compositing -- F3 rules that out -- and no
+probe has established the mechanism.
 
 ### H3 -- a remote TerminalCore converges from snapshot plus tape
 
@@ -255,20 +280,24 @@ Provisional shape; every leg has a gate in the ledger.
   IOSurface is public on iOS -- and a simulator spike showed CoreAnimation there
   honors the swapchain's attach-to-publish protocol. H2 is restated as a result.
   The font seam landed with the pins in T18.
-- **T3 RESEARCH** -- Presentation-path measurement on a real device. First,
-  confirm on hardware what F2 saw only in the simulator: that an IOSurface
-  displays as `layer.contents` and that in-place mutation does not reach the
-  screen. Do that before measuring anything, because the H2 restatement rests on
-  it. F2's discriminator ports directly and takes minutes: render a frame and
-  screenshot; rewrite the store's pixels in place without reattaching and
-  screenshot again; reassign the same surface and screenshot a third time. If
-  the device behaves like the simulator, the first two screenshots are
-  byte-identical and the third differs. Then measure the real
-  `TerminalFrameSwapchain` against
+- **T3 RESEARCH, half done** (F3) -- Presentation-path confirmation and
+  measurement on a real device. The confirmation half has run, on an iPhone 13
+  mini, and it did not go as F2 predicted: an IOSurface does display as
+  `layer.contents` on hardware, but mutating an attached surface presents
+  indeterminately rather than not at all, while the real swapchain's
+  rotate-then-attach path is stable across 100 published frames and holds the
+  last one. H2 is corrected above; attach-to-publish is now a requirement rather
+  than a shared convention. Signing turned out to need no Xcode project: an
+  existing wildcard development profile already covered the device, and
+  `ios-render-spike.sh device` ([ios-render-spike.sh](ios-render-spike.sh)) is
+  the reproduction, sharing its build and bundle assembly with the simulator
+  target F2 used.
+  Still to do: measure the real `TerminalFrameSwapchain` against
   CGImage-copy-per-frame, both on iOS, under a worst-case full-repaint scroll
   workload at a phone-typical grid. Diagnostic frame timings and energy notes
-  into F3. Needs a physical device, so it also needs the signing and
-  provisioning path the simulator spike deliberately avoided.
+  into F3. The two arms differ on cost, not correctness -- the copy path is
+  deterministic by construction -- so the workload has to expose per-frame copy
+  and allocation, and energy is as much the point as frame timing.
 - **T4 DONE** (F4) -- Mac-to-Mac thin-client spike. Convergence confirmed
   byte-for-byte against `pane read`. The join gap is modes, not just history,
   and the stream is not self-synchronizing; F4 states the `pane.snapshot` floor
@@ -279,8 +308,11 @@ Provisional shape; every leg has a gate in the ledger.
   `TerminalFlightRecordingCursor`, with only the ability for a client to supply
   one missing at the protocol edge.
 - **D2 gate** -- select the iOS presentation path, from F2 and F3. F2 narrowed
-  the candidates to the real swapchain versus CGImage-per-frame; T3 supplies the
-  numbers and the device confirmation.
+  the candidates to the real swapchain versus CGImage-per-frame, and F3 supplied
+  the device confirmation: the surface path works on hardware, and reusing a
+  surface safely requires the swapchain's discipline. Both arms are correct, so
+  the gate turns on cost -- the numbers from T3's measurement half, energy
+  first.
 - **D3 gate** -- confirm or restate the day-one-engine direction after F1-F4;
   reopening the rejected text renderer requires these spikes to have failed. When
   it is restated, adopt H5's invariant by name -- single-owner replicated state

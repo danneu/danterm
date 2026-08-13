@@ -130,8 +130,12 @@ Until then the reproduction script owns them.
 Full finding: [f2-render-execution.md](f2-render-execution.md). Reproduction:
 [ios-render-spike.sh](ios-render-spike.sh). Screenshots: `f2-artifacts/`.
 
-- Status: settled for the compile and for the presentation mechanism in the
-  simulator; the device result is a compile only.
+- Status: settled for the compile. The presentation-mechanism half was measured
+  in the simulator only, and F3 superseded it on hardware: the in-place-mutation
+  result below does not reproduce on a device, where mutating an attached
+  surface presents indeterminately instead of not at all. Read the two
+  "Measurements or examples" probes and the "Inference" clause about
+  attach-to-publish as simulator behavior, not iOS behavior.
 - Date and investigator: 2026-08-12, agent (T2).
 - Commit and worktree state: `58abcfc6`, `lib/` unmodified. The script applies
   and restores both the iOS platform pin and the font seam per run.
@@ -192,6 +196,100 @@ error. Copying the `.ttf` to that path, which
 `scripts/bundle-theme-resources.sh` already does for the macOS app, fixes it.
 This is a bundle-assembly requirement, not a portability defect, and it fails
 silently, which is why it is recorded here.
+
+### F3 -- on device, attach-to-publish is required, not merely honored
+
+Reproduction: `ios-render-spike.sh device`
+([ios-render-spike.sh](ios-render-spike.sh)), which builds, signs, and installs
+the same spike for a real iPhone, sharing everything up to the install with the
+simulator target F2 used. Screenshots and console transcripts: `f3-artifacts/`.
+
+- Status: settled for the presentation mechanism on hardware. The measurement
+  half of T3 -- swapchain against CGImage-copy-per-frame, frame timing and
+  energy -- has not run.
+- Date and investigator: 2026-08-13, agent (T3), with the user holding the
+  device and reporting what the screen did.
+- Commit and worktree state: the runs span `642143b6..e4dd79e1`, because another
+  session committed sidebar work while they were in progress. Nothing under
+  `TerminalRenderExecution` or `TerminalRenderPlanning` changed across that
+  range, so every probe ran against identical engine sources. Unlike F2 the
+  script patches nothing: the iOS platform pin and the font seam are both in the
+  tree now, so this is a plain `swift build` against the shipped sources.
+- Device: iPhone 13 mini (iPhone14,4), iOS 26.6, `displayScale=3.0`. Signing
+  reused an existing wildcard development profile that already listed the
+  device, so no Xcode project was created; see the sub-section below.
+- Result: F2's simulator discriminator does **not** reproduce on device, and the
+  behavior it reported is not merely different but nondeterministic. Rewriting
+  the backing store's pixels in place, with nothing reattached, made panel B
+  flash the new frame, revert to the stale one, and then -- roughly thirty
+  seconds later, with no further rendering -- alternate between the two frames
+  indefinitely. The console proves the render happened exactly once
+  (`PROBE-D-ABLATION` appears one time in `console-ablation.log`), so every
+  change after it is presentation-side.
+- Result: a forced compositing pass is not the trigger. Eighteen taps, each
+  recoloring one unrelated square and touching neither the store nor panel B's
+  `contents`, left all three panels on the stale frame.
+- Result: the real `TerminalFrameSwapchain` driving a layer is stable. 100
+  frames at 10Hz, each a full repaint with a changing counter and a cycling
+  background, published and attached with **zero** coalesced publishes -- so
+  buffer acquisition never stalled, which means CoreAnimation releases buffers
+  through `isInUse` on device the way the acquisition logic assumes. After a
+  deliberate stop, frame 99 held indefinitely with no reversion. Its background
+  is blue, matching `41 + (99 % 6)`, so the frame displayed is the frame last
+  published and not a lucky repaint.
+- Result: an IOSurface does display as `layer.contents` on hardware, so F2's
+  presentation result was not a simulator affordance. The packaged Nerd Font
+  glyphs render from a hand-assembled device bundle too.
+- Inference: the difference between the two outcomes is the one thing that
+  differs between them -- whether the surface being written to is currently
+  attached. `TerminalFrameSwapchain` renders into a detached buffer and then
+  attaches it; violating that on iOS produces the alternation above. So
+  attach-to-publish is not a macOS habit the port could drop. It is what makes
+  presentation deterministic on iOS, which is a stronger claim than F2's
+  "CoreAnimation honors the same protocol" and it points the same way.
+- Inference: the H2 restatement in [README.md](README.md) is wrong as written on
+  hardware. "An in-place pixel rewrite does not reach the screen, and
+  reassigning the same surface does" describes one sample of an indeterminate
+  behavior. Corrected there.
+- Competing interpretations: the mechanism behind the alternation is not
+  established. CoreAnimation plausibly holds a cached texture and re-samples the
+  live surface on a schedule of its own, but nothing here probes that, and the
+  finding does not need it -- the design consequence follows from the observable
+  alone. What triggers the re-sampling is also unknown; it is not app-requested
+  compositing, which the tap result rules out.
+- Uncertainty: the ablation's evidence is the user's direct observation, not a
+  screenshot, and deliberately so -- a screenshot forces a capture through the
+  render server, which is the very thing under test. Everything about frame
+  timing, sustained publish rates, the incremental `apply` path, scroll
+  translation, and energy remains unmeasured. The probes used the system
+  monospace at 11pt, so font parity for the user's configured family is still
+  untouched.
+- Scope of the inference: this says nothing against CGImage-copy-per-frame,
+  which is deterministic by construction because each frame is a new immutable
+  image rather than a mutation of an attached one. Probe A held its frame
+  through every run here, the ablation included. The finding constrains how a
+  *reused* surface may be driven; it does not choose between the two arms.
+- Next action: the measurement half of T3, which is now known to be measuring a
+  path that works. The arms differ on cost rather than correctness, so it is a
+  per-frame copy and energy comparison. D2 selects from it.
+
+#### Getting on device needs no Xcode project
+
+The tree has no `.xcodeproj`, no xcodegen, and no `xcodebuild` in any build
+path, and this finding did not add one. Three things already existed: the device
+was paired to `devicectl` over the network, an `Apple Development` identity was
+in the keychain, and a wildcard development profile (`TEAM.*`) listed the
+device's UDID. That covers any bundle id, so the flat bundle the script already
+assembled for the simulator only needs an embedded profile, an entitlements
+plist, and `codesign` before `devicectl device install app` accepts it. That is
+why the two targets are one script: they diverge only at the install.
+
+The `device` target picks the profile by matching the team's wildcard app id
+rather than by UUID, so a reissued profile does not break it, and it derives the
+signing identity from the certificate that profile embeds, so the signature and
+the profile cannot disagree. The one thing minting
+a profile would still be needed for is a bundle id outside the wildcard, or a
+device not yet registered.
 
 ### F4 -- a second engine converges; joining mid-stream loses modes, not just history
 

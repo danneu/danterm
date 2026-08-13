@@ -21,21 +21,32 @@ Referenced from [findings.md](findings.md) as `F2`.
   `arm64-apple-ios26.5-simulator`, device triple `arm64-apple-ios26.5`.
   Simulator: iPhone 17 Pro, iOS 26.5, `displayScale` 3.0.
 - Commands, inputs, or reproduction:
-  [ios-render-spike.sh](ios-render-spike.sh), from any directory. It applies the
-  iOS pin and the font seam, builds the module for the device triple, builds the
+  `ios-render-spike.sh simulator`
+  ([ios-render-spike.sh](ios-render-spike.sh)), from any directory. It builds the
   spike app for the simulator triple, assembles a flat iOS `.app` by hand,
   installs and launches it with `simctl`, and takes three screenshots. There is
   no Xcode project and no `xcodebuild` in the recipe: `swift build` compiles, the
   script assembles the bundle the way `build-app.sh` assembles the macOS one, and
-  `simctl` runs it. Simulator only, so no signing and no provisioning.
+  `simctl` runs it. This target needs no signing and no provisioning; the
+  `device` target added by F3 does, and shares everything up to the install.
+  The script no longer applies the iOS pin and the font seam per run, because
+  both are in the tree now; when this finding was recorded it did.
+- Reproduced on 2026-08-13 against the current tree, byte-identically: the first
+  screenshot and the post-mutation screenshot match exactly and the reattach
+  screenshot differs, which is the discriminator below. This needed one fix to
+  the recipe -- the first capture now happens at 3s rather than 2s, because at
+  2s the launch presentation has not settled and even the panel holding an
+  immutable CGImage differed between captures, for reasons having nothing to do
+  with the surface.
 - Result or artifact paths: the spike source is
   [ios-render-spike/](ios-render-spike/) (a scratch package, deliberately not in
   `lib/`). Screenshots are committed under [f2-artifacts/](f2-artifacts/):
   [first-frame.png](f2-artifacts/first-frame.png),
   [after-in-place-mutation.png](f2-artifacts/after-in-place-mutation.png),
   [after-reattach.png](f2-artifacts/after-reattach.png). The console log, the
-  assembled bundle, and the SwiftPM build trees land in `.build-ios-t2/` at the
-  repository root (gitignored; regenerate with the script).
+  assembled bundle, and the SwiftPM build trees land in
+  `.build-ios-spike/simulator/` at the repository root (gitignored; regenerate
+  with the script).
 
 #### Measurements or examples -- the AppKit itemization
 

@@ -1,0 +1,39 @@
+16:57:54  Acquired tunnel connection to device.
+16:57:54  Enabling developer disk image services.
+16:57:55  Acquired usage assertion.
+Launched application with com.danneu.danterm.ios-render-spike bundle identifier.
+Waiting for the application to terminate…
+SPIKE displayScale=3.0
+SPIKE metrics cell=(7.0, 13.333333333333334) pixels=21x40
+SPIKE plan 53x12 textRuns=19 bgRuns=2 cursor=true
+SPIKE store ok ioSurface=1113x480 bytesPerRow=4480
+SPIKE renderFull returned
+SPIKE PROBE-INK non-background pixels in the rendered store: 49102
+SPIKE PROBE-SWAPCHAIN allocated=true published=true
+SPIKE PROBE-A CGImage assigned to layer.contents; contents is nil: false
+SPIKE PROBE-B IOSurface assigned to layer.contents; retained by CoreAnimation: true
+SPIKE PROBE-C blit into a UIKit context produced non-background pixels: 49102
+SPIKE PROBE-INUSE right after attach, ioSurface.isInUse=false
+SPIKE DONE
+SPIKE PROBE-D rendered a second plan into the same store; nothing reattached
+SPIKE PROBE-INUSE while attached, ioSurface.isInUse=true
+SPIKE PROBE-D-ABLATION fired on a timer; no banner update, no touch
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+SPIKE TAP composite trigger: recolored the marker, touched nothing else
+App terminated due to signal 9.
