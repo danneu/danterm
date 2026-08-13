@@ -744,6 +744,258 @@ final class BenchViewController: UIViewController {
     }
 }
 
+/// Process CPU seconds, user plus system. Negative means the call failed, so a
+/// failure cannot be read as "used no CPU".
+private func processCPUSeconds() -> Double {
+    var usage = rusage()
+    guard getrusage(RUSAGE_SELF, &usage) == 0 else { return -1 }
+    let user = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1e6
+    let system = Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1e6
+    return user + system
+}
+
+/// What a terminal actually does to a screen, as opposed to a full repaint
+/// every frame. One cycle is a burst of command output, then some typing, then
+/// a long idle -- and the idle is the point, not a gap between the parts that
+/// matter.
+private enum WorkloadPhase {
+    case output   // lines arriving: scroll damage
+    case typing   // one echoed cell
+    case idle     // nothing; the phone should be free to ramp down
+
+    static func at(nanosecondsIntoCycle elapsed: UInt64) -> WorkloadPhase {
+        switch elapsed {
+        case ..<250_000_000: .output
+        case ..<600_000_000: .typing
+        default: .idle
+        }
+    }
+}
+
+/// T3's energy arm: the same two presentation paths under a bursty,
+/// incrementally damaged workload, measured by how much CPU time the process
+/// spends over a fixed wall clock.
+///
+/// This exists because the frame-cost benchmark answers a question a terminal
+/// never asks. It runs continuous full-repaint animation, which is both the
+/// copy path's best case -- the swapchain exists to repaint only damaged rows
+/// -- and a workload that denies the phone the idle it would really have. Here
+/// the damage comes from the engine via `drainDamage()`, a frame is presented
+/// only when something changed, and most of the wall clock is idle.
+///
+/// The metric is a proxy, not joules: over the same wall clock and the same
+/// delivered frames, the arm that uses less CPU time leaves the phone idle
+/// longer.
+final class EnergyViewController: UIViewController {
+    private static let cycleNanoseconds: UInt64 = 2_000_000_000
+    private static let warmupNanoseconds: UInt64 = 3_000_000_000
+    private static let recordedNanoseconds: UInt64 = 6_000_000_000
+    private static let schedule: [(arm: Int, record: Bool)] = [
+        (0, false), (1, false), (2, false),
+        (0, true), (1, true), (2, true), (2, true), (1, true), (0, true),
+    ]
+
+    private struct EnergyArm {
+        let name: String
+        var cpuSeconds = 0.0
+        var wallSeconds = 0.0
+        var framesPresented = 0
+        var damagedRows: [UInt64] = []
+        var cpuUnavailable = false
+    }
+
+    private var panel: UIView?
+    private var banner: UILabel?
+    private var terminal: Terminal?
+    private var swapchain: TerminalFrameSwapchain?
+    private var copyStore: TerminalFrameBackingStore?
+    private var displayLink: CADisplayLink?
+    private var arms: [EnergyArm] = []
+    private var blockIndex = 0
+    private var blockStartNanoseconds: UInt64 = 0
+    private var blockStartCPU = 0.0
+    private var cycleStartNanoseconds: UInt64 = 0
+    private var typedColumn = 0
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+
+        let scale = view.window?.screen.scale ?? UIScreen.main.scale
+        guard let metrics = TerminalRenderMetrics(displayScale: scale, fontSize: 11) else {
+            log("ENERGY FAIL TerminalRenderMetrics returned nil")
+            return
+        }
+        let columns = max(20, Int(view.bounds.width / metrics.cellSize.width))
+        let rows = max(10, Int((view.bounds.height - 80) / metrics.cellSize.height))
+        log("ENERGY grid=\(columns)x\(rows) displayScale=\(scale)")
+
+        guard var terminal = Terminal(columns: columns, rows: rows),
+              let swapchain = TerminalFrameSwapchain(
+                  columns: columns, rows: rows, metrics: metrics
+              ),
+              let copyStore = TerminalFrameBackingStore(
+                  columns: columns, rows: rows, metrics: metrics
+              )
+        else {
+            log("ENERGY FAIL could not build the engine, swapchain, or store")
+            return
+        }
+        terminal.feed(Array("\u{1B}[2J\u{1B}[H".utf8))
+        _ = terminal.drainDamage()
+        self.terminal = terminal
+        self.swapchain = swapchain
+        self.copyStore = copyStore
+
+        let banner = UILabel(frame: CGRect(x: 8, y: 44, width: 400, height: 16))
+        banner.font = .systemFont(ofSize: 12, weight: .bold)
+        banner.textColor = .yellow
+        banner.text = "ENERGY running"
+        view.addSubview(banner)
+        self.banner = banner
+
+        let panel = UIView(frame: CGRect(
+            x: 0,
+            y: 68,
+            width: CGFloat(metrics.cellWidthPixels * columns) / scale,
+            height: CGFloat(metrics.cellHeightPixels * rows) / scale
+        ))
+        panel.layer.contentsScale = scale
+        panel.layer.magnificationFilter = .nearest
+        view.addSubview(panel)
+        self.panel = panel
+
+        arms = [
+            EnergyArm(name: "swapchain"),
+            EnergyArm(name: "cgimage-copy"),
+            EnergyArm(name: "plan-only"),
+        ]
+        log("ENERGY cycle=2s (0.25s output, 0.35s typing, 1.4s idle);"
+            + " damage from drainDamage(), never .full")
+        let link = CADisplayLink(target: self, selector: #selector(step))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    @objc private func step(_ link: CADisplayLink) {
+        let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        if blockStartNanoseconds == 0 {
+            blockStartNanoseconds = now
+            cycleStartNanoseconds = now
+            blockStartCPU = processCPUSeconds()
+        }
+        let block = Self.schedule[blockIndex]
+
+        if now - cycleStartNanoseconds >= Self.cycleNanoseconds {
+            cycleStartNanoseconds = now
+        }
+        feed(phase: WorkloadPhase.at(nanosecondsIntoCycle: now - cycleStartNanoseconds))
+        present(armIndex: block.arm, recording: block.record)
+
+        let duration = block.record ? Self.recordedNanoseconds : Self.warmupNanoseconds
+        guard now - blockStartNanoseconds >= duration else { return }
+        endOfBlock(now: now, link: link)
+    }
+
+    private func feed(phase: WorkloadPhase) {
+        guard var terminal else { return }
+        switch phase {
+        case .output:
+            let line = "\u{1B}[32m$\u{1B}[0m building target \(blockIndex): "
+                + "the quick brown fox jumps over the lazy dog\r\n"
+            terminal.feed(Array(line.utf8))
+        case .typing:
+            typedColumn += 1
+            terminal.feed(Array("x".utf8))
+        case .idle:
+            break
+        }
+        self.terminal = terminal
+    }
+
+    private func present(armIndex: Int, recording: Bool) {
+        guard var terminal else { return }
+        let damage = terminal.drainDamage()
+        self.terminal = terminal
+        // No damage, no frame. This is the whole reason the idle phase costs
+        // anything at all to measure: a path that repaints regardless would
+        // show up right here.
+        guard !damage.isEmpty else { return }
+        guard let plan = planFrame(
+            for: terminal,
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: true,
+                cursorShape: .block
+            )
+        ) as RenderFramePlan? else { return }
+
+        if armIndex == 0 {
+            if let store = swapchain?.publish(plan: plan, damage: damage) {
+                panel?.layer.contents = store.ioSurface
+            }
+        } else if armIndex == 1, let copyStore {
+            // The copy path cannot use the damage: whatever changed, the whole
+            // frame is copied to build the image it presents.
+            if !copyStore.apply(plan: plan, damage: damage) {
+                copyStore.renderFull(plan)
+            }
+            if let image = makeImage(from: copyStore) {
+                panel?.layer.contents = image
+            }
+        }
+        guard recording else { return }
+        arms[armIndex].framesPresented += 1
+        arms[armIndex].damagedRows.append(UInt64(damage.damagedRowCount))
+    }
+
+    private func endOfBlock(now: UInt64, link: CADisplayLink) {
+        let block = Self.schedule[blockIndex]
+        let cpu = processCPUSeconds()
+        let wall = Double(now - blockStartNanoseconds) / 1e9
+        if block.record {
+            if cpu < 0 || blockStartCPU < 0 {
+                arms[block.arm].cpuUnavailable = true
+            } else {
+                arms[block.arm].cpuSeconds += cpu - blockStartCPU
+            }
+            arms[block.arm].wallSeconds += wall
+        }
+        log("ENERGY block \(blockIndex) arm=\(arms[block.arm].name)"
+            + " recorded=\(block.record)"
+            + String(format: " wall=%.2fs cpu=%.3fs", wall, max(0, cpu - blockStartCPU))
+            + " thermal=\(ProcessInfo.processInfo.thermalState.rawValue)")
+
+        blockIndex += 1
+        blockStartNanoseconds = 0
+        guard blockIndex >= Self.schedule.count else { return }
+        link.invalidate()
+        displayLink = nil
+        finish()
+    }
+
+    private func finish() {
+        for arm in arms {
+            guard !arm.cpuUnavailable, arm.wallSeconds > 0 else {
+                log("ENERGY \(arm.name) NOT-MEASURED"
+                    + " (cpuUnavailable=\(arm.cpuUnavailable) wall=\(arm.wallSeconds))")
+                continue
+            }
+            let duty = arm.cpuSeconds / arm.wallSeconds * 100
+            log("ENERGY \(arm.name)"
+                + String(format: " cpu=%.3fs wall=%.2fs duty=%.1f%%",
+                         arm.cpuSeconds, arm.wallSeconds, duty)
+                + " frames=\(arm.framesPresented)"
+                + " damagedRows p50=\(percentile(arm.damagedRows, 0.5))"
+                + " p95=\(percentile(arm.damagedRows, 0.95))"
+                + " n=\(arm.damagedRows.count)")
+        }
+        log("ENERGY note: CPU time is a proxy for energy, not a joule count.")
+        banner?.text = "ENERGY done -- see the console"
+        log("ENERGY DONE")
+    }
+}
+
 final class SpikeAppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
@@ -753,10 +1005,12 @@ final class SpikeAppDelegate: UIResponder, UIApplicationDelegate {
     ) -> Bool {
         let window = UIWindow(frame: UIScreen.main.bounds)
         let mode = ProcessInfo.processInfo.environment["SPIKE_MODE"]
-        window.rootViewController =
-            (mode == "bench" || mode == "bench-sat")
-            ? BenchViewController()
-            : SpikeViewController()
+        let root: UIViewController = switch mode {
+        case "bench", "bench-sat": BenchViewController()
+        case "energy": EnergyViewController()
+        default: SpikeViewController()
+        }
+        window.rootViewController = root
         window.makeKeyAndVisible()
         self.window = window
         return true

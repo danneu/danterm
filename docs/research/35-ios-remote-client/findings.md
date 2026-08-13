@@ -204,9 +204,9 @@ Reproduction: `ios-render-spike.sh device`
 the same spike for a real iPhone, sharing everything up to the install with the
 simulator target F2 used. Screenshots and console transcripts: `f3-artifacts/`.
 
-- Status: settled for the presentation mechanism on hardware. The measurement
-  half of T3 -- swapchain against CGImage-copy-per-frame, frame timing and
-  energy -- has not run.
+- Status: settled. The presentation mechanism is confirmed on hardware, and the
+  measurement half has run: frame cost, cadence, and a CPU-time energy proxy
+  under a bursty incrementally damaged workload.
 - Date and investigator: 2026-08-13, agent (T3), with the user holding the
   device and reporting what the screen did.
 - Commit and worktree state: the runs span `642143b6..e4dd79e1`, because another
@@ -269,9 +269,72 @@ simulator target F2 used. Screenshots and console transcripts: `f3-artifacts/`.
   image rather than a mutation of an attached one. Probe A held its frame
   through every run here, the ablation included. The finding constrains how a
   *reused* surface may be driven; it does not choose between the two arms.
-- Next action: the measurement half of T3, which is now known to be measuring a
-  path that works. The arms differ on cost rather than correctness, so it is a
-  per-frame copy and energy comparison. D2 selects from it.
+- Next action: D2 selects the presentation path; the measurements below are its
+  evidence.
+
+#### The measurement half, and two instruments that failed first
+
+Console transcripts: `f3-artifacts/console-bench-paced.log`,
+`console-bench-saturated.log`, `console-energy.log`. Reproduce with
+`SPIKE_MODE` set to `bench`, `bench-sat`, or `energy`.
+
+The harness carries a third arm, `plan-only`, that presents nothing. It exists
+because the plan build was supposed to be a control the presentation path cannot
+reach, and twice it proved it was not one.
+
+- Under display-link pacing, that identical plan-building work read 3300us
+  beside the swapchain, 2482us beside the copy path, and **6138us beside no
+  presentation at all** -- ordered by how much the arm did around it, steady per
+  block, with thermal state flat. A lighter frame lets the thread idle between
+  vsyncs and the CPU settle into a lower power state, so the arms ran at
+  different clocks. No per-frame comparison between them meant anything.
+- Saturating the thread removes the idle, and the control equalizes to
+  1922/1914/1945us across the three arms. That is the ablation: hold the clock
+  up and identical work costs identical time.
+
+So the two pacings answer different questions, and each transcript says which:
+paced reports whether the cadence holds, saturated reports what a frame costs.
+
+- Measurement (saturated, full repaint, 53x54 at `displayScale` 3.0, n=480 per
+  arm): the swapchain presents in 1195us p50 against the copy path's 1984us.
+  The ~788us gap is about what copying this grid's 9.6MB surface costs.
+  Diagnostic timings, not benchmark results.
+- Measurement (paced): both arms hold 60Hz -- tick gap p50 16.68ms, p99 under
+  16.9ms, `missedPresentations=0` on both. Neither is a throughput problem.
+- Measurement (energy proxy, three independent runs): under a 2-second cycle of
+  0.25s output, 0.35s typing, and 1.4s idle, with damage drained from the engine
+  rather than forced full (`damagedRows` p50=1, p95=3), CPU seconds over the
+  same 12.02s wall clock and the same ~218 delivered frames were:
+
+  | arm | run 1 | run 2 | run 3 |
+  |---|---|---|---|
+  | swapchain | 1.590s | 1.578s | 1.574s |
+  | cgimage-copy | 1.737s | 1.756s | 1.743s |
+  | plan-only | 1.580s | 1.565s | 1.573s |
+
+  Within-arm spread is about 0.016s and the swapchain and copy ranges do not
+  overlap. The copy path costs roughly 11% more CPU; the swapchain's
+  presentation cost, +0.008s against presenting nothing, is indistinguishable
+  from zero at that spread.
+- Inference: the swapchain wins on both instruments, and on the realistic
+  workload it wins by not paying per-frame copies that damage of one row does
+  not justify. This is the cost half of D2, and it agrees with the correctness
+  half.
+- Inference, and the more useful one: presentation is not where this workload's
+  energy goes. Presenting nothing at all costs 1.57s of the swapchain's 1.59s.
+  The rest is shared -- engine feed, plan building, and a display link that
+  keeps ticking at 60Hz through a 1.4s idle in which nothing is damaged. The
+  arm choice moves total CPU by about 11%; not running a display link when
+  there is no damage is the larger lever, and no arm's numbers can answer it.
+  It belongs to the client's design, not to D2.
+- Uncertainty: CPU seconds are a proxy for energy, not a joule count, and the
+  transcript labels them so. Instruments never attached, so nothing here
+  measures the display, the memory system's own power, or a session-length
+  drain. One grid, one device, one font size. The workload is a plausible
+  terminal cycle, not a recorded one; a heavier real workload would raise every
+  arm's share and could change the ratio. `damage.apply` returning false falls
+  back to a full render in the copy arm, and how often that happened is not
+  instrumented.
 
 #### Getting on device needs no Xcode project
 

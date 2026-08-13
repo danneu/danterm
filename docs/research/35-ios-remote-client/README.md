@@ -280,24 +280,29 @@ Provisional shape; every leg has a gate in the ledger.
   IOSurface is public on iOS -- and a simulator spike showed CoreAnimation there
   honors the swapchain's attach-to-publish protocol. H2 is restated as a result.
   The font seam landed with the pins in T18.
-- **T3 RESEARCH, half done** (F3) -- Presentation-path confirmation and
-  measurement on a real device. The confirmation half has run, on an iPhone 13
-  mini, and it did not go as F2 predicted: an IOSurface does display as
-  `layer.contents` on hardware, but mutating an attached surface presents
-  indeterminately rather than not at all, while the real swapchain's
-  rotate-then-attach path is stable across 100 published frames and holds the
-  last one. H2 is corrected above; attach-to-publish is now a requirement rather
-  than a shared convention. Signing turned out to need no Xcode project: an
-  existing wildcard development profile already covered the device, and
-  `ios-render-spike.sh device` ([ios-render-spike.sh](ios-render-spike.sh)) is
-  the reproduction, sharing its build and bundle assembly with the simulator
-  target F2 used.
-  Still to do: measure the real `TerminalFrameSwapchain` against
-  CGImage-copy-per-frame, both on iOS, under a worst-case full-repaint scroll
-  workload at a phone-typical grid. Diagnostic frame timings and energy notes
-  into F3. The two arms differ on cost, not correctness -- the copy path is
-  deterministic by construction -- so the workload has to expose per-frame copy
-  and allocation, and energy is as much the point as frame timing.
+- **T3 DONE** (F3) -- Presentation-path confirmation and measurement on a real
+  device (iPhone 13 mini). The confirmation did not go as F2 predicted: an
+  IOSurface does display as `layer.contents` on hardware, but mutating an
+  attached surface presents indeterminately rather than not at all, while the
+  swapchain's rotate-then-attach path is stable across 100 published frames and
+  holds the last one. H2 is corrected above; attach-to-publish is a requirement,
+  not a shared convention. On cost, the swapchain presents a full-repaint frame
+  in 1195us against the copy path's 1984us, both arms hold 60Hz with no missed
+  presentations, and on a bursty incrementally damaged workload the copy path
+  spends about 11% more CPU across three runs while the swapchain's presentation
+  cost is indistinguishable from presenting nothing.
+  Signing needed no Xcode project: an existing wildcard development profile
+  already covered the device, and `ios-render-spike.sh`
+  ([ios-render-spike.sh](ios-render-spike.sh)) reproduces every mode, sharing
+  its build and bundle assembly with the simulator target F2 used.
+  Two results carry past D2. The plan build is not a control the presentation
+  path cannot reach -- under display-link pacing it varied 2.5x with how much
+  work the arm did around it, because a lighter frame lets the CPU settle
+  lower -- so per-frame costs are only comparable under saturated pacing. And
+  presentation is a small share of this workload's energy: presenting nothing
+  costs 1.57s of the swapchain's 1.59s, with the rest going to engine feed, plan
+  building, and a 60Hz display link ticking through an idle in which nothing is
+  damaged.
 - **T4 DONE** (F4) -- Mac-to-Mac thin-client spike. Convergence confirmed
   byte-for-byte against `pane read`. The join gap is modes, not just history,
   and the stream is not self-synchronizing; F4 states the `pane.snapshot` floor
@@ -307,12 +312,14 @@ Provisional shape; every leg has a gate in the ledger.
   wrong grid size; and resume already has its coordinates in
   `TerminalFlightRecordingCursor`, with only the ability for a client to supply
   one missing at the protocol edge.
-- **D2 gate** -- select the iOS presentation path, from F2 and F3. F2 narrowed
-  the candidates to the real swapchain versus CGImage-per-frame, and F3 supplied
-  the device confirmation: the surface path works on hardware, and reusing a
-  surface safely requires the swapchain's discipline. Both arms are correct, so
-  the gate turns on cost -- the numbers from T3's measurement half, energy
-  first.
+- **D2 gate, ready to decide** -- select the iOS presentation path, from F2 and
+  F3. Both arms are correct on device, so the gate turns on cost, and F3's
+  numbers point one way on every instrument: 1195us against 1984us per
+  full-repaint frame, and about 11% less CPU on a realistic bursty workload,
+  where the swapchain's presentation cost is indistinguishable from presenting
+  nothing. The swapchain also needs no new code, since it is what the Mac app
+  already uses. Awaiting the user's decision, recorded in
+  [decisions.md](decisions.md).
 - **D3 gate** -- confirm or restate the day-one-engine direction after F1-F4;
   reopening the rejected text renderer requires these spikes to have failed. When
   it is restated, adopt H5's invariant by name -- single-owner replicated state

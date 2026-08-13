@@ -1,0 +1,22 @@
+17:39:26  Acquired tunnel connection to device.
+17:39:26  Enabling developer disk image services.
+17:39:27  Acquired usage assertion.
+Launched application with com.danneu.danterm.ios-render-spike bundle identifier.
+Waiting for the application to terminate…
+SPIKE ENERGY grid=53x54 displayScale=3.0
+SPIKE ENERGY cycle=2s (0.25s output, 0.35s typing, 1.4s idle); damage from drainDamage(), never .full
+SPIKE ENERGY block 0 arm=swapchain recorded=false wall=3.01s cpu=0.414s thermal=0
+SPIKE ENERGY block 1 arm=cgimage-copy recorded=false wall=3.00s cpu=0.531s thermal=0
+SPIKE ENERGY block 2 arm=plan-only recorded=false wall=3.00s cpu=0.523s thermal=0
+SPIKE ENERGY block 3 arm=swapchain recorded=true wall=6.01s cpu=0.796s thermal=0
+SPIKE ENERGY block 4 arm=cgimage-copy recorded=true wall=6.00s cpu=0.864s thermal=0
+SPIKE ENERGY block 5 arm=plan-only recorded=true wall=6.00s cpu=0.783s thermal=0
+SPIKE ENERGY block 6 arm=plan-only recorded=true wall=6.01s cpu=0.782s thermal=0
+SPIKE ENERGY block 7 arm=cgimage-copy recorded=true wall=6.00s cpu=0.892s thermal=0
+SPIKE ENERGY block 8 arm=swapchain recorded=true wall=6.01s cpu=0.782s thermal=0
+SPIKE ENERGY swapchain cpu=1.578s wall=12.02s duty=13.1% frames=219 damagedRows p50=1 p95=3 n=219
+SPIKE ENERGY cgimage-copy cpu=1.756s wall=12.00s duty=14.6% frames=218 damagedRows p50=1 p95=3 n=218
+SPIKE ENERGY plan-only cpu=1.565s wall=12.01s duty=13.0% frames=218 damagedRows p50=1 p95=3 n=218
+SPIKE ENERGY note: CPU time is a proxy for energy, not a joule count.
+SPIKE ENERGY DONE
+App terminated due to signal 15.
