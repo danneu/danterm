@@ -179,6 +179,50 @@ struct SessionReportTests {
         #expect(model.alerts.count == alertCount)
     }
 
+    @Test("a background session report mutates and alerts for one owning pane")
+    func backgroundSessionReportUsesOneOwningPane() throws {
+        // Intent: the pane mutated by a session report is also the pane named by
+        //   every alert and command that the report produces.
+        // Why it exists: separate session lookups can disagree if ownership
+        //   changes between them; this pins one end-to-end identity result.
+        // Scenario: a waiting report arrives for a pane in a non-selected tab
+        //   while the selected tab has two other live sessions.
+        var model = makeModel()
+        createTab(&model)
+        let targetPaneId = try #require(selectedTab(in: model)?.focusedPaneId)
+        let targetSessionId = try #require(model.pane(targetPaneId)?.session?.id)
+        createTab(&model)
+        update(&model, .splitFocusedPane(direction: .horizontal))
+        let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-identity"))
+
+        update(&model, .sessionReport(
+            sessionId: targetSessionId,
+            report: .agentAttached(agent)
+        ))
+        let sessionsBefore = Dictionary(uniqueKeysWithValues: model.allPanes.compactMap { pane in
+            pane.session.map { (pane.id, $0) }
+        })
+
+        let commands = update(&model, .sessionReport(
+            sessionId: targetSessionId,
+            report: .agentActivityChanged(session: agent, activity: .waiting)
+        ))
+
+        #expect(model.pane(targetPaneId)?.session != sessionsBefore[targetPaneId])
+        for pane in model.allPanes where pane.id != targetPaneId {
+            #expect(pane.session == sessionsBefore[pane.id])
+        }
+        #expect(model.alerts.isEmpty == false)
+        #expect(model.alerts.allSatisfy { $0.paneId == targetPaneId })
+        #expect(commands.isEmpty == false)
+        #expect(commands.allSatisfy { command in
+            if case .sendNotification(_, let paneId, _, _, _) = command {
+                return paneId == targetPaneId
+            }
+            return false
+        })
+    }
+
     private func assertUnknownSessionCallbackIsDropped(_ message: (SessionId) -> Msg) {
         var model = makeModel()
         createTab(&model)

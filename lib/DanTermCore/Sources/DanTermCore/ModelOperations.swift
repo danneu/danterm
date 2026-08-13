@@ -129,6 +129,12 @@ func allPaneIds(_ node: SplitNodeModel) -> [PaneId] {
   }
 }
 
+/// Exposes the pane-id tree walk under a name that cannot collide with
+/// `AppModel.allPaneIds` when core sources compile same-module into the app.
+func paneIdsInNode(_ node: SplitNodeModel) -> [PaneId] {
+  allPaneIds(node)
+}
+
 /// Whether `splitId` names an interior split node of this tree.
 func containsSplit(_ node: SplitNodeModel, _ splitId: SplitId) -> Bool {
   switch node {
@@ -149,35 +155,60 @@ func panesInNode(_ node: SplitNodeModel) -> [PaneModel] {
   }
 }
 
-/// Find the pane with the given id within a node. Backs `AppModel.pane(_:)`.
-func paneInNode(_ node: SplitNodeModel, id: PaneId) -> PaneModel? {
+/// Finds the first leaf pane that satisfies `predicate`, in left-to-right order.
+func paneInNode(
+  _ node: SplitNodeModel,
+  where predicate: (PaneModel) -> Bool
+) -> PaneModel? {
   switch node {
   case .leaf(let pane):
-    return pane.id == id ? pane : nil
+    return predicate(pane) ? pane : nil
   case .split(_, _, let first, let second, _):
-    return paneInNode(first, id: id) ?? paneInNode(second, id: id)
+    return paneInNode(first, where: predicate) ?? paneInNode(second, where: predicate)
   }
 }
 
-/// Rebuild a node with `body` applied to the leaf owning `id`, rebuilding only
-/// the spine down to that leaf (the `setRatio` pattern). Returns nil if `id` is
-/// not in this subtree, letting the caller try a sibling. Stops at the first
-/// match -- pane ids are unique, so `body` runs at most once.
-func updatePaneInNode(_ node: SplitNodeModel, id: PaneId, _ body: (inout PaneModel) -> Void) -> SplitNodeModel? {
+/// Finds the pane with the given id within a node. Backs `AppModel.pane(_:)`.
+func paneInNode(_ node: SplitNodeModel, id: PaneId) -> PaneModel? {
+  paneInNode(node) { $0.id == id }
+}
+
+/// Rebuilds the path to the first leaf that satisfies `predicate` and returns
+/// the value produced while mutating that leaf.
+func updatePaneInNode<Result>(
+  _ node: SplitNodeModel,
+  where predicate: (PaneModel) -> Bool,
+  _ body: (inout PaneModel) -> Result
+) -> (node: SplitNodeModel, result: Result)? {
   switch node {
   case .leaf(var pane):
-    guard pane.id == id else { return nil }
-    body(&pane)
-    return .leaf(pane)
+    guard predicate(pane) else { return nil }
+    let result = body(&pane)
+    return (.leaf(pane), result)
   case .split(let splitId, let dir, let first, let second, let ratio):
-    if let newFirst = updatePaneInNode(first, id: id, body) {
-      return .split(id: splitId, direction: dir, first: newFirst, second: second, ratio: ratio)
+    if let mutation = updatePaneInNode(first, where: predicate, body) {
+      return (
+        .split(id: splitId, direction: dir, first: mutation.node, second: second, ratio: ratio),
+        mutation.result
+      )
     }
-    if let newSecond = updatePaneInNode(second, id: id, body) {
-      return .split(id: splitId, direction: dir, first: first, second: newSecond, ratio: ratio)
+    if let mutation = updatePaneInNode(second, where: predicate, body) {
+      return (
+        .split(id: splitId, direction: dir, first: first, second: mutation.node, ratio: ratio),
+        mutation.result
+      )
     }
     return nil
   }
+}
+
+/// Rebuilds the path to the pane with `id` and applies `body` to that leaf.
+func updatePaneInNode(
+  _ node: SplitNodeModel,
+  id: PaneId,
+  _ body: (inout PaneModel) -> Void
+) -> SplitNodeModel? {
+  updatePaneInNode(node, where: { $0.id == id }, body)?.node
 }
 
 /// Compute the model-derived renderer visibility for every pane in every tab.

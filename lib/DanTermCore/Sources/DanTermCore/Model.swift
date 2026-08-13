@@ -290,7 +290,14 @@ extension AppModel {
     /// Finds the pane that owns a live session, so inbound session identity can
     /// never resolve independently from the pane tree that owns its state.
     func pane(owning sessionId: SessionId) -> PaneModel? {
-        allPanes.first { $0.session?.id == sessionId }
+        for group in groups {
+            for tab in group.tabs {
+                if let found = paneInNode(tab.rootNode, where: { $0.session?.id == sessionId }) {
+                    return found
+                }
+            }
+        }
+        return nil
     }
 
     /// All panes, in tab then tree (left-to-right) order. A few reconcile passes
@@ -303,7 +310,9 @@ extension AppModel {
 
     /// All pane ids, in tab then tree order. Replaces the old `panes.keys`.
     var allPaneIds: [PaneId] {
-        allPanes.map(\.id)
+        groups.flatMap { group in
+            group.tabs.flatMap { paneIdsInNode($0.rootNode) }
+        }
     }
 
     /// Mutate the leaf-owned pane with the given id in place, rebuilding only the
@@ -346,14 +355,34 @@ extension AppModel {
         }
     }
 
-    /// Mutates a session only through the pane leaf that owns its complete value.
-    mutating func updateSession(_ id: SessionId, _ body: (inout SessionModel) -> Void) {
-        guard let paneId = pane(owning: id)?.id else { return }
-        updatePane(paneId) { pane in
-            guard var session = pane.session, session.id == id else { return }
-            body(&session)
-            pane.session = session
+    /// Mutates a session through its owning leaf and returns the identity and
+    /// change result produced by that same tree walk.
+    @discardableResult
+    mutating func updateSession(
+        _ id: SessionId,
+        _ body: (inout SessionModel) -> Void
+    ) -> (paneId: PaneId, didChange: Bool)? {
+        for groupIndex in groups.indices {
+            for tabIndex in groups[groupIndex].tabs.indices {
+                let root = groups[groupIndex].tabs[tabIndex].rootNode
+                guard let mutation = updatePaneInNode(
+                    root,
+                    where: { $0.session?.id == id },
+                    { pane -> (paneId: PaneId, didChange: Bool) in
+                        guard var session = pane.session else {
+                            return (pane.id, false)
+                        }
+                        let previous = session
+                        body(&session)
+                        pane.session = session
+                        return (pane.id, session != previous)
+                    }
+                ) else { continue }
+                groups[groupIndex].tabs[tabIndex].rootNode = mutation.node
+                return mutation.result
+            }
         }
+        return nil
     }
 }
 

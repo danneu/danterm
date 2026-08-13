@@ -83,6 +83,57 @@ struct SessionStoreTests {
         #expect(model.allPanes.count == 1)
     }
 
+    @Test("allPaneIds preserves group tab and leaf order")
+    func allPaneIdsPreservesModelOrder() {
+        // Intent: allPaneIds returns panes in group order, tab order, and
+        //   left-to-right leaf order within each split tree.
+        // Why it exists: callers depend on stable display order, but the prior
+        //   tests constrained only one tab at a time.
+        // Scenario: two groups each contain two tabs, including nested split
+        //   trees whose leaf order differs from their tree depth.
+        let paneIds = (0..<7).map { _ in PaneId() }
+        let firstRoot = SplitNodeModel.split(
+            id: SplitId(),
+            direction: .horizontal,
+            first: .leaf(PaneModel(id: paneIds[0])),
+            second: .split(
+                id: SplitId(),
+                direction: .vertical,
+                first: .leaf(PaneModel(id: paneIds[1])),
+                second: .leaf(PaneModel(id: paneIds[2])),
+                ratio: 0.4
+            ),
+            ratio: 0.6
+        )
+        let secondRoot = SplitNodeModel.split(
+            id: SplitId(),
+            direction: .vertical,
+            first: .split(
+                id: SplitId(),
+                direction: .horizontal,
+                first: .leaf(PaneModel(id: paneIds[4])),
+                second: .leaf(PaneModel(id: paneIds[5])),
+                ratio: 0.5
+            ),
+            second: .leaf(PaneModel(id: paneIds[6])),
+            ratio: 0.7
+        )
+        let firstGroup = GroupModel(id: GroupId(), name: "First", tabs: [
+            TabModel(id: TabId(), focusedPaneId: paneIds[0], rootNode: firstRoot),
+            TabModel(
+                id: TabId(),
+                focusedPaneId: paneIds[3],
+                rootNode: .leaf(PaneModel(id: paneIds[3]))
+            ),
+        ])
+        let secondGroup = GroupModel(id: GroupId(), name: "Second", tabs: [
+            TabModel(id: TabId(), focusedPaneId: paneIds[4], rootNode: secondRoot),
+        ])
+        let model = AppModel(groups: [firstGroup, secondGroup])
+
+        #expect(model.allPaneIds == paneIds)
+    }
+
     @Test("restore mints and nests a fresh session for every leaf")
     func restoreMintsAndNestsFreshSessionForEveryLeaf() throws {
         let groupId = UUID(uuidString: "40000000-0000-4000-8000-000000000000")!

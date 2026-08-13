@@ -537,22 +537,22 @@ func update(
 
     case .sessionReport(let sessionId, let report):
         guard report.isAdmitted,
-              let paneId = model.pane(owning: sessionId)?.id,
-              let previous = model.pane(paneId)?.session
+              let mutation = model.updateSession(
+                sessionId,
+                { reduceSession(&$0, report: report) }
+              )
         else { return [] }
-        model.updateSession(sessionId) { reduceSession(&$0, report: report) }
-        let didChange = model.pane(paneId)?.session != previous
         switch report {
         case .title, .cwd, .progress, .commandStarted, .agentAttached, .agentDetached:
             return []
         case .commandEnded:
             return []
         case .agentActivityChanged(_, .waiting):
-            guard didChange else { return [] }
-            guard selectedTab(in: model)?.focusedPaneId != paneId else { return [] }
+            guard mutation.didChange else { return [] }
+            guard selectedTab(in: model)?.focusedPaneId != mutation.paneId else { return [] }
             return desktopAlertCommands(
                 model: &model,
-                paneId: paneId,
+                paneId: mutation.paneId,
                 senderTitle: "",
                 body: "Waiting for input",
                 env: env
