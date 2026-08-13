@@ -203,7 +203,12 @@ Provisional shape; every leg has a gate in the ledger.
   confirm on hardware what F2 saw only in the simulator: that an IOSurface
   displays as `layer.contents` and that in-place mutation does not reach the
   screen. Do that before measuring anything, because the H2 restatement rests on
-  it. Then measure the real `TerminalFrameSwapchain` against
+  it. F2's discriminator ports directly and takes minutes: render a frame and
+  screenshot; rewrite the store's pixels in place without reattaching and
+  screenshot again; reassign the same surface and screenshot a third time. If
+  the device behaves like the simulator, the first two screenshots are
+  byte-identical and the third differs. Then measure the real
+  `TerminalFrameSwapchain` against
   CGImage-copy-per-frame, both on iOS, under a worst-case full-repaint scroll
   workload at a phone-typical grid. Diagnostic frame timings and energy notes
   into F3. Needs a physical device, so it also needs the signing and
@@ -252,7 +257,12 @@ Provisional shape; every leg has a gate in the ledger.
   arbitrary cursor, and today's `--from-now` reconnect reports no gap at all
   while silently skipping events. Settle at the same time whether the recorder's
   eviction bound is a session-durability parameter, since F4 showed eviction
-  takes the geometry-establishing events first. Records D5.
+  takes the geometry-establishing events first. Whatever design lands, its
+  acceptance test must assert on state the screen does not restore by itself:
+  join a pane running a full-screen program, let the program exit, then check
+  scrollback depth and `inputModes`, not the visible screen. F4 showed the
+  visible screen recovers on its own through a prompt repaint, so a test that
+  reads it would pass against a snapshot that carries nothing. Records D5.
 - **T9 TODO** -- Reconnect behavior on the phone against the T5 bridge and the
   T8 protocol: airplane-mode toggles, backgrounding, cold relaunch. Record what
   each recovery actually required in a finding.
