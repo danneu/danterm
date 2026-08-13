@@ -160,20 +160,28 @@ class AssemblerContractTests(unittest.TestCase):
         (symbols / "LICENSE").write_text("license fixture\n", encoding="utf-8")
 
     def test_every_app_assembler_routes_through_the_shared_bundle_step(self):
-        assemblers = [
+        shipping_producers = [
             ROOT / "build-app.sh",
             ROOT / "dev-build.sh",
+        ]
+        harnesses = [
             ROOT / "scripts" / "terminal-benchmark.sh",
             ROOT / "scripts" / "terminal-viability.sh",
         ]
 
-        for assembler in assemblers:
-            with self.subTest(assembler=assembler.name):
-                source = assembler.read_text(encoding="utf-8")
-                self.assertEqual(source.count("bundle-theme-resources.sh"), 1)
+        for producer in shipping_producers:
+            with self.subTest(producer=producer.name):
+                source = producer.read_text(encoding="utf-8")
+                self.assertEqual(source.count("assemble-app-bundle.sh"), 1)
+                self.assertNotIn("bundle-theme-resources.sh", source)
                 self.assertNotIn("import-themes.py", source)
                 self.assertNotIn("cp -R \"$REPO_ROOT/lib/ghostty-themes\"", source)
                 self.assertNotIn("cp -R \"$THEMES_SRC\"", source)
+
+        for harness in harnesses:
+            with self.subTest(harness=harness.name):
+                source = harness.read_text(encoding="utf-8")
+                self.assertEqual(source.count("bundle-theme-resources.sh"), 1)
 
     def test_ci_reimports_and_rejects_tracked_theme_drift(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(

@@ -17,6 +17,78 @@ swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/swift-build" \
 swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/swift-build" \
     DanTermBundleLayoutTool development > "$TEST_ROOT/development.json"
 
+mkdir -p "$TEST_ROOT/products"
+for product in DanTerm DanTermCLI DanTermInstanceIdentityTool PTYSessionBootstrap; do
+    printf '#!/bin/sh\n# %s\nexit 0\n' "$product" > "$TEST_ROOT/products/$product"
+    chmod 755 "$TEST_ROOT/products/$product"
+done
+
+# Intent: assembly follows every emitted source binding without a second entry list.
+# Why it exists: a complete-looking bundle can still fail at runtime when a producer
+#   writes the wrong built product into a declared executable slot.
+# Scenario: assemble both shipping variants from distinct fake products, then compare
+#   every product-backed destination with the product named by the declaration.
+for variant in release development; do
+    bundle="$TEST_ROOT/assembled-$variant.app"
+    "$ROOT_DIR/scripts/assemble-app-bundle.sh" \
+        "$bundle" "$TEST_ROOT/$variant.json" "$ROOT_DIR" \
+        --version 0.0.0-test \
+        --product "DanTerm=$TEST_ROOT/products/DanTerm" \
+        --product "DanTermCLI=$TEST_ROOT/products/DanTermCLI" \
+        --product "DanTermInstanceIdentityTool=$TEST_ROOT/products/DanTermInstanceIdentityTool" \
+        --product "PTYSessionBootstrap=$TEST_ROOT/products/PTYSessionBootstrap"
+    "$ROOT_DIR/scripts/verify-bundle-layout.sh" \
+        "$bundle" "$TEST_ROOT/$variant.json" "$ROOT_DIR"
+done
+
+mkdir -p "$TEST_ROOT/symlink-target.app"
+ln -s "$TEST_ROOT/symlink-target.app" "$TEST_ROOT/symlink-bundle.app"
+if "$ROOT_DIR/scripts/assemble-app-bundle.sh" \
+    "$TEST_ROOT/symlink-bundle.app" "$TEST_ROOT/release.json" "$ROOT_DIR" \
+    --product "DanTerm=$TEST_ROOT/products/DanTerm" \
+    --product "DanTermCLI=$TEST_ROOT/products/DanTermCLI" \
+    --product "PTYSessionBootstrap=$TEST_ROOT/products/PTYSessionBootstrap" \
+    > "$TEST_ROOT/symlink.out" 2> "$TEST_ROOT/symlink.err"; then
+    fail "assembler followed a symlink bundle destination"
+fi
+grep -qF 'not a removable directory' "$TEST_ROOT/symlink.err" \
+    || fail "symlink destination failure did not name the unsafe target type"
+
+ln -s "$TEST_ROOT/missing-target.app" "$TEST_ROOT/broken-symlink.app"
+if "$ROOT_DIR/scripts/assemble-app-bundle.sh" \
+    "$TEST_ROOT/broken-symlink.app" "$TEST_ROOT/release.json" "$ROOT_DIR" \
+    --product "DanTerm=$TEST_ROOT/products/DanTerm" \
+    --product "DanTermCLI=$TEST_ROOT/products/DanTermCLI" \
+    --product "PTYSessionBootstrap=$TEST_ROOT/products/PTYSessionBootstrap" \
+    > "$TEST_ROOT/broken-symlink.out" 2> "$TEST_ROOT/broken-symlink.err"; then
+    fail "assembler accepted a broken symlink bundle destination"
+fi
+grep -qF 'not a removable directory' "$TEST_ROOT/broken-symlink.err" \
+    || fail "broken symlink failure did not name the unsafe target type"
+
+python3 - "$TEST_ROOT" <<'PY'
+import json
+from pathlib import Path
+import plistlib
+import sys
+
+test_root = Path(sys.argv[1])
+for variant in ("release", "development"):
+    with (test_root / f"{variant}.json").open() as stream:
+        plan = json.load(stream)
+    bundle = test_root / f"assembled-{variant}.app"
+    for entry in plan["entries"]:
+        source = entry["source"]
+        if source["kind"] == "product":
+            assert (bundle / entry["path"]).read_bytes() == (
+                test_root / "products" / source["value"]
+            ).read_bytes(), entry["path"]
+    with (bundle / "Contents/Info.plist").open("rb") as stream:
+        plist = plistlib.load(stream)
+    assert plist["CFBundleVersion"] == "0.0.0-test"
+    assert plist["CFBundleShortVersionString"] == "0.0.0-test"
+PY
+
 # Intent: every emitted entry is enforced without a second hand-written list.
 # Why it exists: adding an entry to BundleLayout must add existence, mode, and
 #   source checks without requiring a matching test edit.

@@ -254,7 +254,7 @@ Behavioral, run locally:
       it. No build-script change yet; the gate stays green on its own terms.
 - [x] Add the emitter product and `scripts/verify-bundle-layout.sh`, plus its
       test in `run-test-suite.sh`. Nothing calls the verifier in anger yet.
-- [ ] Add `scripts/assemble-app-bundle.sh`; both producers become compile +
+- [x] Add `scripts/assemble-app-bundle.sh`; both producers become compile +
       assemble + verify. Deletes their inline assertions and `dev-build.sh`'s five
       plutil literals. Fixes the dev fixture's identical-binaries shim.
 - [ ] Declare the benchmark and viability variants, preserving the identities

@@ -13,6 +13,9 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
+swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/layout-tool-build" \
+    DanTermBundleLayoutTool release > "$TEST_ROOT/release-layout.json"
+
 fail() {
     echo "build-app-helpers-contract_test: $*" >&2
     exit 1
@@ -32,7 +35,8 @@ mkdir -p "$BUILD_ROOT/lib/TerminalPTY" \
     "$BUILD_ROOT/themes" \
     "$FAKE_BIN"
 ln -s "$ROOT_DIR/build-app.sh" "$BUILD_ROOT/build-app.sh"
-cp "$ROOT_DIR/scripts/bundle-theme-resources.sh" "$BUILD_ROOT/scripts/"
+cp "$ROOT_DIR/scripts/assemble-app-bundle.sh" "$BUILD_ROOT/scripts/"
+cp "$ROOT_DIR/scripts/verify-bundle-layout.sh" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/scripts/pack-theme-catalog.py" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/themes/0x96f.json" "$BUILD_ROOT/themes/"
 : > "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf"
@@ -53,6 +57,9 @@ done
 # Each shimmed product gets distinct bytes: build-app.sh deliberately fails when
 # the GUI and CLI binaries compare equal, and that guard must stay exercisable.
 export SWIFT_ARGV_LOG="$TEST_ROOT/swift-argv.log"
+export LAYOUT_VERIFY_LOG="$TEST_ROOT/layout-verify.log"
+export RELEASE_LAYOUT_PLAN="$TEST_ROOT/release-layout.json"
+export REAL_LAYOUT_VERIFIER="$BUILD_ROOT/scripts/verify-bundle-layout.sh"
 : > "$SWIFT_ARGV_LOG"
 cat > "$FAKE_BIN/swift" <<'SHIM'
 #!/usr/bin/env bash
@@ -71,7 +78,13 @@ case " $* " in
                 mkdir -p "$bin_path"
                 printf '#!/bin/sh\n# gui\nexit 0\n' > "$bin_path/DanTerm"
                 printf '#!/bin/sh\n# cli\nexit 0\n' > "$bin_path/DanTermCLI"
-                chmod +x "$bin_path/DanTerm" "$bin_path/DanTermCLI"
+                cat > "$bin_path/DanTermBundleLayoutTool" <<'TOOL'
+#!/usr/bin/env bash
+[[ "$1" == "release" ]] || exit 2
+cat "$RELEASE_LAYOUT_PLAN"
+TOOL
+                chmod +x "$bin_path/DanTerm" "$bin_path/DanTermCLI" \
+                    "$bin_path/DanTermBundleLayoutTool"
                 ;;
         esac
         printf '%s\n' "$bin_path"
@@ -79,6 +92,13 @@ case " $* " in
 esac
 SHIM
 chmod +x "$FAKE_BIN/swift"
+
+cat > "$FAKE_BIN/verify-bundle-layout.sh" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$LAYOUT_VERIFY_LOG"
+exec "$REAL_LAYOUT_VERIFIER" "$@"
+SHIM
+chmod +x "$FAKE_BIN/verify-bundle-layout.sh"
 
 set +e
 TEST_ROOT="$TEST_ROOT" PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
@@ -88,6 +108,8 @@ status=$?
 set -e
 [[ $status -eq 0 ]] \
     || fail "build-app.sh failed (status $status): $(cat "$TEST_ROOT/build.err")"
+[[ $(wc -l < "$LAYOUT_VERIFY_LOG") -eq 1 ]] \
+    || fail "release build did not invoke the bundle-layout verifier exactly once"
 
 APP_PATH="$BUILD_ROOT/build/DanTerm.app"
 
@@ -121,6 +143,38 @@ grep -q -- "--package-path $BUILD_ROOT/lib/TerminalPTY .* --product PTYSessionBo
 if cmp -s "$APP_PATH/Contents/MacOS/DanTerm" "$APP_PATH/Contents/Helpers/danterm"; then
     fail "GUI and CLI bundle binaries have identical content"
 fi
+
+# Intent: a release producer cannot report success when final bundle verification fails.
+# Why it exists: checking the produced files cannot prove that the producer called the verifier.
+# Scenario: a PATH shim replaces the verifier with a deterministic failure.
+cat > "$FAKE_BIN/verify-bundle-layout.sh" <<'SHIM'
+#!/usr/bin/env bash
+echo "fixture verifier failure" >&2
+exit 42
+SHIM
+chmod +x "$FAKE_BIN/verify-bundle-layout.sh"
+if TEST_ROOT="$TEST_ROOT" PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "$BUILD_ROOT/build-app.sh" --version 0.0.0-test \
+    > "$TEST_ROOT/verifier-failure.out" 2> "$TEST_ROOT/verifier-failure.err"; then
+    fail "release build ignored a verifier failure"
+fi
+grep -qF 'fixture verifier failure' "$TEST_ROOT/verifier-failure.err" \
+    || fail "release build did not propagate the verifier failure"
+
+rm "$FAKE_BIN/verify-bundle-layout.sh"
+cat > "$FAKE_BIN/assemble-app-bundle.sh" <<'SHIM'
+#!/usr/bin/env bash
+echo "fixture assembler failure" >&2
+exit 43
+SHIM
+chmod +x "$FAKE_BIN/assemble-app-bundle.sh"
+if TEST_ROOT="$TEST_ROOT" PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "$BUILD_ROOT/build-app.sh" --version 0.0.0-test \
+    > "$TEST_ROOT/assembler-failure.out" 2> "$TEST_ROOT/assembler-failure.err"; then
+    fail "release build ignored an assembler failure"
+fi
+grep -qF 'fixture assembler failure' "$TEST_ROOT/assembler-failure.err" \
+    || fail "release build did not propagate the assembler failure"
 
 # Intent: the release bundle preserves the sole authored agent skill byte-for-byte.
 # Why it exists: `danterm skill` must report instructions from the same version as

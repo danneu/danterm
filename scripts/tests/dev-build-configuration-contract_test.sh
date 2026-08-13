@@ -7,6 +7,9 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
+swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/layout-tool-build" \
+    DanTermBundleLayoutTool development > "$TEST_ROOT/development-layout.json"
+
 fail() {
     echo "dev-build-configuration-contract_test: $*" >&2
     exit 1
@@ -26,7 +29,8 @@ mkdir -p "$BUILD_ROOT/lib/TerminalPTY" \
     "$BUILD_ROOT/themes" \
     "$FAKE_BIN"
 ln -s "$ROOT_DIR/dev-build.sh" "$BUILD_ROOT/dev-build.sh"
-cp "$ROOT_DIR/scripts/bundle-theme-resources.sh" "$BUILD_ROOT/scripts/"
+cp "$ROOT_DIR/scripts/assemble-app-bundle.sh" "$BUILD_ROOT/scripts/"
+cp "$ROOT_DIR/scripts/verify-bundle-layout.sh" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/scripts/pack-theme-catalog.py" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/themes/0x96f.json" "$BUILD_ROOT/themes/"
 : > "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf"
@@ -47,6 +51,9 @@ done
 
 export SWIFT_ARGV_LOG="$TEST_ROOT/swift-argv.log"
 export KILLALL_ARGV_LOG="$TEST_ROOT/killall-argv.log"
+export LAYOUT_VERIFY_LOG="$TEST_ROOT/layout-verify.log"
+export DEVELOPMENT_LAYOUT_PLAN="$TEST_ROOT/development-layout.json"
+export REAL_LAYOUT_VERIFIER="$BUILD_ROOT/scripts/verify-bundle-layout.sh"
 cat > "$FAKE_BIN/swift" <<'SHIM'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$SWIFT_ARGV_LOG"
@@ -61,9 +68,17 @@ case " $* " in
             *)
                 bin_path="$TEST_ROOT/app-bin"
                 mkdir -p "$bin_path"
-                cp /usr/bin/true "$bin_path/DanTerm"
-                cp /usr/bin/true "$bin_path/DanTermCLI"
-                cp /usr/bin/true "$bin_path/DanTermInstanceIdentityTool"
+                printf '#!/bin/sh\n# gui\nexit 0\n' > "$bin_path/DanTerm"
+                printf '#!/bin/sh\n# cli\nexit 0\n' > "$bin_path/DanTermCLI"
+                printf '#!/bin/sh\n# identity\nexit 0\n' > "$bin_path/DanTermInstanceIdentityTool"
+                cat > "$bin_path/DanTermBundleLayoutTool" <<'TOOL'
+#!/usr/bin/env bash
+[[ "$1" == "development" ]] || exit 2
+cat "$DEVELOPMENT_LAYOUT_PLAN"
+TOOL
+                chmod +x "$bin_path/DanTerm" "$bin_path/DanTermCLI" \
+                    "$bin_path/DanTermInstanceIdentityTool" \
+                    "$bin_path/DanTermBundleLayoutTool"
                 ;;
         esac
         printf '%s\n' "$bin_path"
@@ -71,6 +86,13 @@ case " $* " in
 esac
 SHIM
 chmod +x "$FAKE_BIN/swift"
+
+cat > "$FAKE_BIN/verify-bundle-layout.sh" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$LAYOUT_VERIFY_LOG"
+exec "$REAL_LAYOUT_VERIFIER" "$@"
+SHIM
+chmod +x "$FAKE_BIN/verify-bundle-layout.sh"
 
 cat > "$FAKE_BIN/codesign" <<'SHIM'
 #!/usr/bin/env bash
@@ -115,6 +137,8 @@ run_build() {
 # Why it exists: adding an optimized variant must not slow the normal incremental dev loop.
 # Scenario: a developer runs ./dev-build.sh or `just build` without an option.
 run_build debug
+[[ $(wc -l < "$LAYOUT_VERIFY_LOG") -ge 1 ]] \
+    || fail "debug build did not invoke the bundle-layout verifier"
 [[ -r "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/themes/catalog.json" ]] \
     || fail "debug bundle omitted the packed theme catalog"
 [[ -r "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf" ]] \
@@ -174,6 +198,50 @@ run_build no-install --no-install
     || fail "--no-install replaced the shared install"
 [[ ! -s "$KILLALL_ARGV_LOG" ]] \
     || fail "--no-install targeted a running application"
+
+# Intent: a dev producer cannot report success when final bundle verification fails.
+# Why it exists: a valid launch does not prove that the producer called the verifier.
+# Scenario: a PATH shim replaces the verifier with a deterministic failure.
+cat > "$FAKE_BIN/verify-bundle-layout.sh" <<'SHIM'
+#!/usr/bin/env bash
+echo "fixture verifier failure" >&2
+exit 42
+SHIM
+chmod +x "$FAKE_BIN/verify-bundle-layout.sh"
+if HOME="$TEST_ROOT/home-verifier-failure" TEST_ROOT="$TEST_ROOT" \
+    DANTERM_DEV_LSREGISTER="$FAKE_BIN/lsregister" \
+    PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "$BUILD_ROOT/dev-build.sh" --no-install \
+    > "$TEST_ROOT/verifier-failure.out" 2> "$TEST_ROOT/verifier-failure.err"; then
+    fail "dev build ignored a verifier failure"
+fi
+grep -qF 'fixture verifier failure' "$TEST_ROOT/verifier-failure.err" \
+    || fail "dev build did not propagate the verifier failure"
+
+rm "$FAKE_BIN/verify-bundle-layout.sh"
+cat > "$FAKE_BIN/assemble-app-bundle.sh" <<'SHIM'
+#!/usr/bin/env bash
+echo "fixture assembler failure" >&2
+exit 43
+SHIM
+chmod +x "$FAKE_BIN/assemble-app-bundle.sh"
+if HOME="$TEST_ROOT/home-assembler-failure" TEST_ROOT="$TEST_ROOT" \
+    DANTERM_DEV_LSREGISTER="$FAKE_BIN/lsregister" \
+    PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "$BUILD_ROOT/dev-build.sh" --no-install \
+    > "$TEST_ROOT/assembler-failure.out" 2> "$TEST_ROOT/assembler-failure.err"; then
+    fail "dev build ignored an assembler failure"
+fi
+grep -qF 'fixture assembler failure' "$TEST_ROOT/assembler-failure.err" \
+    || fail "dev build did not propagate the assembler failure"
+
+rm "$FAKE_BIN/assemble-app-bundle.sh"
+cat > "$FAKE_BIN/verify-bundle-layout.sh" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$LAYOUT_VERIFY_LOG"
+exec "$REAL_LAYOUT_VERIFIER" "$@"
+SHIM
+chmod +x "$FAKE_BIN/verify-bundle-layout.sh"
 
 if HOME="$TEST_ROOT/home-invalid" TEST_ROOT="$TEST_ROOT" \
     PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
