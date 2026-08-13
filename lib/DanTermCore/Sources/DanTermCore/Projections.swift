@@ -27,7 +27,7 @@ struct ThemeBrowserProjection: Equatable {
 func desiredThemeBrowser(in model: AppModel) -> ThemeBrowserProjection {
     ThemeBrowserProjection(
         currentThemeName: selectedTab(in: model).flatMap {
-            model.pane($0.paneTree.focusedPaneId)?.theme
+            $0.paneTree.focusedPane.theme
         }
     )
 }

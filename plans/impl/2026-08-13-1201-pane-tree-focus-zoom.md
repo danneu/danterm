@@ -188,7 +188,7 @@ Each commit leaves the tree building and `just test` green.
   probe. Re-record the golden under AR1's review rule. Update the sentence in
   `docs/design/2026-05-27-model-driven-view-reconciliation.md` that names the old
   field.
-- [ ] **3. Delete the compensating reads.** Drop the dead pane-missing arms in
+- [x] **3. Delete the compensating reads.** Drop the dead pane-missing arms in
   `tabChrome` and `tabChipKind` and adopt the non-optional focused-pane accessor
   where a tab is already in hand. Foldable into commit 2 if that diff stays
   reviewable.

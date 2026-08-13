@@ -572,7 +572,7 @@ func groupForTab(_ tabId: TabId, in model: AppModel) -> GroupModel? {
 
 func focusedPane(in model: AppModel) -> PaneModel? {
   guard let tab = selectedTab(in: model) else { return nil }
-  return model.pane(tab.paneTree.focusedPaneId)
+  return tab.paneTree.focusedPane
 }
 
 func currentCwd(in model: AppModel) -> String? {
@@ -580,7 +580,7 @@ func currentCwd(in model: AppModel) -> String? {
   // Fall back to most recent tab with a known cwd
   let allTabs = model.groups.flatMap(\.tabs)
   for tab in allTabs.reversed() {
-    if let cwd = model.pane(tab.paneTree.focusedPaneId)?.session?.cwd { return cwd }
+    if let cwd = tab.paneTree.focusedPane.session?.cwd { return cwd }
   }
   return nil
 }
@@ -607,12 +607,10 @@ func abbreviateHome(_ path: String, home: String = NSHomeDirectory()) -> String 
 
 /// Derives tab chrome from the focused pane's current terminal session.
 ///
-/// Resolved inside the tab's own tree, never against the whole window. A tab
-/// owns its panes, so a window-wide search could only ever find the same pane
-/// or -- when the focus is stale -- a stranger's, and it costs a full walk of
-/// every group and tab to do it. `desiredSidebar` calls this once per row.
+/// `PaneTree` guarantees that the focused pane belongs to this tab.
+/// `desiredSidebar` calls this once per row.
 func tabChrome(_ tab: TabModel) -> (title: String, subtitle: String?) {
-  guard let session = paneInNode(tab.paneTree.root, id: tab.paneTree.focusedPaneId)?.session else {
+  guard let session = tab.paneTree.focusedPane.session else {
     return ("Terminal", nil)
   }
   return sessionChrome(session)
@@ -643,7 +641,7 @@ func tabSubtitle(_ tab: TabModel) -> String? {
 /// Returns the chip for one tab's row, taken from the focused pane like the
 /// rest of the row's chrome. An agent in an unfocused split does not show here.
 func tabChipKind(_ tab: TabModel) -> ChipKind {
-  ChipKind(agent: paneInNode(tab.paneTree.root, id: tab.paneTree.focusedPaneId)?.session?.agent ?? .none)
+  ChipKind(agent: tab.paneTree.focusedPane.session?.agent ?? .none)
 }
 
 /// What a pane chip's single state dot says, if anything.
