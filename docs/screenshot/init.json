@@ -1,31 +1,31 @@
 {
-  "version": 2,
+  "version": 3,
   "model": {
     "groups": [
       {
-        "name": "General",
+        "name": "DanTerm dev",
         "tabs": [
           {
-            "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-            "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-            "rootNode": {
-              "type": "leaf",
-              "pane": {
-                "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-                "title": "Terminal",
-                "cwd": "~/world"
-              }
-            }
-          },
-          {
             "id": "AB28B4CE-4A8F-4D39-BAC8-665B6B2DE0F9",
-            "focusedPaneId": "4A53A920-BC2E-4C8E-8242-267DC4F9BC2D",
+            "focusedPaneId": "AC5D792A-BD88-433E-9E3D-C71D3DC961DE",
             "rootNode": {
-              "type": "leaf",
-              "pane": {
-                "id": "4A53A920-BC2E-4C8E-8242-267DC4F9BC2D",
-                "title": "Terminal",
-                "cwd": "~/world"
+              "type": "split",
+              "direction": "horizontal",
+              "first": {
+                "type": "leaf",
+                "pane": {
+                  "id": "4A53A920-BC2E-4C8E-8242-267DC4F9BC2D",
+                  "title": "Terminal",
+                  "cwd": "~/Code/danterm"
+                }
+              },
+              "second": {
+                "type": "leaf",
+                "pane": {
+                  "id": "AC5D792A-BD88-433E-9E3D-C71D3DC961DE",
+                  "title": "Terminal",
+                  "cwd": "~/Code/danterm"
+                }
               }
             }
           },
@@ -43,7 +43,7 @@
                   "pane": {
                     "id": "D4E5F6A7-B8C9-4D0E-AF12-3B4C5D6E7F80",
                     "title": "Terminal",
-                    "cwd": "~/world"
+                    "cwd": "~/Code/danterm"
                   }
                 },
                 "second": {
@@ -51,7 +51,7 @@
                   "pane": {
                     "id": "F6A7B8C9-D0E1-4F20-C134-5D6E7F8A91B2",
                     "title": "Terminal",
-                    "cwd": "~/world/my-apps/danterm"
+                    "cwd": "~/Code/danterm"
                   }
                 }
               },
@@ -63,7 +63,7 @@
                   "pane": {
                     "id": "E5F6A7B8-C9D0-4E1F-B023-4C5D6E7F8A91",
                     "title": "Terminal",
-                    "cwd": "~/world"
+                    "cwd": "~/Code/danterm"
                   }
                 },
                 "second": {
@@ -71,7 +71,7 @@
                   "pane": {
                     "id": "A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D",
                     "title": "Terminal",
-                    "cwd": "~/world/my-apps/danterm"
+                    "cwd": "~/Code/danterm"
                   }
                 }
               }
