@@ -1,58 +1,8 @@
-// Portable pane-tape stream values, record construction, the bounded subscription lifecycle,
-// and the one enqueue site every follow write goes through.
+// The bounded lifecycle of a followed pane-tape stream: which fence a subscription may claim,
+// which batch it owes, and what it is owed when it ends. The record shapes it delivers are
+// built in PaneTapeRecords.swift, shared with the finite dump; nothing here restates them.
 import Foundation
 import DanTermProtocol
-
-/// Carries every coordinate needed to resume after recorder eviction without estimating loss.
-/// The two byte watermarks stay apart because the feed and write streams are numbered apart.
-struct PaneTapeFollowCursor: Equatable, Sendable {
-    let nextSequence: UInt64
-    let feedBytesBeforeNextSequence: Int
-    let writeBytesBeforeNextSequence: Int
-
-    static let beginning = Self(
-        nextSequence: 0,
-        feedBytesBeforeNextSequence: 0,
-        writeBytesBeforeNextSequence: 0
-    )
-}
-
-/// Keeps stream geometry independent from the terminal engine's dimension type.
-struct PaneTapeFollowDimensions: Equatable, Sendable {
-    let columns: Int
-    let rows: Int
-}
-
-/// Adapts one terminal event to the support layer without importing terminal modules.
-struct PaneTapeFollowEvent: Equatable, Sendable {
-    let sequence: UInt64
-    let elapsedNanoseconds: UInt64
-    /// When the event that produced these bytes occurred, on the same scale as
-    /// `elapsedNanoseconds`; nil for bytes with no origin earlier than their own transfer.
-    let originElapsedNanoseconds: UInt64?
-    let event: JSONValue
-}
-
-/// Represents one owner-fenced suffix in protocol-only values for off-main processing.
-struct PaneTapeFollowSnapshot: Equatable, Sendable {
-    let events: [PaneTapeFollowEvent]
-    let droppedEventCount: UInt64
-    let droppedFeedBytes: Int
-    let droppedWriteBytes: Int
-    let nextCursor: PaneTapeFollowCursor
-}
-
-/// Delivers complete JSON records together with the cursor they advance through.
-struct PaneTapeFollowBatch: Equatable, Sendable {
-    let records: [JSONValue]
-    let nextCursor: PaneTapeFollowCursor
-}
-
-/// Couples the first result record to the exact cursor its live notifications continue from.
-struct PaneTapeFollowStart: Equatable, Sendable {
-    let record: JSONValue
-    let cursor: PaneTapeFollowCursor
-}
 
 /// Identifies the exact owner-fenced suffix an append edge may fetch. It names no
 /// connection: the fetch resolves its transport under the subscription id, and a coarser
@@ -60,7 +10,7 @@ struct PaneTapeFollowStart: Equatable, Sendable {
 struct PaneTapeFollowFetch: Equatable, Sendable {
     let subscriptionId: UUID
     let paneId: UUID
-    let cursor: PaneTapeFollowCursor
+    let cursor: PaneTapeCursor
 }
 
 /// Names the one stream a terminal record belongs to. It carries no transport coordinate:
@@ -71,98 +21,13 @@ struct PaneTapeFollowEnd: Equatable, Sendable {
     let record: JSONValue
 }
 
-/// Builds the result record that establishes a stream before notifications begin.
-func makePaneTapeFollowStart(
-    provenance: JSONValue,
-    initial: PaneTapeFollowDimensions,
-    cursor: PaneTapeFollowCursor
-) -> PaneTapeFollowStart {
-    PaneTapeFollowStart(
-        record: .object([
-            "kind": .string("start"),
-            "version": .number(1),
-            "provenance": provenance,
-            "initial": .object([
-                "columns": .number(Double(initial.columns)),
-                "rows": .number(Double(initial.rows)),
-            ]),
-        ]),
-        cursor: cursor
-    )
-}
-
-/// Converts an owner-fenced suffix into an ordered gap-and-events delivery.
-func makePaneTapeFollowBatch(from snapshot: PaneTapeFollowSnapshot) -> PaneTapeFollowBatch {
-    var records: [JSONValue] = []
-    records.reserveCapacity(snapshot.events.count + (snapshot.droppedEventCount > 0 ? 1 : 0))
-    if snapshot.droppedEventCount > 0 {
-        records.append(.object([
-            "kind": .string("gap"),
-            "droppedEventCount": .number(Double(snapshot.droppedEventCount)),
-            "droppedPayloadBytes": .number(
-                Double(snapshot.droppedFeedBytes + snapshot.droppedWriteBytes)
-            ),
-        ]))
-    }
-    records.append(contentsOf: snapshot.events.map { event in
-        // The origin sits beside the transfer stamp rather than inside the event, because this
-        // shape already hoists timing out of the event object. An absent origin omits the key:
-        // a number there would read as a measurement of an event that had none.
-        var record: [String: JSONValue] = [
-            "kind": .string("event"),
-            "sequence": .number(Double(event.sequence)),
-            "elapsedNanoseconds": .number(Double(event.elapsedNanoseconds)),
-            "event": event.event,
-        ]
-        if let origin = event.originElapsedNanoseconds {
-            record["originElapsedNanoseconds"] = .number(Double(origin))
-        }
-        return .object(record)
-    })
-    return PaneTapeFollowBatch(records: records, nextCursor: snapshot.nextCursor)
-}
-
-/// Produces the only explicit stream terminator promised while the app remains alive.
-func makePaneTapeFollowEndRecord(reason: String = "pane-closed") -> JSONValue {
-    .object([
-        "kind": .string("end"),
-        "reason": .string(reason),
-    ])
-}
-
-/// The single site that puts a follow record on the wire, for batches and terminators alike.
-///
-/// Each call enqueues straight onto the connection's serial write queue, so records reach the
-/// socket in the order they were handed over. Routing one write kind through a concurrent queue
-/// instead would let a terminator overtake a batch prepared before it, and a stream's last
-/// record would not be its last. The optional completion reports the flush of the final record.
-func writePaneTapeFollowRecords(
-    _ records: [JSONValue],
-    connection: IpcConnection,
-    subscriptionId: UUID,
-    completion: (@MainActor @Sendable (Bool) -> Void)? = nil
-) {
-    precondition(records.isEmpty == false)
-    let lastIndex = records.index(before: records.endIndex)
-    for (index, record) in records.enumerated() {
-        connection.writeNotification(
-            method: Methods.paneTapeEvent,
-            params: .object([
-                "subscription": .string(subscriptionId.uuidString),
-                "record": record,
-            ]),
-            completion: index == lastIndex ? completion : nil
-        )
-    }
-}
-
 /// Enforces one fetch-and-delivery batch in flight per stream and drops dead owners eagerly.
 struct PaneTapeFollowSubscriptions {
     /// One main-actor-owned stream position; no event storage lives here.
     private struct Subscription {
         let connectionId: UUID
         let paneId: UUID
-        var cursor: PaneTapeFollowCursor
+        var cursor: PaneTapeCursor
         var isInFlight = false
         var hasPendingEvents = false
     }
@@ -176,7 +41,7 @@ struct PaneTapeFollowSubscriptions {
         id: UUID,
         connectionId: UUID,
         paneId: UUID,
-        cursor: PaneTapeFollowCursor
+        cursor: PaneTapeCursor
     ) {
         subscriptions[id] = Subscription(
             connectionId: connectionId,
@@ -196,8 +61,8 @@ struct PaneTapeFollowSubscriptions {
     /// Advances a claimed stream through the exact suffix that will be handed to its socket.
     mutating func finishFetch(
         subscriptionId: UUID,
-        batch: PaneTapeFollowBatch
-    ) -> PaneTapeFollowBatch? {
+        batch: PaneTapeBatch
+    ) -> PaneTapeBatch? {
         guard var subscription = subscriptions[subscriptionId], subscription.isInFlight else {
             return nil
         }
@@ -223,11 +88,11 @@ struct PaneTapeFollowSubscriptions {
 
     /// Drops one stream that ends while its socket is still writable, and returns the
     /// terminator that stream is owed under `reason`.
-    mutating func end(_ subscriptionId: UUID, reason: String) -> PaneTapeFollowEnd? {
+    mutating func end(_ subscriptionId: UUID, reason: PaneTapeEndReason) -> PaneTapeFollowEnd? {
         guard subscriptions.removeValue(forKey: subscriptionId) != nil else { return nil }
         return PaneTapeFollowEnd(
             subscriptionId: subscriptionId,
-            record: makePaneTapeFollowEndRecord(reason: reason)
+            record: makePaneTapeEndRecord(reason: reason)
         )
     }
 
@@ -240,7 +105,10 @@ struct PaneTapeFollowSubscriptions {
             subscriptions.removeValue(forKey: id)
         }
         return ids.map { id in
-            PaneTapeFollowEnd(subscriptionId: id, record: makePaneTapeFollowEndRecord())
+            PaneTapeFollowEnd(
+                subscriptionId: id,
+                record: makePaneTapeEndRecord(reason: .paneClosed)
+            )
         }
     }
 

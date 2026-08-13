@@ -133,7 +133,10 @@ contract.
 ## Commit progress
 
 - [x] 1. Give the pane recorder independent feed and write byte coordinates
-- [ ] 2. Emit version 2 pane-tape JSON Lines for finite and followed captures
+- [x] 2. Emit version 2 pane-tape JSON Lines for finite and followed captures
+      Non-green until slice 4: `scripts/tests/danterm-cli_test.sh` still asserts
+      `jq -e '.events'` against the version 1 single-document output. `just test`
+      stays green; only `just test-cli` fails, and only on that one assertion.
 - [ ] 3. Add `pane tape --format inspect` with structured payload spans
 - [ ] 4. Convert version 2 replay streams into neutral fixtures
 
@@ -147,7 +150,20 @@ contract.
   every serialization site. The gap subtraction is pinned instead by a test
   whose two cursor watermarks differ from each other and from the retained
   head's, so reading either coordinate from the other stream changes the answer.
-- Lifetime eviction keeps one combined `droppedPayloadBytes` counter. Exact
-  per-direction loss is not accumulated: `cursorSnapshot` measures it against
-  the caller's own cursor from the retained head's watermarks, which is the only
-  place the answer is well defined.
+- Eviction accumulates no loss totals at all. Loss is not a property of the
+  recorder but of the distance between a reader's cursor and the retained head,
+  so `cursorSnapshot` measures it there, from the head slot's own watermarks.
+  (Commit 1 kept one combined counter for the finite snapshot serializer;
+  commit 2 removed that serializer, and the counter with it.)
+- The finite dump encodes and enqueues its start reply and all its trailing
+  records from one utility-queue block, rather than writing the trailing records
+  from the start reply's main-actor completion. A dump can carry the whole
+  retained tape, so encoding it on the main actor would hitch the panes being
+  drawn. Order survives because each write encodes inline and hands its bytes to
+  the connection's own serial write queue.
+- The app target now depends on `TerminalPTYHost` and names the recorder's value
+  types directly. The alternative kept the app off that module by passing cursor
+  coordinates through `TerminalPaneSession` one `Int` at a time, which is a
+  workaround rather than a boundary: this view is the adapter between the
+  recorder vocabulary and the portable stream vocabulary, so naming both sides
+  is its job.

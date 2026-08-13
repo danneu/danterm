@@ -207,7 +207,7 @@ struct IpcConnectionWriteTests {
             Darwin.close(descriptors.peer)
         }
 
-        writePaneTapeFollowRecords(
+        writePaneTapeRecords(
             [
                 .object(["kind": .string("event"), "sequence": .number(0)]),
                 .object(["kind": .string("event"), "sequence": .number(1)]),
@@ -215,14 +215,14 @@ struct IpcConnectionWriteTests {
             connection: connection,
             subscriptionId: subscriptionId
         )
-        writePaneTapeFollowRecords(
-            [makePaneTapeFollowEndRecord()],
+        writePaneTapeRecords(
+            [makePaneTapeEndRecord(reason: .paneClosed)],
             connection: connection,
             subscriptionId: subscriptionId
         )
         // A sibling stream on the same socket must still be served after the `end`.
         let siblingId = UUID()
-        writePaneTapeFollowRecords(
+        writePaneTapeRecords(
             [.object(["kind": .string("event"), "sequence": .number(7)])],
             connection: connection,
             subscriptionId: siblingId

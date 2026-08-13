@@ -41,6 +41,7 @@ let package = Package(
                 .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
                 .product(name: "TerminalPaneSession", package: "TerminalPTY"),
+                .product(name: "TerminalPTYHost", package: "TerminalPTY"),
                 .product(name: "TerminalRenderPlanning", package: "TerminalCore"),
                 .product(name: "TerminalRenderExecution", package: "TerminalCore"),
                 .product(name: "TerminalBenchmarkMarkers", package: "TerminalCore"),

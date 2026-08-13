@@ -139,54 +139,17 @@ public struct TerminalFlightRecordingOrigin: Equatable, Sendable {
     public let cursor: TerminalFlightRecordingCursor
 }
 
-/// Immutable dump boundary whose arrays retain feed storage by reference until encoding ends.
-public struct TerminalFlightRecordingSnapshot: Equatable, Sendable {
-    /// Pane geometry when the recorder was constructed; retention eviction does not advance it.
-    public let initial: NeutralTerminalDimensions
-    /// Oldest-to-newest retained transitions with their inert capture timestamps.
-    public let events: [TerminalFlightRecordingEvent]
-    /// Retained payload plus conservative per-event allocation overhead.
-    public let accountedBytes: Int
-    /// Lifetime count of whole events removed from the recording head.
-    public let droppedEventCount: Int
-    /// Lifetime payload bytes represented by removed events.
-    public let droppedPayloadBytes: Int
-
-    /// True once any event was dropped, even if later writes leave ample free budget.
-    public var isTruncated: Bool { droppedEventCount > 0 }
-
-    /// Encodes the immutable snapshot as one replayable raw-capture document off the owner queue.
-    public func encodedRecording() throws -> Data {
-        let recording = NeutralTerminalRecording(
-            provenance: .liveCapture(),
-            initial: initial,
-            events: events.map(\.event)
-        )
-        let baseData = try JSONEncoder().encode(recording)
-        guard var document = try JSONSerialization.jsonObject(with: baseData) as? [String: Any],
-              var encodedEvents = document["events"] as? [[String: Any]],
-              encodedEvents.count == events.count
-        else {
-            throw EncodingError.invalidValue(
-                recording,
-                .init(codingPath: [], debugDescription: "recording did not encode as an object")
-            )
-        }
-
-        for index in encodedEvents.indices {
-            encodedEvents[index]["elapsedNanoseconds"] = events[index].elapsedNanoseconds
-            if let origin = events[index].originElapsedNanoseconds {
-                encodedEvents[index]["originElapsedNanoseconds"] = origin
-            }
-        }
-        document["events"] = encodedEvents
-        document["truncation"] = [
-            "isTruncated": isTruncated,
-            "droppedEventCount": droppedEventCount,
-            "droppedPayloadBytes": droppedPayloadBytes,
-        ]
-        return try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys])
-    }
+/// One finite capture of the whole retained tape, fenced as a single moment.
+///
+/// A finite dump is a cursored read from the recorder's beginning, not a separate kind of
+/// read: the same origin and the same cursor snapshot a follow stream starts from. Pairing
+/// them in one value is what makes the pair atomic, so a dump cannot report geometry from
+/// before an event it then omits.
+public struct TerminalFlightRecordingCapture: Equatable, Sendable {
+    /// Recorder birth geometry with the cursor the retained events are measured against.
+    public let origin: TerminalFlightRecordingOrigin
+    /// Every retained event, plus the exact lifetime loss before the oldest of them.
+    public let snapshot: TerminalFlightRecordingCursorSnapshot
 }
 
 /// Owner-queue-only FIFO that releases evicted payload storage without shifting an array.
@@ -222,11 +185,6 @@ package final class TerminalFlightRecorder {
     /// because the retained count remains bounded per pane.
     private var slots: Deque<Slot> = []
     private var accountedBytes = 0
-    private var droppedEventCount = 0
-    /// Lifetime evicted payload across both directions. Per-direction loss is not accumulated
-    /// here: `cursorSnapshot` measures it exactly, against the caller's own cursor, from the
-    /// retained head's watermarks.
-    private var droppedPayloadBytes = 0
     private var nextSequence: UInt64 = 0
     private var totalFeedBytes = 0
     private var totalWriteBytes = 0
@@ -334,13 +292,12 @@ package final class TerminalFlightRecorder {
         return snapshot
     }
 
-    package func snapshot() -> TerminalFlightRecordingSnapshot {
-        return TerminalFlightRecordingSnapshot(
-            initial: initial,
-            events: slots.map(\.event),
-            accountedBytes: accountedBytes,
-            droppedEventCount: droppedEventCount,
-            droppedPayloadBytes: droppedPayloadBytes
+    /// Reads the whole retained tape as one finite capture, in the same vocabulary a follow
+    /// stream reads its suffix in, so both captures build the same records downstream.
+    package func capture() -> TerminalFlightRecordingCapture {
+        TerminalFlightRecordingCapture(
+            origin: backlogOrigin(),
+            snapshot: cursorSnapshot(from: .beginning)
         )
     }
 
@@ -390,6 +347,9 @@ package final class TerminalFlightRecorder {
         )
     }
 
+    /// Evicts oldest-first without accumulating loss totals. Loss is not a property of the
+    /// recorder but of the distance between a reader's cursor and the retained head, and
+    /// `cursorSnapshot` measures exactly that from the head slot's own watermarks.
     private func enforceBounds() {
         while accountedBytes > configuration.budgetBytes
             || slots.count > configuration.eventLimit
@@ -397,8 +357,6 @@ package final class TerminalFlightRecorder {
             guard !slots.isEmpty else { break }
             let evicted = slots.removeFirst()
             accountedBytes -= evicted.payloadBytes + configuration.eventOverheadBytes
-            droppedEventCount += 1
-            droppedPayloadBytes += evicted.payloadBytes
         }
     }
 

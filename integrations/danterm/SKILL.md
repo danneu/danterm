@@ -435,61 +435,97 @@ A genuinely spurious row renders correctly at the width it was built for and
 garbled at every other one, so pair this with `pane tape` to capture the byte
 stream that made it.
 
-### Dump a pane flight recording
+### Capture a pane flight recording
 
-`pane tape` prints the pane's bounded, raw recording as one complete
-snapshot JSON document. This is the replay artifact format: it carries the
-initial geometry, ordered neutral events, live-capture provenance, and
-truncation metadata. Feed payloads emitted by the app use lossless base64.
+`pane tape` prints the pane's bounded, raw recording as JSON Lines. One stream
+contract covers both captures: without `--follow` you get a finite dump of the
+retained tape, and with `--follow` the same stream stays open for live events.
+Every line is one independently valid JSON record, so no single line holds the
+whole recording, and a reader can act on each record as it arrives.
+
+    danterm pane tape --pane "$PANE_ID" > tape.jsonl
+    danterm pane tape --pane "$PANE_ID" --follow > tape.jsonl
+    danterm pane tape --pane "$PANE_ID" --follow --from-now > tape.jsonl
+
+`--from-now` skips the backlog and waits for the next live event. Redirect the
+stream when evidence must survive an app crash.
+
+Every stream opens with `start` and closes with `end` when the producer can
+state a clean end. In between come `event` records in order, and a `gap` record
+whenever the producer lost bytes: a finite dump can only lose them before its
+oldest retained event, so its `gap` comes right after `start`, but a follower
+that falls behind can be told at any point, so a followed capture may carry a
+`gap` between two events.
+
+- `start` opens every stream:
+  `{"kind":"start","version":2,"capture":"snapshot"|"follow","format":"replay",`
+  `"provenance":{...},"initial":{"columns":N,"rows":N},`
+  `"cursor":{"sequence":N,"feedByteOffset":N,"writeByteOffset":N}}`.
+  The `cursor` is the baseline every later byte offset is read against, so a
+  stream that begins past the beginning still reports offsets with an origin.
+- `gap` reports exact loss since the requested cursor, per direction:
+  `{"kind":"gap","droppedEventCount":N,"droppedFeedBytes":N,"droppedWriteBytes":N}`.
+- `event` carries one recorded event:
+  `{"kind":"event","sequence":N,"elapsedNanoseconds":N,`
+  `"byteOffset":N,"byteLength":N,"event":{"type":"feed","base64":"..."}}`.
+  Timing sits above the event object. `byteOffset` and `byteLength` appear only
+  on `feed` and `write` events; the offsets are zero-based and numbered
+  independently per direction, so a feed offset counts feed bytes only.
+- `end` states why the producer stopped:
+  `{"kind":"end","reason":"snapshot-complete"|"pane-closed"|"stream-failed"}`.
+
+A finite dump (`capture: "snapshot"`) fences one atomic moment and always ends
+with `snapshot-complete`. Events that arrive while its records reach you are not
+in it, and the pane closing part way through delivery does not truncate it. If
+the stream ends at EOF instead, the capture is incomplete and the CLI exits
+nonzero saying DanTerm closed the connection before the tape ended -- do not
+treat that output as a whole recording.
+
+A followed capture (`capture: "follow"`) ends with `pane-closed` when the pane
+goes away, or `stream-failed` when DanTerm cannot keep it going. Either record
+ends that stream only -- other follows and requests on the same connection keep
+working, and the connection stays open until you close it. A follow that ends at
+EOF without an `end` record is still a valid capture of everything up to the
+moment the app stopped, which is what surviving a crash looks like.
 
 The tape records both directions: `feed` events are bytes the child produced,
 `write` events are bytes that reached the child. A `write` also carries
 `originElapsedNanoseconds` when its bytes came from an event outside the pane
 owner, so the gap between that stamp and `elapsedNanoseconds` is time the app
 held the input; bytes the owner produced itself, such as terminal replies,
-carry no origin. Because input is recorded, a tape can contain what was typed,
-including a password a `sudo` or `ssh` prompt never echoed -- treat one as
-sensitive before sharing or committing it.
+carry no origin. Feed payloads use lossless base64. Because input is recorded, a
+tape can contain what was typed, including a password a `sudo` or `ssh` prompt
+never echoed -- treat one as sensitive before sharing or committing it.
 
 The output is unscrubbed; redirect it to a file, then run the repository's
-fixture converter before committing it. The converter refuses every snapshot
-that reports dropped events because its surviving geometry and event sequence
-cannot be trusted. There is no truncation override. Every pane records, in
+fixture converter before committing it. The converter refuses every stream that
+reports a `gap`, because its surviving geometry and event sequence cannot be
+trusted. There is no truncation override. A truncated finite dump still
+succeeds and reports its loss as that `gap` record. Every pane records, in
 production as well as in a dev build, so this always answers for a live pane.
-
-    danterm pane tape --pane "$PANE_ID" > tape.json
-    scripts/terminal-tape-to-fixture.py tape.json \\
-        lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json \\
-        --test TerminalPromptRegressionTests --shell fish --stimulus "dragged divider"
-
-### Follow a pane flight recording
-
-`--follow` is the incremental capture format: it writes unwrapped `start`,
-`event`, optional `gap`, and `end` records as JSON Lines. An `event` record
-hoists `elapsedNanoseconds`, and `originElapsedNanoseconds` when the event has
-an origin, above the event object itself. `--from-now` skips the
-backlog and waits for the next live event. Redirect the stream when evidence
-must survive an app crash:
-
-    danterm pane tape --pane "$PANE_ID" --follow > tape.jsonl
-    danterm pane tape --pane "$PANE_ID" --follow --from-now > tape.jsonl
-
-The stream is raw and unscrubbed. A slow reader may receive a `gap` record when
-it falls behind the bounded recorder; the fixture converter rejects any such
-stream.
-
-An `end` record carries a `reason`: `pane-closed` when the followed pane goes
-away, and `stream-failed` when DanTerm cannot keep the stream going. Either way
-the record ends that stream only -- other follows and requests on the same
-connection keep working, and the connection stays open until you close it. An
-abrupt app exit can still leave a valid stream ending at EOF without an `end`
-record.
-
-The fixture converter accepts either complete snapshot JSON or follow JSONL:
 
     scripts/terminal-tape-to-fixture.py tape.jsonl \
         lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json \
         --test TerminalPromptRegressionTests --shell fish --stimulus "dragged divider"
+
+Because the output is one record per line, `jq -c` filters it record by record
+and `jq -s` slurps the whole stream into an array:
+
+    # How the stream started and how it ended.
+    jq -c 'select(.kind == "start" or .kind == "end")' tape.jsonl
+
+    # Count the event records.
+    jq -s '[.[] | select(.kind == "event")] | length' tape.jsonl
+
+    # The child's output as raw bytes, in order.
+    jq -r 'select(.kind == "event" and .event.type == "feed") | .event.base64' \
+        tape.jsonl | base64 -d
+
+    # Any loss the producer reported.
+    jq -c 'select(.kind == "gap")' tape.jsonl
+
+    # Fail when a capture never stated a clean end.
+    jq -e -s 'last | .kind == "end"' tape.jsonl > /dev/null
 
 JSON-RPC notifications are socket transport only and are not a persisted
 recording format.
@@ -627,8 +663,8 @@ else prints nothing on success and exits 0.
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
 | `pane zoom --pane <pane-id> on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `tab.isZoomed` and current session-reported fields |
 | `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
-| `pane tape --pane <pane-id>` | JSON: replayable raw live-capture recording |
-| `pane tape --pane <pane-id> --follow [--from-now]` | JSON Lines: `start`, `event`, optional `gap`, and `end` records |
+| `pane tape --pane <pane-id>` | JSON Lines: one `start` record, an optional `gap`, one record per event, then `end` with reason `snapshot-complete` |
+| `pane tape --pane <pane-id> --follow [--from-now]` | The same JSON Lines stream, with `capture: "follow"`, held open for live events |
 
 The `agent attach`, `agent activity`, and `agent detach` commands are silent
 mutations: no stdout on success. Activity accepts only `working`, `waiting`, or

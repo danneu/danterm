@@ -63,8 +63,10 @@ struct DanTermCLI {
                                       Print each display row's line structure as
                                       JSON: wrap claim, content end, and width.
           pane tape --pane <pane-id> [--follow] [--from-now]
-                                      Print a replayable snapshot, or follow the
-                                      bounded backlog and live events as JSON Lines
+                                      Print the pane's flight recording as JSON
+                                      Lines: one start record, then one record per
+                                      event. --follow keeps the stream open for
+                                      live events; --from-now skips the backlog.
           theme set --pane <pane-id> <name>|--clear
                                       Set or clear a pane theme
           agent attach --pane <pane-id> --kind <kind> --id <session-id>
@@ -139,13 +141,11 @@ struct DanTermCLI {
                 environment: environment,
                 fallback: controlSocketPath().path
             )
-            if command.method == IpcRequestMethod.paneTape.rawValue, command.params["follow"] == .bool(true) {
+            // Every tape capture is a record stream, finite or followed alike, so none of them
+            // go through the single-result request path below.
+            if command.method == IpcRequestMethod.paneTape.rawValue {
                 signal(SIGPIPE, SIG_IGN)
-                try requestPaneTapeFollow(
-                    command,
-                    socketPath: socketPath,
-                    environment: environment
-                )
+                try requestPaneTape(command, socketPath: socketPath)
                 exit(0)
             }
             let response = try request(command, socketPath: socketPath, environment: environment)
@@ -192,26 +192,31 @@ struct DanTermCLI {
         throw CLIError("DanTerm closed the connection")
     }
 
-    private static func requestPaneTapeFollow(
+    /// Renders one tape capture to stdout. The socket carries no receive timeout: a followed
+    /// stream is idle whenever its pane is, and a finite dump's records arrive at the app's
+    /// pace, so a timeout here would cut a healthy capture short.
+    private static func requestPaneTape(
         _ command: CLICommand,
-        socketPath: String,
-        environment: [String: String]
+        socketPath: String
     ) throws {
         let fd = try connectSocket(path: socketPath, receiveTimeout: false)
         defer { Darwin.close(fd) }
 
         guard let helloLine = try readLine(from: fd) else {
-            return
+            throw CLIError("DanTerm closed the connection")
         }
         try validateHello(helloLine)
 
         let (requestId, request) = makeRequest(command)
         try writeJSON(request, to: fd)
-        _ = try renderPaneTapeFollowStream(
+        let outcome = try renderPaneTapeStream(
             socket: fd,
             output: STDOUT_FILENO,
             requestId: requestId
         )
+        if let failure = paneTapeStreamFailure(for: outcome) {
+            throw failure
+        }
     }
 
     private static func makeRequest(_ command: CLICommand) -> (id: String, request: JsonRpcRequest) {

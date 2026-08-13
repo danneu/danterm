@@ -7,6 +7,10 @@ import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording
 import TerminalPaneSession
+// The pane tape's recorder value types -- cursors, spans, fenced captures -- are named here.
+// This view is the adapter that lowers them into the portable stream vocabulary, and naming
+// both sides is that adapter's job.
+import TerminalPTYHost
 import TerminalRenderExecution
 import TerminalRenderPlanning
 #endif
@@ -16,6 +20,59 @@ import TerminalRenderPlanning
 func paneTapeFollowEventJSON(_ event: NeutralTerminalRecordingEvent) throws -> JSONValue {
     let data = try JSONEncoder().encode(event)
     return try JSONDecoder().decode(JSONValue.self, from: data)
+}
+
+/// Restates the engine's live-capture provenance in the protocol's JSON vocabulary.
+func paneTapeProvenanceJSON() throws -> JSONValue {
+    let data = try JSONEncoder().encode(NeutralTerminalProvenance.liveCapture())
+    return try JSONDecoder().decode(JSONValue.self, from: data)
+}
+
+/// Lowers engine geometry into the support layer's stream dimensions.
+func paneTapeDimensions(_ dimensions: NeutralTerminalDimensions) -> PaneTapeDimensions {
+    .init(columns: dimensions.columns, rows: dimensions.rows)
+}
+
+/// Lowers a recorder cursor into the support layer's stream cursor.
+func paneTapeCursor(_ cursor: TerminalFlightRecordingCursor) -> PaneTapeCursor {
+    .init(
+        nextSequence: cursor.nextSequence,
+        feedBytesBeforeNextSequence: cursor.feedBytesBeforeNextSequence,
+        writeBytesBeforeNextSequence: cursor.writeBytesBeforeNextSequence
+    )
+}
+
+/// Raises a stream cursor a client resumed from back into the recorder's own cursor.
+func recorderCursor(_ cursor: PaneTapeCursor) -> TerminalFlightRecordingCursor {
+    .init(
+        nextSequence: cursor.nextSequence,
+        feedBytesBeforeNextSequence: cursor.feedBytesBeforeNextSequence,
+        writeBytesBeforeNextSequence: cursor.writeBytesBeforeNextSequence
+    )
+}
+
+/// Lowers one fenced recorder suffix into the support layer's stream snapshot. Finite dumps
+/// and follow batches both come through here, so neither can adapt an event differently.
+func paneTapeSnapshot(
+    _ snapshot: TerminalFlightRecordingCursorSnapshot
+) throws -> PaneTapeSnapshot {
+    PaneTapeSnapshot(
+        events: try snapshot.events.map { recorded in
+            PaneTapeEvent(
+                sequence: recorded.sequence,
+                elapsedNanoseconds: recorded.elapsedNanoseconds,
+                originElapsedNanoseconds: recorded.originElapsedNanoseconds,
+                payload: recorded.payload.map {
+                    .init(byteOffset: $0.byteOffset, byteLength: $0.byteLength)
+                },
+                event: try paneTapeFollowEventJSON(recorded.event)
+            )
+        },
+        droppedEventCount: snapshot.droppedEventCount,
+        droppedFeedBytes: snapshot.droppedFeedBytes,
+        droppedWriteBytes: snapshot.droppedWriteBytes,
+        nextCursor: paneTapeCursor(snapshot.nextCursor)
+    )
 }
 #endif
 
@@ -915,79 +972,58 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     #if !DANTERM_UI_TEST
-    func flightRecordingEncoder() -> (@Sendable () throws -> Data)? {
-        let snapshot = controller.flightRecordingSnapshot()
-        return { try snapshot.encodedRecording() }
+    func paneTapeDump() -> (@Sendable () throws -> PaneTapeDump)? {
+        let capture = controller.flightRecordingCapture()
+        return {
+            PaneTapeDump(
+                start: makePaneTapeStart(
+                    capture: .snapshot,
+                    provenance: try paneTapeProvenanceJSON(),
+                    initial: paneTapeDimensions(capture.origin.initial),
+                    cursor: paneTapeCursor(capture.origin.cursor)
+                ),
+                snapshot: try paneTapeSnapshot(capture.snapshot)
+            )
+        }
     }
 
     func paneTapeFollowStart(
         fromNow: Bool
-    ) -> (@Sendable () throws -> PaneTapeFollowStart)? {
+    ) -> (@Sendable () throws -> PaneTapeStart)? {
         let origin = fromNow
             ? controller.flightRecordingOriginFromNow()
             : controller.flightRecordingBacklogOrigin()
         return {
-            let provenanceData = try JSONEncoder().encode(NeutralTerminalProvenance.liveCapture())
-            let provenance = try JSONDecoder().decode(JSONValue.self, from: provenanceData)
-            return makePaneTapeFollowStart(
-                provenance: provenance,
-                initial: .init(columns: origin.initial.columns, rows: origin.initial.rows),
-                cursor: .init(
-                    nextSequence: origin.cursor.nextSequence,
-                    feedBytesBeforeNextSequence: origin.cursor.feedBytesBeforeNextSequence,
-                    writeBytesBeforeNextSequence: origin.cursor.writeBytesBeforeNextSequence
-                )
+            makePaneTapeStart(
+                capture: .follow,
+                provenance: try paneTapeProvenanceJSON(),
+                initial: paneTapeDimensions(origin.initial),
+                cursor: paneTapeCursor(origin.cursor)
             )
         }
     }
 
     func paneTapeFollowBatch(
         subscriptionId: UUID,
-        from cursor: PaneTapeFollowCursor
-    ) -> (@Sendable () throws -> PaneTapeFollowSnapshot)? {
+        from cursor: PaneTapeCursor
+    ) -> (@Sendable () throws -> PaneTapeSnapshot)? {
         guard let snapshot = controller.flightRecordingFollowSnapshot(
             subscriptionId: subscriptionId,
-            nextSequence: cursor.nextSequence,
-            feedBytesBeforeNextSequence: cursor.feedBytesBeforeNextSequence,
-            writeBytesBeforeNextSequence: cursor.writeBytesBeforeNextSequence
+            from: recorderCursor(cursor)
         ) else {
             return nil
         }
-        return {
-            let events = try snapshot.events.map { recorded in
-                return PaneTapeFollowEvent(
-                    sequence: recorded.sequence,
-                    elapsedNanoseconds: recorded.elapsedNanoseconds,
-                    originElapsedNanoseconds: recorded.originElapsedNanoseconds,
-                    event: try paneTapeFollowEventJSON(recorded.event)
-                )
-            }
-            return PaneTapeFollowSnapshot(
-                events: events,
-                droppedEventCount: snapshot.droppedEventCount,
-                droppedFeedBytes: snapshot.droppedFeedBytes,
-                droppedWriteBytes: snapshot.droppedWriteBytes,
-                nextCursor: .init(
-                    nextSequence: snapshot.nextCursor.nextSequence,
-                    feedBytesBeforeNextSequence:
-                        snapshot.nextCursor.feedBytesBeforeNextSequence,
-                    writeBytesBeforeNextSequence:
-                        snapshot.nextCursor.writeBytesBeforeNextSequence
-                )
-            )
-        }
+        return { try paneTapeSnapshot(snapshot) }
     }
 
     func addPaneTapeFollowNotice(
         id: UUID,
-        cursor: PaneTapeFollowCursor,
+        cursor: PaneTapeCursor,
         notify: @escaping @Sendable () -> Void
     ) -> PaneTapeFollowNoticeRegistration? {
         controller.addFlightRecordingFollowNotice(
             id: id,
-            nextSequence: cursor.nextSequence,
-            feedBytesBeforeNextSequence: cursor.feedBytesBeforeNextSequence,
-            writeBytesBeforeNextSequence: cursor.writeBytesBeforeNextSequence,
+            from: recorderCursor(cursor),
             notify: notify
         )
         let controller = controller
