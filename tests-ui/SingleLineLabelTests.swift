@@ -15,11 +15,11 @@ func singleLineLabelTests() {
         let (sidebar, outline, window) = makeSingleLineSidebar()
         defer { window.close() }
 
-        let groupCell: SidebarGroupCellView = try singleLineCell(
+        let groupCell: SidebarGroupCellView = try sidebarCell(
             for: .group(sidebarFixtureGroupId), in: outline)
         try assertSingleLine(groupCell.titleField, "sidebar group header")
 
-        let tabCell: SidebarTabCellView = try singleLineCell(
+        let tabCell: SidebarTabCellView = try sidebarCell(
             for: .tab(sidebarFixtureTabId), in: outline)
         try assertSingleLine(tabCell.titleField, "sidebar tab title")
         try assertSingleLine(tabCell.subtitleField, "sidebar tab subtitle")
@@ -65,7 +65,7 @@ func singleLineLabelTests() {
         let (sidebar, outline, window) = makeSingleLineSidebar()
         defer { window.close() }
 
-        let cell: SidebarTabCellView = try singleLineCell(
+        let cell: SidebarTabCellView = try sidebarCell(
             for: .tab(sidebarFixtureTabId), in: outline)
         let titleField = cell.titleField
         sidebar.beginRenamingTab(sidebarFixtureTabId)
@@ -126,7 +126,7 @@ private func makeSingleLineSidebar() -> (SidebarView, NSOutlineView, NSWindow) {
         contentRect: sidebar.frame, styleMask: [.titled], backing: .buffered, defer: false)
     window.contentView = sidebar
     window.layoutIfNeeded()
-    let outline = findSingleLineOutlineView(in: sidebar)!
+    let outline = sidebarOutlineView(in: sidebar)!
 
     let paneId = PaneId()
     var pane = PaneModel(id: paneId)
@@ -139,11 +139,8 @@ private func makeSingleLineSidebar() -> (SidebarView, NSOutlineView, NSWindow) {
             GroupModel(id: GroupId(), name: "second", tabs: []),
         ],
         selectedTabId: sidebarFixtureTabId)
-    let projection = desiredSidebar(in: model)
-    sidebar.applySidebarOps(
-        computeSidebarRowOps(old: nil, new: projection),
-        projection: projection, renameTargetToEnd: nil)
-    outline.layoutSubtreeIfNeeded()
+    let driver = SidebarReconcileDriver()
+    _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
     window.layoutIfNeeded()
     return (sidebar, outline, window)
 }
@@ -158,28 +155,6 @@ private func makeSingleLinePaneWrapper() -> PaneWrapperView {
     return PaneWrapperView(
         paneId: paneId, terminalView: TerminalView(),
         isZoomed: false, hasSplits: false, runtime: AppRuntime(model: model))
-}
-
-@MainActor
-private func singleLineCell<Cell: NSTableCellView>(
-    for target: RenameTarget,
-    in outline: NSOutlineView
-) throws -> Cell {
-    for row in 0..<outline.numberOfRows {
-        guard let item = outline.item(atRow: row) as? SidebarItem else { continue }
-        let matches: Bool = {
-            switch (target, item.kind) {
-            case (.tab(let expected), .tab(let tab)): return expected == tab.id
-            case (.group(let expected), .group(let group)): return expected == group.id
-            default: return false
-            }
-        }()
-        guard matches,
-              let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? Cell
-        else { continue }
-        return cell
-    }
-    throw UITestFailure(message: "missing cell for \(target)")
 }
 
 private func requireField(_ field: NSTextField?) throws -> NSTextField {
@@ -202,13 +177,4 @@ private func singleLineFields(in root: NSView) -> [NSTextField] {
         let nested = singleLineFields(in: view)
         return (view as? NSTextField).map { [$0] + nested } ?? nested
     }
-}
-
-@MainActor
-private func findSingleLineOutlineView(in root: NSView) -> NSOutlineView? {
-    for view in root.subviews {
-        if let outline = view as? NSOutlineView { return outline }
-        if let found = findSingleLineOutlineView(in: view) { return found }
-    }
-    return nil
 }

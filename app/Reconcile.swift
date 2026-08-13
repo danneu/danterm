@@ -2,12 +2,12 @@
 // (and after a restore commit). Stage 3 stands up the scaffolding -- reconcile(),
 // ReconcilerCaches, and the first keyed pass reconcileFocusBorders -- that stages
 // 4-8 extend. Pure projections live in Projections.swift (AppKit-free, unit
-// tested); the reconcile* passes here are the thin impure executors that apply the
-// diff to AppKit and are manual-QA-only.
+// tested); the reconcile* passes here are thin impure executors. The sidebar's
+// ordered pass lives in SidebarReconcileDriver so the UI harness can drive it.
 //
 // Template for adding a pass (per the migration plan):
 //   1. a pure projection in Projections.swift returning an Equatable value
-//   2. a cache field on ReconcilerCaches (resets for free via tearDownCurrentSession)
+//   2. a cache field on ReconcilerCaches (or a cache-owning driver for an ordered pass)
 //   3. a reconcileX() running the projection through applyDiff (or, for a single
 //      panel, a direct compare against a single-optional cache field)
 //   4. delete the matching Command case + its perform arm, in the same stage
@@ -32,12 +32,6 @@ struct ReconcilerCaches {
     // The last container shape reconciled per tab. computeContainerOps diffs new
     // shapes against this into full builds for new tabs and keyed patches for survivors.
     var containerShape: [TabId: ContainerShape] = [:]
-    // Single-optional ordered-pass cache (like the eventual switcher cache): the last
-    // sidebar projection reconcileSidebar applied. computeSidebarRowOps diffs the new
-    // projection against this into ordered NSOutlineView row ops. nil == not yet built
-    // (first reconcile inserts all rows via reloadAll). NSOutlineView owns selection, so it
-    // is excluded from the projection and reapplied separately (resolveReloadSelection).
-    var sidebar: SidebarProjection? = nil
     // Single-struct-compare cache: the last window chrome reconcileWindowChrome applied.
     // Its three hosts (window, chromeView, dock tile) persist across container edits,
     // so this cache needs no cross-pass invalidation. nil == not yet applied.
@@ -210,39 +204,10 @@ extension AppRuntime {
         })
     }
 
-    /// Granular NSOutlineView sidebar diff -- the one ordered op-list pass. The pure
-    /// `computeSidebarRowOps` diffs the projection against `caches.sidebar` into an
-    /// ordered insert/remove/reload/collapse script (inconsistent batch ops crash
-    /// NSOutlineView hard, so all the diff logic stays pure + tested); the thin executor
-    /// `SidebarView.applySidebarOps` issues the matching outline mutations. Selection is
-    /// view-owned: the executor captures the live multi-selection, applies the ops, then
-    /// reapplies through `resolveReloadSelection` (replacing the deleted
-    /// `.setSidebarSelection` effect). The narrow rename guard suppresses only a `reload`
-    /// of the live-editing row (its title/attrs belong to the field editor) while
-    /// structural ops still apply; a structural op on that row ends the view-owned edit.
-    /// Replaces the deleted `reloadSidebar` / `setSidebarSelection` /
-    /// `updateSidebarTabRow` / `updateSidebarGroupRow` effects + the imperative
-    /// `reload(model:)`.
+    /// Drives the sidebar through its single cache-owning reconcile pipeline.
     func reconcileSidebar(tally: UnreadAlertTally) {
         guard let sidebarView = sidebarView else { return }
-        let new = desiredSidebar(in: model, tally: tally)
-        let rawOps = computeSidebarRowOps(old: caches.sidebar, new: new)
-        let renameTarget = sidebarView.activeRenameTarget
-        let guarded = guardSidebarRenameOps(
-            ops: rawOps,
-            renameTarget: renameTarget,
-            new: new)
-        let unapplied = sidebarView.applySidebarOps(
-            guarded.ops, projection: new,
-            renameTargetToEnd: guarded.clearRename ? renameTarget : nil)
-        // Advance the cache. If a reload was suppressed for the still-editing row,
-        // or could not paint a visible row, retain its prior projection so the deferred
-        // attr update re-fires later.
-        caches.sidebar = advanceSidebarCache(
-            old: caches.sidebar, new: new,
-            suppressedRenameTarget: sidebarView.activeRenameTarget,
-            unappliedTabIds: unapplied.tabs,
-            unappliedGroupIds: unapplied.groups)
+        sidebarReconcileDriver.reconcile(model, tally: tally, in: sidebarView)
     }
 
     /// Push the window chrome -- window/content title, dock + toolbar-bell unread badge,

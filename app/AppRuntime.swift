@@ -137,6 +137,9 @@ class AppRuntime {
     // Per-pass diff caches for the view reconciler (see Reconcile.swift).
     // Reset on teardown so a post-restore reconcile is a clean build.
     var caches = ReconcilerCaches()
+    // The sidebar owns an ordered row-op pipeline and therefore keeps its cache
+    // with the pipeline driver rather than in the generic reconciler cache bag.
+    var sidebarReconcileDriver = SidebarReconcileDriver()
     // internal (not private): the cross-file reconcileContainers extension reads/mutates it.
     var tabContainers: [TabId: SplitContainerView] = [:]
     weak var window: NSWindow?
@@ -1787,6 +1790,7 @@ class AppRuntime {
         // Reset reconciler caches by re-init so the first post-restore reconcile is
         // a clean build, not a stale diff (restore/import can reuse pane IDs).
         caches = ReconcilerCaches()
+        sidebarReconcileDriver = SidebarReconcileDriver()
         for paneId in Array(replayFiles.keys) {
             cleanupReplayFile(for: paneId)
         }

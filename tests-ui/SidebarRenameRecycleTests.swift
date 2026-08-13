@@ -46,7 +46,7 @@ func sidebarRenameRecycleTests() {
             (groupA, "Primary", false, [(tab, "short")] + overflowTabs),
             (groupB, "Secondary", false, [(anchor, "anchor")]),
         ], selected: tab)
-        model.alerts = [renameRecycleBellAlert(
+        model.alerts = [sidebarBellAlert(
             paneId: model.groups[0].tabs[0].paneTree.focusedPaneId)]
 
         let scroll = findRenameRecycleScrollView(in: sidebar)!
@@ -56,11 +56,11 @@ func sidebarRenameRecycleTests() {
 
         for width in [260.0, 200.0, 300.0] {
             window.setContentSize(NSSize(width: width, height: 140))
-            materializeRenameRecycleRows(sidebar, outline: outline)
+            materializeSidebarRows(sidebar, outline: outline)
 
-            let groupCell: SidebarGroupCellView = try renameRecycleCell(
+            let groupCell: SidebarGroupCellView = try sidebarCell(
                 for: .group(groupA), in: outline)
-            let tabCell: SidebarTabCellView = try renameRecycleCell(
+            let tabCell: SidebarTabCellView = try sidebarCell(
                 for: .tab(tab), in: outline)
             try expectCellFillsVisibleContent(groupCell, scroll: scroll, label: "group at \(width)")
             try expectCellFillsVisibleContent(tabCell, scroll: scroll, label: "tab at \(width)")
@@ -90,11 +90,11 @@ func sidebarRenameRecycleTests() {
             (groupA, "Primary", false, [(tab, "short")]),
             (groupB, "Secondary", false, [(anchor, "anchor")]),
         ], selected: tab)
-        model.alerts = [renameRecycleBellAlert(
+        model.alerts = [sidebarBellAlert(
             paneId: model.groups[0].tabs[0].paneTree.focusedPaneId)]
         var projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         let scroll = findRenameRecycleScrollView(in: sidebar)!
-        let cell: SidebarTabCellView = try renameRecycleCell(for: .tab(tab), in: outline)
+        let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         let titleField = cell.titleField
 
         try expectTabTitlePrecedesAccessory(in: cell)
@@ -122,8 +122,8 @@ func sidebarRenameRecycleTests() {
         model.groups[0].tabs[0].customTitle = longTitle
         projection = applyRenameRecycleTransition(
             old: projection, newModel: model,
-            to: sidebar, outline: outline, runtime: runtime)
-        materializeRenameRecycleRows(sidebar, outline: outline)
+            to: sidebar, outline: outline)
+        materializeSidebarRows(sidebar, outline: outline)
         try uiExpect(titleField.stringValue == longTitle,
             "committed long title should reach display mode")
         try expectTabTitlePrecedesAccessory(in: cell)
@@ -139,7 +139,7 @@ func sidebarRenameRecycleTests() {
         _ = sidebar.control(
             titleField, textView: cancelEditor,
             doCommandBy: #selector(NSResponder.cancelOperation(_:)))
-        materializeRenameRecycleRows(sidebar, outline: outline)
+        materializeSidebarRows(sidebar, outline: outline)
         try uiExpect(titleField.stringValue == longTitle,
             "rename cancellation should restore the committed title")
         try expectTabTitlePrecedesAccessory(in: cell)
@@ -150,8 +150,8 @@ func sidebarRenameRecycleTests() {
         model.groups[0].tabs[0].customTitle = "changed"
         _ = applyRenameRecycleTransition(
             old: projection, newModel: model,
-            to: sidebar, outline: outline, runtime: runtime)
-        materializeRenameRecycleRows(sidebar, outline: outline)
+            to: sidebar, outline: outline)
+        materializeSidebarRows(sidebar, outline: outline)
         try expectAccessoryTrailingInset(
             cell.alertBadge, inset: 2,
             scroll: scroll, label: "after title change")
@@ -177,7 +177,7 @@ func sidebarRenameRecycleTests() {
         _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
 
         sidebar.beginRenamingTab(tab)
-        let tabCell: SidebarTabCellView = try renameRecycleCell(for: .tab(tab), in: outline)
+        let tabCell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         tabCell.titleField.frame.size.width = 0
         tabCell.titleField.invalidateIntrinsicContentSize()
         window.contentView?.layoutSubtreeIfNeeded()
@@ -186,7 +186,7 @@ func sidebarRenameRecycleTests() {
 
         window.makeFirstResponder(nil)
         sidebar.beginRenamingGroup(groupA)
-        let groupCell: SidebarGroupCellView = try renameRecycleCell(
+        let groupCell: SidebarGroupCellView = try sidebarCell(
             for: .group(groupA), in: outline)
         groupCell.titleField.frame.size.width = 0
         groupCell.titleField.invalidateIntrinsicContentSize()
@@ -210,7 +210,7 @@ func sidebarRenameRecycleTests() {
             selected: tab)
         _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         sidebar.beginRenamingTab(tab)
-        let cell: SidebarTabCellView = try renameRecycleCell(for: .tab(tab), in: outline)
+        let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         cell.titleField.stringValue = "renamed"
 
         sidebar.finishActiveRenameForPointerInteraction()
@@ -245,7 +245,7 @@ func sidebarRenameRecycleTests() {
             (groupB, "B", false, [(tabB, "beta")]),
         ])
         _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
-        let groupCell: SidebarGroupCellView = try renameRecycleCell(
+        let groupCell: SidebarGroupCellView = try sidebarCell(
             for: .group(groupA), in: outline)
         let field = groupCell.titleField
 
@@ -319,7 +319,7 @@ func sidebarRenameRecycleTests() {
             selected: tab)
         let projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         sidebar.beginRenamingTab(tab)
-        let cell: SidebarTabCellView = try renameRecycleCell(for: .tab(tab), in: outline)
+        let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         cell.titleField.stringValue = "stale draft"
         cell.titleField.abortEditing()
         try uiExpect(cell.titleField.currentEditor() == nil,
@@ -327,7 +327,7 @@ func sidebarRenameRecycleTests() {
 
         _ = applyRenameRecycleTransition(
             old: projection, newModel: model,
-            to: sidebar, outline: outline, runtime: runtime)
+            to: sidebar, outline: outline)
 
         try uiExpect(sidebar.activeRenameTarget == nil,
             "abandoned editor should clear the authoritative rename target")
@@ -361,7 +361,7 @@ func sidebarRenameRecycleTests() {
         let initialProjection = applyRenameRecycleModel(initial, to: sidebar, outline: outline, old: nil)
 
         sidebar.beginRenamingTab(edited)
-        let editedRow = try renameRecycleRow(for: edited, in: outline)
+        let editedRow = try sidebarTabRow(for: edited, in: outline)
         let editedCell = outline.view(
             atColumn: 0, row: editedRow,
             makeIfNecessary: false) as! SidebarTabCellView
@@ -378,7 +378,7 @@ func sidebarRenameRecycleTests() {
         ])
         let collapsedProjection = applyRenameRecycleTransition(
             old: initialProjection, newModel: collapsed,
-            to: sidebar, outline: outline, runtime: runtime)
+            to: sidebar, outline: outline)
 
         let expanded = renameRecycleModel([
             (groupA, "A", false, [(edited, "alpha")]),
@@ -386,9 +386,9 @@ func sidebarRenameRecycleTests() {
         ])
         _ = applyRenameRecycleTransition(
             old: collapsedProjection, newModel: expanded,
-            to: sidebar, outline: outline, runtime: runtime)
+            to: sidebar, outline: outline)
 
-        let row = try renameRecycleRow(for: edited, in: outline)
+        let row = try sidebarTabRow(for: edited, in: outline)
         let cell = outline.view(
             atColumn: 0, row: row,
             makeIfNecessary: true) as! SidebarTabCellView
@@ -426,7 +426,7 @@ func sidebarRenameRecycleTests() {
         let initialProjection = applyRenameRecycleModel(initial, to: sidebar, outline: outline, old: nil)
 
         sidebar.beginRenamingTab(edited)
-        let editedRow = try renameRecycleRow(for: edited, in: outline)
+        let editedRow = try sidebarTabRow(for: edited, in: outline)
         let editedCell = outline.view(
             atColumn: 0, row: editedRow,
             makeIfNecessary: false) as! SidebarTabCellView
@@ -439,7 +439,7 @@ func sidebarRenameRecycleTests() {
             selected: spawned)
         _ = applyRenameRecycleTransition(
             old: initialProjection, newModel: afterCmdT,
-            to: sidebar, outline: outline, runtime: runtime)
+            to: sidebar, outline: outline)
 
         try uiExpect(editedCell.titleField.isEditable == false,
             "selection moving away must end the rename, not strand an editable cell")
@@ -466,7 +466,7 @@ func sidebarRenameRecycleTests() {
         let projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
 
         sidebar.beginRenamingTab(edited)
-        let editedRow = try renameRecycleRow(for: edited, in: outline)
+        let editedRow = try sidebarTabRow(for: edited, in: outline)
         let editedCell = outline.view(
             atColumn: 0, row: editedRow,
             makeIfNecessary: false) as! SidebarTabCellView
@@ -477,7 +477,7 @@ func sidebarRenameRecycleTests() {
 
         _ = applyRenameRecycleTransition(
             old: projection, newModel: model,
-            to: sidebar, outline: outline, runtime: runtime)
+            to: sidebar, outline: outline)
 
         try uiExpect(editedCell.titleField.currentEditor() != nil,
             "cosmetic sweep should leave the live field editor attached")
@@ -503,7 +503,7 @@ func sidebarRenameRecycleTests() {
         let initialProjection = applyRenameRecycleModel(initial, to: sidebar, outline: outline, old: nil)
 
         sidebar.beginRenamingTab(edited)
-        let editedRow = try renameRecycleRow(for: edited, in: outline)
+        let editedRow = try sidebarTabRow(for: edited, in: outline)
         let editedCell = outline.view(
             atColumn: 0, row: editedRow,
             makeIfNecessary: false) as! SidebarTabCellView
@@ -516,7 +516,7 @@ func sidebarRenameRecycleTests() {
         sidebar.testForceNextNilCellTabIds.insert(edited)
         let dropped = applyRenameRecycleTransitionResult(
             old: initialProjection, newModel: afterCmdT,
-            to: sidebar, outline: outline, runtime: runtime)
+            to: sidebar, outline: outline)
 
         try uiExpect(dropped.droppedTabs == Set([edited]),
             "rename resync should report the dropped edited tab")
@@ -526,10 +526,10 @@ func sidebarRenameRecycleTests() {
             "dropped resync should leave the old edited-row title visible")
 
         let repainted = applyRenameRecycleTransitionResult(
-            old: dropped.advancedProjection, newModel: afterCmdT,
-            to: sidebar, outline: outline, runtime: runtime)
+            old: dropped.driver, newModel: afterCmdT,
+            to: sidebar, outline: outline)
 
-        let updatedRow = try renameRecycleRow(for: edited, in: outline)
+        let updatedRow = try sidebarTabRow(for: edited, in: outline)
         let updatedCell = outline.view(
             atColumn: 0, row: updatedRow,
             makeIfNecessary: false) as! SidebarTabCellView
@@ -563,7 +563,7 @@ func sidebarRenameRecycleTests() {
             let projection = applyRenameRecycleModel(
                 initial, to: sidebar, outline: outline, old: nil)
             sidebar.beginRenamingGroup(groupA)
-            let cell: SidebarGroupCellView = try renameRecycleCell(
+            let cell: SidebarGroupCellView = try sidebarCell(
                 for: .group(groupA), in: outline)
             let field = cell.titleField
             field.stringValue = "stale draft"
@@ -589,7 +589,7 @@ func sidebarRenameRecycleTests() {
 
             _ = applyRenameRecycleTransition(
                 old: projection, newModel: next,
-                to: sidebar, outline: outline, runtime: runtime)
+                to: sidebar, outline: outline)
             let renameEndDeadline = Date(timeIntervalSinceNow: 0.1)
             while !runtime.sentMessages.contains(where: {
                 if case .sidebarRenameEnded = $0 { return true }
@@ -632,7 +632,7 @@ func sidebarRenameRecycleTests() {
             selected: first)
         _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         sidebar.beginRenamingTab(first)
-        let firstCell: SidebarTabCellView = try renameRecycleCell(
+        let firstCell: SidebarTabCellView = try sidebarCell(
             for: .tab(first), in: outline)
         let firstField = firstCell.titleField
         firstField.stringValue = "first draft"
@@ -685,7 +685,7 @@ func sidebarRenameRecycleTests() {
         let model = renameRecycleModel([(group, "G", false, [(tab, "alpha")])])
         _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         sidebar.beginRenamingTab(tab)
-        let cell: SidebarTabCellView = try renameRecycleCell(for: .tab(tab), in: outline)
+        let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         cell.titleField.abortEditing()
 
         sidebar.testResetRecycledRenameState(cell)
@@ -712,13 +712,13 @@ func sidebarRenameRecycleTests() {
             (groupA, "A", false, [(tabA, "alpha")]),
             (groupB, "B", false, [(tabB, "beta")]),
         ])
-        let projection = applyRenameRecycleModel(
+        _ = applyRenameRecycleModel(
             model, to: sidebar, outline: outline, old: nil)
-        let oldCell: SidebarGroupCellView = try renameRecycleCell(
+        let oldCell: SidebarGroupCellView = try sidebarCell(
             for: .group(groupA), in: outline)
-        let replacedCell: SidebarGroupCellView = try renameRecycleCell(
+        let replacedCell: SidebarGroupCellView = try sidebarCell(
             for: .group(groupB), in: outline)
-        let groupBProjection = projection.groups.first { $0.id == groupB }!
+        let groupBProjection = desiredSidebar(in: model).groups.first { $0.id == groupB }!
         let groupBRow = outline.row(for: replacedCell)
         guard let rowView = outline.rowView(
             atRow: groupBRow, makeIfNecessary: false) as? SidebarRowView else {
@@ -758,7 +758,7 @@ func sidebarRenameRecycleTests() {
         let initialProjection = applyRenameRecycleModel(initial, to: sidebar, outline: outline, old: nil)
 
         sidebar.beginRenamingTab(edited)
-        let editedRow = try renameRecycleRow(for: edited, in: outline)
+        let editedRow = try sidebarTabRow(for: edited, in: outline)
         let editedCell = outline.view(
             atColumn: 0, row: editedRow,
             makeIfNecessary: false) as! SidebarTabCellView
@@ -771,7 +771,7 @@ func sidebarRenameRecycleTests() {
         ])
         let collapsedProjection = applyRenameRecycleTransition(
             old: initialProjection, newModel: collapsed,
-            to: sidebar, outline: outline, runtime: runtime)
+            to: sidebar, outline: outline)
 
         // Spawn a new tab in the other group -- the insertTab op makes a cell,
         // and NSOutlineView may hand back the stranded one from its reuse pool.
@@ -779,13 +779,13 @@ func sidebarRenameRecycleTests() {
             (groupA, "A", true, [(edited, "alpha")]),
             (groupB, "B", false, [(anchor, "anchor"), (spawned, "fresh tab")]),
         ])
-        spawnedModel.alerts = [renameRecycleBellAlert(
+        spawnedModel.alerts = [sidebarBellAlert(
             paneId: spawnedModel.groups[1].tabs[1].paneTree.focusedPaneId)]
         _ = applyRenameRecycleTransition(
             old: collapsedProjection, newModel: spawnedModel,
-            to: sidebar, outline: outline, runtime: runtime)
+            to: sidebar, outline: outline)
 
-        let row = try renameRecycleRow(for: spawned, in: outline)
+        let row = try sidebarTabRow(for: spawned, in: outline)
         let cell = outline.view(
             atColumn: 0, row: row,
             makeIfNecessary: true) as! SidebarTabCellView
@@ -817,7 +817,7 @@ private func makeRenameRecycleHarness() -> (SidebarView, NSOutlineView, NSWindow
         defer: false)
     window.contentView = sidebar
     window.layoutIfNeeded()
-    let outline = findRenameRecycleOutlineView(in: sidebar)!
+    let outline = sidebarOutlineView(in: sidebar)!
     return (sidebar, outline, window, runtime)
 }
 
@@ -848,110 +848,43 @@ private func applyRenameRecycleModel(
     _ model: AppModel,
     to sidebar: SidebarView,
     outline: NSOutlineView,
-    old: SidebarProjection?
-) -> SidebarProjection {
-    let projection = desiredSidebar(in: model)
-    sidebar.applySidebarOps(
-        computeSidebarRowOps(old: old, new: projection),
-        projection: projection,
-        renameTargetToEnd: nil)
-    materializeRenameRecycleRows(sidebar, outline: outline)
-    return projection
+    old: SidebarReconcileDriver?
+) -> SidebarReconcileDriver {
+    let driver = old ?? SidebarReconcileDriver()
+    applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
+    return driver
 }
 
-/// Mirrors reconcileSidebar's production pipeline: read the target from the
-/// view-owned session, guard and apply the raw ops, then advance the cache.
 @discardableResult
 private func applyRenameRecycleTransition(
-    old oldProjection: SidebarProjection,
+    old driver: SidebarReconcileDriver,
     newModel: AppModel,
     to sidebar: SidebarView,
-    outline: NSOutlineView,
-    runtime: AppRuntime
-) -> SidebarProjection {
-    applyRenameRecycleTransitionResult(
-        old: oldProjection, newModel: newModel,
-        to: sidebar, outline: outline, runtime: runtime
-    ).advancedProjection
+    outline: NSOutlineView
+) -> SidebarReconcileDriver {
+    _ = applySidebarTestModel(newModel, using: driver, to: sidebar, outline: outline)
+    return driver
 }
 
 @discardableResult
 private func applyRenameRecycleTransitionResult(
-    old oldProjection: SidebarProjection,
+    old driver: SidebarReconcileDriver,
     newModel: AppModel,
     to sidebar: SidebarView,
-    outline: NSOutlineView,
-    runtime: AppRuntime
+    outline: NSOutlineView
 ) -> (
+    driver: SidebarReconcileDriver,
     advancedProjection: SidebarProjection,
     droppedTabs: Set<TabId>,
     droppedGroups: Set<GroupId>
 ) {
-    let newProjection = desiredSidebar(in: newModel)
-    let rawOps = computeSidebarRowOps(old: oldProjection, new: newProjection)
-    let guarded = guardSidebarRenameOps(
-        ops: rawOps,
-        renameTarget: sidebar.activeRenameTarget,
-        new: newProjection)
-    let dropped = sidebar.applySidebarOps(
-        guarded.ops, projection: newProjection,
-        renameTargetToEnd: guarded.clearRename ? sidebar.activeRenameTarget : nil)
-    materializeRenameRecycleRows(sidebar, outline: outline)
-    let advanced = advanceSidebarCache(
-        old: oldProjection, new: newProjection,
-        suppressedRenameTarget: sidebar.activeRenameTarget,
-        unappliedTabIds: dropped.tabs,
-        unappliedGroupIds: dropped.groups)
-    return (advanced, dropped.tabs, dropped.groups)
-}
-
-private func materializeRenameRecycleRows(_ sidebar: SidebarView, outline: NSOutlineView) {
-    sidebar.layoutSubtreeIfNeeded()
-    outline.layoutSubtreeIfNeeded()
-    for row in 0..<outline.numberOfRows {
-        _ = outline.view(atColumn: 0, row: row, makeIfNecessary: true)
-        _ = outline.rowView(atRow: row, makeIfNecessary: true)
-    }
-}
-
-private func renameRecycleRow(
-    for tabId: TabId,
-    in outline: NSOutlineView,
-    file: String = #file,
-    line: Int = #line
-) throws -> Int {
-    for row in 0..<outline.numberOfRows {
-        guard let item = outline.item(atRow: row) as? SidebarItem,
-              case .tab(let tab) = item.kind,
-              tab.id == tabId
-        else { continue }
-        return row
-    }
-    throw UITestFailure(message: "missing row for tab \(tabId) (\(file):\(line))")
-}
-
-private func renameRecycleCell<Cell: NSTableCellView>(
-    for target: RenameTarget,
-    in outline: NSOutlineView,
-    file: String = #file,
-    line: Int = #line
-) throws -> Cell {
-    for row in 0..<outline.numberOfRows {
-        guard let item = outline.item(atRow: row) as? SidebarItem else { continue }
-        let matches: Bool = {
-            switch (target, item.kind) {
-            case (.tab(let expected), .tab(let tab)): return expected == tab.id
-            case (.group(let expected), .group(let group)): return expected == group.id
-            default: return false
-            }
-        }()
-        guard matches,
-              let cell = outline.view(
-                atColumn: 0, row: row, makeIfNecessary: true) as? Cell
-        else { continue }
-        return cell
-    }
-    throw UITestFailure(message: "missing cell for \(target) (\(file):\(line))")
+    let result = applySidebarTestModel(
+        newModel, using: driver, to: sidebar, outline: outline)
+    return (
+        driver,
+        result.appliedProjection,
+        result.unappliedTabIds,
+        result.unappliedGroupIds)
 }
 
 private func requireRenameRecycleEditor(_ field: NSTextField) throws -> NSTextView {
@@ -959,16 +892,6 @@ private func requireRenameRecycleEditor(_ field: NSTextField) throws -> NSTextVi
         throw UITestFailure(message: "rename should install a field editor")
     }
     return editor
-}
-
-private func findRenameRecycleOutlineView(in view: NSView) -> NSOutlineView? {
-    if let outline = view as? NSOutlineView { return outline }
-    for subview in view.subviews {
-        if let found = findRenameRecycleOutlineView(in: subview) {
-            return found
-        }
-    }
-    return nil
 }
 
 /// Finds the production scroll view without exposing it on SidebarView solely for tests.
@@ -980,18 +903,6 @@ private func findRenameRecycleScrollView(in view: NSView) -> NSScrollView? {
         }
     }
     return nil
-}
-
-/// Builds the unread alert needed to keep the tab's trailing badge visible.
-private func renameRecycleBellAlert(paneId: PaneId) -> AlertModel {
-    AlertModel(
-        id: AlertId(),
-        kind: .bell,
-        paneId: paneId,
-        title: "Bell",
-        body: "",
-        createdAt: Date(timeIntervalSince1970: 0),
-        isUnread: true)
 }
 
 /// Compares a materialized cell with the clip view in one coordinate space.

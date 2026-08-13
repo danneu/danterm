@@ -8,6 +8,33 @@ import Cocoa
 func sidebarSelectionCacheTests() {
     print("SidebarSelectionCache")
 
+    uiTest("a fresh reconcile driver fully builds a fresh empty sidebar") {
+        // Intent: constructing a driver makes its first pass a full rebuild.
+        // Why it exists: a cache retained outside the driver can make a restored
+        //   session diff against rows that belong to the prior view.
+        // Scenario: driver A builds view A, then driver B builds a separate empty
+        //   view from the same model after session teardown.
+        let model = sidebarOverflowModel(
+            tabIds: (0..<3).map { _ in TabId() },
+            selected: nil)
+        let (firstSidebar, firstOutline, firstWindow) = makeSidebarSelectionHarness()
+        defer { firstWindow.close() }
+        let firstDriver = SidebarReconcileDriver()
+        firstDriver.reconcile(model, in: firstSidebar)
+        materializeSidebarRows(firstSidebar, outline: firstOutline)
+
+        let (secondSidebar, secondOutline, secondWindow) = makeSidebarSelectionHarness()
+        defer { secondWindow.close() }
+        let secondDriver = SidebarReconcileDriver()
+        secondDriver.reconcile(model, in: secondSidebar)
+        materializeSidebarRows(secondSidebar, outline: secondOutline)
+
+        try uiExpect(secondOutline.numberOfRows == firstOutline.numberOfRows,
+            "a fresh driver should materialize the complete row set in an empty view")
+        try uiExpect(secondOutline.numberOfRows == 3,
+            "single-group mode should materialize all three tab rows")
+    }
+
     uiTest("real sidebar executor preserves selected-row highlight after cross-group move") {
         let (sidebar, outline, window) = makeSidebarSelectionHarness()
         defer { window.close() }
@@ -25,7 +52,7 @@ func sidebarSelectionCacheTests() {
 
         try uiExpect(sidebarVisibleTabIds(in: outline).contains(moved),
             "initial rows should contain moved tab")
-        let sourceRow = try sidebarRow(for: moved, in: outline)
+        let sourceRow = try sidebarTabRow(for: moved, in: outline)
         outline.selectRowIndexes(IndexSet(integer: sourceRow), byExtendingSelection: false)
 
         let newModel = sidebarSelectionModel([
@@ -125,7 +152,7 @@ func sidebarSelectionCacheTests() {
         clearVisibleSidebarRowDisplayFlags(in: outline)
         applySidebarTransition(old: projection, newModel: changedModel, to: sidebar, outline: outline)
 
-        let changedRow = try sidebarRow(for: tabIds[4], in: outline)
+        let changedRow = try sidebarTabRow(for: tabIds[4], in: outline)
         try assertVisibleSidebarRowsDoNotNeedDisplay(in: outline, except: [changedRow])
     }
 
@@ -203,7 +230,7 @@ func sidebarSelectionCacheTests() {
         let pane = PaneId()
         let model = sidebarAlertModel(groupId: group, tabId: tab, paneId: pane, unread: true)
         let projection = applyInitialSidebarModel(model, to: sidebar, outline: outline)
-        let row = try sidebarRow(for: tab, in: outline)
+        let row = try sidebarTabRow(for: tab, in: outline)
         try assertSidebarRowVisible(row, in: outline)
         try uiExpect(try sidebarBadgeCount(for: tab, in: outline) == 1,
             "precondition: alert badge should be visible")
@@ -221,7 +248,7 @@ func sidebarSelectionCacheTests() {
             "dropped paint should retain old attrs in the advanced cache")
 
         let repainted = applySidebarTransitionResult(
-            old: dropped.advancedProjection, newModel: cleared, to: sidebar, outline: outline)
+            old: dropped.driver, newModel: cleared, to: sidebar, outline: outline)
 
         try uiExpect(repainted.droppedTabs.isEmpty, "retry should fetch and paint the tab row")
         try uiExpect(try sidebarBadgeCount(for: tab, in: outline) == 0,
@@ -243,8 +270,8 @@ func sidebarSelectionCacheTests() {
         let tabIds = (0..<6).map { _ in TabId() }
         let model = sidebarOverflowModel(tabIds: tabIds, selected: tabIds[0])
         let projection = applyInitialSidebarModel(model, to: sidebar, outline: outline)
-        let focusRow = try sidebarRow(for: tabIds[0], in: outline)
-        let otherRow = try sidebarRow(for: tabIds[5], in: outline)
+        let focusRow = try sidebarTabRow(for: tabIds[0], in: outline)
+        let otherRow = try sidebarTabRow(for: tabIds[5], in: outline)
 
         outline.selectRowIndexes(IndexSet(integer: focusRow), byExtendingSelection: false)
         outline.selectRowIndexes(IndexSet(integer: otherRow), byExtendingSelection: true)
@@ -396,7 +423,7 @@ private func makeSidebarSelectionHarness() -> (SidebarView, NSOutlineView, NSWin
         defer: false)
     window.contentView = sidebar
     window.layoutIfNeeded()
-    let outline = findSidebarOutlineView(in: sidebar)!
+    let outline = sidebarOutlineView(in: sidebar)!
     return (sidebar, outline, window)
 }
 
@@ -405,64 +432,47 @@ private func applyInitialSidebarModel(
     _ model: AppModel,
     to sidebar: SidebarView,
     outline: NSOutlineView
-) -> SidebarProjection {
-    let projection = desiredSidebar(in: model)
-    sidebar.applySidebarOps(
-        computeSidebarRowOps(old: nil, new: projection),
-        projection: projection,
-        renameTargetToEnd: nil)
-    materializeSidebarRows(sidebar, outline: outline)
-    return projection
+) -> SidebarReconcileDriver {
+    let driver = SidebarReconcileDriver()
+    applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
+    return driver
 }
 
 @discardableResult
 private func applySidebarTransition(
-    old oldProjection: SidebarProjection,
+    old driver: SidebarReconcileDriver,
     newModel: AppModel,
     to sidebar: SidebarView,
     outline: NSOutlineView
-) -> SidebarProjection {
-    applySidebarTransitionResult(
-        old: oldProjection, newModel: newModel, to: sidebar, outline: outline
-    ).advancedProjection
+) -> SidebarReconcileDriver {
+    _ = applySidebarTestModel(newModel, using: driver, to: sidebar, outline: outline)
+    return driver
 }
 
 @discardableResult
 private func applySidebarTransitionResult(
-    old oldProjection: SidebarProjection,
+    old driver: SidebarReconcileDriver,
     newModel: AppModel,
     to sidebar: SidebarView,
     outline: NSOutlineView,
     materializeRows: Bool = true
 ) -> (
+    driver: SidebarReconcileDriver,
     advancedProjection: SidebarProjection,
     droppedTabs: Set<TabId>,
     droppedGroups: Set<GroupId>
 ) {
-    let newProjection = desiredSidebar(in: newModel)
-    let dropped = sidebar.applySidebarOps(
-        computeSidebarRowOps(old: oldProjection, new: newProjection),
-        projection: newProjection,
-        renameTargetToEnd: nil)
-    if materializeRows {
-        materializeSidebarRows(sidebar, outline: outline)
-    }
-    let advanced = advanceSidebarCache(
-        old: oldProjection,
-        new: newProjection,
-        suppressedRenameTarget: nil,
-        unappliedTabIds: dropped.tabs,
-        unappliedGroupIds: dropped.groups)
-    return (advanced, dropped.tabs, dropped.groups)
-}
-
-private func materializeSidebarRows(_ sidebar: SidebarView, outline: NSOutlineView) {
-    sidebar.layoutSubtreeIfNeeded()
-    outline.layoutSubtreeIfNeeded()
-    for row in 0..<outline.numberOfRows {
-        _ = outline.view(atColumn: 0, row: row, makeIfNecessary: true)
-        _ = outline.rowView(atRow: row, makeIfNecessary: true)
-    }
+    let result = applySidebarTestModel(
+        newModel,
+        using: driver,
+        to: sidebar,
+        outline: outline,
+        materializeRows: materializeRows)
+    return (
+        driver,
+        result.appliedProjection,
+        result.unappliedTabIds,
+        result.unappliedGroupIds)
 }
 
 private func clearVisibleSidebarRowDisplayFlags(in outline: NSOutlineView) {
@@ -494,7 +504,7 @@ private func sidebarRowView(
     file: String = #file,
     line: Int = #line
 ) throws -> SidebarRowView {
-    let row = try sidebarRow(for: tabId, in: outline, file: file, line: line)
+    let row = try sidebarTabRow(for: tabId, in: outline, file: file, line: line)
     guard let rowView = outline.rowView(atRow: row, makeIfNecessary: true) as? SidebarRowView else {
         throw UITestFailure(message: "missing SidebarRowView for tab \(tabId) (\(file):\(line))")
     }
@@ -507,7 +517,7 @@ private func assertSidebarSelectedTab(
     file: String = #file,
     line: Int = #line
 ) throws {
-    let row = try sidebarRow(for: tabId, in: outline, file: file, line: line)
+    let row = try sidebarTabRow(for: tabId, in: outline, file: file, line: line)
     try uiExpect(outline.selectedRowIndexes.contains(row), "selected rows should contain tab row", file: file, line: line)
     let rowView = outline.rowView(atRow: row, makeIfNecessary: true)
     try uiExpect(rowView?.isSelected == true, "materialized row view should be selected", file: file, line: line)
@@ -519,22 +529,6 @@ private func assertSidebarSelectedTab(
     }
 }
 
-private func sidebarRow(
-    for tabId: TabId,
-    in outline: NSOutlineView,
-    file: String = #file,
-    line: Int = #line
-) throws -> Int {
-    for row in 0..<outline.numberOfRows {
-        guard let item = outline.item(atRow: row) as? SidebarItem,
-              case .tab(let tab) = item.kind,
-              tab.id == tabId
-        else { continue }
-        return row
-    }
-    throw UITestFailure(message: "missing row for tab \(tabId) (\(file):\(line))")
-}
-
 private func sidebarVisibleTabIds(in outline: NSOutlineView) -> [TabId] {
     (0..<outline.numberOfRows).compactMap { row in
         guard let item = outline.item(atRow: row) as? SidebarItem,
@@ -542,16 +536,6 @@ private func sidebarVisibleTabIds(in outline: NSOutlineView) -> [TabId] {
         else { return nil }
         return tab.id
     }
-}
-
-private func findSidebarOutlineView(in view: NSView) -> NSOutlineView? {
-    if let outline = view as? NSOutlineView { return outline }
-    for subview in view.subviews {
-        if let found = findSidebarOutlineView(in: subview) {
-            return found
-        }
-    }
-    return nil
 }
 
 private func sidebarSelectionModel(
@@ -632,17 +616,6 @@ private func sidebarAlertModel(
     return model
 }
 
-private func sidebarBellAlert(paneId: PaneId) -> AlertModel {
-    AlertModel(
-        id: AlertId(),
-        kind: .bell,
-        paneId: paneId,
-        title: "Bell",
-        body: "",
-        createdAt: Date(timeIntervalSince1970: 0),
-        isUnread: true)
-}
-
 private func sidebarSelectionTab(_ id: TabId) -> TabModel {
     let paneId = PaneId()
     return TabModel(id: id, paneTree: PaneTree(root: .leaf(PaneModel(id: paneId)), focusedPaneId: paneId))
@@ -655,7 +628,7 @@ private func sidebarBadgeCount(
     file: String = #file,
     line: Int = #line
 ) throws -> Int {
-    let row = try sidebarRow(for: tabId, in: outline, file: file, line: line)
+    let row = try sidebarTabRow(for: tabId, in: outline, file: file, line: line)
     guard let cell = outline.view(
         atColumn: 0, row: row,
         makeIfNecessary: false) as? SidebarTabCellView

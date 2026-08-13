@@ -91,27 +91,11 @@ private func makeSidebarRightClickHarness() -> (SidebarView, NSOutlineView, NSWi
     let model = AppModel(
         groups: [GroupModel(id: GroupId(), name: "Group", tabs: tabs)],
         selectedTabId: tabs[0].id)
-    let projection = desiredSidebar(in: model)
-    sidebar.applySidebarOps(
-        computeSidebarRowOps(old: nil, new: projection),
-        projection: projection, renameTargetToEnd: nil)
+    let driver = SidebarReconcileDriver()
+    _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: sidebarOutlineView(in: sidebar)!)
 
-    let outline = findSidebarOutlineView(in: sidebar)!
-    sidebar.layoutSubtreeIfNeeded()
-    outline.layoutSubtreeIfNeeded()
-    for row in 0..<outline.numberOfRows {
-        _ = outline.view(atColumn: 0, row: row, makeIfNecessary: true)
-        _ = outline.rowView(atRow: row, makeIfNecessary: true)
-    }
+    let outline = sidebarOutlineView(in: sidebar)!
     return (sidebar, outline, window)
-}
-
-private func findSidebarOutlineView(in view: NSView) -> NSOutlineView? {
-    if let outline = view as? NSOutlineView { return outline }
-    for subview in view.subviews {
-        if let found = findSidebarOutlineView(in: subview) { return found }
-    }
-    return nil
 }
 
 private func makeSidebarContextMenuHarness(groupCount: Int) -> (SidebarView, AppModel) {
@@ -120,11 +104,12 @@ private func makeSidebarContextMenuHarness(groupCount: Int) -> (SidebarView, App
         GroupModel(id: GroupId(), name: "Group \(index + 1)")
     }
     let model = AppModel(groups: groups)
-    let projection = desiredSidebar(in: model)
-    sidebar.applySidebarOps(
-        computeSidebarRowOps(old: nil, new: projection),
-        projection: projection,
-        renameTargetToEnd: nil)
+    let driver = SidebarReconcileDriver()
+    _ = applySidebarTestModel(
+        model,
+        using: driver,
+        to: sidebar,
+        outline: sidebarOutlineView(in: sidebar)!)
     return (sidebar, model)
 }
 

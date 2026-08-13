@@ -19,7 +19,7 @@ func sidebarProjectionRowTests() {
         //   strings, so they did not exercise the outline view's click consumer.
         // Scenario: spec-first -- a tab's bell is cleared while its row stays
         //   materialized under the pointer.
-        let (sidebar, outline, window, runtime) = makeProjectionRowHarness()
+        let (sidebar, outline, window, _, driver) = makeProjectionRowHarness()
         defer { window.close() }
 
         let group = GroupId()
@@ -30,10 +30,10 @@ func sidebarProjectionRowTests() {
                 projectionRowTab(id: tab, title: "ringing", paneId: pane),
             ])],
             selectedTabId: tab)
-        model.alerts = [projectionRowBellAlert(paneId: pane)]
-        let alertedProjection = applyProjectionRowModel(model, to: sidebar, outline: outline)
+        model.alerts = [sidebarBellAlert(paneId: pane)]
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
 
-        let cell: SidebarTabCellView = try projectionRowCell(for: .tab(tab), in: outline)
+        let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         try uiExpect(cell.alertBadge.isHidden == false,
             "alerted tab should have a visible badge")
         let badge = cell.alertBadge
@@ -43,9 +43,7 @@ func sidebarProjectionRowTests() {
             "a point inside the visible badge should resolve its tab")
 
         model.alerts = []
-        _ = applyProjectionRowTransition(
-            old: alertedProjection, newModel: model,
-            to: sidebar, outline: outline, runtime: runtime)
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
 
         try uiExpect(outline.tabForBadgeHit(at: badgePoint) == nil,
             "the badge point should resolve nothing after the badge is hidden")
@@ -58,7 +56,7 @@ func sidebarProjectionRowTests() {
         //   collapses its arranged-subview width without resizing a live editor.
         // Scenario: spec-first -- jump mode ends normally, then ends again while
         //   the user is renaming the same tab.
-        let (sidebar, outline, window, runtime) = makeProjectionRowHarness()
+        let (sidebar, outline, window, _, driver) = makeProjectionRowHarness()
         defer { window.close() }
 
         let group = GroupId()
@@ -69,32 +67,26 @@ func sidebarProjectionRowTests() {
             ])],
             selectedTabId: tab)
         model.jumpMode = JumpModeState(keyMap: [tab: "a"])
-        var projection = applyProjectionRowModel(model, to: sidebar, outline: outline)
-        let cell: SidebarTabCellView = try projectionRowCell(for: .tab(tab), in: outline)
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
+        let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         window.contentView?.layoutSubtreeIfNeeded()
         let badgedWidth = projectionRowTitleLaneWidth(cell)
 
         model.jumpMode = nil
-        projection = applyProjectionRowTransition(
-            old: projection, newModel: model,
-            to: sidebar, outline: outline, runtime: runtime)
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
         window.contentView?.layoutSubtreeIfNeeded()
         let clearedWidth = projectionRowTitleLaneWidth(cell)
         try uiExpect(clearedWidth >= badgedWidth + 20,
             "clearing the jump key should return the badge width to the title lane")
 
         model.jumpMode = JumpModeState(keyMap: [tab: "a"])
-        projection = applyProjectionRowTransition(
-            old: projection, newModel: model,
-            to: sidebar, outline: outline, runtime: runtime)
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
         sidebar.beginRenamingTab(tab)
         window.contentView?.layoutSubtreeIfNeeded()
         let editingWidth = projectionRowTitleLaneWidth(cell)
 
         model.jumpMode = nil
-        let suppressed = applyProjectionRowTransition(
-            old: projection, newModel: model,
-            to: sidebar, outline: outline, runtime: runtime)
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
         window.contentView?.layoutSubtreeIfNeeded()
         try uiExpect(abs(projectionRowTitleLaneWidth(cell) - editingWidth) <= 0.5,
             "clearing the jump key during rename should not resize the title lane")
@@ -105,9 +97,7 @@ func sidebarProjectionRowTests() {
         _ = sidebar.control(
             cell.titleField, textView: editor,
             doCommandBy: #selector(NSResponder.cancelOperation(_:)))
-        _ = applyProjectionRowTransition(
-            old: suppressed, newModel: model,
-            to: sidebar, outline: outline, runtime: runtime)
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
         window.contentView?.layoutSubtreeIfNeeded()
         try uiExpect(projectionRowTitleLaneWidth(cell) >= editingWidth + 20,
             "the deferred repaint should return the badge width after rename ends")
@@ -119,29 +109,30 @@ func sidebarProjectionRowTests() {
         // Why it exists: typed access removes silent lookup failures only if each
         //   stored child remains part of the cell's single total paint path.
         // Scenario: spec-first -- a row arrives with every scalar decoration set.
-        let (sidebar, outline, window, _) = makeProjectionRowHarness()
+        let (sidebar, outline, window, _, driver) = makeProjectionRowHarness()
         defer { window.close() }
 
         let group = GroupId()
         let tab = TabId()
-        let model = AppModel(groups: [
+        var model = AppModel(groups: [
             GroupModel(id: group, name: "G", tabs: [
                 projectionRowTab(id: tab, title: "model title"),
             ]),
         ])
-        var projection = desiredSidebar(in: model)
-        projection.groups[0].tabs[0].displayTitle = DisplayLine("painted title")
-        projection.groups[0].tabs[0].subtitle = DisplayLine("painted subtitle")
-        projection.groups[0].tabs[0].unreadAlertCount = 3
-        projection.groups[0].tabs[0].jumpKey = "q"
-        projection.groups[0].tabs[0].color = .purple
-        projection.groups[0].tabs[0].chipKind = .codex
-        sidebar.applySidebarOps(
-            computeSidebarRowOps(old: nil, new: projection),
-            projection: projection, renameTargetToEnd: nil)
-        materializeProjectionRows(sidebar, outline: outline)
+        model.groups[0].tabs[0].customTitle = "painted title"
+        model.groups[0].tabs[0].color = .purple
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        model.groups[0].tabs[0].paneTree.updatePane(paneId) { pane in
+            pane.session?.cwd = "painted subtitle"
+            pane.session?.agent = .attached(
+                session: AgentSession(kind: "codex", sessionId: "paint-test")!,
+                activity: nil)
+        }
+        model.jumpMode = JumpModeState(keyMap: [tab: "q"])
+        model.alerts = (0..<3).map { _ in sidebarBellAlert(paneId: paneId) }
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
 
-        let cell: SidebarTabCellView = try projectionRowCell(for: .tab(tab), in: outline)
+        let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         try uiExpect(cell.titleField.stringValue == "painted title",
             "the title should come from the projection")
         try uiExpect(
@@ -171,7 +162,7 @@ func sidebarProjectionRowTests() {
         //   and the retained-projection retry was a no-op that looked correct.
         // Scenario: the user renames a split tab while its second pane rings a bell
         //   and its focused pane reports a new title, then ends the rename.
-        let (sidebar, outline, window, runtime) = makeProjectionRowHarness()
+        let (sidebar, outline, window, _, driver) = makeProjectionRowHarness()
         defer { window.close() }
 
         let group = GroupId()
@@ -184,9 +175,9 @@ func sidebarProjectionRowTests() {
                 projectionRowTab(id: other, title: "other"),
             ])],
             selectedTabId: edited)
-        let initial = applyProjectionRowModel(model, to: sidebar, outline: outline)
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
 
-        let cell: SidebarTabCellView = try projectionRowCell(for: .tab(edited), in: outline)
+        let cell: SidebarTabCellView = try sidebarCell(for: .tab(edited), in: outline)
         try uiExpect(cell.textField?.stringValue == "alpha",
             "precondition: the row should start on the old title")
         try uiExpect(cell.alertBadge.isHidden,
@@ -202,9 +193,8 @@ func sidebarProjectionRowTests() {
         // bell on the other pane (which moves both the badge and the strip).
         model.groups[0].tabs[0] = projectionRowSplitTab(
             id: edited, panes: [(paneA, "alpha updated"), (paneB, "beta")], focused: paneA)
-        model.alerts = [projectionRowBellAlert(paneId: paneB)]
-        let suppressed = applyProjectionRowTransition(
-            old: initial, newModel: model, to: sidebar, outline: outline, runtime: runtime)
+        model.alerts = [sidebarBellAlert(paneId: paneB)]
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
 
         // Force the reconfigure: without it the row would pass simply by never having
         // been repainted. Ending the rename resyncs the cell from its backing item.
@@ -222,10 +212,9 @@ func sidebarProjectionRowTests() {
         try uiExpect(cell.paneStrip.chips.map(\.state) == [.quiet, .quiet],
             "a reconfigure after a suppressed reload must not paint the newer strip")
 
-        _ = applyProjectionRowTransition(
-            old: suppressed, newModel: model, to: sidebar, outline: outline, runtime: runtime)
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
 
-        let converged: SidebarTabCellView = try projectionRowCell(
+        let converged: SidebarTabCellView = try sidebarCell(
             for: .tab(edited), in: outline)
         try uiExpect(converged.textField?.stringValue == "alpha updated",
             "the retained projection should re-fire the reload and converge the title")
@@ -245,7 +234,7 @@ func sidebarProjectionRowTests() {
         //   badges to the row ops that were actually applied.
         // Scenario: spec-first -- a group collapses while gaining a tab and a bell,
         //   then expands again.
-        let (sidebar, outline, window, runtime) = makeProjectionRowHarness()
+        let (sidebar, outline, window, _, driver) = makeProjectionRowHarness()
         defer { window.close() }
 
         let groupA = GroupId(); let groupB = GroupId()
@@ -262,7 +251,7 @@ func sidebarProjectionRowTests() {
                 ]),
             ],
             selectedTabId: first)
-        let expandedProjection = applyProjectionRowModel(model, to: sidebar, outline: outline)
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
 
         try assertProjectionRowGroup(
             groupA, in: outline, caret: "chevron.down",
@@ -272,10 +261,8 @@ func sidebarProjectionRowTests() {
         model.groups[0].isCollapsed = true
         model.groups[0].tabs.append(
             projectionRowTab(id: added, title: "three", paneId: addedPane))
-        model.alerts = [projectionRowBellAlert(paneId: addedPane)]
-        let collapsedProjection = applyProjectionRowTransition(
-            old: expandedProjection, newModel: model,
-            to: sidebar, outline: outline, runtime: runtime)
+        model.alerts = [sidebarBellAlert(paneId: addedPane)]
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
 
         try assertProjectionRowGroup(
             groupA, in: outline, caret: "chevron.right",
@@ -283,9 +270,7 @@ func sidebarProjectionRowTests() {
             bell: "1", tabCount: "3", label: "collapsed group")
 
         model.groups[0].isCollapsed = false
-        _ = applyProjectionRowTransition(
-            old: collapsedProjection, newModel: model,
-            to: sidebar, outline: outline, runtime: runtime)
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
 
         try assertProjectionRowGroup(
             groupA, in: outline, caret: "chevron.down",
@@ -296,7 +281,9 @@ func sidebarProjectionRowTests() {
 
 // MARK: - Harness helpers
 
-private func makeProjectionRowHarness() -> (SidebarView, SidebarOutlineView, NSWindow, AppRuntime) {
+private func makeProjectionRowHarness() -> (
+    SidebarView, SidebarOutlineView, NSWindow, AppRuntime, SidebarReconcileDriver
+) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
     let runtime = AppRuntime()
     sidebar.runtime = runtime
@@ -307,8 +294,8 @@ private func makeProjectionRowHarness() -> (SidebarView, SidebarOutlineView, NSW
         defer: false)
     window.contentView = sidebar
     window.layoutIfNeeded()
-    let outline = findProjectionRowOutlineView(in: sidebar)!
-    return (sidebar, outline, window, runtime)
+    let outline = sidebarOutlineView(in: sidebar) as! SidebarOutlineView
+    return (sidebar, outline, window, runtime, SidebarReconcileDriver())
 }
 
 private func projectionRowTab(
@@ -335,89 +322,8 @@ private func projectionRowSplitTab(
     return TabModel(id: id, paneTree: PaneTree(root: root, focusedPaneId: focused))
 }
 
-private func projectionRowBellAlert(paneId: PaneId) -> AlertModel {
-    AlertModel(
-        id: AlertId(), kind: .bell, paneId: paneId,
-        title: "bell", body: "", createdAt: Date(timeIntervalSince1970: 0), isUnread: true)
-}
-
-@discardableResult
-private func applyProjectionRowModel(
-    _ model: AppModel,
-    to sidebar: SidebarView,
-    outline: NSOutlineView
-) -> SidebarProjection {
-    let projection = desiredSidebar(in: model)
-    sidebar.applySidebarOps(
-        computeSidebarRowOps(old: nil, new: projection),
-        projection: projection,
-        renameTargetToEnd: nil)
-    materializeProjectionRows(sidebar, outline: outline)
-    return projection
-}
-
-/// Mirrors reconcileSidebar's production pipeline: guard the raw ops with the
-/// view-owned rename target, apply, then advance the cache so a suppressed or
-/// dropped row keeps its prior projection for the next transition.
-@discardableResult
-private func applyProjectionRowTransition(
-    old oldProjection: SidebarProjection,
-    newModel: AppModel,
-    to sidebar: SidebarView,
-    outline: NSOutlineView,
-    runtime: AppRuntime
-) -> SidebarProjection {
-    let newProjection = desiredSidebar(in: newModel)
-    let guarded = guardSidebarRenameOps(
-        ops: computeSidebarRowOps(old: oldProjection, new: newProjection),
-        renameTarget: sidebar.activeRenameTarget,
-        new: newProjection)
-    let dropped = sidebar.applySidebarOps(
-        guarded.ops, projection: newProjection,
-        renameTargetToEnd: guarded.clearRename ? sidebar.activeRenameTarget : nil)
-    materializeProjectionRows(sidebar, outline: outline)
-    return advanceSidebarCache(
-        old: oldProjection, new: newProjection,
-        suppressedRenameTarget: sidebar.activeRenameTarget,
-        unappliedTabIds: dropped.tabs,
-        unappliedGroupIds: dropped.groups)
-}
-
-private func materializeProjectionRows(_ sidebar: SidebarView, outline: NSOutlineView) {
-    sidebar.layoutSubtreeIfNeeded()
-    outline.layoutSubtreeIfNeeded()
-    for row in 0..<outline.numberOfRows {
-        _ = outline.view(atColumn: 0, row: row, makeIfNecessary: true)
-        _ = outline.rowView(atRow: row, makeIfNecessary: true)
-    }
-}
-
 private func projectionRowTitleLaneWidth(_ cell: SidebarTabCellView) -> CGFloat {
     cell.leadingStack.bounds.maxX - cell.titleField.frame.minX
-}
-
-private func projectionRowCell<Cell: NSTableCellView>(
-    for target: RenameTarget,
-    in outline: NSOutlineView,
-    file: String = #file,
-    line: Int = #line
-) throws -> Cell {
-    for row in 0..<outline.numberOfRows {
-        guard let item = outline.item(atRow: row) as? SidebarItem else { continue }
-        let matches: Bool = {
-            switch (target, item.kind) {
-            case (.tab(let expected), .tab(let tab)): return expected == tab.id
-            case (.group(let expected), .group(let group)): return expected == group.id
-            default: return false
-            }
-        }()
-        guard matches,
-              let cell = outline.view(
-                atColumn: 0, row: row, makeIfNecessary: true) as? Cell
-        else { continue }
-        return cell
-    }
-    throw UITestFailure(message: "missing cell for \(target) (\(file):\(line))")
 }
 
 /// Assert a group row's three projection-driven accessories at once. `bell` and
@@ -434,7 +340,7 @@ private func assertProjectionRowGroup(
     file: String = #file,
     line: Int = #line
 ) throws {
-    let cell: SidebarGroupCellView = try projectionRowCell(
+    let cell: SidebarGroupCellView = try sidebarCell(
         for: .group(groupId), in: outline, file: file, line: line)
     try uiExpect(cell.titleField.stringValue == title,
         "\(label): title should show \(title)", file: file, line: line)
@@ -453,14 +359,4 @@ private func assertProjectionRowGroup(
     let shownCount = cell.tabCountBadge.isHidden ? nil : cell.tabCountBadge.stringValue
     try uiExpect(shownCount == tabCount,
         "\(label): tab-count badge should show \(tabCount ?? "nothing")", file: file, line: line)
-}
-
-private func findProjectionRowOutlineView(in view: NSView) -> SidebarOutlineView? {
-    if let outline = view as? SidebarOutlineView { return outline }
-    for subview in view.subviews {
-        if let found = findProjectionRowOutlineView(in: subview) {
-            return found
-        }
-    }
-    return nil
 }

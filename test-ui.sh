@@ -113,6 +113,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/TableContextMenuHighlight.swift" \
         "$SCRIPT_DIR/app/SidebarCellViews.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \
+        "$SCRIPT_DIR/app/SidebarReconcileDriver.swift" \
         "$SCRIPT_DIR/app/SwitcherPanel.swift" \
         "$SCRIPT_DIR/app/BellToolbarButton.swift" \
         "$SCRIPT_DIR/app/TitlebarDragView.swift" \
@@ -128,6 +129,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/PaneStripViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/MenuCommandPolicyTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoInputViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/SidebarTestSupport.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarSelectionCacheTests.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarRenameRecycleTests.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarContextMenuTests.swift" \

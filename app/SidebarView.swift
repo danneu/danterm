@@ -295,8 +295,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     // MARK: - Reconcile & Reload
 
-    /// Entry point for the reconcileSidebar pass: apply an ordered row-op script to the
-    /// NSOutlineView, then reapply the view-owned selection. `isReloading` suppresses the
+    /// Executes row ops for `SidebarReconcileDriver`, its only production caller, then
+    /// reapplies the view-owned selection. `isReloading` suppresses the
     /// selectionDidChange / collapse feedback loop while we mutate. Mirrors what the old
     /// imperative `reload(model:)` / `applySelection(...)` did (snapshot selection ->
     /// mutate -> resolveReloadSelection -> restore), but the mutation is now the granular
