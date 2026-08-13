@@ -146,7 +146,7 @@ in itself.
 | ------ | ----------- | ----- | --- | --- | -------------- | ------ | ----------------------------------------------------------------------------------------------------------------------- |
 |        | [S01](#s01) | 25    | 5   | 5   | build          | small  | Make CI run the local gate instead of running no tests at all                                                           |
 | part 3b95df8f | [S02](#s02) | 20    | 4   | 5   | app-runtime    | medium | Make TODO/alerts popover existence a reconcile pass, not four commands                                     |
-| ce093e2e | [S03](#s03) | 20    | 4   | 5   | build          | medium | Collapse the duplicated bundle assembly in dev-build.sh and build-app.sh                                                |
+| de143358 ccaa146a | [S03](#s03) | 20    | 4   | 5   | build          | medium | Collapse the duplicated bundle assembly in dev-build.sh and build-app.sh                                                |
 | ce093e2e 9947118a | [S04](#s04) | 20    | 4   | 5   | build          | small  | Replace the four hand-copied bundle-layout assertion lists with one script                                              |
 |        | [S05](#s05) | 20    | 4   | 5   | core-model     | medium | Make a tab's focus and zoom part of its tree, not two loose fields                                                      |
 | 31c8d71d | [S06](#s06) | 20    | 4   | 5   | core-model     | small  | Give sessions one tree-walking mutator instead of five whole-model traversals per report                                |
