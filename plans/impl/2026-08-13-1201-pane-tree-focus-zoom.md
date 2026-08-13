@@ -192,7 +192,7 @@ Each commit leaves the tree building and `just test` green.
   `tabChrome` and `tabChipKind` and adopt the non-optional focused-pane accessor
   where a tab is already in hand. Foldable into commit 2 if that diff stays
   reviewable.
-- [ ] **4. Record the finding as closed.** Put the commit hashes in the Status
+- [x] **4. Record the finding as closed.** Put the commit hashes in the Status
   column of the S05 row in `docs/scratch/2026-08-11-simplification-audit.md`,
   matching the convention the closed rows already use.
 
