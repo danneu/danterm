@@ -11,7 +11,9 @@ spike (T4), and F5 for the bridge prototype over the tailnet (T5).
   in briefing.md sec. 4 for those modules.
 - Date and investigator: 2026-08-12, agent (T1).
 - Commit and worktree state: `98fcca12`, clean tree plus the temporary iOS
-  platform pins the reproduction script applies and restores.
+  platform pins the reproduction script applies and restores. Re-run unchanged
+  on the merge that landed this finding, after six commits that touched
+  `DanTermCore`.
 - Environment: Xcode 26.6 (17F113), Swift 6.3.3, iOS 26.5 SDKs. Simulator triple
   `arm64-apple-ios26.5-simulator`, device triple `arm64-apple-ios26.5`.
 - Commands, inputs, or reproduction:
