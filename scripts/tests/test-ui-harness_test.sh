@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract test for checkout-independent UI harness build artifacts.
+# Contract test for the UI harness compiler invocation and checkout-independent artifacts.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -22,6 +22,7 @@ cp "$REPO_ROOT/test-ui.sh" "$TEST_ROOT/checkout-b/test-ui.sh"
 
 export UI_COMPILE_LOG="$TEST_ROOT/compile.log"
 export UI_RUN_LOG="$TEST_ROOT/run.log"
+export UI_SOURCE_LOG="$TEST_ROOT/source.log"
 cat > "$FAKE_BIN/xcrun" <<'SHIM'
 #!/usr/bin/env bash
 output=""
@@ -35,6 +36,10 @@ while (( $# > 0 )); do
         -o)
             output="$2"
             shift 2
+            ;;
+        *.swift)
+            printf '%s\n' "$1" >> "$UI_SOURCE_LOG"
+            shift
             ;;
         *)
             shift
@@ -91,6 +96,14 @@ done < "$UI_RUN_LOG"
 [[ ${#run_paths[@]} -eq 2 ]] || fail "expected two UI run paths"
 [[ "${compile_paths[0]}" != "${compile_paths[1]}" ]] \
     || fail "concurrent checkouts shared UI binary ${compile_paths[0]}"
+
+# Intent: the UI compiler receives the portable pane-tape values used by TerminalSession.
+# Why it exists: the explicit harness source list can omit a dependency that the app target
+#   receives automatically.
+# Scenario: each concurrent checkout compiles the complete TerminalSession source boundary.
+pane_tape_source_count="$(grep -c '/PaneTapeRecords.swift$' "$UI_SOURCE_LOG" || true)"
+[[ "$pane_tape_source_count" -eq 2 ]] \
+    || fail "expected PaneTapeRecords.swift in both UI compiler invocations"
 
 for path in "${compile_paths[@]}"; do
     printf '%s\n' "${run_paths[@]}" | grep -qFx "$path" \

@@ -228,9 +228,3 @@ and only the first is behavior. `cell.alertBadge` asserts the first alone.
   does not expose caret clicks, jump mode, badge clicks, or divider drags, so
   the AppKit harness covered those interactions instead of expanding this
   refactor into new IPC commands.
-
-## Follow Up
-
-- `test-ui.sh` omits `lib/DanTermSupport/Sources/DanTermSupport/PaneTapeRecords.swift`,
-  so the UI harness cannot compile the `PaneTape*` types used by
-  `app/TerminalSession.swift` without a temporary file-list correction.
