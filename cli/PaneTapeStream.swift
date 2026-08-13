@@ -1,5 +1,10 @@
 // Unbuffered JSON Lines renderer for pane-tape streams, finite and followed alike.
+//
+// This file renders; it does not read a socket. The conversation it renders comes from a
+// DanTermClient session, and each record's shape is decoded by that module's reader, so
+// the only spellings left here are the CLI's own output policy.
 import Foundation
+import DanTermClient
 import DanTermProtocol
 import Darwin
 
@@ -40,8 +45,6 @@ func paneTapeStreamFailure(for outcome: PaneTapeStreamOutcome) -> PaneTapeStream
 enum PaneTapeStreamError: Error, LocalizedError {
     case rpc(String)
     case malformedResponse
-    case readFailed
-    case lineTooLarge
     case writeFailed
     case incompleteCapture
 
@@ -49,85 +52,56 @@ enum PaneTapeStreamError: Error, LocalizedError {
         switch self {
         case .rpc(let message): return message
         case .malformedResponse: return "malformed response"
-        case .readFailed: return "failed to read from DanTerm"
-        case .lineTooLarge: return "response line too large"
         case .writeFailed: return "failed to write pane tape stream"
         case .incompleteCapture: return "DanTerm closed the connection before the tape ended"
         }
     }
 }
 
-/// Unwraps one tape conversation and writes each record directly to an output fd.
+/// Renders one tape conversation, writing each record directly to an output fd.
 ///
 /// `transform` is applied to every unwrapped record before it is written, one record at a
 /// time, which is what keeps a derived view from needing the whole recording in memory.
+/// Every record is written as it arrived rather than re-encoded from a decoded form, so a
+/// replay capture keeps the exact bytes -- including a record kind this build does not
+/// know, which is passed through and does not end the stream.
 func renderPaneTapeStream(
-    socket: Int32,
+    session: DanTermClientSession,
     output: Int32,
     requestId: String,
     transform: (JSONValue) throws -> JSONValue = { $0 }
 ) throws -> PaneTapeStreamOutcome {
-    var capture: PaneTapeCaptureMode?
-    while let line = try readPaneTapeLine(from: socket) {
-        let envelope = try JSONDecoder().decode(JSONValue.self, from: Data(line.utf8))
+    guard let response = try session.awaitReply(id: .string(requestId)) else {
+        return .init(termination: .eof, capture: nil)
+    }
+    if let error = response.error {
+        throw PaneTapeStreamError.rpc(error.message)
+    }
+    // A capture this build does not know is malformed, not a follow. Failing open here
+    // would apply the permissive ending rule to a stream that never claimed it.
+    guard let start = response.result,
+          case .start(let opening)? = decodePaneTapeRecord(start)
+    else {
+        throw PaneTapeStreamError.malformedResponse
+    }
+    let capture = opening.capture
+    guard try writePaneTapeRecord(transform(start), to: output) else {
+        return .init(termination: .brokenPipe, capture: capture)
+    }
 
-        if capture == nil, envelope["id"] == .string(requestId) {
-            if let message = envelope["error"]?["message"]?.asString {
-                throw PaneTapeStreamError.rpc(message)
-            }
-            // A capture this build does not know is malformed, not a follow. Failing open
-            // here would apply the permissive ending rule to a stream that never claimed it.
-            guard let start = envelope["result"],
-                  let mode = start["capture"]?.asString
-                      .flatMap(PaneTapeCaptureMode.init(rawValue:))
-            else {
-                throw PaneTapeStreamError.malformedResponse
-            }
-            guard try writePaneTapeRecord(transform(start), to: output) else {
-                return .init(termination: .brokenPipe, capture: mode)
-            }
-            capture = mode
-            continue
-        }
-
-        guard capture != nil,
-              envelope["method"] == .string(Methods.paneTapeEvent),
-              let record = envelope["params"]?["record"]
-        else {
-            continue
-        }
-        guard try writePaneTapeRecord(transform(record), to: output) else {
+    while let notification = try session.nextNotification() {
+        guard let carried = PaneTapeStreamNotification(
+            method: notification.method,
+            params: notification.params
+        ) else { continue }
+        guard try writePaneTapeRecord(transform(carried.record), to: output) else {
             return .init(termination: .brokenPipe, capture: capture)
         }
-        if record["kind"] == .string("end") {
+        if case .end? = decodePaneTapeRecord(carried.record) {
             return .init(termination: .end, capture: capture)
         }
     }
     return .init(termination: .eof, capture: capture)
-}
-
-private func readPaneTapeLine(from descriptor: Int32) throws -> String? {
-    var data = Data()
-    var byte = UInt8(0)
-    while true {
-        let count = withUnsafeMutableBytes(of: &byte) { buffer in
-            Darwin.read(descriptor, buffer.baseAddress, 1)
-        }
-        if count == 0 {
-            return data.isEmpty ? nil : String(data: data, encoding: .utf8)
-        }
-        if count < 0 {
-            if errno == EINTR { continue }
-            throw PaneTapeStreamError.readFailed
-        }
-        if byte == 0x0A {
-            return String(data: data, encoding: .utf8)
-        }
-        data.append(byte)
-        if data.count > 16 * 1024 * 1024 {
-            throw PaneTapeStreamError.lineTooLarge
-        }
-    }
 }
 
 private func writePaneTapeRecord(_ record: JSONValue, to descriptor: Int32) throws -> Bool {

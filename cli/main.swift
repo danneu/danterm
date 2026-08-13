@@ -1,5 +1,11 @@
 // Local utility commands and the command-line client for DanTerm's JSON-RPC socket.
+//
+// The conversation itself -- connecting, framing, the hello handshake, correlating a
+// reply -- belongs to DanTermClient. What stays here is the part that is genuinely the
+// CLI's: which socket to talk to, and how each failure is worded for a person reading a
+// terminal. Do not grow a second transport in this file.
 import Foundation
+import DanTermClient
 import DanTermProtocol
 import DanTermSupport
 import Darwin
@@ -17,9 +23,9 @@ struct CLIError: Error {
 struct DanTermCLI {
     private static let socketTimeoutSeconds = 5
 
-    // Top-level help text. Kept in sync by hand with `parseCLI` and
-    // the `EnvVars` constants used in `request(...)` -- there is no
-    // automated check, so any change to either touches this string too.
+    // Top-level help text. Kept in sync by hand with `parseCLI` and the `EnvVars`
+    // constants read by `selectControlSocketPath(...)` -- there is no automated check,
+    // so any change to either touches this string too.
     private static let usageText: String = """
         danterm -- control DanTerm from the shell
 
@@ -160,7 +166,7 @@ struct DanTermCLI {
             }
             // A nil reply means the app closed the connection and the method
             // expected that -- a quit it honored exits before it can answer.
-            if let response = try request(command, socketPath: socketPath, environment: environment) {
+            if let response = try request(command, socketPath: socketPath) {
                 if let error = response.error {
                     throw CLIError(error.message)
                 }
@@ -183,51 +189,117 @@ struct DanTermCLI {
     /// under the request because that is what the request asked for.
     private static func request(
         _ command: CLICommand,
-        socketPath: String,
-        environment: [String: String]
+        socketPath: String
     ) throws -> JsonRpcResponse? {
-        let fd = try connectSocket(path: socketPath, receiveTimeout: true)
-        defer { Darwin.close(fd) }
-
-        guard let helloLine = try readLine(from: fd) else {
-            throw CLIError("DanTerm closed the connection")
-        }
-        try validateHello(helloLine)
+        let session = try openSession(socketPath: socketPath, receiveTimeout: true)
+        defer { session.close() }
 
         let (requestId, request) = makeRequest(command)
-        try writeJSON(request, to: fd)
-
-        return try awaitReply(requestId: requestId, method: command.request.method) {
-            try readLine(from: fd)
+        let reply = try reporting(socketPath) {
+            try session.send(request)
+            return try session.awaitReply(id: .string(requestId))
         }
+        return try resolveReply(reply, method: command.request.method)
     }
 
-    /// Renders one tape capture to stdout. The socket carries no receive timeout: a followed
-    /// stream is idle whenever its pane is, and a finite dump's records arrive at the app's
-    /// pace, so a timeout here would cut a healthy capture short.
+    /// Renders one tape capture to stdout. The connection carries no receive timeout: a
+    /// followed stream is idle whenever its pane is, and a finite dump's records arrive at
+    /// the app's pace, so a timeout here would cut a healthy capture short.
     private static func requestPaneTape(
         _ command: CLICommand,
         socketPath: String,
         format: PaneTapeFormat
     ) throws {
-        let fd = try connectSocket(path: socketPath, receiveTimeout: false)
-        defer { Darwin.close(fd) }
-
-        guard let helloLine = try readLine(from: fd) else {
-            throw CLIError("DanTerm closed the connection")
-        }
-        try validateHello(helloLine)
+        let session = try openSession(socketPath: socketPath, receiveTimeout: false)
+        defer { session.close() }
 
         let (requestId, request) = makeRequest(command)
-        try writeJSON(request, to: fd)
-        let outcome = try renderPaneTapeStream(
-            socket: fd,
-            output: STDOUT_FILENO,
-            requestId: requestId,
-            transform: format == .inspect ? paneTapeInspectRecord : { $0 }
-        )
+        let outcome = try reporting(socketPath) {
+            try session.send(request)
+            return try renderPaneTapeStream(
+                session: session,
+                output: STDOUT_FILENO,
+                requestId: requestId,
+                transform: format == .inspect ? paneTapeInspectRecord : { $0 }
+            )
+        }
         if let failure = paneTapeStreamFailure(for: outcome) {
             throw failure
+        }
+    }
+
+    /// Connects and completes the handshake, so no caller sends a request to a peer whose
+    /// protocol version it has not agreed with.
+    private static func openSession(
+        socketPath: String,
+        receiveTimeout: Bool
+    ) throws -> DanTermClientSession {
+        let transport = try reporting(socketPath) {
+            try UnixSocketTransport(
+                path: socketPath,
+                receiveTimeout: receiveTimeout ? Double(socketTimeoutSeconds) : nil,
+                sendTimeout: Double(socketTimeoutSeconds)
+            )
+        }
+        let session = DanTermClientSession(transport: transport)
+        do {
+            try session.handshake()
+        } catch {
+            session.close()
+            throw cliError(error, socketPath: socketPath)
+        }
+        return session
+    }
+
+    /// Runs one step of the conversation and words any failure the way this CLI words it.
+    private static func reporting<T>(_ socketPath: String, _ body: () throws -> T) throws -> T {
+        do {
+            return try body()
+        } catch let error as UnixSocketTransportError {
+            throw cliError(error, socketPath: socketPath)
+        } catch let error as DanTermClientError {
+            throw cliError(error, socketPath: socketPath)
+        }
+    }
+
+    /// Translates a client-module failure into the sentence a person sees.
+    ///
+    /// The wording lives here rather than in the module because it is this CLI's contract
+    /// with its callers, and because a phone client showing "DanTerm is not running" would
+    /// be saying something different from what it means.
+    private static func cliError(_ error: Error, socketPath: String) -> Error {
+        switch error {
+        case UnixSocketTransportError.unreachable:
+            return CLIError("DanTerm is not running")
+        case UnixSocketTransportError.accessDenied(let path):
+            return CLIError("cannot access control socket (sandbox or permissions): \(path)")
+        case UnixSocketTransportError.connectFailed(let reason, let path):
+            return CLIError("cannot connect to control socket (\(reason)): \(path)")
+        case UnixSocketTransportError.pathTooLong:
+            return CLIError("socket path is too long")
+        case UnixSocketTransportError.createFailed:
+            return CLIError("failed to create socket")
+        case UnixSocketTransportError.configureFailed:
+            return CLIError("failed to configure socket")
+        case UnixSocketTransportError.configureTimeoutFailed:
+            return CLIError("failed to configure socket timeout")
+        case UnixSocketTransportError.timedOut:
+            return CLIError("DanTerm is not responding")
+        case UnixSocketTransportError.readFailed:
+            return CLIError("failed to read from DanTerm")
+        case UnixSocketTransportError.writeFailed:
+            return CLIError("failed to write to DanTerm")
+        case UnixSocketTransportError.peerClosed,
+             DanTermClientError.closedBeforeHello:
+            return CLIError("DanTerm closed the connection")
+        case DanTermClientError.invalidHello:
+            return CLIError("invalid hello from DanTerm")
+        case DanTermClientError.unsupportedProtocol(let version):
+            return CLIError("unsupported DanTerm IPC protocol \(version)")
+        case DanTermClientError.oversizedLine:
+            return CLIError("response line too large")
+        default:
+            return error
         }
     }
 
@@ -264,7 +336,7 @@ struct DanTermCLI {
             method: .doctorPermissions
         ) else { return .unavailable }
         let command = CLICommand(request: .doctorPermissions, outputMode: .none)
-        let reply = try? request(command, socketPath: socketPath, environment: environment)
+        let reply = try? request(command, socketPath: socketPath)
         guard let response = reply ?? nil,
               response.error == nil,
               let result = response.result,
@@ -294,145 +366,6 @@ struct DanTermCLI {
         }
     }
 
-    private static func validateHello(_ line: String) throws {
-        let hello = try JSONDecoder().decode(JsonRpcRequest.self, from: Data(line.utf8))
-        guard hello.method == Methods.hello,
-              let version = hello.params?["protocol"]?.asNumber
-        else {
-            throw CLIError("invalid hello from DanTerm")
-        }
-        guard Int(version) == 1 else {
-            throw CLIError("unsupported DanTerm IPC protocol \(Int(version))")
-        }
-    }
-
-    private static func connectSocket(path: String, receiveTimeout: Bool) throws -> Int32 {
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw CLIError("failed to create socket") }
-        do {
-            try configureSocket(fd, receiveTimeout: receiveTimeout)
-        } catch {
-            Darwin.close(fd)
-            throw error
-        }
-
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-        let maxLength = MemoryLayout.size(ofValue: addr.sun_path)
-        guard path.utf8.count < maxLength else {
-            Darwin.close(fd)
-            throw CLIError("socket path is too long")
-        }
-        path.withCString { ptr in
-            withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
-                let buffer = UnsafeMutableRawPointer(pathPtr).assumingMemoryBound(to: CChar.self)
-                strncpy(buffer, ptr, maxLength - 1)
-            }
-        }
-
-        let result = withUnsafePointer(to: &addr) { ptr in
-            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                Darwin.connect(fd, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        }
-        if result != 0 {
-            let connectErrno = errno
-            Darwin.close(fd)
-            throw connectError(errorNumber: connectErrno, path: path)
-        }
-        return fd
-    }
-
-    private static func connectError(errorNumber: Int32, path: String) -> CLIError {
-        switch errorNumber {
-        case ENOENT, ECONNREFUSED:
-            return CLIError("DanTerm is not running")
-        case EACCES, EPERM:
-            return CLIError("cannot access control socket (sandbox or permissions): \(path)")
-        default:
-            let reason = String(cString: strerror(errorNumber))
-            return CLIError("cannot connect to control socket (\(reason)): \(path)")
-        }
-    }
-
-    private static func configureSocket(_ fd: Int32, receiveTimeout: Bool) throws {
-        try setNoSigPipe(fd)
-        if receiveTimeout {
-            try setSocketTimeout(fd, option: SO_RCVTIMEO)
-        }
-        try setSocketTimeout(fd, option: SO_SNDTIMEO)
-    }
-
-    private static func setNoSigPipe(_ fd: Int32) throws {
-        var value: Int32 = 1
-        let result = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &value, socklen_t(MemoryLayout<Int32>.size))
-        guard result == 0 else {
-            throw CLIError("failed to configure socket")
-        }
-    }
-
-    private static func setSocketTimeout(_ fd: Int32, option: Int32) throws {
-        var timeout = timeval(tv_sec: socketTimeoutSeconds, tv_usec: 0)
-        let result = withUnsafePointer(to: &timeout) { pointer in
-            setsockopt(fd, SOL_SOCKET, option, pointer, socklen_t(MemoryLayout<timeval>.size))
-        }
-        guard result == 0 else {
-            throw CLIError("failed to configure socket timeout")
-        }
-    }
-
-    private static func readLine(from fd: Int32) throws -> String? {
-        var data = Data()
-        var byte = UInt8(0)
-        while true {
-            let count = withUnsafeMutableBytes(of: &byte) { buffer in
-                Darwin.read(fd, buffer.baseAddress, 1)
-            }
-            if count == 0 { return data.isEmpty ? nil : String(data: data, encoding: .utf8) }
-            if count < 0 {
-                if errno == EINTR {
-                    continue
-                }
-                if errno == EAGAIN || errno == EWOULDBLOCK {
-                    throw CLIError("DanTerm is not responding")
-                }
-                throw CLIError("failed to read from DanTerm")
-            }
-            if byte == 0x0A {
-                return String(data: data, encoding: .utf8)
-            }
-            data.append(byte)
-            if data.count > 16 * 1024 * 1024 {
-                throw CLIError("response line too large")
-            }
-        }
-    }
-
-    private static func writeJSON<T: Encodable>(_ value: T, to fd: Int32) throws {
-        var data = try JSONEncoder().encode(value)
-        data.append(0x0A)
-        try data.withUnsafeBytes { buffer in
-            guard let baseAddress = buffer.baseAddress else { return }
-            var offset = 0
-            while offset < buffer.count {
-                let written = Darwin.write(fd, baseAddress.advanced(by: offset), buffer.count - offset)
-                if written < 0 {
-                    if errno == EINTR {
-                        continue
-                    }
-                    if errno == EAGAIN || errno == EWOULDBLOCK {
-                        throw CLIError("DanTerm is not responding")
-                    }
-                    throw CLIError("failed to write to DanTerm")
-                }
-                if written == 0 {
-                    throw CLIError("DanTerm closed the connection")
-                }
-                offset += written
-            }
-        }
-    }
-
     private static func printResult(_ result: JSONValue, mode: CLIOutputMode) throws {
         switch mode {
         case .none:
@@ -459,23 +392,15 @@ struct DanTermCLI {
 
 }
 
-/// Reads replies until the one matching this request arrives.
+/// Decides what a missing reply means for the method that asked for it.
 ///
-/// Returns nil when the app closed the stream first. That is a failure for an
-/// ordinary method, and the expected success for a method that ends the
-/// instance: a quit that worked takes the socket down with the app, so only an
-/// explicit error reply means it did not happen.
-func awaitReply(
-    requestId: String,
-    method: IpcRequestMethod,
-    nextLine: () throws -> String?
-) throws -> JsonRpcResponse? {
-    while let line = try nextLine() {
-        let response = try JSONDecoder().decode(JsonRpcResponse.self, from: Data(line.utf8))
-        if response.id == .string(requestId) {
-            return response
-        }
-    }
+/// The session reports "the app closed the stream before replying" as nil and leaves the
+/// judgement here, because only the CLI knows the verb. That is a failure for an ordinary
+/// method, and the expected success for a method that ends the instance: a quit that
+/// worked takes the socket down with the app, so only an explicit error reply means it did
+/// not happen.
+func resolveReply(_ reply: JsonRpcResponse?, method: IpcRequestMethod) throws -> JsonRpcResponse? {
+    if let reply { return reply }
     guard method.terminatesInstance else {
         throw CLIError("DanTerm closed the connection")
     }
