@@ -87,21 +87,34 @@ Add the flake and Home Manager module:
 Press Cmd+, to edit settings. DanTerm stores them in
 `~/.config/danterm/config.json`.
 
+Every setting has a default, so a new config file holds only
+`{"schemaVersion": 1}`. This example writes each one out at its default value:
+
 ```json
 {
   "schemaVersion": 1,
-  "font": { "size": 14 },
-  "theme": { "default": "Dracula", "remote": "Purplepeter" },
+  "font": { "size": 13 },
+  "theme": { "default": "Monokai Remastered", "remote": "Purplepeter" },
   "shell": { "localeFallback": true },
   "ui": { "alertClearMode": "focus", "copyOnSelect": true }
 }
 ```
 
+| Key | Default | Meaning |
+|---|---|---|
+| `font.family` | system monospace | Terminal font family. Omit the key to keep the system font. |
+| `font.size` | `13` | Terminal font size, in points. Bounded to 8 through 72. |
+| `theme.default` | `"Monokai Remastered"` | Theme for local panes. |
+| `theme.remote` | `"Purplepeter"` | Theme for panes in an SSH or other remote session. |
+| `shell.localeFallback` | `true` | Give a local pane a UTF-8 `LANG` when it inherits none. |
+| `ui.alertClearMode` | `"focus"` | `"focus"` clears pane alerts on focus, `"manual"` keeps them until you dismiss them. |
+| `ui.copyOnSelect` | `true` | Copy a mouse selection to the clipboard when it finishes. |
+
 Press Cmd+Shift+, to reload the file.
 
-`shell.localeFallback` defaults to `true`. For locally spawned panes, DanTerm
-sets `LANG` to a supported UTF-8 locale only when it inherits no non-empty
-`LANG`, `LC_CTYPE`, or `LC_ALL`. Set it to `false` to disable this fallback.
+For locally spawned panes, DanTerm sets `LANG` to a supported UTF-8 locale only
+when it inherits no non-empty `LANG`, `LC_CTYPE`, or `LC_ALL`. Set
+`shell.localeFallback` to `false` to disable this fallback.
 
 Keep alerts until you dismiss them:
 
