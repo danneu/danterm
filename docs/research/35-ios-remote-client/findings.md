@@ -335,6 +335,14 @@ paced reports whether the cadence holds, saturated reports what a frame costs.
   arm's share and could change the ratio. `damage.apply` returning false falls
   back to a full render in the copy arm, and how often that happened is not
   instrumented.
+- Uncertainty, and the one that bears on D2: the harness does not implement the
+  swapchain's owner contract. `app/SwiftTerminalSessionView.swift` retries a
+  coalesced publish on a later tick; the energy arm here does neither -- it
+  ignores a nil return and still counts the frame, so a coalesced publish would
+  read as a delivered frame. The paced benchmark did count them, at zero across
+  480 samples per arm, which is the only reason to think the energy arm's frame
+  counts are honest. A client that runs this swapchain has to own the retry, and
+  that owner is real iOS code the copy path would not need.
 
 #### Getting on device needs no Xcode project
 
