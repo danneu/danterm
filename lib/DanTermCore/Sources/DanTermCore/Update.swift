@@ -26,10 +26,11 @@ func update(
 
     // MARK: - IPC
 
-    case .ipcRequest(let reqId, let request):
+    case .ipcRequest(let reqId, let caller, let request):
         return handleIpcRequest(
             &model,
             reqId: reqId,
+            caller: caller,
             request: request,
             env: env
         )

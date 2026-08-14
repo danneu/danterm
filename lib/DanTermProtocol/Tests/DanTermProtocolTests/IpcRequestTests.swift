@@ -55,6 +55,17 @@ struct IpcRequestTests {
         #expect(ending == [.quit])
     }
 
+    @Test("quit is the only method that requires a local caller")
+    func quitIsTheOnlyLocalCallerMethod() {
+        // Intent: every catalog method makes an explicit remote-authority choice.
+        // Why it exists: a new method must not silently inherit local or remote
+        //   authority when it joins the exhaustive request catalog.
+        // Scenario: the milestone-1 remote surface permits every method except quit.
+        let localOnly = IpcRequestMethod.allCases.filter(\.requiresLocalCaller)
+
+        #expect(localOnly == [.quit])
+    }
+
     @Test("todo requests accept either owner and reject ambiguous targeting")
     func todoRequestsRequireExactlyOneOwner() throws {
         let pane = "11111111-1111-4111-8111-111111111111"

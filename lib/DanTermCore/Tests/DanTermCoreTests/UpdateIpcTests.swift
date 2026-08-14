@@ -1180,6 +1180,34 @@ import DanTermProtocol
         #expect(model.pendingConfirmation?.subject == .app)
     }
 
+    @Test("remote quit is refused before instance authorization")
+    func remoteQuitIsRefused() throws {
+        // Intent: a remote caller cannot end the Mac instance it depends on.
+        // Why it exists: remote authority is per request and must take precedence
+        //   over the launcher's instance authorization.
+        // Scenario: an admitted remote caller reaches a launcher pool slot.
+        var model = makeModel()
+        let env = makeTestEnv(
+            instanceIdentity: try #require(DanTermInstanceIdentity(developmentSlot: 1))
+        )
+        let caller = IpcCallerIdentity.remote(
+            nodeId: "node-remote",
+            user: "dan@example.com",
+            machineName: "phone"
+        )
+
+        let commands = sendIpc(
+            &model,
+            method: IpcRequestMethod.quit.rawValue,
+            caller: caller,
+            env: env
+        )
+
+        let error = try requireIpcError(commands)
+        #expect(error.message == "quit is unavailable to remote callers")
+        #expect(hasEffect(commands, isTerminate) == false)
+    }
+
     @Test(
         "quit is refused by every instance outside the launcher pool",
         arguments: [
@@ -2962,7 +2990,7 @@ import DanTermProtocol
             ])
         )
 
-        let commands = update(&model, .ipcRequest(reqId: requestId, request: request))
+        let commands = update(&model, .ipcRequest(reqId: requestId, caller: .local, request: request))
         let submissions = commands.compactMap { command -> InputSubmissionId? in
             switch command {
             case .sendInputText(_, _, let id), .sendInputKey(_, _, _, let id): id
@@ -3000,7 +3028,7 @@ import DanTermProtocol
                 ]),
             ])
         )
-        let commands = update(&model, .ipcRequest(reqId: requestId, request: request))
+        let commands = update(&model, .ipcRequest(reqId: requestId, caller: .local, request: request))
         let submissions = commands.compactMap { command -> InputSubmissionId? in
             if case .sendInputText(_, _, let id) = command { return id }
             return nil
@@ -3718,6 +3746,7 @@ private func sendIpc(
     method: String,
     params: JSONValue = .object([:]),
     pane: PaneId? = nil,
+    caller: IpcCallerIdentity = .local,
     env: CoreEnv = .live
 ) -> [Command] {
     var effectiveParams = params
@@ -3731,6 +3760,7 @@ private func sendIpc(
             &model,
             .ipcRequest(
                 reqId: reqId,
+                caller: caller,
                 request: try IpcRequest.decode(method: method, params: effectiveParams)
             ),
             env: env
@@ -4019,7 +4049,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
 
             let commands = update(
                 &model,
-                .ipcRequest(reqId: requestId, request: request)
+                .ipcRequest(reqId: requestId, caller: .local, request: request)
             )
             let sessionId = try #require(commands.compactMap { command -> SessionId? in
                 if case .createSession(let id, _, _, _, _) = command { return id }

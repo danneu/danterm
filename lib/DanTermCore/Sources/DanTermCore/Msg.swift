@@ -74,7 +74,7 @@ enum Msg {
     case sidebarRenameEnded
 
     // IPC
-    case ipcRequest(reqId: UUID, request: IpcRequest)
+    case ipcRequest(reqId: UUID, caller: IpcCallerIdentity, request: IpcRequest)
     case ipcRequestDecodeFailed(reqId: UUID, error: IpcRequestDecodeError)
 
     // Internal (confirmed close — do not send from UI directly)

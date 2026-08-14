@@ -1,6 +1,14 @@
 // The exhaustive typed request catalog shared by the CLI and app daemon.
 import Foundation
 
+/// Carries the authenticated caller facts with each request through pure dispatch.
+public enum IpcCallerIdentity: Equatable, Sendable {
+    /// Identifies a caller connected through the Mac-local control socket.
+    case local
+    /// Identifies an admitted tailnet peer without coupling protocol to its resolver.
+    case remote(nodeId: String, user: String, machineName: String)
+}
+
 /// Names every client-to-daemon request method admitted by DanTerm.
 public enum IpcRequestMethod: String, CaseIterable, Sendable {
     /// Requests the app-owned permission facts used by `danterm doctor`.
@@ -103,6 +111,23 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
              .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
              .todoDelete, .todoClearCompleted:
             return true
+        }
+    }
+
+    /// Makes remote authority classification exhaustive when a method joins the catalog.
+    public var requiresLocalCaller: Bool {
+        switch self {
+        case .quit:
+            return true
+        case .doctorPermissions, .ls, .focusInfo, .groupNew,
+             .groupRename, .groupClose,
+             .tabNew, .tabRename, .tabClose,
+             .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
+             .paneRead, .paneRows, .paneZoom, .paneTape, .paneSnapshot, .themeSet,
+             .agentAttach, .agentActivity, .agentDetach,
+             .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
+             .todoDelete, .todoClearCompleted:
+            return false
         }
     }
 }

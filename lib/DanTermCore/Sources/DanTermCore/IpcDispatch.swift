@@ -11,6 +11,7 @@ import DanTermProtocol
 func handleIpcRequest(
     _ model: inout AppModel,
     reqId: UUID,
+    caller: IpcCallerIdentity,
     request: IpcRequest,
     env: CoreEnv
 ) -> [Command] {
@@ -18,6 +19,7 @@ func handleIpcRequest(
         return try dispatchIpc(
             &model,
             reqId: reqId,
+            caller: caller,
             request: request,
             env: env
         )
@@ -33,9 +35,14 @@ func handleIpcRequest(
 private func dispatchIpc(
     _ model: inout AppModel,
     reqId: UUID,
+    caller: IpcCallerIdentity,
     request: IpcRequest,
     env: CoreEnv
 ) throws -> [Command] {
+    if request.method.requiresLocalCaller, case .remote = caller {
+        throw IpcParamsError("\(request.method.rawValue) is unavailable to remote callers")
+    }
+
     switch request {
     case .doctorPermissions:
         return [.readDoctorPermissions(reqId: reqId)]

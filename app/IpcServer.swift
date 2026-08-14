@@ -79,6 +79,7 @@ actor IpcServer {
         do {
             message = .ipcRequest(
                 reqId: reqId,
+                caller: .local,
                 request: try IpcRequest.decode(
                     method: request.method,
                     params: request.params ?? .object([:])

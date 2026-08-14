@@ -284,6 +284,7 @@ private func sendRequest(
     do {
         return update(&model, .ipcRequest(
             reqId: UUID(),
+            caller: .local,
             request: try IpcRequest.decode(method: method, params: params)))
     } catch {
         Issue.record("could not decode \(method): \(error)")

@@ -278,6 +278,7 @@ struct AppRuntimeIpcCommandTests {
 
         runtime.send(.ipcRequest(
             reqId: requestId,
+            caller: .local,
             request: .agentActivity(
                 pane: targetPaneId,
                 session: IpcAgentSession(kind: "codex", id: "thread-1"),
