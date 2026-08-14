@@ -722,3 +722,140 @@ in [README.md](README.md) and remains open.
     the same change, per AGENTS.md), Mac remote-sized rendering, and later
     the origin field on resize events. None of it belongs to this research
     doc's phases; it lands with milestone-1 client work.
+
+### D8 -- input: the wire carries intent, and the PTY owner encodes
+
+- Status: decided 2026-08-14, brainstormed with the user fork by fork. This is
+  the T11 gate. Nothing is implemented by this entry; the wire and CLI changes
+  it names land with milestone-1 client work.
+- Evidence used:
+  - Read directly, and this is the decisive evidence -- the tree already
+    implements one of the two candidate positions for every existing writer:
+    - `lib/TerminalCore/Sources/TerminalCore/TerminalInputEncoding.swift#encodeTerminalKey`
+      is a pure function -- semantic key, modifiers, and a mode snapshot in,
+      bytes out -- covering SS3-vs-CSI cursor keys, application keypad, LNM,
+      and the kitty protocol. `TerminalCore` is iOS-pinned, so both ends hold
+      the same encoder; the question was only which end's modes feed it.
+    - `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift#sendKey`
+      states the invariant in its doc comment: mode read, encoding, viewport
+      snap, and write stay atomic on the owner queue.
+    - `app/SwiftTerminalSessionView.swift#keyDown`: the Mac's own keyboard
+      encodes nothing. It normalizes the NSEvent to a semantic key and sends
+      it down the same funnel the CLI and agents use.
+    - The same file's `sendText`: the top-level `text` field of `pane.input`
+      is contractually the paste path, with owner-side safe-paste policy and
+      bracket markers from live modes; a `.text` token among key events is
+      deliberately raw so full-screen programs see characters as typed.
+  - F4's payload floor item 5 -- "a client encodes keystrokes from its own
+    `inputModes`, which is what a real client must do" -- the recorded
+    position this decision overrules.
+  - F7: modes replicate to the phone live. Named because it makes client-side
+    encoding look workable; staleness is why it is not.
+  - D3's limit statement: the invariant places state and does not resolve
+    races, so this race is T11's to decide. D5's deferred input-direction
+    rule: only the PTY-owning engine answers queries.
+- Candidate solutions:
+  1. The client encodes from its own replicated `inputModes` and sends bytes.
+     F4's position.
+  2. The wire carries semantic intent -- text runs, named keys with
+     modifiers, paste, wheel -- and the PTY-owning engine encodes atomically
+     with the mode read. The shipped shape.
+- Selected direction: (2). The phone is the fifth writer through the funnel
+  the Mac GUI, the CLI, and agents already use.
+- Decision and rationale:
+  - **Wrong bytes are worse than a wrong target.** Both positions share the
+    same timing hazard: a program can exit inside the round trip. Under (1)
+    the phone sends bytes encoded for dead modes and the receiving program
+    gets garbage. Under (2) the intent is encoded against whatever modes are
+    live on arrival -- the keystroke may land in a different program than the
+    user aimed at, which no design can prevent, but the bytes are always
+    valid for the program that receives them.
+  - **Atomicity is unreachable from the phone even in principle.** The owner
+    encodes inside the same critical section that reads the modes. The
+    client's mode snapshot is one round trip old at best; F7's "modes track
+    live" is a latency observation, not a fence.
+  - **It is the same rule D5 deferred, facing the other way.** Only the
+    PTY-owning engine answers queries; only the PTY-owning engine produces
+    PTY-bound bytes. One consequence travels free: the kitty keyboard
+    protocol stays an owner-side encoding detail, and the client never needs
+    the flags to type correctly.
+  - **The steelman for (1), and why it loses.** Client-side encoding frees
+    the client from the wire grammar's completeness: any byte sequence is
+    typeable, and no gap waits on a protocol change. That cost is real under
+    (2) -- the gap list below is exactly that bill coming due -- but it is
+    recoverable: the grammar extends, and a raw-bytes form for
+    mode-*independent* sequences could be added later without inheriting the
+    race, because the race lives only in mode-dependent encodings. Adopting
+    (1) bakes the race in permanently.
+  - **F4's payload floor item 5 is overruled**, and the ledger's contradiction
+    is closed. It described how standalone terminals work, not how DanTerm's
+    writers work: no existing writer encodes locally.
+  - **What does not change either way, stated so it is not re-argued:** echo
+    latency, because the echo always returns through the tape stream from
+    the PTY; and predictive local echo, because a prediction is a speculative
+    application of the replica's own modes, reconciled against the stream --
+    it is not an encoding, and D5's mode floor in the sync payload stays load
+    bearing under (2) for exactly that use.
+- The gap list -- what the wire grammar cannot express today, and what closes
+  each gap. This is T11's itemization obligation, checked against
+  `TerminalInputKey` and the accessory row (Esc, Ctrl, Tab, arrows, pipe,
+  tilde, slash):
+  1. **Ctrl over non-letters is inexpressible**: `C-\` (SIGQUIT), `C-[`,
+     `C-]`, `C-^`, `C-_`, and `C-Space`, which the token classifier throws on
+     by design. The engine's `TerminalInputKey.character` already encodes all
+     of them; the gap is only in the wire enum. Close it by **widening
+     `InputEvent`** with one case -- a character plus modifiers -- rather
+     than adopting `TerminalInputKey` as the wire form: the engine type drags
+     seventeen keypad cases onto the wire, and coupling the protocol to an
+     engine type makes an engine refactor a wire change, which is the exact
+     coupling D5 rejected for state.
+  2. **The new case requires at least one modifier.** Without that rule the
+     same keystroke has two wire spellings -- `{"text": "a"}` and
+     `{"key": "a", "mods": []}` -- that must produce identical bytes in every
+     mode forever, which is a standing invitation to quiet disagreement.
+     One spelling per keystroke: plain characters are text; the key case
+     exists for modifier combos. An empty-modifier key form is a parse error.
+  3. **`Insert` exists in the engine and not on the wire.** Added with the
+     widening; trivial.
+  4. **Mouse has no wire form at all, and wheel is milestone-1 scope.**
+     Scrolling splits by screen: on the primary screen the phone scrolls its
+     own replica scrollback locally, free, no wire change; on the alternate
+     screen (`less`, vim, htop) there is no scrollback and scrolling *is*
+     wheel events, so without a wire form the phone cannot scroll a pager at
+     all -- a known-broken case, and touch-scroll is the phone's most natural
+     gesture. The wire gains wheel up/down at a cell; the owner's existing
+     mode gating applies on arrival, like keys. Click, drag, and motion wait
+     until real use asks for them. One client-policy rule travels with this,
+     same flavor as D6's predicate and derived from replicated state: a
+     scroll gesture moves the replica viewport while the alternate screen is
+     off, and sends wheel events while it is on.
+  5. **The accessory row needs nothing else.** Pipe, tilde, and slash are
+     text; Esc, Tab, and arrows exist; Ctrl as a latching modifier is client
+     UI with no wire presence. Shift+letter stays rejected -- shifted letters
+     are text.
+- Deferred: **focus reports move to T9**, with the expected shape recorded so
+  it is not re-derived. Today a pane's focus-in/out report follows the Mac
+  view's keyboard focus, so a phone driving a pane whose Mac window is
+  backgrounded types into a program that was told nobody is looking. The
+  expected answer is "focused means anyone is engaged" -- Mac view focus or
+  an engaged remote client -- but "engaged" is a lifecycle fact (foreground,
+  background, connection death) that T9 owns and has not established. Doing
+  nothing fails mildly (a late autoread, a dim prompt), the reports are
+  generated Mac-side, and the fix is a policy change rather than a wire
+  change, so nothing in milestone 1 blocks on it.
+- What this declines, knowingly: byte-exact client freedom. Under (2) an
+  input the grammar cannot name cannot be typed remotely until the grammar
+  grows. The gap list above is believed complete against the engine's own
+  encoder; what it cannot cover is a future input class that is both
+  mode-dependent and impossible to name semantically. That class is the one
+  thing that would force the escape-hatch design to be weighed against the
+  race rather than added casually, and it is this decision's reopen
+  condition.
+- Consequences for other tasks:
+  - The CLI token grammar grows with the wire (`C-\`, `C-Space`, and
+    friends stop throwing), and the `integrations/danterm/SKILL.md` update
+    lands in the same change, per AGENTS.md.
+  - T9 inherits the focus-report question with its expected shape.
+  - D6 is untouched: typing never claims is a client policy over
+    `pane.input` plus `pane.resize`, and nothing here couples keystrokes to
+    geometry.

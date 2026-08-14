@@ -583,15 +583,21 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   then origin suppression and rendering polish, with every contested fork
   (typing never claims, hybrid reflow, auto-take-back) kept as client policy.
   Input is untouched; T11 stays free.
-- **T11 TODO** -- Input surface: map an iOS keyboard plus an accessory key row
-  (Esc, Ctrl, Tab, arrows, pipe, tilde, slash) onto `pane.input`/`KeyTokens`;
-  itemize what the token grammar cannot express today. Also decide who encodes,
-  which H5 opened as a live contradiction: F4's payload floor says the client
-  encodes from its own `inputModes`, and the competing position is that the
-  client sends tokens and the PTY-owning engine encodes. Traffic does not
-  separate them -- a keystroke is a keystroke either way -- so decide it on the
-  mode race, on input ordering across several writers, and on D5's deferred
-  input-direction rule, then say explicitly which position is overruled.
+- **T11 DECIDED as D8** ([decisions.md](decisions.md)) -- the wire carries
+  intent, and the PTY owner encodes. The contradiction is closed by the tree
+  itself: no existing writer encodes locally -- the Mac's own keyboard sends
+  semantic keys, and `TerminalPTYHost.sendKey` reads modes and encodes in one
+  atomic step -- so the phone is the fifth writer through the same funnel,
+  and F4's payload floor item 5 is overruled. The race decides it: a client
+  encoding from replicated modes sends wrong bytes when a program exits
+  inside the round trip, while owner-side encoding degrades to a wrong
+  target with valid bytes. The itemized grammar gaps and their fixes:
+  widen `InputEvent` with a character-plus-modifiers case (modifier
+  required, so every keystroke has one wire spelling), add `Insert`, teach
+  the CLI tokens `C-\` and `C-Space` and friends, and add wheel events for
+  milestone 1 (alternate-screen scrolling is wheel events; click and drag
+  wait for real use). Focus-report semantics defer to T9 with the expected
+  shape recorded. The accessory row needs nothing else.
 
 ### Phase 5 -- codebase refactors the client justifies
 
