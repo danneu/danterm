@@ -407,7 +407,7 @@ by a tape stream. T23 owns closing that.
 
 ### Phase 3 -- durable subscriptions and resume
 
-- **T8 VETTING** -- Design `pane.snapshot` plus sequence-numbered tape resume:
+- **T8 DONE** (D5, shipped) -- Design `pane.snapshot` plus sequence-numbered tape resume:
   a broker owning per-pane bounded ring buffers and subscriber cursors, resume
   as `fromSeq` backfill; decide whether the broker lives in the app runtime or
   the bridge. Unblocked -- F4 supplies the gap shapes, including an explicit
@@ -433,7 +433,18 @@ by a tape stream. T23 owns closing that.
   so T8 does not depend on T5. The retention bound stays at 8 MiB / 32,768
   events and reverts to a debugging parameter, because the design invariant is
   that no stream's ability to reach exact state depends on retention. Plan:
-  [plans/wip/2026-08-12-1500-pane-snapshot-and-tape-resume.md](../../../plans/wip/2026-08-12-1500-pane-snapshot-and-tape-resume.md).
+  [plans/impl/2026-08-13-1942-pane-snapshot-and-tape-resume.md](../../../plans/impl/2026-08-13-1942-pane-snapshot-and-tape-resume.md).
+
+  **Shipped** 2026-08-13, across `dd96996b`, `737c99c2`, `46a2da45`, and
+  `fb1f0b0f`: stream version 3, `pane.snapshot`, structured start and mode
+  parameters across the IPC, CLI, and client boundaries, and a raw mode that
+  keeps serving the debugging dump. Four contract points that D5 did not
+  anticipate are recorded with it: a sync is a multi-record indivisible prefix
+  that takes effect only when complete; the inactive alternate screen is
+  excluded because the engine blanks it on every entry and no byte stream can
+  reveal it; unfinished input-stream state travels in the payload because a
+  fence does not land in ground state; and a cursor is meaningful only to the
+  recorder lifetime that minted it.
 - **T20 TODO** -- Measure a sync payload against the backlog it would replace,
   across three panes: quiet with deep history, freshly started, and flooding.
   This decides two things H5 left open, and both currently rest on an unchecked

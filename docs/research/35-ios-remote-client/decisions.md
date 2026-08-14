@@ -239,7 +239,10 @@ task ledger in [README.md](README.md) and remain open.
 
 ### D5 -- durable subscriptions: state sync as tape bytes, and cursor resume
 
-- Status: decided 2026-08-12, from F4.
+- Status: decided 2026-08-12, from F4. **Implemented and on master**
+  2026-08-13, across `dd96996b`, `737c99c2`, `46a2da45`, and `fb1f0b0f`. What
+  shipped is recorded at the end of this entry, including the four contract
+  points the implementation settled that this decision did not anticipate.
 - Evidence used: [f4-mac-to-mac.md](f4-mac-to-mac.md) in full -- the
   divergence table for a from-now join, the `aftermath` run showing a joiner
   heals its visible screen and never its history, the `evict` run showing an
@@ -257,9 +260,12 @@ task ledger in [README.md](README.md) and remain open.
      stated geometry, delivered as a record in the tape stream.
   3. No snapshot; raise the recorder's retention bound so backlog replay is a
      reliable recovery path.
-- Selected direction: (2), delivered as a `sync` record in the tape stream plus
-  a one-shot method returning the same payload, with tape requests able to
-  supply a start cursor.
+- Selected direction: (2), delivered as `sync` records in the tape stream plus a
+  one-shot method returning the same payload, with tape requests able to supply
+  a start cursor. Both are plural: implementation established that one record
+  cannot hold a full pane's history, so a sync is a contiguous multi-record
+  prefix and the one-shot method is a bounded stream rather than a single
+  reply.
 - Decision and rationale:
   - **Payload shape.** The wire is the terminal protocol itself. A reader
     already knows how to feed bytes to a terminal, so sync needs no new
@@ -312,4 +318,43 @@ task ledger in [README.md](README.md) and remain open.
   override, which are not gaps in the payload because the engine models none of
   them -- they become sync work only if it starts to, and the round-trip proof
   obligation is what will say so.
-- Plan: `plans/wip/2026-08-12-1500-pane-snapshot-and-tape-resume.md`.
+- Plan: `plans/impl/2026-08-13-1942-pane-snapshot-and-tape-resume.md`.
+- **What shipped, and the four contract points this decision did not
+  anticipate.** All four were found by review or by implementation, and each one
+  changes what a client must do, so they are recorded here rather than left in a
+  historical plan.
+  1. **A sync is a multi-record indivisible prefix, and it is all-or-nothing.**
+     The engine's scrollback budget and the IPC line bound are both 16 MiB, so a
+     full pane's encoded history cannot fit one line and a single-record
+     transfer would silently drop history the source still holds. The records
+     are contiguous, no recorded event is delivered between them, and the
+     producer withholds the fence cursor until the last record completes the
+     transfer. A reader applies a sync only when it is complete, so a stream cut
+     partway leaves its terminal untouched and still exactly at its previous
+     cursor. Recovery is then ordinary resume, with no separate retry route --
+     which is what stops a reader that applied half a reset-and-repaint payload
+     from being at no position at all.
+  2. **The inactive alternate screen is excluded from the transferred state.**
+     The engine blanks the alternate grid on every entry, so no byte stream can
+     ever reveal what a retained inactive alternate screen holds. Carrying it
+     would cost a full extra screen on every sync of any pane that has run a
+     full-screen program, to reproduce state nothing can observe. The primary
+     screen retained *under* an active alternate screen is the opposite case and
+     is carried, because exiting the alternate screen reveals it.
+  3. **Unfinished input-stream state is part of the payload.** A fence lands
+     between two recorded byte chunks and nothing makes that boundary fall in
+     ground state, so the transfer carries a partial UTF-8 scalar and a sequence
+     the absorber has begun but not dispatched, with its parameters,
+     intermediates, and collected payload. Without this a sync silently corrupts
+     the first bytes delivered after it.
+  4. **A cursor is meaningful only to the recorder lifetime that minted it.**
+     Every published cursor carries that identity and a supplied cursor carries
+     it back, so a stale cursor from a previous recorder is detected rather than
+     placed in a sequence space where it means something else. The gap record
+     grew a total-loss form for this case, because per-direction counts do not
+     exist against a cursor the producer cannot place, and inventing them in
+     exact fields would be worse than saying so.
+- Surface as shipped: stream version 3, `pane.snapshot`, structured start and
+  mode parameters across the IPC, CLI, and client boundaries, and a raw mode
+  that keeps delivering retained evidence for the debugging dump while
+  reconstructible readers get exact state.
