@@ -1,7 +1,7 @@
 # Decisions -- iOS remote client
 
-Auditable decision log for doc 35. D6 and D7 are reserved as gates by the task
-ledger in [README.md](README.md) and remain open.
+Auditable decision log for doc 35. D7 is reserved as a gate by the task ledger
+in [README.md](README.md) and remains open.
 
 ### D1 -- scope and first milestone
 
@@ -566,3 +566,159 @@ ledger in [README.md](README.md) and remain open.
   mode parameters across the IPC, CLI, and client boundaries, and a raw mode
   that keeps delivering retained evidence for the debugging dump while
   reconstructible readers get exact state.
+
+### D6 -- geometry: claim is a gesture, not a lock
+
+- Status: decided 2026-08-13, brainstormed with the user. This is the T10 gate.
+  It decides the model and stages the build-out; nothing is implemented by this
+  entry, and implementation graduates to a plan under milestone 1.
+- Evidence used:
+  - [f4-mac-to-mac.md](f4-mac-to-mac.md), the geometry runs in full: stream
+    geometry is unconditional and authoritative (`geometry`), local reflow
+    after applying it works (`reflow`), and a differently-sized client that
+    ignores the stream's resize renders wide output as interleaved garbage.
+    These kill every model in which a client quietly renders at its own size,
+    and they are why this decision starts from "the pane has one size" rather
+    than negotiating one.
+  - F5's mobility result: the connection survived a wifi-to-cell-to-wifi
+    switch *without reconnecting* and dies on backgrounding, so "the phone
+    detached" is not a crisp event. This is the load-bearing argument against
+    stored ownership: a stored claim needs a release rule, every release rule
+    needs a detach event, and there is no detach event -- any timeout is wrong
+    in one direction or the other.
+  - F7's smoke: the phone scaled the whole 179x66 frame by 0.293 to fit its
+    screen. Legible as proof, unusable as product; the status quo this
+    replaces.
+  - D3's invariant, which this decision is checked against: the client
+    originates no authoritative state. A claimed resize enters through the
+    control surface and returns as an ordinary authoritative resize event --
+    the exact shape D3 named when it narrowed "originates nothing".
+  - D5's fence: a sync is an indivisible multi-record prefix and the stream
+    continues at the sync's own fence, so a resize landing mid-sync is
+    delivered after the sync completes. State transfer needs nothing new from
+    this decision.
+  - Read directly: `references/tmux/resize.c#default_window_size` and
+    `references/tmux/server-client.c#server_client_update_latest`. tmux's
+    `window-size latest` sizes a window to its most recently active client --
+    a keypress or a client resize marks the client latest -- with no lock, no
+    release protocol, and no liveness tracking. Precedent that the no-lock
+    shape survives daily use; viability evidence, not a rationale.
+  - `lib/DanTermProtocol/Sources/DanTermProtocol/IpcRequest.swift`: no resize
+    method exists today. The Mac layout is currently the only writer of pane
+    geometry.
+- Candidate solutions:
+  1. A per-pane mode dial: *observe* vs *claim*, selectable per pane. The
+     ledger's original framing.
+  2. Stored ownership: a pane has exactly one owner; the iOS app shows each
+     pane as owned by someone else; a claim button transfers ownership and
+     resizes; detach releases it. The user's starting idea.
+  3. Claim as a gesture over unchanged geometry: the pane keeps a single
+     authoritative size with last-writer-wins resize events; "claimed" is not
+     stored anywhere -- every client renders in one of two modes decided by a
+     local predicate (*native* when its surface matches the pane size,
+     *remote-sized* otherwise); claiming is an explicit gesture that sends the
+     client's size as a resize; the anti-clobber mechanism, added only when
+     use shows it is needed, is descriptive origin metadata on resize events,
+     not a lock.
+- Selected direction: (3).
+- Decision and rationale:
+  - **Ownership's one load-bearing job is suppressing incidental clobbers** --
+    the Mac window dragged for an unrelated reason must not snap a
+    deliberately phone-sized pane back mid-session. Everything else stored
+    ownership adds is cost, and the costs are exactly T10's hard parts: a
+    release protocol against a detach that F5 shows is not crisp, a stuck
+    claim when the holder is neither present nor gone, and an arbitration
+    rule for two claimers. Origin-tagged resizes do the one real job without
+    liveness: a client suppresses its *incidental* (layout-driven) resizes
+    for a pane whose current size origin is another client, until a direct
+    interaction with that pane reasserts. Origin is metadata on an event the
+    stream already carries, derivable by every replica -- no new
+    authoritative store, so it passes D3's derivability sentence.
+  - **Detach dissolves instead of being answered.** An absent phone leaves a
+    size behind; recovery is one gesture at the Mac, which is the natural
+    act when the user walks back to that machine. Auto-take-back when T9's
+    lifecycle work gives the Mac a provable "that client is gone" becomes an
+    optional policy knob, not a correctness requirement.
+  - **The Mac window is just another client.** While the pane's size differs
+    from its layout slot, the Mac renders remote-sized -- the small grid
+    letterboxed in the slot with a take-back affordance -- and the phone
+    renders remote-sized while the pane is Mac-sized. One rendering concept,
+    implemented on both ends; the observe/claim dial disappears into the
+    predicate.
+  - **Two claimers self-heal.** Last writer wins, as everywhere in this doc,
+    and it is *less* bad here than usual: the loser does not render garbage,
+    its predicate flips to remote-sized and its UI shows who has the size and
+    the claim affordance. No arbitration protocol exists because no lock
+    exists.
+  - **The fence needs nothing new.** A claim is a resize entering through the
+    control surface; D5 already orders events against a sync's fence, so a
+    claim landing mid-sync is delivered after the sync completes and applies
+    to a replica that has already reached the fence state.
+  - **Ownership does not govern input, because ownership does not exist.**
+    Input stays orthogonal and T11 is untouched. The one named interaction:
+    quick-replying to an agent pane from the phone must not reformat the pane
+    the agent's TUI is drawn in, so *typing never claims* -- but that is
+    client policy over `pane.input` plus `pane.resize`, not input semantics,
+    and T11 remains free to place encoding wherever its race and ordering
+    arguments land. tmux chose the opposite policy (a keypress marks latest);
+    flipping to it later is a client change with no protocol consequence.
+  - **The protocol layer never encodes a UX opinion, which is what keeps the
+    staged build-out safe.** Every contested fork -- does typing claim, what
+    reasserts at the Mac, scale vs reflow -- lives in client policy over two
+    policy-free primitives. The stages, each motivated by use rather than
+    speculation:
+    1. *Remote-sized rendering on the phone, observe only.* Apply the
+       stream's geometry (mandatory in every world), render scaled to fit,
+       type freely. No new protocol, no Mac-side work, and groundwork no
+       later stage deletes: even with claim, the phone renders remote-sized
+       between joining and claiming and after any Mac take-back. This is the
+       supervision milestone becoming usable, which is when the fork opinions
+       become real.
+    2. *`pane.resize` as a plain control method.* No semantics attached; the
+       claim button calls it, and it is a general CLI verb (`danterm pane
+       resize`) useful for headless geometry reproduction regardless of the
+       phone. The new Mac work is rendering a pane smaller than its slot:
+       v1 is the grid top-left with blank surround and no affordance, and
+       take-back is crude and free -- any Mac layout event reasserts, because
+       nothing suppresses it yet. "Claim survives until the Mac's layout next
+       fires" is v1 behavior, not a bug.
+    3. *Origin metadata on resize events*, only if stage-2 use shows the
+       incidental clobber hurts: the suppression rule above plus the "sized
+       by iPhone -- click to take back" affordance.
+    4. *Client-local polish*, each revisable by living with it: hybrid
+       observe rendering (reflow the primary screen, scale the alternate
+       screen -- the alternate-screen flag is replicated state the phone
+       already holds), auto-take-back on T9's death signal, typing-claims if
+       the explicit gesture proves to be friction.
+- What this declines, knowingly:
+  - **Tenure.** There is no moment where the phone *has* the pane: a Mac
+    take-back mid-vim silently drops the phone to remote-sized. With one
+    human across both devices this is a feature -- the user is always the
+    winner -- and it is the first thing a second human breaks.
+  - **Stored ownership as a concept**, declined but not foreclosed: a lock
+    would layer above these primitives without replacing them, so choosing
+    the gesture model now costs nothing if ownership is ever really needed.
+  - **Full-screen fidelity in observe.** Reflow cannot help a program drawing
+    at absolute coordinates; vim on an unclaimed pane stays a scaled
+    179-column screen. Claiming is the designed answer for that case, not a
+    gap this decision failed to see (F4's reflow cost statement).
+- What would reopen it:
+  - **A second human sharing panes.** Last-writer-wins arbitration is
+    acceptable exactly because both writers are the same person; two humans
+    need tenure, which means stored ownership layered above the primitives.
+  - **Origin suppression proving insufficient in use** -- if direct Mac
+    interaction reasserting turns out to be wrong too, the model is
+    misdescribing how the user wants take-back to feel, and the stored-state
+    arm gets re-examined rather than re-tuned.
+- Consequences for other tasks:
+  - **T11 is untouched** and inherits one named constraint from the policy
+    default: typing never claims, so the input surface must not couple
+    keystrokes to geometry.
+  - **T9's connection-death signal gains an optional consumer** -- the
+    auto-take-back knob -- which is policy, not lifecycle correctness, so it
+    adds no requirement to T9.
+  - **Implementation surface, when a plan picks this up:** the `pane.resize`
+    method and CLI verb (with the `integrations/danterm/SKILL.md` update in
+    the same change, per AGENTS.md), Mac remote-sized rendering, and later
+    the origin field on resize events. None of it belongs to this research
+    doc's phases; it lands with milestone-1 client work.

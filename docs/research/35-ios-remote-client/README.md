@@ -568,15 +568,21 @@ isolation, and F7 then ran the composition on a phone against a live pane.
 
 ### Phase 4 -- geometry and input semantics
 
-- **T10 VETTING** -- Geometry conflict semantics: *observe* (read-only, local
-  reflow of history) vs *claim* (the phone owns the PTY size and restores it on
-  detach), selectable per pane; define what the Mac window shows while a pane
-  is claimed. F4 removed the third option: stream geometry is unconditional and
-  authoritative, so a client cannot quietly render at its own size -- a
-  differently-sized client that ignores the stream's resize renders wide output
-  into a narrow grid as garbage. Observe therefore means local reflow *after*
-  applying the stream's geometry, which F4 verified works; claim means the
-  client's size enters the stream as a normal resize event. Records D6.
+- **T10 DECIDED as D6** ([decisions.md](decisions.md)) -- claim is a gesture,
+  not a lock. Geometry stays a single authoritative size with last-writer-wins
+  resizes (F4's constraint); "claimed" is a derived predicate rather than
+  stored state -- each client renders *native* when its surface matches the
+  pane size and *remote-sized* (letterbox/scale, local reflow for line
+  content, a take-back affordance) otherwise, and the Mac window is just
+  another client under the same rule. Claiming sends the client's size as an
+  ordinary resize through a new `pane.resize` method; the anti-clobber
+  mechanism, added only if use demands it, is origin metadata on resize
+  events. Detach needs no protocol -- an absent phone leaves a size behind,
+  recovered by one gesture at the Mac -- which is what F5's non-crisp detach
+  forces. Build-out is staged: observe-only rendering, then `pane.resize`,
+  then origin suppression and rendering polish, with every contested fork
+  (typing never claims, hybrid reflow, auto-take-back) kept as client policy.
+  Input is untouched; T11 stays free.
 - **T11 TODO** -- Input surface: map an iOS keyboard plus an accessory key row
   (Esc, Ctrl, Tab, arrows, pipe, tilde, slash) onto `pane.input`/`KeyTokens`;
   itemize what the token grammar cannot express today. Also decide who encodes,
