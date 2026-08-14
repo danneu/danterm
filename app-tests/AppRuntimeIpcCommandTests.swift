@@ -152,13 +152,30 @@ struct AppRuntimeIpcCommandTests {
         register(dump, requestId: dumpId, rpcId: .number(1), runtime: runtime)
         register(follow, requestId: followId, rpcId: .number(2), runtime: runtime)
 
-        runtime.perform(.dumpPaneTape(reqId: dumpId, paneId: paneId))
-        runtime.perform(.followPaneTape(reqId: followId, paneId: paneId, fromNow: true))
+        runtime.perform(.streamPaneTape(
+            reqId: dumpId,
+            paneId: paneId,
+            capture: .dump,
+            start: .beginning,
+            mode: .raw
+        ))
+        runtime.perform(.streamPaneTape(
+            reqId: followId,
+            paneId: paneId,
+            capture: .follow,
+            start: .now,
+            mode: .reconstructible
+        ))
 
         #expect(try dump.readResponse().error?.message == "pane has no terminal to read a tape from")
         #expect(try follow.readResponse().error?.message == "pane has no terminal to read a tape from")
-        #expect(ports.session.paneTapeDumpCount == 1)
-        #expect(ports.session.paneTapeFollowFromNow == [true])
+        #expect(ports.session.paneTapeOpenings.count == 2)
+        #expect(ports.session.paneTapeOpenings[0].0 == .dump)
+        #expect(ports.session.paneTapeOpenings[0].1 == .beginning)
+        #expect(ports.session.paneTapeOpenings[0].2 == .raw)
+        #expect(ports.session.paneTapeOpenings[1].0 == .follow)
+        #expect(ports.session.paneTapeOpenings[1].1 == .now)
+        #expect(ports.session.paneTapeOpenings[1].2 == .reconstructible)
     }
 
     @Test("config save failure alerts and completes font resolution before return")

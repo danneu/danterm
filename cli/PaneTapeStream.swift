@@ -37,7 +37,7 @@ func paneTapeStreamFailure(for outcome: PaneTapeStreamOutcome) -> PaneTapeStream
     guard outcome.termination == .eof else { return nil }
     switch outcome.capture {
     case .follow: return nil
-    case .snapshot, nil: return .incompleteCapture
+    case .dump, .snapshot, nil: return .incompleteCapture
     }
 }
 

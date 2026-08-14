@@ -509,7 +509,11 @@ import DanTermProtocol
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneInfo.rawValue,
-            params: .object(["pane": .string(paneId.rawValue.uuidString)])
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "start": .string("beginning"),
+                "mode": .string("raw"),
+            ])
         )
 
         let reply = try requireIpcReply(commands)
@@ -3580,15 +3584,24 @@ import DanTermProtocol
         let commands = sendIpc(
             &model,
             method: IpcRequestMethod.paneTape.rawValue,
-            params: .object(["pane": .string(paneId.rawValue.uuidString)])
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "start": .string("beginning"),
+                "mode": .string("raw"),
+            ])
         )
 
         #expect(commands.count == 1)
-        guard case .dumpPaneTape(_, let commandPaneId) = commands[0] else {
-            Issue.record("expected dumpPaneTape command")
+        guard case .streamPaneTape(
+            _, let commandPaneId, let capture, let start, let mode
+        ) = commands[0] else {
+            Issue.record("expected streamPaneTape command")
             return
         }
         #expect(commandPaneId == paneId)
+        #expect(capture == .dump)
+        #expect(start == .beginning)
+        #expect(mode == .raw)
     }
 
     @Test("pane.tape follow resolves the addressed pane and preserves tail mode")
@@ -3606,17 +3619,22 @@ import DanTermProtocol
             params: .object([
                 "pane": .string(paneId.rawValue.uuidString),
                 "follow": .bool(true),
-                "fromNow": .bool(true),
+                "start": .string("now"),
+                "mode": .string("reconstructible"),
             ])
         )
 
         #expect(commands.count == 1)
-        guard case .followPaneTape(_, let commandPaneId, let fromNow) = commands[0] else {
-            Issue.record("expected followPaneTape command")
+        guard case .streamPaneTape(
+            _, let commandPaneId, let capture, let start, let mode
+        ) = commands[0] else {
+            Issue.record("expected streamPaneTape command")
             return
         }
         #expect(commandPaneId == paneId)
-        #expect(fromNow)
+        #expect(capture == .follow)
+        #expect(start == .now)
+        #expect(mode == .reconstructible)
     }
 
     @Test("pane.tape rejects missing and unknown panes")
@@ -3636,7 +3654,11 @@ import DanTermProtocol
         let unknown = sendIpc(
             &unknownModel,
             method: IpcRequestMethod.paneTape.rawValue,
-            params: .object(["pane": .string(UUID().uuidString)])
+            params: .object([
+                "pane": .string(UUID().uuidString),
+                "start": .string("beginning"),
+                "mode": .string("raw"),
+            ])
         )
         #expect(try requireIpcError(unknown) == .init(code: -32602, message: "pane not found"))
 
@@ -3648,13 +3670,39 @@ import DanTermProtocol
             method: IpcRequestMethod.paneTape.rawValue,
             params: .object([
                 "pane": .string(paneId.rawValue.uuidString),
-                "fromNow": .bool(true),
+                "start": .string("bogus"),
+                "mode": .string("raw"),
             ])
         )
         #expect(try requireIpcError(invalid) == .init(
             code: -32602,
-            message: "fromNow requires follow"
+            message: "invalid tape start"
         ))
+    }
+
+    @Test("pane.snapshot requests exact current state from the addressed pane")
+    func paneSnapshotRequestsExactCurrentState() {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+
+        let commands = sendIpc(
+            &model,
+            method: IpcRequestMethod.paneSnapshot.rawValue,
+            pane: paneId
+        )
+
+        #expect(commands.count == 1)
+        guard case .streamPaneTape(
+            _, let commandPaneId, let capture, let start, let mode
+        ) = commands[0] else {
+            Issue.record("expected streamPaneTape command")
+            return
+        }
+        #expect(commandPaneId == paneId)
+        #expect(capture == .snapshot)
+        #expect(start == .now)
+        #expect(mode == .reconstructible)
     }
 }
 

@@ -349,9 +349,15 @@ geometry negotiation (`research/35/T10` owns it), and the bridge.
   IPC line, the whole payload and its continuation cursor come from the single
   fence of I2, and the reader can tell the transfer is complete.
 
+## Implementation notes
+
+- `--from-cursor` accepts the exact cursor JSON object emitted by `start` and
+  `sync` records. The IPC request carries that cursor as a structured start
+  position instead of making each caller transcribe its fields.
+
 ## Commit progress
 
 - [x] 1. Bind resume cursors to recorder lifetimes and validate supplied positions
 - [x] 2. Serialize exact terminal state and fence it with the recorder cursor
 - [x] 3. Add reconstructible and raw tape stream state machines
-- [ ] 4. Expose pane state and cursor resume through IPC, CLI, client, and docs
+- [x] 4. Expose pane state and cursor resume through IPC, CLI, client, and docs

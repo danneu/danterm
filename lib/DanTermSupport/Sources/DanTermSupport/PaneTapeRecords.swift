@@ -6,26 +6,8 @@
 import Foundation
 import DanTermProtocol
 
-/// Carries every coordinate needed to resume after recorder eviction without estimating loss.
-/// The two byte watermarks stay apart because the feed and write streams are numbered apart.
-struct PaneTapeCursor: Equatable, Sendable {
-    let recorderLifetimeId: UUID
-    let nextSequence: UInt64
-    let feedBytesBeforeNextSequence: Int
-    let writeBytesBeforeNextSequence: Int
-
-    init(
-        recorderLifetimeId: UUID,
-        nextSequence: UInt64,
-        feedBytesBeforeNextSequence: Int,
-        writeBytesBeforeNextSequence: Int
-    ) {
-        self.recorderLifetimeId = recorderLifetimeId
-        self.nextSequence = nextSequence
-        self.feedBytesBeforeNextSequence = feedBytesBeforeNextSequence
-        self.writeBytesBeforeNextSequence = writeBytesBeforeNextSequence
-    }
-
+extension PaneTapeCursor {
+    /// Internal sentinel used only where stream policy ignores the supplied-cursor branch.
     static let beginning = Self(
         recorderLifetimeId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
         nextSequence: 0,
@@ -93,7 +75,7 @@ func makePaneTapeStart(
     initial: PaneTapeDimensions,
     cursor: PaneTapeCursor,
     publishesCursor: Bool = true,
-    reconstructible: Bool? = nil
+    reconstructible: Bool = false
 ) -> PaneTapeStart {
     var record: [String: JSONValue] = [
         "kind": .string("start"),
@@ -112,23 +94,11 @@ func makePaneTapeStart(
         // reports offsets a reader has no origin for.
         record["cursor"] = paneTapeCursorJSON(cursor)
     }
-    if let reconstructible {
-        record["reconstructible"] = .bool(reconstructible)
-    }
+    record["reconstructible"] = .bool(reconstructible)
     return PaneTapeStart(
         record: .object(record),
         cursor: cursor
     )
-}
-
-/// Encodes the recorder coordinates shared by start and completed synchronization records.
-func paneTapeCursorJSON(_ cursor: PaneTapeCursor) -> JSONValue {
-    .object([
-        "recorderLifetimeId": .string(cursor.recorderLifetimeId.uuidString),
-        "sequence": .number(Double(cursor.nextSequence)),
-        "feedByteOffset": .number(Double(cursor.feedBytesBeforeNextSequence)),
-        "writeByteOffset": .number(Double(cursor.writeBytesBeforeNextSequence)),
-    ])
 }
 
 /// Converts an owner-fenced suffix into an ordered gap-and-events delivery.
@@ -159,7 +129,7 @@ func makePaneTapeExactGapRecord(_ snapshot: PaneTapeSnapshot) -> JSONValue {
 /// terminator would leave a reader unable to tell a whole capture from a truncated one.
 func makePaneTapeDumpRecords(after dump: PaneTapeDump) -> [JSONValue] {
     makePaneTapeBatch(from: dump.snapshot).records
-        + [makePaneTapeEndRecord(reason: .snapshotComplete)]
+        + [makePaneTapeEndRecord(reason: .dumpComplete)]
 }
 
 /// Builds one event record, with its timing and byte position hoisted out of the event object.

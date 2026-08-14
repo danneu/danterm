@@ -43,6 +43,8 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     case paneZoom = "pane.zoom"
     /// Reads or follows the flight recording for one explicitly named pane.
     case paneTape = "pane.tape"
+    /// Streams one exact terminal-state snapshot for an explicitly named pane.
+    case paneSnapshot = "pane.snapshot"
     /// Changes the theme override for one explicitly named pane.
     case themeSet = "theme.set"
     /// Attaches an agent session to one explicitly named pane.
@@ -80,7 +82,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
              .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneTape, .themeSet,
+             .paneRead, .paneRows, .paneZoom, .paneTape, .paneSnapshot, .themeSet,
              .agentAttach, .agentActivity, .agentDetach,
              .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
              .todoDelete, .todoClearCompleted:
@@ -96,7 +98,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
         case .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneTape, .themeSet,
+             .paneRead, .paneRows, .paneZoom, .paneTape, .paneSnapshot, .themeSet,
              .agentAttach, .agentActivity, .agentDetach,
              .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
              .todoDelete, .todoClearCompleted:
@@ -234,7 +236,14 @@ public enum IpcRequest: Equatable, Sendable {
     /// Applies a decoded zoom operation to a structurally required pane.
     case paneZoom(pane: PaneId, state: IpcPaneZoomState)
     /// Reads or follows recording data from a structurally required pane.
-    case paneTape(pane: PaneId, follow: Bool, fromNow: Bool)
+    case paneTape(
+        pane: PaneId,
+        follow: Bool,
+        start: PaneTapeStartPosition,
+        mode: PaneTapeStreamMode
+    )
+    /// Streams exact terminal state from one owner fence.
+    case paneSnapshot(pane: PaneId)
     /// Sets or clears the theme of a structurally required pane.
     case themeSet(pane: PaneId, themeName: String?)
     /// Attaches a decoded agent identity to a structurally required pane.
@@ -280,6 +289,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .paneRows: return .paneRows
         case .paneZoom: return .paneZoom
         case .paneTape: return .paneTape
+        case .paneSnapshot: return .paneSnapshot
         case .themeSet: return .themeSet
         case .agentAttach: return .agentAttach
         case .agentActivity: return .agentActivity
@@ -309,7 +319,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .tabRename, .tabClose:
             return ["tab"]
         case .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneTape, .themeSet,
+             .paneRead, .paneRows, .paneZoom, .paneTape, .paneSnapshot, .themeSet,
              .agentAttach, .agentActivity, .agentDetach:
             return ["pane"]
         case .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
@@ -367,11 +377,16 @@ public enum IpcRequest: Equatable, Sendable {
             return object
         case .paneZoom(let pane, let state):
             return ["pane": idValue(pane), "state": .string(state.rawValue)]
-        case .paneTape(let pane, let follow, let fromNow):
-            var object = ["pane": idValue(pane)]
+        case .paneTape(let pane, let follow, let start, let mode):
+            var object = [
+                "pane": idValue(pane),
+                "start": paneTapeStartJSON(start),
+                "mode": .string(mode.rawValue),
+            ]
             if follow { object["follow"] = .bool(true) }
-            if fromNow { object["fromNow"] = .bool(true) }
             return object
+        case .paneSnapshot(let pane):
+            return ["pane": idValue(pane)]
         case .themeSet(let pane, let themeName):
             return ["pane": idValue(pane), "themeName": themeName.map(JSONValue.string) ?? .null]
         case .agentAttach(let pane, let session), .agentDetach(let pane, let session):
@@ -472,9 +487,15 @@ public enum IpcRequest: Equatable, Sendable {
         case .paneTape:
             let pane: PaneId = try target("pane", object: object)
             let follow = try optionalBool(object?["follow"], name: "follow")
-            let fromNow = try optionalBool(object?["fromNow"], name: "fromNow")
-            guard fromNow == false || follow else { throw invalid("fromNow requires follow") }
-            return .paneTape(pane: pane, follow: follow, fromNow: fromNow)
+            guard let start = decodePaneTapeStart(object?["start"]) else {
+                throw invalid("invalid tape start")
+            }
+            guard case .string(let rawMode)? = object?["mode"],
+                  let mode = PaneTapeStreamMode(rawValue: rawMode)
+            else { throw invalid("invalid tape mode") }
+            return .paneTape(pane: pane, follow: follow, start: start, mode: mode)
+        case .paneSnapshot:
+            return .paneSnapshot(pane: try target("pane", object: object))
         case .themeSet:
             let pane: PaneId = try target("pane", object: object)
             guard let value = object?["themeName"] else { throw invalid("invalid theme params") }
@@ -524,6 +545,27 @@ public enum IpcRequest: Equatable, Sendable {
         case .todoClearCompleted:
             return .todoClearCompleted(owner: try todoOwner(object))
         }
+    }
+}
+
+private func paneTapeStartJSON(_ start: PaneTapeStartPosition) -> JSONValue {
+    switch start {
+    case .beginning:
+        return .string("beginning")
+    case .now:
+        return .string("now")
+    case .cursor(let cursor):
+        return .object(["cursor": paneTapeCursorJSON(cursor)])
+    }
+}
+
+private func decodePaneTapeStart(_ value: JSONValue?) -> PaneTapeStartPosition? {
+    switch value {
+    case .string("beginning")?: return .beginning
+    case .string("now")?: return .now
+    case .object(let object)?:
+        return decodePaneTapeCursor(object["cursor"]).map(PaneTapeStartPosition.cursor)
+    default: return nil
     }
 }
 

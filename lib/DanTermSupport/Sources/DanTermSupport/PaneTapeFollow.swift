@@ -41,12 +41,14 @@ struct PaneTapeFollowSubscriptions {
         id: UUID,
         connectionId: UUID,
         paneId: UUID,
-        cursor: PaneTapeCursor
+        cursor: PaneTapeCursor,
+        isDeliveringOpening: Bool = false
     ) {
         subscriptions[id] = Subscription(
             connectionId: connectionId,
             paneId: paneId,
-            cursor: cursor
+            cursor: cursor,
+            isInFlight: isDeliveringOpening
         )
     }
 

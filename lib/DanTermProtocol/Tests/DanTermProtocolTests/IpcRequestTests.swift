@@ -132,6 +132,7 @@ struct IpcRequestTests {
             try parseCLI(["pane", "rows", "--pane", pane]),
             try parseCLI(["pane", "zoom", "--pane", pane, "on"]),
             try parseCLI(["pane", "tape", "--pane", pane, "--follow"]),
+            try parseCLI(["pane", "snapshot", "--pane", pane]),
             try parseCLI(["theme", "set", "--pane", pane, "Tokyo Night"]),
             try parseCLI(["agent", "attach", "--pane", pane, "--kind", "codex", "--id", "thread-1"]),
             try parseCLI(["agent", "activity", "--pane", pane, "--kind", "codex", "--id", "thread-1", "--state", "working"]),

@@ -153,11 +153,13 @@ struct CLICharacterizationTests {
         let start = JSONValue.object([
             "kind": .string("start"),
             "version": .number(Double(paneTapeStreamVersion)),
-            "capture": .string("snapshot"),
+            "capture": .string("dump"),
             "format": .string("replay"),
+            "reconstructible": .bool(false),
             "provenance": .object(["pane": .string(samplePaneId)]),
             "initial": .object(["columns": .number(80), "rows": .number(24)]),
             "cursor": .object([
+                "recorderLifetimeId": .string("11111111-1111-4111-8111-111111111111"),
                 "sequence": .number(0),
                 "feedByteOffset": .number(0),
                 "writeByteOffset": .number(0),
@@ -173,7 +175,7 @@ struct CLICharacterizationTests {
         ])
         let end = JSONValue.object([
             "kind": .string("end"),
-            "reason": .string("snapshot-complete"),
+            "reason": .string("dump-complete"),
         ])
 
         let run = try withScriptedEndpoint { connection in

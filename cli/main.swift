@@ -68,15 +68,17 @@ struct DanTermCLI {
           pane rows --pane <pane-id>
                                       Print each display row's line structure as
                                       JSON: wrap claim, content end, and width.
-          pane tape --pane <pane-id> [--follow] [--from-now]
-                    [--format replay|inspect]
-                                      Print the pane's flight recording as JSON
-                                      Lines: one start record, then one record per
-                                      event. --follow keeps the stream open for
-                                      live events; --from-now skips the backlog.
+          pane tape --pane <pane-id> [--follow]
+                    [--from-now | --from-cursor <cursor-json>]
+                    [--raw | --reconstructible] [--format replay|inspect]
+                                      Print or follow the pane's flight recording.
+                                      Follows and resumes reconstruct exact state;
+                                      finite beginning dumps default to raw evidence.
                                       --format inspect replaces each payload with
                                       readable spans; replay (the default) keeps
                                       the exact bytes.
+          pane snapshot --pane <pane-id>
+                                      Print one exact pane-state sync as JSON Lines
           theme set --pane <pane-id> <name>|--clear
                                       Set or clear a pane theme
           agent attach --pane <pane-id> --kind <kind> --id <session-id>

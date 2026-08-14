@@ -46,7 +46,8 @@ and skips those rows when the app is unavailable.
     danterm pane read --pane <pane-id> [--lines <n>]
     danterm pane zoom --pane <pane-id> on|off|toggle
     danterm pane rows --pane <pane-id>
-    danterm pane tape --pane <pane-id> [--follow] [--from-now] [--format replay|inspect]
+    danterm pane tape --pane <pane-id> [--follow] [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] [--format replay|inspect]
+    danterm pane snapshot --pane <pane-id>
     danterm theme set --pane <pane-id> <name>|--clear
     danterm agent attach --pane <pane-id> --kind <kind> --id <session-id>
     danterm agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>
@@ -122,8 +123,8 @@ For agent commands:
   `--tab <tab-id>`.
 - `agent attach`, `agent activity`, and `agent detach`: always pass
   `--pane <pane-id>`. The bundled hooks pass `$DANTERM_PANE` explicitly.
-- `pane focus`, `pane info`, `pane read`, `pane rows`, `pane zoom`, and
-  `pane tape`: always name the pane explicitly.
+- `pane focus`, `pane info`, `pane read`, `pane rows`, `pane zoom`, `pane tape`,
+  and `pane snapshot`: always name the pane explicitly.
 - `quit`: always pass `--socket <path>` naming the slot you launched. It takes
   no other target, and the CLI refuses it without an explicit socket. Never aim
   it at the user's DanTerm; the app refuses that anyway, but the rule is yours
@@ -257,6 +258,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "why is the pane's text laid out wrong after a resize" | `pane rows --pane <pane-id>` |
 | "dump the pane's flight recording" | `pane tape --pane <pane-id>` |
 | "watch the pane's flight recording live" | `pane tape --pane <pane-id> --follow` |
+| "get the pane's exact terminal state" | `pane snapshot --pane <pane-id>` |
 | "type X into pane <id>" / "send Ctrl-C to..." | `pane input --pane <pane-id>` |
 | "what tabs/panes are open?" | `ls` |
 | "which control owns key focus?" | `focus` |
@@ -482,48 +484,53 @@ stream that made it.
 
 ### Capture a pane flight recording
 
-`pane tape` prints the pane's bounded, raw recording as JSON Lines. One stream
-contract covers both captures: without `--follow` you get a finite dump of the
-retained tape, and with `--follow` the same stream stays open for live events.
-Every line is one independently valid JSON record, so no single line holds the
-whole recording, and a reader can act on each record as it arrives.
+`pane tape` prints the pane's bounded recording as JSON Lines. Without
+`--follow` it ends at one fence. With `--follow` it stays open for live events.
+A finite stream from the beginning defaults to raw evidence. A follow,
+`--from-now`, or `--from-cursor` defaults to reconstructible state. Override the
+default with `--raw` or `--reconstructible`.
 
     danterm pane tape --pane "$PANE_ID" > tape.jsonl
-    danterm pane tape --pane "$PANE_ID" --follow > tape.jsonl
+    danterm pane tape --pane "$PANE_ID" --follow --raw > tape.jsonl
     danterm pane tape --pane "$PANE_ID" --follow --from-now > tape.jsonl
     danterm pane tape --pane "$PANE_ID" --format inspect
 
-`--from-now` skips the backlog and waits for the next live event. Redirect the
-stream when evidence must survive an app crash. `--format replay` is the default
-and keeps the exact bytes; `--format inspect` is the readable view described
-below.
+`--from-now` starts at current pane state. `--from-cursor '<json>'` resumes from
+a cursor copied from a completed `start` or `sync` record. A cursor carries
+`recorderLifetimeId`, `sequence`, `feedByteOffset`, and `writeByteOffset`. A
+cursor from a previous app lifetime is accepted and repaired with total loss
+plus fresh state. `--format replay` is the default and keeps exact bytes;
+`--format inspect` is the readable event view described below.
 
-Every stream opens with `start` and closes with `end` when the producer can
-state a clean end. In between come `event` records in order, and a `gap` record
-whenever the producer lost bytes: a finite dump can only lose them before its
-oldest retained event, so its `gap` comes right after `start`, but a follower
-that falls behind can be told at any point, so a followed capture may carry a
-`gap` between two events.
+Every stream opens with `start`. In between come recorded `event` values,
+reported `gap` values, and synthesized `sync` values. A clean finite stream ends
+with `end`. Every line is independently valid JSON; one state transfer can use
+several lines.
 
 - `start` opens every stream:
-  `{"kind":"start","version":2,"capture":"snapshot"|"follow","format":"replay"|"inspect",`
-  `"provenance":{...},"initial":{"columns":N,"rows":N},`
-  `"cursor":{"sequence":N,"feedByteOffset":N,"writeByteOffset":N}}`.
-  The `cursor` is the baseline every later byte offset is read against, so a
-  stream that begins past the beginning still reports offsets with an origin.
-- `gap` reports exact loss since the requested cursor, per direction:
+  `{"kind":"start","version":3,"capture":"dump"|"follow"|"snapshot",`
+  `"format":"replay"|"inspect","reconstructible":true|false,`
+  `"provenance":{...},"initial":{"columns":N,"rows":N},"cursor":{...}}`.
+  `cursor` is absent while a state sync is pending. It appears only after all
+  state bytes have arrived.
+- `gap` reports exact loss for a cursor from this recorder:
   `{"kind":"gap","droppedEventCount":N,"droppedFeedBytes":N,"droppedWriteBytes":N}`.
+  A cursor the recorder cannot place reports `{"kind":"gap","loss":"total"}`.
 - `event` carries one recorded event:
   `{"kind":"event","sequence":N,"elapsedNanoseconds":N,`
   `"byteOffset":N,"byteLength":N,"event":{"type":"feed","base64":"..."}}`.
   Timing sits above the event object. `byteOffset` and `byteLength` appear only
   on `feed` and `write` events; the offsets are zero-based and numbered
   independently per direction, so a feed offset counts feed bytes only.
+- `sync` carries synthesized terminal bytes in ordered parts. The first part
+  carries current geometry. The final part carries the continuation cursor:
+  `{"kind":"sync","part":1,"parts":N,"base64":"...","initial":{"columns":N,"rows":N}}`.
+  Buffer every part and apply the bytes only after the final part arrives.
 - `end` states why the producer stopped:
-  `{"kind":"end","reason":"snapshot-complete"|"pane-closed"|"stream-failed"}`.
+  `{"kind":"end","reason":"dump-complete"|"snapshot-complete"|"pane-closed"|"stream-failed"}`.
 
-A finite dump (`capture: "snapshot"`) fences one atomic moment and always ends
-with `snapshot-complete`. Events that arrive while its records reach you are not
+A finite tape dump (`capture: "dump"`) fences one atomic moment and always ends
+with `dump-complete`. Events that arrive while its records reach you are not
 in it, and the pane closing part way through delivery does not truncate it. If
 the stream ends at EOF instead, the capture is incomplete and the CLI exits
 nonzero saying DanTerm closed the connection before the tape ended -- do not
@@ -536,6 +543,19 @@ working, and the connection stays open until you close it. A follow that ends at
 EOF without an `end` record is still a valid capture of everything up to the
 moment the app stopped, which is what surviving a crash looks like.
 
+A reconstructible stream injects a sync only when the requested position plus
+the delivered events cannot reconstruct exact pane state. A raw stream never
+injects state. It reports retained events and loss as recorder evidence. Use
+`--raw` for captures that will become fixtures.
+
+### Snapshot exact pane state
+
+`pane snapshot` returns the same atomic sync records a reconstructible tape
+stream uses, then `snapshot-complete`. It always starts without a cursor because
+the cursor takes effect only on the final sync part.
+
+    danterm pane snapshot --pane "$PANE_ID" > pane-state.jsonl
+
 The tape records both directions: `feed` events are bytes the child produced,
 `write` events are bytes that reached the child. A `write` also carries
 `originElapsedNanoseconds` when its bytes came from an event outside the pane
@@ -545,16 +565,15 @@ carry no origin. Feed payloads use lossless base64. Because input is recorded, a
 tape can contain what was typed, including a password a `sudo` or `ssh` prompt
 never echoed -- treat one as sensitive before sharing or committing it.
 
-The output is unscrubbed; redirect it to a file, then run the repository's
+Raw output is unscrubbed; redirect it to a file, then run the repository's
 fixture converter before committing it. The converter refuses every stream that
-reports a `gap`, because its surviving geometry and event sequence cannot be
-trusted. There is no truncation override. A truncated finite dump still
-succeeds and reports its loss as that `gap` record. It also refuses a stream
-whose sequences or per-direction byte offsets do not continue, and a finite dump
-that stops without its `end` record, because neither is the whole run of bytes
-the pane saw. A followed capture that stops at EOF is accepted as evidence up to
-that point. Every pane records, in production as well as in a dev build, so this
-always answers for a live pane.
+is reconstructible or reports a `gap`, because synthesized state and surviving
+geometry are not raw evidence of the whole run. It also refuses a stream whose
+event sequence or per-direction byte offsets do not continue. There is no
+truncation override. A finite dump that stops without its `end` record is not a
+whole recording and is refused. A followed capture that stops at EOF is accepted
+as evidence up to that point. Every pane records, in production as well as in a
+dev build, so this always answers for a live pane.
 
     scripts/terminal-tape-to-fixture.py tape.jsonl \
         lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json \
@@ -589,15 +608,16 @@ to read what a pane did rather than replay it. DanTerm always records and sends
 the exact bytes; the CLI derives this view locally, one record at a time, so
 nothing about the recording changes.
 
-    {"kind":"start","version":2,"capture":"snapshot","format":"inspect","initial":{"columns":80,"rows":24},"cursor":{"sequence":0,"feedByteOffset":0,"writeByteOffset":0},"provenance":{...}}
+    {"kind":"start","version":3,"capture":"dump","format":"inspect","reconstructible":false,"initial":{"columns":80,"rows":24},"cursor":{"recorderLifetimeId":"...","sequence":0,"feedByteOffset":0,"writeByteOffset":0},"provenance":{...}}
     {"kind":"event","sequence":0,"elapsedNanoseconds":123652792,"byteOffset":0,"byteLength":41,"event":{"type":"feed","spans":[{"control":"ESC"},{"text":"]1337;DanTermShell=3;integration-ready"},{"control":"ESC"},{"text":"\\"}]}}
 
 A `start` record changes only its `format` field; its version, capture,
 provenance, geometry, and cursor are unchanged. An `event` record replaces
-`base64` inside the event object with `spans`, and every field outside that
+`base64` inside an event object with `spans`, and every field outside that
 payload -- `sequence`, `elapsedNanoseconds`, `originElapsedNanoseconds`,
 `byteOffset`, `byteLength` -- is identical to the replay record. `gap` and `end`
-records pass through unchanged.
+records pass through unchanged. A `sync` also stays base64 because it is terminal
+state, not a recorded event payload.
 
 Spans account for every payload byte exactly once, in order, under three keys:
 
@@ -774,9 +794,10 @@ else prints nothing on success and exits 0.
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
 | `pane zoom --pane <pane-id> on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `tab.isZoomed` and current session-reported fields |
 | `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
-| `pane tape --pane <pane-id>` | JSON Lines: one `start` record, an optional `gap`, one record per event, then `end` with reason `snapshot-complete` |
-| `pane tape --pane <pane-id> --follow [--from-now]` | The same JSON Lines stream, with `capture: "follow"`, held open for live events |
+| `pane tape --pane <pane-id>` | Raw JSON Lines: `start`, retained events or loss, then `dump-complete` |
+| `pane tape --pane <pane-id> --follow [--from-now | --from-cursor <cursor-json>]` | Reconstructible JSON Lines held open for live events |
 | `pane tape --pane <pane-id> [--format replay\|inspect]` | Same stream either way. `replay` (the default) carries exact `base64` payloads; `inspect` carries readable `spans` and is neither replayable nor fixture evidence |
+| `pane snapshot --pane <pane-id>` | JSON Lines: `start`, one or more atomic `sync` parts, then `snapshot-complete` |
 
 The `agent attach`, `agent activity`, and `agent detach` commands are silent
 mutations: no stdout on success. Activity accepts only `working`, `waiting`, or

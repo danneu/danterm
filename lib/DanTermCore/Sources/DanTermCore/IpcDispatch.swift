@@ -363,11 +363,25 @@ private func dispatchIpc(
         try requirePane(paneId, in: model)
         return [.readPaneRowStructure(reqId: reqId, paneId: paneId)]
 
-    case .paneTape(let paneId, let follow, let fromNow):
+    case .paneTape(let paneId, let follow, let start, let mode):
         try requirePane(paneId, in: model)
-        return follow
-            ? [.followPaneTape(reqId: reqId, paneId: paneId, fromNow: fromNow)]
-            : [.dumpPaneTape(reqId: reqId, paneId: paneId)]
+        return [.streamPaneTape(
+            reqId: reqId,
+            paneId: paneId,
+            capture: follow ? .follow : .dump,
+            start: start,
+            mode: mode
+        )]
+
+    case .paneSnapshot(let paneId):
+        try requirePane(paneId, in: model)
+        return [.streamPaneTape(
+            reqId: reqId,
+            paneId: paneId,
+            capture: .snapshot,
+            start: .now,
+            mode: .reconstructible
+        )]
 
     case .todoList(let owner):
         try requireTodoOwner(owner, in: model)

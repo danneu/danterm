@@ -8,9 +8,9 @@ struct PaneTapeFollowTests {
     private static let lifetimeId = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
 
     @Test("a finite dump ends with its own terminator after its gap and events")
-    func dumpRecordsEndWithSnapshotComplete() {
+    func dumpRecordsEndWithDumpComplete() {
         // Intent: everything a finite dump owes after its start record is its loss, then its
-        //   events in order, then an `end` naming a completed snapshot.
+        //   events in order, then an `end` naming a completed dump.
         // Why it exists: a dump's boundary is a fence it already took, so nothing can arrive
         //   later to extend it. Stopping without that terminator would leave a reader unable
         //   to tell a whole capture from one the app died partway through, which is exactly
@@ -18,7 +18,7 @@ struct PaneTapeFollowTests {
         // Scenario: an agent dumps a busy pane whose oldest events the recorder already evicted.
         let dump = PaneTapeDump(
             start: makePaneTapeStart(
-                capture: .snapshot,
+                capture: .dump,
                 provenance: .object(["source": .string("danterm-live-capture")]),
                 initial: .init(columns: 80, rows: 24),
                 cursor: .beginning
@@ -64,14 +64,14 @@ struct PaneTapeFollowTests {
         #expect(records.dropFirst().compactMap { $0["sequence"] } == [.number(4), .number(5)])
         #expect(records.last == .object([
             "kind": .string("end"),
-            "reason": .string("snapshot-complete"),
+            "reason": .string("dump-complete"),
         ]))
     }
 
     @Test("backlog and from-now starts preserve their fenced geometry and cursor")
     func startsPreserveMetadataAndCursor() {
         let backlog = makePaneTapeStart(
-            capture: .snapshot,
+            capture: .dump,
             provenance: .object(["source": .string("danterm-live-capture")]),
             initial: .init(columns: 120, rows: 40),
             cursor: .beginning
@@ -79,9 +79,10 @@ struct PaneTapeFollowTests {
 
         #expect(backlog.record == .object([
             "kind": .string("start"),
-            "version": .number(2),
-            "capture": .string("snapshot"),
+            "version": .number(3),
+            "capture": .string("dump"),
             "format": .string("replay"),
+            "reconstructible": .bool(false),
             "provenance": .object(["source": .string("danterm-live-capture")]),
             "initial": .object([
                 "columns": .number(120),
@@ -137,7 +138,7 @@ struct PaneTapeFollowTests {
             cursor: cursor
         )
 
-        #expect(start.record["version"] == .number(2))
+        #expect(start.record["version"] == .number(3))
         #expect(start.record["capture"] == .string("follow"))
         #expect(start.record["format"] == .string("replay"))
         #expect(start.record["cursor"] == .object([
@@ -196,12 +197,12 @@ struct PaneTapeFollowTests {
     @Test("each end reason reaches the wire with its own spelling")
     func endRecordSpellsEveryReason() {
         // Intent: the three reasons a producer can state are distinct strings on the wire.
-        // Why it exists: a reader holds a snapshot capture to `snapshot-complete` and accepts
+        // Why it exists: a reader holds a finite dump to `dump-complete` and accepts
         //   the two follow endings, so two reasons sharing a spelling would let a truncated
         //   dump pass as a complete one.
-        #expect(makePaneTapeEndRecord(reason: .snapshotComplete) == .object([
+        #expect(makePaneTapeEndRecord(reason: .dumpComplete) == .object([
             "kind": .string("end"),
-            "reason": .string("snapshot-complete"),
+            "reason": .string("dump-complete"),
         ]))
         #expect(makePaneTapeEndRecord(reason: .paneClosed) == .object([
             "kind": .string("end"),
@@ -373,6 +374,31 @@ struct PaneTapeFollowTests {
         let pendingFetch = subscriptions.completeDelivery(subscriptionId: subscriptionId)
         let followUp = try #require(pendingFetch)
         #expect(followUp.cursor.nextSequence == 1)
+        #expect(subscriptions.eventsAvailable(subscriptionId) == nil)
+    }
+
+    @Test("live output waits until every opening synchronization record is delivered")
+    func openingSynchronizationBlocksLiveFetch() throws {
+        let subscriptionId = UUID()
+        let cursor = PaneTapeCursor(
+            recorderLifetimeId: Self.lifetimeId,
+            nextSequence: 7,
+            feedBytesBeforeNextSequence: 40,
+            writeBytesBeforeNextSequence: 2
+        )
+        var subscriptions = PaneTapeFollowSubscriptions()
+        subscriptions.add(
+            id: subscriptionId,
+            connectionId: UUID(),
+            paneId: UUID(),
+            cursor: cursor,
+            isDeliveringOpening: true
+        )
+
+        #expect(subscriptions.eventsAvailable(subscriptionId) == nil)
+        let completedOpening = subscriptions.completeDelivery(subscriptionId: subscriptionId)
+        let fetch = try #require(completedOpening)
+        #expect(fetch.cursor == cursor)
         #expect(subscriptions.eventsAvailable(subscriptionId) == nil)
     }
 

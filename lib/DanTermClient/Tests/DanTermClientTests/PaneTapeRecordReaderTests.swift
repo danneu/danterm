@@ -7,6 +7,64 @@ import DanTermProtocol
 @testable import DanTermClient
 
 struct PaneTapeRecordReaderTests {
+    @Test("a state sync decodes its ordered part and completion cursor")
+    func stateSyncDecodes() throws {
+        let record = JSONValue.object([
+            "kind": .string("sync"),
+            "part": .number(2),
+            "parts": .number(2),
+            "base64": .string(Data("state".utf8).base64EncodedString()),
+            "cursor": .object([
+                "recorderLifetimeId": .string("11111111-1111-4111-8111-111111111111"),
+                "sequence": .number(41),
+                "feedByteOffset": .number(100),
+                "writeByteOffset": .number(7),
+            ]),
+        ])
+
+        guard case .sync(let sync)? = decodePaneTapeRecord(record) else {
+            Issue.record("sync record did not decode")
+            return
+        }
+        #expect(sync.part == 2)
+        #expect(sync.parts == 2)
+        #expect(sync.bytes == Array("state".utf8))
+        #expect(sync.cursor?.nextSequence == 41)
+    }
+
+    @Test("a state sync becomes visible only after its final ordered part")
+    func stateSyncAssemblesAtomically() throws {
+        let cursor = PaneTapeCursor(
+            recorderLifetimeId: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
+            nextSequence: 41,
+            feedBytesBeforeNextSequence: 100,
+            writeBytesBeforeNextSequence: 7
+        )
+        var assembler = PaneTapeSyncAssembler()
+
+        #expect(assembler.ingest(PaneTapeSyncRecord(
+            part: 1,
+            parts: 2,
+            bytes: Array("sta".utf8),
+            columns: 80,
+            rows: 24,
+            cursor: nil
+        )) == nil)
+        #expect(assembler.ingest(PaneTapeSyncRecord(
+            part: 2,
+            parts: 2,
+            bytes: Array("te".utf8),
+            columns: nil,
+            rows: nil,
+            cursor: cursor
+        )) == PaneTapeStateSynchronization(
+            bytes: Array("state".utf8),
+            columns: 80,
+            rows: 24,
+            cursor: cursor
+        ))
+    }
+
     @Test("a record kind this build does not know decodes as unknown, not as a failure")
     func unknownKindSurvives() throws {
         // Intent: an unfamiliar kind is reported as unfamiliar and the reader keeps going.
@@ -15,12 +73,12 @@ struct PaneTapeRecordReaderTests {
         //   predates it could not tell "I do not handle this" from "this stream is broken".
         // Scenario: a client built today reads a stream from a newer DanTerm.
         let record = JSONValue.object([
-            "kind": .string("sync"),
+            "kind": .string("future"),
             "sequence": .number(41),
             "someFieldFromTheFuture": .bool(true),
         ])
 
-        #expect(decodePaneTapeRecord(record) == .unknown(kind: "sync"))
+        #expect(decodePaneTapeRecord(record) == .unknown(kind: "future"))
     }
 
     @Test("an end reason this build does not know still reads as an end")
@@ -46,14 +104,64 @@ struct PaneTapeRecordReaderTests {
     @Test("a known kind missing its own required fields fails to decode")
     func malformedKnownKindFails() {
         // Intent: "unknown kind" and "known kind, broken record" stay apart.
-        // Why it exists: tolerating a future kind must not also tolerate a corrupt one --
-        //   a start record with no cursor gives a reader no origin for later offsets.
+        // Why it exists: tolerating a future kind must not also tolerate a corrupt one.
         #expect(decodePaneTapeRecord(.object(["kind": .string("event")])) == nil)
         #expect(decodePaneTapeRecord(.object([
             "kind": .string("start"),
             "capture": .string("snapshot"),
             "format": .string("replay"),
         ])) == nil)
+    }
+
+    @Test("numeric record coordinates must be whole and inside their decoded domains")
+    func malformedNumericCoordinatesFail() {
+        #expect(decodePaneTapeRecord(.object([
+            "kind": .string("start"),
+            "version": .number(3),
+            "capture": .string("snapshot"),
+            "format": .string("replay"),
+            "reconstructible": .bool(true),
+            "initial": .object(["columns": .number(80.5), "rows": .number(24)]),
+        ])) == nil)
+        #expect(decodePaneTapeRecord(.object([
+            "kind": .string("gap"),
+            "droppedEventCount": .number(-1),
+            "droppedFeedBytes": .number(0),
+            "droppedWriteBytes": .number(0),
+        ])) == nil)
+        #expect(decodePaneTapeRecord(.object([
+            "kind": .string("event"),
+            "sequence": .number(1.5),
+            "elapsedNanoseconds": .number(2),
+            "event": .object([:]),
+        ])) == nil)
+    }
+
+    @Test("a reconstructible start may withhold its cursor until sync completion")
+    func synchronizedStartWithholdsCursor() throws {
+        let record = JSONValue.object([
+            "kind": .string("start"),
+            "version": .number(3),
+            "capture": .string("snapshot"),
+            "format": .string("replay"),
+            "reconstructible": .bool(true),
+            "initial": .object(["columns": .number(80), "rows": .number(24)]),
+        ])
+
+        guard case .start(let start)? = decodePaneTapeRecord(record) else {
+            Issue.record("start record did not decode")
+            return
+        }
+        #expect(start.cursor == nil)
+        #expect(start.reconstructible)
+    }
+
+    @Test("a total gap stays distinct from exact loss")
+    func totalGapDecodes() {
+        #expect(decodePaneTapeRecord(.object([
+            "kind": .string("gap"),
+            "loss": .string("total"),
+        ])) == .gap(.total))
     }
 
     @Test("a capture mode this build does not know is malformed rather than tolerated")

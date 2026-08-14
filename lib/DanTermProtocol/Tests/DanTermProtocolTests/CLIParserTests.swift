@@ -379,7 +379,7 @@ struct CLIParserTests {
             try parseCLI(["pane"])
         }
 
-        #expect(error?.message == "usage: danterm pane <focus|info|split|close|input|read|rows|zoom|tape>")
+        #expect(error?.message == "usage: danterm pane <focus|info|split|close|input|read|rows|zoom|tape|snapshot>")
     }
 
     @Test("group command usage lists every supported subcommand")
@@ -500,8 +500,8 @@ struct CLIParserTests {
         #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "zoom", "on", "off"]) }
     }
 
-    @Test("pane tape renders a replay stream unless another format is asked for")
-    func paneTapeDefaultsToTheReplayStream() throws {
+    @Test("pane tape defaults a finite beginning dump to raw replay")
+    func paneTapeDefaultsToRawReplay() throws {
         // Intent: with no --format flag, the command renders the exact-bytes stream.
         // Why it exists: the default output is what fixture conversion and replay consume, so
         // a default that derived a readable view would silently make every capture
@@ -509,7 +509,11 @@ struct CLIParserTests {
         let command = try parseCLI(["pane", "tape", "--pane", paneId])
 
         #expect(command.method == IpcRequestMethod.paneTape.rawValue)
-        #expect(command.params == ["pane": .string(paneId)])
+        #expect(command.params == [
+            "pane": .string(paneId),
+            "start": .string("beginning"),
+            "mode": .string("raw"),
+        ])
         #expect(command.outputMode == .tapeStream(.replay))
     }
 
@@ -524,15 +528,21 @@ struct CLIParserTests {
 
         #expect(command.outputMode == .tapeStream(testCase.1))
         // The format never reaches DanTerm: the app always sends exact bytes.
-        #expect(command.params == ["pane": .string(paneId)])
+        #expect(command.params == [
+            "pane": .string(paneId),
+            "start": .string("beginning"),
+            "mode": .string("raw"),
+        ])
     }
 
-    @Test("pane tape parses follow and from now")
-    func paneTapeParsesFollowAndFromNow() throws {
+    @Test("pane tape defaults follows and cursor resumes to reconstructible")
+    func paneTapeParsesFollowAndCursorResume() throws {
         let follow = try parseCLI(["pane", "tape", "--pane", paneId, "--follow"])
         #expect(follow.params == [
             "pane": .string(paneId),
             "follow": .bool(true),
+            "start": .string("beginning"),
+            "mode": .string("reconstructible"),
         ])
 
         let fromNow = try parseCLI([
@@ -541,15 +551,50 @@ struct CLIParserTests {
         #expect(fromNow.params == [
             "pane": .string(paneId),
             "follow": .bool(true),
-            "fromNow": .bool(true),
+            "start": .string("now"),
+            "mode": .string("reconstructible"),
         ])
+
+        let cursor = """
+            {"recorderLifetimeId":"11111111-1111-4111-8111-111111111111",\
+            "sequence":7,"feedByteOffset":20,"writeByteOffset":3}
+            """
+        let resumed = try parseCLI([
+            "pane", "tape", "--pane", paneId, "--from-cursor", cursor,
+        ])
+        #expect(resumed.params["start"] == .object([
+            "cursor": .object([
+                "recorderLifetimeId": .string("11111111-1111-4111-8111-111111111111"),
+                "sequence": .number(7),
+                "feedByteOffset": .number(20),
+                "writeByteOffset": .number(3),
+            ]),
+        ]))
+        #expect(resumed.params["mode"] == .string("reconstructible"))
+    }
+
+    @Test("pane tape accepts an explicit stream mode and pane snapshot is a stream")
+    func paneTapeModeAndPaneSnapshot() throws {
+        let reconstructed = try parseCLI([
+            "pane", "tape", "--pane", paneId, "--reconstructible",
+        ])
+        #expect(reconstructed.params["mode"] == .string("reconstructible"))
+
+        let rawFollow = try parseCLI([
+            "pane", "tape", "--pane", paneId, "--follow", "--raw",
+        ])
+        #expect(rawFollow.params["mode"] == .string("raw"))
+
+        let snapshot = try parseCLI(["pane", "snapshot", "--pane", paneId])
+        #expect(snapshot.method == IpcRequestMethod.paneSnapshot.rawValue)
+        #expect(snapshot.params == ["pane": .string(paneId)])
+        #expect(snapshot.outputMode == .tapeStream(.replay))
     }
 
     @Test("pane tape rejects missing and unexpected arguments", arguments: [
         (["pane", "tape"], paneTapeUsage),
         (["pane", "tape", "--follow"], paneTapeUsage),
         (["pane", "tape", "--pane"], paneTapeUsage),
-        (["pane", "tape", "--pane", paneId, "--from-now"], "--from-now requires --follow\n\(paneTapeUsage)"),
         (["pane", "tape", "--pane", paneId, "--format"], "--format requires replay or inspect\n\(paneTapeUsage)"),
         (["pane", "tape", "--pane", paneId, "--format", "bogus"], "unknown format: bogus\n\(paneTapeUsage)"),
         (["pane", "tape", "--pane", paneId, "extra"], "unexpected argument: extra"),
@@ -730,4 +775,4 @@ private let groupNewUsage = "usage: danterm group new --name <name> [--cmd <s>] 
 private let groupCloseUsage = "usage: danterm group close --group <group-id> [--move-tabs]"
 private let tabNewUsageWithPositionFlags = "usage: danterm tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end]"
 private let paneSplitUsageWithFocusFlags = "usage: danterm pane split --pane <pane-id> -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
-private let paneTapeUsage = "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now] [--format replay|inspect]"
+private let paneTapeUsage = "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] [--format replay|inspect]"

@@ -62,7 +62,7 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                 stream_start(),
                 byte_event(0, "feed", PROMPT_BYTES, offset=0, elapsed=12),
                 plain_event(1, {"type": "resize", "columns": 79, "rows": 23}, elapsed=25),
-                stream_end("snapshot-complete"),
+                stream_end("dump-complete"),
             ],
             "--test",
             "TerminalPromptRegressionTests",
@@ -103,7 +103,7 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
             plain_event(2, {"type": "resize", "columns": 90, "rows": 30}, elapsed=11),
         ]
         finite = self.accept(
-            [stream_start(), *events, stream_end("snapshot-complete")], "--keep-identifiers"
+            [stream_start(), *events, stream_end("dump-complete")], "--keep-identifiers"
         )
         followed = self.accept(
             [stream_start("follow"), *events, stream_end("pane-closed")], "--keep-identifiers"
@@ -219,7 +219,7 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                     0,
                     {"type": "mouse", "action": "move", "button": 1, "column": 3, "row": 2},
                 ),
-                stream_end("snapshot-complete"),
+                stream_end("dump-complete"),
             ],
             "--keep-identifiers",
         )
@@ -247,7 +247,7 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
         event["byteOffset"] = 0
         event["byteLength"] = 2
         result = self.refuse(
-            [stream_start(format="inspect"), event, stream_end("snapshot-complete")]
+            [stream_start(format="inspect"), event, stream_end("dump-complete")]
         )
 
         self.assertIn("inspect", result.stderr)
@@ -275,10 +275,10 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
             # That capture is a whole, successful dump of a partial recording, and it is the
             # one shape most likely to be mistaken for evidence of the whole run.
             "truncated finite dump": [
-                stream_start("snapshot"),
+                stream_start("dump"),
                 gap,
                 byte_event(3, "feed", b"a", offset=47),
-                stream_end("snapshot-complete"),
+                stream_end("dump-complete"),
             ],
         }
         for name, records in cases.items():
@@ -370,13 +370,13 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
 
     def test_end_reasons_must_match_the_capture_that_stated_them(self):
         cases = {
-            "snapshot ends as a follow": [
+            "dump ends as a follow": [
                 stream_start(),
                 stream_end("pane-closed"),
             ],
-            "follow ends as a snapshot": [
+            "follow ends as a dump": [
                 stream_start("follow"),
-                stream_end("snapshot-complete"),
+                stream_end("dump-complete"),
             ],
             "unknown reason": [stream_start("follow"), stream_end("bored")],
             "reasonless end": [stream_start("follow"), {"kind": "end"}],
@@ -609,7 +609,7 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                 self.refuse(records)
 
     def test_committed_follow_sample_is_convertible(self):
-        # Intent: the checked-in sample stays a valid version 2 follow capture, so the shape
+        # Intent: the checked-in sample stays a valid version 3 follow capture, so the shape
         #   this suite builds by hand is anchored to one whole recording.
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "fixture.json"
@@ -658,12 +658,13 @@ def local_identifier():
     return socket.gethostname()
 
 
-def stream_start(capture="snapshot", *, sequence=0, feed_offset=0, write_offset=0, **overrides):
+def stream_start(capture="dump", *, sequence=0, feed_offset=0, write_offset=0, **overrides):
     record = {
         "kind": "start",
-        "version": 2,
+        "version": 3,
         "capture": capture,
         "format": "replay",
+        "reconstructible": False,
         "provenance": {
             "source": "danterm-live-capture",
             "author": "DanTerm",
@@ -672,6 +673,7 @@ def stream_start(capture="snapshot", *, sequence=0, feed_offset=0, write_offset=
         },
         "initial": {"columns": 80, "rows": 24},
         "cursor": {
+            "recorderLifetimeId": "11111111-1111-4111-8111-111111111111",
             "sequence": sequence,
             "feedByteOffset": feed_offset,
             "writeByteOffset": write_offset,

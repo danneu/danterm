@@ -16,11 +16,12 @@ struct PaneTapeRoundTripTests {
     @Test("the start record round-trips its capture, format, geometry, and cursor")
     func startRecordRoundTrips() throws {
         let cursor = PaneTapeCursor(
+            recorderLifetimeId: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
             nextSequence: 12,
             feedBytesBeforeNextSequence: 340,
             writeBytesBeforeNextSequence: 56
         )
-        for capture in [PaneTapeCaptureMode.snapshot, .follow] {
+        for capture in [PaneTapeCaptureMode.dump, .follow, .snapshot] {
             let start = makePaneTapeStart(
                 capture: capture,
                 provenance: .object(["pane": .string("p")]),
@@ -37,6 +38,8 @@ struct PaneTapeRoundTripTests {
             #expect(decoded.format == .replay)
             #expect(decoded.columns == 120)
             #expect(decoded.rows == 40)
+            #expect(decoded.cursor == cursor)
+            #expect(decoded.reconstructible == false)
             #expect(decoded.nextSequence == cursor.nextSequence)
             #expect(decoded.feedByteOffset == cursor.feedBytesBeforeNextSequence)
             #expect(decoded.writeByteOffset == cursor.writeBytesBeforeNextSequence)
@@ -102,7 +105,9 @@ struct PaneTapeRoundTripTests {
         // Intent: no reason spelling is readable by the producer alone.
         // Why it exists: the reasons are raw strings on the wire, so a rename on one side
         //   is invisible until a reader silently reports "ended for no stated reason".
-        for reason in [PaneTapeEndReason.snapshotComplete, .paneClosed, .streamFailed] {
+        for reason in [
+            PaneTapeEndReason.dumpComplete, .snapshotComplete, .paneClosed, .streamFailed,
+        ] {
             #expect(decodePaneTapeRecord(makePaneTapeEndRecord(reason: reason)) == .end(reason: reason))
         }
     }
@@ -111,7 +116,7 @@ struct PaneTapeRoundTripTests {
     func dumpRecordsDecodeInOrder() throws {
         let dump = PaneTapeDump(
             start: makePaneTapeStart(
-                capture: .snapshot,
+                capture: .dump,
                 provenance: .null,
                 initial: PaneTapeDimensions(columns: 80, rows: 24),
                 cursor: .beginning
@@ -138,6 +143,6 @@ struct PaneTapeRoundTripTests {
         #expect(decoded.count == 3)
         if case .gap? = decoded.first ?? nil {} else { Issue.record("a dump leads with its gap") }
         if case .event? = decoded[1] {} else { Issue.record("the event follows the gap") }
-        #expect(decoded.last == .end(reason: .snapshotComplete))
+        #expect(decoded.last == .end(reason: .dumpComplete))
     }
 }

@@ -3,19 +3,6 @@
 import Foundation
 import DanTermProtocol
 
-/// Selects whether the stream reconstructs terminal state or exposes only recorded evidence.
-enum PaneTapeStreamMode: Equatable, Sendable {
-    case reconstructible
-    case raw
-}
-
-/// Names the position the requester wants the producer to continue from.
-enum PaneTapeStartPosition: Equatable, Sendable {
-    case beginning
-    case now
-    case cursor(PaneTapeCursor)
-}
-
 /// Holds the request facts that decide the stream's opening records.
 struct PaneTapeStreamRequest: Equatable, Sendable {
     let capture: PaneTapeCaptureMode

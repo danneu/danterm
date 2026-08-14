@@ -1075,48 +1075,40 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     #if !DANTERM_UI_TEST
-    func paneTapeDump() -> (@Sendable () throws -> PaneTapeDump)? {
-        let capture = controller.flightRecordingCapture()
-        return {
-            PaneTapeDump(
-                start: makePaneTapeStart(
-                    capture: .snapshot,
-                    provenance: try paneTapeProvenanceJSON(),
-                    initial: paneTapeDimensions(capture.origin.initial),
-                    cursor: paneTapeCursor(capture.origin.cursor)
-                ),
-                snapshot: try paneTapeSnapshot(capture.snapshot)
-            )
+    func paneTapeOpening(
+        capture: PaneTapeCaptureMode,
+        start: PaneTapeStartPosition,
+        mode: PaneTapeStreamMode
+    ) -> (@Sendable () throws -> PaneTapeOpening)? {
+        let requestedCursor: PaneTapeCursor
+        switch start {
+        case .cursor(let cursor): requestedCursor = cursor
+        case .beginning, .now: requestedCursor = .beginning
         }
-    }
-
-    func paneTapeFollowStart(
-        fromNow: Bool
-    ) -> (@Sendable () throws -> PaneTapeStart)? {
-        let origin = fromNow
-            ? controller.flightRecordingOriginFromNow()
-            : controller.flightRecordingBacklogOrigin()
+        let fence = controller.flightRecordingStreamFence(from: recorderCursor(requestedCursor))
         return {
-            makePaneTapeStart(
-                capture: .follow,
-                provenance: try paneTapeProvenanceJSON(),
-                initial: paneTapeDimensions(origin.initial),
-                cursor: paneTapeCursor(origin.cursor)
+            makePaneTapeOpening(
+                request: PaneTapeStreamRequest(capture: capture, mode: mode, position: start),
+                fence: try paneTapeStreamFence(fence),
+                provenance: try paneTapeProvenanceJSON()
             )
         }
     }
 
     func paneTapeFollowBatch(
         subscriptionId: UUID,
-        from cursor: PaneTapeCursor
-    ) -> (@Sendable () throws -> PaneTapeSnapshot)? {
-        guard let snapshot = controller.flightRecordingFollowSnapshot(
+        from cursor: PaneTapeCursor,
+        mode: PaneTapeStreamMode
+    ) -> (@Sendable () throws -> PaneTapeBatch)? {
+        guard let fence = controller.flightRecordingFollowStreamFence(
             subscriptionId: subscriptionId,
             from: recorderCursor(cursor)
         ) else {
             return nil
         }
-        return { try paneTapeSnapshot(snapshot) }
+        return {
+            makePaneTapeContinuation(mode: mode, fence: try paneTapeFollowStreamFence(fence))
+        }
     }
 
     func addPaneTapeFollowNotice(

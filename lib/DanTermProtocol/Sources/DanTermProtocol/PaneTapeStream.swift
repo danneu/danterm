@@ -7,7 +7,7 @@ import Foundation
 
 /// The stream contract producers emit and readers key their expectations off. It moves whenever
 /// a record's shape or vocabulary changes.
-public let paneTapeStreamVersion = 2
+public let paneTapeStreamVersion = 3
 
 /// Names the payload representation a stream carries.
 public enum PaneTapeFormat: String, Sendable {
@@ -20,17 +20,20 @@ public enum PaneTapeFormat: String, Sendable {
 /// Distinguishes the two captures so a reader can demand the terminator a finite dump always
 /// has, and accept EOF only where a follow stream can legitimately stop.
 public enum PaneTapeCaptureMode: String, Sendable {
-    /// One atomic fence of the retained tape, which always ends with `snapshot-complete`.
-    case snapshot
+    /// One atomic fence of the retained tape, which always ends with `dump-complete`.
+    case dump
     /// A live stream that ends when the pane closes, when DanTerm cannot keep it going, or at
     /// EOF if the app stops abruptly.
     case follow
+    /// One atomic transfer of exact pane state, which always ends with `snapshot-complete`.
+    case snapshot
 }
 
 /// Every clean reason a producer can state for a stream it stopped on purpose. A stream that
 /// ends at EOF states no reason, which is why the follow capture admits that ending and the
 /// snapshot capture does not.
 public enum PaneTapeEndReason: String, Sendable {
+    case dumpComplete = "dump-complete"
     case snapshotComplete = "snapshot-complete"
     case paneClosed = "pane-closed"
     case streamFailed = "stream-failed"

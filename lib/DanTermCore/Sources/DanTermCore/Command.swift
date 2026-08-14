@@ -48,8 +48,13 @@ enum Command {
     case readFocusInfo(reqId: UUID)
     case readPaneText(reqId: UUID, paneId: PaneId, lineLimit: Int?)
     case readPaneRowStructure(reqId: UUID, paneId: PaneId)
-    case dumpPaneTape(reqId: UUID, paneId: PaneId)
-    case followPaneTape(reqId: UUID, paneId: PaneId, fromNow: Bool)
+    case streamPaneTape(
+        reqId: UUID,
+        paneId: PaneId,
+        capture: PaneTapeCaptureMode,
+        start: PaneTapeStartPosition,
+        mode: PaneTapeStreamMode
+    )
     // System
     // `paneId` is carried for grouping alone: it becomes the banner's thread
     // identifier so a chatty pane stacks into one Notification Center entry

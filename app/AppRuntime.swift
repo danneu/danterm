@@ -103,6 +103,7 @@ private func appendTerminalCharacterizationEvent(_ description: String) {
 @MainActor
 private struct PaneTapeFollowTransport {
     let connection: IpcConnection
+    let mode: PaneTapeStreamMode
     /// Registers the stream in the shutdown census. Its cancel closure closes the socket,
     /// which is right for app teardown and wrong for one stream ending, so every teardown
     /// short of shutdown retires this token with `run` instead of `cancel`.
@@ -529,16 +530,23 @@ class AppRuntime {
     /// from that one copy, so output arriving mid-delivery, or the pane closing outright,
     /// cannot add to or truncate a dump that already stated its boundary. This capture holds
     /// no subscription: its id only routes its records to the socket that asked for them.
-    private func dumpPaneTape(
+    private func streamFinitePaneTape(
         reqId: UUID,
         connection: IpcConnection,
-        session: any TerminalSession
+        session: any TerminalSession,
+        capture: PaneTapeCaptureMode,
+        start: PaneTapeStartPosition,
+        mode: PaneTapeStreamMode
     ) {
         guard schedulingLifecycle.isActive else {
             connection.close()
             return
         }
-        guard let prepareDump = session.paneTapeDump() else {
+        guard let prepareOpening = session.paneTapeOpening(
+            capture: capture,
+            start: start,
+            mode: mode
+        ) else {
             connection.writeError(
                 reqId: reqId,
                 code: -32603,
@@ -549,15 +557,18 @@ class AppRuntime {
         let captureId = UUID()
         DispatchQueue.global(qos: .utility).async {
             do {
-                let dump = try prepareDump()
+                let opening = try prepareOpening()
                 // Both writes are enqueued from this one utility-queue block, so every record
                 // is encoded here rather than on the main actor -- a dump can carry the whole
                 // retained tape, and the main actor is drawing panes. Order still holds: each
                 // call encodes inline and hands its bytes to the connection's serial write
                 // queue, so the start record reaches the socket ahead of everything after it.
-                connection.writeSuccess(reqId: reqId, result: dump.start.record)
+                connection.writeSuccess(reqId: reqId, result: opening.start.record)
+                let endReason: PaneTapeEndReason = capture == .snapshot
+                    ? .snapshotComplete
+                    : .dumpComplete
                 writePaneTapeRecords(
-                    makePaneTapeDumpRecords(after: dump),
+                    opening.records + [makePaneTapeEndRecord(reason: endReason)],
                     connection: connection,
                     subscriptionId: captureId
                 )
@@ -574,7 +585,8 @@ class AppRuntime {
     private func beginPaneTapeFollow(
         reqId: UUID,
         paneId: PaneId,
-        fromNow: Bool,
+        start: PaneTapeStartPosition,
+        mode: PaneTapeStreamMode,
         connection: IpcConnection,
         session: any TerminalSession
     ) {
@@ -582,7 +594,11 @@ class AppRuntime {
             connection.close()
             return
         }
-        guard let prepareStart = session.paneTapeFollowStart(fromNow: fromNow) else {
+        guard let prepareOpening = session.paneTapeOpening(
+            capture: .follow,
+            start: start,
+            mode: mode
+        ) else {
             connection.writeError(
                 reqId: reqId,
                 code: -32603,
@@ -597,8 +613,8 @@ class AppRuntime {
         }
         DispatchQueue.global(qos: .utility).async {
             do {
-                let start = try prepareStart()
-                connection.writeSuccess(reqId: reqId, result: start.record) { [weak self] succeeded in
+                let opening = try prepareOpening()
+                connection.writeSuccess(reqId: reqId, result: opening.start.record) { [weak self] succeeded in
                     guard let self else { return }
                     self.schedulingLifecycle.run(callbackToken) {
                         self.finishPaneTapeFollowStart(
@@ -606,7 +622,8 @@ class AppRuntime {
                             subscriptionId: subscriptionId,
                             paneId: paneId,
                             connection: connection,
-                            start: start
+                            opening: opening,
+                            mode: mode
                         )
                     }
                 }
@@ -629,7 +646,8 @@ class AppRuntime {
         subscriptionId: UUID,
         paneId: PaneId,
         connection: IpcConnection,
-        start: PaneTapeStart
+        opening: PaneTapeOpening,
+        mode: PaneTapeStreamMode
     ) {
         guard schedulingLifecycle.isActive else { return }
         guard succeeded else { return }
@@ -647,10 +665,12 @@ class AppRuntime {
             id: subscriptionId,
             connectionId: connection.id,
             paneId: paneId.rawValue,
-            cursor: start.cursor
+            cursor: opening.nextCursor,
+            isDeliveringOpening: opening.records.isEmpty == false
         )
         paneTapeFollowTransports[subscriptionId] = PaneTapeFollowTransport(
             connection: connection,
+            mode: mode,
             shutdownToken: schedulingLifecycle.arm(
                 .subscription,
                 cancel: { connection.close() }
@@ -658,7 +678,7 @@ class AppRuntime {
         )
         guard let noticeRegistration = session.addPaneTapeFollowNotice(
             id: subscriptionId,
-            cursor: start.cursor,
+            cursor: opening.nextCursor,
             // This hop is real, unlike the ones the write completions used to need: the notice
             // fires on the PTY host's owner queue, and that queue has no business learning
             // about the main actor just to save the crossing.
@@ -675,6 +695,29 @@ class AppRuntime {
             return
         }
         paneTapeFollowTransports[subscriptionId]?.noticeRegistration = noticeRegistration
+        guard opening.records.isEmpty == false else { return }
+        guard let callbackToken = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
+            dropPaneTapeFollow(subscriptionId)
+            return
+        }
+        writePaneTapeRecords(
+            opening.records,
+            connection: connection,
+            subscriptionId: subscriptionId
+        ) { [weak self] succeeded in
+            guard let self else { return }
+            self.schedulingLifecycle.run(callbackToken) {
+                guard succeeded else {
+                    self.dropPaneTapeFollow(subscriptionId)
+                    return
+                }
+                if let fetch = self.paneTapeFollowSubscriptions.completeDelivery(
+                    subscriptionId: subscriptionId
+                ) {
+                    self.fetchPaneTapeFollow(fetch)
+                }
+            }
+        }
     }
 
     private func paneTapeFollowEventsAvailable(_ subscriptionId: UUID) {
@@ -686,10 +729,11 @@ class AppRuntime {
     }
 
     private func fetchPaneTapeFollow(_ fetch: PaneTapeFollowFetch) {
-        guard let connection = paneTapeFollowTransports[fetch.subscriptionId]?.connection else {
+        guard let transport = paneTapeFollowTransports[fetch.subscriptionId] else {
             dropPaneTapeFollow(fetch.subscriptionId)
             return
         }
+        let connection = transport.connection
         let paneId = PaneId(rawValue: fetch.paneId)
         guard let session = sessions[paneId] else {
             endPaneTapeFollowers(for: paneId)
@@ -697,7 +741,8 @@ class AppRuntime {
         }
         guard let prepareBatch = session.paneTapeFollowBatch(
             subscriptionId: fetch.subscriptionId,
-            from: fetch.cursor
+            from: fetch.cursor,
+            mode: transport.mode
         ) else {
             failPaneTapeFollow(fetch.subscriptionId)
             return
@@ -708,8 +753,7 @@ class AppRuntime {
         ) else { return }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             do {
-                let snapshot = try prepareBatch()
-                let batch = makePaneTapeBatch(from: snapshot)
+                let batch = try prepareBatch()
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.schedulingLifecycle.run(callbackToken) {
@@ -1064,31 +1108,31 @@ class AppRuntime {
             }
             connection.writeSuccess(reqId: reqId, result: .object(["rows": .array(rows)]))
 
-        case .dumpPaneTape(let reqId, let paneId):
+        case .streamPaneTape(let reqId, let paneId, let capture, let start, let mode):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = sessions[paneId] else {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
                 break
             }
-            dumpPaneTape(reqId: reqId, connection: connection, session: session)
-
-        case .followPaneTape(let reqId, let paneId, let fromNow):
-            guard let connection = takeIpcConnection(for: reqId) else { break }
-            guard let session = sessions[paneId] else {
-                connection.writeError(
+            if capture == .follow {
+                beginPaneTapeFollow(
                     reqId: reqId,
-                    code: -32603,
-                    message: "pane no longer available"
+                    paneId: paneId,
+                    start: start,
+                    mode: mode,
+                    connection: connection,
+                    session: session
                 )
-                break
+            } else {
+                streamFinitePaneTape(
+                    reqId: reqId,
+                    connection: connection,
+                    session: session,
+                    capture: capture,
+                    start: start,
+                    mode: mode
+                )
             }
-            beginPaneTapeFollow(
-                reqId: reqId,
-                paneId: paneId,
-                fromNow: fromNow,
-                connection: connection,
-                session: session
-            )
 
         case .saveDanTermConfig(let config):
             do {

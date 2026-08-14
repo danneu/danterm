@@ -17,6 +17,7 @@ smoke_output="$(mktemp)"
 smoke_error="$(mktemp)"
 tape_output="$(mktemp)"
 inspect_output="$(mktemp)"
+snapshot_output="$(mktemp)"
 tape_fixture="$(mktemp)"
 # Holds socket paths that must never resolve, for the cases asserting the CLI
 # ignores an ambient DANTERM_SOCK.
@@ -41,7 +42,7 @@ cleanup() {
     trap - EXIT INT TERM
     release_slot
     rm -f "$launch_output" "$launch_error" "$smoke_output" "$smoke_error" \
-        "$tape_output" "$inspect_output" "$tape_fixture"
+        "$tape_output" "$inspect_output" "$snapshot_output" "$tape_fixture"
     rm -rf "$unusable_dir"
     exit "$status"
 }
@@ -293,16 +294,22 @@ for _ in $(seq 1 30); do
     fi
     sleep 1
 done
-jq -e -s '(.[0] | .kind == "start" and .version == 2 and .capture == "snapshot"
-             and .format == "replay")
-    and (last | .kind == "end" and .reason == "snapshot-complete")
+jq -e -s '(.[0] | .kind == "start" and .version == 3 and .capture == "dump"
+             and .format == "replay" and .reconstructible == false)
+    and (last | .kind == "end" and .reason == "dump-complete")
     and ([.[] | select(.kind == "event" and .event.type == "feed")] | length > 0)' \
     "$tape_output" >/dev/null
 slot_cli pane tape --pane "$pane_id" --format inspect >"$inspect_output"
-jq -e -s '(.[0] | .kind == "start" and .version == 2 and .format == "inspect")
+jq -e -s '(.[0] | .kind == "start" and .version == 3 and .format == "inspect")
     and ([.[] | select(.kind == "event" and (.event.spans | type) == "array")] | length > 0)
     and ([.[] | select(.event.base64 != null)] | length == 0)' \
     "$inspect_output" >/dev/null
+slot_cli pane snapshot --pane "$pane_id" >"$snapshot_output"
+jq -e -s '(.[0] | .kind == "start" and .version == 3 and .capture == "snapshot"
+             and .reconstructible == true and .cursor == null)
+    and ([.[] | select(.kind == "sync")] | length > 0)
+    and (last | .kind == "end" and .reason == "snapshot-complete")' \
+    "$snapshot_output" >/dev/null
 python3 "$SCRIPT_DIR/scripts/terminal-tape-to-fixture.py" "$tape_output" "$tape_fixture" \
     --keep-identifiers --test TerminalCliSmokeTests >/dev/null
 jq -e '.version == 1 and .provenance.source == "danterm" and (.events | length) > 0' \

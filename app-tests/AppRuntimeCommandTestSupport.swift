@@ -64,8 +64,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var viewportText: String?
     var fullHistoryText: String?
     var rowStructure: [TerminalSessionRowStructure]?
-    var paneTapeDumpCount = 0
-    var paneTapeFollowFromNow: [Bool] = []
+    var paneTapeOpenings: [(PaneTapeCaptureMode, PaneTapeStartPosition, PaneTapeStreamMode)] = []
     var sentText: [String] = []
     var sentInputText: [String] = []
     var sentInputKeys: [(key: KeyName, modifiers: KeyMods)] = []
@@ -104,14 +103,12 @@ final class RecordingTerminalSession: NSView, TerminalSession {
         primaryHistoryTail
     }
     func primaryHistoryTailReader() -> CheckpointScrollbackRead? { nil }
-    func paneTapeDump() -> (@Sendable () throws -> PaneTapeDump)? {
-        paneTapeDumpCount += 1
-        return nil
-    }
-    func paneTapeFollowStart(
-        fromNow: Bool
-    ) -> (@Sendable () throws -> PaneTapeStart)? {
-        paneTapeFollowFromNow.append(fromNow)
+    func paneTapeOpening(
+        capture: PaneTapeCaptureMode,
+        start: PaneTapeStartPosition,
+        mode: PaneTapeStreamMode
+    ) -> (@Sendable () throws -> PaneTapeOpening)? {
+        paneTapeOpenings.append((capture, start, mode))
         return nil
     }
     func scroll(toRow row: Int) {}

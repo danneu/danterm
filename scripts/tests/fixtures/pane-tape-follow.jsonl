@@ -1,4 +1,4 @@
-{"kind":"start","version":2,"capture":"follow","format":"replay","provenance":{"source":"danterm-live-capture","author":"DanTerm","test":"live-pane-tape","recordedDeviations":[]},"initial":{"columns":80,"rows":24},"cursor":{"sequence":91,"feedByteOffset":700,"writeByteOffset":40}}
+{"kind":"start","version":3,"capture":"follow","format":"replay","reconstructible":false,"provenance":{"source":"danterm-live-capture","author":"DanTerm","test":"live-pane-tape","recordedDeviations":[]},"initial":{"columns":80,"rows":24},"cursor":{"recorderLifetimeId":"11111111-1111-4111-8111-111111111111","sequence":91,"feedByteOffset":700,"writeByteOffset":40}}
 {"kind":"event","sequence":91,"elapsedNanoseconds":2,"byteOffset":700,"byteLength":2,"event":{"type":"feed","base64":"SGk="}}
 {"kind":"event","sequence":92,"elapsedNanoseconds":5,"event":{"type":"resize","columns":90,"rows":30}}
 {"kind":"event","sequence":93,"elapsedNanoseconds":9,"originElapsedNanoseconds":7,"byteOffset":40,"byteLength":1,"event":{"type":"write","base64":"cQ=="}}

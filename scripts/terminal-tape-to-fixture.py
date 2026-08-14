@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Scrub a live-pane terminal tape into a neutral replay fixture.
 
-A tape is the version 2 JSON Lines stream printed by `danterm pane tape --pane
+A tape is the version 3 raw JSON Lines stream printed by `danterm pane tape --pane
 ID`, with or without `--follow`. Its events already use the neutral recording
 schema, including real PTY chunk boundaries and resize ordering, so this script
 only scrubs the byte payloads they carry in either direction, verifies that local
@@ -75,18 +75,21 @@ def local_identifiers() -> list:
     return sorted((c.encode() for c in candidates if len(c) > 2), key=len, reverse=True)
 
 
-STREAM_VERSION = 2
-START_KEYS = {"kind", "version", "capture", "format", "provenance", "initial", "cursor"}
-CURSOR_KEYS = {"sequence", "feedByteOffset", "writeByteOffset"}
+STREAM_VERSION = 3
+START_KEYS = {
+    "kind", "version", "capture", "format", "reconstructible", "provenance",
+    "initial", "cursor",
+}
+CURSOR_KEYS = {"recorderLifetimeId", "sequence", "feedByteOffset", "writeByteOffset"}
 EVENT_KEYS = {"kind", "sequence", "elapsedNanoseconds", "event"}
 EVENT_OPTIONAL_KEYS = {"originElapsedNanoseconds", "byteOffset", "byteLength"}
 # A finite capture always states its own end, so a missing one means the records stop
 # somewhere the producer never chose. A follow capture legitimately stops at EOF.
-END_REASONS = {"snapshot": {"snapshot-complete"}, "follow": {"pane-closed", "stream-failed"}}
+END_REASONS = {"dump": {"dump-complete"}, "follow": {"pane-closed", "stream-failed"}}
 
 
 def load_tape(path: str):
-    """Loads one version 2 pane-tape replay stream as a flat neutral recording."""
+    """Loads one version 3 raw pane-tape replay stream as a flat neutral recording."""
     with open(path, encoding="utf-8") as handle:
         contents = handle.read()
     return load_replay_stream(parse_records(contents))
@@ -127,6 +130,8 @@ def load_replay_stream(records: list):
     capture = start["capture"]
     if capture not in END_REASONS:
         raise ValueError(f"invalid capture mode: {capture!r}")
+    if start["reconstructible"] is not False:
+        raise ValueError("a reconstructible stream contains synthesized state, not raw evidence")
     stream_format = start["format"]
     if stream_format == "inspect":
         raise ValueError("an inspect stream is a derived view, not replay evidence")
@@ -146,7 +151,9 @@ def load_replay_stream(records: list):
     if (
         not isinstance(cursor, dict)
         or set(cursor) != CURSOR_KEYS
-        or not all(nonnegative_integer(cursor[key]) for key in cursor)
+        or not isinstance(cursor["recorderLifetimeId"], str)
+        or not cursor["recorderLifetimeId"]
+        or not all(nonnegative_integer(cursor[key]) for key in CURSOR_KEYS - {"recorderLifetimeId"})
     ):
         raise ValueError("invalid start cursor")
 
@@ -175,7 +182,7 @@ def load_replay_stream(records: list):
         events.append(read_event(record, expected_sequence, offsets))
         expected_sequence += 1
 
-    if capture == "snapshot" and not ended:
+    if capture == "dump" and not ended:
         raise ValueError("finite capture stops without its end record")
     return {"initial": initial, "events": events}
 
@@ -391,7 +398,7 @@ def validate_modifiers(event: dict, event_type: str):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tape", help="version 2 replay JSONL from `danterm pane tape`")
+    parser.add_argument("tape", help="version 3 raw replay JSONL from `danterm pane tape`")
     parser.add_argument("fixture", help="fixture JSON to write")
     parser.add_argument("--keep-identifiers", action="store_true",
                         help="skip host/home scrubbing (local-only tapes)")

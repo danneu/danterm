@@ -168,13 +168,12 @@ protocol TerminalSession: AnyObject {
     /// actor -- the recovery checkpoint's expensive half. nil when this session has no history
     /// to read, which leaves the caller to read eagerly instead.
     func primaryHistoryTailReader() -> CheckpointScrollbackRead?
-    /// Fences the whole retained tape as one finite capture and defers its record
-    /// construction off the main actor.
-    func paneTapeDump() -> (@Sendable () throws -> PaneTapeDump)?
-    /// Fences the chosen stream origin and defers its protocol adaptation off the main actor.
-    func paneTapeFollowStart(
-        fromNow: Bool
-    ) -> (@Sendable () throws -> PaneTapeStart)?
+    /// Fences every value needed to open one raw or reconstructible tape stream.
+    func paneTapeOpening(
+        capture: PaneTapeCaptureMode,
+        start: PaneTapeStartPosition,
+        mode: PaneTapeStreamMode
+    ) -> (@Sendable () throws -> PaneTapeOpening)?
     /// Arms one append edge at the start cursor without moving recorder events across queues.
     func addPaneTapeFollowNotice(
         id: UUID,
@@ -184,8 +183,9 @@ protocol TerminalSession: AnyObject {
     /// Fences one retained suffix and defers event adaptation off the main actor.
     func paneTapeFollowBatch(
         subscriptionId: UUID,
-        from cursor: PaneTapeCursor
-    ) -> (@Sendable () throws -> PaneTapeSnapshot)?
+        from cursor: PaneTapeCursor,
+        mode: PaneTapeStreamMode
+    ) -> (@Sendable () throws -> PaneTapeBatch)?
     func scroll(toRow row: Int)
     func copySelection()
     func pasteClipboard()
@@ -229,10 +229,11 @@ extension TerminalSession {
         }
     }
 
-    func paneTapeDump() -> (@Sendable () throws -> PaneTapeDump)? { nil }
-    func paneTapeFollowStart(
-        fromNow: Bool
-    ) -> (@Sendable () throws -> PaneTapeStart)? { nil }
+    func paneTapeOpening(
+        capture: PaneTapeCaptureMode,
+        start: PaneTapeStartPosition,
+        mode: PaneTapeStreamMode
+    ) -> (@Sendable () throws -> PaneTapeOpening)? { nil }
     func addPaneTapeFollowNotice(
         id: UUID,
         cursor: PaneTapeCursor,
@@ -240,6 +241,7 @@ extension TerminalSession {
     ) -> PaneTapeFollowNoticeRegistration? { nil }
     func paneTapeFollowBatch(
         subscriptionId: UUID,
-        from cursor: PaneTapeCursor
-    ) -> (@Sendable () throws -> PaneTapeSnapshot)? { nil }
+        from cursor: PaneTapeCursor,
+        mode: PaneTapeStreamMode
+    ) -> (@Sendable () throws -> PaneTapeBatch)? { nil }
 }

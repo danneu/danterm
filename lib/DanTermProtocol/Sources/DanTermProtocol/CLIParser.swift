@@ -141,7 +141,7 @@ public func parseCLI(
 
     case "pane":
         guard args.count >= 2 else {
-            throw CLIParseError("usage: danterm pane <focus|info|split|close|input|read|rows|zoom|tape>")
+            throw CLIParseError("usage: danterm pane <focus|info|split|close|input|read|rows|zoom|tape|snapshot>")
         }
         switch args[1] {
         case "focus":
@@ -163,6 +163,8 @@ public func parseCLI(
             return try parsePaneZoomCommand(Array(args.dropFirst(2)))
         case "tape":
             return try parsePaneTapeCommand(Array(args.dropFirst(2)))
+        case "snapshot":
+            return try parsePaneSnapshotCommand(Array(args.dropFirst(2)))
         default:
             throw CLIParseError("unknown pane command")
         }
@@ -553,7 +555,8 @@ private func parsePaneRowsCommand(_ args: [String]) throws -> CLICommand {
 
 private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
     let usage = """
-        usage: danterm pane tape --pane <pane-id> [--follow] [--from-now] \
+        usage: danterm pane tape --pane <pane-id> [--follow] \
+        [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] \
         [--format replay|inspect]
         """
     let parsed: ParsedTapePane
@@ -563,8 +566,14 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
         switch error {
         case .missingPane, .missingPaneArg:
             throw CLIParseError(usage)
-        case .fromNowRequiresFollow:
-            throw CLIParseError("--from-now requires --follow\n\(usage)")
+        case .conflictingStart:
+            throw CLIParseError("choose only one tape start position\n\(usage)")
+        case .missingCursorArg:
+            throw CLIParseError("--from-cursor requires cursor JSON\n\(usage)")
+        case .invalidCursor:
+            throw CLIParseError("invalid tape cursor\n\(usage)")
+        case .conflictingMode:
+            throw CLIParseError("choose only one tape mode\n\(usage)")
         case .missingFormatArg:
             throw CLIParseError("--format requires replay or inspect\n\(usage)")
         case .invalidFormat(let value):
@@ -579,9 +588,19 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
         request: .paneTape(
             pane: try paneId(parsed.pane),
             follow: parsed.follow,
-            fromNow: parsed.fromNow
+            start: parsed.start,
+            mode: parsed.mode
         ),
         outputMode: .tapeStream(parsed.format)
+    )
+}
+
+private func parsePaneSnapshotCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm pane snapshot --pane <pane-id>"
+    guard args.count == 2, args[0] == "--pane" else { throw CLIParseError(usage) }
+    return CLICommand(
+        request: .paneSnapshot(pane: try paneId(args[1])),
+        outputMode: .tapeStream(.replay)
     )
 }
 

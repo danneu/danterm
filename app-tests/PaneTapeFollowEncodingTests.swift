@@ -31,6 +31,7 @@ struct PaneTapeFollowEncodingTests {
                 droppedFeedBytes: 0,
                 droppedWriteBytes: 0,
                 nextCursor: .init(
+                    recorderLifetimeId: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
                     nextSequence: 2,
                     feedBytesBeforeNextSequence: 2,
                     writeBytesBeforeNextSequence: 0
