@@ -24,6 +24,12 @@
 	</array>
 	<key>DTPlatformName</key>
 	<string>iphonesimulator</string>
+	<!-- T23 connects to the relay on the Mac over the LAN. Without this key iOS
+	     local network privacy refuses the connection before it leaves the phone,
+	     and the error it reports is "No route to host", which reads like the
+	     network is wrong rather than the permission. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>The T23 smoke connects to a DanTerm relay on this network.</string>
 	<key>MinimumOSVersion</key>
 	<string>26.0</string>
 	<key>UIDeviceFamily</key>

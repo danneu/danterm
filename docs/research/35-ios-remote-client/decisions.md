@@ -193,6 +193,10 @@ task ledger in [README.md](README.md) and remain open.
     still closes, because each seam is individually proven and the seams are
     narrow, but the residual is real and no ledger task owns an on-device
     integration smoke. Phase 2's first client work should be that smoke.
+    **Settled by F7** (T23, 2026-08-13): the composition ran on an iPhone against
+    a live pane and converged with it, and the join needed no change to any
+    shipped module. This gate's confidence is no longer resting on an
+    unobserved composition.
   - **What this declines, knowingly.**
     - The client owns the swapchain contract D2 priced, including retrying a
       coalesced publish. (2) would not have needed it.

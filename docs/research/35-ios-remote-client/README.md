@@ -11,6 +11,11 @@ Research started: 2026-08-12.
   screenshots.
 - [f4-mac-to-mac.md](f4-mac-to-mac.md) -- F4 in full, with the `t4-spike/`
   client and its ten scenarios.
+- [t23-relay.py](t23-relay.py) and [t23-run.sh](t23-run.sh) -- the F7
+  reproduction: a throwaway authenticated TCP relay on the Mac, and the run that
+  drives a real pane while the phone replicates it. The phone half is the
+  `client` mode of [ios-render-spike.sh](ios-render-spike.sh); its console
+  transcript is under `t23-artifacts/`.
 - [briefing.md](briefing.md) -- the initiating brainstorm dump: repo census, IPC
   surface, portability inference, candidate directions. Census-grade evidence;
   every claim that carries weight is re-verified by a Phase 1 task before a
@@ -160,7 +165,12 @@ probe has established the mechanism.
 
 ### H3 -- a remote TerminalCore converges from snapshot plus tape
 
-Confirmed by F4, Mac-to-Mac, with zero iOS variables. A client replaying a
+Confirmed by F4, Mac-to-Mac, and then by F7 on a phone: a replica engine on an
+iPhone, joined to a live pane through the D5 sync, reached a viewport whose
+digest matches that pane's own `pane read`. The iOS variables F4 excluded turned
+out to change nothing about convergence.
+
+A client replaying a
 pane's whole retained tape produced a viewport byte-identical to that pane's own
 `pane read`, and planned a `RenderFramePlan` from its own engine in a process
 with no AppKit. The uplink needs nothing new either.
@@ -337,9 +347,8 @@ in the ledger.
   and does not resolve races, and records what the replica costs plus what
   would reopen it.
 
-Phase 1 is closed. Every leg passed in isolation and the composition has never
-run: no iOS binary links `DanTermClient`, and no engine on a phone has been fed
-by a tape stream. T23 owns closing that.
+Phase 1 is closed, and so is the residual it closed over: every leg passed in
+isolation, and F7 then ran the composition on a phone against a live pane.
 
 ### Phase 2 -- transport, authentication, security
 
@@ -356,14 +365,20 @@ by a tape stream. T23 owns closing that.
   architectural and safe to adopt now; a binary tape framing is not, because
   deflate over JSON envelopes and base64 may erase most of that tax for no
   protocol change. T19 decides whether any framing work is left.
-- **T23 TODO** -- On-device integration smoke, and the first Phase 2 client
-  work. Every Phase 1 leg was proven alone: F1 and F2 are compiles, F3 drove a
-  local engine on the phone with a synthetic workload, F4 converged from a tape
-  stream on a Mac. Nothing has composed them, so link `DanTermClient` into an
-  iOS binary, feed a real pane's tape stream to a real engine on the phone, and
-  present it through the D2 swapchain. This is the residual D3 closed over, and
-  it is a smoke test rather than the client: it fails or passes, it does not
-  design anything.
+- **T23 DONE** (F7) -- On-device integration smoke. It passes. An iOS binary
+  links `DanTermClient`, subscribes to a live pane over a TCP conformance of the
+  transport seam, applies the D5 sync with the shipped assembler, drives a
+  replica `TerminalCore` on the phone from the following events, and presents it
+  through the D2 swapchain. The phone's viewport digest matches the source pane's
+  own `pane read`, the presented surface carries real ink, and `vim` moves the
+  replica's modes and alternate screen and back. Nothing in `lib/` changed; the
+  seam that names no socket kind absorbed the whole transport difference.
+  Three things carry forward. The listener's authentication story is in F7 and
+  is not the tailnet one this doc's rules assume, because this Mac has no
+  tailnet. An iOS client needs `NSLocalNetworkUsageDescription` or the connection
+  fails as "No route to host", which reads like a network fault. And the
+  swapchain's pending-presentation retry never fired at this event rate, so that
+  half of the D2 contract is still unexercised on a phone.
 - **T24 TODO** -- Version skew between the two engines. D3 accepts that the
   client only works against engines whose behavior it agrees with, and the
   deployment model gives no atomic upgrade -- the Mac replaces its app, the

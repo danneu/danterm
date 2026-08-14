@@ -527,3 +527,113 @@ that was not the awaited reply -- the exact defect the plan's notification
 obligation exists to catch -- and its decoder returned nil for an unknown record
 kind, which would not survive T8 adding one. The plan cites it as evidence, which
 is correct and stays correct; nobody should copy from it.
+
+### F7 -- the composition runs on a phone: a real pane, a replica engine, real pixels
+
+Discharges T23, the residual D3 closed over. Reproduction:
+[t23-relay.py](t23-relay.py) plus [t23-run.sh](t23-run.sh), against the client
+mode of [ios-render-spike.sh](ios-render-spike.sh). Console transcript:
+[t23-artifacts/console-client-smoke.log](t23-artifacts/console-client-smoke.log).
+
+- Status: settled for the path it exercised. It is a smoke test: it says the
+  seams join, and it measures nothing.
+- Date and investigator: 2026-08-13, agent (T23).
+- Commit and worktree state: `b17d30c9`, plus the spike itself.
+- Environment: Xcode 26.6 (17F113), Swift 6.3.3, macOS 26.5.2, iOS device triple
+  `arm64-apple-ios26.5`. iPhone 13 mini "Pelucho" on iOS 26, installed by
+  `devicectl` over the LAN. Mac side: an isolated dev slot from `just
+  launch-slot`, one pane at 179x66.
+- Commands, inputs, or reproduction: start the relay, then
+  `bash docs/research/35-ios-remote-client/t23-run.sh <slot-socket> <pane-id>
+  <host> <port> <token>`. The run subscribes from the phone, waits until the
+  phone reports its sync applied, then drives the real pane: two commands, a
+  `vim` session with typing in it, `:q!`, and one command after the exit.
+- **Authentication story, as this doc's investigation rules require of any task
+  that opens a listener.** The listener is `t23-relay.py`, a throwaway TCP relay
+  that splices one connection into the app's Unix socket, and it is *not* bound
+  to the tailnet interface, because there is no tailnet on this Mac: Tailscale is
+  not installed, and no interface carries a 100.64/10 address. The doc's
+  unauthenticated escape hatch is therefore unavailable, and this took the
+  authenticated branch instead. The relay binds one explicit LAN address and
+  refuses `0.0.0.0` outright, and a connection must send `token <secret>` as its
+  first line before one byte reaches the control socket; a wrong or missing token
+  is closed with no reply and nothing proxied. The user chose this over
+  installing Tailscale first. The token is a shared secret on a command line and
+  decides nothing for T5 or T6, which own the bridge and the real auth model.
+- Result: **the composition works.** An iOS binary links `DanTermClient`, speaks
+  the hello handshake and the framed request loop over a TCP conformance of
+  `DanTermClientTransport`, subscribes to a live pane with `start: now` and
+  `mode: reconstructible`, applies the D5 sync with the shipped
+  `PaneTapeSyncAssembler`, feeds every following event to a replica
+  `TerminalCore` on the phone, and presents it through `TerminalFrameSwapchain`.
+  One representative run: stream version 3, opening start with `syncPending=true`
+  as D5 specifies, one sync of 18,758 bytes at 179x66, 95 live events applied, 13
+  frames published, 0 coalesced.
+- Result: **the replica converged with the source pane, checked on the phone.**
+  The phone's viewport digest and the Mac's own `pane read` digest agree
+  (`60ba87e3657bc82b`, 66 rows) over the same normalization on both sides. This
+  is F4's convergence check moved onto the device, and it is the smoke's pass
+  condition rather than a look at the screen.
+- Result: **pixels, not just a plan.** The surface the layer is showing carries
+  288,830 non-background pixels, counted on the device from the buffer the
+  swapchain published. F3 established that an IOSurface presents on this
+  hardware; this is the first time the pixels in one came from another machine's
+  terminal.
+- Result: **modes track the stream live, which is the state F4 found a late
+  joiner gets wrong.** Entering `vim` moved the replica to
+  `applicationCursorKeys=true mouseTracking=drag alternateScreen=true`, and
+  `:q!` moved it back. Scrollback also accumulated on the phone past the
+  viewport (66 rows visible, `totalRows` reaching 196), so history is replicated
+  rather than only the screen.
+- Result: the seam named no socket kind and did not have to be reopened for
+  this. The TCP transport is a conformance written entirely inside the spike;
+  nothing in `lib/DanTermClient` changed, and nothing in `lib/` changed at all.
+  The only tree change outside the spike directory is the spike package's
+  dependency on `lib/DanTermClient`.
+- Observation: **iOS local network privacy fails as "No route to host".** The
+  first device run could not connect, and the error read like a routing or
+  firewall problem on a LAN where the phone was demonstrably reachable. The cause
+  was the missing `NSLocalNetworkUsageDescription` key: without it iOS refuses
+  the connection before it leaves the phone. Whatever the T5 bridge ends up
+  being, an iOS client reaching a Mac on the same LAN needs that key, and this
+  failure mode will be misdiagnosed once per person who meets it.
+- Observation: a first run applied its sync and then reported
+  `appliedEvents=0`, which looked like the live-follow half was broken. It was
+  not: the phone joined after the driving finished, so everything the pane had
+  emitted arrived *inside* the opening sync instead of as events. A `start: now`
+  join makes "nothing streamed" and "everything already streamed" look identical
+  from the client's counters. The run script now waits for the phone to report
+  its sync before driving anything.
+- Observation: a bug in the first spike client is worth recording because the
+  shipped session is what caught it. Treating any reply as the tape request's
+  reply killed the stream the moment a second request was sent on the same
+  conversation -- `DanTermClientSession` had already delivered the frame
+  correctly, and the correlation rule its doc comment states is the thing the
+  spike ignored. Replies must be matched by id, on the client as on the server.
+- Uncertainty: **the swapchain's pending-presentation retry never fired.** Across
+  every run, `coalescedPublishes=0` and `retriedPresentations=0`: at this event
+  rate a publish always acquired a buffer. The retry path D2 priced is
+  implemented in the spike and is unexercised evidence, so nothing here supports
+  or contradicts that part of the contract. A flood workload would exercise it;
+  T21 owns the flood.
+- Uncertainty: nothing about mobility, reconnect, resume from a cursor, or
+  backgrounding was tested. The connection was a LAN TCP socket held open for the
+  length of one run. T9 owns all of it, and the relay is deliberately unable to
+  help -- it holds no session state.
+- Uncertainty: no timings and no energy numbers, on purpose. F3 showed that
+  per-frame costs under display-link pacing vary with what else the frame did,
+  so a number from this run would be diagnostic at best and misleading at worst.
+- Uncertainty: geometry was not negotiated. The pane is 179x66 because the Mac
+  window is, the stream's geometry is authoritative as F4 established, and the
+  phone scales the whole frame by 0.293 to fit its screen. That is legible as a
+  smoke and is not a design: T10 owns what a phone-sized client does instead.
+- Inference: D3's residual is closed in the confirming direction. Every seam it
+  named -- the client module in an iOS binary, a real pane's stream driving a
+  replica engine on a phone, the D2 swapchain presenting it -- holds when joined,
+  and the join needed no change to any shipped module. What remains between here
+  and a usable client is transport and lifecycle work that already has owners
+  (T5, T6, T9, T24), not a question about whether the spine works.
+- Next action: T5 can assume the client end is real, and should take the local
+  network key and the correlate-by-id rule from this finding rather than
+  rediscovering them. The spike and the relay are throwaway per this doc's
+  rules; delete them once T5 has a bridge.

@@ -1,0 +1,58 @@
+SPIKE T23 transport connected to 192.168.1.66:7723
+SPIKE T23 handshake ok
+SPIKE T23 start v3 179x66 reconstructible=true syncPending=true
+SPIKE T23 surfaces 179x66 fitScale=0.293
+SPIKE T23 sync applied 18758B at 179x66
+SPIKE T23 MODES applicationCursorKeys=false bracketedPaste=true mouseTracking=off alternateScreen=false
+SPIKE T23 MODES applicationCursorKeys=false bracketedPaste=false mouseTracking=off alternateScreen=false
+SPIKE T23 MODES applicationCursorKeys=false bracketedPaste=true mouseTracking=off alternateScreen=false
+SPIKE T23 REPORT syncs=1 appliedEvents=28 publishedFrames=6 coalescedPublishes=0 retriedPresentations=0 idleTicks=289 grid=179x66
+SPIKE T23 REPORT-PIXELS ink=288832 (non-background pixels in the surface the layer is showing)
+SPIKE T23 REPORT-MODES applicationCursorKeys=false bracketedPaste=true mouseTracking=off alternateScreen=false totalRows=191
+SPIKE T23 REPORT-DIGEST 8c47544c730e4a8f rows=66
+SPIKE T23 REPORT-VIEWPORT nonEmptyRows=66
+SPIKE T23 VIEWPORT | .rwxr-xr-x@  102k root  24 Jun 21:29 apply
+SPIKE T23 VIEWPORT | .r-xr-xr-x@   32k root  24 Jun 21:29 apropos
+SPIKE T23 VIEWPORT | .rwxr-xr-x@  119k root  24 Jun 21:29 ar
+SPIKE T23 VIEWPORT | .rwxr-xr-x@  121k root  24 Jun 21:29 arch
+SPIKE T23 VIEWPORT | ╭ ~                                                                                                                                                                    k8s:orbstack
+SPIKE T23 VIEWPORT | ╰ $ 
+SPIKE T23 MODES applicationCursorKeys=true bracketedPaste=true mouseTracking=drag alternateScreen=true
+SPIKE T23 MODES applicationCursorKeys=false bracketedPaste=false mouseTracking=off alternateScreen=false
+SPIKE T23 MODES applicationCursorKeys=false bracketedPaste=true mouseTracking=off alternateScreen=false
+SPIKE T23 REPORT syncs=1 appliedEvents=80 publishedFrames=11 coalescedPublishes=0 retriedPresentations=0 idleTicks=580 grid=179x66
+SPIKE T23 REPORT-PIXELS ink=288831 (non-background pixels in the surface the layer is showing)
+SPIKE T23 REPORT-MODES applicationCursorKeys=false bracketedPaste=true mouseTracking=off alternateScreen=false totalRows=193
+SPIKE T23 REPORT-DIGEST b66f559ed9ac0a97 rows=66
+SPIKE T23 REPORT-VIEWPORT nonEmptyRows=66
+SPIKE T23 VIEWPORT | .rwxr-xr-x@  119k root  24 Jun 21:29 ar
+SPIKE T23 VIEWPORT | .rwxr-xr-x@  121k root  24 Jun 21:29 arch
+SPIKE T23 VIEWPORT | ╭ ~                                                                                                                                                                    k8s:orbstack
+SPIKE T23 VIEWPORT | ╰ $ vim /tmp/t23-scratch.txt
+SPIKE T23 VIEWPORT | ╭ ~                                                                                                                                                                    k8s:orbstack
+SPIKE T23 VIEWPORT | ╰ $ 
+SPIKE T23 MODES applicationCursorKeys=false bracketedPaste=false mouseTracking=off alternateScreen=false
+SPIKE T23 MODES applicationCursorKeys=false bracketedPaste=true mouseTracking=off alternateScreen=false
+SPIKE T23 REPORT syncs=1 appliedEvents=95 publishedFrames=13 coalescedPublishes=0 retriedPresentations=0 idleTicks=878 grid=179x66
+SPIKE T23 REPORT-PIXELS ink=288830 (non-background pixels in the surface the layer is showing)
+SPIKE T23 REPORT-MODES applicationCursorKeys=false bracketedPaste=true mouseTracking=off alternateScreen=false totalRows=196
+SPIKE T23 REPORT-DIGEST 60ba87e3657bc82b rows=66
+SPIKE T23 REPORT-VIEWPORT nonEmptyRows=66
+SPIKE T23 VIEWPORT | ╰ $ vim /tmp/t23-scratch.txt
+SPIKE T23 VIEWPORT | ╭ ~                                                                                                                                                                    k8s:orbstack
+SPIKE T23 VIEWPORT | ╰ $ echo T23 AFTER VIM
+SPIKE T23 VIEWPORT | T23 AFTER VIM
+SPIKE T23 VIEWPORT | ╭ ~                                                                                                                                                                    k8s:orbstack
+SPIKE T23 VIEWPORT | ╰ $ 
+SPIKE T23 REPORT syncs=1 appliedEvents=95 publishedFrames=13 coalescedPublishes=0 retriedPresentations=0 idleTicks=1178 grid=179x66
+SPIKE T23 REPORT-PIXELS ink=288830 (non-background pixels in the surface the layer is showing)
+SPIKE T23 REPORT-MODES applicationCursorKeys=false bracketedPaste=true mouseTracking=off alternateScreen=false totalRows=196
+SPIKE T23 REPORT-DIGEST 60ba87e3657bc82b rows=66
+SPIKE T23 REPORT-VIEWPORT nonEmptyRows=66
+SPIKE T23 VIEWPORT | ╰ $ vim /tmp/t23-scratch.txt
+SPIKE T23 VIEWPORT | ╭ ~                                                                                                                                                                    k8s:orbstack
+SPIKE T23 VIEWPORT | ╰ $ echo T23 AFTER VIM
+SPIKE T23 VIEWPORT | T23 AFTER VIM
+SPIKE T23 VIEWPORT | ╭ ~                                                                                                                                                                    k8s:orbstack
+SPIKE T23 VIEWPORT | ╰ $ 
+SPIKE T23 REPORT syncs=1 appliedEvents=95 publishedFrames=13 coalescedPublishes=0 retriedPresentations=0 idleTicks=1478 grid=179x66

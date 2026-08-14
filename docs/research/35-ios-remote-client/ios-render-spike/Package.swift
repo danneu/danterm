@@ -10,14 +10,20 @@ let package = Package(
     platforms: [.iOS(.v26)],
     dependencies: [
         .package(path: "../../../../lib/TerminalCore"),
+        // T23 links the shipped client end of the conversation rather than a
+        // spike copy of it: whether `DanTermClient` builds into and works from
+        // an iOS binary is the thing being tested.
+        .package(path: "../../../../lib/DanTermClient"),
     ],
     targets: [
         .executableTarget(
             name: "IOSRenderSpike",
             dependencies: [
                 .product(name: "TerminalCore", package: "TerminalCore"),
+                .product(name: "TerminalCoreRecording", package: "TerminalCore"),
                 .product(name: "TerminalRenderPlanning", package: "TerminalCore"),
                 .product(name: "TerminalRenderExecution", package: "TerminalCore"),
+                .product(name: "DanTermClient", package: "DanTermClient"),
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

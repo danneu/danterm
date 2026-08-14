@@ -1008,6 +1008,7 @@ final class SpikeAppDelegate: UIResponder, UIApplicationDelegate {
         let root: UIViewController = switch mode {
         case "bench", "bench-sat": BenchViewController()
         case "energy": EnergyViewController()
+        case "client": T23ClientSmokeViewController()
         default: SpikeViewController()
         }
         window.rootViewController = root
