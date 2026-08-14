@@ -35,23 +35,37 @@ pane what state it is in.
 Load-bearing premises taken from the tree, not re-derived here:
 
 - `TerminalFlightRecordingCursor` (sequence plus per-direction byte
-  watermarks) is already a resume position, `cursorSnapshot(from:)` already
-  computes exact per-direction loss against an arbitrary cursor, and the
-  `start` record already publishes a cursor. The missing piece at the protocol
-  edge is only the ability for a requester to supply one.
-- `TerminalFlightRecordingCapture` already fences geometry against a cursor
-  snapshot in one value, for the same reason a state transfer needs a fence.
+  watermarks) is already a resume position, and the `start` record already
+  publishes a cursor -- which is where it stays only for a stream that opens
+  without a sync, per I9. `cursorSnapshot(from:)` computes exact per-direction
+  loss, but only for a cursor its own recorder minted: it preconditions the
+  sequence and both byte watermarks against its lifetime totals, and places the
+  cursor by index arithmetic that assumes the same sequence space. Those are
+  internal invariants today, because every cursor it sees came from that
+  recorder. A supplied cursor makes them remote input, which I10 covers.
+- The fence a state transfer needs already exists: `diagnosticCapture` returns
+  terminal state and recorder transitions from one `performAccountedFence`, so
+  state and stream cursor come out of a single owner-queue moment.
+  `TerminalPaneSessionController.cachedTerminal` is not that route -- it is the
+  last asynchronously consumed snapshot and lags the recorder's live cursor, so
+  pairing it with a live cursor drops or double-applies events.
+  `TerminalFlightRecordingCapture` is the narrower precedent: it fences birth
+  geometry against a cursor snapshot in one value.
 - The recorder is already a per-pane bounded ring buffer, and
   `PaneTapeFollowSubscriptions` already holds per-subscriber cursors.
-- The engine models neither a title stack, nor OSC 4 palette redefinition, nor
-  DCS state (DCS is absorbed and discarded). Colors stay semantic; the renderer
-  owns the palette.
+- The engine models neither a title stack nor OSC 4 palette redefinition, and
+  retains nothing from a DCS sequence once it finishes. It does retain an
+  unfinished one: `TerminalInputStream` holds a `UTF8Decoder` and an
+  `EscapeAbsorber` that keep a partial CSI, DCS, OSC, or SOS/PM/APC sequence
+  with its parameters, intermediates, and collected payload across feeds. Colors
+  stay semantic; the renderer owns the palette.
 - Device-query replies accumulate in the engine and are drained by whoever owns
   the PTY. A client engine has no PTY, so nothing sends its replies.
 
 ## Decision
 
-**Sync is a record in the tape stream, and its payload is terminal bytes.**
+**Sync is one or more records in the tape stream, and its payload is terminal
+bytes.**
 
 The producer transfers pane state by serializing it back into a byte stream
 that reconstructs it when fed to a reset terminal of a stated geometry. The
@@ -85,29 +99,52 @@ Behavioral scope:
 
 - A tape request states its start position: the beginning, now, or a supplied
   cursor.
-- The producer injects a sync record exactly when the requested position is not
+- The producer injects a sync exactly when the requested position is not
   reconstructible from the records it will deliver, and stream contents resume
   at the sync's own fence.
-- A gap record states exact per-direction loss measured against the position
-  the requester asked for, including the case that asked for a supplied cursor.
-- A new one-shot method returns the same sync payload for a pane.
+- A gap record states loss measured against the position the requester asked
+  for, including the case that asked for a supplied cursor. It is exact and
+  per-direction for a cursor the producer can place in its own lifetime. For a
+  cursor it cannot place, per-direction counts do not exist -- the cursor names
+  a different sequence and byte space -- so the record carries the total form
+  instead, and never invented numbers in exact fields.
+- A new one-shot method returns the same sync payload for a pane, in the same
+  records, ending at its fence. It is a bounded stream rather than a single
+  response, for the reason I5 gives: a full pane's payload does not fit one
+  line, and the pane with deep history is the one the method exists for.
 - A raw mode suppresses sync, for reading the record rather than reconstructing
   from it. A raw stream is not reconstructible and says so in its start record.
+  Asked to resume from a cursor the producer cannot place, it carries the same
+  total-loss gap record and continues from the retained head: it has already
+  declared that reaching exact state is not what it offers.
+- The finite dump of a pane's retained tape defaults to raw, because a debugger
+  asked for the recorded events; a follow or resume stream defaults to
+  reconstructible.
 
 Out of scope for this plan: what a client does with the state once it has it,
 geometry negotiation (`research/35/T10` owns it), and the bridge.
 
 ## Invariants
 
-- **I1 -- reconstruction.** After applying a sync record, a reader's terminal
-  state equals the source pane's state at the sync's fence: both screens'
-  contents with attributes and which is active, the primary screen's retained
-  history to the depth the record states, the cursor including visibility,
+- **I1 -- reconstruction.** After applying a sync, a reader's terminal
+  state equals the source pane's observable state at the sync's fence: the
+  active screen's contents with attributes and which screen is active, the
+  primary screen retained under an active alternate screen, the primary
+  screen's whole retained history, the cursor including visibility,
   shape, blink and the saved cursor, the full input modes, and the remaining
   parser and screen modes the tape sets and never restates -- scroll region,
   origin, autowrap, tab stops, current pen, charsets, synchronized output,
-  hyperlink state, and shell-integration marks.
-- **I2 -- fence.** A sync record's state and its stream cursor are taken in one
+  hyperlink state, and shell-integration marks. It also equals the source
+  pane's unfinished input-stream state -- a partial UTF-8 scalar, and a
+  sequence the absorber has begun but not dispatched, with its parameters,
+  intermediates, and collected payload -- because a fence lands between two
+  recorded byte chunks and nothing makes that boundary fall in ground state. An
+  inactive alternate screen's
+  contents are excluded: the engine blanks the alternate grid on every entry, so
+  no byte stream can ever reveal what a retained inactive alternate screen
+  holds, and carrying it would cost a full extra screen on every sync of any
+  pane that has run a full-screen program.
+- **I2 -- fence.** A sync's state and its stream cursor are taken in one
   fence, so no event can be both reflected in the state and delivered after it,
   and none can be reflected in neither.
 - **I3 -- self-sufficiency.** Every stream that does not declare itself raw is
@@ -117,16 +154,51 @@ geometry negotiation (`research/35/T10` owns it), and the bridge.
 - **I4 -- stated loss.** Loss is measured against the position the requester
   asked for, and any loss is stated. A resume from a supplied cursor that skips
   events reports them.
-- **I5 -- stated truncation.** A sync record states the history depth it
-  carries. A record that could not carry the pane's full history says so; it
-  never truncates silently. The record fits one IPC line.
-- **I6 -- geometry is carried.** A sync record states the geometry its bytes
+- **I5 -- the whole retained history is transferred, as one indivisible
+  prefix.** A sync carries all the history the source pane retains, as one or
+  more records whose payload and continuation cursor all come from the single
+  fence of I2. Its records are contiguous: no recorded event is delivered
+  between them, so no live output can be applied before the state it sits on
+  top of. The framer's line bound sizes a record, not the transfer: the engine's
+  scrollback budget and the IPC line bound are both 16 MiB, so a full pane's
+  encoded history does not fit one line and a one-record transfer would drop
+  history the source still holds.
+- **I6 -- geometry is carried.** A sync states the geometry its bytes
   reconstruct at, which is not the recorder's birth geometry.
 - **I7 -- retention independence.** No stream's ability to reach exact state
   depends on the recorder's retention bound.
-- **I8 -- provenance.** A sync record is distinguishable from recorded traffic.
+- **I8 -- provenance.** A sync's records are distinguishable from recorded traffic.
   Its bytes were synthesized and were never on a PTY, so tooling that treats
   the tape as evidence does not mistake them for observed output.
+- **I9 -- an incomplete sync changes nothing.** A sync takes effect at its
+  completion or not at all, on the wire and at the reader alike. The producer
+  publishes the sync's fence cursor when the last record completes it, never in
+  the start record before it, so a cursor never names a position the reader has
+  not been given everything up to. The reader applies a sync only once it is
+  complete, so a stream cut partway through leaves the reader's terminal
+  untouched and still exactly at the cursor it held before. Recovery is then
+  ordinary resume from that cursor, with no separate retry route: the events
+  since it are either retained, and replay onto state that never moved, or
+  evicted, and the injection rule gives the reader a fresh sync. Without both
+  halves, a reader that applied part of a reset-and-repaint payload is at no
+  position at all, and every continuation it is sent lands on a mangled
+  terminal.
+- **I10 -- a cursor is meaningful only to the recorder that minted it.** Every
+  published cursor carries the identity of the recorder lifetime that minted
+  it, and a supplied cursor carries it back. The producer places a supplied
+  cursor in its own lifetime before using it, and a cursor it cannot place --
+  wrong lifetime, or out of range for the right one -- is by definition not
+  reconstructible: on a reconstructible stream it takes the fresh-sync branch of
+  the injection rule, on a raw stream the branch that rule already has for raw,
+  and either way loss is stated as total against the position the requester
+  asked for. It is
+  never an error the client must handle on its own, because resuming across an
+  app restart is the ordinary case a recovered pane produces, and a second
+  recovery route is what I9 exists to avoid. Without this, a stale cursor whose
+  sequence happens to fall under the new lifetime's head looks reconstructible,
+  so the reader is spliced onto another lifetime's events with no sync and no
+  gap; and one whose sequence falls above it reaches a precondition, so a
+  remote argument kills the app.
 
 ## Proof obligations
 
@@ -134,8 +206,15 @@ geometry negotiation (`research/35/T10` owns it), and the bridge.
   class of state named in I1, serialize, feed the result to a fresh terminal at
   the stated geometry, and assert the two terminals' state is equal. The corpus
   includes an alternate-screen program with modes set, wide characters,
-  soft-wrapped history, a saved cursor, hyperlinks, and shell-integration
-  marks. Equality is asserted over state, not over the bytes produced.
+  soft-wrapped history, a saved cursor, hyperlinks, shell-integration marks,
+  and a pane sitting at the engine's hyperlink and semantic-metadata cap --
+  the only place where replaying in a different order can admit a different
+  surviving set than the source retained. Equality is asserted over the
+  observable state named in I1, not over the bytes produced. A second round-trip
+  takes the sync with the fence inside an unfinished input: a split UTF-8
+  scalar, and a partial CSI, DCS, and OSC sequence. It then feeds the
+  continuation bytes to both terminals and asserts they still agree, which is
+  what fails when a reset reader prints a DCS payload the source absorbs.
 - **PO2 (I2).** Events recorded concurrently with a sync appear exactly once in
   the reader's result: neither dropped between state and cursor, nor applied
   twice on top of state that already includes them.
@@ -153,10 +232,34 @@ geometry negotiation (`research/35/T10` owns it), and the bridge.
   reader's position, the reader still reaches the source pane's exact state.
   This pins the F4 eviction case, where an evicted resize left a reader
   replaying into an 80x24 grid for a 179x66 pane.
-- **PO6 (I5).** A pane whose history exceeds what one record can carry produces
-  a record that states the depth it carried and is accepted by the framer.
+- **PO6 (I5).** A pane whose retained history exceeds one IPC line is
+  transferred in full: every record is accepted by the framer, and the reader's
+  history depth and contents equal the source pane's.
 - **PO7 (I6).** A sync taken after a pane has resized reconstructs at the
   current geometry, not the birth geometry.
+- **PO8 (the mode contract in Behavioral scope).** Request selection behaves as
+  stated: a finite dump defaults to raw and a follow or resume stream to
+  reconstructible; a raw stream carries no sync and declares itself raw; a
+  reconstructible stream carries a sync exactly when the requested position is
+  not reconstructible from the records it will deliver, and none when it is;
+  and the one-shot method's state payload reconstructs the same state as the
+  streamed form, including on a pane whose payload exceeds one line. Without
+  this, an implementation can pass PO1 through PO7 while contaminating a
+  debugging dump with synthesized bytes.
+- **PO9 (I5, I9).** A multi-record sync delivered while the pane keeps writing,
+  cut before each of its records in turn, with the reader's previous cursor
+  still fully retained by the recorder -- the case where the injection rule
+  correctly sends continuation records rather than a second sync. No cut
+  interleaves live output with the sync; no cut before completion leaves the
+  reader holding a resumable cursor from that stream or changes the reader's
+  terminal; and a reader that resumes from its unchanged previous cursor after
+  each cut, and finally completes, reaches the source pane's exact state having
+  applied the sync exactly once.
+- **PO10 (I10).** A resume with a cursor from a previous recorder lifetime,
+  both below and above the new lifetime's head, yields a fresh sync with total
+  loss stated -- never a trap, and never a silent splice onto the new
+  lifetime's events. The below-head case is the one that looks correct: its
+  numbers are in range, so only the lifetime identity distinguishes it.
 
 ## Non-goals
 
@@ -175,13 +278,25 @@ geometry negotiation (`research/35/T10` owns it), and the bridge.
   state and can fall behind a new mode the engine starts modelling. Accepted
   because PO1 fails loudly when it does, and because the alternative -- a
   structured state wire -- has the same exposure plus a versioned format.
-- **AR2 -- sync cost on a metered link.** A sync carries the live grid and a
-  history tail, so a reconnect on cell data is not free. Accepted: it replaces
-  replaying up to the recorder's whole retained tape, which is larger.
+- **AR2 -- sync cost on a metered link.** A sync carries the live grid and the
+  pane's whole retained history, so a reconnect on cell data is not free.
+  Accepted: it is
+  expected to be smaller than replaying the recorder's retained tape in the
+  flooding and long-offline cases, and is unverified for a quiet pane with deep
+  history and little recent traffic, where sync may carry the whole scrollback
+  to avoid replaying a few bytes. `research/35/T20` sizes both.
 - **AR3 -- superseded events are not delivered.** When a sync is injected into
   a backlog read, retained events before its fence are not sent, because
   applying them after the state would double-apply them. A reader that wants
   those bytes asks for the raw stream.
+- **AR4 -- a deferred sync is held alongside the reader's own state.** I9 makes
+  the reader hold the sync aside until it completes, so a client peaks at its
+  committed terminal plus either the complete encoded sync or a scratch
+  terminal, its choice. The encoded form is larger than the pane's scrollback
+  storage -- that is why I5 needs several records -- so the peak is not bounded
+  by the engine's scrollback budget; `research/35/T20` sizes it. Accepted:
+  transient, and it buys a recovery route that is ordinary resume rather than a
+  second protocol mode.
 
 ## Rejected ideas
 
@@ -200,10 +315,13 @@ geometry negotiation (`research/35/T10` owns it), and the bridge.
   an input-direction question, not a state-transfer one: the rule it needs is
   that only the engine owning the PTY answers, and a client never forwards its
   own drained replies. It belongs with the input surface work, not here.
-- **DCS state, OSC 4 palette redefinition, and the title stack.** F4 listed
-  these as unprobed. They are not gaps in the sync payload: the engine does not
-  model them, so there is no state to carry. They become sync work only if the
-  engine starts modelling them, and PO1 is what will say so.
+- **Completed DCS sequences, OSC 4 palette redefinition, and the title stack.**
+  F4 listed these as unprobed. They are not gaps in the sync payload: the engine
+  keeps nothing once a DCS sequence finishes, and models neither a palette
+  override nor a title stack, so there is no settled state to carry. They become
+  sync work only if the engine starts modelling them, and PO1 is what will say
+  so. An unfinished DCS sequence is a different thing and is carried: it lives in
+  the absorber, and I1 covers it.
 - **OSC 11 background override.** Query traffic is visibly present in captured
   streams, but the engine answers the query from host-configured defaults and
   retains no override, so there is no retained state to transfer.
@@ -211,11 +329,13 @@ geometry negotiation (`research/35/T10` owns it), and the bridge.
 
 ## Deliverables
 
-- A sync record in the tape stream and a one-shot method returning the same
+- A sync in the tape stream and a one-shot method returning the same
   payload, both documented in `integrations/danterm/SKILL.md` in the same
   change as the CLI surface that reaches them.
 - A start-position argument on the tape request that accepts a supplied cursor,
-  replacing the two-state beginning-or-now choice.
+  replacing the two-state beginning-or-now choice. Published cursors carry
+  their recorder lifetime's identity per I10, so the cursor's wire form changes
+  wherever it appears.
 - The stream version moves, and the existing capture-mode and end-reason
   spellings that already use the word "snapshot" for a finite dump are renamed,
   so "snapshot" names one thing.
@@ -225,5 +345,6 @@ geometry negotiation (`research/35/T10` owns it), and the bridge.
 - Where the serializer lives inside the engine module, and the exact byte
   sequences it emits for a given state -- PO1 constrains the result, not the
   encoding.
-- How the history-depth bound in I5 is chosen, provided the depth carried is
-  stated and the record fits one IPC line.
+- How a sync payload is split across records, provided every record fits one
+  IPC line, the whole payload and its continuation cursor come from the single
+  fence of I2, and the reader can tell the transfer is complete.
