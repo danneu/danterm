@@ -49,7 +49,15 @@ struct CLIParserTests {
     func globalSocketTargetParsesBeforeCommand() throws {
         let invocation = try parseCLIInvocation(["--socket", "/tmp/slot.sock", "ls"])
 
-        #expect(invocation.socketPath == "/tmp/slot.sock")
+        #expect(invocation.target == .unixSocket(path: "/tmp/slot.sock"))
+        #expect(invocation.command == CLICommand(request: .ls, outputMode: .json))
+    }
+
+    @Test("global TCP target parses before the command")
+    func globalTCPTargetParsesBeforeCommand() throws {
+        let invocation = try parseCLIInvocation(["--tcp", "localhost:24863", "ls"])
+
+        #expect(invocation.target == .tcp(host: "localhost", port: 24863))
         #expect(invocation.command == CLICommand(request: .ls, outputMode: .json))
     }
 
@@ -58,7 +66,7 @@ struct CLIParserTests {
         let invocation = try parseCLIInvocation(["ls"])
         let command = try parseCLI(["ls"])
 
-        #expect(invocation.socketPath == nil)
+        #expect(invocation.target == nil)
         #expect(invocation.command == command)
     }
 
@@ -97,6 +105,24 @@ struct CLIParserTests {
         (["--socket", "/tmp/one.sock", "--socket", "/tmp/two.sock", "ls"], "--socket may be specified only once"),
     ] as [([String], String)])
     func globalSocketTargetRejectsUnusableForms(_ testCase: ([String], String)) {
+        let error = #expect(throws: CLIParseError.self) {
+            try parseCLIInvocation(testCase.0)
+        }
+
+        #expect(error?.message == testCase.1)
+    }
+
+    @Test("global TCP target rejects unusable forms", arguments: [
+        (["--tcp"], "usage: danterm --tcp <host:port> <command> [args]"),
+        (["--tcp", "", "ls"], "--tcp requires a non-empty host:port"),
+        (["--tcp", "localhost:", "ls"], "--tcp requires host:port"),
+        (["--tcp", ":24863", "ls"], "--tcp requires host:port"),
+        (["--tcp", "localhost:0", "ls"], "--tcp port must be between 1 and 65535"),
+        (["--tcp", "localhost:24863", "--tcp", "localhost:24864", "ls"], "--tcp may be specified only once"),
+        (["--socket", "/tmp/control.sock", "--tcp", "localhost:24863", "ls"], "--socket and --tcp are mutually exclusive"),
+        (["--tcp", "localhost:24863", "--socket", "/tmp/control.sock", "ls"], "--socket and --tcp are mutually exclusive"),
+    ] as [([String], String)])
+    func globalTCPTargetRejectsUnusableForms(_ testCase: ([String], String)) {
         let error = #expect(throws: CLIParseError.self) {
             try parseCLIInvocation(testCase.0)
         }

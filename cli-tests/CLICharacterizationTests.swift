@@ -140,6 +140,38 @@ struct CLICharacterizationTests {
         }
     }
 
+    @Test("TCP connection refusals have the same distinct CLI messages")
+    func tcpConnectionRefusalsHaveDistinctMessages() throws {
+        let cases: [(IpcConnectionRejectionReason, String)] = [
+            (.notAdmitted, "danterm: DanTerm refused this device: not admitted\n"),
+            (
+                .identityUnresolved,
+                "danterm: DanTerm could not resolve this device's tailnet identity\n"
+            ),
+            (
+                .connectionLimit,
+                "danterm: DanTerm refused the connection: connection limit reached\n"
+            ),
+            (
+                .auditUnavailable,
+                "danterm: DanTerm refused the connection: audit unavailable\n"
+            ),
+        ]
+
+        for (reason, expectedError) in cases {
+            let run = try withScriptedTCPEndpoint { connection in
+                writeLine(encoded(reason.notification), to: connection)
+                Darwin.close(connection)
+            } run: { port in
+                try runCLI(["--tcp", "127.0.0.1:\(port)", "ls"], environment: [:])
+            }
+
+            #expect(run.status == 1)
+            #expect(run.stdout == "")
+            #expect(run.stderr == expectedError)
+        }
+    }
+
     @Test("an ordinary reply prints its result as one compact JSON line")
     func ordinaryReplyPrintsCompactJSON() throws {
         let result = JSONValue.object([
@@ -254,10 +286,14 @@ private func cliExecutableURL() -> URL {
 }
 
 private func runCLI(_ arguments: [String], socketPath: String) throws -> CLIRun {
+    try runCLI(arguments, environment: ["DANTERM_SOCK": socketPath])
+}
+
+private func runCLI(_ arguments: [String], environment: [String: String]) throws -> CLIRun {
     let process = Process()
     process.executableURL = cliExecutableURL()
     process.arguments = arguments
-    process.environment = ["DANTERM_SOCK": socketPath, "PATH": "/usr/bin:/bin"]
+    process.environment = environment.merging(["PATH": "/usr/bin:/bin"]) { current, _ in current }
     let out = Pipe()
     let err = Pipe()
     process.standardOutput = out
@@ -273,6 +309,49 @@ private func runCLI(_ arguments: [String], socketPath: String) throws -> CLIRun 
         stdout: String(decoding: outData, as: UTF8.self),
         stderr: String(decoding: errData, as: UTF8.self)
     )
+}
+
+/// Binds an IPv4 loopback listener and runs the CLI against its selected port.
+private func withScriptedTCPEndpoint(
+    script: @escaping @Sendable (Int32) -> Void,
+    run: (UInt16) throws -> CLIRun
+) throws -> CLIRun {
+    let listener = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+    guard listener >= 0 else { throw ScriptedEndpointError.socketFailed(errno) }
+    defer { Darwin.close(listener) }
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = 0
+    address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+    let bound = withUnsafePointer(to: &address) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        }
+    }
+    guard bound == 0 else { throw ScriptedEndpointError.bindFailed(errno) }
+    guard Darwin.listen(listener, 1) == 0 else {
+        throw ScriptedEndpointError.listenFailed(errno)
+    }
+    var selected = sockaddr_in()
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let named = withUnsafeMutablePointer(to: &selected) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            getsockname(listener, $0, &length)
+        }
+    }
+    guard named == 0 else { throw ScriptedEndpointError.bindFailed(errno) }
+
+    let accepted = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+        let connection = Darwin.accept(listener, nil, nil)
+        accepted.signal()
+        guard connection >= 0 else { return }
+        script(connection)
+    }
+    let result = try run(UInt16(bigEndian: selected.sin_port))
+    _ = accepted.wait(timeout: .now() + 5)
+    return result
 }
 
 // MARK: - The scripted endpoint

@@ -17,17 +17,21 @@ version-matched file without installing the skill or starting DanTerm.
 Keep this section synced with `danterm help` and the parser in
 `lib/DanTermProtocol/Sources/DanTermProtocol/CLIParser.swift`.
 
-Every IPC command accepts `--socket <path>` before the command name. This
-explicit instance target overrides `DANTERM_SOCK` and identity-derived socket
-lookup.
+Every IPC command accepts one explicit target before the command name:
+`--socket <path>` for a local instance or `--tcp <host:port>` for a tailnet
+listener. `--socket` overrides `DANTERM_SOCK` and identity-derived socket
+lookup. TCP has no environment-variable form, and the two flags are mutually
+exclusive.
 
-`quit` inverts that rule: it *requires* `--socket <path>` and refuses both
-`DANTERM_SOCK` and identity lookup, so it can never mean "whatever instance I
-happen to be running inside".
+`quit` inverts the ambient-target rule: it requires either explicit flag and
+refuses both `DANTERM_SOCK` and identity lookup. A tailnet server refuses the
+request because remote callers have no authority to end the app.
 
-The local `skill` and `doctor` commands do not accept `--socket` or inspect pane
-targeting. `doctor` queries the matching running app for macOS permission state
-and skips those rows when the app is unavailable.
+The local `skill` and `doctor` commands do not accept a target flag or inspect
+pane targeting. `doctor` queries the matching running app for macOS permission
+state and skips those rows when the app is unavailable.
+
+    danterm --tcp 100.99.4.1:24863 ls
 
     danterm ls
     danterm focus
@@ -125,10 +129,9 @@ For agent commands:
   `--pane <pane-id>`. The bundled hooks pass `$DANTERM_PANE` explicitly.
 - `pane focus`, `pane info`, `pane read`, `pane rows`, `pane zoom`, `pane tape`,
   and `pane snapshot`: always name the pane explicitly.
-- `quit`: always pass `--socket <path>` naming the slot you launched. It takes
-  no other target, and the CLI refuses it without an explicit socket. Never aim
-  it at the user's DanTerm; the app refuses that anyway, but the rule is yours
-  to keep, not the guard's.
+- `quit`: for a slot you launched, always pass `--socket <path>` naming it. The
+  CLI also accepts an explicit TCP target so callers can observe the server's
+  remote-authority refusal. Never aim a local quit at the user's DanTerm.
 
 ## Context env vars
 
@@ -847,4 +850,8 @@ a stale hook cannot mutate a replacement session.
   of stable Tailscale node ids. Restart DanTerm after changing it. The app never
   falls back to a wildcard or LAN bind, and a bad bind or unavailable audit log
   leaves the local control socket running.
+- Drive an enabled listener with `danterm --tcp <tailnet-ip>:<port> <command>`.
+  The TCP target is always explicit. It uses the same handshake, typed refusal
+  errors, commands, and output shapes as a Unix-socket target. Remote `quit` is
+  sent normally and refused by the server while the app stays running.
 - macOS only. If `danterm` is not on PATH, stop.

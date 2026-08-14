@@ -250,7 +250,7 @@ protocol.
       only where they decode. (PO4, part of PO5)
 - [x] LocalAPI resolver: scripted-server tests first, rewrite `live`, delete
       `runWhois` and candidates, restate error taxonomy. (PO1)
-- [ ] CLI TCP target: `TCPSocketTransport`, `--tcp` parsing, target-agnostic
+- [x] CLI TCP target: `TCPSocketTransport`, `--tcp` parsing, target-agnostic
       CLI errors, loopback + characterization tests, SKILL.md + README +
       `usageText`. Gate the commit on the live smoke rerun (dev slot, config
       backed up and restored): admitted `ls`, not-admitted refusal, remote

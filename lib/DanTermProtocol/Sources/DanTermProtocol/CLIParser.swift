@@ -31,12 +31,21 @@ public struct CLICommand: Equatable {
 
 /// Keeps process-local targeting separate from the JSON-RPC command so an
 /// explicit instance choice can never leak into method parameters.
+public enum CLIConnectionTarget: Equatable, Sendable {
+    /// Names one local AF_UNIX control socket.
+    case unixSocket(path: String)
+    /// Names one remote listener without adding target data to the request.
+    case tcp(host: String, port: UInt16)
+}
+
+/// Keeps process-local targeting separate from the JSON-RPC command so an
+/// explicit instance choice can never leak into method parameters.
 public struct CLIInvocation: Equatable {
-    public let socketPath: String?
+    public let target: CLIConnectionTarget?
     public let command: CLICommand
 
-    public init(socketPath: String?, command: CLICommand) {
-        self.socketPath = socketPath
+    public init(target: CLIConnectionTarget?, command: CLICommand) {
+        self.target = target
         self.command = command
     }
 }
@@ -58,27 +67,81 @@ public func parseCLIInvocation(
     currentDirectory: String = FileManager.default.currentDirectoryPath
 ) throws -> CLIInvocation {
     var remaining = args
-    var socketPath: String?
+    var target: CLIConnectionTarget?
+    var sawSocket = false
+    var sawTCP = false
 
-    while remaining.first == "--socket" {
-        guard remaining.count >= 2 else {
-            throw CLIParseError("usage: danterm --socket <path> <command> [args]")
+    while let option = remaining.first, option == "--socket" || option == "--tcp" {
+        switch option {
+        case "--socket":
+            guard remaining.count >= 2 else {
+                throw CLIParseError("usage: danterm --socket <path> <command> [args]")
+            }
+            guard sawSocket == false else {
+                throw CLIParseError("--socket may be specified only once")
+            }
+            guard sawTCP == false else {
+                throw CLIParseError("--socket and --tcp are mutually exclusive")
+            }
+            let candidate = remaining[1]
+            guard !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw CLIParseError("--socket requires a non-empty path")
+            }
+            target = .unixSocket(path: candidate)
+            sawSocket = true
+        case "--tcp":
+            guard remaining.count >= 2 else {
+                throw CLIParseError("usage: danterm --tcp <host:port> <command> [args]")
+            }
+            guard sawTCP == false else {
+                throw CLIParseError("--tcp may be specified only once")
+            }
+            guard sawSocket == false else {
+                throw CLIParseError("--socket and --tcp are mutually exclusive")
+            }
+            let candidate = remaining[1]
+            guard !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw CLIParseError("--tcp requires a non-empty host:port")
+            }
+            target = try parseTCPConnectionTarget(candidate)
+            sawTCP = true
+        default:
+            preconditionFailure("prefix loop admitted an unknown option")
         }
-        guard socketPath == nil else {
-            throw CLIParseError("--socket may be specified only once")
-        }
-        let candidate = remaining[1]
-        guard !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw CLIParseError("--socket requires a non-empty path")
-        }
-        socketPath = candidate
         remaining.removeFirst(2)
     }
 
     return CLIInvocation(
-        socketPath: socketPath,
+        target: target,
         command: try parseCLI(remaining, currentDirectory: currentDirectory)
     )
+}
+
+/// Turns the one TCP flag value into a typed target before any connection is attempted.
+private func parseTCPConnectionTarget(_ value: String) throws -> CLIConnectionTarget {
+    let host: String
+    let portText: String
+    if value.first == "[", let closingBracket = value.firstIndex(of: "]") {
+        let colon = value.index(after: closingBracket)
+        guard colon < value.endIndex, value[colon] == ":" else {
+            throw CLIParseError("--tcp requires host:port")
+        }
+        host = String(value[value.index(after: value.startIndex)..<closingBracket])
+        portText = String(value[value.index(after: colon)...])
+    } else {
+        guard let colon = value.lastIndex(of: ":") else {
+            throw CLIParseError("--tcp requires host:port")
+        }
+        host = String(value[..<colon])
+        portText = String(value[value.index(after: colon)...])
+    }
+    guard host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+          portText.isEmpty == false
+    else { throw CLIParseError("--tcp requires host:port") }
+    guard let port = UInt16(portText), port > 0 else {
+        throw CLIParseError("--tcp port must be between 1 and 65535")
+    }
+    return .tcp(host: host, port: port)
 }
 
 public func parseCLI(

@@ -120,6 +120,16 @@ only when the admitted-node list is non-empty and the private audit log is
 writable. A bad address, a port collision, or an unavailable audit sink leaves
 local IPC and the app running normally.
 
+Connect with the shipped CLI from an admitted tailnet peer:
+
+```sh
+danterm --tcp 100.99.4.1:24863 ls
+```
+
+The TCP target is always explicit. It has no environment-variable form. The
+same handshake, refusal messages, and commands used by the local control socket
+run over this connection. The server refuses remote `quit` requests.
+
 For locally spawned panes, DanTerm sets `LANG` to a supported UTF-8 locale only
 when it inherits no non-empty `LANG`, `LC_CTYPE`, or `LC_ALL`. Set
 `shell.localeFallback` to `false` to disable this fallback.

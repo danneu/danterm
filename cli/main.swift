@@ -1,8 +1,8 @@
-// Local utility commands and the command-line client for DanTerm's JSON-RPC socket.
+// Local utility commands and the command-line client for DanTerm's JSON-RPC transports.
 //
 // The conversation itself -- connecting, framing, the hello handshake, correlating a
 // reply -- belongs to DanTermClient. What stays here is the part that is genuinely the
-// CLI's: which socket to talk to, and how each failure is worded for a person reading a
+// CLI's: which target to use, and how each failure is worded for a person reading a
 // terminal. Do not grow a second transport in this file.
 import Foundation
 import DanTermClient
@@ -24,13 +24,13 @@ struct DanTermCLI {
     private static let socketTimeoutSeconds = 5
 
     // Top-level help text. Kept in sync by hand with `parseCLI` and the `EnvVars`
-    // constants read by `selectControlSocketPath(...)` -- there is no automated check,
+    // constants read by `selectConnectionTarget(...)` -- there is no automated check,
     // so any change to either touches this string too.
     private static let usageText: String = """
         danterm -- control DanTerm from the shell
 
         Usage:
-          danterm [--socket <path>] <command> [args]
+          danterm [--socket <path> | --tcp <host:port>] <command> [args]
 
         Commands:
           ls                          Print the full app snapshot as JSON
@@ -87,8 +87,8 @@ struct DanTermCLI {
                                       Report explicit root-agent activity
           agent detach --pane <pane-id> --kind <kind> --id <session-id>
                                       Detach the matching root agent session
-          quit                        Quit the instance named by --socket, the
-                                      way Cmd-Q does. Development slots only.
+          quit                        Ask the explicitly targeted instance to quit.
+                                      TCP peers are refused by the server.
           skill                       Print DanTerm's agent skill instructions
           doctor                      Check DanTerm integration health
           todo list (--pane <pane-id> | --tab <tab-id>)
@@ -110,6 +110,8 @@ struct DanTermCLI {
         CLI defaults:
           --socket explicitly targets one DanTerm instance and overrides
           DANTERM_SOCK and identity-derived socket lookup.
+          --tcp explicitly targets one tailnet listener. It cannot be combined
+          with --socket and has no environment-variable form.
           tab new opens in the background at the target group end by default.
           Position flags change placement; --foreground selects the new tab.
           group new opens in the background too; --foreground selects its tab.
@@ -117,9 +119,8 @@ struct DanTermCLI {
           holding every tab unless --move-tabs keeps those tabs.
           pane split opens in the background by default; --foreground focuses
           the new pane within its tab. App UI shortcuts are unaffected.
-          quit requires --socket: it never takes its target from DANTERM_SOCK
-          or from identity lookup, and the app refuses it unless the named
-          instance holds a launcher slot (1 through 8).
+          quit requires --socket or --tcp: it never takes its target from
+          DANTERM_SOCK or identity lookup. The app authorizes the request.
 
         Environment:
           DANTERM        Marks a process launched inside DanTerm. Without a
@@ -153,8 +154,8 @@ struct DanTermCLI {
             let invocation = try parseCLIInvocation(rawArgs)
             let command = invocation.command
             let environment = ProcessInfo.processInfo.environment
-            let socketPath = try selectControlSocketPath(
-                explicit: invocation.socketPath,
+            let target = try selectConnectionTarget(
+                explicit: invocation.target,
                 environment: environment,
                 fallback: controlSocketPath().path,
                 method: command.request.method
@@ -163,12 +164,12 @@ struct DanTermCLI {
             // go through the single-result request path below.
             if case .tapeStream(let format) = command.outputMode {
                 signal(SIGPIPE, SIG_IGN)
-                try requestPaneTape(command, socketPath: socketPath, format: format)
+                try requestPaneTape(command, target: target, format: format)
                 exit(0)
             }
             // A nil reply means the app closed the connection and the method
             // expected that -- a quit it honored exits before it can answer.
-            if let response = try request(command, socketPath: socketPath) {
+            if let response = try request(command, target: target) {
                 if let error = response.error {
                     throw CLIError(error.message)
                 }
@@ -191,13 +192,13 @@ struct DanTermCLI {
     /// under the request because that is what the request asked for.
     private static func request(
         _ command: CLICommand,
-        socketPath: String
+        target: CLIResolvedTarget
     ) throws -> JsonRpcResponse? {
-        let session = try openSession(socketPath: socketPath, receiveTimeout: true)
+        let session = try openSession(target: target, receiveTimeout: true)
         defer { session.close() }
 
         let (requestId, request) = makeRequest(command)
-        let reply = try reporting(socketPath) {
+        let reply = try reporting {
             try session.send(request)
             return try session.awaitReply(id: .string(requestId))
         }
@@ -209,14 +210,14 @@ struct DanTermCLI {
     /// the app's pace, so a timeout here would cut a healthy capture short.
     private static func requestPaneTape(
         _ command: CLICommand,
-        socketPath: String,
+        target: CLIResolvedTarget,
         format: PaneTapeFormat
     ) throws {
-        let session = try openSession(socketPath: socketPath, receiveTimeout: false)
+        let session = try openSession(target: target, receiveTimeout: false)
         defer { session.close() }
 
         let (requestId, request) = makeRequest(command)
-        let outcome = try reporting(socketPath) {
+        let outcome = try reporting {
             try session.send(request)
             return try renderPaneTapeStream(
                 session: session,
@@ -233,34 +234,47 @@ struct DanTermCLI {
     /// Connects and completes the handshake, so no caller sends a request to a peer whose
     /// protocol version it has not agreed with.
     private static func openSession(
-        socketPath: String,
+        target: CLIResolvedTarget,
         receiveTimeout: Bool
     ) throws -> DanTermClientSession {
-        let transport = try reporting(socketPath) {
-            try UnixSocketTransport(
-                path: socketPath,
-                receiveTimeout: receiveTimeout ? Double(socketTimeoutSeconds) : nil,
-                sendTimeout: Double(socketTimeoutSeconds)
-            )
+        let transport: any DanTermClientTransport = try reporting {
+            switch target {
+            case .unixSocket(let path):
+                return try UnixSocketTransport(
+                    path: path,
+                    receiveTimeout: receiveTimeout ? Double(socketTimeoutSeconds) : nil,
+                    sendTimeout: Double(socketTimeoutSeconds)
+                )
+            case .tcp(let host, let port):
+                return try TCPSocketTransport(
+                    host: host,
+                    port: port,
+                    connectTimeout: Double(socketTimeoutSeconds),
+                    receiveTimeout: receiveTimeout ? Double(socketTimeoutSeconds) : nil,
+                    sendTimeout: Double(socketTimeoutSeconds)
+                )
+            }
         }
         let session = DanTermClientSession(transport: transport)
         do {
             try session.handshake()
         } catch {
             session.close()
-            throw cliError(error, socketPath: socketPath)
+            throw cliError(error)
         }
         return session
     }
 
     /// Runs one step of the conversation and words any failure the way this CLI words it.
-    private static func reporting<T>(_ socketPath: String, _ body: () throws -> T) throws -> T {
+    private static func reporting<T>(_ body: () throws -> T) throws -> T {
         do {
             return try body()
         } catch let error as UnixSocketTransportError {
-            throw cliError(error, socketPath: socketPath)
+            throw cliError(error)
+        } catch let error as TCPSocketTransportError {
+            throw cliError(error)
         } catch let error as DanTermClientError {
-            throw cliError(error, socketPath: socketPath)
+            throw cliError(error)
         }
     }
 
@@ -269,7 +283,7 @@ struct DanTermCLI {
     /// The wording lives here rather than in the module because it is this CLI's contract
     /// with its callers, and because a phone client showing "DanTerm is not running" would
     /// be saying something different from what it means.
-    private static func cliError(_ error: Error, socketPath: String) -> Error {
+    private static func cliError(_ error: Error) -> Error {
         switch error {
         case UnixSocketTransportError.unreachable:
             return CLIError("DanTerm is not running")
@@ -292,8 +306,25 @@ struct DanTermCLI {
         case UnixSocketTransportError.writeFailed:
             return CLIError("failed to write to DanTerm")
         case UnixSocketTransportError.peerClosed,
+             TCPSocketTransportError.peerClosed,
              DanTermClientError.closedBeforeHello:
             return CLIError("DanTerm closed the connection")
+        case TCPSocketTransportError.unresolvedHost(let host):
+            return CLIError("cannot resolve TCP target: \(host)")
+        case TCPSocketTransportError.connectFailed(let reason, let target):
+            return CLIError("cannot connect to DanTerm over TCP (\(reason)): \(target)")
+        case TCPSocketTransportError.connectTimedOut(let target):
+            return CLIError("timed out connecting to DanTerm over TCP: \(target)")
+        case TCPSocketTransportError.configureFailed:
+            return CLIError("failed to configure TCP connection")
+        case TCPSocketTransportError.configureTimeoutFailed:
+            return CLIError("failed to configure TCP timeout")
+        case TCPSocketTransportError.timedOut:
+            return CLIError("DanTerm is not responding")
+        case TCPSocketTransportError.readFailed:
+            return CLIError("failed to read from DanTerm")
+        case TCPSocketTransportError.writeFailed:
+            return CLIError("failed to write to DanTerm")
         case DanTermClientError.invalidHello:
             return CLIError("invalid hello from DanTerm")
         case DanTermClientError.notAdmitted:
@@ -339,14 +370,14 @@ struct DanTermCLI {
     /// Best-effort app query: local doctor checks remain useful when no instance is running.
     private static func gatherDoctorPermissions() -> DoctorFacts.Permissions {
         let environment = ProcessInfo.processInfo.environment
-        guard let socketPath = try? selectControlSocketPath(
+        guard let target = try? selectConnectionTarget(
             explicit: nil,
             environment: environment,
             fallback: controlSocketPath().path,
             method: .doctorPermissions
         ) else { return .unavailable }
         let command = CLICommand(request: .doctorPermissions, outputMode: .none)
-        let reply = try? request(command, socketPath: socketPath)
+        let reply = try? request(command, target: target)
         guard let response = reply ?? nil,
               response.error == nil,
               let result = response.result,
@@ -417,39 +448,49 @@ func resolveReply(_ reply: JsonRpcResponse?, method: IpcRequestMethod) throws ->
     return nil
 }
 
-/// Selects an explicit owner or the external-process fallback without crossing instances.
-///
-/// A method that ends the instance it reaches resolves only from `--socket`.
-/// Naming the target is the authorization, and the identity-derived fallback of
-/// the shipped binary is production's socket -- the one instance this verb must
-/// never reach by accident.
-func selectControlSocketPath(
-    explicit: String?,
+/// Holds the endpoint choice after ambient local-socket resolution is complete.
+enum CLIResolvedTarget: Equatable {
+    case unixSocket(path: String)
+    case tcp(host: String, port: UInt16)
+}
+
+/// Selects the explicit network target or resolves the local control socket fallback.
+func selectConnectionTarget(
+    explicit: CLIConnectionTarget?,
     environment: [String: String],
     fallback: String,
     method: IpcRequestMethod
-) throws -> String {
+) throws -> CLIResolvedTarget {
     func nonEmptyValue(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
 
     if method.terminatesInstance {
-        guard let explicit = nonEmptyValue(explicit) else {
-            throw CLIError("\(method.rawValue) requires an explicit --socket <path>")
+        guard let explicit else {
+            throw CLIError("\(method.rawValue) requires an explicit --socket <path> or --tcp <host:port>")
         }
-        return explicit
+        return CLIResolvedTarget(explicit)
     }
-    if let explicit = nonEmptyValue(explicit) {
-        return explicit
+    if let explicit {
+        return CLIResolvedTarget(explicit)
     }
     if let explicit = nonEmptyValue(environment[EnvVars.sock]) {
-        return explicit
+        return .unixSocket(path: explicit)
     }
     if nonEmptyValue(environment[EnvVars.flag]) != nil {
         throw CLIError("DanTerm is not running")
     }
-    return fallback
+    return .unixSocket(path: fallback)
+}
+
+private extension CLIResolvedTarget {
+    init(_ target: CLIConnectionTarget) {
+        switch target {
+        case .unixSocket(let path): self = .unixSocket(path: path)
+        case .tcp(let host, let port): self = .tcp(host: host, port: port)
+        }
+    }
 }
 
 DanTermCLI.main()

@@ -6,26 +6,26 @@ import DanTermProtocol
 struct SocketSelectionTests {
     @Test("explicit non-empty socket target wins")
     func explicitTargetWins() throws {
-        let selected = try selectControlSocketPath(
-            explicit: "/tmp/flag.sock",
+        let selected = try selectConnectionTarget(
+            explicit: .unixSocket(path: "/tmp/flag.sock"),
             environment: [EnvVars.flag: "1", EnvVars.sock: "/tmp/owned.sock"],
             fallback: "/tmp/fallback.sock",
             method: .ls
         )
 
-        #expect(selected == "/tmp/flag.sock")
+        #expect(selected == .unixSocket(path: "/tmp/flag.sock"))
     }
 
     @Test("environment socket remains the explicit ambient target")
     func environmentTargetWinsWithoutFlag() throws {
-        let selected = try selectControlSocketPath(
+        let selected = try selectConnectionTarget(
             explicit: nil,
             environment: [EnvVars.flag: "1", EnvVars.sock: "/tmp/owned.sock"],
             fallback: "/tmp/fallback.sock",
             method: .ls
         )
 
-        #expect(selected == "/tmp/owned.sock")
+        #expect(selected == .unixSocket(path: "/tmp/owned.sock"))
     }
 
     @Test("DanTerm pane without a socket target fails closed")
@@ -36,7 +36,7 @@ struct SocketSelectionTests {
         //   route commands from its panes into the winning process.
         // Scenario: a pane receives DANTERM=1 and an empty DANTERM_SOCK overlay.
         do {
-            _ = try selectControlSocketPath(
+            _ = try selectConnectionTarget(
                 explicit: nil,
                 environment: [EnvVars.flag: "1", EnvVars.sock: ""],
                 fallback: "/tmp/other-instance.sock",
@@ -64,7 +64,7 @@ struct SocketSelectionTests {
         // Scenario: the inherited pane socket, the in-pane pair, and a plain
         //   shell with neither.
         do {
-            _ = try selectControlSocketPath(
+            _ = try selectConnectionTarget(
                 explicit: nil,
                 environment: environment,
                 fallback: "/tmp/production.sock",
@@ -72,7 +72,7 @@ struct SocketSelectionTests {
             )
             Issue.record("expected quit to refuse an ambient target")
         } catch let error as CLIError {
-            #expect(error.message == "quit requires an explicit --socket <path>")
+            #expect(error.message == "quit requires an explicit --socket <path> or --tcp <host:port>")
         } catch {
             Issue.record("unexpected error: \(error)")
         }
@@ -80,25 +80,37 @@ struct SocketSelectionTests {
 
     @Test("quit accepts the explicitly named instance")
     func quitAcceptsExplicitTarget() throws {
-        let selected = try selectControlSocketPath(
-            explicit: "/tmp/slot-3.sock",
+        let selected = try selectConnectionTarget(
+            explicit: .unixSocket(path: "/tmp/slot-3.sock"),
             environment: [EnvVars.sock: "/tmp/owned.sock"],
             fallback: "/tmp/production.sock",
             method: .quit
         )
 
-        #expect(selected == "/tmp/slot-3.sock")
+        #expect(selected == .unixSocket(path: "/tmp/slot-3.sock"))
+    }
+
+    @Test("quit accepts an explicitly named TCP target")
+    func quitAcceptsExplicitTCPTarget() throws {
+        let selected = try selectConnectionTarget(
+            explicit: .tcp(host: "localhost", port: 24863),
+            environment: [EnvVars.sock: "/tmp/owned.sock"],
+            fallback: "/tmp/production.sock",
+            method: .quit
+        )
+
+        #expect(selected == .tcp(host: "localhost", port: 24863))
     }
 
     @Test("ordinary terminal uses identity-derived fallback")
     func externalProcessUsesFallback() throws {
-        let selected = try selectControlSocketPath(
+        let selected = try selectConnectionTarget(
             explicit: nil,
             environment: [:],
             fallback: "/tmp/identity.sock",
             method: .ls
         )
 
-        #expect(selected == "/tmp/identity.sock")
+        #expect(selected == .unixSocket(path: "/tmp/identity.sock"))
     }
 }
