@@ -433,14 +433,15 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   fails as "No route to host", which reads like a network fault. And the
   swapchain's pending-presentation retry never fired at this event rate, so that
   half of the D2 contract is still unexercised on a phone.
-- **T24 TODO** -- Version skew between the two engines. D3 accepts that the
-  client only works against engines whose behavior it agrees with, and the
-  deployment model gives no atomic upgrade -- the Mac replaces its app, the
-  phone updates through TestFlight, so the ends skew in normal use. There is no
-  version field in the hello handshake and no mismatch detection. Decide what
-  the handshake carries and what a mismatched client does: refuse, degrade, or
-  warn. Wanted before the client ships, not before the smoke.
-- **T6 DECIDED as D4** ([decisions.md](decisions.md)) -- the tailnet identity is
+- **T24 DONE as D9** ([decisions.md](decisions.md)) -- the handshake is
+  protocol-hard and app-soft. An unsupported protocol number refuses; an app
+  version difference succeeds and is surfaced for a warning. Pre-hello
+  admission failures use stable `rejected` reasons, so clients do not infer
+  identity, capacity, or audit failures from a silent close. Strict app-version
+  equality is rejected because normal Mac/TestFlight and dev-build skew is not
+  a compatibility boundary. An observed behavioral failure under skew is the
+  reopen condition.
+- **T6 DONE as D4** ([decisions.md](decisions.md)) -- the tailnet identity is
   the credential and **the app owns the listener**. The ideal the task was
   required to weigh wins: there is no bridge process. A bridge cannot hold the
   method classification without drifting from the enum that defines it, cannot
@@ -458,7 +459,12 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   stable node ids, not "any tailnet peer", since adding a device to the tailnet
   must not silently grant it a shell. A request-rate limit is declined and a
   concurrent-connection cap is required instead, on F8's evidence. D4 also moves
-  T15's APNs sender into the app and settles H4.
+  T15's APNs sender into the app and settles H4. The shipped listener is closed
+  by default, fails soft on config, bind, or audit-sink failure, resolves and
+  admits identity before hello, stamps caller identity per request, and applies
+  write-ahead audit gates to remote connections and requests. D4's audit wording
+  is amended: `pane.input` records request text UTF-8 bytes or event count, never
+  key identity or owner-encoded PTY bytes.
 - **T7 DONE** (F8) -- Security review of the exposed surface. The surface is
   remote code execution and `pane.input` is not the sharpest edge: `tab.new`
   carries a `cmd` the app runs, verified running `id` as the user with no pane
@@ -477,8 +483,10 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   to `pane.read` and the tape. And a tailnet peer address resolves locally to a
   stable node id and an owning user, which is the evidence D4's identity model
   rests on. F8 states what an audit log must capture, including the deliberate
-  blind spot: `pane.input` is logged as a byte count and never as content,
-  because the alternative is a keylogger at rest.
+  blind spot: `pane.input` is logged only as request payload accounting and
+  never as content, because the alternative is a keylogger at rest. D4's
+  implementation amendment makes that accounting text UTF-8 bytes or event
+  count, not owner-encoded PTY bytes.
 - **T19 TODO** -- Measure what the tape stream actually costs on the wire, since
   H5 asserts an ordering and no magnitude. Capture a follow stream's bytes over a
   real interactive session against a live slot, raw and deflated, and separate

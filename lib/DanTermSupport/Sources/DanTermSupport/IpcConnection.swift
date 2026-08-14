@@ -27,6 +27,7 @@ final class IpcConnection: @unchecked Sendable {
 
     func startReading(
         onRequest: @escaping @Sendable (JsonRpcRequest, IpcConnection) -> Void,
+        onMalformedRequest: @escaping @Sendable (String?, IpcConnection) -> Void = { _, _ in },
         onClose: @escaping @Sendable (IpcConnection) -> Void
     ) {
         DispatchQueue.global(qos: .utility).async { [self] in
@@ -47,6 +48,11 @@ final class IpcConnection: @unchecked Sendable {
                             let request = try JSONDecoder().decode(JsonRpcRequest.self, from: line)
                             onRequest(request, self)
                         } catch {
+                            let method = try? JSONDecoder().decode(
+                                IpcMalformedRequestProbe.self,
+                                from: line
+                            ).method
+                            onMalformedRequest(method, self)
                             writeErrorResponse(id: .null, code: -32700, message: "parse error")
                         }
                     case .oversized:
@@ -117,6 +123,18 @@ final class IpcConnection: @unchecked Sendable {
             error: JsonRpcError(code: code, message: message)
         )
         writeLine(response, closeAfterWrite: closeAfterWrite)
+    }
+
+    /// Writes a complete typed protocol error, including stable machine-readable data.
+    func writeErrorResponse(
+        id: JSONValue?,
+        error: JsonRpcError,
+        closeAfterWrite: Bool = false
+    ) {
+        writeLine(
+            JsonRpcResponse(id: id ?? .null, error: error),
+            closeAfterWrite: closeAfterWrite
+        )
     }
 
     /// Queues one server-initiated JSON-RPC notification after earlier writes on this socket.
@@ -210,4 +228,9 @@ final class IpcConnection: @unchecked Sendable {
         var value: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &value, socklen_t(MemoryLayout<Int32>.size))
     }
+}
+
+/// Recovers a method string from an otherwise malformed JSON-RPC envelope for audit.
+private struct IpcMalformedRequestProbe: Decodable {
+    let method: String?
 }

@@ -188,7 +188,7 @@ class AppRuntime {
     private let exportWriter = CheckpointWriter(label: "danterm.export.io")
     private var searchDebouncers: [PaneId: Debouncer] = [:]
     private var searchDebouncerTokens: [PaneId: AppRuntimeSchedulingToken] = [:]
-    private var ipcConnections: [UUID: IpcConnection] = [:]
+    private var ipcConnections: [UUID: IpcRequestTransport] = [:]
     private var ipcConnectionTokens: [UUID: AppRuntimeSchedulingToken] = [:]
     private var paneTapeFollowSubscriptions = PaneTapeFollowSubscriptions()
     // Keyed by subscription id, like the subscriptions themselves. Anything coarser is shared
@@ -244,7 +244,11 @@ class AppRuntime {
 
         if startsApplicationServices {
             do {
-                let server = try IpcServer(socketPath: controlSocketPath(), runtime: self)
+                let server = try IpcServer(
+                    socketPath: controlSocketPath(),
+                    tailnetConfig: launchConfig.tailnet,
+                    runtime: self
+                )
                 self.ipcServer = server
                 self.ipcServerToken = schedulingLifecycle.arm(.ipcServer) {
                     server.stop()
@@ -497,12 +501,16 @@ class AppRuntime {
         ipcServer?.socketPath
     }
 
-    func registerIpcConnection(_ connection: IpcConnection, for reqId: UUID) {
+    func registerIpcConnection(
+        _ connection: IpcConnection,
+        for reqId: UUID,
+        audit: IpcRequestAudit? = nil
+    ) {
         guard schedulingLifecycle.isActive else {
             connection.close()
             return
         }
-        ipcConnections[reqId] = connection
+        ipcConnections[reqId] = IpcRequestTransport(connection: connection, audit: audit)
         ipcConnectionTokens[reqId] = schedulingLifecycle.arm(.subscription) {
             connection.close()
         }
@@ -511,8 +519,8 @@ class AppRuntime {
     /// Drops all streams owned by a closed socket before another append edge can fetch.
     func ipcConnectionClosed(_ connectionId: UUID) {
         guard schedulingLifecycle.isActive else { return }
-        let requestIds = ipcConnections.compactMap { reqId, connection in
-            connection.id == connectionId ? reqId : nil
+        let requestIds = ipcConnections.compactMap { reqId, transport in
+            transport.id == connectionId ? reqId : nil
         }
         for reqId in requestIds {
             ipcConnections.removeValue(forKey: reqId)
@@ -532,7 +540,7 @@ class AppRuntime {
     /// no subscription: its id only routes its records to the socket that asked for them.
     private func streamFinitePaneTape(
         reqId: UUID,
-        connection: IpcConnection,
+        connection: IpcRequestTransport,
         session: any TerminalSession,
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,
@@ -569,7 +577,7 @@ class AppRuntime {
                     : .dumpComplete
                 writePaneTapeRecords(
                     opening.records + [makePaneTapeEndRecord(reason: endReason)],
-                    connection: connection,
+                    connection: connection.connection,
                     subscriptionId: captureId
                 )
             } catch {
@@ -587,7 +595,7 @@ class AppRuntime {
         paneId: PaneId,
         start: PaneTapeStartPosition,
         mode: PaneTapeStreamMode,
-        connection: IpcConnection,
+        connection: IpcRequestTransport,
         session: any TerminalSession
     ) {
         guard schedulingLifecycle.isActive else {
@@ -621,7 +629,7 @@ class AppRuntime {
                             succeeded: succeeded,
                             subscriptionId: subscriptionId,
                             paneId: paneId,
-                            connection: connection,
+                            connection: connection.connection,
                             opening: opening,
                             mode: mode
                         )
@@ -877,7 +885,7 @@ class AppRuntime {
     }
 
     /// Transfers one pending IPC request out of the shutdown census before replying.
-    private func takeIpcConnection(for reqId: UUID) -> IpcConnection? {
+    private func takeIpcConnection(for reqId: UUID) -> IpcRequestTransport? {
         guard let connection = ipcConnections.removeValue(forKey: reqId) else { return nil }
         if let token = ipcConnectionTokens.removeValue(forKey: reqId) {
             schedulingLifecycle.run(token, action: {})

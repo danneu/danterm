@@ -475,7 +475,7 @@ Out of scope for this plan:
 - [x] Handshake and refusal shapes: `rejected` notification, client session
       surfaces app version and typed rejections, CLI rewired, SKILL.md
       refusal notes. (PO7)
-- [ ] App wiring: config schema and store read, listener enablement with
+- [x] App wiring: config schema and store read, listener enablement with
       fail-soft bind and the writable-sink precondition, remote accept path
       (accept-boundary cap reservation, whois, admission, hello), caller
       stamping, the per-connection/per-request write-ahead audit gate;
@@ -496,3 +496,10 @@ Out of scope for this plan:
   messages instead of performing a second rewire.
 - The request-level audit refusal uses JSON-RPC server error code `-32001`, the
   message `audit unavailable`, and `data.reason` set to `audit-unavailable`.
+- AppRuntime retains each request's audit completion in an app-side transport
+  wrapper. Existing response paths can therefore record the final outcome
+  without moving audit IO into pure core or DanTermSupport.
+- The real-socket remote server suite is serialized. Each connection still uses
+  the existing blocking reader, so parallel cases can exhaust the process-wide
+  worker pool and starve unrelated socket tests. The deferred readiness-based
+  reader remains the structural fix.

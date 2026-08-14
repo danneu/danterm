@@ -839,4 +839,10 @@ a stale hook cannot mutate a replacement session.
   work. Do not retry any of these in a loop. A protocol-version error requires
   compatible client and server builds; an app-version difference alone does not
   refuse the connection.
+- Remote IPC is closed by default. To enable it, add a `tailnet` object to
+  `~/.config/danterm/config.json` with `listen` set to this Mac's explicit
+  Tailscale IPv4 address and port, and `admittedNodeIds` set to a non-empty list
+  of stable Tailscale node ids. Restart DanTerm after changing it. The app never
+  falls back to a wildcard or LAN bind, and a bad bind or unavailable audit log
+  leaves the local control socket running.
 - macOS only. If `danterm` is not on PATH, stop.

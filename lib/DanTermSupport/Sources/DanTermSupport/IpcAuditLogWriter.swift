@@ -219,6 +219,16 @@ final class IpcAuditLogWriter: Sendable {
         self.maximumBytes = max(1, maximumBytes)
     }
 
+    /// Creates and fsyncs the private sink so listener startup can fail closed.
+    func prepare() throws {
+        try lock.withLock { _ in
+            try prepareDirectory()
+            let fileDescriptor = try openLogFile()
+            defer { Darwin.close(fileDescriptor) }
+            guard fsync(fileDescriptor) == 0 else { throw auditPOSIXError() }
+        }
+    }
+
     /// Appends and fsyncs one complete line, rotating before it would cross the bound.
     func append(_ event: IpcAuditEvent) throws {
         let entry = IpcAuditLogEntry(timestamp: now(), event: event)
@@ -227,25 +237,15 @@ final class IpcAuditLogWriter: Sendable {
         guard line.count <= maximumBytes else { throw Error.entryTooLarge }
         try lock.withLock { _ in
             let fileManager = FileManager.default
-            let directory = logURL.deletingLastPathComponent()
-            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-            guard chmod(directory.path, 0o700) == 0 else { throw auditPOSIXError() }
+            try prepareDirectory()
             let existingBytes = (try? fileManager.attributesOfItem(atPath: logURL.path)[.size]
                 as? NSNumber)?.intValue ?? 0
             if existingBytes > 0, existingBytes + line.count > maximumBytes {
                 try? fileManager.removeItem(at: rotatedLogURL)
                 try fileManager.moveItem(at: logURL, to: rotatedLogURL)
             }
-            let fileDescriptor = Darwin.open(
-                logURL.path,
-                O_WRONLY | O_CREAT | O_APPEND,
-                S_IRUSR | S_IWUSR
-            )
-            guard fileDescriptor >= 0 else { throw auditPOSIXError() }
+            let fileDescriptor = try openLogFile()
             defer { Darwin.close(fileDescriptor) }
-            guard fchmod(fileDescriptor, S_IRUSR | S_IWUSR) == 0 else {
-                throw auditPOSIXError()
-            }
             try line.withUnsafeBytes { bytes in
                 var remaining = bytes.count
                 var cursor = bytes.baseAddress!
@@ -258,6 +258,26 @@ final class IpcAuditLogWriter: Sendable {
             }
             guard fsync(fileDescriptor) == 0 else { throw auditPOSIXError() }
         }
+    }
+
+    private func prepareDirectory() throws {
+        let directory = logURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard chmod(directory.path, 0o700) == 0 else { throw auditPOSIXError() }
+    }
+
+    private func openLogFile() throws -> Int32 {
+        let fileDescriptor = Darwin.open(
+            logURL.path,
+            O_WRONLY | O_CREAT | O_APPEND,
+            S_IRUSR | S_IWUSR
+        )
+        guard fileDescriptor >= 0 else { throw auditPOSIXError() }
+        guard fchmod(fileDescriptor, S_IRUSR | S_IWUSR) == 0 else {
+            Darwin.close(fileDescriptor)
+            throw auditPOSIXError()
+        }
+        return fileDescriptor
     }
 }
 

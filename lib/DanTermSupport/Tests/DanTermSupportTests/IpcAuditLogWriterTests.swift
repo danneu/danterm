@@ -6,6 +6,19 @@ import Testing
 @testable import DanTermSupport
 
 struct IpcAuditLogWriterTests {
+    @Test("prepare proves the sink is writable without adding an audit event")
+    func prepareCreatesPrivateEmptySink() throws {
+        let directory = makeAuditDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writer = IpcAuditLogWriter(directory: directory)
+
+        try writer.prepare()
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: writer.logURL.path)
+        #expect((attributes[.size] as? NSNumber)?.intValue == 0)
+        #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+    }
+
     @Test("append writes one timestamped JSON line with mode 0600")
     func appendWritesPrivateJSONLine() throws {
         let directory = makeAuditDirectory()

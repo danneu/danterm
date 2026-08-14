@@ -6,6 +6,20 @@ public enum AlertClearMode: String, Equatable, Sendable {
     case manual  // require explicit Cmd+. (tab) or Cmd+Shift+. (pane) to clear
 }
 
+/// Names the one tailnet endpoint and stable node identities admitted at app launch.
+public struct DanTermTailnetConfig: Equatable, Sendable {
+    /// Explicit tailnet IPv4 address and port in `address:port` form.
+    public let listen: String
+    /// Stable Tailscale node ids allowed to use the remote IPC surface.
+    public let admittedNodeIds: [String]
+
+    /// Creates the launch-time remote-service contract read from the shared config.
+    public init(listen: String, admittedNodeIds: [String]) {
+        self.listen = listen
+        self.admittedNodeIds = admittedNodeIds
+    }
+}
+
 /// Projects the modeled settings shared by every reader of DanTerm's config file.
 public struct DanTermConfig: Equatable, Sendable {
     /// Explicit local theme, or nil when the catalog-backed default applies.
@@ -23,6 +37,8 @@ public struct DanTermConfig: Equatable, Sendable {
     public var copyOnSelect: Bool = true
     /// Whether locally spawned panes receive a supported LANG when no locale is inherited.
     public var localeFallback: Bool = true
+    /// Tailnet remote-service settings, or nil when the listener is disabled.
+    public var tailnet: DanTermTailnetConfig? = nil
 
     /// Stable settings used when the config file omits a modeled value.
     public static let `default` = DanTermConfig()
@@ -43,7 +59,8 @@ public struct DanTermConfig: Equatable, Sendable {
         fontSize: Double? = nil,
         alertClearMode: AlertClearMode = .focus,
         copyOnSelect: Bool = true,
-        localeFallback: Bool = true
+        localeFallback: Bool = true,
+        tailnet: DanTermTailnetConfig? = nil
     ) {
         self.defaultTheme = defaultTheme
         self.remoteTheme = remoteTheme
@@ -52,6 +69,7 @@ public struct DanTermConfig: Equatable, Sendable {
         self.alertClearMode = alertClearMode
         self.copyOnSelect = copyOnSelect
         self.localeFallback = localeFallback
+        self.tailnet = tailnet
     }
 
     /// Map a size into `fontSizeRange`. Preferences applies this to what it

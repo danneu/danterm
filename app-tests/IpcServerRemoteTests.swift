@@ -1,0 +1,595 @@
+// App-level integration coverage for tailnet admission, capacity, and audit gates.
+import Darwin
+import DanTermProtocol
+import Foundation
+import Testing
+@testable import DanTerm
+
+@Suite(.serialized)
+@MainActor
+struct IpcServerRemoteTests {
+    @Test("tailnet service is closed by default")
+    func absentConfigOpensOnlyLocalSocket() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let server = try IpcServer(
+            socketPath: fixture.socketURL,
+            auditWriter: fixture.auditWriter,
+            runtime: nil
+        )
+        defer { server.stop() }
+
+        await server.start()
+        #expect(server.tailnetPort == nil)
+        let local = try RemotePeer(socketPath: fixture.socketURL)
+        defer { local.close() }
+        #expect(try await local.readRequest().method == Methods.hello)
+    }
+
+    @Test("invalid bind config fails soft and records the listener failure")
+    func invalidBindKeepsLocalSocketAlive() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let server = try IpcServer(
+            socketPath: fixture.socketURL,
+            tailnetConfig: DanTermTailnetConfig(
+                listen: "0.0.0.0:24863",
+                admittedNodeIds: ["node-phone"]
+            ),
+            auditWriter: fixture.auditWriter,
+            runtime: nil
+        )
+        defer { server.stop() }
+
+        await server.start()
+        #expect(server.tailnetPort == nil)
+        let local = try RemotePeer(socketPath: fixture.socketURL)
+        defer { local.close() }
+        #expect(try await local.readRequest().method == Methods.hello)
+        #expect(try fixture.auditEntries().contains { $0.event.kind == .listenerFailed })
+    }
+
+    @Test("a tailnet bind collision fails soft and records the listener failure")
+    func occupiedPortKeepsLocalSocketAlive() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let occupied = try TailnetListener.open(on: TailnetBindAddress(
+            address: "127.0.0.1",
+            port: 0,
+            interfaceName: "lo0"
+        ))
+        defer { occupied.close() }
+        let server = try IpcServer(
+            socketPath: fixture.socketURL,
+            tailnetConfig: DanTermTailnetConfig(
+                listen: "100.99.4.1:24863",
+                admittedNodeIds: ["node-phone"]
+            ),
+            auditWriter: fixture.auditWriter,
+            resolveTailnetBindAddress: { _ in
+                TailnetBindAddress(
+                    address: "127.0.0.1",
+                    port: occupied.port,
+                    interfaceName: "lo0"
+                )
+            },
+            runtime: nil
+        )
+        defer { server.stop() }
+
+        await server.start()
+        #expect(server.tailnetPort == nil)
+        let local = try RemotePeer(socketPath: fixture.socketURL)
+        defer { local.close() }
+        #expect(try await local.readRequest().method == Methods.hello)
+        #expect(try fixture.auditEntries().contains { $0.event.kind == .listenerFailed })
+    }
+
+    @Test("an unavailable audit sink prevents tailnet service but not local IPC")
+    func unwritableAuditSinkFailsSoft() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        try fixture.breakAuditSink()
+        let server = try fixture.makeServer(runtime: nil)
+        defer { server.stop() }
+
+        await server.start()
+        #expect(server.tailnetPort == nil)
+        let local = try RemotePeer(socketPath: fixture.socketURL)
+        defer { local.close() }
+        #expect(try await local.readRequest().method == Methods.hello)
+    }
+
+    @Test("an admitted tailnet peer receives hello and can dispatch ls")
+    func admittedPeerIsServiced() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(runtime: runtime)
+        defer { server.stop() }
+
+        await server.start()
+        let peer = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { peer.close() }
+
+        let hello = try await peer.readRequest()
+        #expect(hello.method == Methods.hello)
+        try peer.writeRequest(method: IpcRequestMethod.ls.rawValue, id: .number(7))
+        let response = try await peer.readResponse()
+        #expect(response.id == .number(7))
+        #expect(response.error == nil)
+    }
+
+    @Test("remote admission distinguishes unknown and unresolved identities", arguments: [
+        RemoteAdmissionCase.unknown,
+        RemoteAdmissionCase.unresolved,
+    ])
+    func refusedPeerGetsReason(_ admissionCase: RemoteAdmissionCase) async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let resolver: TailnetWhoisResolver
+        let expected: IpcConnectionRejectionReason
+        switch admissionCase {
+        case .unknown:
+            resolver = TailnetWhoisResolver { _ in
+                TailnetPeerIdentity(nodeId: "node-stranger", user: "other@example.com", machineName: "other")
+            }
+            expected = .notAdmitted
+        case .unresolved:
+            resolver = TailnetWhoisResolver { _ in throw TailnetWhoisResolver.Error.invalidOutput }
+            expected = .identityUnresolved
+        }
+        let server = try fixture.makeServer(runtime: nil, whoisResolver: resolver)
+        defer { server.stop() }
+
+        await server.start()
+        let peer = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { peer.close() }
+
+        let rejection = try await peer.readRequest()
+        #expect(rejection == expected.notification)
+        #expect(try await peer.readByte() == 0)
+    }
+
+    @Test("the accept-boundary cap refuses excess peers and releases on close")
+    func connectionCapBoundsRemotePeers() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let server = try fixture.makeServer(runtime: nil, remoteConnectionLimit: 1)
+        defer { server.stop() }
+
+        await server.start()
+        let first = try RemotePeer(port: try #require(server.tailnetPort))
+        _ = try await first.readRequest()
+        let excess = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { excess.close() }
+        #expect(try await excess.readRequest() == IpcConnectionRejectionReason.connectionLimit.notification)
+        first.close()
+
+        let replacement = try await fixture.connectWhenSlotReleases(port: try #require(server.tailnetPort))
+        replacement.close()
+    }
+
+    @Test("the cap rejects a burst while admitted identity resolution is stalled")
+    func connectionCapPrecedesAdmissionWork() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let resolverStarted = DispatchSemaphore(value: 0)
+        let releaseResolver = DispatchSemaphore(value: 0)
+        let resolver = TailnetWhoisResolver { _ in
+            resolverStarted.signal()
+            releaseResolver.wait()
+            return TailnetPeerIdentity(
+                nodeId: "node-phone",
+                user: "dan@example.com",
+                machineName: "iphone"
+            )
+        }
+        let server = try fixture.makeServer(
+            runtime: nil,
+            whoisResolver: resolver,
+            remoteConnectionLimit: 1
+        )
+        defer { server.stop() }
+
+        await server.start()
+        let first = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { first.close() }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                resolverStarted.wait()
+                continuation.resume()
+            }
+        }
+        let excess = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { excess.close() }
+
+        #expect(try await excess.readRequest() == IpcConnectionRejectionReason.connectionLimit.notification)
+        releaseResolver.signal()
+        #expect(try await first.readRequest().method == Methods.hello)
+    }
+
+    @Test("shutdown prevents stalled admission from starting service")
+    func shutdownWinsAgainstPendingAdmission() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let resolverStarted = DispatchSemaphore(value: 0)
+        let releaseResolver = DispatchSemaphore(value: 0)
+        let resolver = TailnetWhoisResolver { _ in
+            resolverStarted.signal()
+            releaseResolver.wait()
+            return TailnetPeerIdentity(
+                nodeId: "node-phone",
+                user: "dan@example.com",
+                machineName: "iphone"
+            )
+        }
+        let server = try fixture.makeServer(runtime: nil, whoisResolver: resolver)
+
+        await server.start()
+        let peer = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { peer.close() }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                resolverStarted.wait()
+                continuation.resume()
+            }
+        }
+        server.stop()
+        releaseResolver.signal()
+
+        #expect(try await peer.readByte() == 0)
+    }
+
+    @Test("server shutdown records serviced connection closure")
+    func shutdownAuditsConnectionClose() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let server = try fixture.makeServer(runtime: nil)
+
+        await server.start()
+        let peer = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { peer.close() }
+        _ = try await peer.readRequest()
+        server.stop()
+
+        #expect(try await peer.readByte() == 0)
+        let entries = try await fixture.auditEntriesWhenConnectionCloses()
+        #expect(entries.last?.event.kind == .connectionClosed)
+    }
+
+    @Test("remote request audit failure blocks only that connection and retries on the next request")
+    func requestAuditGateFailsClosedAndRecovers() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(runtime: runtime)
+        defer { server.stop() }
+
+        await server.start()
+        let first = try RemotePeer(port: try #require(server.tailnetPort))
+        let second = try RemotePeer(port: try #require(server.tailnetPort))
+        defer {
+            first.close()
+            second.close()
+        }
+        _ = try await first.readRequest()
+        _ = try await second.readRequest()
+        try fixture.breakAuditSink()
+
+        try first.writeRequest(
+            method: IpcRequestMethod.groupNew.rawValue,
+            id: .number(1),
+            params: .object(["name": .string("must-not-run")])
+        )
+        let failure = try await first.readResponse()
+        #expect(failure.error == IpcRequestErrors.auditUnavailable)
+        #expect(try await first.readByte() == 0)
+        #expect(runtime.model.groups.count == 1)
+
+        let local = try RemotePeer(socketPath: fixture.socketURL)
+        defer { local.close() }
+        _ = try await local.readRequest()
+        try local.writeRequest(method: IpcRequestMethod.ls.rawValue, id: .number(9))
+        #expect(try await local.readResponse().error == nil)
+
+        try fixture.restoreAuditSink()
+        try second.writeRequest(method: IpcRequestMethod.ls.rawValue, id: .number(2))
+        let success = try await second.readResponse()
+        #expect(success.id == .number(2))
+        #expect(success.error == nil)
+
+        let kinds = try fixture.auditEntries().map(\.event.kind)
+        let startedIndex = try #require(kinds.lastIndex(of: .requestStarted))
+        let completedIndex = try #require(kinds.lastIndex(of: .requestCompleted))
+        #expect(startedIndex < completedIndex)
+    }
+
+    @Test("the app audit path records local, remote, malformed, dropped, and close events")
+    func completeAuditSequence() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(runtime: runtime)
+        defer { server.stop() }
+
+        await server.start()
+        let local = try RemotePeer(socketPath: fixture.socketURL)
+        let remote = try RemotePeer(port: try #require(server.tailnetPort))
+        defer {
+            local.close()
+            remote.close()
+        }
+        _ = try await local.readRequest()
+        _ = try await remote.readRequest()
+
+        try local.writeRequest(method: IpcRequestMethod.ls.rawValue, id: .number(1))
+        _ = try await local.readResponse()
+        try remote.writeRequest(method: IpcRequestMethod.ls.rawValue, id: .number(2))
+        _ = try await remote.readResponse()
+        try remote.writeRequest(method: IpcRequestMethod.quit.rawValue, id: .number(3))
+        #expect(try await remote.readResponse().error != nil)
+        try remote.writeRequest(method: "unknown.method", id: .number(4))
+        #expect(try await remote.readResponse().error != nil)
+        try remote.writeRawLine(#"{"jsonrpc":2,"id":5,"method":"pane.read","params":{}}"#)
+        #expect(try await remote.readResponse().error?.code == -32700)
+        try remote.writeRequest(method: IpcRequestMethod.ls.rawValue, id: nil)
+        remote.close()
+
+        let entries = try await fixture.auditEntriesWhenConnectionCloses()
+        let kinds = entries.map(\.event.kind)
+        #expect(kinds == [
+            .connectionOpened,
+            .connectionOpened,
+            .localRequest,
+            .requestStarted,
+            .requestCompleted,
+            .requestStarted,
+            .requestCompleted,
+            .requestDecodeFailed,
+            .requestDecodeFailed,
+            .requestDropped,
+            .connectionClosed,
+        ])
+        let remoteStarted = try #require(entries.firstIndex {
+            $0.event.kind == .requestStarted && $0.event.caller?.kind == .remote
+        })
+        let remoteCompleted = try #require(entries.firstIndex {
+            $0.event.kind == .requestCompleted && $0.event.caller?.kind == .remote
+        })
+        #expect(remoteStarted < remoteCompleted)
+        let localEntry = try #require(entries.first { $0.event.kind == .localRequest })
+        #expect(localEntry.event.caller?.kind == .local)
+    }
+}
+
+enum RemoteAdmissionCase: Sendable {
+    case unknown
+    case unresolved
+}
+
+private struct RemoteIpcServerFixture {
+    let directory: URL
+    let socketURL: URL
+    let auditDirectory: URL
+    let auditWriter: IpcAuditLogWriter
+
+    init() throws {
+        directory = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("danterm-remote-ipc-\(UUID().uuidString)", isDirectory: true)
+        socketURL = directory.appendingPathComponent("control.sock")
+        auditDirectory = directory.appendingPathComponent("audit", isDirectory: true)
+        auditWriter = IpcAuditLogWriter(directory: auditDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    func makeServer(
+        runtime: AppRuntime?,
+        whoisResolver: TailnetWhoisResolver = TailnetWhoisResolver { _ in
+            TailnetPeerIdentity(nodeId: "node-phone", user: "dan@example.com", machineName: "iphone")
+        },
+        remoteConnectionLimit: Int = 4
+    ) throws -> IpcServer {
+        try IpcServer(
+            socketPath: socketURL,
+            appVersion: "test",
+            tailnetConfig: DanTermTailnetConfig(
+                listen: "100.99.4.1:24863",
+                admittedNodeIds: ["node-phone"]
+            ),
+            auditWriter: auditWriter,
+            whoisResolver: whoisResolver,
+            remoteConnectionLimit: remoteConnectionLimit,
+            resolveTailnetBindAddress: { _ in
+                TailnetBindAddress(address: "127.0.0.1", port: 0, interfaceName: "lo0")
+            },
+            runtime: runtime
+        )
+    }
+
+    func breakAuditSink() throws {
+        try? FileManager.default.removeItem(at: auditDirectory)
+        try Data("blocked".utf8).write(to: auditDirectory)
+    }
+
+    func restoreAuditSink() throws {
+        try FileManager.default.removeItem(at: auditDirectory)
+        try FileManager.default.createDirectory(at: auditDirectory, withIntermediateDirectories: true)
+    }
+
+    func auditEntries() throws -> [IpcAuditLogEntry] {
+        let data = try Data(contentsOf: auditWriter.logURL)
+        return try data.split(separator: 0x0A).map {
+            try JSONDecoder().decode(IpcAuditLogEntry.self, from: Data($0))
+        }
+    }
+
+    func auditEntriesWhenConnectionCloses() async throws -> [IpcAuditLogEntry] {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while ContinuousClock.now < deadline {
+            if let entries = try? auditEntries(),
+               entries.contains(where: { $0.event.kind == .connectionClosed })
+            {
+                return entries
+            }
+            await Task.yield()
+        }
+        throw CocoaError(.fileReadUnknown)
+    }
+
+    func connectWhenSlotReleases(port: UInt16) async throws -> RemotePeer {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while ContinuousClock.now < deadline {
+            let peer = try RemotePeer(port: port)
+            if let first = try? await peer.readRequest(), first.method == Methods.hello {
+                return peer
+            }
+            peer.close()
+            await Task.yield()
+        }
+        throw CocoaError(.fileReadUnknown)
+    }
+
+    func remove() {
+        try? FileManager.default.removeItem(at: directory)
+    }
+}
+
+private final class RemotePeer: @unchecked Sendable {
+    private let fileDescriptor: Int32
+    private let closeLock = NSLock()
+    private var isClosed = false
+
+    init(port: UInt16) throws {
+        fileDescriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard fileDescriptor >= 0 else { throw POSIXError(.EIO) }
+        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        setsockopt(fileDescriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        inet_pton(AF_INET, "127.0.0.1", &address.sin_addr)
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(fileDescriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard result == 0 else {
+            Darwin.close(fileDescriptor)
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    init(socketPath: URL) throws {
+        fileDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fileDescriptor >= 0 else { throw POSIXError(.EIO) }
+        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        setsockopt(fileDescriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let maximumLength = MemoryLayout.size(ofValue: address.sun_path)
+        guard socketPath.path.utf8.count < maximumLength else { throw CocoaError(.fileWriteInvalidFileName) }
+        socketPath.path.withCString { source in
+            withUnsafeMutablePointer(to: &address.sun_path) { pathPointer in
+                let destination = UnsafeMutableRawPointer(pathPointer).assumingMemoryBound(to: CChar.self)
+                strncpy(destination, source, maximumLength - 1)
+            }
+        }
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(fileDescriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard result == 0 else {
+            Darwin.close(fileDescriptor)
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    func writeRequest(
+        method: String,
+        id: JSONValue?,
+        params: JSONValue = .object([:])
+    ) throws {
+        let data = try encodeIpcLine(JsonRpcRequest(id: id, method: method, params: params))
+        try write(data)
+    }
+
+    func writeRawLine(_ source: String) throws {
+        try write(Data((source + "\n").utf8))
+    }
+
+    private func write(_ data: Data) throws {
+        let count = data.withUnsafeBytes { bytes in
+            Darwin.write(fileDescriptor, bytes.baseAddress, bytes.count)
+        }
+        guard count == data.count else { throw POSIXError(.EIO) }
+    }
+
+    func readRequest() async throws -> JsonRpcRequest {
+        try JSONDecoder().decode(JsonRpcRequest.self, from: await readLine())
+    }
+
+    func readResponse() async throws -> JsonRpcResponse {
+        try JSONDecoder().decode(JsonRpcResponse.self, from: await readLine())
+    }
+
+    func readByte() async throws -> UInt8 {
+        let fileDescriptor = fileDescriptor
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                var byte: UInt8 = 0
+                let count = Darwin.read(fileDescriptor, &byte, 1)
+                guard count >= 0 else {
+                    continuation.resume(
+                        throwing: POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                    )
+                    return
+                }
+                continuation.resume(returning: count == 0 ? 0 : byte)
+            }
+        }
+    }
+
+    func close() {
+        closeLock.lock()
+        guard isClosed == false else {
+            closeLock.unlock()
+            return
+        }
+        isClosed = true
+        closeLock.unlock()
+        Darwin.shutdown(fileDescriptor, SHUT_RDWR)
+        Darwin.close(fileDescriptor)
+    }
+
+    private func readLine() async throws -> Data {
+        let fileDescriptor = fileDescriptor
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                var data = Data()
+                var byte: UInt8 = 0
+                while true {
+                    let count = Darwin.read(fileDescriptor, &byte, 1)
+                    guard count > 0 else {
+                        continuation.resume(throwing: POSIXError(
+                            count == 0
+                                ? .ECONNRESET
+                                : (POSIXErrorCode(rawValue: errno) ?? .EIO)
+                        ))
+                        return
+                    }
+                    if byte == 0x0A {
+                        continuation.resume(returning: data)
+                        return
+                    }
+                    data.append(byte)
+                }
+            }
+        }
+    }
+}

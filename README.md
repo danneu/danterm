@@ -107,10 +107,18 @@ Every setting has a default, so a new config file holds only
 | `theme.default` | `"Monokai Remastered"` | Theme for local panes. |
 | `theme.remote` | `"Purplepeter"` | Theme for panes in an SSH or other remote session. |
 | `shell.localeFallback` | `true` | Give a local pane a UTF-8 `LANG` when it inherits none. |
+| `tailnet.listen` | absent | Tailnet IPv4 address and TCP port, for example `"100.99.4.1:24863"`. |
+| `tailnet.admittedNodeIds` | absent | Stable Tailscale node ids allowed to use remote IPC. An empty list keeps the listener closed. |
 | `ui.alertClearMode` | `"focus"` | `"focus"` clears pane alerts on focus, `"manual"` keeps them until you dismiss them. |
 | `ui.copyOnSelect` | `true` | Copy a mouse selection to the clipboard when it finishes. |
 
 Press Cmd+Shift+, to reload the file.
+
+The tailnet listener is closed by default and reads its configuration only at
+launch. It opens only on an address assigned to this Mac in 100.64.0.0/10, and
+only when the admitted-node list is non-empty and the private audit log is
+writable. A bad address, a port collision, or an unavailable audit sink leaves
+local IPC and the app running normally.
 
 For locally spawned panes, DanTerm sets `LANG` to a supported UTF-8 locale only
 when it inherits no non-empty `LANG`, `LC_CTYPE`, or `LC_ALL`. Set

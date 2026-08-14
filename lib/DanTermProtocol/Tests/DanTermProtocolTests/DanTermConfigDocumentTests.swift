@@ -13,7 +13,11 @@ struct DanTermConfigDocumentTests {
           "font": { "family": "Menlo", "size": 15.5 },
           "theme": { "default": "Solarized Light", "remote": "Grape" },
           "ui": { "alertClearMode": "manual", "copyOnSelect": false },
-          "shell": { "localeFallback": false }
+          "shell": { "localeFallback": false },
+          "tailnet": {
+            "listen": "100.99.4.1:24863",
+            "admittedNodeIds": ["node-phone", "node-tablet"]
+          }
         }
         """)))
 
@@ -24,6 +28,37 @@ struct DanTermConfigDocumentTests {
         #expect(document.config.alertClearMode == .manual)
         #expect(document.config.copyOnSelect == false)
         #expect(document.config.localeFallback == false)
+        #expect(document.config.tailnet == DanTermTailnetConfig(
+            listen: "100.99.4.1:24863",
+            admittedNodeIds: ["node-phone", "node-tablet"]
+        ))
+    }
+
+    @Test("tailnet activation is absent by default and rejects incomplete objects", arguments: [
+        #"{"schemaVersion":1}"#,
+        #"{"schemaVersion":1,"tailnet":{"listen":"100.99.4.1:24863"}}"#,
+        #"{"schemaVersion":1,"tailnet":{"listen":42,"admittedNodeIds":["node"]}}"#,
+        #"{"schemaVersion":1,"tailnet":{"listen":"100.99.4.1:24863","admittedNodeIds":[42]}}"#,
+    ])
+    func invalidTailnetConfigStaysDisabled(_ source: String) throws {
+        let document = try #require(DanTermConfigDocument.decode(data(source)))
+
+        #expect(document.config.tailnet == nil)
+    }
+
+    @Test("tailnet config survives a settings save")
+    func tailnetConfigSurvivesSettingsSave() throws {
+        var document = try #require(DanTermConfigDocument.decode(data(#"{"schemaVersion":1,"tailnet":{"listen":"100.99.4.1:24863","admittedNodeIds":["node-phone"]}}"#)))
+        var config = document.config
+
+        config.fontSize = 16
+        document.apply(config)
+        let roundTrip = try #require(DanTermConfigDocument.decode(document.encoded()))
+
+        #expect(roundTrip.config.tailnet == DanTermTailnetConfig(
+            listen: "100.99.4.1:24863",
+            admittedNodeIds: ["node-phone"]
+        ))
     }
 
     @Test("locale fallback defaults to on when the key is absent")

@@ -245,7 +245,7 @@ in [README.md](README.md) and remains open.
 
 ### D4 -- the tailnet is the credential, and the app owns the listener
 
-- Status: decided 2026-08-13, from F5 and F8. This is the gate on the Direction
+- Status: decided 2026-08-13, from F5 and F8. Implemented 2026-08-14. This is the gate on the Direction
   section's server leg, and it **overturns** that leg: the leg said a separate
   bridge process owns network listening, authentication, and the APNs sender,
   and this decision says the app listens and there is no bridge. The leg was
@@ -397,6 +397,15 @@ in [README.md](README.md) and remains open.
     audited. Fixing the thread-per-connection reader itself is the ideal and is
     the better repair; it is not this decision's to make, and the cap is stated
     as a bound that must hold however the reader is implemented.
+  - **2026-08-14 audit amendment: request accounting replaces PTY byte
+    accounting for `pane.input`.** F8 called for a byte count, but the PTY byte
+    stream exists only after the owner reads live modes and encodes the request.
+    Crossing back to fetch it would weaken the owner-side atomicity D8 protects.
+    The durable record therefore counts UTF-8 bytes for the request's text form,
+    or events for its events form. It never records text, character keys, key
+    names, or encoded PTY bytes. Key identity is content, so logging names would
+    turn the stated blind spot into a keylogger. This amendment supersedes F8's
+    PTY-byte wording without changing its privacy requirement.
 - What this declines, knowingly:
   - **Reachability without Tailscale.** The client cannot be used from a network
     the phone has not joined to the tailnet, and Tailscale becomes a hard
@@ -861,3 +870,20 @@ in [README.md](README.md) and remains open.
   - D6 is untouched: typing never claims is a client policy over
     `pane.input` plus `pane.resize`, and nothing here couples keystrokes to
     geometry.
+
+### D9 -- handshake policy: protocol-hard, app-soft
+
+- Status: decided and implemented 2026-08-14. This closes T24.
+- Selected direction: the server-first hello keeps its protocol number and app
+  version. A client refuses an unsupported protocol number, but accepts and
+  surfaces a different app version so the UI can warn without blocking use.
+  Admission failures use a separate `rejected` notification with stable reasons
+  for not admitted, unresolved identity, connection capacity, and unavailable
+  audit storage.
+- Rejected direction: strict app-version equality. Mac and TestFlight upgrades
+  are not atomic, and a dev build routinely differs from the phone build. An
+  app version is release identity, not an honest version of terminal behavior,
+  so strict equality would reject normal skew without proving compatibility.
+- Reopen condition: observed app-version skew causes a behavioral failure that
+  the protocol number cannot distinguish. That evidence must define the missing
+  compatibility boundary before another hard version field is added.

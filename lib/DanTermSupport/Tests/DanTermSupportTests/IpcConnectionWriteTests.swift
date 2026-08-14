@@ -289,6 +289,32 @@ struct IpcConnectionWriteTests {
         #expect(elapsed < .seconds(30), "the silent reads took \(elapsed)")
     }
 
+    @Test("a malformed envelope reports its readable raw method")
+    func malformedEnvelopeReportsMethod() throws {
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        let malformed = MalformedRequestProbe()
+        defer {
+            connection.close()
+            Darwin.close(descriptors.peer)
+        }
+        connection.startReading(
+            onRequest: { _, _ in },
+            onMalformedRequest: { method, _ in malformed.record(method) },
+            onClose: { _ in }
+        )
+
+        let line = Data((#"{"jsonrpc":2,"id":1,"method":"pane.read","params":{}}"# + "\n").utf8)
+        _ = line.withUnsafeBytes { Darwin.write(descriptors.peer, $0.baseAddress, $0.count) }
+
+        #expect(malformed.wait() == "pane.read")
+        let response = try JSONDecoder().decode(
+            JsonRpcResponse.self,
+            from: readIpcLine(from: descriptors.peer)
+        )
+        #expect(response.error?.code == -32700)
+    }
+
     private func socketPair() throws -> (connection: Int32, peer: Int32) {
         var descriptors: [Int32] = [-1, -1]
         guard Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0 else {
@@ -399,5 +425,25 @@ private final class ConnectionCloseProbe: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return connectionId
+    }
+}
+
+private final class MalformedRequestProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var method: String?
+
+    func record(_ method: String?) {
+        lock.lock()
+        self.method = method
+        lock.unlock()
+        semaphore.signal()
+    }
+
+    func wait() -> String? {
+        guard semaphore.wait(timeout: .now() + 2) == .success else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        return method
     }
 }

@@ -80,6 +80,17 @@ public struct DanTermConfigDocument: Equatable {
         setNestedValue(.bool(enabled), parent: "shell", key: "localeFallback")
     }
 
+    /// Sets or clears launch-time tailnet service without exposing the lossless JSON tree.
+    public mutating func setTailnet(_ tailnet: DanTermTailnetConfig?) {
+        let value = tailnet.map { config in
+            ConfigJSONValue.object([
+                "listen": .string(config.listen),
+                "admittedNodeIds": .array(config.admittedNodeIds.map(ConfigJSONValue.string)),
+            ])
+        }
+        setTopLevelValue(value, key: "tailnet")
+    }
+
     /// Applies the complete modeled settings set as one document transaction.
     public mutating func apply(_ config: DanTermConfig) {
         setDefaultTheme(config.defaultTheme)
@@ -89,6 +100,7 @@ public struct DanTermConfigDocument: Equatable {
         setAlertClearMode(config.alertClearMode)
         setCopyOnSelect(config.copyOnSelect)
         setLocaleFallback(config.localeFallback)
+        setTailnet(config.tailnet)
     }
 
     /// Returns original bytes until a semantic edit occurs, then stable sorted JSON.
@@ -113,6 +125,18 @@ public struct DanTermConfigDocument: Equatable {
             guard parentObject.removeValue(forKey: key) != nil else { return }
         }
         rootObject[parent] = .object(parentObject)
+        root = .object(rootObject)
+        isDirty = true
+    }
+
+    private mutating func setTopLevelValue(_ value: ConfigJSONValue?, key: String) {
+        guard case .object(var rootObject) = root else { return }
+        if let value {
+            guard rootObject[key] != value else { return }
+            rootObject[key] = value
+        } else {
+            guard rootObject.removeValue(forKey: key) != nil else { return }
+        }
         root = .object(rootObject)
         isDirty = true
     }
@@ -159,6 +183,22 @@ public struct DanTermConfigDocument: Equatable {
            case .bool(let localeFallback)? = shell["localeFallback"]
         {
             config.localeFallback = localeFallback
+        }
+        if case .object(let tailnet)? = rootObject["tailnet"],
+           case .string(let listen)? = tailnet["listen"],
+           listen.isEmpty == false,
+           case .array(let rawNodeIds)? = tailnet["admittedNodeIds"]
+        {
+            let nodeIds = rawNodeIds.compactMap { value -> String? in
+                guard case .string(let nodeId) = value, nodeId.isEmpty == false else { return nil }
+                return nodeId
+            }
+            if nodeIds.count == rawNodeIds.count {
+                config.tailnet = DanTermTailnetConfig(
+                    listen: listen,
+                    admittedNodeIds: nodeIds
+                )
+            }
         }
         return config
     }
