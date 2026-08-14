@@ -209,10 +209,16 @@ app-tests automatically); targeted iteration via
 - [x] 1. test(app): prove pane hosts construct headlessly
 - [x] 2. refactor(app): inject ambient-effect ports into the command interpreter
 - [x] 3. test(app): cover session and scheduling command dispatch
-- [ ] 4. test(app): cover IPC dispatch, re-entry, and command ordering
+- [x] 4. test(app): cover IPC dispatch, re-entry, and command ordering
 
 ## Implementation notes
 
 - The export-destination port accepts an optional window. Headless app tests cannot
   construct `NSWindow`; the live port treats `nil` as cancellation, which preserves
   the no-window behavior while letting the real export writer run under `swift test`.
+- Re-entry reached the window-chrome reconcile pass under headless `swift test`, where
+  the process has no `NSApplication`. The pass now skips only the dock-tile write when
+  `NSApp` is nil and still updates its projection cache.
+- The S21 audit row records the first three implementation hashes. This final commit
+  changes that row, so its own hash is discoverable from the audit file's history and
+  cannot be embedded in its own contents.

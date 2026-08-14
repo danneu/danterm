@@ -1,0 +1,289 @@
+// Command-interpreter coverage for IPC wires, synchronous re-entry, and command order.
+import Darwin
+import DanTermProtocol
+import Foundation
+import Testing
+@testable import DanTerm
+
+/// Proves every IPC Command arm against a real socketpair and locks down re-entry order.
+@MainActor
+struct AppRuntimeIpcCommandTests {
+    @Test("IPC reply and error commands write their JSON-RPC envelopes")
+    func directReplyAndErrorWriteWireEnvelopes() throws {
+        let ports = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(ports)
+        let reply = try CommandIpcConnectionFixture()
+        let failure = try CommandIpcConnectionFixture()
+        defer {
+            reply.closePeer()
+            failure.connection.close()
+            failure.closePeer()
+        }
+        let replyId = UUID()
+        let failureId = UUID()
+        reply.remember(reqId: replyId, rpcId: .number(11))
+        failure.remember(reqId: failureId, rpcId: .string("failure"))
+        runtime.registerIpcConnection(reply.connection, for: replyId)
+        runtime.registerIpcConnection(failure.connection, for: failureId)
+
+        runtime.perform(.ipcReply(reqId: replyId, result: .object(["ok": .bool(true)])))
+        runtime.perform(.ipcError(reqId: failureId, code: -32602, message: "invalid pane"))
+
+        let replyEnvelope = try reply.readResponse()
+        let failureEnvelope = try failure.readResponse()
+        #expect(replyEnvelope.id == .number(11))
+        #expect(replyEnvelope.result == .object(["ok": .bool(true)]))
+        #expect(failureEnvelope.id == .string("failure"))
+        #expect(failureEnvelope.error == JsonRpcError(code: -32602, message: "invalid pane"))
+        #expect(reply.hasReadableData() == false, "a retired reply must not close its socket")
+
+        runtime.shutdown()
+        reply.connection.close()
+
+        #expect(reply.readByte() == 0, "transport shutdown must be the first source of EOF")
+    }
+
+    @Test("doctor and focus reads return runtime-owned facts")
+    func doctorAndFocusReadsWriteFacts() async throws {
+        let ports = RecordingAppRuntimePorts()
+        ports.doctorPermissions = DoctorFacts.Permissions(
+            notifications: .granted,
+            fullDiskAccess: .denied,
+            developerTools: .unknown
+        )
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let doctor = try CommandIpcConnectionFixture()
+        let focus = try CommandIpcConnectionFixture()
+        defer {
+            doctor.connection.close()
+            doctor.closePeer()
+            focus.connection.close()
+            focus.closePeer()
+        }
+        let doctorId = UUID()
+        let focusId = UUID()
+        doctor.remember(reqId: doctorId, rpcId: .number(1))
+        focus.remember(reqId: focusId, rpcId: .number(2))
+        runtime.registerIpcConnection(doctor.connection, for: doctorId)
+        runtime.registerIpcConnection(focus.connection, for: focusId)
+
+        runtime.perform(.readDoctorPermissions(reqId: doctorId))
+        runtime.perform(.readFocusInfo(reqId: focusId))
+
+        let doctorEnvelope = try await doctor.readResponseAsync()
+        let focusEnvelope = try focus.readResponse()
+        #expect(doctorEnvelope.result == ports.doctorPermissions.jsonValue)
+        #expect(focusEnvelope.result == .object([
+            "focus": .object(["type": .string("none")]),
+        ]))
+    }
+
+    @Test("pane text and row reads preserve terminal results")
+    func paneReadsWriteSessionResults() throws {
+        let ports = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        ports.session.viewportText = "visible"
+        ports.session.fullHistoryText = "one\ntwo\nthree"
+        ports.session.rowStructure = [TerminalSessionRowStructure(
+            index: 7,
+            isRetained: true,
+            isSoftWrapped: false,
+            contentEnd: 4,
+            width: 12,
+            marginKind: "padding",
+            staleWrapClaim: true
+        )]
+        runtime.sessions[paneId] = ports.session
+        let viewport = try CommandIpcConnectionFixture()
+        let history = try CommandIpcConnectionFixture()
+        let rows = try CommandIpcConnectionFixture()
+        defer {
+            for fixture in [viewport, history, rows] {
+                fixture.connection.close()
+                fixture.closePeer()
+            }
+        }
+        let viewportId = UUID()
+        let historyId = UUID()
+        let rowsId = UUID()
+        register(viewport, requestId: viewportId, rpcId: .number(1), runtime: runtime)
+        register(history, requestId: historyId, rpcId: .number(2), runtime: runtime)
+        register(rows, requestId: rowsId, rpcId: .number(3), runtime: runtime)
+
+        runtime.perform(.readPaneText(reqId: viewportId, paneId: paneId, lineLimit: nil))
+        runtime.perform(.readPaneText(reqId: historyId, paneId: paneId, lineLimit: 2))
+        runtime.perform(.readPaneRowStructure(reqId: rowsId, paneId: paneId))
+
+        #expect(try viewport.readResponse().result == .object(["text": .string("visible")]))
+        #expect(try history.readResponse().result == .object(["text": .string("two\nthree")]))
+        #expect(try rows.readResponse().result == .object([
+            "rows": .array([.object([
+                "index": .number(7),
+                "retained": .bool(true),
+                "softWrapped": .bool(false),
+                "contentEnd": .number(4),
+                "width": .number(12),
+                "marginKind": .string("padding"),
+                "staleWrapClaim": .bool(true),
+            ])]),
+        ]))
+    }
+
+    @Test("pane tape commands select dump and follow session entry points")
+    func paneTapeCommandsWriteSessionErrors() throws {
+        let ports = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        runtime.sessions[paneId] = ports.session
+        let dump = try CommandIpcConnectionFixture()
+        let follow = try CommandIpcConnectionFixture()
+        defer {
+            dump.connection.close()
+            dump.closePeer()
+            follow.connection.close()
+            follow.closePeer()
+        }
+        let dumpId = UUID()
+        let followId = UUID()
+        register(dump, requestId: dumpId, rpcId: .number(1), runtime: runtime)
+        register(follow, requestId: followId, rpcId: .number(2), runtime: runtime)
+
+        runtime.perform(.dumpPaneTape(reqId: dumpId, paneId: paneId))
+        runtime.perform(.followPaneTape(reqId: followId, paneId: paneId, fromNow: true))
+
+        #expect(try dump.readResponse().error?.message == "pane has no terminal to read a tape from")
+        #expect(try follow.readResponse().error?.message == "pane has no terminal to read a tape from")
+        #expect(ports.session.paneTapeDumpCount == 1)
+        #expect(ports.session.paneTapeFollowFromNow == [true])
+    }
+
+    @Test("config save failure alerts and completes font resolution before return")
+    func configFailureReentersBeforePerformReturns() {
+        let ports = RecordingAppRuntimePorts()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("danterm-unwritable-config-\(UUID().uuidString)/config.json")
+        let store = DanTermConfigStore(url: url, writeData: { _, _ in
+            throw POSIXError(.EROFS)
+        })
+        let runtime = makeCommandTestRuntime(ports, configStore: store)
+        defer { runtime.shutdown() }
+        runtime.model.resolvedFontFamily = "stale family"
+        var config = DanTermConfig.default
+        config.fontFamily = "DanTerm Missing Font \(UUID().uuidString)"
+
+        runtime.perform(.saveDanTermConfig(config))
+
+        #expect(ports.alerts.count == 1)
+        #expect(ports.alerts.first?.title == "DanTerm Config Error")
+        #expect(ports.alerts.first?.message.contains("could not save") == true)
+        #expect(runtime.model.resolvedFontFamily == nil)
+    }
+
+    @Test("input rejection re-enters update and writes the pending reply")
+    func inputRejectionWritesPendingErrorBeforeReturn() throws {
+        let ports = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let wire = try CommandIpcConnectionFixture()
+        defer {
+            wire.connection.close()
+            wire.closePeer()
+        }
+        let requestId = UUID()
+        let submissionId = InputSubmissionId(rawValue: UUID())
+        wire.remember(reqId: requestId, rpcId: .number(9))
+        runtime.registerIpcConnection(wire.connection, for: requestId)
+        runtime.model.pendingInputRequests[requestId] = PendingInputRequest(
+            remaining: [submissionId]
+        )
+        runtime.model.pendingInputSubmissions[submissionId] = requestId
+
+        runtime.perform(.sendText(
+            paneId: PaneId(rawValue: UUID()),
+            text: "unroutable",
+            submissionId: submissionId
+        ))
+
+        let response = try wire.readResponse()
+        #expect(response.error?.code == -32603)
+        #expect(response.error?.message == "pane input was not delivered")
+        #expect(runtime.model.pendingInputRequests.isEmpty)
+        #expect(runtime.model.pendingInputSubmissions.isEmpty)
+    }
+
+    @Test("one send orders a notification port before its IPC reply")
+    func sendPreservesCommandOrderAcrossPortAndWire() throws {
+        let ports = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let wire = try CommandIpcConnectionFixture()
+        defer {
+            wire.connection.close()
+            wire.closePeer()
+        }
+        let requestId = UUID()
+        wire.remember(reqId: requestId, rpcId: .number(42))
+        runtime.registerIpcConnection(wire.connection, for: requestId)
+        let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
+        let selectedPaneId = PaneId(rawValue: UUID())
+        let targetPaneId = PaneId(rawValue: UUID())
+        let selectedTabId = TabId(rawValue: UUID())
+        let targetTabId = TabId(rawValue: UUID())
+        var targetSession = SessionModel(id: SessionId(rawValue: UUID()))
+        targetSession.agent = .attached(session: agent, activity: nil)
+        runtime.model = AppModel(
+            groups: [GroupModel(
+                id: GroupId(rawValue: UUID()),
+                name: "General",
+                tabs: [
+                    TabModel(
+                        id: selectedTabId,
+                        paneTree: PaneTree(root: .leaf(PaneModel(id: selectedPaneId)))
+                    ),
+                    TabModel(
+                        id: targetTabId,
+                        paneTree: PaneTree(root: .leaf(PaneModel(
+                            id: targetPaneId,
+                            session: targetSession
+                        )))
+                    ),
+                ]
+            )],
+            selectedTabId: selectedTabId
+        )
+        ports.onNotification = {
+            wire.connection.writeNotification(method: "test.notification", params: .null)
+        }
+
+        runtime.send(.ipcRequest(
+            reqId: requestId,
+            request: .agentActivity(
+                pane: targetPaneId,
+                session: IpcAgentSession(kind: "codex", id: "thread-1"),
+                activity: .waiting
+            )
+        ))
+
+        let first = try JSONDecoder().decode(JsonRpcRequest.self, from: wire.readLine())
+        let second = try wire.readResponse()
+        #expect(ports.notifications.count == 1)
+        #expect(first.method == "test.notification")
+        #expect(second.id == .number(42))
+        #expect(second.result == .object(["ok": .bool(true)]))
+    }
+}
+
+@MainActor
+private func register(
+    _ fixture: CommandIpcConnectionFixture,
+    requestId: UUID,
+    rpcId: JSONValue,
+    runtime: AppRuntime
+) {
+    fixture.remember(reqId: requestId, rpcId: rpcId)
+    runtime.registerIpcConnection(fixture.connection, for: requestId)
+}

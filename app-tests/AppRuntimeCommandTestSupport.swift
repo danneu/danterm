@@ -1,6 +1,8 @@
 // Recording ports and terminal session fixtures for AppRuntime command-dispatch tests.
 import Cocoa
+import Darwin
 import DanTermProtocol
+import Foundation
 import UserNotifications
 @testable import DanTerm
 
@@ -11,8 +13,10 @@ final class RecordingAppRuntimePorts {
     var notifications: [UNNotificationRequest] = []
     var exportDestination: URL?
     var alerts: [(title: String, message: String)] = []
+    var doctorPermissions = DoctorFacts.Permissions.unavailable
     var terminateCount = 0
     var activationCount = 0
+    var onNotification: (() -> Void)?
 
     init(session: RecordingTerminalSession = RecordingTerminalSession()) {
         self.session = session
@@ -26,6 +30,7 @@ final class RecordingAppRuntimePorts {
             },
             deliverNotification: { [self] request in
                 notifications.append(request)
+                onNotification?()
             },
             selectExportDestination: { [self] _, completion in
                 completion(exportDestination)
@@ -33,7 +38,7 @@ final class RecordingAppRuntimePorts {
             presentAlert: { [self] title, message in
                 alerts.append((title, message))
             },
-            readDoctorPermissions: { .unavailable },
+            readDoctorPermissions: { [self] in doctorPermissions },
             terminateApp: { [self] in terminateCount += 1 },
             activateApp: { [self] in activationCount += 1 }
         )
@@ -56,6 +61,11 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var hasSelection = false
     var primaryHistoryText: String?
     var primaryHistoryTail: String?
+    var viewportText: String?
+    var fullHistoryText: String?
+    var rowStructure: [TerminalSessionRowStructure]?
+    var paneTapeDumpCount = 0
+    var paneTapeFollowFromNow: [Bool] = []
     var sentText: [String] = []
     var sentInputText: [String] = []
     var sentInputKeys: [(key: KeyName, modifiers: KeyMods)] = []
@@ -86,14 +96,24 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     func setSearchNeedle(_ needle: String) { searchNeedles.append(needle) }
     func navigateSearch(_ direction: SearchDirection) { searchDirections.append(direction) }
     func endSearch() { endSearchCount += 1 }
-    func readViewportText() -> String? { nil }
-    func readRowStructure() -> [TerminalSessionRowStructure]? { nil }
-    func readFullHistoryText() -> String? { nil }
+    func readViewportText() -> String? { viewportText }
+    func readRowStructure() -> [TerminalSessionRowStructure]? { rowStructure }
+    func readFullHistoryText() -> String? { fullHistoryText }
     func readPrimaryHistoryText() -> String? { primaryHistoryText }
     func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? {
         primaryHistoryTail
     }
     func primaryHistoryTailReader() -> CheckpointScrollbackRead? { nil }
+    func paneTapeDump() -> (@Sendable () throws -> PaneTapeDump)? {
+        paneTapeDumpCount += 1
+        return nil
+    }
+    func paneTapeFollowStart(
+        fromNow: Bool
+    ) -> (@Sendable () throws -> PaneTapeStart)? {
+        paneTapeFollowFromNow.append(fromNow)
+        return nil
+    }
     func scroll(toRow row: Int) {}
     func copySelection() {}
     func pasteClipboard() {}
@@ -103,14 +123,92 @@ final class RecordingTerminalSession: NSView, TerminalSession {
 }
 
 @MainActor
-func makeCommandTestRuntime(_ fixture: RecordingAppRuntimePorts) -> AppRuntime {
+func makeCommandTestRuntime(
+    _ fixture: RecordingAppRuntimePorts,
+    configStore: DanTermConfigStore? = nil
+) -> AppRuntime {
     let absentConfig = FileManager.default.temporaryDirectory
         .appendingPathComponent("danterm-no-config-\(UUID().uuidString)")
     return AppRuntime(
         ports: fixture.value,
-        configStore: DanTermConfigStore(url: absentConfig),
+        configStore: configStore ?? DanTermConfigStore(url: absentConfig),
         startsApplicationServices: false
     )
+}
+
+struct CommandIpcConnectionFixture {
+    let connection: IpcConnection
+    let peer: Int32
+
+    init() throws {
+        var descriptors: [Int32] = [-1, -1]
+        guard Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0 else {
+            throw POSIXError(.ENOTSOCK)
+        }
+        connection = IpcConnection(fileDescriptor: descriptors[0])
+        peer = descriptors[1]
+    }
+
+    func remember(reqId: UUID, rpcId: JSONValue) {
+        connection.rememberRequest(reqId: reqId, rpcId: rpcId)
+    }
+
+    func readResponse() throws -> JsonRpcResponse {
+        try readCommandResponse(from: peer)
+    }
+
+    func readLine() throws -> Data {
+        try readCommandLine(from: peer)
+    }
+
+    func readResponseAsync() async throws -> JsonRpcResponse {
+        let peer = peer
+        let data = try await Task.detached {
+            try readCommandLine(from: peer)
+        }.value
+        return try JSONDecoder().decode(JsonRpcResponse.self, from: data)
+    }
+
+    func hasReadableData() -> Bool {
+        var readiness = pollfd(fd: peer, events: Int16(POLLIN), revents: 0)
+        return Darwin.poll(&readiness, 1, 0) > 0
+    }
+
+    func readByte() -> Int {
+        guard waitUntilCommandReadable(peer) else { return -1 }
+        var byte: UInt8 = 0
+        return Darwin.read(peer, &byte, 1)
+    }
+
+    func closePeer() {
+        Darwin.close(peer)
+    }
+}
+
+private func readCommandResponse(from descriptor: Int32) throws -> JsonRpcResponse {
+    try JSONDecoder().decode(JsonRpcResponse.self, from: readCommandLine(from: descriptor))
+}
+
+private func readCommandLine(from descriptor: Int32) throws -> Data {
+    guard waitUntilCommandReadable(descriptor) else { throw POSIXError(.ETIMEDOUT) }
+    var bytes: [UInt8] = []
+    var byte: UInt8 = 0
+    while true {
+        let count = Darwin.read(descriptor, &byte, 1)
+        guard count > 0 else { throw POSIXError(.ECONNRESET) }
+        if byte == 0x0A { break }
+        bytes.append(byte)
+    }
+    return Data(bytes)
+}
+
+private func waitUntilCommandReadable(_ descriptor: Int32) -> Bool {
+    var readiness = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+    while true {
+        let result = Darwin.poll(&readiness, 1, 2_000)
+        if result < 0, errno == EINTR { continue }
+        return result > 0
+    }
 }
 
 func makeCommandSnapshot(paneId: PaneId, scrollback: String? = nil) -> AppModelSnapshot {

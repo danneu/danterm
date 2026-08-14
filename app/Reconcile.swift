@@ -227,8 +227,10 @@ extension AppRuntime {
         window?.title = new.windowTitle.text
         chromeView?.updateTitle(new.contentTitle.text)
         chromeView?.updateBellBadge(count: new.unreadCount)
-        NSApp.dockTile.badgeLabel = new.unreadCount > 0 ? "\(new.unreadCount)" : nil
-        NSApp.dockTile.display()
+        if let app = NSApp {
+            app.dockTile.badgeLabel = new.unreadCount > 0 ? "\(new.unreadCount)" : nil
+            app.dockTile.display()
+        }
         chromeView?.tabTodoButton.update(
             totalCount: new.tabTodoTotal, uncompletedCount: new.tabTodoUncompleted)
         caches.windowChrome = new

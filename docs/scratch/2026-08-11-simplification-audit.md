@@ -174,7 +174,7 @@ in itself.
 |        | [S18](#s18) | 16    | 4   | 4   | scrollback     | medium | Derive the grand row/content totals from the block index instead of storing them                                        |
 |        | [S19](#s19) | 16    | 4   | 4   | terminal-views | small  | Collapse the two presentation-input change detectors into one entry point                                               |
 |        | [S20](#s20) | 16    | 4   | 4   | tests          | medium | Stop forking a PTY child for tests that only exercise engine policy                                                     |
-|        | [S21](#s21) | 16    | 4   | 4   | tests          | large  | The Command interpreter, the app's highest-churn logic, has no automated coverage                                       |
+| 6977454e b910eaba 2d9d4dd4 | [S21](#s21) | 16    | 4   | 4   | tests          | large  | The Command interpreter, the app's highest-churn logic, has no automated coverage                                       |
 |        | [S22](#s22) | 15    | 3   | 5   | app-runtime    | medium | Collapse the parallel `sessions` and `paneHosts` maps into one pane map                                                 |
 |        | [S23](#s23) | 15    | 3   | 5   | app-runtime    | small  | Delete the divergent inline copy of tearDownSession in tearDownCurrentSession                                           |
 | part 6b2e27f0 | [S24](#s24) | 15    | 3   | 5   | app-runtime    | medium | Give scheduled work one handle instead of a handle plus a shadow token                                     |
