@@ -8,6 +8,40 @@ public enum IpcAuditInputAccounting: Codable, Equatable, Sendable {
     case textBytes(Int)
     /// Counts the intent events supplied through the structured input form.
     case eventCount(Int)
+
+    private enum CodingKeys: String, CodingKey {
+        case textBytes
+        case eventCount
+    }
+
+    /// Decodes the explicit accounting vocabulary used by durable audit entries.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch (container.contains(.textBytes), container.contains(.eventCount)) {
+        case (true, false):
+            self = .textBytes(try container.decode(Int.self, forKey: .textBytes))
+        case (false, true):
+            self = .eventCount(try container.decode(Int.self, forKey: .eventCount))
+        default:
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Input accounting must contain exactly one accounting key"
+                )
+            )
+        }
+    }
+
+    /// Encodes one stable key instead of exposing Swift's associated-value representation.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .textBytes(let count):
+            try container.encode(count, forKey: .textBytes)
+        case .eventCount(let count):
+            try container.encode(count, forKey: .eventCount)
+        }
+    }
 }
 
 /// Carries only the request facts that the durable audit log is permitted to retain.

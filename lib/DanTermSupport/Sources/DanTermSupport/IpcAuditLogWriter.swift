@@ -232,7 +232,10 @@ final class IpcAuditLogWriter: Sendable {
     /// Appends and fsyncs one complete line, rotating before it would cross the bound.
     func append(_ event: IpcAuditEvent) throws {
         let entry = IpcAuditLogEntry(timestamp: now(), event: event)
-        var line = try JSONEncoder().encode(entry)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        var line = try encoder.encode(entry)
         line.append(0x0A)
         guard line.count <= maximumBytes else { throw Error.entryTooLarge }
         try lock.withLock { _ in

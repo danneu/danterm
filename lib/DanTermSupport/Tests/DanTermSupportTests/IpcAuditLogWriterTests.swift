@@ -35,13 +35,37 @@ struct IpcAuditLogWriterTests {
         let data = try Data(contentsOf: writer.logURL)
         let lines = data.split(separator: 0x0A)
         #expect(lines.count == 1)
-        let entry = try JSONDecoder().decode(IpcAuditLogEntry.self, from: Data(lines[0]))
+        let encoded = String(decoding: lines[0], as: UTF8.self)
+        #expect(encoded.contains("\"timestamp\":\"2023-11-14T22:13:20Z\""))
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let entry = try decoder.decode(IpcAuditLogEntry.self, from: Data(lines[0]))
         #expect(entry.timestamp == instant)
         #expect(entry.event.kind == .connectionRefused)
         #expect(entry.event.reason == "not-admitted")
         var status = stat()
         try #require(lstat(writer.logURL.path, &status) == 0)
         #expect(status.st_mode & mode_t(0o777) == mode_t(0o600))
+    }
+
+    @Test("the same entry has deterministic key order and bytes")
+    func entryEncodingIsDeterministic() throws {
+        let directory = makeAuditDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let instant = Date(timeIntervalSince1970: 1_700_000_000)
+        let writer = IpcAuditLogWriter(directory: directory, now: { instant }, maximumBytes: 4096)
+        let event = IpcAuditEvent.connectionRefused(
+            transport: "tailnet",
+            peerAddress: "100.98.63.67:49152",
+            reason: "not-admitted"
+        )
+
+        try writer.append(event)
+        try writer.append(event)
+
+        let lines = try Data(contentsOf: writer.logURL).split(separator: 0x0A)
+        #expect(lines.count == 2)
+        #expect(lines[0] == lines[1])
     }
 
     @Test("crossing the size bound preserves one rotated log")

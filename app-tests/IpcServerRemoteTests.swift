@@ -422,8 +422,10 @@ private struct RemoteIpcServerFixture {
 
     func auditEntries() throws -> [IpcAuditLogEntry] {
         let data = try Data(contentsOf: auditWriter.logURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         return try data.split(separator: 0x0A).map {
-            try JSONDecoder().decode(IpcAuditLogEntry.self, from: Data($0))
+            try decoder.decode(IpcAuditLogEntry.self, from: Data($0))
         }
     }
 

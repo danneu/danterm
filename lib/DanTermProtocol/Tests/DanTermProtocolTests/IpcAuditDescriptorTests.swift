@@ -16,8 +16,11 @@ struct IpcAuditDescriptorTests {
         let encoded = String(decoding: try JSONEncoder().encode(descriptor), as: UTF8.self)
 
         #expect(descriptor.input == .textBytes(12))
+        #expect(encoded.contains("\"textBytes\":12"))
+        #expect(encoded.contains("_0") == false)
         #expect(encoded.contains("secret") == false)
         #expect(encoded.contains("pi-\u{00F1}") == false)
+        #expect(try JSONDecoder().decode(IpcAuditRequestDescriptor.self, from: Data(encoded.utf8)) == descriptor)
     }
 
     @Test("event input records only the event count")
@@ -31,8 +34,11 @@ struct IpcAuditDescriptorTests {
         let encoded = String(decoding: try JSONEncoder().encode(descriptor), as: UTF8.self)
 
         #expect(descriptor.input == .eventCount(2))
+        #expect(encoded.contains("\"eventCount\":2"))
+        #expect(encoded.contains("_0") == false)
         #expect(encoded.contains("hidden") == false)
         #expect(encoded.contains("ctrl") == false)
+        #expect(try JSONDecoder().decode(IpcAuditRequestDescriptor.self, from: Data(encoded.utf8)) == descriptor)
     }
 
     @Test("launch requests retain command and working directory")
