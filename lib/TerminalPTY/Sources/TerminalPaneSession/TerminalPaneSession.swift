@@ -970,6 +970,13 @@ public final class TerminalPaneSessionController {
         )
     }
 
+    /// Fences every value needed to choose raw events or exact reconstructible state.
+    public func flightRecordingStreamFence(
+        from cursor: TerminalFlightRecordingCursor
+    ) -> TerminalFlightRecordingStreamFence {
+        host.fencedFlightRecordingStream(from: cursor)
+    }
+
     /// Arms one append edge without carrying recorder events across the owner boundary.
     public func addFlightRecordingFollowNotice(
         id: UUID,
@@ -990,6 +997,17 @@ public final class TerminalPaneSessionController {
         from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingCursorSnapshot? {
         host.fencedFlightRecordingFollowSnapshot(
+            subscriptionId: subscriptionId,
+            from: cursor
+        )
+    }
+
+    /// Rearms one followed suffix with exact state available for reconstructible loss repair.
+    public func flightRecordingFollowStreamFence(
+        subscriptionId: UUID,
+        from cursor: TerminalFlightRecordingCursor
+    ) -> TerminalFlightRecordingFollowFence? {
+        host.fencedFlightRecordingFollowStream(
             subscriptionId: subscriptionId,
             from: cursor
         )

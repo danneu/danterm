@@ -890,6 +890,32 @@ public actor TerminalPTYHost {
         )
     }
 
+    /// Fences retained tape, remote cursor placement, and exact pane state for stream policy.
+    package nonisolated func fencedFlightRecordingStream(
+        from cursor: TerminalFlightRecordingCursor
+    ) -> TerminalFlightRecordingStreamFence {
+        let fenced = fence(countsAsProduction: false) { owner in
+            let terminal = owner.terminal
+            let liveCursor = owner.flightTape.liveCursor()
+            return (
+                terminal,
+                liveCursor,
+                owner.flightTape.backlogOrigin(),
+                owner.flightTape.cursorSnapshot(from: .beginning),
+                owner.flightTape.cursorPlacement(from: cursor)
+            )
+        }.value
+        return TerminalFlightRecordingStreamFence(
+            origin: fenced.2,
+            retained: fenced.3,
+            requested: fenced.4,
+            synchronization: TerminalFlightRecordingStateSynchronization(
+                state: fenced.0.stateSynchronization,
+                cursor: fenced.1
+            )
+        )
+    }
+
     /// Copies the retained suffix and exact cursor gap in one owner-queue fence.
     package nonisolated func fencedFlightRecording(
         from cursor: TerminalFlightRecordingCursor
@@ -897,6 +923,30 @@ public actor TerminalPTYHost {
         fence(countsAsProduction: false) { owner in
             owner.flightTape.cursorSnapshot(from: cursor)
         }.value
+    }
+
+    /// Rearms one follow notice while pairing its suffix with exact state at the same cursor.
+    package nonisolated func fencedFlightRecordingFollowStream(
+        subscriptionId: UUID,
+        from cursor: TerminalFlightRecordingCursor
+    ) -> TerminalFlightRecordingFollowFence? {
+        let fenced: (Terminal, TerminalFlightRecordingCursorSnapshot)? = fence(
+            countsAsProduction: false
+        ) { owner in
+            guard let snapshot = owner.flightTape.followCursorSnapshot(
+                subscriptionId: subscriptionId,
+                from: cursor
+            ) else { return nil }
+            return (owner.terminal, snapshot)
+        }.value
+        guard let fenced else { return nil }
+        return TerminalFlightRecordingFollowFence(
+            snapshot: fenced.1,
+            synchronization: TerminalFlightRecordingStateSynchronization(
+                state: fenced.0.stateSynchronization,
+                cursor: fenced.1.nextCursor
+            )
+        )
     }
 
     /// Registers one edge-triggered recorder notice at an already-fenced stream cursor.

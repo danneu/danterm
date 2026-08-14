@@ -91,31 +91,44 @@ func makePaneTapeStart(
     capture: PaneTapeCaptureMode,
     provenance: JSONValue,
     initial: PaneTapeDimensions,
-    cursor: PaneTapeCursor
+    cursor: PaneTapeCursor,
+    publishesCursor: Bool = true,
+    reconstructible: Bool? = nil
 ) -> PaneTapeStart {
-    PaneTapeStart(
-        record: .object([
-            "kind": .string("start"),
-            "version": .number(Double(paneTapeStreamVersion)),
-            "capture": .string(capture.rawValue),
-            "format": .string(PaneTapeFormat.replay.rawValue),
-            "provenance": provenance,
-            "initial": .object([
-                "columns": .number(Double(initial.columns)),
-                "rows": .number(Double(initial.rows)),
-            ]),
-            // The baseline every later offset is read against. Without it a stream that starts
-            // past the beginning -- a tail-only follow, or a dump whose head was evicted --
-            // reports offsets a reader has no origin for.
-            "cursor": .object([
-                "recorderLifetimeId": .string(cursor.recorderLifetimeId.uuidString),
-                "sequence": .number(Double(cursor.nextSequence)),
-                "feedByteOffset": .number(Double(cursor.feedBytesBeforeNextSequence)),
-                "writeByteOffset": .number(Double(cursor.writeBytesBeforeNextSequence)),
-            ]),
+    var record: [String: JSONValue] = [
+        "kind": .string("start"),
+        "version": .number(Double(paneTapeStreamVersion)),
+        "capture": .string(capture.rawValue),
+        "format": .string(PaneTapeFormat.replay.rawValue),
+        "provenance": provenance,
+        "initial": .object([
+            "columns": .number(Double(initial.columns)),
+            "rows": .number(Double(initial.rows)),
         ]),
+    ]
+    if publishesCursor {
+        // The baseline every later offset is read against. Without it a stream that starts
+        // past the beginning -- a tail-only follow, or a dump whose head was evicted --
+        // reports offsets a reader has no origin for.
+        record["cursor"] = paneTapeCursorJSON(cursor)
+    }
+    if let reconstructible {
+        record["reconstructible"] = .bool(reconstructible)
+    }
+    return PaneTapeStart(
+        record: .object(record),
         cursor: cursor
     )
+}
+
+/// Encodes the recorder coordinates shared by start and completed synchronization records.
+func paneTapeCursorJSON(_ cursor: PaneTapeCursor) -> JSONValue {
+    .object([
+        "recorderLifetimeId": .string(cursor.recorderLifetimeId.uuidString),
+        "sequence": .number(Double(cursor.nextSequence)),
+        "feedByteOffset": .number(Double(cursor.feedBytesBeforeNextSequence)),
+        "writeByteOffset": .number(Double(cursor.writeBytesBeforeNextSequence)),
+    ])
 }
 
 /// Converts an owner-fenced suffix into an ordered gap-and-events delivery.
@@ -123,15 +136,20 @@ func makePaneTapeBatch(from snapshot: PaneTapeSnapshot) -> PaneTapeBatch {
     var records: [JSONValue] = []
     records.reserveCapacity(snapshot.events.count + (snapshot.droppedEventCount > 0 ? 1 : 0))
     if snapshot.droppedEventCount > 0 {
-        records.append(.object([
-            "kind": .string("gap"),
-            "droppedEventCount": .number(Double(snapshot.droppedEventCount)),
-            "droppedFeedBytes": .number(Double(snapshot.droppedFeedBytes)),
-            "droppedWriteBytes": .number(Double(snapshot.droppedWriteBytes)),
-        ]))
+        records.append(makePaneTapeExactGapRecord(snapshot))
     }
     records.append(contentsOf: snapshot.events.map(makePaneTapeEventRecord))
     return PaneTapeBatch(records: records, nextCursor: snapshot.nextCursor)
+}
+
+/// States exact loss for a cursor the recorder placed in its own lifetime.
+func makePaneTapeExactGapRecord(_ snapshot: PaneTapeSnapshot) -> JSONValue {
+    .object([
+        "kind": .string("gap"),
+        "droppedEventCount": .number(Double(snapshot.droppedEventCount)),
+        "droppedFeedBytes": .number(Double(snapshot.droppedFeedBytes)),
+        "droppedWriteBytes": .number(Double(snapshot.droppedWriteBytes)),
+    ])
 }
 
 /// Orders every record a finite dump owes after its start record.

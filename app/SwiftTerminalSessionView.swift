@@ -76,6 +76,52 @@ func paneTapeSnapshot(
         nextCursor: paneTapeCursor(snapshot.nextCursor)
     )
 }
+
+/// Lowers exact terminal state and its continuation cursor into stream-policy values.
+func paneTapeStateSynchronization(
+    _ synchronization: TerminalFlightRecordingStateSynchronization
+) -> PaneTapeStateSynchronization {
+    .init(
+        bytes: synchronization.state.bytes,
+        dimensions: .init(
+            columns: synchronization.state.columns,
+            rows: synchronization.state.rows
+        ),
+        cursor: paneTapeCursor(synchronization.cursor)
+    )
+}
+
+/// Lowers one owner-fenced stream-policy input without making the support layer import engines.
+func paneTapeStreamFence(
+    _ fence: TerminalFlightRecordingStreamFence
+) throws -> PaneTapeStreamFence {
+    let requested: PaneTapeCursorPlacement
+    switch fence.requested {
+    case .placed(let snapshot):
+        requested = .placed(try paneTapeSnapshot(snapshot))
+    case .unplaceable:
+        requested = .unplaceable
+    }
+    return PaneTapeStreamFence(
+        origin: .init(
+            initial: paneTapeDimensions(fence.origin.initial),
+            cursor: paneTapeCursor(fence.origin.cursor)
+        ),
+        retained: try paneTapeSnapshot(fence.retained),
+        requested: requested,
+        synchronization: paneTapeStateSynchronization(fence.synchronization)
+    )
+}
+
+/// Lowers a followed suffix and its replacement state without separating their fence.
+func paneTapeFollowStreamFence(
+    _ fence: TerminalFlightRecordingFollowFence
+) throws -> PaneTapeFollowStreamFence {
+    PaneTapeFollowStreamFence(
+        snapshot: try paneTapeSnapshot(fence.snapshot),
+        synchronization: paneTapeStateSynchronization(fence.synchronization)
+    )
+}
 #endif
 
 /// Lowers stored terminal facts from the engine vocabulary into the

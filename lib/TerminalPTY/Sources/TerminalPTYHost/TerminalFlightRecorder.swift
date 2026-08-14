@@ -117,12 +117,14 @@ public struct TerminalFlightRecordingCursor: Equatable, Sendable {
 }
 
 /// Separates a cursor the recorder can place from untrusted coordinates it must not use.
-package enum TerminalFlightRecordingCursorPlacement: Equatable, Sendable {
+public enum TerminalFlightRecordingCursorPlacement: Equatable, Sendable {
+    /// The recorder accepted the cursor and measured its retained suffix.
     case placed(TerminalFlightRecordingCursorSnapshot)
+    /// The coordinates cannot name a position in this recorder lifetime.
     case unplaceable
 
     /// Lets stream policy branch on invalid provenance without unpacking a valid snapshot.
-    package var isUnplaceable: Bool {
+    public var isUnplaceable: Bool {
         if case .unplaceable = self { true } else { false }
     }
 }
@@ -183,6 +185,26 @@ public struct TerminalFlightRecordingStateSynchronization: Equatable, Sendable {
         self.state = state
         self.cursor = cursor
     }
+}
+
+/// Captures every input the stream policy needs in one owner-queue turn.
+public struct TerminalFlightRecordingStreamFence: Equatable, Sendable {
+    /// Recorder birth geometry and its real lifetime cursor at sequence zero.
+    public let origin: TerminalFlightRecordingOrigin
+    /// The whole retained suffix for raw fallback and beginning requests.
+    public let retained: TerminalFlightRecordingCursorSnapshot
+    /// Placement of the requester's supplied cursor in this recorder lifetime.
+    public let requested: TerminalFlightRecordingCursorPlacement
+    /// Exact pane state and the first event outside it.
+    public let synchronization: TerminalFlightRecordingStateSynchronization
+}
+
+/// Pairs a followed suffix with exact state at the same notice-rearming owner fence.
+public struct TerminalFlightRecordingFollowFence: Equatable, Sendable {
+    /// Retained events and exact loss from the subscriber's previous cursor.
+    public let snapshot: TerminalFlightRecordingCursorSnapshot
+    /// Exact pane state at `snapshot.nextCursor` for reconstructible loss repair.
+    public let synchronization: TerminalFlightRecordingStateSynchronization
 }
 
 /// Owner-queue-only FIFO that releases evicted payload storage without shifting an array.

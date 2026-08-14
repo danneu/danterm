@@ -881,6 +881,78 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
+    @Test(
+        "stream fence validates a supplied cursor beside retained tape and exact state",
+        .timeLimit(.minutes(1))
+    )
+    func streamFenceCarriesPlacementAndState() async throws {
+        // Intent: one owner turn returns remote cursor placement, retained events, and state.
+        // Why it exists: separate fences can splice a cursor onto state from another moment.
+        // Scenario: a live pane rejects a foreign cursor while its exact state stays replayable.
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(command: "printf 'pane-state'; sleep 30"))
+        #expect(await host.waitForOutput(containing: Array("pane-state".utf8)))
+        let foreign = TerminalFlightRecordingCursor(
+            recorderLifetimeId: UUID(),
+            nextSequence: 0,
+            feedBytesBeforeNextSequence: 0,
+            writeBytesBeforeNextSequence: 0
+        )
+
+        let fenced = host.fencedFlightRecordingStream(from: foreign)
+        var resumed = try #require(Terminal(
+            columns: fenced.synchronization.state.columns,
+            rows: fenced.synchronization.state.rows
+        ))
+        resumed.feed(fenced.synchronization.state.bytes)
+
+        #expect(fenced.requested.isUnplaceable)
+        #expect(fenced.retained.events.isEmpty == false)
+        #expect(fenced.synchronization.cursor == fenced.retained.nextCursor)
+        #expect(resumed.screenText == host.fencedSnapshot().screenText)
+        await host.close()
+    }
+
+    @Test(
+        "follow fence rearms its notice beside a suffix and exact replacement state",
+        .timeLimit(.minutes(1))
+    )
+    func followFenceCarriesSuffixAndState() async throws {
+        // Intent: a followed suffix and its replacement state end at the same recorder cursor.
+        // Why it exists: eviction during delivery must repair state without losing later output.
+        // Scenario: a child waits between two writes while a follower arms at the first one.
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(
+            command: "printf 'one'; read ignored; printf 'two'; sleep 30"
+        ))
+        #expect(await host.waitForOutput(containing: Array("one".utf8)))
+        let origin = host.fencedFlightRecordingOriginFromNow()
+        let subscriptionId = UUID()
+        host.addFlightRecordingFollowNotice(
+            id: subscriptionId,
+            from: origin.cursor,
+            notify: {}
+        )
+        host.send(Array("\n".utf8))
+        #expect(await host.waitForOutput(containing: Array("two".utf8)))
+
+        let fenced = try #require(host.fencedFlightRecordingFollowStream(
+            subscriptionId: subscriptionId,
+            from: origin.cursor
+        ))
+        var resumed = try #require(Terminal(
+            columns: fenced.synchronization.state.columns,
+            rows: fenced.synchronization.state.rows
+        ))
+        resumed.feed(fenced.synchronization.state.bytes)
+
+        #expect(fenced.snapshot.events.isEmpty == false)
+        #expect(fenced.synchronization.cursor == fenced.snapshot.nextCursor)
+        #expect(resumed.screenText == host.fencedSnapshot().screenText)
+        host.removeFlightRecordingFollowNotice(id: subscriptionId)
+        await host.close()
+    }
+
     @Test("input the child has not accepted stays out of the tape", .timeLimit(.minutes(1)))
     func backpressuredInputIsRecordedOnlyOnceItCrosses() async throws {
         // Intent: the tape holds the bytes the PTY accepted and no others, so input still
