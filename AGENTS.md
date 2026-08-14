@@ -249,6 +249,8 @@ prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
   the justfile; add new ones there, and only steps independent of every other
   one (no shared temp path, build directory, port, or socket). `just test-serial`
   when parallel interleaving is in the way.
+- Codex only: run `just test` with [sandbox escalation](https://learn.chatgpt.com/docs/agent-approvals-security);
+  SwiftPM cannot nest its macOS sandbox inside Codex's.
 - `just test-ui` -- AppKit UI harness. Excluded from the gate because it needs a
   WindowServer connection: it fails headless but runs fine from any shell in a
   logged-in GUI session, including an agent's.
