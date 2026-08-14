@@ -38,6 +38,10 @@ struct UTF8Decoder: Equatable, Sendable {
 
     private var accumulator: UInt32 = 0
     private var state = acceptState
+    private var pending0: UInt8 = 0
+    private var pending1: UInt8 = 0
+    private var pending2: UInt8 = 0
+    private var pendingCount: UInt8 = 0
 
     /// True when no partial sequence is buffered, so the next ASCII byte decodes to itself.
     ///
@@ -47,6 +51,22 @@ struct UTF8Decoder: Equatable, Sendable {
     /// equal to accept, so the skipped calls would have produced exactly those scalars and left
     /// exactly this state.
     var isIdle: Bool { state == Self.acceptState }
+
+    /// Returns the incomplete scalar prefix that must precede later continuation bytes.
+    var synchronizationPrefix: [UInt8] {
+        switch pendingCount {
+        case 0: []
+        case 1: [pending0]
+        case 2: [pending0, pending1]
+        default: [pending0, pending1, pending2]
+        }
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.accumulator == rhs.accumulator
+            && lhs.state == rhs.state
+            && lhs.synchronizationPrefix == rhs.synchronizationPrefix
+    }
 
     /// Consumes one byte, or asks the caller to retry it after replacing a malformed prefix.
     mutating func next(_ byte: UInt8) -> (scalar: Unicode.Scalar?, consumed: Bool) {
@@ -64,13 +84,26 @@ struct UTF8Decoder: Equatable, Sendable {
         if state == Self.acceptState {
             let scalar = Unicode.Scalar(accumulator) ?? "\u{FFFD}"
             accumulator = 0
+            pendingCount = 0
             return (scalar, true)
         }
 
         if state == Self.rejectState {
             accumulator = 0
             state = Self.acceptState
+            pendingCount = 0
             return ("\u{FFFD}", initialState == Self.acceptState)
+        }
+
+        if initialState == Self.acceptState {
+            pending0 = byte
+            pendingCount = 1
+        } else if pendingCount == 1 {
+            pending1 = byte
+            pendingCount = 2
+        } else {
+            pending2 = byte
+            pendingCount = 3
         }
 
         return (nil, true)

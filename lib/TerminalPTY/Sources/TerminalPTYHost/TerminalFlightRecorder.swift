@@ -3,6 +3,7 @@
 import PaneProcessLifecycle
 import DequeModule
 import Foundation
+import TerminalCore
 import TerminalCoreRecording
 
 /// Bounds retained payload and metadata independently so both bulk and tiny PTY chunks fit.
@@ -164,6 +165,24 @@ public struct TerminalFlightRecordingCapture: Equatable, Sendable {
     public let origin: TerminalFlightRecordingOrigin
     /// Every retained event, plus the exact lifetime loss before the oldest of them.
     public let snapshot: TerminalFlightRecordingCursorSnapshot
+}
+
+/// Pairs serialized terminal state with the first recorder event outside that state.
+public struct TerminalFlightRecordingStateSynchronization: Equatable, Sendable {
+    /// Terminal-protocol bytes and the geometry needed to replay them.
+    public let state: TerminalStateSynchronization
+
+    /// Recorder position taken in the same owner turn as `state`.
+    public let cursor: TerminalFlightRecordingCursor
+
+    /// Keeps state and continuation position inseparable across the session boundary.
+    public init(
+        state: TerminalStateSynchronization,
+        cursor: TerminalFlightRecordingCursor
+    ) {
+        self.state = state
+        self.cursor = cursor
+    }
 }
 
 /// Owner-queue-only FIFO that releases evicted payload storage without shifting an array.
@@ -380,7 +399,7 @@ package final class TerminalFlightRecorder {
         TerminalFlightRecordingOrigin(initial: initial, cursor: backlogCursor())
     }
 
-    private func liveCursor() -> TerminalFlightRecordingCursor {
+    package func liveCursor() -> TerminalFlightRecordingCursor {
         .init(
             recorderLifetimeId: lifetimeId,
             nextSequence: nextSequence,

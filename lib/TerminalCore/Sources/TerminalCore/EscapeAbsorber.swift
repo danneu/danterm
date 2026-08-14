@@ -219,6 +219,76 @@ struct EscapeAbsorber: Equatable, Sendable {
     /// Distinguishes raw sequence bytes from ground-state bytes that require UTF-8 decoding.
     var isGround: Bool { state == .ground }
 
+    /// Returns a normalized unfinished sequence prefix with the same next-byte behavior.
+    var synchronizationPrefix: [UInt8] {
+        var bytes: [UInt8]
+        switch state {
+        case .ground:
+            return []
+        case .escape:
+            return [0x1B]
+        case .escapeIntermediate:
+            return [0x1B] + Array(intermediates)
+        case .csiEntry:
+            return [0x1B, 0x5B]
+        case .csiIntermediate:
+            bytes = [0x1B, 0x5B]
+            appendPrivateIntermediates(to: &bytes)
+            appendParameters(to: &bytes)
+            appendFinalIntermediates(to: &bytes)
+            return bytes
+        case .csiParameter:
+            bytes = [0x1B, 0x5B]
+            bytes.append(contentsOf: Array(intermediates))
+            appendParameters(to: &bytes)
+            return bytes
+        case .csiIgnore:
+            return [0x1B, 0x5B, 0x3A]
+        case .dcsEntry:
+            return [0x1B, 0x50]
+        case .dcsParameter:
+            bytes = [0x1B, 0x50]
+            bytes.append(contentsOf: Array(intermediates))
+            appendParameters(to: &bytes)
+            return bytes
+        case .dcsIntermediate:
+            bytes = [0x1B, 0x50]
+            appendPrivateIntermediates(to: &bytes)
+            appendParameters(to: &bytes)
+            appendFinalIntermediates(to: &bytes)
+            return bytes
+        case .dcsPassthrough:
+            return [0x1B, 0x50, 0x71]
+        case .dcsIgnore:
+            return [0x1B, 0x50, 0x3A]
+        case .oscString:
+            return [0x1B, 0x5D] + oscPayload + (oscPayloadOverflowed ? [0x20] : [])
+        case .oscEscape:
+            return [0x1B, 0x5D] + oscPayload
+                + (oscPayloadOverflowed ? [0x20] : []) + [0x1B]
+        case .sosPmApcString:
+            return [0x1B, 0x58]
+        }
+    }
+
+    private func appendParameters(to bytes: inout [UInt8]) {
+        for index in parameters.indices {
+            bytes.append(contentsOf: String(parameters[index]).utf8)
+            bytes.append(colonSeparators[index] ? 0x3A : 0x3B)
+        }
+        if hasParameterDigits {
+            bytes.append(contentsOf: String(parameterAccumulator).utf8)
+        }
+    }
+
+    private func appendPrivateIntermediates(to bytes: inout [UInt8]) {
+        bytes.append(contentsOf: intermediates.filter { (0x3C...0x3F).contains($0) })
+    }
+
+    private func appendFinalIntermediates(to bytes: inout [UInt8]) {
+        bytes.append(contentsOf: intermediates.filter { (0x20...0x2F).contains($0) })
+    }
+
     /// Starts 7-bit escape recognition after the stream decoder emits ESC.
     mutating func startEscape() {
         clearCollection()

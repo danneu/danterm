@@ -27,6 +27,11 @@ struct TerminalInputStream: Equatable, Sendable {
     private var decoder = UTF8Decoder()
     private var absorber = EscapeAbsorber()
 
+    /// Returns the unfinished byte prefix that recreates this stream reducer's next-byte state.
+    var synchronizationPrefix: [UInt8] {
+        decoder.synchronizationPrefix + absorber.synchronizationPrefix
+    }
+
     /// Printable ASCII: the bytes that decode to themselves and print as one narrow cell.
     ///
     /// 0x7F is deliberately outside it -- DEL is an `.execute` -- and so is 0x1B, which starts an

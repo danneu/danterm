@@ -105,6 +105,7 @@ package enum TerminalPTYProductionFenceOperation: Sendable {
     case frameState
     case consumptionState
     case diagnosticState
+    case stateSynchronization
     case beginCloseAndSnapshot
     case installUpdateHandler(@Sendable (TerminalPTYUpdateSignal) -> Void)
 }
@@ -120,6 +121,10 @@ package enum TerminalPTYProductionFenceOutput: Sendable {
     case diagnosticState(
         frameState: TerminalPTYFrameState,
         transitions: [TerminalPTYAppliedTransition]
+    )
+    case stateSynchronization(
+        terminal: Terminal,
+        cursor: TerminalFlightRecordingCursor
     )
     case closeSnapshot(Terminal)
     case updateHandlerInstalled
@@ -839,6 +844,11 @@ public actor TerminalPTYHost {
                     frameState: owner.drainedFrameState(),
                     transitions: owner.appliedTransitions
                 )
+            case .stateSynchronization:
+                return .stateSynchronization(
+                    terminal: owner.terminal,
+                    cursor: owner.flightTape.liveCursor()
+                )
             case .beginCloseAndSnapshot:
                 owner.updateHandler = nil
                 owner.beginShutdown(completion: nil)
@@ -865,6 +875,19 @@ public actor TerminalPTYHost {
     /// states one atomic moment and its record building stays off-actor.
     package nonisolated func fencedFlightRecordingCapture() -> TerminalFlightRecordingCapture {
         fence(countsAsProduction: false) { owner in owner.flightTape.capture() }.value
+    }
+
+    /// Copies terminal state and the recorder continuation cursor in one owner-queue turn.
+    package nonisolated func fencedStateSynchronization()
+        -> TerminalFlightRecordingStateSynchronization
+    {
+        let fenced = fence(countsAsProduction: false) { owner in
+            (owner.terminal, owner.flightTape.liveCursor())
+        }.value
+        return TerminalFlightRecordingStateSynchronization(
+            state: fenced.0.stateSynchronization,
+            cursor: fenced.1
+        )
     }
 
     /// Copies the retained suffix and exact cursor gap in one owner-queue fence.

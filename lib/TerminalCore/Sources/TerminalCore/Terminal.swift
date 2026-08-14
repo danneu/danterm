@@ -85,6 +85,25 @@ public struct TerminalTextRange: Equatable, Sendable {
     }
 }
 
+/// Carries reset-to-current terminal bytes together with the geometry they require.
+public struct TerminalStateSynchronization: Equatable, Sendable {
+    /// Grid width at the state fence.
+    public let columns: Int
+
+    /// Grid height at the state fence.
+    public let rows: Int
+
+    /// Ordinary terminal-protocol bytes that rebuild the fenced state on a fresh terminal.
+    public let bytes: [UInt8]
+
+    /// Keeps geometry inseparable from bytes whose cursor and wrapping operations depend on it.
+    public init(columns: Int, rows: Int, bytes: [UInt8]) {
+        self.columns = columns
+        self.rows = rows
+        self.bytes = bytes
+    }
+}
+
 /// Reduces terminal bytes into deterministic value-semantic screen state without IO.
 public struct Terminal: Equatable, Sendable {
     /// Carries owner-observed generations without making observation history part of value equality.
@@ -863,6 +882,398 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
+    /// Serializes observable engine state into bytes accepted by an ordinary reset terminal.
+    public var stateSynchronization: TerminalStateSynchronization {
+        var writer = StateSynchronizationWriter()
+        writer.append("\u{1B}c\u{1B}[3J\u{1B}]133;S;redraw=0\u{7}")
+
+        var primaryRows: [GridRow] = []
+        primaryRows.reserveCapacity(historyRowCount + rowCount)
+        for index in 0..<historyRowCount {
+            guard let row = history.paintedDisplayRow(at: index) else {
+                preconditionFailure("retained history count must address every retained row")
+            }
+            primaryRows.append(row.materialized(to: columnCount))
+        }
+        primaryRows.append(contentsOf: primaryScreenRows.map { $0.materialized(to: columnCount) })
+        writer.appendRows(primaryRows, terminal: self)
+
+        let primaryState = activeScreen == .primary ? screen : inactiveScreen!
+        appendControlState(for: primaryState, to: &writer)
+
+        if activeScreen == .alternate {
+            writer.append("\u{1B}[0m\u{1B}[?1047h")
+            writer.append("\u{1B}[H")
+            writer.appendRows(screen.rows.map { $0.materialized(to: columnCount) }, terminal: self)
+            appendControlState(for: screen, to: &writer)
+        }
+
+        writer.append(promptRedrawSequence)
+        appendGraphemeSynchronization(to: &writer)
+        writer.append(inputStream.synchronizationPrefix)
+        return TerminalStateSynchronization(columns: columnCount, rows: rowCount, bytes: writer.bytes)
+    }
+
+    private func appendControlState(
+        for targetScreen: ScreenState,
+        to writer: inout StateSynchronizationWriter
+    ) {
+        writer.append("\u{1B}[3g")
+        for column in tabStops.sorted() {
+            writer.append(cursorPosition(row: 0, column: column, originMode: false))
+            writer.append("\u{1B}H")
+        }
+
+        if let scrollRegion {
+            writer.append("\u{1B}[\(scrollRegion.lowerBound + 1);\(scrollRegion.upperBound)r")
+        } else {
+            writer.append("\u{1B}[r")
+        }
+
+        appendSavedCursor(targetScreen.savedCursor, in: targetScreen, to: &writer)
+        appendModes(for: targetScreen, to: &writer)
+        writer.append(styleSequence(currentStyle))
+        writer.append(hyperlinkSequence(hyperlinkPen.flatMap { hyperlinkTargets[$0] }))
+        writer.append(cursorPosition(
+            row: targetScreen.cursor.row,
+            column: targetScreen.cursor.column,
+            originMode: modes.isOriginMode
+        ))
+        if targetScreen.isPendingWrap {
+            appendPendingWrap(
+                at: targetScreen.cursor,
+                in: targetScreen,
+                originMode: modes.isOriginMode,
+                to: &writer
+            )
+            writer.append(styleSequence(currentStyle))
+            writer.append(hyperlinkSequence(hyperlinkPen.flatMap { hyperlinkTargets[$0] }))
+        }
+        appendSemanticState(targetScreen, to: &writer)
+        writer.appendRowState(targetScreen.rows[targetScreen.cursor.row])
+    }
+
+    private func appendSavedCursor(
+        _ saved: SavedCursorState,
+        in targetScreen: ScreenState,
+        to writer: inout StateSynchronizationWriter
+    ) {
+        writer.append(saved.isOriginMode ? "\u{1B}[?6h" : "\u{1B}[?6l")
+        writer.append(saved.isCursorVisible ? "\u{1B}[?25h" : "\u{1B}[?25l")
+        writer.append(cursorStyleSequence(
+            shape: saved.cursorShape,
+            blinking: saved.isCursorBlinking
+        ))
+        writer.append(styleSequence(saved.style))
+        writer.append(cursorPosition(
+            row: saved.position.row,
+            column: saved.position.column,
+            originMode: saved.isOriginMode
+        ))
+        if saved.isPendingWrap {
+            appendPendingWrap(
+                at: saved.position,
+                in: targetScreen,
+                originMode: saved.isOriginMode,
+                to: &writer
+            )
+            writer.append(styleSequence(saved.style))
+        }
+        writer.append("\u{1B}7")
+    }
+
+    private func appendPendingWrap(
+        at position: CellPosition,
+        in targetScreen: ScreenState,
+        originMode: Bool,
+        to writer: inout StateSynchronizationWriter
+    ) {
+        let addressedColumn = targetScreen.rows[position.row].cell(at: position.column).kind
+            == .wideTail ? position.column - 1 : position.column
+        let cell = targetScreen.rows[position.row].cell(at: addressedColumn)
+        guard cell.kind == .narrow || cell.kind == .wideHead else {
+            preconditionFailure("pending wrap must be backed by the cell that reached the margin")
+        }
+        writer.append(cursorPosition(
+            row: position.row,
+            column: addressedColumn,
+            originMode: originMode
+        ))
+        writer.append(styleSequence(style(for: cell.styleId)))
+        writer.append(hyperlinkSequence(cell.hyperlinkId.flatMap { hyperlinkTargets[$0] }))
+        writer.append(Array(String(describing: cell.scalars).utf8))
+    }
+
+    private func appendModes(
+        for targetScreen: ScreenState,
+        to writer: inout StateSynchronizationWriter
+    ) {
+        writer.append(modes.isInsertMode ? "\u{1B}[4h" : "\u{1B}[4l")
+        writer.append(modes.isLineFeedNewLineMode ? "\u{1B}[20h" : "\u{1B}[20l")
+        writer.append(modes.isApplicationKeypadMode ? "\u{1B}=" : "\u{1B}>")
+
+        let privateModes: [(Int, Bool)] = [
+            (1, modes.isApplicationCursorKeysMode),
+            (6, modes.isOriginMode),
+            (7, modes.isAutoWrapMode),
+            (12, modes.isCursorBlinking),
+            (25, modes.isCursorVisible),
+            (1004, modes.isFocusReportingMode),
+            (1006, modes.isSGRMouseEncodingMode),
+            (2004, modes.isBracketedPasteMode),
+            (2026, modes.isSynchronizedOutputActive),
+        ]
+        for (mode, enabled) in privateModes {
+            writer.append("\u{1B}[?\(mode)\(enabled ? "h" : "l")")
+        }
+        writer.append("\u{1B}[?1000l\u{1B}[?1002l\u{1B}[?1003l")
+        switch modes.mouseTrackingMode {
+        case .off: break
+        case .click: writer.append("\u{1B}[?1000h")
+        case .drag: writer.append("\u{1B}[?1002h")
+        case .anyMotion: writer.append("\u{1B}[?1003h")
+        }
+        writer.append(cursorStyleSequence(
+            shape: modes.cursorShape,
+            blinking: modes.isCursorBlinking
+        ))
+        writer.append("\u{1B}[<u")
+        for flags in targetScreen.kittyKeyboardStack {
+            writer.append("\u{1B}[>\(flags)u")
+        }
+    }
+
+    private func appendSemanticState(
+        _ targetScreen: ScreenState,
+        to writer: inout StateSynchronizationWriter
+    ) {
+        switch targetScreen.semanticContent {
+        case .output:
+            writer.append("\u{1B}]133;D\u{7}")
+        case .prompt:
+            writer.append("\u{1B}]133;P\u{7}")
+        case .input:
+            writer.append(targetScreen.semanticContentClearsAtEndOfLine
+                ? "\u{1B}]133;I\u{7}"
+                : "\u{1B}]133;B\u{7}")
+        }
+    }
+
+    private var promptRedrawSequence: String {
+        let value = switch promptRedrawMode {
+        case .disabled: "0"
+        case .full: "1"
+        case .last: "last"
+        }
+        return "\u{1B}]133;S;redraw=\(value)\u{7}"
+    }
+
+    private func appendGraphemeSynchronization(to writer: inout StateSynchronizationWriter) {
+        writer.append("\u{1B}]133;S;repeat=none\u{7}")
+        if let lastPrintedCluster {
+            let scalars = Array(lastPrintedCluster.scalars)
+            let chunkSize = 4_096
+            for start in stride(from: 0, to: scalars.count, by: chunkSize) {
+                let end = min(start + chunkSize, scalars.count)
+                let encoded = scalars[start..<end]
+                    .map { String($0.value, radix: 16) }
+                    .joined(separator: ",")
+                writer.append(
+                    "\u{1B}]133;S;repeat-add=\(lastPrintedCluster.cellWidth):\(encoded)\u{7}"
+                )
+            }
+        }
+
+        let clusterValue: String
+        if let clusterContext {
+            clusterValue = [
+                String(clusterContext.target.row),
+                String(clusterContext.target.column),
+                String(clusterContext.previousClass.rawValue),
+                String(graphemeBreakStateCode(clusterContext.breakState)),
+            ].joined(separator: ",")
+        } else {
+            clusterValue = "none"
+        }
+        writer.append("\u{1B}]133;S;cluster=\(clusterValue)\u{7}")
+    }
+
+    private func graphemeBreakStateCode(_ state: GraphemeBreakState) -> UInt8 {
+        switch state {
+        case .initial: 0
+        case .regionalIndicator: 1
+        case .extendedPictographic: 2
+        case .indicConjunctBreakConsonant: 3
+        case .indicConjunctBreakLinker: 4
+        }
+    }
+
+    private func cursorPosition(row: Int, column: Int, originMode: Bool) -> String {
+        let reportedRow = originMode ? row - activeScrollRegion.lowerBound : row
+        return "\u{1B}[\(reportedRow + 1);\(column + 1)H"
+    }
+
+    private func cursorStyleSequence(shape: TerminalCursorShape, blinking: Bool) -> String {
+        let parameter = switch (shape, blinking) {
+        case (.block, true): 1
+        case (.block, false): 2
+        case (.underline, true): 3
+        case (.underline, false): 4
+        case (.bar, true): 5
+        case (.bar, false): 6
+        }
+        return "\u{1B}[\(parameter) q"
+    }
+
+    private func styleSequence(_ style: TerminalStyle) -> String {
+        var parameters = ["0"]
+        if style.bold { parameters.append("1") }
+        if style.dim { parameters.append("2") }
+        if style.italic { parameters.append("3") }
+        switch style.underline {
+        case .none: break
+        case .single: parameters.append("4")
+        case .double: parameters.append("4:2")
+        case .curly: parameters.append("4:3")
+        case .dotted: parameters.append("4:4")
+        case .dashed: parameters.append("4:5")
+        }
+        if style.reverse { parameters.append("7") }
+        if style.hidden { parameters.append("8") }
+        if style.strikethrough { parameters.append("9") }
+        appendColor(style.foreground, selector: 38, to: &parameters)
+        appendColor(style.background, selector: 48, to: &parameters)
+        appendColor(style.underlineColor, selector: 58, to: &parameters)
+        return "\u{1B}[\(parameters.joined(separator: ";"))m"
+    }
+
+    private func hyperlinkSequence(_ hyperlink: TerminalHyperlink?) -> String {
+        guard let hyperlink else { return "\u{1B}]8;;\u{7}" }
+        let parameter = hyperlink.explicitId.map { "id=\($0)" } ?? ""
+        return "\u{1B}]8;\(parameter);\(hyperlink.uri)\u{7}"
+    }
+
+    private func appendColor(_ color: TerminalColor, selector: Int, to parameters: inout [String]) {
+        switch color {
+        case .default:
+            if selector == 58 { parameters.append("59") }
+        case .indexed(let index):
+            parameters.append(contentsOf: [String(selector), "5", String(index)])
+        case .rgb(let red, let green, let blue):
+            parameters.append(contentsOf: [
+                String(selector), "2", String(red), String(green), String(blue),
+            ])
+        }
+    }
+
+    /// Builds one canonical byte stream while suppressing redundant style and hyperlink changes.
+    private struct StateSynchronizationWriter {
+        var bytes: [UInt8] = []
+        private var style: TerminalStyle?
+        private var hyperlink: TerminalHyperlink?
+
+        mutating func append(_ string: String) {
+            bytes.append(contentsOf: string.utf8)
+        }
+
+        mutating func append(_ appended: [UInt8]) {
+            bytes.append(contentsOf: appended)
+        }
+
+        mutating func appendRows(_ rows: [GridRow], terminal: Terminal) {
+            style = nil
+            var firstColumn = 0
+            for rowIndex in rows.indices {
+                let sourceRow = rows[rowIndex]
+                let row = sourceRow.withGatedContinuation
+                var column = firstColumn
+                firstColumn = 0
+                while column < terminal.columnCount {
+                    let cell = row.cell(at: column)
+                    switch cell.kind {
+                    case .padding:
+                        var end = column + 1
+                        while end < terminal.columnCount,
+                              row.cell(at: end).kind == .padding,
+                              row.cell(at: end).styleId == cell.styleId
+                        {
+                            end += 1
+                        }
+                        let count = end - column
+                        let cellStyle = terminal.style(for: cell.styleId)
+                        if cellStyle != TerminalStyle() {
+                            setStyle(cellStyle, terminal: terminal)
+                            append("\u{1B}[\(count)X")
+                        }
+                        if end < terminal.columnCount {
+                            append("\u{1B}[\(count)C")
+                        }
+                        column = end
+                    case .narrow, .wideHead:
+                        setStyle(terminal.style(for: cell.styleId), terminal: terminal)
+                        setHyperlink(cell.hyperlinkId.flatMap { terminal.hyperlinkTargets[$0] })
+                        append(Array(String(describing: cell.scalars).utf8))
+                        column += cell.kind == .wideHead ? 2 : 1
+                    case .wideTail:
+                        column += 1
+                    case .spacerHead:
+                        if column == terminal.columnCount - 1,
+                           rowIndex + 1 < rows.count,
+                           rows[rowIndex + 1].cell(at: 0).kind == .wideHead
+                        {
+                            let next = rows[rowIndex + 1].cell(at: 0)
+                            setStyle(terminal.style(for: next.styleId), terminal: terminal)
+                            setHyperlink(next.hyperlinkId.flatMap { terminal.hyperlinkTargets[$0] })
+                            append(Array(String(describing: next.scalars).utf8))
+                            firstColumn = 2
+                        }
+                        column += 1
+                    }
+                }
+                appendRowState(sourceRow)
+                setHyperlink(nil)
+                guard rowIndex + 1 < rows.count else { continue }
+                if row.isSoftWrapped {
+                    continue
+                } else {
+                    setStyle(TerminalStyle(), terminal: terminal)
+                    append("\r\n")
+                }
+            }
+        }
+
+        private mutating func setStyle(_ next: TerminalStyle, terminal: Terminal) {
+            guard next != style else { return }
+            append(terminal.styleSequence(next))
+            style = next
+        }
+
+        private mutating func setHyperlink(_ next: TerminalHyperlink?) {
+            guard next != hyperlink else { return }
+            if let next {
+                let parameter = next.explicitId.map { "id=\($0)" } ?? ""
+                append("\u{1B}]8;\(parameter);\(next.uri)\u{7}")
+            } else {
+                append("\u{1B}]8;;\u{7}")
+            }
+            hyperlink = next
+        }
+
+        mutating func appendRowState(_ row: GridRow) {
+            let mark = switch row.semanticPrompt {
+            case .none: "none"
+            case .prompt: "prompt"
+            case .continuation: "continuation"
+            case .output: "output"
+            case .vacated: "vacated"
+            }
+            let wrap = row.isSoftWrapped
+                ? (row.marginErased ? "stale" : "soft")
+                : "hard"
+            append("\u{1B}]133;S;mark=\(mark);wrap=\(wrap)\u{7}")
+        }
+    }
+
     /// Lets the serialized PTY owner route semantic wheel intent without a lagging snapshot.
     public var isAlternateScreenActive: Bool {
         activeScreen == .alternate
@@ -1358,7 +1769,7 @@ public struct Terminal: Equatable, Sendable {
         if action == 0x4C { // L takes no options.
             guard command.count == 1 else { return }
         } else {
-            guard [0x41, 0x42, 0x49, 0x43, 0x44, 0x4E, 0x50].contains(action),
+            guard [0x41, 0x42, 0x49, 0x43, 0x44, 0x4E, 0x50, 0x53].contains(action),
                   command.count == 1 || command[1] == 0x3B
             else { return }
         }
@@ -1396,8 +1807,127 @@ public struct Terminal: Equatable, Sendable {
             screen.semanticContentClearsAtEndOfLine = false
         case 0x4C: // L
             semanticPromptFreshLine()
+        case 0x53: // S is DanTerm's state-only synchronization form.
+            applySemanticSynchronizationState(options)
         default:
             break
+        }
+    }
+
+    private mutating func applySemanticSynchronizationState(_ options: [UInt8]) {
+        if let redraw = semanticPromptOption("redraw", in: options) {
+            switch redraw {
+            case "0": promptRedrawMode = .disabled
+            case "1": promptRedrawMode = .full
+            case "last": promptRedrawMode = .last
+            default: break
+            }
+        }
+        if let mark = semanticPromptOption("mark", in: options) {
+            screen.rows[screen.cursor.row].semanticPrompt = switch mark {
+            case "none": .none
+            case "prompt": .prompt
+            case "continuation": .continuation
+            case "output": .output
+            case "vacated": .vacated
+            default: screen.rows[screen.cursor.row].semanticPrompt
+            }
+        }
+        if let wrap = semanticPromptOption("wrap", in: options) {
+            switch wrap {
+            case "hard":
+                screen.rows[screen.cursor.row].isSoftWrapped = false
+                screen.rows[screen.cursor.row].marginErased = false
+            case "soft":
+                screen.rows[screen.cursor.row].isSoftWrapped = true
+                screen.rows[screen.cursor.row].marginErased = false
+            case "stale":
+                screen.rows[screen.cursor.row].isSoftWrapped = true
+                screen.rows[screen.cursor.row].marginErased = true
+            default:
+                break
+            }
+        }
+        if let repeatValue = semanticPromptOption("repeat", in: options) {
+            applyRepeatSynchronizationState(repeatValue)
+        }
+        if let repeatValue = semanticPromptOption("repeat-add", in: options) {
+            appendRepeatSynchronizationState(repeatValue)
+        }
+        if let clusterValue = semanticPromptOption("cluster", in: options) {
+            applyClusterSynchronizationState(clusterValue)
+        }
+    }
+
+    private mutating func applyRepeatSynchronizationState(_ value: String) {
+        guard value == "none" else { return }
+        lastPrintedCluster = nil
+    }
+
+    private mutating func appendRepeatSynchronizationState(_ value: String) {
+        let fields = value.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        guard fields.count == 2,
+              let width = Int(fields[0]),
+              width == 1 || width == 2,
+              let appended = synchronizationScalars(fields[1])
+        else { return }
+        if var cluster = lastPrintedCluster {
+            guard cluster.cellWidth == width else { return }
+            for scalar in appended { cluster.scalars.append(scalar) }
+            lastPrintedCluster = cluster
+        } else {
+            lastPrintedCluster = LastPrintedCluster(
+                scalars: TerminalScalars(appended),
+                cellWidth: width
+            )
+        }
+    }
+
+    private func synchronizationScalars(_ value: Substring) -> [Unicode.Scalar]? {
+        let scalarValues = value.split(separator: ",", omittingEmptySubsequences: false)
+        guard scalarValues.isEmpty == false else { return nil }
+        var scalars: [Unicode.Scalar] = []
+        scalars.reserveCapacity(scalarValues.count)
+        for value in scalarValues {
+            guard let codePoint = UInt32(value, radix: 16),
+                  let scalar = Unicode.Scalar(codePoint)
+            else { return nil }
+            scalars.append(scalar)
+        }
+        return scalars
+    }
+
+    private mutating func applyClusterSynchronizationState(_ value: String) {
+        if value == "none" {
+            clusterContext = nil
+            return
+        }
+        let fields = value.split(separator: ",", omittingEmptySubsequences: false)
+        guard fields.count == 4,
+              let row = Int(fields[0]),
+              let column = Int(fields[1]),
+              screen.rows.indices.contains(row),
+              screen.rows[row].cells.indices.contains(column),
+              let previousRaw = UInt8(fields[2]),
+              let previousClass = GraphemeBreakClass(rawValue: previousRaw),
+              let stateRaw = UInt8(fields[3]),
+              let breakState = graphemeBreakState(code: stateRaw)
+        else { return }
+        clusterContext = ClusterContext(
+            target: CellPosition(row: row, column: column),
+            previousClass: previousClass,
+            breakState: breakState
+        )
+    }
+
+    private func graphemeBreakState(code: UInt8) -> GraphemeBreakState? {
+        switch code {
+        case 0: .initial
+        case 1: .regionalIndicator
+        case 2: .extendedPictographic
+        case 3: .indicConjunctBreakConsonant
+        case 4: .indicConjunctBreakLinker
+        default: nil
         }
     }
 
@@ -2329,6 +2859,11 @@ public struct Terminal: Equatable, Sendable {
         for id in 0..<HyperlinkId.max {
             hyperlinkTargets[id] = TerminalHyperlink(uri: "x")
         }
+    }
+
+    mutating func primeLastPrintedClusterForTesting(_ scalars: TerminalScalars, cellWidth: Int) {
+        lastPrintedCluster = LastPrintedCluster(scalars: scalars, cellWidth: cellWidth)
+        clusterContext = nil
     }
 
     /// Creates the one-operation no-eviction oracle used to isolate eviction side effects.

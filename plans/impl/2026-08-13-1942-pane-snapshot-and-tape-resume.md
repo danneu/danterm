@@ -352,6 +352,6 @@ geometry negotiation (`research/35/T10` owns it), and the bridge.
 ## Commit progress
 
 - [x] 1. Bind resume cursors to recorder lifetimes and validate supplied positions
-- [ ] 2. Serialize exact terminal state and fence it with the recorder cursor
+- [x] 2. Serialize exact terminal state and fence it with the recorder cursor
 - [ ] 3. Add reconstructible and raw tape stream state machines
 - [ ] 4. Expose pane state and cursor resume through IPC, CLI, client, and docs

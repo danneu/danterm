@@ -956,6 +956,20 @@ public final class TerminalPaneSessionController {
         host.fencedFlightRecordingCapture()
     }
 
+    /// Fences exact pane state with the recorder position that continues after it.
+    public func flightRecordingStateSynchronization()
+        -> TerminalFlightRecordingStateSynchronization
+    {
+        let fence = performAccountedFence(kind: .checkpoint, operation: .stateSynchronization)
+        guard case .stateSynchronization(let terminal, let cursor) = fence else {
+            preconditionFailure("state synchronization fence returned the wrong payload")
+        }
+        return TerminalFlightRecordingStateSynchronization(
+            state: terminal.stateSynchronization,
+            cursor: cursor
+        )
+    }
+
     /// Arms one append edge without carrying recorder events across the owner boundary.
     public func addFlightRecordingFollowNotice(
         id: UUID,

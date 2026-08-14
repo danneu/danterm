@@ -845,6 +845,42 @@ struct TerminalPTYHostTests {
         #expect(liveSuffix.events.isEmpty)
     }
 
+    @Test("terminal synchronization and recorder cursor share one owner fence", .timeLimit(.minutes(1)))
+    func stateSynchronizationSharesRecorderFence() async throws {
+        // Intent: pair serialized terminal state with the first event not reflected in that state.
+        // Why it exists: separate terminal and recorder reads can drop or double-apply output between them.
+        // Scenario: a live child prints history, the host fences a sync, and later output resumes at its cursor.
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(command: "printf 'one\\n'; read ignored; printf 'two\\n'; sleep 30"))
+        #expect(await host.waitForOutput(containing: Array("one".utf8)))
+
+        let fenced = host.fencedStateSynchronization()
+        var resumed = try #require(Terminal(
+            columns: fenced.state.columns,
+            rows: fenced.state.rows
+        ))
+        resumed.feed(fenced.state.bytes)
+        host.send(Array("\n".utf8))
+        #expect(await host.waitForOutput(containing: Array("two".utf8)))
+        let suffix = host.fencedFlightRecording(from: fenced.cursor)
+        for recorded in suffix.events {
+            switch recorded.event {
+            case .feed(let bytes):
+                resumed.feed(bytes)
+            case .resize(let columns, let rows):
+                resumed.resize(columns: columns, rows: rows)
+            default:
+                break
+            }
+        }
+        let source = host.fencedSnapshot()
+
+        #expect(resumed.screenText == source.screenText)
+        #expect(resumed.scrollbackRowCount == source.scrollbackRowCount)
+        #expect(suffix.events.contains { if case .feed = $0.event { true } else { false } })
+        await host.close()
+    }
+
     @Test("input the child has not accepted stays out of the tape", .timeLimit(.minutes(1)))
     func backpressuredInputIsRecordedOnlyOnceItCrosses() async throws {
         // Intent: the tape holds the bytes the PTY accepted and no others, so input still
