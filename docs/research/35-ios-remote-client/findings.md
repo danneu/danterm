@@ -805,3 +805,150 @@ Console transcript:
   network key turned out not to bite over the tailnet -- a 100.x address is not
   a local network address, so iOS did not gate it -- but the correlate-by-id
   rule did carry, and the T5 probe was written against it from the start.
+
+### F8 -- the surface is remote code execution, and its only bound is a thread pool
+
+Discharges T7 and feeds D4. Reproduction for the connection result:
+[t7-connection-probe.py](t7-connection-probe.py). Every other result here is one
+`just launch-slot` instance and the `danterm` CLI, and each is quoted with the
+command that produced it.
+
+- Status: settled as a review of the surface as it stands. It changes nothing.
+  Every repair it names is listed with an owner at the end, because this doc's
+  scope rule says a review that finds work hands that work to a task rather than
+  doing it.
+- Date and investigator: 2026-08-13, agent (T7).
+- Commit and worktree state: `4621e55e`, with no source change in the tree for
+  any file this finding reads.
+- Environment: macOS 26.5.2, Swift 6.3.3. One dev slot from `just launch-slot`,
+  released afterwards. No listener was opened by this task, so the doc's
+  listener rule does not apply to it.
+- Result: **the control surface is remote code execution, and `pane.input` is
+  not the sharpest edge.** `tab.new` carries a `LaunchSpec` whose `cmd` field the
+  app runs, so one request executes an arbitrary command with no pane, no
+  keystrokes, and no user present. Verified against a slot: `danterm tab new
+  --group <id> --cmd 'id > /tmp/danterm-t7-probe.txt; echo probe-ran'` wrote
+  `uid=503(dan) gid=20(staff) groups=...,80(admin),...`. The reply is the
+  ordinary tab document; nothing marks the request as privileged. `pane.split`
+  takes the same spec.
+- Result: **there is no least-privilege subset of this surface, so an allowlist
+  is not a containment mechanism.** Removing `cmd` from the remote catalog would
+  change nothing, because `pane.input` writes bytes into a live shell and a shell
+  runs what it is given. Any catalog that lets the phone type into a pane -- which
+  is D1's whole milestone -- is equivalent in authority to a shell. This is the
+  fact every authentication argument has to be priced against: the question is
+  never "how much can a remote caller do", it is only "who is admitted, and what
+  is written down about it".
+- Result: **today's authenticator is the filesystem, and it is exactly what
+  crossing machines loses.** `ControlSocketListener.open` chmods the containing
+  directory to 0700 and the bound socket to 0600, so reaching the socket proves
+  the caller runs as this uid on this machine. There is no handshake credential,
+  no peer-credential check, and no per-connection identity: `IpcServer.accept`
+  writes hello and starts dispatching. The security model is not weak, it is
+  *implicit*, and a network transport removes the thing it rests on rather than
+  weakening it. That is the gap D4 has to fill, and it is the reason the doc's
+  unauthenticated escape hatch is written in terms of an interface rather than a
+  posture.
+- Result: **idle connections deny service, and 64 of them are enough.** Every
+  accepted connection parks one libdispatch worker inside a blocking `read` for
+  its whole life (`IpcConnection.startReading` dispatches to the global utility
+  queue and loops on `Darwin.read`). A peer that connects and sends nothing
+  therefore consumes a thread per connection. Measured against a slot: with 63
+  idle connections held, a fresh caller's `ls` answered in 6.9ms; with 64 held,
+  the fresh caller waited 20s and gave up. The step is exactly where a 64-thread
+  libdispatch pool for that QoS would put it, which is the mechanism this result
+  suggests, though nothing here measured the pool itself.
+- Result: **the flood attacks reconnect, not the live session, which is the worst
+  shape it could have for this product.** With 100 idle connections held, an
+  already-established conversation still answered `ls` in 1.9ms while a new
+  connection failed, and new connections recovered as soon as the idle ones
+  closed. So a flood does not interrupt a phone that is already attached -- it
+  denies the phone the ability to come back, which is the operation a mobile
+  client performs constantly and the one T9 owns. It costs the attacker no valid
+  request, no credential, and no bytes after the handshake, and the app writes no
+  record of it. Under the T5 bridge this crosses unchanged, because the bridge
+  opens one Unix connection per accepted TCP connection and bounds neither.
+- Result: **the `NSHomeDirectory` taint is real, and briefing.md sec. 7 frames it
+  in a way that would produce the wrong repair.** `IpcEntityEncoder` abbreviates
+  cwd for `ls` and does not for `pane.info`, which is a plain inconsistency:
+  `ls` answered `"cwd":"~"` and `pane info` answered `"cwd":"/Users/dan"` for the
+  same pane in the same session. But the abbreviation is defeated inside its own
+  reply -- that same `ls` object carries `"title":"/Users/dan"`, because the
+  shell sets the title and DanTerm passes it through. Chasing `~` substitution
+  therefore protects nothing: the title carries the path, `pane.read` carries the
+  screen, and the tape carries every byte the pane has emitted. The correct
+  posture is that every reply on this surface is host-identifying and often
+  secret-bearing, and that the protection is the confidentiality of the channel
+  and the list of who may open it, not scrubbing fields. The `pane.info`
+  inconsistency is worth fixing for tidiness and is not a security control.
+- Result: **nothing is recorded.** A grep over `app/` and `lib/` for audit,
+  rate-limit, or request logging finds no hit outside unrelated prose. No request
+  is logged, no connection is logged, no failed decode is logged, and no counter
+  exists. So today there is no way to answer "what did that device do", which is
+  the only question that matters after a surface with this authority is exposed.
+- Result: **`quit` is an availability asymmetry, not just an authority one.** It
+  is already allowlisted -- `IpcDispatch` refuses it unless
+  `env.instanceIdentity().isLauncherPoolSlot` -- and that guard exists for a
+  different reason. The remote case adds one the guard does not cover: a phone
+  that ends the Mac app cannot start it again, so a single request destroys the
+  client's own access until the user walks back to the Mac. Every other method is
+  recoverable from the phone; this one is not.
+- What an audit log must capture, which T7 owes D4:
+  1. **Connection lifetime with a resolved identity**: open and close, the peer
+     address, and the tailnet identity it resolves to (see the next result), not
+     just the address. An address without the resolution is a number nobody can
+     act on a week later.
+  2. **Every request, with caller, method, target id, and outcome** -- including
+     local ones. A log that records only remote callers misreports history the
+     moment the CLI and the phone both drive the same pane, which is the normal
+     case here and is already this doc's open multi-client question.
+  3. **The full `cmd` and `cwd` of `tab.new` and `pane.split`**, because that
+     text *is* the authority exercised, and it is already visible in the pane
+     title to anyone who could read the log.
+  4. **`pane.input` as method, pane, and byte count -- never content.** This is
+     the one deliberate blind spot. The user types passwords into panes from the
+     phone, so a log that captured input content would be a keylogger stored at
+     rest, and it would be a worse breach than the one it documents. The byte
+     count is enough to reconstruct that input happened and how much.
+  5. **Never the content of `pane.read`, `pane.rows`, `pane.tape`, or
+     `pane.snapshot`** -- the fact and the pane only, for the same reason at
+     larger scale.
+  The log belongs to the app, not to a proxy: it needs the model to name a pane
+  and needs dispatch to know an outcome, and a byte proxy has neither. It is
+  written under the instance's own directory at 0600 with a bounded size, beside
+  the recovery store.
+- Result, found while reviewing T6's arms and recorded here because it is
+  evidence rather than a decision: **a tailnet peer address resolves to a named
+  identity locally, without root.** `tailscale whois 100.98.63.67` returns the
+  machine name `iphone-13-mini.tail11347d.ts.net`, the stable node id
+  `nYLVaWdKL811CNTRL`, the node key, and the owning user
+  (`cgv4zsvr89@privaterelay.appleid.com`); `--json` returns the same
+  structurally. This is what makes "the tailnet is the authenticator" a real
+  identity claim rather than a statement that the network is trusted: the source
+  address on the tailnet interface is bound to a WireGuard peer key, and the
+  address can be turned back into a device and a person at accept time. D4 rests
+  on it.
+- Uncertainty: **the flood's effect on the GUI was not observed, only reasoned
+  about.** The reader loops run on a global utility queue and the main actor is
+  not in the path, so the terminal itself should keep running while IPC is deaf --
+  but the instrument for checking is IPC, which is the thing that is down. A run
+  that watched the window directly would settle it.
+- Uncertainty: the connection bound was measured against a Unix socket on one
+  machine. The same code path serves a bridged TCP connection, so the bound
+  should carry, but no run has produced it from the network side.
+- Uncertainty: nothing here reviewed the recovery store, the config file, or the
+  checkpoint on disk, which is where the same session state lands at rest. The
+  review was scoped to what crosses the wire.
+- Uncertainty: this is one reviewer reading one surface. It is not a substitute
+  for an adversarial review of the wire format itself, which nobody has done and
+  no task currently owns.
+- Inference: the three repairs this finding implies are not T7's to make, and
+  each has an owner. The connection bound and the audit log are D4's, because
+  both are properties of admitting a remote caller at all. The `pane.info` cwd
+  inconsistency is a tidy-up that belongs with whoever next touches
+  `IpcEntityEncoder` and is recorded here so it is not lost. The GUI-liveness
+  uncertainty joins T9, which already has to distinguish a dead app from a slow
+  one.
+- Next action: D4 takes the identity model, the connection bound, and the audit
+  log. T9 takes the reconnect consequence of the flood, and should assume a
+  reconnect can be denied by something other than the network.

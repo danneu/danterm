@@ -1,7 +1,7 @@
 # Decisions -- iOS remote client
 
-Auditable decision log for doc 35. D4, D6, and D7 are reserved as gates by the
-task ledger in [README.md](README.md) and remain open.
+Auditable decision log for doc 35. D6 and D7 are reserved as gates by the task
+ledger in [README.md](README.md) and remain open.
 
 ### D1 -- scope and first milestone
 
@@ -240,6 +240,210 @@ task ledger in [README.md](README.md) and remain open.
   which stays rejected on fidelity under D1 regardless -- they would reopen the
   *placement*, toward (3) or a hybrid, and would do it against this invariant
   rather than item by item.
+
+### D4 -- the tailnet is the credential, and the app owns the listener
+
+- Status: decided 2026-08-13, from F5 and F8. This is the gate on the Direction
+  section's server leg, and it **overturns** that leg: the leg said a separate
+  bridge process owns network listening, authentication, and the APNs sender,
+  and this decision says the app listens and there is no bridge. The leg was
+  written as a proposal with this task as its gate, so overturning it is what
+  deciding it means, but the reversal is called out here because it changes a
+  statement the doc has carried since briefing.md.
+- Evidence used:
+  - F5 in full: the tailnet-identity-only arm ran end to end, a phone drove a
+    real pane for 215 seconds, and the connection survived a wifi-to-cell-to-wifi
+    switch without reconnecting. Also its two absences -- no auth surface, no TLS
+    -- both deliberate, so nothing here is inherited.
+  - F8 in full: the surface is remote code execution, there is no least-privilege
+    subset of it, today's authenticator is filesystem permissions, 64 idle
+    connections deny service to new callers while leaving established ones alone,
+    nothing is logged, and a tailnet peer address resolves locally to a stable
+    node id and a user.
+  - Read directly: `ControlSocketListener.open` (the 0700 directory and 0600
+    socket), `IpcServer.accept` (hello then dispatch, no credential),
+    `IpcDispatch`'s `quit` case (an authorization check that already lives in the
+    pure core and reads its input from `CoreEnv`), `IpcRequestMethod`'s
+    `terminatesInstance` and `isTargeting` (two exhaustive switches that already
+    force every new method to classify itself), and `t5-bridge/`'s
+    `TailnetBindAddress`.
+  - [briefing.md](briefing.md) sec. 8.2, which proposed the bridge and named it
+    "a natural home for rate limits, method allowlists, and an audit log". That
+    sentence is the specific claim this decision rejects.
+- Candidate solutions, on two axes that the task ledger names together and that
+  turn out to interact:
+  - Identity: (a) tailnet identity only; (b) pinned client certificates over
+    TLS; (c) a pairing token.
+  - Placement: (1) a separate bridge process that proxies into the Unix socket;
+    (2) the app opens the network listener itself.
+- Selected direction: **(a) with (2)** -- the app binds a tailnet listener, the
+  peer's tailnet identity is the credential, and that identity must appear on an
+  explicit admitted-node list. No TLS, no pairing token, no bridge process. Three
+  things travel with it: an exhaustive remote-method classification in the pure
+  core, an app-side audit log, and a cap on concurrent connections. The listener
+  is per instance and closed by default, so an ordinary launch opens no port.
+- Decision and rationale:
+  - **The tailnet is a real credential, not a trusted-network assumption.** The
+    source address of a packet on the tailnet interface is bound to a WireGuard
+    peer key, and F8 verified that the address turns back into a stable node id,
+    a machine name, and an owning user with a local `tailscale whois` that needs
+    no root. So the listener learns *which device and whose account* is calling
+    before it reads a byte, gets encryption and key rotation it does not
+    implement, and gets revocation through an admin console the user already has.
+    That is more identity than an application-layer credential would give, and it
+    is the only one of the three arms whose revocation story does not require the
+    user to be at the Mac.
+  - **TLS is declined, and this closes the untested half of H4 rather than
+    leaving it open.** Over WireGuard it re-encrypts an already encrypted
+    transport. Unpinned it adds no identity. Pinned it adds a second credential
+    system with its own provisioning, expiry, and revocation, all manual, to sit
+    behind an identity that is already stronger -- and a second system whose
+    revocation is worse than the first's is a security cost, not a defense in
+    depth. The one threat it would genuinely address is a Tailscale coordination
+    server that inserts a node into this tailnet; against that, node-key pinning
+    at the *Tailscale* layer (tailnet lock) is the instrument, and it is the
+    user's to turn on, not this listener's to reimplement. F5's mobility result
+    also removes the argument that a handshake is too expensive for a phone --
+    connections here are long-lived -- so TLS is declined on what it adds, not on
+    what it costs.
+  - **A pairing token is declined, and it stays declined.** It is a replayable
+    bearer secret that has to be stored on both ends, rotated by hand, and kept
+    out of logs and command lines, and it authenticates a secret rather than a
+    device. F5 already retired the T23 token once. Nothing in this review found a
+    case it covers that the tailnet identity does not.
+  - **"Any tailnet peer" is too coarse, and this is where F5's arm needs
+    narrowing.** F5 proved the listener can only exist on the tailnet; it says
+    nothing about which peers may talk to it. Given F8 -- one request runs a
+    command as the user, and no subset of the surface is safer -- "every device
+    on my tailnet, forever, including ones added later" is the wrong grant. The
+    listener therefore checks the resolved stable node id against an explicit
+    admitted list, so admitting a work laptop to the tailnet does not silently
+    hand it a shell on the MacBook. Stable node id, not address: addresses are
+    reassignable and a name is a label, while the stable id is what the admin
+    console revokes.
+  - **The app listens; the bridge is rejected, and the reason is structural
+    rather than economic.** This is the ideal the task was required to weigh, and
+    it wins on three counts.
+    1. *The allowlist drifts in a bridge and cannot drift in the app.* The app
+       already decides authorization in pure code -- `quit` is refused in
+       `IpcDispatch` unless the instance identity says the launcher pool minted
+       it -- and `IpcRequestMethod` already carries two exhaustive switches whose
+       whole purpose is that a new method must classify itself or fail to
+       compile. A remote-caller classification is that same shape and gets that
+       same guarantee. A bridge classifies JSON-RPC method *strings* it does not
+       own, so adding a method to the enum forces no decision there and the
+       method's remote status silently defaults to whatever the bridge does with
+       names it has never seen.
+    2. *A bridge that enforces anything stops being a proxy.* F5's bridge is a
+       byte splice on purpose, and F5 recorded the price of making it act per
+       record: a record can reach the 16 MiB IPC line bound, so a bridge that
+       parses to allowlist must buffer whole records, and it grows a second copy
+       of the framing, the method catalog, and the version skew T24 owns.
+    3. *The audit log needs facts a proxy does not have.* F8's requirements are
+       method, pane, outcome, and caller. A byte proxy sees a frame length. The
+       app sees the request, the model, and the reply.
+  - **What the bridge is genuinely better at, stated so the trade is visible.**
+    It has an independent lifecycle: it can be restarted or killed without
+    touching the GUI app, it runs under launchd, and a crash in network handling
+    does not take the user's terminal down. That is real and this decision gives
+    it up. It loses anyway, because the crash-isolation benefit is small next to
+    the drift defect above, and because the *security* argument for it is empty:
+    the bridge holds full authority over the app by construction, so anything
+    that compromises the bridge has already won. It is a hop, not a boundary.
+    "The app's Unix-socket security model stays untouched" is a slogan of the
+    same kind -- F8 established that the model is "whoever opens the socket may
+    run commands as the user", and a bridge hands exactly that to the network
+    from a different pid.
+  - **Where the pieces live.** The listener is a sibling of
+    `ControlSocketListener` in `DanTermSupport`, which is the Mac host's
+    side-effect layer and already owns socket lifetime. `TailnetBindAddress` is
+    adopted as-is, because it is the precondition of the whole identity argument
+    rather than a prototype artifact: peer addresses are only WireGuard-authentic
+    on the tailnet interface, so a listener that could also accept a LAN
+    connection would silently downgrade an identity check into trusting a source
+    IP. Keeping the type's shape -- no public initializer, so holding the value
+    is the proof the check ran -- is the point of adopting it. Caller identity
+    then travels *with the request* into the pure core, not through `CoreEnv`:
+    it is per-request rather than ambient, so the message carries it and
+    `IpcDispatch` decides on it, which keeps the whole authorization rule unit
+    testable with no socket.
+  - **The remote-method classification is for attribution and availability, and
+    it is not containment.** F8 is explicit that a surface including `pane.input`
+    is equivalent to a shell, so refusing `tab.new --cmd` remotely would be
+    theater. What the classification actually buys is that a new method must
+    decide, and that `quit` is refused for remote callers: a phone that ends the
+    app cannot start it again, so that one request destroys the client's own
+    access until the user is back at the Mac. Every other method is recoverable
+    from the phone. The classification axis is authority, not product scope --
+    which resolves the tension the ledger records: D1's "the client never calls
+    todo methods" stays a client-side convention and is *not* promoted to an
+    enforced rule, because a todo method is not dangerous and an allowlist keyed
+    on what the phone happens to use would need editing every time the client
+    grows a feature.
+  - **A request-rate limit is declined; a concurrent-connection cap is
+    required.** With an explicit admitted-node list there is no anonymous caller
+    to throttle, and F5 recorded that latency is the phone's dominant variable,
+    so an unmeasured limiter on the interactive path is a cost with no matching
+    threat. The bound that does exist is not about request rate at all: F8
+    measured that 64 idle connections make the app deaf to new ones while
+    established conversations keep answering, because each connection parks a
+    worker in a blocking read. That is a real denial of service, it needs no
+    valid request, and its shape is the worst one for this product -- it denies
+    reconnect, which is what a phone does constantly. So the listener caps
+    concurrent connections well below the pool, refuses past the cap with a
+    stated error instead of accepting and never reading, and the refusal is
+    audited. Fixing the thread-per-connection reader itself is the ideal and is
+    the better repair; it is not this decision's to make, and the cap is stated
+    as a bound that must hold however the reader is implemented.
+- What this declines, knowingly:
+  - **Reachability without Tailscale.** The client cannot be used from a network
+    the phone has not joined to the tailnet, and Tailscale becomes a hard
+    dependency of the product rather than a convenient default. This is the real
+    cost of letting the transport carry the identity: there is no fallback
+    credential, so an outage of the coordination server is an outage of the
+    feature. Accepted because the alternative is maintaining a second credential
+    system full time to cover a case the user does not have.
+  - **Crash isolation of network handling**, given up with the bridge, as above.
+  - **Defense against a compromised admitted device.** A phone that is unlocked
+    by someone else has a shell on the Mac. Nothing in this decision changes
+    that, and no application-layer credential would have; the mitigations are
+    the phone's own lock and the ability to revoke a node.
+  - **Any claim that the audit log prevents something.** It is for
+    reconstruction after the fact, and F8's deliberate blind spot on
+    `pane.input` content means it will never show what was typed.
+- What would reopen it:
+  - **Any listener that binds something other than a tailnet address** -- a LAN
+    address, a public address, or a relay in the middle. Then nothing
+    authenticates the peer, `TailnetBindAddress` cannot be constructed, and TLS
+    with pinning becomes mandatory rather than declined. This is the single
+    condition that flips the TLS answer.
+  - **A second human on the tailnet**, or a shared node from another tailnet.
+    The admitted-node list already narrows this, but an identity model that
+    assumes one owner would need re-examining rather than re-tuning.
+  - **A remote consumer that must run while the app does not.** The bridge is
+    not that -- it proxies into the app and is useless without it -- but a
+    genuine headless component would reopen placement.
+- Consequences for other tasks, recorded here because this decision moves them:
+  - **T15's APNs sender moves into the app.** The ledger specifies it in the
+    bridge; there is no bridge. This is the easier home anyway, because the
+    34/D2 activity transitions the sender consumes are app-side model events that
+    a separate process would have to subscribe to over IPC to relay.
+  - **`t5-bridge/` is throwaway evidence and stays that way.** Under this doc's
+    rules a spike is deleted once the gate it feeds has chosen, and this gate has
+    chosen against the shape the spike prototyped. `TailnetBindAddress` is the
+    one part adopted, by re-implementation in `DanTermSupport` rather than by
+    moving the file, and F5's measurements stand on their own. Deleting the
+    directory belongs with whoever implements the listener, so the evidence
+    survives until it is replaced.
+  - **H4 is settled and narrowed.** Its "TCP+TLS listener" wording is overruled
+    on TLS, and its "bridge process" wording is overruled on placement. What
+    survives, confirmed by F5, is the part that mattered: a TCP listener reached
+    over Tailscale yields a session that survives real phone mobility.
+  - **T24's handshake gains a second job.** The hello handshake is where a
+    version field lands, and it is also the first place a rejected node learns it
+    was rejected. T24 should decide the refusal shape at the same time, so a
+    client can tell "you are not admitted" from "your version is wrong" from
+    "the Mac is asleep".
 
 ### D5 -- durable subscriptions: state sync as tape bytes, and cursor resume
 

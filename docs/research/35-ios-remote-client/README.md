@@ -21,6 +21,9 @@ Research started: 2026-08-12.
   is the `client` mode of [ios-render-spike.sh](ios-render-spike.sh); its
   console transcript is under `t23-artifacts/`. It originally drove a throwaway
   authenticated relay, which F5 deleted.
+- [t7-connection-probe.py](t7-connection-probe.py) -- F8's reproduction: holds
+  idle connections against a dev slot and shows that past the reader-thread bound
+  the app stops answering new callers while established ones keep working.
 - [briefing.md](briefing.md) -- the initiating brainstorm dump: repo census, IPC
   surface, portability inference, candidate directions. Census-grade evidence;
   every claim that carries weight is re-verified by a Phase 1 task before a
@@ -213,9 +216,13 @@ UI question nobody owns yet -- the client is unresponsive for several seconds
 with nothing to show, and no protocol signal distinguishes a slow network from a
 dead one.
 
-F5 tested no TLS, so the encrypted-listener half of the original hypothesis is
-untested rather than disproved; T6 decides whether it is wanted over a transport
-that already encrypts.
+F5 tested no TLS, so the encrypted-listener half of the original hypothesis was
+untested rather than disproved. D4 has since decided it: TLS is declined over a
+transport that already encrypts and authenticates, and the bridge is declined
+with it, so this hypothesis's "TCP+TLS" and "bridge process" wordings are both
+overruled. What survives is the part F5 confirmed -- a TCP listener reached over
+Tailscale yields a session that survives real phone mobility -- and it now
+describes a listener the app owns.
 
 ### H5 -- the split is decided by derivability, not by a smart/dumb dial
 
@@ -288,9 +295,13 @@ in the ledger.
   is a protocol peer of the CLI: `ls`, `pane.input`, `pane.tape` events, plus
   new `pane.snapshot` and sequence-numbered resume. Todo methods are simply
   never called.
-- **Server: a separate bridge process** (`danterm serve` or `danterm-bridge`)
-  owns network listening, authentication, and later the APNs sender; the app's
-  Unix-socket security model stays untouched.
+- **Server: the app listens.** Settled by D4, which overturned the separate
+  bridge process this section used to name. A tailnet listener lives beside the
+  control socket in the host layer, the peer's tailnet identity is the
+  credential and must be on an explicit admitted-node list, authorization is
+  decided in the pure core beside the existing `quit` rule, and the audit log
+  and the APNs sender live in the app because both need facts a byte proxy does
+  not have. No TLS, no pairing token, and the listener is closed by default.
 - **Reachability: Tailscale**, deployed on both ends and confirmed by F5. It
   supplies three things at once: the reachability, the stable address that makes
   a network switch survivable without reconnecting, and the peer identity that
@@ -426,21 +437,45 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   version field in the hello handshake and no mismatch detection. Decide what
   the handshake carries and what a mismatched client does: refuse, degrade, or
   warn. Wanted before the client ships, not before the smoke.
-- **T6 VETTING** -- Pairing and auth model: compare tailnet-identity-only,
-  pinned client certificates, and a pairing token; decide where the method
-  allowlist, rate limits, and audit log live. Also weigh the ideal alternative
-  to a bridge (the app listening on the network itself) rather than assuming
-  the bridge. Records D4. F5 demonstrated the tailnet-identity-only arm end to
-  end and deliberately decided nothing else, so this task inherits a working
-  example rather than a commitment. Two things it should settle explicitly:
-  whether TLS is wanted at all over a transport that already encrypts and
-  authenticates, and whether the structural bind guard F5 built -- a listen
-  address that cannot be constructed off the tailnet -- is the right shape for
-  the shipped surface or an artifact of a prototype with no auth.
-- **T7 TODO** -- Security review of the exposed surface: what
-  internet-reachable `pane.input` implies, the `NSHomeDirectory` taint in `ls`
-  and snapshot payloads (briefing.md sec. 7) now that replies cross machines,
-  and what an audit log must capture. Feeds D4.
+- **T6 DECIDED as D4** ([decisions.md](decisions.md)) -- the tailnet identity is
+  the credential and **the app owns the listener**. The ideal the task was
+  required to weigh wins: there is no bridge process. A bridge cannot hold the
+  method classification without drifting from the enum that defines it, cannot
+  enforce anything without parsing records up to the 16 MiB line bound and
+  growing a second copy of the protocol, and cannot audit what it cannot name --
+  and it is a hop rather than a security boundary, since it holds full authority
+  over the app by construction. Its one real advantage, an independent lifecycle,
+  is given up knowingly. TLS is declined rather than left untested: over
+  WireGuard it re-encrypts, unpinned it adds no identity, and pinned it is a
+  second credential system with a worse revocation story than the one it sits
+  behind. A pairing token stays retired. F5's bind guard is adopted as the
+  shipped shape, because peer addresses are only WireGuard-authentic on the
+  tailnet interface, so it is the precondition of the identity argument rather
+  than a prototype artifact -- but F5's arm is narrowed: an admitted-node list of
+  stable node ids, not "any tailnet peer", since adding a device to the tailnet
+  must not silently grant it a shell. A request-rate limit is declined and a
+  concurrent-connection cap is required instead, on F8's evidence. D4 also moves
+  T15's APNs sender into the app and settles H4.
+- **T7 DONE** (F8) -- Security review of the exposed surface. The surface is
+  remote code execution and `pane.input` is not the sharpest edge: `tab.new`
+  carries a `cmd` the app runs, verified running `id` as the user with no pane
+  and no confirmation. There is therefore no least-privilege subset, which is why
+  D4 treats a method allowlist as attribution and availability rather than
+  containment. Today's authenticator is filesystem permissions on the socket,
+  which is precisely what crossing machines removes. Three results were
+  unplanned. **64 idle connections deny service**: every connection parks a
+  worker in a blocking read, and past the bound the app accepts and never reads,
+  so a new caller waits forever while established conversations still answer in
+  milliseconds -- a denial of *reconnect*, which is the phone's most common
+  operation and T9's subject. The `NSHomeDirectory` taint is real but
+  briefing.md sec. 7 frames it in a way that produces the wrong repair: `ls`
+  abbreviates cwd and `pane.info` does not, yet the same `ls` reply carries
+  `"title":"/Users/dan"` from the shell, so scrubbing `~` protects nothing next
+  to `pane.read` and the tape. And a tailnet peer address resolves locally to a
+  stable node id and an owning user, which is the evidence D4's identity model
+  rests on. F8 states what an audit log must capture, including the deliberate
+  blind spot: `pane.input` is logged as a byte count and never as content,
+  because the alternative is a keylogger at rest.
 - **T19 TODO** -- Measure what the tape stream actually costs on the wire, since
   H5 asserts an ordering and no magnitude. Capture a follow stream's bytes over a
   real interactive session against a live slot, raw and deflated, and separate
@@ -526,7 +561,10 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   process genuinely loses its socket. Take the instrument trap with it --
   `devicectl process launch --console` streams over the wifi these tests
   interrupt, and devicectl SIGTERMs the app when that drops, so a detached launch
-  plus a phone-side transcript is the only shape that works.
+  plus a phone-side transcript is the only shape that works. F8 adds a second
+  case to distinguish: a reconnect can be refused by the Mac rather than by the
+  network, because idle connections make the app deaf to new ones while
+  established conversations keep answering.
 
 ### Phase 4 -- geometry and input semantics
 
@@ -607,9 +645,12 @@ isolation, and F7 then ran the composition on a phone against a live pane.
 
 ### Phase 6 -- push notifications and quick replies (after milestone 1)
 
-- **T15 TODO** -- APNs sender in the bridge keyed off the 34/D2 activity
+- **T15 TODO** -- APNs sender **in the app** keyed off the 34/D2 activity
   transitions; notification tap opens the pane, quick reply sends `pane.input`.
-  Paid developer account is confirmed, so no blocker beyond the bridge itself.
+  D4 moved it there: there is no bridge, and the transitions the sender consumes
+  are app-side model events a separate process would have to subscribe to over
+  IPC just to relay. Paid developer account is confirmed, so nothing blocks it
+  but the listener.
 
 ## Rejected
 
