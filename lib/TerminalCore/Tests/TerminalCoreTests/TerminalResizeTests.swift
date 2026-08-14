@@ -468,9 +468,9 @@ struct TerminalResizeTests {
         //   hide it, and a later widen fills exactly those lost rows from retained history.
         // Why it exists: structural blank preservation has one deliberate lossy edge. Without
         //   this boundary test, the cursor clamp could discard content or preserve hidden blanks.
-        // Scenario: two live full rows and two trailing blanks sit below retained short lines;
+        // Scenario: two live full rows and three trailing blanks sit below retained short lines;
         //   the cursor returns to the first row before a 6 -> 3 -> 6 width round trip.
-        var terminal = try #require(Terminal(columns: 6, rows: 4))
+        var terminal = try #require(Terminal(columns: 6, rows: 5))
         terminal.feed(Array("h0\r\nh1\r\nh2\r\nh3\r\nh4\r\nh5\r\n".utf8))
         terminal.feed(Array("\u{001B}[2J".utf8))
         terminal.moveCursor(row: 0, column: 0)
@@ -481,20 +481,18 @@ struct TerminalResizeTests {
         let historyRows = terminal.scrollbackRowCount
         let fullHistory = terminal.fullHistoryText
 
-        terminal.resize(columns: 3, rows: 4)
+        terminal.resize(columns: 3, rows: 5)
 
         #expect(terminal.scrollbackRowCount == historyRows)
-        #expect(terminal.screenText == "abc\ndef\nghi\njkl")
+        #expect(terminal.screenText == "abc\ndef\nghi\njkl\n   ")
         #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
 
-        terminal.resize(columns: 6, rows: 4)
+        terminal.resize(columns: 6, rows: 5)
 
         #expect(terminal.scrollbackRowCount == historyRows - 2)
-        #expect(terminal.screenText.hasSuffix("abcdef\nghijkl"))
+        #expect(terminal.screenText == "h0    \nh1    \nabcdef\nghijkl\n      ")
         #expect(terminal.fullHistoryText == fullHistory)
-        #expect(terminal.geometry.rows.allSatisfy { row in
-            row.cells.contains { $0.kind != .padding }
-        })
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 0, isPendingWrap: false))
         expectValidGrid(terminal)
     }
 

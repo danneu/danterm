@@ -93,33 +93,31 @@ struct TerminalLogicalLineFoldTests {
 
                 _ = store.setWidth(newWidth)
 
-                // The same content displayed by a pane that was *never* at the old width, so
-                // nothing the fold could have cached is shared with it.
-                let referenceRows = try liveDisplayRows(
-                    content.stimulus,
-                    columns: content.columns,
-                    resizedTo: newWidth
+                // The same content displayed by a pane that was *never* at the old width. Its
+                // transcript stays in the live grid, so neither retained storage nor a resize
+                // fold is shared with the store under test.
+                let referenceRows = try liveDisplayRows(content.stimulus, columns: newWidth)
+                #expect(
+                    store.grandDisplayRowTotal == referenceRows.count,
+                    "\(content) at width \(newWidth): folded \(store.grandDisplayRowTotal) rows against \(referenceRows.count)"
                 )
-                let shared = min(
-                    referenceRows.count,
-                    comparableRowCount(store, store.grandDisplayRowTotal)
-                )
-                try #require(shared > 0)
-                for offset in 0..<shared {
-                    let folded = try #require(store.displayRow(at: offset))
-                    // The **content** walk, and only it: today's reflow measures a hard-ended
-                    // row to its content end, so a reflowed reference row has already lost any
-                    // background-erase tail it was displaying. The store's painted walk keeps
-                    // that paint, which is a divergence in the store's favour and is pinned by
-                    // `widthChangeRepaintsTheTrailingFillTodaysReflowDrops` rather than hidden
-                    // by comparing the weaker walk here.
-                    assertSameContentRow(
-                        folded,
-                        referenceRows[offset],
+                for offset in 0..<comparableRowCount(store, referenceRows.count) {
+                    let painted = try #require(store.paintedDisplayRow(at: offset))
+                    let contentOnly = try #require(store.displayRow(at: offset))
+                    assertSameRow(
+                        painted: painted,
+                        content: contentOnly,
+                        reference: referenceRows[offset],
                         width: newWidth,
                         label: "\(content) at width \(newWidth), row \(offset)"
                     )
                 }
+                try assertOpenTailSeam(
+                    store,
+                    referenceRows,
+                    width: newWidth,
+                    label: "\(content) at width \(newWidth)"
+                )
             }
         }
     }
@@ -464,7 +462,7 @@ struct TerminalLogicalLineFoldTests {
         }
         _ = store.setWidth(9)
 
-        let referenceRows = try liveDisplayRows(
+        let referenceRows = try resizedLiveDisplayRows(
             RetainedContent.backgroundErased.stimulus,
             columns: 17,
             resizedTo: 9
@@ -658,32 +656,49 @@ struct TerminalLogicalLineFoldTests {
         }
     }
 
-    /// The display rows a pane of `columns` shows for `stimulus`.
-    ///
-    /// The viewport is deliberately taller than the transcript at its feed width. A later narrow
-    /// preserves the trailing blank rows and can therefore displace refolded rows into history;
-    /// the oracle must read both regions to keep the full displayed stream.
-    private func liveDisplayRows(
-        _ stimulus: String,
-        columns: Int,
-        resizedTo newWidth: Int? = nil
-    ) throws -> [Terminal.GridRow] {
+    /// The display rows a pane created at `columns` shows for `stimulus` in its live grid.
+    private func liveDisplayRows(_ stimulus: String, columns: Int) throws -> [Terminal.GridRow] {
         let viewportRows = 400
         var terminal = try #require(Terminal(columns: columns, rows: viewportRows))
         terminal.feed(Array(stimulus.utf8))
-        if let newWidth {
-            terminal.resize(columns: newWidth, rows: viewportRows)
-        }
+        try #require(terminal.scrollbackRowCount == 0, "the reference transcript entered scrollback")
         var rows: [Terminal.GridRow] = []
-        for index in 0..<terminal.scrollbackRowCount {
-            guard let row = terminal.retainedRowForTesting(at: index) else { break }
-            rows.append(row)
-        }
         for index in 0..<viewportRows {
             guard let row = terminal.liveRowForTesting(at: index) else { break }
             rows.append(row)
         }
         // The blank rows below the transcript are the viewport's, not the content's.
+        while let last = rows.last,
+              last.isSoftWrapped == false,
+              last.semanticPrompt == .none,
+              last.cells.allSatisfy({
+                  $0.kind == .padding && $0.styleId == Terminal.defaultStyleId
+              })
+        {
+            rows.removeLast()
+        }
+        return rows
+    }
+
+    /// The one resize-driven reference, used only to show today's live-grid erase-tail loss.
+    private func resizedLiveDisplayRows(
+        _ stimulus: String,
+        columns: Int,
+        resizedTo newWidth: Int
+    ) throws -> [Terminal.GridRow] {
+        let feedRows = 400
+        let resizedRows = 800
+        var terminal = try #require(Terminal(columns: columns, rows: feedRows))
+        terminal.feed(Array(stimulus.utf8))
+        try #require(terminal.scrollbackRowCount == 0, "the reference transcript entered scrollback")
+        terminal.resize(columns: newWidth, rows: resizedRows)
+        try #require(terminal.scrollbackRowCount == 0, "the resized reference entered scrollback")
+
+        var rows: [Terminal.GridRow] = []
+        for index in 0..<resizedRows {
+            guard let row = terminal.liveRowForTesting(at: index) else { break }
+            rows.append(row)
+        }
         while let last = rows.last,
               last.isSoftWrapped == false,
               last.semanticPrompt == .none,
@@ -777,31 +792,6 @@ struct TerminalLogicalLineFoldTests {
                 "\(label): content column \(column)",
                 sourceLocation: sourceLocation
             )
-        }
-    }
-
-    /// Compares the store's content walk against a reference row column by column.
-    private func assertSameContentRow(
-        _ folded: Terminal.GridRow,
-        _ reference: Terminal.GridRow,
-        width: Int,
-        label: String,
-        sourceLocation: SourceLocation = #_sourceLocation
-    ) {
-        #expect(
-            folded.isSoftWrapped == reference.isSoftWrapped,
-            "\(label): soft wrap",
-            sourceLocation: sourceLocation
-        )
-        #expect(
-            folded.semanticPrompt == reference.semanticPrompt,
-            "\(label): semantic prompt",
-            sourceLocation: sourceLocation
-        )
-        for column in 0..<width {
-            let lhs = folded.cell(at: column)
-            let rhs = reference.cell(at: column)
-            #expect(lhs == rhs, "\(label): column \(column)", sourceLocation: sourceLocation)
         }
     }
 

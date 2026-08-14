@@ -78,7 +78,7 @@ struct TerminalKittyAdaptedTests {
         #expect(terminal.screenText.contains("PROMPT-ONE-X") == false)
 
         let originalHistory = terminal.fullHistoryText
-        let originalRows = retainedRows(of: terminal)
+        let originalRows = displayedRows(of: terminal)
 
         terminal.resize(columns: 5, rows: 4)
         #expect(terminal.fullHistoryText == originalHistory)
@@ -88,7 +88,7 @@ struct TerminalKittyAdaptedTests {
         terminal.resize(columns: 8, rows: 4)
         #expect(terminal.fullHistoryText == originalHistory)
         expectPromptIsOneWholeLine(terminal)
-        #expect(retainedRows(of: terminal) == originalRows)
+        #expect(displayedRows(of: terminal) == originalRows)
         expectValidGrid(terminal)
     }
 
@@ -197,9 +197,13 @@ struct TerminalKittyAdaptedTests {
         terminal.resize(columns: 3, rows: 4)
 
         #expect(terminal.scrollbackRowCount == 1)
-        #expect(terminal.scrollbackRow(at: 0)?.isSoftWrapped == false)
-        #expect(terminal.screenText == "abc\nde \n   \n   ")
-        #expect(terminal.geometry.rows.map(\.isSoftWrapped) == [true, false, false, false])
+        #expect(displayedRows(of: terminal) == [
+            "123",
+            "abc|wrap",
+            "de ",
+            "   ",
+            "   ",
+        ])
         expectValidGrid(terminal)
     }
 
@@ -223,46 +227,22 @@ struct TerminalKittyAdaptedTests {
         terminal.resize(columns: 3, rows: 5)
 
         #expect(terminal.scrollbackRowCount == 2)
-        #expect(terminal.scrollbackRow(at: 0)?.isSoftWrapped == true)
-        #expect(terminal.scrollbackRow(at: 1)?.isSoftWrapped == true)
-        #expect(terminal.screenText == "bcd\ne  \n   \n   \n   ")
-        #expect(terminal.geometry.rows.map(\.isSoftWrapped) == [true, false, false, false, false])
+        #expect(displayedRows(of: terminal) == [
+            "123|wrap",
+            "  a|wrap",
+            "bcd|wrap",
+            "e  ",
+            "   ",
+            "   ",
+            "   ",
+        ])
         expectValidGrid(terminal)
     }
 
     // MARK: - Helpers
 
-    /// Row text plus wrap flag for the whole retained stream, which is what "the rows split
-    /// exactly as they did originally" means without reaching into private row state.
-    private func retainedRows(of terminal: Terminal) -> [String] {
-        let history = (0..<terminal.scrollbackRowCount).map { index -> String in
-            guard let row = terminal.scrollbackRow(at: index) else { return "<missing>" }
-            return rowText(row.cells) + (row.isSoftWrapped ? "|wrap" : "")
-        }
-        let screen = terminal.screenText.split(separator: "\n", omittingEmptySubsequences: false)
-        let viewport = zip(screen, terminal.geometry.rows).map { text, row in
-            String(text) + (row.isSoftWrapped ? "|wrap" : "")
-        }
-        return history + viewport
-    }
-
     private func viewportLines(of terminal: Terminal) -> [Substring] {
         terminal.viewportText.split(separator: "\n", omittingEmptySubsequences: false)
-    }
-
-    private func rowText(_ cells: [TerminalCell]) -> String {
-        var result = ""
-        for cell in cells {
-            switch cell.kind {
-            case .narrow, .wideHead:
-                for scalar in cell.scalars { result.unicodeScalars.append(scalar) }
-            case .padding, .spacerHead:
-                result.append(" ")
-            case .wideTail:
-                break
-            }
-        }
-        return result
     }
 
     /// Asserts the A2 prompt is exactly one whole logical line and appears exactly once.

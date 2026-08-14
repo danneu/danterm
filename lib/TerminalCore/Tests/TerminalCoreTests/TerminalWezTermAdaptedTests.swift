@@ -149,9 +149,13 @@ struct TerminalWezTermAdaptedTests {
         // WezTerm's by-2 leg: the tail moves to a continuation row and the cursor follows it.
         terminal.resize(columns: 18, rows: 4)
         #expect(terminal.scrollbackRowCount == 1)
-        #expect(terminal.scrollbackRow(at: 0)?.isSoftWrapped == true)
-        #expect(terminal.screenText.split(separator: "\n")[0] == "t                 ")
-        #expect(terminal.geometry.rows[0].isSoftWrapped == false)
+        #expect(displayedRows(of: terminal) == [
+            "some long long tex|wrap",
+            "t                 ",
+            "                  ",
+            "                  ",
+            "                  ",
+        ])
         #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 1, isPendingWrap: false))
 
         // The height leg from #test_resize_2162_by_2_then_up_1, folded back to full width.

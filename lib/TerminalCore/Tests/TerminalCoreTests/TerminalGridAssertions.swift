@@ -3,6 +3,35 @@ import Testing
 
 @testable import TerminalCore
 
+/// Renders every retained and live row as text plus wrap state without hiding their seam.
+func displayedRows(of terminal: Terminal) -> [String] {
+    let history = (0..<terminal.scrollbackRowCount).map { index -> String in
+        guard let row = terminal.scrollbackRow(at: index) else { return "<missing>" }
+        return displayedRowText(row.cells) + (row.isSoftWrapped ? "|wrap" : "")
+    }
+    let screen = terminal.screenText.split(separator: "\n", omittingEmptySubsequences: false)
+    let viewport = zip(screen, terminal.geometry.rows).map { text, row in
+        String(text) + (row.isSoftWrapped ? "|wrap" : "")
+    }
+    return history + viewport
+}
+
+/// Preserves explicit spaces and omits the storage-only tail of a wide cell.
+private func displayedRowText(_ cells: [TerminalCell]) -> String {
+    var result = ""
+    for cell in cells {
+        switch cell.kind {
+        case .narrow, .wideHead:
+            for scalar in cell.scalars { result.unicodeScalars.append(scalar) }
+        case .padding, .spacerHead:
+            result.append(" ")
+        case .wideTail:
+            break
+        }
+    }
+    return result
+}
+
 func expectValidGrid(
     _ terminal: Terminal,
     context: Comment? = nil,
