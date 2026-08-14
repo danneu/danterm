@@ -24,7 +24,7 @@ struct IpcAuditDescriptorTests {
     func eventInputIsRedactedToCount() throws {
         let request = IpcRequest.paneInput(
             pane: pane,
-            input: .events([.key(.letter("c"), [.ctrl]), .text("hidden")])
+            input: .events([.key(.character("c"), [.ctrl]), .text("hidden")])
         )
 
         let descriptor = request.auditDescriptor

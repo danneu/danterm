@@ -582,9 +582,19 @@ public actor TerminalPTYHost {
     }
 
     /// Enqueues normalized fractional wheel input for atomic route and mode selection.
-    nonisolated public func sendWheel(_ event: TerminalWheelEvent, origin: UInt64? = nil) {
+    nonisolated public func sendWheel(
+        _ event: TerminalWheelEvent,
+        origin: UInt64? = nil,
+        onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
+    ) {
         queueClosingResizeRun().async { [weak self] in
-            self?.assumeIsolated { owner in owner.applyWheel(event, origin: origin) }
+            guard let self else {
+                onCompletion(.rejected(.processEnded))
+                return
+            }
+            self.assumeIsolated { owner in
+                owner.applyWheel(event, origin: origin, onCompletion: onCompletion)
+            }
         }
     }
 
@@ -1191,11 +1201,19 @@ public actor TerminalPTYHost {
         }
     }
 
-    private func applyWheel(_ event: TerminalWheelEvent, origin: UInt64?) {
-        guard teardownFinished == false else { return }
+    private func applyWheel(
+        _ event: TerminalWheelEvent,
+        origin: UInt64?,
+        onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void
+    ) {
+        guard teardownFinished == false else {
+            onCompletion(.rejected(.processEnded))
+            return
+        }
         let decision = decideTerminalWheel(event, terminal: terminal, state: &interactionState)
         if decision.inputBytes.isEmpty == false {
-            submitInput(decision.inputBytes, origin: origin)
+            submitInput(decision.inputBytes, origin: origin, onCompletion: onCompletion)
+            return
         }
         if decision.localRowDelta != 0 {
             applyViewportNavigation(
@@ -1203,6 +1221,7 @@ public actor TerminalPTYHost {
                 publishUpdate: true
             )
         }
+        onCompletion(.delivered)
     }
 
     private func applyPointer(

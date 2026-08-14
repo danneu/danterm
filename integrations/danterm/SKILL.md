@@ -752,19 +752,21 @@ sent as a separate event; there is no implicit space-joining. Quote a single
 arg when spaces or newlines must be preserved.
 
 Input submitted while the pane is spawning stays buffered in order. The
-command returns success only after every submission has crossed the PTY master;
-spawn, process, or write failure returns an error instead.
+command returns success only after every submission is handled by the pane
+owner; byte-producing submissions must cross the PTY master. Spawn, process,
+or write failure returns an error instead.
 
-- Bare words (`"ls"`, `"cargo"`) are typed as text.
-- Named keys are key presses: `Enter`, `Tab`, `BSpace`, `Escape`, `Up`,
-  `Down`, `Left`, `Right`, `Home`, `End`, `PgUp`, `PgDn`, `Delete`, `F1`
-  through `F12`.
-- `C-<x>` is Ctrl-x and `M-<x>` is Alt-x, such as `C-c`, `C-d`, and `M-b`.
-  `S-` is accepted on named keys, such as `S-Tab` and `C-S-Up`; shifted
-  letters such as `S-a` remain unsupported.
-- `--literal` disables key parsing. Every token after `--` is emitted as text.
-  Each token is still a separate event; pass one quoted argument if you need
-  spaces inside the literal text.
+| Token form | Meaning |
+|---|---|
+| Bare words such as `"ls"` or `"cargo"` | Text |
+| `Space` | One text space |
+| `Enter`, `Tab`, `BSpace`, `Escape`, `Up`, `Down`, `Left`, `Right`, `Home`, `End`, `PgUp`, `PgDn`, `Insert`, `Delete`, `F1` through `F12` | Named key press |
+| `C-<x>` or `M-<x>` | Ctrl or Alt character, such as `C-c`, `C-\`, `C-[`, `C-]`, `C-^`, `C-_`, `C-Space`, or `M-b` |
+| `S-<named-key>` | Shifted named key, such as `S-Tab` or `C-S-Up`; shifted letters such as `S-a` remain unsupported |
+| `--literal` before `--` | Disable key parsing; every following token is text |
+
+Each token remains a separate event. Pass one quoted argument when literal text
+must contain spaces or newlines.
 
 Example: run a command and press enter:
 

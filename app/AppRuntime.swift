@@ -1008,6 +1008,28 @@ class AppRuntime {
                 ))
             }
 
+        case .sendInputWheel(
+            let paneId,
+            let direction,
+            let column,
+            let row,
+            let submissionId
+        ):
+            guard let submissionId else {
+                sessions[paneId]?.sendInputWheel(direction, column: column, row: row)
+                break
+            }
+            guard let session = sessions[paneId] else {
+                send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
+                break
+            }
+            session.sendInputWheel(direction, column: column, row: row) { [weak self] result in
+                self?.send(.inputSubmissionCompleted(
+                    id: submissionId,
+                    result: result == .delivered ? .delivered : .rejected
+                ))
+            }
+
         case .focusSession(let paneId, let focused):
             sessions[paneId]?.setFocused(focused)
 

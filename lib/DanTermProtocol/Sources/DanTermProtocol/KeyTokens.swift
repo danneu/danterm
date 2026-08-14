@@ -1,7 +1,7 @@
 // Argv-token classifier for `danterm pane input -- <token>...`.
 // Each token is classified as either a literal text run or a structured key
 // event. The rule is deterministic -- no fall-through that contradicts itself
-// -- and accepts Shift only for named keys whose terminal encoding can use it.
+// -- and keeps plain characters on the text path.
 import Foundation
 
 public enum KeyTokenError: Error, Equatable {
@@ -25,14 +25,14 @@ private func classifyKeyToken(_ token: String, literal: Bool) throws -> InputEve
 
     // Step 2: modifier-prefixed token (e.g. C-c, M-x, C-M-Up).
     if let prefixSplit = stripModifierPrefix(token) {
-        // Modifier-prefixed Space is out of scope for v1.
         if prefixSplit.base == "Space" {
-            throw KeyTokenError.unknownKey(token)
+            return .key(.character(" "), prefixSplit.mods.toKeyMods())
         }
-        // Resolve the base: known keyname or single ASCII letter (either case,
-        // normalized to lowercase before going on the wire).
+        // Resolve the base: known key name or canonical printable ASCII character.
         if let key = KeyName(wireName: prefixSplit.base) {
-            if case .letter = key, prefixSplit.mods.contains(.shift) {
+            if case .character(let character) = key,
+               character.isLetter,
+               prefixSplit.mods.contains(.shift) {
                 throw KeyTokenError.unknownKey(token)
             }
             return .key(key, prefixSplit.mods.toKeyMods())

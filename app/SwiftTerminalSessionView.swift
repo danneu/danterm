@@ -941,6 +941,43 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         }
     }
 
+    func sendInputWheel(_ direction: InputWheelDirection, column: Int, row: Int) {
+        controller.sendWheel(
+            Self.terminalWheelEvent(direction, column: column, row: row),
+            origin: PaneInputOrigin.appEntry()
+        )
+    }
+
+    func sendInputWheel(
+        _ direction: InputWheelDirection,
+        column: Int,
+        row: Int,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    ) {
+        controller.sendWheel(
+            Self.terminalWheelEvent(direction, column: column, row: row),
+            origin: PaneInputOrigin.appEntry()
+        ) { result in
+            onCompletion(Self.inputResult(result))
+        }
+    }
+
+    private static func terminalWheelEvent(
+        _ direction: InputWheelDirection,
+        column: Int,
+        row: Int
+    ) -> TerminalWheelEvent {
+        let rowDelta: Double = switch direction {
+        case .up: -1
+        case .down: 1
+        }
+        return TerminalWheelEvent(
+            rowDelta: rowDelta,
+            column: column,
+            row: row
+        )
+    }
+
     private static func inputResult(
         _ result: PaneInputSubmissionResult
     ) -> TerminalInputSubmissionResult {
@@ -1623,7 +1660,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     private static func terminalKey(for key: KeyName) -> TerminalInputKey? {
         switch key {
-        case .letter(let character):
+        case .character(let character):
             guard let scalar = character.lowercased().unicodeScalars.first else { return nil }
             return .character(scalar)
         case .named(let name):
@@ -1640,6 +1677,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             case .end: return .end
             case .pgUp: return .pageUp
             case .pgDn: return .pageDown
+            case .insert: return .insert
             case .delete: return .deleteForward
             case .f1: return .f1
             case .f2: return .f2

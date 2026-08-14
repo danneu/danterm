@@ -594,7 +594,7 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   then origin suppression and rendering polish, with every contested fork
   (typing never claims, hybrid reflow, auto-take-back) kept as client policy.
   Input is untouched; T11 stays free.
-- **T11 DECIDED as D8** ([decisions.md](decisions.md)) -- the wire carries
+- **T11 DONE as D8** ([decisions.md](decisions.md)) -- the wire carries
   intent, and the PTY owner encodes. The contradiction is closed by the tree
   itself: no existing writer encodes locally -- the Mac's own keyboard sends
   semantic keys, and `TerminalPTYHost.sendKey` reads modes and encodes in one

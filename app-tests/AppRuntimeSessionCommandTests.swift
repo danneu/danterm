@@ -52,6 +52,12 @@ struct AppRuntimeSessionCommandTests {
             key: .named(.up),
             mods: [.ctrl, .shift]
         ))
+        runtime.perform(.sendInputWheel(
+            paneId: paneId,
+            direction: .up,
+            column: 4,
+            row: 2
+        ))
         runtime.perform(.focusSession(paneId: paneId, focused: true))
         runtime.perform(.sendStartSearch(paneId: paneId))
         runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "find"))
@@ -63,6 +69,11 @@ struct AppRuntimeSessionCommandTests {
         #expect(fixture.session.sentInputKeys.count == 1)
         #expect(key.key == .named(.up))
         #expect(key.modifiers == [.ctrl, .shift])
+        let wheel = try #require(fixture.session.sentInputWheels.first)
+        #expect(fixture.session.sentInputWheels.count == 1)
+        #expect(wheel.direction == .up)
+        #expect(wheel.column == 4)
+        #expect(wheel.row == 2)
         #expect(fixture.session.focusedValues == [true])
         #expect(fixture.session.startSearchCount == 1)
         #expect(fixture.session.searchNeedles == ["find"])

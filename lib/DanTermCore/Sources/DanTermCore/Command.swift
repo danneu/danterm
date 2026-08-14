@@ -27,6 +27,15 @@ enum Command {
     // One named/letter key with modifiers, encoded by the terminal's key encoder so
     // arrows, F-keys, C-c, and Esc reach the PTY as real escape sequences.
     case sendInputKey(paneId: PaneId, key: KeyName, mods: KeyMods, submissionId: InputSubmissionId? = nil)
+    // One vertical wheel step, routed by the terminal owner against its current mouse and
+    // screen modes so a remote writer follows the same policy as the AppKit wheel path.
+    case sendInputWheel(
+        paneId: PaneId,
+        direction: InputWheelDirection,
+        column: Int,
+        row: Int,
+        submissionId: InputSubmissionId? = nil
+    )
 
     // Focus
     case focusSession(paneId: PaneId, focused: Bool)

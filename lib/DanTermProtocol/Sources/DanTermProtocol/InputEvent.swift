@@ -5,20 +5,32 @@
 import Foundation
 
 public enum InputEvent: Equatable, Sendable {
+    /// Sends committed text through the pane owner's raw keyboard-text path.
     case text(String)
+    /// Sends one semantic key for owner-side mode-aware encoding.
     case key(KeyName, KeyMods)
+    /// Sends one vertical wheel step at a zero-based viewport cell.
+    case wheel(InputWheelDirection, column: Int, row: Int)
+}
+
+/// Keeps wheel intent independent from the terminal engine's routing types.
+public enum InputWheelDirection: String, Equatable, Sendable {
+    /// Moves toward retained history or reports terminal mouse button 4.
+    case up
+    /// Moves toward live output or reports terminal mouse button 5.
+    case down
 }
 
 // One of the closed set of key names danterm understands.
 public enum KeyName: Equatable, Sendable {
     case named(NamedKey)
-    // Single lowercase ASCII letter, used for modifier-letter combos (e.g. C-c).
-    case letter(Character)
+    /// Holds one canonical printable ASCII character used with modifiers.
+    case character(Character)
 
     /// Canonical IPC serialization name for a key event.
     public var wireName: String {
         switch self {
-        case .letter(let c):
+        case .character(let c):
             return String(c)
         case .named(let n):
             return n.wireName
@@ -33,8 +45,11 @@ public enum KeyName: Equatable, Sendable {
         }
         if wireName.count == 1,
            let c = wireName.first,
-           c.isASCII, c.isLetter, c.isLowercase {
-            self = .letter(c)
+           c.isASCII,
+           let scalar = c.unicodeScalars.first,
+           (0x20...0x7E).contains(scalar.value),
+           c.isLetter == false || c.isLowercase {
+            self = .character(c)
             return
         }
         return nil
@@ -62,6 +77,7 @@ public enum NamedKey: Equatable, CaseIterable, Sendable {
     case end
     case pgUp
     case pgDn
+    case insert
     case delete
     case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
 
@@ -81,6 +97,7 @@ public enum NamedKey: Equatable, CaseIterable, Sendable {
         case .end:    return "End"
         case .pgUp:   return "PgUp"
         case .pgDn:   return "PgDn"
+        case .insert: return "Insert"
         case .delete: return "Delete"
         case .f1:  return "F1"
         case .f2:  return "F2"

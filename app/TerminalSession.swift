@@ -129,6 +129,7 @@ protocol TerminalSession: AnyObject {
     func sendText(_ text: String)
     func sendInputText(_ text: String)
     func sendInputKey(_ key: KeyName, modifiers: KeyMods)
+    func sendInputWheel(_ direction: InputWheelDirection, column: Int, row: Int)
     func sendText(
         _ text: String,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
@@ -140,6 +141,12 @@ protocol TerminalSession: AnyObject {
     func sendInputKey(
         _ key: KeyName,
         modifiers: KeyMods,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    )
+    func sendInputWheel(
+        _ direction: InputWheelDirection,
+        column: Int,
+        row: Int,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     )
     func setFocused(_ focused: Bool)
@@ -224,6 +231,18 @@ extension TerminalSession {
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) {
         sendInputKey(key, modifiers: modifiers)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { onCompletion(.delivered) }
+        }
+    }
+
+    func sendInputWheel(
+        _ direction: InputWheelDirection,
+        column: Int,
+        row: Int,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    ) {
+        sendInputWheel(direction, column: column, row: row)
         DispatchQueue.main.async {
             MainActor.assumeIsolated { onCompletion(.delivered) }
         }

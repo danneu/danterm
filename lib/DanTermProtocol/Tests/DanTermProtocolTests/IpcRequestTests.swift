@@ -4,6 +4,56 @@ import Testing
 @testable import DanTermProtocol
 
 struct IpcRequestTests {
+    @Test("character keys require a modifier", arguments: ["a", "\\"])
+    func characterKeysRequireModifier(_ key: String) throws {
+        // Intent: plain characters have only the text spelling on the wire.
+        // Why it exists: accepting an unmodified key spelling makes one keystroke
+        //   ambiguous and forces every future mode to keep both forms equivalent.
+        // Scenario: a direct client sends a letter or punctuation as a key with no mods.
+        let pane = "11111111-1111-4111-8111-111111111111"
+        let error = #expect(throws: IpcRequestDecodeError.self) {
+            try IpcRequest.decode(
+                method: IpcRequestMethod.paneInput.rawValue,
+                params: .object([
+                    "pane": .string(pane),
+                    "input": .array([.object(["key": .string(key)])]),
+                ])
+            )
+        }
+        #expect(error?.message == "character key requires at least one modifier")
+    }
+
+    @Test("modified character and wheel events round trip")
+    func modifiedCharacterAndWheelEventsRoundTrip() throws {
+        // Intent: the widened key and wheel cases preserve their intent through JSON.
+        // Why it exists: a client and the app must agree on the stable event grammar.
+        // Scenario: one request carries Ctrl-backslash and wheel-up at a viewport cell.
+        let pane = PaneId(rawValue: UUID())
+        let request = IpcRequest.paneInput(
+            pane: pane,
+            input: .events([
+                .key(.character("\\"), [.ctrl]),
+                .wheel(.up, column: 4, row: 2),
+            ])
+        )
+
+        #expect(request.params["input"] == .array([
+            .object([
+                "key": .string("\\"),
+                "mods": .array([.string("ctrl")]),
+            ]),
+            .object([
+                "wheel": .string("up"),
+                "column": .number(4),
+                "row": .number(2),
+            ]),
+        ]))
+        #expect(try IpcRequest.decode(
+            method: request.method.rawValue,
+            params: .object(request.params)
+        ) == request)
+    }
+
     @Test("every CLI request round trips through the shared catalog")
     func everyCLIRequestRoundTripsThroughCatalog() throws {
         // Intent: every command the CLI builds decodes to the same typed request.

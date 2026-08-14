@@ -743,9 +743,18 @@ public final class TerminalPaneSessionController {
     }
 
     /// Forwards fractional wheel input and gesture boundaries for owner-side routing.
-    public func sendWheel(_ event: TerminalWheelEvent, origin: UInt64?) {
-        guard isTornDown == false else { return }
-        host.sendWheel(event, origin: origin)
+    public func sendWheel(
+        _ event: TerminalWheelEvent,
+        origin: UInt64?,
+        onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
+    ) {
+        guard isTornDown == false else {
+            Self.deliverInputCompletion(onCompletion, .rejected(.processEnded))
+            return
+        }
+        host.sendWheel(event, origin: origin) { result in
+            Self.deliverInputCompletion(onCompletion, result)
+        }
     }
 
     /// Submits each distinct valid grid once, preserving its order relative to input.

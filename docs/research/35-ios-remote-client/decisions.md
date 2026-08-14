@@ -736,9 +736,9 @@ in [README.md](README.md) and remains open.
 
 ### D8 -- input: the wire carries intent, and the PTY owner encodes
 
-- Status: decided 2026-08-14, brainstormed with the user fork by fork. This is
-  the T11 gate. Nothing is implemented by this entry; the wire and CLI changes
-  it names land with milestone-1 client work.
+- Status: decided and implemented 2026-08-14, brainstormed with the user fork
+  by fork. This closes the T11 gate. The shipped wire and CLI changes are the
+  milestone-1 Mac input surface; the iOS client remains separate work.
 - Evidence used:
   - Read directly, and this is the decisive evidence -- the tree already
     implements one of the two candidate positions for every existing writer:

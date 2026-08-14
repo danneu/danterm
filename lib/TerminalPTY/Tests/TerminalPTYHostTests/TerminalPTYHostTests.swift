@@ -13,6 +13,48 @@ import TerminalCoreRecording
 /// Exercises the native owner only through real PTYs and controlled child behavior.
 @Suite(.serialized)
 struct TerminalPTYHostTests {
+    @Test("character and Insert keys encode at the PTY owner", .timeLimit(.minutes(1)))
+    func widenedKeysEncodeAtPTYOwner() async throws {
+        // Intent: owner-side key encoding covers every new byte-exact D8 key class.
+        // Why it exists: encoding these keys in a client would race live terminal modes.
+        // Scenario: Ctrl-Space, Ctrl-backslash, and Insert reach one waiting child.
+        let host = try makeHost()
+        let command = "stty -echo; exec \(try probeExecutable()) hold \"$0\""
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let baseline = await host.inputWrites().count
+
+        host.sendKey(.character(" "), modifiers: [.control])
+        host.sendKey(.character("\\"), modifiers: [.control])
+        host.sendKey(.insert, modifiers: [])
+        _ = host.fencedSnapshot()
+        let writes = Array((await host.inputWrites()).dropFirst(baseline))
+
+        #expect(writes == [
+            [0x00],
+            [0x1C],
+            Array("\u{1B}[2~".utf8),
+        ])
+        await host.close()
+    }
+
+    @Test("captured wheel completion follows PTY delivery", .timeLimit(.minutes(1)))
+    func capturedWheelCompletionFollowsPTYDelivery() async throws {
+        let host = try makeHost()
+        let command = "printf '\\033[?1000;1006h'; exec \(try probeExecutable()) hold \"$0\""
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let completion = InputCompletionRecorder(expecting: 1)
+
+        host.sendWheel(.init(rowDelta: -1, column: 2, row: 3)) {
+            completion.signal($0)
+        }
+
+        #expect(completion.waitForAll(within: .seconds(20)))
+        #expect(completion.results == [.delivered])
+        await host.close()
+    }
+
     @Test("encoded key and paste submissions complete after PTY delivery", .timeLimit(.minutes(1)))
     func encodedInputSubmissionsCompleteAfterDelivery() async throws {
         let host = try makeHost()

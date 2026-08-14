@@ -612,14 +612,20 @@ struct CLIParserTests {
         // Intent: `pane input` serializes each token to the exact wire JSON the IPC
         //   decoder consumes -- the encode path end-to-end (argv -> params["input"]).
         // Why it exists: this plan moves key encoding into KeyName.wireName and rewires
-        //   inputEventToJSON; without asserting the payload, a bad `.letter` arm or a
+        //   inputEventToJSON; without asserting the payload, a bad `.character` arm or a
         //   mis-wired call ships silently (the round-trip and classifier tests miss it).
         // Scenario: spec-first contract for the pane.input params["input"] array.
-        let cmd = try parseCLI(["pane", "input", "--pane", paneId, "--", "BSpace", "F12", "C-c", "S-Tab"])
+        let cmd = try parseCLI([
+            "pane", "input", "--pane", paneId, "--",
+            "BSpace", "Insert", "F12", "C-c", "C-\\", "C-Space", "S-Tab",
+        ])
         #expect(cmd.params["input"] == .array([
             .object(["key": .string("BSpace")]),
+            .object(["key": .string("Insert")]),
             .object(["key": .string("F12")]),
             .object(["key": .string("c"), "mods": .array([.string("ctrl")])]),
+            .object(["key": .string("\\"), "mods": .array([.string("ctrl")])]),
+            .object(["key": .string(" "), "mods": .array([.string("ctrl")])]),
             .object(["key": .string("Tab"), "mods": .array([.string("shift")])]),
         ]))
     }

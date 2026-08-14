@@ -703,12 +703,25 @@ private func decodeInputEvent(_ value: JSONValue) throws -> InputEvent {
     guard case .object(let object) = value else { throw invalid("input event must be an object") }
     let textPresent = object["text"] != nil
     let keyPresent = object["key"] != nil
-    guard textPresent != keyPresent else { throw invalid("input event must have text xor key") }
+    let wheelPresent = object["wheel"] != nil
+    guard [textPresent, keyPresent, wheelPresent].filter({ $0 }).count == 1 else {
+        throw invalid("input event must have exactly one of text, key, or wheel")
+    }
     if textPresent {
         guard case .string(let text)? = object["text"] else {
             throw invalid("input event text must be a string")
         }
         return .text(text)
+    }
+    if wheelPresent {
+        guard case .string(let rawDirection)? = object["wheel"],
+              let direction = InputWheelDirection(rawValue: rawDirection)
+        else {
+            throw invalid("wheel must be one of up or down")
+        }
+        let column = try inputCellCoordinate(object["column"], name: "column")
+        let row = try inputCellCoordinate(object["row"], name: "row")
+        return .wheel(direction, column: column, row: row)
     }
     guard case .string(let keyName)? = object["key"] else {
         throw invalid("input event key must be a string")
@@ -727,7 +740,20 @@ private func decodeInputEvent(_ value: JSONValue) throws -> InputEvent {
             throw invalid("unknown mod \(name)")
         }
     }
+    if case .character = key, mods.isEmpty {
+        throw invalid("character key requires at least one modifier")
+    }
     return .key(key, mods)
+}
+
+private func inputCellCoordinate(_ value: JSONValue?, name: String) throws -> Int {
+    guard case .number(let number)? = value,
+          let coordinate = Int(exactly: number),
+          coordinate >= 0
+    else {
+        throw invalid("\(name) must be a non-negative integer")
+    }
+    return coordinate
 }
 
 private func lineLimit(_ value: JSONValue?) throws -> Int? {
@@ -778,5 +804,11 @@ private func inputEventJSON(_ event: InputEvent) -> JSONValue {
             object["mods"] = .array(names)
         }
         return .object(object)
+    case .wheel(let direction, let column, let row):
+        return .object([
+            "wheel": .string(direction.rawValue),
+            "column": .number(Double(column)),
+            "row": .number(Double(row)),
+        ])
     }
 }

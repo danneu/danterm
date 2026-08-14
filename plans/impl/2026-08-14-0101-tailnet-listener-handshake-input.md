@@ -481,7 +481,7 @@ Out of scope for this plan:
       stamping, the per-connection/per-request write-ahead audit gate;
       research-doc closeout including the D4 amendment. (PO1, PO3, PO5,
       PO11, PO12)
-- [ ] D8 grammar: widened key case with the modifier-required rule, `Insert`,
+- [x] D8 grammar: widened key case with the modifier-required rule, `Insert`,
       CLI tokens, wheel event and its lowering to `sendWheel`, SKILL.md token
       table. (PO8, PO9)
 
@@ -503,3 +503,7 @@ Out of scope for this plan:
   the existing blocking reader, so parallel cases can exhaust the process-wide
   worker pool and starve unrelated socket tests. The deferred readiness-based
   reader remains the structural fix.
+- A wheel event uses `wheel: "up"|"down"` plus zero-based `column` and `row`
+  fields. Each event is one row step. The existing owner-side wheel path now
+  reports completion after local routing or PTY delivery so `pane.input` keeps
+  its deferred-success contract for mixed event arrays.

@@ -3148,7 +3148,7 @@ import DanTermProtocol
 
     @Test("pane.input key with ctrl mod emits sendInputKey")
     func paneInputKeyWithCtrlModEmitsSendInputKey() {
-        // Intent: ctrl-c emits sendInputKey(.letter("c"), .ctrl).
+        // Intent: ctrl-c emits sendInputKey(.character("c"), .ctrl).
         // Why it exists: pins the ctrl modifier mapping.
         // Scenario: spec-first ctrl-c.
         var model = makeModel()
@@ -3169,10 +3169,46 @@ import DanTermProtocol
         )
         #expect(hasEffect(commands) {
             if case .sendInputKey(let p, let k, let m, _) = $0 {
-                return p == paneId && k == .letter("c") && m == [.ctrl]
+                return p == paneId && k == .character("c") && m == [.ctrl]
             }
             return false
         }, "expected sendInputKey for C-c")
+    }
+
+    @Test("pane.input wheel event emits owner-side wheel command")
+    func paneInputWheelEventEmitsWheelCommand() {
+        // Intent: a wire wheel event retains direction and cell through pure dispatch.
+        // Why it exists: lowering wheel input anywhere else could bypass the pane owner's
+        //   authoritative mouse-tracking and screen-mode decision.
+        // Scenario: a remote caller wheels up over column 4, row 2.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        let commands = sendIpc(
+            &model,
+            method: IpcRequestMethod.paneInput.rawValue,
+            params: .object([
+                "input": .array([.object([
+                    "wheel": .string("up"),
+                    "column": .number(4),
+                    "row": .number(2),
+                ])])
+            ]),
+            pane: paneId
+        )
+
+        #expect(commands.contains { command in
+            if case .sendInputWheel(
+                let target,
+                direction: .up,
+                column: 4,
+                row: 2,
+                submissionId: _
+            ) = command {
+                return target == paneId
+            }
+            return false
+        })
     }
 
     @Test("pane.input with both text and input is invalid params")

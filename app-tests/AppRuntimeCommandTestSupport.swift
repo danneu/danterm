@@ -68,6 +68,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var sentText: [String] = []
     var sentInputText: [String] = []
     var sentInputKeys: [(key: KeyName, modifiers: KeyMods)] = []
+    var sentInputWheels: [(direction: InputWheelDirection, column: Int, row: Int)] = []
     var focusedValues: [Bool] = []
     var renderingAvailableValues: [Bool] = []
     var startSearchCount = 0
@@ -79,6 +80,9 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     func sendInputText(_ text: String) { sentInputText.append(text) }
     func sendInputKey(_ key: KeyName, modifiers: KeyMods) {
         sentInputKeys.append((key, modifiers))
+    }
+    func sendInputWheel(_ direction: InputWheelDirection, column: Int, row: Int) {
+        sentInputWheels.append((direction, column, row))
     }
     func setFocused(_ focused: Bool) { focusedValues.append(focused) }
     func setVisible(_ visible: Bool) {}

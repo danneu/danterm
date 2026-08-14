@@ -320,6 +320,14 @@ private func dispatchIpc(
                         mods: mods,
                         submissionId: submissionId
                     ))
+                case .wheel(let direction, let column, let row):
+                    commands.append(.sendInputWheel(
+                        paneId: paneId,
+                        direction: direction,
+                        column: column,
+                        row: row,
+                        submissionId: submissionId
+                    ))
                 }
             }
         }

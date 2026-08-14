@@ -232,6 +232,46 @@ struct AppRuntimeIpcCommandTests {
         #expect(runtime.model.pendingInputSubmissions.isEmpty)
     }
 
+    @Test("wheel completion re-enters update and writes the pending reply")
+    func wheelCompletionWritesPendingReply() async throws {
+        // Intent: a routed wheel event completes the same pending IPC request as keys and text.
+        // Why it exists: wheel can finish as a local scroll or a PTY write, but neither path
+        //   may leave the caller waiting after the pane owner handled it.
+        // Scenario: an installed session accepts one wheel-up event at a viewport cell.
+        let ports = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let wire = try CommandIpcConnectionFixture()
+        defer {
+            wire.connection.close()
+            wire.closePeer()
+        }
+        let paneId = PaneId(rawValue: UUID())
+        let requestId = UUID()
+        let submissionId = InputSubmissionId(rawValue: UUID())
+        runtime.sessions[paneId] = ports.session
+        wire.remember(reqId: requestId, rpcId: .number(10))
+        runtime.registerIpcConnection(wire.connection, for: requestId)
+        runtime.model.pendingInputRequests[requestId] = PendingInputRequest(
+            remaining: [submissionId]
+        )
+        runtime.model.pendingInputSubmissions[submissionId] = requestId
+
+        runtime.perform(.sendInputWheel(
+            paneId: paneId,
+            direction: .up,
+            column: 4,
+            row: 2,
+            submissionId: submissionId
+        ))
+
+        let response = try await wire.readResponseAsync()
+        #expect(response.result == .object(["ok": .bool(true)]))
+        #expect(ports.session.sentInputWheels.count == 1)
+        #expect(runtime.model.pendingInputRequests.isEmpty)
+        #expect(runtime.model.pendingInputSubmissions.isEmpty)
+    }
+
     @Test("one send orders a notification port before its IPC reply")
     func sendPreservesCommandOrderAcrossPortAndWire() throws {
         let ports = RecordingAppRuntimePorts()

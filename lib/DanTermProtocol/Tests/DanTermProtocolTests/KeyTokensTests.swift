@@ -31,7 +31,7 @@ struct KeyTokensTests {
 
     @Test("ctrl letter")
     func ctrlLetter() throws {
-        #expect(try parseKeyTokens(["C-c"]) == [.key(.letter("c"), [.ctrl])])
+        #expect(try parseKeyTokens(["C-c"]) == [.key(.character("c"), [.ctrl])])
     }
 
     @Test("modifier with unresolvable base throws")
@@ -43,7 +43,7 @@ struct KeyTokensTests {
 
     @Test("alt letter")
     func altLetter() throws {
-        #expect(try parseKeyTokens(["M-x"]) == [.key(.letter("x"), [.alt])])
+        #expect(try parseKeyTokens(["M-x"]) == [.key(.character("x"), [.alt])])
     }
 
     @Test("alt named key")
@@ -126,11 +126,21 @@ struct KeyTokensTests {
         #expect(try parseKeyTokens(["echo", "Space", "hi"]) == [.text("echo"), .text(" "), .text("hi")])
     }
 
-    @Test("ctrl space throws")
-    func ctrlSpaceThrows() throws {
-        #expect(throws: KeyTokenError.unknownKey("C-Space")) {
-            try parseKeyTokens(["C-Space"])
-        }
+    @Test("ctrl character gap tokens", arguments: [
+        ("C-Space", Character(" ")),
+        ("C-\\", Character("\\")),
+        ("C-[", Character("[")),
+        ("C-]", Character("]")),
+        ("C-^", Character("^")),
+        ("C-_", Character("_")),
+    ])
+    func ctrlCharacterGapTokens(_ token: String, _ character: Character) throws {
+        #expect(try parseKeyTokens([token]) == [.key(.character(character), [.ctrl])])
+    }
+
+    @Test("insert is a named key")
+    func insertIsNamedKey() throws {
+        #expect(try parseKeyTokens(["Insert"]) == [.key(.named(.insert), [])])
     }
 
     @Test("literal mode is exhaustive")
@@ -196,7 +206,13 @@ struct KeyTokensTests {
 
     @Test("wire name lowercase letter")
     func wireNameLowercaseLetter() {
-        #expect(KeyName(wireName: "c") == .letter("c"))
+        #expect(KeyName(wireName: "c") == .character("c"))
+    }
+
+    @Test("wire name printable ASCII character")
+    func wireNamePrintableASCIICharacter() {
+        #expect(KeyName(wireName: "\\") == .character("\\"))
+        #expect(KeyName(wireName: " ") == .character(" "))
     }
 
     @Test("wire name bogus rejected")
