@@ -2,6 +2,7 @@
 import Darwin
 import DanTermProtocol
 import Foundation
+import Synchronization
 import Testing
 @testable import DanTerm
 
@@ -119,6 +120,32 @@ struct IpcServerRemoteTests {
         let response = try await peer.readResponse()
         #expect(response.id == .number(7))
         #expect(response.error == nil)
+    }
+
+    @Test("remote identity resolution receives the accepted source address")
+    func resolverReceivesPeerAddress() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let observedAddresses = Mutex<[String]>([])
+        let resolver = TailnetWhoisResolver { address in
+            observedAddresses.withLock { $0.append(address) }
+            return TailnetPeerIdentity(
+                nodeId: "node-phone",
+                user: "dan@example.com",
+                machineName: "iphone"
+            )
+        }
+        let server = try fixture.makeServer(runtime: nil, whoisResolver: resolver)
+        defer { server.stop() }
+
+        await server.start()
+        let peer = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { peer.close() }
+        _ = try await peer.readRequest()
+
+        let address = try #require(observedAddresses.withLock { $0.first })
+        #expect(address.hasPrefix("127.0.0.1:"))
+        #expect(UInt16(address.split(separator: ":").last ?? "") != nil)
     }
 
     @Test("remote admission distinguishes unknown and unresolved identities", arguments: [

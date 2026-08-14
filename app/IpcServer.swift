@@ -200,7 +200,7 @@ actor IpcServer {
                 }
                 Task.detached { [weak self, slots] in
                     let resolution = Result {
-                        try resolver.resolve(peerHost: accepted.peer.host)
+                        try resolver.resolve(peerAddress: accepted.peer.description)
                     }
                     guard let self else {
                         Darwin.close(accepted.fileDescriptor)

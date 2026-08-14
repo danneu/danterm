@@ -248,7 +248,7 @@ protocol.
 - [x] Stable audit JSON: hand-written accounting Codable + symmetric
       decoder, ISO-8601 sorted-keys encoder; existing audit tests updated
       only where they decode. (PO4, part of PO5)
-- [ ] LocalAPI resolver: scripted-server tests first, rewrite `live`, delete
+- [x] LocalAPI resolver: scripted-server tests first, rewrite `live`, delete
       `runWhois` and candidates, restate error taxonomy. (PO1)
 - [ ] CLI TCP target: `TCPSocketTransport`, `--tcp` parsing, target-agnostic
       CLI errors, loopback + characterization tests, SKILL.md + README +
