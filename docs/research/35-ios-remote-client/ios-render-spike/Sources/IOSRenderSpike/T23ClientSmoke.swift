@@ -37,23 +37,35 @@ private func log(_ message: String) {
 /// A TCP conformance of `DanTermClientTransport`, which is the whole point of
 /// the seam naming no socket kind: the conversation above it is unchanged.
 ///
-/// It sends the relay's token line before anything else, so the first bytes the
-/// relay sees authenticate the connection and the DanTerm conversation starts
-/// only after that. Writes are serialized because the display link sends
-/// requests from the main thread while the reader thread is blocked in
-/// `receive()`.
+/// `token` is optional because the two listeners this has spoken to authenticate
+/// differently. The T23 relay took the authenticated branch -- a shared secret on
+/// its first line -- only because the Mac had no tailnet then. The T5 bridge
+/// binds a tailnet address instead, which is the research doc's own escape
+/// hatch, so it wants no token line at all and would read one as a malformed
+/// request. Passing nil is therefore a statement about which listener is on the
+/// other end, not a way to skip a check.
+///
+/// Writes are serialized because the display link sends requests from the main
+/// thread while the reader thread is blocked in `receive()`.
 final class T23TCPTransport: DanTermClientTransport {
     enum Failure: Error {
         case unresolvedHost(String)
         case connectFailed(String)
         case writeFailed(String)
         case readFailed(String)
+        /// The read timeout elapsed with no bytes. Distinct from `readFailed`
+        /// because a stalled link is the thing T5 and T9 are trying to observe:
+        /// a caller can log the stall and keep waiting, and a connection that is
+        /// merely quiet must not be reported as a broken one.
+        case timedOut
     }
 
     private let descriptor: Int32
     private let writeLock = NSLock()
 
-    init(host: String, port: UInt16, token: String) throws {
+    /// `readTimeoutSeconds` of 0 blocks forever, which is what a follower wants
+    /// when nothing about mobility is being measured.
+    init(host: String, port: UInt16, token: String?, readTimeoutSeconds: Int32 = 0) throws {
         var hints = addrinfo(
             ai_flags: 0,
             ai_family: AF_UNSPEC,
@@ -85,8 +97,30 @@ final class T23TCPTransport: DanTermClientTransport {
             Darwin.close(socketDescriptor)
             throw Failure.connectFailed(String(cString: strerror(errno)))
         }
+        if readTimeoutSeconds > 0 {
+            var timeout = timeval(tv_sec: Int(readTimeoutSeconds), tv_usec: 0)
+            _ = setsockopt(
+                socketDescriptor,
+                SOL_SOCKET,
+                SO_RCVTIMEO,
+                &timeout,
+                socklen_t(MemoryLayout<timeval>.size)
+            )
+        }
+        // Single keystrokes go up this socket, so Nagle would batch exactly the
+        // traffic whose latency is the product's headline number.
+        var noDelay: Int32 = 1
+        _ = setsockopt(
+            socketDescriptor,
+            IPPROTO_TCP,
+            TCP_NODELAY,
+            &noDelay,
+            socklen_t(MemoryLayout<Int32>.size)
+        )
         descriptor = socketDescriptor
-        try send(Data("token \(token)\n".utf8))
+        if let token, token.isEmpty == false {
+            try send(Data("token \(token)\n".utf8))
+        }
     }
 
     func send(_ bytes: Data) throws {
@@ -115,6 +149,7 @@ final class T23TCPTransport: DanTermClientTransport {
             if count == 0 { return Data() }
             if count < 0 {
                 if errno == EINTR { continue }
+                if errno == EAGAIN || errno == EWOULDBLOCK { throw Failure.timedOut }
                 throw Failure.readFailed(String(cString: strerror(errno)))
             }
             return Data(chunk[0..<count])
@@ -377,13 +412,15 @@ final class T23ClientSmokeViewController: UIViewController {
         guard let host = environment["T23_HOST"],
               let rawPort = environment["T23_PORT"],
               let port = UInt16(rawPort),
-              let token = environment["T23_TOKEN"],
               let pane = environment["T23_PANE"]
         else {
-            log("T23 FAIL missing T23_HOST/T23_PORT/T23_TOKEN/T23_PANE")
+            log("T23 FAIL missing T23_HOST/T23_PORT/T23_PANE")
             showBanner("T23: missing environment")
             return
         }
+        // Absent against the T5 bridge, which authenticates by being reachable
+        // only on the tailnet; present against the retired T23 relay.
+        let token = environment["T23_TOKEN"]
         self.pane = pane
 
         displayScale = view.window?.screen.scale ?? UIScreen.main.scale

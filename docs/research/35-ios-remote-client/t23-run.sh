@@ -7,18 +7,22 @@
 # exit, so it prints "Waiting for the application to terminate..." forever. This
 # is the same shape as .build-ios-spike/replicate-energy.sh.
 #
-# The relay must already be running. It is a separate process on purpose -- it
-# holds the listener and its token, and this script holds none of that.
+# The listener must already be running. It is a separate process on purpose --
+# it holds the listener and this script holds none of it.
 #
-# Usage: t23-run.sh <slot-socket> <pane-id> <host> <port> <token> [seconds]
+# T5 replaced the throwaway relay this originally drove with the tailnet bridge,
+# so there is no token: the bridge authenticates by being reachable only on the
+# tailnet. Start it with
+# `t5-bridge --listen "$(tailscale ip -4):7420" --socket <slot-socket>`.
+#
+# Usage: t23-run.sh <slot-socket> <pane-id> <host> <port> [seconds]
 set -eu
 
 SOCKET="$1"
 PANE="$2"
 HOST="$3"
 PORT="$4"
-TOKEN="$5"
-SECONDS_TO_RUN="${6:-40}"
+SECONDS_TO_RUN="${5:-40}"
 
 DEVICE=93E093CD-0A20-5382-A4ED-1AE8E94B19AE
 BUNDLE=com.danneu.danterm.ios-render-spike
@@ -27,7 +31,7 @@ LOG="$ROOT/.build-ios-spike/console-t23-client.log"
 
 echo "== launching the client smoke on $DEVICE =="
 xcrun devicectl device process launch --device "$DEVICE" --console \
-  -e "{\"SPIKE_MODE\":\"client\",\"T23_HOST\":\"$HOST\",\"T23_PORT\":\"$PORT\",\"T23_TOKEN\":\"$TOKEN\",\"T23_PANE\":\"$PANE\"}" \
+  -e "{\"SPIKE_MODE\":\"client\",\"T23_HOST\":\"$HOST\",\"T23_PORT\":\"$PORT\",\"T23_PANE\":\"$PANE\"}" \
   "$BUNDLE" > "$LOG" 2>&1 &
 LAUNCHER=$!
 

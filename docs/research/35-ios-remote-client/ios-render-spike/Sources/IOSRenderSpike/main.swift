@@ -1009,6 +1009,7 @@ final class SpikeAppDelegate: UIResponder, UIApplicationDelegate {
         case "bench", "bench-sat": BenchViewController()
         case "energy": EnergyViewController()
         case "client": T23ClientSmokeViewController()
+        case "t5": T5LatencyProbeViewController()
         default: SpikeViewController()
         }
         window.rootViewController = root
