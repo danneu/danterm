@@ -26,9 +26,38 @@ import Foundation
 import TerminalCoreRecording
 import UIKit
 
+/// Where the probe's own transcript goes, in the app's Documents container, so
+/// it can be pulled off the device with `devicectl device copy from` afterwards.
+///
+/// This exists because the obvious instrument is not usable for the one
+/// measurement T5 needs. `devicectl device process launch --console` streams the
+/// console over the same LAN wifi the mobility test turns off: the first run of
+/// this probe lost its log the instant wifi went down, and devicectl then
+/// SIGTERMed the app, so the subject died with the instrument for a reason that
+/// had nothing to do with the tailnet. A file on the phone survives both.
+private let transcriptURL: URL? = FileManager.default
+    .urls(for: .documentDirectory, in: .userDomainMask)
+    .first?
+    .appendingPathComponent("t5-beats.log")
+
+private let transcriptLock = NSLock()
+
 private func log(_ message: String) {
     print("SPIKE \(message)")
     fflush(stdout)
+    guard let transcriptURL else { return }
+    // Wall clock, not uptime: a reader correlating this against the Mac's bridge
+    // log needs a timestamp both machines can be read against.
+    let stamped = "\(Date().timeIntervalSince1970) \(message)\n"
+    transcriptLock.lock()
+    defer { transcriptLock.unlock() }
+    if let handle = try? FileHandle(forWritingTo: transcriptURL) {
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data(stamped.utf8))
+    } else {
+        try? Data(stamped.utf8).write(to: transcriptURL)
+    }
 }
 
 /// Percentiles over whatever samples exist, printed with n first so an aggregate
@@ -336,6 +365,10 @@ final class T5LatencyProbeViewController: UIViewController {
             return
         }
         let samples = environment["T5_SAMPLES"].flatMap(Int.init) ?? 40
+        // Start each run's transcript empty, so a pulled file is one run rather
+        // than every run this build has ever done.
+        if let transcriptURL { try? FileManager.default.removeItem(at: transcriptURL) }
+        log("T5 transcript at \(transcriptURL?.path ?? "NONE")")
 
         do {
             // A read timeout, so a network the phone has left shows up as a

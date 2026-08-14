@@ -40,11 +40,19 @@ final class BridgeConnection: @unchecked Sendable {
     /// architecture and not the buffer size.
     private static let readBufferBytes = 64 * 1024
 
+    /// How often a live connection reports its counters. The bridge is the only
+    /// instrument that survives the phone leaving its network, so a connection
+    /// that goes quiet has to be distinguishable from one that has died, and
+    /// only a periodic line can do that.
+    private static let reportInterval: TimeInterval = 5
+
     private let client: Int32
     private let upstream: Int32
     private let peer: String
     private let metrics = ConnectionMetrics()
     private let log: @Sendable (String) -> Void
+    private let openLock = NSLock()
+    private var isOpen = true
 
     init(client: Int32, upstream: Int32, peer: String, log: @escaping @Sendable (String) -> Void) {
         self.client = client
@@ -58,6 +66,19 @@ final class BridgeConnection: @unchecked Sendable {
     /// The downlink runs on this thread and the uplink on its own, so the
     /// caller's thread is the one that outlives the connection and reports it.
     func run() {
+        let reporter = Thread { [self] in
+            while true {
+                Thread.sleep(forTimeInterval: Self.reportInterval)
+                openLock.lock()
+                let open = isOpen
+                openLock.unlock()
+                guard open else { return }
+                log("\(peer) live | \(metrics.summary(final: false))")
+            }
+        }
+        reporter.name = "t5-reporter"
+        reporter.start()
+
         let uplinkThread = Thread { [self] in
             pump(
                 from: client,
@@ -74,7 +95,10 @@ final class BridgeConnection: @unchecked Sendable {
         pump(from: upstream, to: client, direction: .downlink)
         shutdown(client, SHUT_WR)
 
-        log("\(peer) closed | \(metrics.summary())")
+        openLock.lock()
+        isOpen = false
+        openLock.unlock()
+        log("\(peer) closed | \(metrics.summary(final: true))")
         Darwin.close(client)
         Darwin.close(upstream)
     }

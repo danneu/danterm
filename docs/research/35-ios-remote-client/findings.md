@@ -1,7 +1,6 @@
 # Findings -- iOS remote client
 
-Append-only evidence chain for doc 35. F5 is still reserved by the task ledger
-in [README.md](README.md), for the bridge prototype over the tailnet (T5).
+Append-only evidence chain for doc 35.
 
 F2 and F4 outgrew this file and live beside it, per the promotion rule in
 [FORMAT.md](../FORMAT.md). The entries here carry the result and the pointer;
@@ -467,6 +466,169 @@ agent, command, and connection, with no geometry, modes, or screen state;
 gives text. The closest thing to a snapshot today is `pane.rows` plus
 `pane.read`, which carries no attributes, no cursor, and no modes.
 
+### F5 -- the tailnet bridge holds a session across a wifi-to-cell switch
+
+Discharges T5. Reproduction: [t5-run.sh](t5-run.sh), which builds and starts
+[t5-bridge/](t5-bridge/) and launches the `t5` mode of
+[ios-render-spike.sh](ios-render-spike.sh) against it.
+
+- Status: settled for the path it exercised, on one device, over one tailnet,
+  in one session per phase. The latency numbers are diagnostic, not benchmark:
+  they were not produced under
+  [agent-docs/terminal-performance.md](../../../agent-docs/terminal-performance.md)
+  conditions, and this doc's rules require them to be labeled so.
+- Date and investigator: 2026-08-13, agent (T5).
+- Commit and worktree state: `061cf3d8`, plus the instrument changes that land
+  with this finding.
+- Environment: Xcode 26.6, Swift 6.3.3, macOS 26.5.2. Mac `macbook` at
+  `100.106.152.106` on `utun4`; iPhone 13 mini `iphone-13-mini` at
+  `100.98.63.67`, iOS 26. One dev slot from `just launch-slot`, one pane at
+  179x66. Tailscale reported a DNS health failure the whole time (`openat
+  ts.net: path escapes from parent`), so every address here is a raw 100.x one
+  and MagicDNS was never used.
+- **Authentication story, as this doc's investigation rules require of any task
+  that opens a listener.** There is none, and this is the doc's own escape hatch
+  rather than an omission: an unauthenticated listener is permitted exactly when
+  it is bound to the tailnet interface and the finding says so. This one is, and
+  the binding is structural rather than conventional. `TailnetBindAddress` is the
+  only way to construct a listen address, and it refuses a wildcard, any address
+  outside 100.64.0.0/10, and any tailnet address no local interface carries; all
+  four refusals were exercised. There is no flag, no default, and no typo that
+  reaches a listener the tailnet does not already gate, so reaching this port
+  means holding a WireGuard key this tailnet has admitted. This supersedes F7's
+  compromise -- one explicit LAN address plus a shared `token` line -- which
+  existed only because the Mac had no tailnet when T23 ran. Nothing here decides
+  pairing, certificate pinning, the method allowlist, rate limits, or the audit
+  log: T6 owns all of them and records D4, and a prototype that grew an auth
+  model would have pre-empted T6's obligation to weigh the ideal alternative of
+  the app listening on the network itself.
+- Result: **the bridge works, and the phone drove a real pane through it.** An
+  iOS binary linking `DanTermClient` reached the control socket over the tailnet,
+  completed the hello handshake, subscribed with `start: now` and
+  `mode: reconstructible`, received a stream-version-3 opening sync at 179x66,
+  and then held a conversation for 215 consecutive seconds. Nothing in `lib/`
+  changed.
+- Result: **H4 is confirmed in the confirming direction, and the margin is
+  larger than the hypothesis assumed.** The TCP connection survived a full
+  wifi -> cell -> wifi round trip *without reconnecting*. There was no stream
+  close, no resume, no gap record, and no lost frame; the bridge never logged the
+  connection closing, and the phone's own transcript has 215 unbroken beats. The
+  tailnet address is stable across the interface change, so the connection the
+  phone holds is not tied to the path underneath it.
+- Measurements, diagnostic: round trips from the phone, 40 samples per phase.
+  The Mac-to-its-own-tailnet-address baseline is 30 samples of the same request
+  and exists to separate the network from the bridge and the app.
+
+  | Path | p50 | p95 | max |
+  |---|---|---|---|
+  | Mac -> own tailnet address, `pane.info` (baseline) | 1.9ms | 5.6ms | 7.3ms |
+  | Phone -> Mac, `pane.info` (no PTY, no shell) | 11.9ms | 86.8ms | 91.3ms |
+  | Phone -> Mac, keystroke -> the pane's own echo | 21.9ms | 104.8ms | 127.3ms |
+
+- Measurements, diagnostic: the heartbeat across the switch, 215 beats at one
+  per second, segmented by the two transitions. The middle window is 5x slower
+  at p50 and returns afterwards, which is what establishes that the phone really
+  was carrying traffic over cellular rather than briefly dropping an association.
+
+  | Window | beats | p50 | p95 | max | over 100ms |
+  |---|---|---|---|---|---|
+  | wifi, before the switch | 138 | 16.5ms | 128.0ms | 165.9ms | 7% |
+  | cellular | 46 | 80.0ms | 176.7ms | 276.9ms | 28% |
+  | wifi, after returning | 29 | 19.8ms | 124.7ms | 126.2ms | 17% |
+
+  The two transitions cost one stalled beat each: **4.3s leaving wifi** and
+  **6.4s returning to it**. Both completed rather than failing, so the cost of a
+  network switch on this path is a single multi-second freeze, not a session.
+- Result: **the buffering bound is enforced by there being no buffer.** The
+  ledger states that the bridge is the only place an unbounded per-subscriber
+  buffer can exist, so the invariant to carry is that it holds at most one
+  in-flight batch per subscriber. The bridge holds no queue at all: each
+  direction reads one 64 KiB buffer and writes every byte of it before reading
+  again, so when the phone is slow the bridge stalls inside the write, stops
+  draining the control socket, and lands the backpressure on the app -- where
+  `PaneTapeFollowSubscriptions` already keeps one batch in flight and merges
+  every append behind it. The coalescing stays in the component that implements
+  it, and the bridge cannot grow a second, unbounded copy of it.
+- Result: the framer is an observer rather than a gate. Bytes are forwarded as
+  they arrive instead of being held until a record completes, which keeps the
+  bound at one read buffer rather than one record -- and a record here can reach
+  the 16 MiB IPC line bound that a D5 sync is sized against. A repair policy that
+  must act per record is what would have to pay that cost. T20 owns it, and this
+  finding is where the price is recorded rather than discovered later.
+- Measurements, feeding T19 and not deciding it: over the whole 215-second
+  session the downlink carried **252,265 bytes in 571 frames** (largest frame
+  4,303 bytes) and the uplink **52,710 bytes in 372 frames** (largest 192). A
+  stream deflater over the same downlink would have produced **17,973 bytes, a
+  ratio of 0.071** -- about 14x. The bridge measures this and applies nothing:
+  T19 decides whether a binary tape framing has anything left to win after
+  compression, and a prototype that quietly compressed its stream would have
+  answered that by accident. Note the traffic is a heartbeat plus an idle pane,
+  which is the most compressible shape this stream has; it is a ceiling, not a
+  typical case.
+- Observation: **`devicectl device process launch --console` cannot be used for
+  a mobility test, and the way it fails is misleading.** The first attempt lost
+  its console the instant wifi went down -- the console streams over the same LAN
+  wifi the experiment turns off -- and devicectl then SIGTERMed the app, which
+  logged `App terminated due to signal 15`. The subject died with the instrument,
+  for a reason with nothing to do with the tailnet, and the transcript ended at
+  the exact moment the experiment began. The working shape is a detached launch
+  plus two independent records: the phone writes its own timestamped transcript
+  to its Documents container (pulled afterwards with `devicectl device copy
+  from`), and the bridge reports live counters from the Mac. T9 tests airplane
+  mode, backgrounding, and cold relaunch, and will meet this trap first.
+- Uncertainty: **the bound was never stressed.** Across the whole session the
+  bridge spent 27ms blocked writing to the phone, out of 215 seconds. The phone
+  kept up with an idle pane trivially, so the backpressure path is proved to
+  exist by construction and is not proved to behave under load. The workload that
+  would exercise it is a flood, and T21 owns the flood.
+- Uncertainty: **the p95 tail is unexplained.** On wifi the round trip is 12ms at
+  p50 and 87ms at p95 on an otherwise idle link, and 7% of heartbeat beats
+  exceeded 100ms. Phone wifi power saving, Tailscale, and the bridge are all
+  candidates and none was separated. It matters because the doc already records
+  that latency is the phone's dominant variable and that no task owns it.
+- Uncertainty: **TLS was never tested.** H4 says "a TCP+TLS listener" and this
+  prototype terminates no TLS. The user chose that: over WireGuard, TLS adds
+  encryption that is already there and, without pinning, no identity -- and
+  choosing an identity model is D4's job. So the TLS half of H4 is untested
+  rather than disproved, and T6 should decide it rather than inherit it.
+- Uncertainty: one run per phase, one device, one tailnet, one physical location.
+  The switch was made from Control Center, which drops the wifi association but
+  does not power the radio down, so a phone that walks out of range may behave
+  differently from one that is told to leave.
+- Uncertainty: nothing here measured battery, and the heartbeat is not a
+  realistic workload for it.
+- Inference: **resume is not what a network switch needs.** D5 built sync and
+  cursor resume for a client whose subscription dies, and F4 measured what the
+  gap costs. This finding says the wifi-to-cell case does not reach that
+  machinery at all -- the connection simply persists through a multi-second
+  freeze. That narrows what T9 is really testing: backgrounding, app death, and
+  cold relaunch, where the process loses its socket, rather than mobility, where
+  it does not. It also raises the value of the freeze itself as a UI problem: the
+  client is unresponsive for four to six seconds with no error to show, and
+  nothing in the protocol tells it which of the two situations it is in.
+- Inference: Tailscale earns its place in the direction section on evidence now
+  rather than on being half-deployed. It supplies the reachability, the stable
+  address that makes the switch survivable, and the identity that lets this
+  listener carry no auth of its own.
+- Next action: T6 takes the auth model with the tailnet arm now demonstrated,
+  and must still weigh the app listening on the network itself against a bridge.
+  T9 takes backgrounding and cold relaunch, and the `--console` trap above. T19
+  takes the compression ceiling. T21 takes the flood that would stress the bound.
+
+#### The T23 relay is deleted, not archived
+
+`t23-relay.py` is removed. It was a throwaway TCP splice with no framing, no
+session state, and no buffering policy, and its shared-token authentication
+existed only because there was no tailnet to bind to. Every one of those is now
+answered by the bridge, and this doc's rules delete a spike once the gate it
+feeds has chosen.
+
+F7's reproduction is not orphaned by the deletion: the T23 client smoke runs
+against the bridge instead, and [t23-run.sh](t23-run.sh) takes no token. That
+is worth stating rather than leaving to be discovered, because it means F7's
+result -- the composition works on a phone -- is still reproducible from the
+tree as it stands.
+
 ### F6 -- the client module ships, and the platform claim is now gated
 
 Discharges T17, T18, and T14. Plan:
@@ -531,8 +693,11 @@ is correct and stays correct; nobody should copy from it.
 ### F7 -- the composition runs on a phone: a real pane, a replica engine, real pixels
 
 Discharges T23, the residual D3 closed over. Reproduction:
-[t23-relay.py](t23-relay.py) plus [t23-run.sh](t23-run.sh), against the client
-mode of [ios-render-spike.sh](ios-render-spike.sh). Console transcript:
+[t23-run.sh](t23-run.sh), against the client mode of
+[ios-render-spike.sh](ios-render-spike.sh). It originally drove a throwaway
+relay, `t23-relay.py`, which T5 replaced with the tailnet bridge and F5 deleted;
+the smoke reproduces against [t5-bridge/](t5-bridge/) and sends no token.
+Console transcript:
 [t23-artifacts/console-client-smoke.log](t23-artifacts/console-client-smoke.log).
 
 - Status: settled for the path it exercised. It is a smoke test: it says the
@@ -636,4 +801,7 @@ mode of [ios-render-spike.sh](ios-render-spike.sh). Console transcript:
 - Next action: T5 can assume the client end is real, and should take the local
   network key and the correlate-by-id rule from this finding rather than
   rediscovering them. The spike and the relay are throwaway per this doc's
-  rules; delete them once T5 has a bridge.
+  rules; delete them once T5 has a bridge. **F5 deleted the relay.** The local
+  network key turned out not to bite over the tailnet -- a 100.x address is not
+  a local network address, so iOS did not gate it -- but the correlate-by-id
+  rule did carry, and the T5 probe was written against it from the start.

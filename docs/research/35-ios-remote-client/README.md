@@ -11,11 +11,16 @@ Research started: 2026-08-12.
   screenshots.
 - [f4-mac-to-mac.md](f4-mac-to-mac.md) -- F4 in full, with the `t4-spike/`
   client and its ten scenarios.
-- [t23-relay.py](t23-relay.py) and [t23-run.sh](t23-run.sh) -- the F7
-  reproduction: a throwaway authenticated TCP relay on the Mac, and the run that
-  drives a real pane while the phone replicates it. The phone half is the
-  `client` mode of [ios-render-spike.sh](ios-render-spike.sh); its console
-  transcript is under `t23-artifacts/`.
+- [t5-bridge/](t5-bridge/) and [t5-run.sh](t5-run.sh) -- the F5 reproduction:
+  the bridge that puts the control socket on the tailnet, and the run that
+  measures round trips from the phone and holds a session across a network
+  switch. The phone half is the `t5` mode of
+  [ios-render-spike.sh](ios-render-spike.sh).
+- [t23-run.sh](t23-run.sh) -- the F7 reproduction: the run that drives a real
+  pane while the phone replicates it, against the bridge above. The phone half
+  is the `client` mode of [ios-render-spike.sh](ios-render-spike.sh); its
+  console transcript is under `t23-artifacts/`. It originally drove a throwaway
+  authenticated relay, which F5 deleted.
 - [briefing.md](briefing.md) -- the initiating brainstorm dump: repo census, IPC
   surface, portability inference, candidate directions. Census-grade evidence;
   every claim that carries weight is re-verified by a Phase 1 task before a
@@ -188,12 +193,29 @@ and the observe-vs-claim consequence for T10.
 
 ### H4 -- a bridge process over the tailnet survives real phone mobility
 
-A TCP+TLS listener proxying frames into the existing Unix socket, reached over
-Tailscale, plus client-side reconnect and a resume protocol, yields a usable
-session across wifi-to-cell transitions and app backgrounding. Competing
-explanations: connection churn is frequent enough that even resume feels broken
-without server-side buffering (feeds T8's design), or Tailscale's own iOS
-background behavior dominates. T5 and T9 test with a real phone.
+A TCP listener proxying frames into the existing Unix socket, reached over
+Tailscale, yields a usable session across wifi-to-cell transitions and app
+backgrounding.
+
+The mobility half is confirmed by F5, and more cheaply than the hypothesis
+assumed: the wifi-to-cell case needs no client-side reconnect and no resume at
+all, because the tailnet address is stable across the interface change and the
+TCP connection simply persists. It costs one multi-second freeze in each
+direction -- 4.3s out, 6.4s back -- and nothing else. Both competing
+explanations are therefore dead for this case: connection churn did not happen,
+so server-side buffering cannot be needed to paper over it, and Tailscale's
+background behavior did not dominate because the app stayed in the foreground
+throughout.
+
+What that leaves open is the half where the process really does lose its socket:
+backgrounding, app death, and cold relaunch, which is T9. The freeze is also a
+UI question nobody owns yet -- the client is unresponsive for several seconds
+with nothing to show, and no protocol signal distinguishes a slow network from a
+dead one.
+
+F5 tested no TLS, so the encrypted-listener half of the original hypothesis is
+untested rather than disproved; T6 decides whether it is wanted over a transport
+that already encrypts.
 
 ### H5 -- the split is decided by derivability, not by a smart/dumb dial
 
@@ -269,7 +291,10 @@ in the ledger.
 - **Server: a separate bridge process** (`danterm serve` or `danterm-bridge`)
   owns network listening, authentication, and later the APNs sender; the app's
   Unix-socket security model stays untouched.
-- **Reachability: Tailscale**, already half-deployed.
+- **Reachability: Tailscale**, deployed on both ends and confirmed by F5. It
+  supplies three things at once: the reachability, the stable address that makes
+  a network switch survivable without reconnecting, and the peer identity that
+  lets the listener carry no authentication of its own.
 - **UI: tabs/groups as a list, panes as a flat list within a tab, one pane
   on screen.**
 
@@ -352,19 +377,34 @@ isolation, and F7 then ran the composition on a phone against a live pane.
 
 ### Phase 2 -- transport, authentication, security
 
-- **T5 RESEARCH** -- Bridge prototype: TCP+TLS listener proxying frames into
-  the Unix socket, bound to the tailnet interface; put Tailscale on the phone
-  and connect with a scratch client. Record round-trip latency and behavior
-  across a wifi/cell switch in F5. Two H5 consequences land here rather than in
-  T8. First, the bridge is where an unbounded per-subscriber buffer can exist at
-  all: the app side already holds a cursor and two booleans per subscription and
-  stores no events, and the ring is the flight recorder, so the invariant to
-  carry across the network is that **the bridge buffers at most one in-flight
-  batch per subscriber**. State it where the bound lives, or it gets enforced in
-  the layer that was never the risk. Second, stream compression at the bridge is
-  architectural and safe to adopt now; a binary tape framing is not, because
-  deflate over JSON envelopes and base64 may erase most of that tax for no
-  protocol change. T19 decides whether any framing work is left.
+- **T5 DONE** (F5) -- Bridge prototype over the tailnet. A phone drove a real
+  pane through it for 215 seconds, and the headline result is that the session
+  **survived a wifi -> cell -> wifi switch without reconnecting**: no stream
+  close, no resume, no lost frame, at a cost of one stalled beat of 4.3s leaving
+  wifi and 6.4s returning. Round trips from the phone are 11.9ms at p50 for an
+  RPC and 21.9ms for a keystroke to the pane's own echo, against a 1.9ms
+  Mac-local baseline; cellular runs 5x slower at p50 than wifi. All diagnostic,
+  not benchmark.
+  The listener is unauthenticated and bound to the tailnet interface, which is
+  this doc's own escape hatch, and the binding is structural: the one type that
+  can produce a listen address refuses wildcards, anything outside 100.64.0.0/10,
+  and any tailnet address no local interface carries. That retires F7's
+  shared-token compromise. **TLS was not tested** -- over WireGuard it adds
+  encryption that is already there and, without pinning, no identity -- so that
+  half of H4 is untested rather than disproved, and T6 decides it.
+  The buffering invariant landed as an absence: the bridge holds no queue, so a
+  slow phone stalls it inside a write, which stops it draining the control socket
+  and lands the backpressure on the app, where the one-batch-in-flight coalescing
+  already lives. It was never stressed -- 27ms blocked writing across the whole
+  session -- so T21's flood is what would exercise it. Stream compression is
+  measured and not applied: 252 KB of downlink deflates to 18 KB, about 14x, on
+  the most compressible traffic this stream has. T19 still owns the framing
+  question.
+  Two results carry past T5. Resume is not what a network switch needs, which
+  narrows T9 to backgrounding, app death, and cold relaunch. And
+  `devicectl process launch --console` cannot instrument a mobility test: the
+  console rides the wifi the experiment turns off, and devicectl SIGTERMs the app
+  when it drops, so the subject dies with the instrument.
 - **T23 DONE** (F7) -- On-device integration smoke. It passes. An iOS binary
   links `DanTermClient`, subscribes to a live pane over a TCP conformance of the
   transport seam, applies the D5 sync with the shipped assembler, drives a
@@ -390,7 +430,13 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   pinned client certificates, and a pairing token; decide where the method
   allowlist, rate limits, and audit log live. Also weigh the ideal alternative
   to a bridge (the app listening on the network itself) rather than assuming
-  the bridge. Records D4.
+  the bridge. Records D4. F5 demonstrated the tailnet-identity-only arm end to
+  end and deliberately decided nothing else, so this task inherits a working
+  example rather than a commitment. Two things it should settle explicitly:
+  whether TLS is wanted at all over a transport that already encrypts and
+  authenticates, and whether the structural bind guard F5 built -- a listen
+  address that cannot be constructed off the tailnet -- is the right shape for
+  the shipped surface or an artifact of a prototype with no auth.
 - **T7 TODO** -- Security review of the exposed surface: what
   internet-reachable `pane.input` implies, the `NSHomeDirectory` taint in `ls`
   and snapshot payloads (briefing.md sec. 7) now that replies cross machines,
@@ -475,7 +521,12 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   decide it; the buffering bound itself is not in question and belongs to T5.
 - **T9 TODO** -- Reconnect behavior on the phone against the T5 bridge and the
   T8 protocol: airplane-mode toggles, backgrounding, cold relaunch. Record what
-  each recovery actually required in a finding.
+  each recovery actually required in a finding. F5 narrowed this: a wifi-to-cell
+  switch needs no reconnect at all, so what is left is the cases where the
+  process genuinely loses its socket. Take the instrument trap with it --
+  `devicectl process launch --console` streams over the wifi these tests
+  interrupt, and devicectl SIGTERMs the app when that drops, so a detached launch
+  plus a phone-side transcript is the only shape that works.
 
 ### Phase 4 -- geometry and input semantics
 
@@ -623,7 +674,11 @@ issues `pane.split`. Reopen on user request only.
   pick a window before T3 and T9 measure both sides.
 - **Latency is the phone's dominant variable, and no task owns it.** Bandwidth
   over a tailnet is nearly free; the round trip on cell is not, so every traffic
-  lever should be scored against latency and not only against bytes. The replica
+  lever should be scored against latency and not only against bytes. F5 supplies
+  the first magnitudes -- 12ms for an RPC and 22ms keystroke-to-echo on wifi,
+  with cellular 5x slower at p50 -- and one number nobody has explained: the p95
+  is seven times the p50 on an idle wifi link, and phone power saving,
+  Tailscale, and the bridge were not separated. The replica
   engine also makes mosh-style predictive local echo reachable later -- the
   client has a real terminal, so it can apply its own keystrokes speculatively
   and reconcile against the authoritative stream. That is not milestone-1 work

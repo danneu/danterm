@@ -145,21 +145,39 @@ final class ConnectionMetrics: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// One line per connection, with every counter printed even when zero: a
-    /// zero here is a result, not an absence.
-    func summary() -> String {
+    /// One line of counters, with every one printed even when zero: a zero here
+    /// is a result, not an absence.
+    ///
+    /// `final` flushes the deflater, so it may be passed exactly once and only
+    /// when the connection is over -- a live summary that finalized the stream
+    /// would corrupt every count after it. Live summaries exist because the
+    /// bridge is the only instrument that survives the phone changing networks:
+    /// the console channel this spike is watched through runs over the same
+    /// wifi the experiment turns off.
+    func summary(final: Bool) -> String {
         lock.lock()
         defer { lock.unlock() }
-        deflate?.finish()
-        let deflated = deflate?.deflatedBytes ?? -1
-        let ratio = downlink.bytes > 0 && deflated >= 0
-            ? String(format: "%.3f", Double(deflated) / Double(downlink.bytes))
-            : "n/a"
+        // A deflater holds its window until it is flushed, so an unfinished
+        // count is not a small number -- it is not a number at all, and printing
+        // it as one would read as "compression saved everything".
+        let compression: String
+        if final, let probe = deflate, downlink.bytes > 0 {
+            // Flush first: the count is only complete once the window is out.
+            probe.finish()
+            let deflated = probe.deflatedBytes
+            compression = "deflated=\(deflated) ratio="
+                + String(format: "%.3f", Double(deflated) / Double(downlink.bytes))
+                + " (measured, not applied)"
+        } else if final {
+            compression = "deflated=NOT-MEASURED"
+        } else {
+            compression = "deflated=PENDING (a stream deflater reports only when flushed)"
+        }
         return "uplink frames=\(uplink.frames) bytes=\(uplink.bytes)"
             + " largestFrame=\(uplink.largestFrameBytes)"
             + " | downlink frames=\(downlink.frames) bytes=\(downlink.bytes)"
             + " largestFrame=\(downlink.largestFrameBytes)"
-            + " | downlink deflated=\(deflated) ratio=\(ratio) (measured, not applied)"
+            + " | downlink \(compression)"
             + " | blockedWriting="
             + String(format: "%.1f", Double(blockedWritingNanoseconds) / 1e6) + "ms"
     }
