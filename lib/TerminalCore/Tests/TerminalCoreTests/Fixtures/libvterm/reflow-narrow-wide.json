@@ -8,7 +8,8 @@
     "license": "MIT",
     "licenseNotice": "LICENSE.libvterm.txt",
     "recordedDeviations": [
-      "DanTerm inserts a spacer head rather than splitting a wide cell at the odd-width boundary."
+      "DanTerm inserts a spacer head rather than splitting a wide cell at the odd-width boundary.",
+      "DanTerm preserves the two trailing blank rows, so narrowing displaces the first two refolded rows into scrollback."
     ]
   },
   "initial": { "columns": 6, "rows": 3 },
@@ -18,15 +19,33 @@
     {
       "type": "expect",
       "expect": {
-        "viewportText": "ab \n\u754cc\nd  ",
+        "viewportText": "d  \n   \n   ",
         "cellKinds": [
-          ["narrow", "narrow", "spacer-head"],
-          ["wide-head", "wide-tail", "narrow"],
-          ["narrow", "padding", "padding"]
+          ["narrow", "padding", "padding"],
+          ["padding", "padding", "padding"],
+          ["padding", "padding", "padding"]
         ],
-        "softWraps": [true, true, false],
-        "cursor": { "row": 2, "column": 1, "pendingWrap": false },
-        "scrollbackCount": 0,
+        "softWraps": [false, false, false],
+        "cursor": { "row": 0, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 2,
+        "scrollbackRows": [
+          {
+            "softWrapped": true,
+            "cells": [
+              { "kind": "narrow", "scalars": "a" },
+              { "kind": "narrow", "scalars": "b" },
+              { "kind": "spacer-head", "scalars": "" }
+            ]
+          },
+          {
+            "softWrapped": true,
+            "cells": [
+              { "kind": "wide-head", "scalars": "\u754c" },
+              { "kind": "wide-tail", "scalars": "" },
+              { "kind": "narrow", "scalars": "c" }
+            ]
+          }
+        ],
         "fullHistoryText": "ab\u754ccd"
       }
     }

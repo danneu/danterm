@@ -270,10 +270,11 @@ struct TerminalCellStyleTests {
 
         terminal.resize(columns: 3, rows: 3)
 
-        #expect(terminal.cell(row: 0, column: 2)?.kind == .spacerHead)
-        #expect(terminal.cell(row: 0, column: 2)?.style == red)
-        #expect(terminal.cell(row: 1, column: 0)?.style == red)
-        #expect(terminal.cell(row: 1, column: 1)?.style == red)
+        #expect(terminal.scrollbackRowCount == 1)
+        #expect(terminal.scrollbackRow(at: 0)?.cells[2].kind == .spacerHead)
+        #expect(terminal.scrollbackRow(at: 0)?.cells[2].style == red)
+        #expect(terminal.cell(row: 0, column: 0)?.style == red)
+        #expect(terminal.cell(row: 0, column: 1)?.style == red)
         expectValidGrid(terminal)
     }
 

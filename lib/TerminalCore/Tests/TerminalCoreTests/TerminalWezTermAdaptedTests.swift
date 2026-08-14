@@ -131,9 +131,10 @@ struct TerminalWezTermAdaptedTests {
         //   collapsed into one walk because DanTerm's resize is order-canonical
         //   (see `combinedResizeUsesCanonicalOrder`), so the by-2-then-up-1 variant adds a
         //   height leg rather than a distinct width transition.
-        //   Divergence: WezTerm asserts a one-past-end cursor (`x == cols`) and a `seqno`;
-        //   DanTerm has no such position, so each of those states is translated to the
-        //   last cell plus `isPendingWrap: true`, and no sequence number is asserted.
+        //   Divergence: WezTerm consumes trailing blanks on the narrow leg. DanTerm preserves
+        //   them, so the wrapped head moves to scrollback and the cursor stays with the live tail.
+        //   WezTerm also asserts a one-past-end cursor (`x == cols`) and a `seqno`; DanTerm has
+        //   no such position, so that state uses the last cell plus `isPendingWrap: true`.
         var terminal = try #require(Terminal(columns: 20, rows: 4))
         terminal.feed(Array("some long long text".utf8))
         #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 19, isPendingWrap: false))
@@ -147,9 +148,11 @@ struct TerminalWezTermAdaptedTests {
 
         // WezTerm's by-2 leg: the tail moves to a continuation row and the cursor follows it.
         terminal.resize(columns: 18, rows: 4)
-        #expect(terminal.screenText.split(separator: "\n")[0] == "some long long tex")
-        #expect(terminal.geometry.rows[0].isSoftWrapped == true)
-        #expect(terminal.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: false))
+        #expect(terminal.scrollbackRowCount == 1)
+        #expect(terminal.scrollbackRow(at: 0)?.isSoftWrapped == true)
+        #expect(terminal.screenText.split(separator: "\n")[0] == "t                 ")
+        #expect(terminal.geometry.rows[0].isSoftWrapped == false)
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 1, isPendingWrap: false))
 
         // The height leg from #test_resize_2162_by_2_then_up_1, folded back to full width.
         terminal.resize(columns: 20, rows: 3)

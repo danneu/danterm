@@ -242,19 +242,19 @@ struct TerminalResizeTests {
         narrow.feed(Array("abcdef".utf8))
         narrow.moveCursor(row: 0, column: 4)
         narrow.resize(columns: 4, rows: 3)
-        #expect(narrow.geometry.cursor == TerminalCursor(row: 1, column: 0, isPendingWrap: false))
+        #expect(narrow.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
 
         var tail = try #require(Terminal(columns: 6, rows: 3))
         tail.feed(Array("ab\u{754C}c".utf8))
         tail.moveCursor(row: 0, column: 3)
         tail.resize(columns: 3, rows: 3)
-        #expect(tail.geometry.cursor == TerminalCursor(row: 1, column: 0, isPendingWrap: false))
+        #expect(tail.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
 
         var head = try #require(Terminal(columns: 6, rows: 3))
         head.feed(Array("ab\u{754C}c".utf8))
         head.moveCursor(row: 0, column: 2)
         head.resize(columns: 3, rows: 3)
-        #expect(head.geometry.cursor == TerminalCursor(row: 1, column: 0, isPendingWrap: false))
+        #expect(head.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
 
         var spacer = try #require(Terminal(columns: 3, rows: 3))
         spacer.feed(Array("ab\u{754C}".utf8))
@@ -313,7 +313,7 @@ struct TerminalResizeTests {
         var narrower = try #require(Terminal(columns: 6, rows: 3))
         narrower.feed(Array("abcdef".utf8))
         narrower.resize(columns: 3, rows: 3)
-        #expect(narrower.geometry.cursor == TerminalCursor(row: 1, column: 2, isPendingWrap: true))
+        #expect(narrower.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: true))
     }
 
     @Test("a squeezed-out trailing-blank cursor defers its wrap instead of eating a cell")
@@ -355,15 +355,29 @@ struct TerminalResizeTests {
         #expect(padded.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
     }
 
-    @Test("width shrink uses viewport blanks before displacing content")
-    func widthShrinkDoesNotSelfPush() throws {
+    @Test("width shrink preserves trailing blanks by displacing content")
+    func widthShrinkPreservesTrailingBlanksAndRoundTrips() throws {
+        // Intent: narrowing preserves never-written rows and widening restores the exact layout.
+        // Why it exists: consuming trailing blanks makes width reflow lossy and requires later
+        //   resize calls to remember the destroyed layout.
+        // Scenario: one full row above two blank rows wraps once at the narrow width.
         var terminal = try #require(Terminal(columns: 6, rows: 3))
         terminal.feed(Array("abcdef".utf8))
+        let screen = terminal.screenText
+        let cursor = terminal.geometry.cursor
+        let scrollbackRows = terminal.scrollbackRowCount
 
         terminal.resize(columns: 4, rows: 3)
 
-        #expect(terminal.scrollbackRowCount == 0)
-        #expect(terminal.screenText == "abcd\nef  \n    ")
+        #expect(terminal.scrollbackRowCount == 1)
+        #expect(terminal.screenText == "ef  \n    \n    ")
+
+        terminal.resize(columns: 6, rows: 3)
+
+        #expect(terminal.screenText == screen)
+        #expect(terminal.geometry.cursor == cursor)
+        #expect(terminal.scrollbackRowCount == scrollbackRows)
+        expectValidGrid(terminal)
     }
 
     @Test("a width round trip preserves a Codex composer viewport above the bottom")
@@ -403,12 +417,11 @@ struct TerminalResizeTests {
         expectValidGrid(terminal)
     }
 
-    @Test("a multi-step width series restores a trailing-padding cursor")
-    func multiStepWidthSeriesRestoresTrailingPaddingCursor() throws {
+    @Test("a multi-step width walk restores layout but may clamp a padding cursor")
+    func multiStepWidthWalkRestoresLayoutAndHistory() throws {
         var terminal = try makeComposerFixture()
         terminal.moveCursor(row: 2, column: 9)
         let viewport = terminal.screenText
-        let cursor = terminal.geometry.cursor
         let scrollbackRows = terminal.scrollbackRowCount
         let fullHistory = terminal.fullHistoryText
 
@@ -421,62 +434,17 @@ struct TerminalResizeTests {
         }
 
         #expect(terminal.screenText == viewport)
-        #expect(terminal.geometry.cursor == cursor)
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 6, isPendingWrap: false))
         #expect(terminal.scrollbackRowCount == scrollbackRows)
     }
 
-    @Test("primary output ends a width series before the next width change")
-    func primaryOutputEndsWidthSeries() throws {
+    @Test("viewport navigation survives widening while the live layout round trips")
+    func viewportNavigationPreservesBrowsingAnchorAcrossWiden() throws {
         var terminal = try makeComposerFixture()
-        terminal.resize(columns: 5, rows: 6)
-        terminal.feed(Array("X".utf8))
-        let afterOutput = terminal.fullHistoryText
-        var explicitlyEnded = terminal
-        explicitlyEnded.scroll(byRows: 0)
-
-        terminal.resize(columns: 10, rows: 6)
-        explicitlyEnded.resize(columns: 10, rows: 6)
-
-        #expect(terminal == explicitlyEnded)
-        #expect(terminal.fullHistoryText == afterOutput)
-        #expect(terminal.viewportText.contains("composeX"))
-        expectValidGrid(terminal)
-    }
-
-    @Test("primary cursor motion ends a width series before the next width change")
-    func primaryCursorMotionEndsWidthSeries() throws {
-        var terminal = try makeComposerFixture()
-        terminal.resize(columns: 5, rows: 6)
-        terminal.feed(Array("\u{001B}[1;1H".utf8))
-        var explicitlyEnded = terminal
-        explicitlyEnded.scroll(byRows: 0)
-
-        terminal.resize(columns: 10, rows: 6)
-        explicitlyEnded.resize(columns: 10, rows: 6)
-
-        #expect(terminal == explicitlyEnded)
-        #expect(terminal.geometry.cursor?.column == 0)
-        expectValidGrid(terminal)
-    }
-
-    @Test("height then width establishes a new resize layout")
-    func heightChangeEndsWidthSeriesInCanonicalOrder() throws {
-        var combined = try makeComposerFixture()
-        combined.resize(columns: 5, rows: 6)
-        combined.resize(columns: 5, rows: 7)
-        var explicitlyEnded = combined
-        explicitlyEnded.scroll(byRows: 0)
-
-        combined.resize(columns: 10, rows: 7)
-        explicitlyEnded.resize(columns: 10, rows: 7)
-
-        #expect(combined == explicitlyEnded)
-        expectValidGrid(combined)
-    }
-
-    @Test("viewport navigation replaces the resize-series viewport anchor")
-    func viewportNavigationEndsWidthSeries() throws {
-        var terminal = try makeComposerFixture()
+        let liveScreen = terminal.screenText
+        let liveStructure = terminal.rowStructure
+        let liveHistoryRows = terminal.scrollbackRowCount
+        let fullHistory = terminal.fullHistoryText
         terminal.resize(columns: 5, rows: 6)
         terminal.scroll(toTopRow: 0)
         #expect(terminal.scrollProjection.isFollowing == false)
@@ -485,28 +453,53 @@ struct TerminalResizeTests {
 
         #expect(terminal.scrollProjection.isFollowing == false)
         #expect(terminal.viewportText.contains("history-0"))
+        #expect(terminal.rowStructure == liveStructure)
+        #expect(terminal.scrollbackRowCount == liveHistoryRows)
+        #expect(terminal.fullHistoryText == fullHistory)
+        var following = terminal
+        following.scrollToBottom()
+        #expect(following.screenText == liveScreen)
         expectValidGrid(terminal)
     }
 
-    @Test("reset prevents a later width from restoring the ended layout")
-    func resetEndsWidthSeries() throws {
-        for reset in [[UInt8](arrayLiteral: 0x1B, 0x63), Array("\u{001B}[!p".utf8)] {
-            var terminal = try makeComposerFixture()
-            terminal.resize(columns: 5, rows: 6)
-            terminal.feed(reset)
-            var explicitlyEnded = terminal
-            explicitlyEnded.scroll(byRows: 0)
+    @Test("cursor visibility removes only trailing blanks and widening fills their rows from history")
+    func cursorVisibilityClampDefinesResidualBlankLoss() throws {
+        // Intent: a cursor above wrapping content removes only the trailing blanks that would
+        //   hide it, and a later widen fills exactly those lost rows from retained history.
+        // Why it exists: structural blank preservation has one deliberate lossy edge. Without
+        //   this boundary test, the cursor clamp could discard content or preserve hidden blanks.
+        // Scenario: two live full rows and two trailing blanks sit below retained short lines;
+        //   the cursor returns to the first row before a 6 -> 3 -> 6 width round trip.
+        var terminal = try #require(Terminal(columns: 6, rows: 4))
+        terminal.feed(Array("h0\r\nh1\r\nh2\r\nh3\r\nh4\r\nh5\r\n".utf8))
+        terminal.feed(Array("\u{001B}[2J".utf8))
+        terminal.moveCursor(row: 0, column: 0)
+        terminal.feed(Array("abcdef".utf8))
+        terminal.moveCursor(row: 1, column: 0)
+        terminal.feed(Array("ghijkl".utf8))
+        terminal.moveCursor(row: 0, column: 0)
+        let historyRows = terminal.scrollbackRowCount
+        let fullHistory = terminal.fullHistoryText
 
-            terminal.resize(columns: 10, rows: 6)
-            explicitlyEnded.resize(columns: 10, rows: 6)
+        terminal.resize(columns: 3, rows: 4)
 
-            #expect(terminal == explicitlyEnded)
-            expectValidGrid(terminal)
-        }
+        #expect(terminal.scrollbackRowCount == historyRows)
+        #expect(terminal.screenText == "abc\ndef\nghi\njkl")
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
+
+        terminal.resize(columns: 6, rows: 4)
+
+        #expect(terminal.scrollbackRowCount == historyRows - 2)
+        #expect(terminal.screenText.hasSuffix("abcdef\nghijkl"))
+        #expect(terminal.fullHistoryText == fullHistory)
+        #expect(terminal.geometry.rows.allSatisfy { row in
+            row.cells.contains { $0.kind != .padding }
+        })
+        expectValidGrid(terminal)
     }
 
-    @Test("a primary width series survives alternate-screen output")
-    func alternateOutputDoesNotEndPrimaryWidthSeries() throws {
+    @Test("a primary width round trip restores behind alternate-screen output")
+    func primaryWidthRoundTripBehindAlternateScreen() throws {
         var terminal = try makeComposerFixture()
         let viewport = terminal.screenText
         let cursor = terminal.geometry.cursor
@@ -527,28 +520,8 @@ struct TerminalResizeTests {
         expectValidGrid(terminal)
     }
 
-    @Test("screen transitions end an existing primary width series")
-    func screenTransitionEndsWidthSeries() throws {
-        var terminal = try makeComposerFixture()
-        terminal.resize(columns: 5, rows: 6)
-        let historyBeforeTransition = terminal.scrollbackRowCount
-        terminal.feed(Array("\u{001B}[?1047h".utf8))
-        terminal.moveCursor(row: 5, column: 0)
-        terminal.feed(Array("\u{001B}[?1047l".utf8))
-        var explicitlyEnded = terminal
-        explicitlyEnded.scroll(byRows: 0)
-
-        terminal.resize(columns: 10, rows: 6)
-        explicitlyEnded.resize(columns: 10, rows: 6)
-
-        #expect(terminal == explicitlyEnded)
-        #expect(terminal.geometry.cursor?.row == 3)
-        #expect(terminal.scrollbackRowCount < historyBeforeTransition)
-        expectValidGrid(terminal)
-    }
-
-    @Test("eviction clamps a width-series viewport to retained content")
-    func widthSeriesClampsAfterEviction() throws {
+    @Test("widen after full eviction pads blanks without resurrecting history")
+    func widthWidenAfterEvictionPreservesRetainedContent() throws {
         var terminal = try makeComposerFixture()
         terminal.resize(columns: 3, rows: 6)
         terminal.evictScrollbackRowsForTesting(Int.max)
@@ -559,26 +532,37 @@ struct TerminalResizeTests {
         #expect(terminal.fullHistoryText == retainedHistory)
         #expect(terminal.viewportText.contains("compose"))
         #expect(terminal.viewportText.contains("history-0") == false)
+        #expect(terminal.geometry.rows.count == 6)
         expectValidGrid(terminal)
     }
 
-    @Test("continuation growth above the cursor consumes its bottom-row distance")
-    func widthShrinkCountsAllContinuationsAboveCursor() throws {
-        // Intent: count reflow growth from every viewport line at or above
-        //   the cursor when deriving its new distance from the bottom.
-        // Why it exists: counting only the cursor's logical line appended an
-        //   extra blank and displaced a second source row into scrollback.
+    @Test("continuation growth above the cursor preserves its trailing blank")
+    func widthShrinkDisplacesAllGrowthAndRoundTrips() throws {
+        // Intent: every continuation added above the cursor displaces content while the one
+        //   never-written row below it remains layout data.
+        // Why it exists: deriving padding from cursor distance consumes blanks during shrink
+        //   and loses the layout that a later widen must reconstruct.
         // Scenario: two full hard lines above a cursor each gain a continuation
-        //   row when the viewport narrows from six columns to three.
+        //   row when the viewport narrows from six columns to three, then fold back exactly.
         var terminal = try #require(Terminal(columns: 6, rows: 4))
         terminal.feed(Array("abcdef\r\nghijkl\r\nm".utf8))
         #expect(terminal.geometry.cursor?.row == 2)
+        let screen = terminal.screenText
+        let cursor = terminal.geometry.cursor
+        let scrollbackRows = terminal.scrollbackRowCount
 
         terminal.resize(columns: 3, rows: 4)
 
-        #expect(terminal.scrollbackRowCount == 1)
-        #expect(terminal.screenText == "def\nghi\njkl\nm  ")
-        #expect(terminal.geometry.cursor?.row == 3)
+        #expect(terminal.scrollbackRowCount == 2)
+        #expect(terminal.screenText == "ghi\njkl\nm  \n   ")
+        #expect(terminal.geometry.cursor?.row == 2)
+
+        terminal.resize(columns: 6, rows: 4)
+
+        #expect(terminal.screenText == screen)
+        #expect(terminal.geometry.cursor == cursor)
+        #expect(terminal.scrollbackRowCount == scrollbackRows)
+        expectValidGrid(terminal)
     }
 
     @Test("post-clear shrink keeps history out and overflow shrink moves only top rows")
@@ -619,8 +603,12 @@ struct TerminalResizeTests {
         var cluster = try #require(Terminal(columns: 6, rows: 3))
         cluster.feed(Array(("a" + family + "b").utf8))
         cluster.resize(columns: 2, rows: 3)
-        #expect(cluster.geometry.rows[0].cells.last?.kind == .spacerHead)
-        #expect(cluster.cell(row: 1, column: 0)?.scalars == TerminalScalars(family.unicodeScalars))
+        #expect(cluster.scrollbackRowCount == 2)
+        #expect(cluster.scrollbackRow(at: 0)?.cells.last?.kind == .spacerHead)
+        #expect(
+            cluster.scrollbackRow(at: 1)?.cells[0].scalars
+                == TerminalScalars(family.unicodeScalars)
+        )
         expectValidGrid(cluster)
     }
 

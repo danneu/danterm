@@ -629,20 +629,6 @@ public struct Terminal: Equatable, Sendable {
         case boundary(line: Int, offset: Int)
     }
 
-    /// Keeps the cursor's logical meaning after an intermediate width clamps its grid position.
-    private enum WidthResizeCursorAttachment: Equatable, Sendable {
-        case cell(offset: Int)
-        case trailingPadding(distance: Int, allPaddingColumn: Int?)
-        case boundary(offset: Int)
-    }
-
-    /// Retains the primary layout that consecutive width changes must keep restating.
-    private struct WidthResizeSeries: Equatable, Sendable {
-        var viewportTop: TextAnchor
-        var cursorLineFromEnd: Int
-        var cursorAttachment: WidthResizeCursorAttachment
-    }
-
     /// Records a cursor destination before the rebuilt stream is split into regions.
     private struct ReflowDestination {
         var row: Int
@@ -654,7 +640,6 @@ public struct Terminal: Equatable, Sendable {
     private struct PackedReflowLine {
         var rows: [GridRow]
         var cellDestinations: [Int: ReflowDestination]
-        var logicalCellDestinations: [Int: ReflowDestination]
         var boundaryDestinations: [Int: ReflowDestination]
         var contentEnd: ReflowDestination
     }
@@ -739,7 +724,6 @@ public struct Terminal: Equatable, Sendable {
     /// observers do not fire during initialization.
     private var hasContentInspectionState = false
     private var viewportState = ViewportState.following
-    private var widthResizeSeries: WidthResizeSeries?
     private var damage: TerminalDamageAccumulator
 
     /// Total following-viewport rows advanced by scrolls recorded as damage
@@ -1291,10 +1275,6 @@ public struct Terminal: Equatable, Sendable {
         in bytes: UnsafeBufferPointer<UInt8>,
         before: inout DamageActionSnapshot
     ) {
-        let primaryGenerationBefore = primaryHistoryObservation.value
-        let primaryCursorBefore = isAlternateScreenActive
-            ? nil
-            : (position: screen.cursor, isPendingWrap: screen.isPendingWrap)
         switch action {
         case let .printASCIIRun(range):
             printASCIIRun(bytes, range)
@@ -1317,13 +1297,6 @@ public struct Terminal: Equatable, Sendable {
         }
         let after = damageActionSnapshot
         recordDamage(from: before, to: after)
-        let primaryCursorChanged = primaryCursorBefore.map {
-            isAlternateScreenActive == false
-                && ($0.position != screen.cursor || $0.isPendingWrap != screen.isPendingWrap)
-        } ?? false
-        if primaryHistoryObservation.value != primaryGenerationBefore || primaryCursorChanged {
-            widthResizeSeries = nil
-        }
         before = after
     }
 
@@ -2077,7 +2050,6 @@ public struct Terminal: Equatable, Sendable {
 
     /// Moves the local window by signed visual rows; positive values move toward live output.
     public mutating func scroll(byRows rowDelta: Int) {
-        widthResizeSeries = nil
         guard isAlternateScreenActive == false else { return }
         let current = scrollProjection.topRow
         let addition = current.addingReportingOverflow(rowDelta)
@@ -2089,7 +2061,6 @@ public struct Terminal: Equatable, Sendable {
 
     /// Selects a top visual row in current-stream coordinates, clamping to a complete window.
     public mutating func scroll(toTopRow requestedRow: Int) {
-        widthResizeSeries = nil
         guard isAlternateScreenActive == false else { return }
         let previous = viewportState
         let maximumTop = max(0, historyRowCount + screen.rows.count - rowCount)
@@ -2108,7 +2079,6 @@ public struct Terminal: Equatable, Sendable {
 
     /// Returns local presentation to live-bottom follow without changing terminal content.
     public mutating func scrollToBottom() {
-        widthResizeSeries = nil
         guard isAlternateScreenActive == false else { return }
         guard viewportState != .following else { return }
         viewportState = .following
@@ -2296,12 +2266,7 @@ public struct Terminal: Equatable, Sendable {
         history.paintedDisplayRow(at: index)
     }
 
-    /// Hands a test one live-grid row.
-    ///
-    /// The independent oracle the fold's fidelity proof needs now that retained history *is*
-    /// the record store: the live grid's wrapping is the printer's own and shares no code with
-    /// the fold, so a terminal tall enough to hold its whole transcript answers "what does a
-    /// pane of this width display" without asking the thing under test.
+    /// Hands a test one live-grid row without exposing mutable storage.
     func liveRowForTesting(at index: Int) -> GridRow? {
         screen.rows.indices.contains(index) ? screen.rows[index] : nil
     }
@@ -3867,9 +3832,6 @@ public struct Terminal: Equatable, Sendable {
                 self[slot] = nil
             }
         }
-        if let top = widthResizeSeries?.viewportTop, top < firstRetained {
-            widthResizeSeries?.viewportTop = firstRetained
-        }
         clampViewportAnchorToRetainedStream()
     }
 
@@ -4276,7 +4238,6 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func resizePrimaryScreen(columns: Int, rows: Int) {
         if rows != rowCount {
-            widthResizeSeries = nil
             resizeHeight(to: rows)
         }
         if columns != columnCount {
@@ -4435,12 +4396,7 @@ public struct Terminal: Equatable, Sendable {
         // must not.
         renumberRows()
         let oldColumnCount = columnCount
-        let oldBottomDistance = rowCount - 1 - screen.cursor.row
         let historyRowsBefore = historyRowCount
-        let startsResizeSeries = widthResizeSeries == nil && oldBottomDistance > 0
-        let resizeSeriesTop = widthResizeSeries?.viewportTop ?? (startsResizeSeries
-            ? TextAnchor(row: evictedRowCount + historyRowsBefore, column: 0)
-            : nil)
         let viewportTopBeforeReflow: TextAnchor?
         if case let .browsing(top) = viewportState {
             viewportTopBeforeReflow = top
@@ -4450,10 +4406,7 @@ public struct Terminal: Equatable, Sendable {
 
         // Captured against the *old* fold, which exists only until the index is recomputed.
         // `research/31/D3` Decision 2's one new ordering invariant, stated rather than discovered later.
-        let capturedBeforeSeam = capturedAnchorAddresses(
-            historyRows: historyRowsBefore,
-            resizeSeriesTop: resizeSeriesTop
-        )
+        let capturedBeforeSeam = capturedAnchorAddresses(historyRows: historyRowsBefore)
 
         // A line still being printed keeps its prompt mark on its record -- unless the pull-back
         // consumes the whole record, in which case the live refold inherits it.
@@ -4465,7 +4418,9 @@ public struct Terminal: Equatable, Sendable {
         let captured = rebasedAcrossSeam(capturedBeforeSeam, seamPrefixLength: seamPrefix.count)
 
         let lastLiveContentRow = screen.rows.lastIndex(where: Self.rowContainsContent) ?? 0
-        let sourceRows = Array(screen.rows[...max(screen.cursor.row, lastLiveContentRow)])
+        let lastSourceRow = max(screen.cursor.row, lastLiveContentRow)
+        let trailingBlankRowCount = screen.rows.count - lastSourceRow - 1
+        let sourceRows = Array(screen.rows[...lastSourceRow])
         let reconstruction = reconstructLogicalLines(
             from: sourceRows,
             leadingCells: seamPrefix,
@@ -4474,20 +4429,6 @@ public struct Terminal: Equatable, Sendable {
             oldColumnCount: oldColumnCount
         )
 
-        if startsResizeSeries,
-           let resizeSeriesTop,
-           let cursorAttachment = widthResizeCursorAttachment(
-               for: reconstruction.anchor,
-               in: reconstruction.lines[reconstruction.cursorLine]
-           )
-        {
-            widthResizeSeries = WidthResizeSeries(
-                viewportTop: resizeSeriesTop,
-                cursorLineFromEnd: reconstruction.lines.count - reconstruction.cursorLine,
-                cursorAttachment: cursorAttachment
-            )
-        }
-
         var rebuiltRows: [GridRow] = []
         var cursorDestination: ReflowDestination?
         var liveDestinations = [WidthChangeAnchor: TextAnchor]()
@@ -4495,16 +4436,8 @@ public struct Terminal: Equatable, Sendable {
             let packed = pack(line: line, columns: newColumnCount)
             let baseRow = rebuiltRows.count
 
-            switch (widthResizeSeries, reconstruction.anchor) {
-            case let (.some(series), _)
-                where lineIndex == reconstruction.lines.count - series.cursorLineFromEnd:
-                cursorDestination = widthResizeCursorDestination(
-                    for: series.cursorAttachment,
-                    in: packed,
-                    baseRow: baseRow,
-                    columns: newColumnCount
-                )
-            case let (.none, .cell(key)) where lineIndex == reconstruction.cursorLine:
+            switch reconstruction.anchor {
+            case let .cell(key) where lineIndex == reconstruction.cursorLine:
                 if let local = packed.cellDestinations[key] {
                     cursorDestination = ReflowDestination(
                         row: baseRow + local.row,
@@ -4512,8 +4445,7 @@ public struct Terminal: Equatable, Sendable {
                         isPendingWrap: false
                     )
                 }
-            case let (.none, .trailingPadding(line, distance, allPaddingColumn))
-                where line == lineIndex:
+            case let .trailingPadding(line, distance, allPaddingColumn) where line == lineIndex:
                 if let allPaddingColumn {
                     cursorDestination = ReflowDestination(
                         row: baseRow,
@@ -4542,7 +4474,7 @@ public struct Terminal: Equatable, Sendable {
                         isPendingWrap: distance == 0 && packed.contentEnd.column == newColumnCount
                     )
                 }
-            case let (.none, .boundary(line, offset)) where line == lineIndex:
+            case let .boundary(line, offset) where line == lineIndex:
                 if let local = packed.boundaryDestinations[offset] {
                     cursorDestination = ReflowDestination(
                         row: baseRow + local.row,
@@ -4580,55 +4512,36 @@ public struct Terminal: Equatable, Sendable {
             historyRowsAfter: historyRowsAfter
         )
 
-        let viewportStart: Int
-        if let series = widthResizeSeries {
-            var liveBase = evictedRowCount + historyRowCount
-            let desiredTop = max(series.viewportTop.row, evictedRowCount)
-            if desiredTop < liveBase {
-                var pulled = history.truncateTail(
-                    displayRows: min(liveBase - desiredTop, historyRowCount)
-                )
-                synchronizeSearchIndexPrefix()
-                columnCount = newColumnCount
-                restoreSeamSpacer(in: &pulled, before: rebuiltRows.first)
-                columnCount = oldColumnCount
-                rebuiltRows.insert(
-                    contentsOf: pulled.map { $0.materialized(to: newColumnCount) },
-                    at: 0
-                )
-                destination.row += pulled.count
-                liveBase -= pulled.count
-            }
+        for _ in 0..<trailingBlankRowCount {
+            rebuiltRows.append(makeBlankRow(columns: newColumnCount))
+        }
 
-            let recordedStart = max(0, desiredTop - liveBase)
-            let contentVisibilityStart = max(0, rebuiltRows.count - rowCount)
-            viewportStart = max(recordedStart, contentVisibilityStart)
-            while rebuiltRows.count < viewportStart + rowCount {
-                rebuiltRows.append(makeBlankRow(columns: newColumnCount))
-            }
-        } else {
-            // A widening at the live bottom hands history back before it adds blank rows.
-            let deficit = rowCount - rebuiltRows.count
-            if deficit > 0, historyRowCount > 0 {
-                var pulled = history.truncateTail(displayRows: min(deficit, historyRowCount))
-                synchronizeSearchIndexPrefix()
-                columnCount = newColumnCount
-                restoreSeamSpacer(in: &pulled, before: rebuiltRows.first)
-                columnCount = oldColumnCount
-                rebuiltRows.insert(
-                    contentsOf: pulled.map { $0.materialized(to: newColumnCount) },
-                    at: 0
-                )
-                destination.row += pulled.count
-            }
+        // A widening hands history back only after the old trailing blanks are present. This
+        // ordering makes the deficit equal the rows that a prior narrowing displaced.
+        let deficit = rowCount - rebuiltRows.count
+        if deficit > 0, historyRowCount > 0 {
+            var pulled = history.truncateTail(displayRows: min(deficit, historyRowCount))
+            synchronizeSearchIndexPrefix()
+            columnCount = newColumnCount
+            restoreSeamSpacer(in: &pulled, before: rebuiltRows.first)
+            columnCount = oldColumnCount
+            rebuiltRows.insert(
+                contentsOf: pulled.map { $0.materialized(to: newColumnCount) },
+                at: 0
+            )
+            destination.row += pulled.count
+        }
+        while rebuiltRows.count < rowCount {
+            rebuiltRows.append(makeBlankRow(columns: newColumnCount))
+        }
 
-            let continuationIncrease = max(0, destination.row - screen.cursor.row)
-            let desiredBottomDistance = max(0, oldBottomDistance - continuationIncrease)
-            let requiredRowCount = max(rowCount, destination.row + desiredBottomDistance + 1)
-            while rebuiltRows.count < requiredRowCount {
-                rebuiltRows.append(makeBlankRow(columns: newColumnCount))
-            }
-            viewportStart = rebuiltRows.count - rowCount
+        var viewportStart = max(0, rebuiltRows.count - rowCount)
+        if destination.row < viewportStart {
+            // Only the appended tail can be removed here. If content below the cursor still
+            // exceeds the viewport after those blanks are gone, the existing top clamp applies.
+            let blankShortfall = min(viewportStart - destination.row, trailingBlankRowCount)
+            rebuiltRows.removeLast(blankShortfall)
+            viewportStart -= blankShortfall
         }
 
         columnCount = newColumnCount
@@ -4659,7 +4572,6 @@ public struct Terminal: Equatable, Sendable {
         case armStart
         case armEnd
         case browsingTop
-        case resizeSeriesTop
     }
 
     /// What a width change did to one held range: it had none to restate, it restated one, or
@@ -4709,8 +4621,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func capturedAnchorAddresses(
-        historyRows: Int,
-        resizeSeriesTop: TextAnchor?
+        historyRows: Int
     ) -> [(WidthChangeAnchor, WidthChangeAddress)] {
         var captured: [(WidthChangeAnchor, WidthChangeAddress)] = []
         func capture(_ slot: WidthChangeAnchor, _ anchor: TextAnchor?) {
@@ -4726,7 +4637,6 @@ public struct Terminal: Equatable, Sendable {
         capture(.armStart, armedLinkState?.range.start)
         capture(.armEnd, armedLinkState?.range.end)
         if case let .browsing(top) = viewportState { capture(.browsingTop, top) }
-        capture(.resizeSeriesTop, resizeSeriesTop)
         return captured
     }
 
@@ -4818,9 +4728,6 @@ public struct Terminal: Equatable, Sendable {
         }
         if let top = restated[.browsingTop] {
             viewportState = .browsing(top: TextAnchor(row: top.row, column: 0))
-        }
-        if let top = restated[.resizeSeriesTop] {
-            widthResizeSeries?.viewportTop = TextAnchor(row: top.row, column: 0)
         }
     }
 
@@ -5036,7 +4943,6 @@ public struct Terminal: Equatable, Sendable {
         var packedRows = [makeBlankRow(columns: columns)]
         packedRows[0].semanticPrompt = line.semanticPrompt
         var cellDestinations: [Int: ReflowDestination] = [:]
-        var logicalCellDestinations: [Int: ReflowDestination] = [:]
         var boundaryDestinations = [
             0: ReflowDestination(row: 0, column: 0, isPendingWrap: false),
         ]
@@ -5072,11 +4978,6 @@ public struct Terminal: Equatable, Sendable {
 
             for (offset, cell) in unit.cells.enumerated() {
                 packedRows[row].cells[column + offset] = cell
-                logicalCellDestinations[logicalOffset + offset] = ReflowDestination(
-                    row: row,
-                    column: column + offset,
-                    isPendingWrap: false
-                )
             }
             for source in unit.sourceOffsets {
                 cellDestinations[source.key] = ReflowDestination(
@@ -5095,7 +4996,6 @@ public struct Terminal: Equatable, Sendable {
         return PackedReflowLine(
             rows: packedRows,
             cellDestinations: cellDestinations,
-            logicalCellDestinations: logicalCellDestinations,
             boundaryDestinations: boundaryDestinations,
             contentEnd: ReflowDestination(
                 row: row,
@@ -5103,63 +5003,6 @@ public struct Terminal: Equatable, Sendable {
                 isPendingWrap: false
             )
         )
-    }
-
-    private func widthResizeCursorAttachment(
-        for anchor: ReflowCursorAnchor,
-        in line: ReflowLine
-    ) -> WidthResizeCursorAttachment? {
-        switch anchor {
-        case let .cell(key):
-            var logicalOffset = 0
-            for unit in line.units {
-                if let source = unit.sourceOffsets.first(where: { $0.key == key }) {
-                    return .cell(offset: logicalOffset + source.offset)
-                }
-                logicalOffset += unit.cells.count
-            }
-            return nil
-        case let .trailingPadding(_, distance, allPaddingColumn):
-            return .trailingPadding(
-                distance: distance,
-                allPaddingColumn: allPaddingColumn
-            )
-        case let .boundary(_, offset):
-            return .boundary(offset: offset)
-        }
-    }
-
-    private func widthResizeCursorDestination(
-        for attachment: WidthResizeCursorAttachment,
-        in packed: PackedReflowLine,
-        baseRow: Int,
-        columns: Int
-    ) -> ReflowDestination? {
-        let local: ReflowDestination?
-        switch attachment {
-        case let .cell(offset):
-            local = packed.logicalCellDestinations[offset]
-        case let .trailingPadding(distance, allPaddingColumn):
-            if let allPaddingColumn {
-                local = ReflowDestination(
-                    row: 0,
-                    column: min(allPaddingColumn, columns - 1),
-                    isPendingWrap: false
-                )
-            } else {
-                let desired = packed.contentEnd.column + distance
-                local = ReflowDestination(
-                    row: packed.contentEnd.row,
-                    column: min(desired, columns - 1),
-                    isPendingWrap: distance == 0 && packed.contentEnd.column == columns
-                )
-            }
-        case let .boundary(offset):
-            local = packed.boundaryDestinations[offset] ?? packed.contentEnd
-        }
-        guard var local else { return nil }
-        local.row += baseRow
-        return local
     }
 
     static func retainedContentEnd(in row: GridRow) -> Int {
@@ -5968,7 +5811,6 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func switchAlternateScreen(enabled: Bool) {
-        widthResizeSeries = nil
         recordFullDamage()
         if enabled {
             clearInspection()
@@ -6057,7 +5899,6 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func softReset() {
-        widthResizeSeries = nil
         recordFullDamage()
         selectPrimaryScreen()
         resetControlState()
@@ -6067,7 +5908,6 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func hardReset() {
-        widthResizeSeries = nil
         recordFullDamage()
         clearInspection()
         // Restarting the count is what a pinned range cannot survive: without this, a stale

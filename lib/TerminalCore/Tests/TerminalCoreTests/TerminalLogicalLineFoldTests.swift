@@ -658,13 +658,11 @@ struct TerminalLogicalLineFoldTests {
         }
     }
 
-    /// The display rows a pane of `columns` shows for `stimulus`, read out of the live grid.
+    /// The display rows a pane of `columns` shows for `stimulus`.
     ///
-    /// The viewport is deliberately taller than the transcript so nothing scrolls into history:
-    /// these rows are the oracle, and an oracle that had been through the store under test would
-    /// not be one. `resizedTo` refolds the same live grid, which is the surviving half of the old
-    /// width reflow and the independent answer to "what does this content look like at that
-    /// width".
+    /// The viewport is deliberately taller than the transcript at its feed width. A later narrow
+    /// preserves the trailing blank rows and can therefore displace refolded rows into history;
+    /// the oracle must read both regions to keep the full displayed stream.
     private func liveDisplayRows(
         _ stimulus: String,
         columns: Int,
@@ -676,9 +674,11 @@ struct TerminalLogicalLineFoldTests {
         if let newWidth {
             terminal.resize(columns: newWidth, rows: viewportRows)
         }
-        try #require(terminal.scrollbackRowCount == 0, "the transcript outgrew the oracle viewport")
-
         var rows: [Terminal.GridRow] = []
+        for index in 0..<terminal.scrollbackRowCount {
+            guard let row = terminal.retainedRowForTesting(at: index) else { break }
+            rows.append(row)
+        }
         for index in 0..<viewportRows {
             guard let row = terminal.liveRowForTesting(at: index) else { break }
             rows.append(row)

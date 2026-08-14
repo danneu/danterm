@@ -189,15 +189,17 @@ struct TerminalKittyAdaptedTests {
         //
         // Adapted from kitty_tests/datatypes.py#test_rewrap_narrower
         //   (kitty v0.48.2 2cb1d95, body sha256:dacf8a9efad9).
-        //   Divergence: kitty asserts `is_continued == (False, False, True)`; we assert the
-        //   row texts and DanTerm's forward-facing `isSoftWrapped`.
+        //   Divergence: kitty consumes a trailing blank while DanTerm preserves it and moves
+        //   the unchanged first row into scrollback.
         var terminal = try #require(Terminal(columns: 5, rows: 4))
         terminal.feed(Array("123\r\nabcde".utf8))
 
         terminal.resize(columns: 3, rows: 4)
 
-        #expect(terminal.screenText == "123\nabc\nde \n   ")
-        #expect(terminal.geometry.rows.map(\.isSoftWrapped) == [false, true, false, false])
+        #expect(terminal.scrollbackRowCount == 1)
+        #expect(terminal.scrollbackRow(at: 0)?.isSoftWrapped == false)
+        #expect(terminal.screenText == "abc\nde \n   \n   ")
+        #expect(terminal.geometry.rows.map(\.isSoftWrapped) == [true, false, false, false])
         expectValidGrid(terminal)
     }
 
@@ -212,15 +214,19 @@ struct TerminalKittyAdaptedTests {
         //   Divergence: kitty's `create_lbuf('123  ', 'abcde')` marks line 1 continued
         //   because line 0 fills the width; we produce the same single logical line by
         //   feeding it as one overflowing write, and assert row texts plus `isSoftWrapped`
-        //   instead of `is_continued`.
+        //   instead of `is_continued`. Kitty consumes the trailing blank rows; DanTerm keeps
+        //   them and displaces the first two narrowed rows into scrollback.
         var terminal = try #require(Terminal(columns: 5, rows: 5))
         terminal.feed(Array("123  abcde".utf8))
         #expect(terminal.geometry.rows.map(\.isSoftWrapped) == [true, false, false, false, false])
 
         terminal.resize(columns: 3, rows: 5)
 
-        #expect(terminal.screenText == "123\n  a\nbcd\ne  \n   ")
-        #expect(terminal.geometry.rows.map(\.isSoftWrapped) == [true, true, true, false, false])
+        #expect(terminal.scrollbackRowCount == 2)
+        #expect(terminal.scrollbackRow(at: 0)?.isSoftWrapped == true)
+        #expect(terminal.scrollbackRow(at: 1)?.isSoftWrapped == true)
+        #expect(terminal.screenText == "bcd\ne  \n   \n   \n   ")
+        #expect(terminal.geometry.rows.map(\.isSoftWrapped) == [true, false, false, false, false])
         expectValidGrid(terminal)
     }
 
