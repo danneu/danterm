@@ -84,6 +84,11 @@ final class IpcConnection: @unchecked Sendable {
         writeLine(hello)
     }
 
+    /// Writes the pre-handshake refusal and closes after its complete line is flushed.
+    func writeRejected(_ reason: IpcConnectionRejectionReason) {
+        writeLine(reason.notification, closeAfterWrite: true)
+    }
+
     func writeSuccess(
         reqId: UUID,
         result: JSONValue,

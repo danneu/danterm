@@ -108,6 +108,38 @@ struct CLICharacterizationTests {
         #expect(run.stderr == "danterm: unsupported DanTerm IPC protocol 2\n")
     }
 
+    @Test("connection refusals have distinct CLI messages")
+    func connectionRefusalsHaveDistinctMessages() throws {
+        let cases: [(IpcConnectionRejectionReason, String)] = [
+            (.notAdmitted, "danterm: DanTerm refused this device: not admitted\n"),
+            (
+                .identityUnresolved,
+                "danterm: DanTerm could not resolve this device's tailnet identity\n"
+            ),
+            (
+                .connectionLimit,
+                "danterm: DanTerm refused the connection: connection limit reached\n"
+            ),
+            (
+                .auditUnavailable,
+                "danterm: DanTerm refused the connection: audit unavailable\n"
+            ),
+        ]
+
+        for (reason, expectedError) in cases {
+            let run = try withScriptedEndpoint { connection in
+                writeLine(encoded(reason.notification), to: connection)
+                Darwin.close(connection)
+            } run: { path in
+                try runCLI(["ls"], socketPath: path)
+            }
+
+            #expect(run.status == 1)
+            #expect(run.stdout == "")
+            #expect(run.stderr == expectedError)
+        }
+    }
+
     @Test("an ordinary reply prints its result as one compact JSON line")
     func ordinaryReplyPrintsCompactJSON() throws {
         let result = JSONValue.object([
@@ -348,7 +380,13 @@ private func readLine(from fd: Int32) -> String? {
 }
 
 private func helloLine(protocolVersion: Int) -> String {
-    #"{"jsonrpc":"2.0","method":"\#(Methods.hello)","params":{"protocol":\#(protocolVersion)}}"#
+    encoded(JsonRpcRequest(
+        method: Methods.hello,
+        params: .object([
+            "protocol": .number(Double(protocolVersion)),
+            "app": .string("server-test"),
+        ])
+    ))
 }
 
 private func requestId(of line: String) -> String? {

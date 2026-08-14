@@ -23,9 +23,24 @@ public enum DanTermClientError: Error, Equatable {
     case closedBeforeHello
     /// The first line arrived but was not a hello this client can read.
     case invalidHello
+    /// The tailnet node id is not in the server's admitted set.
+    case notAdmitted
+    /// The server could not resolve the connection to a tailnet identity.
+    case identityUnresolved
+    /// The server has no connection slot available.
+    case connectionLimit
+    /// The server cannot provide the durable audit record required for remote service.
+    case auditUnavailable
+    /// The server spoke a protocol version this client cannot use.
     case unsupportedProtocol(Int)
     /// A line exceeded the framer's limit, so the stream can no longer be trusted.
     case oversizedLine
+}
+
+/// Identifies the server build after protocol compatibility has been established.
+public struct DanTermServerHello: Equatable, Sendable {
+    /// The app version is advisory, so callers can warn about skew without refusing it.
+    public let appVersion: String
 }
 
 /// Drives a DanTerm control conversation over one transport.
@@ -53,15 +68,24 @@ public final class DanTermClientSession {
 
     /// Reads the peer's opening hello and refuses a protocol version this client cannot
     /// speak. Call this before sending anything.
-    public func handshake() throws {
+    @discardableResult
+    public func handshake() throws -> DanTermServerHello {
         guard let line = try nextLine() else { throw DanTermClientError.closedBeforeHello }
-        guard let hello = try? JSONDecoder().decode(JsonRpcRequest.self, from: line),
-              hello.method == Methods.hello,
-              let version = hello.params?["protocol"]?.asNumber
-        else { throw DanTermClientError.invalidHello }
-        guard Int(version) == Self.supportedProtocolVersion else {
-            throw DanTermClientError.unsupportedProtocol(Int(version))
+        guard let notification = try? JSONDecoder().decode(JsonRpcRequest.self, from: line) else {
+            throw DanTermClientError.invalidHello
         }
+        if let rejection = IpcConnectionRejectionReason(notification: notification) {
+            throw Self.clientError(for: rejection)
+        }
+        guard notification.method == Methods.hello,
+              let versionNumber = notification.params?["protocol"]?.asNumber,
+              let version = Int(exactly: versionNumber),
+              let appVersion = notification.params?["app"]?.asString
+        else { throw DanTermClientError.invalidHello }
+        guard version == Self.supportedProtocolVersion else {
+            throw DanTermClientError.unsupportedProtocol(version)
+        }
+        return DanTermServerHello(appVersion: appVersion)
     }
 
     /// Writes one request. Correlating its reply is a separate step, so a caller may have
@@ -116,6 +140,17 @@ public final class DanTermClientSession {
     }
 
     public func close() { transport.close() }
+
+    private static func clientError(
+        for rejection: IpcConnectionRejectionReason
+    ) -> DanTermClientError {
+        switch rejection {
+        case .notAdmitted: .notAdmitted
+        case .identityUnresolved: .identityUnresolved
+        case .connectionLimit: .connectionLimit
+        case .auditUnavailable: .auditUnavailable
+        }
+    }
 
     /// Classifies one line. A frame carrying an id is a reply; anything else with a method
     /// is a notification. A line that is neither is skipped rather than failing the stream,

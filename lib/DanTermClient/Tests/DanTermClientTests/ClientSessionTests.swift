@@ -37,10 +37,15 @@ final class ScriptedTransport: DanTermClientTransport {
 }
 
 struct ClientSessionTests {
-    @Test("the handshake accepts the protocol version this client speaks")
-    func handshakeAcceptsKnownVersion() throws {
-        let session = DanTermClientSession(transport: ScriptedTransport(lines: [hello(protocol: 1)]))
-        #expect(throws: Never.self) { try session.handshake() }
+    @Test("the handshake accepts the protocol version and surfaces the server app version")
+    func handshakeAcceptsKnownVersionAndSurfacesAppVersion() throws {
+        let session = DanTermClientSession(
+            transport: ScriptedTransport(lines: [hello(protocol: 1, app: "9.4.1")])
+        )
+
+        let server = try session.handshake()
+
+        #expect(server.appVersion == "9.4.1")
     }
 
     @Test("the handshake reports a stream that closed, a bad hello, and an unknown version apart")
@@ -58,14 +63,32 @@ struct ClientSessionTests {
         }
         #expect(throws: DanTermClientError.unsupportedProtocol(9)) {
             try DanTermClientSession(
-                transport: ScriptedTransport(lines: [hello(protocol: 9)])
+                transport: ScriptedTransport(lines: [hello(protocol: 9, app: "future")])
             ).handshake()
+        }
+    }
+
+    @Test("every connection rejection reason becomes its own typed client error")
+    func handshakeDistinguishesConnectionRejections() {
+        let cases: [(IpcConnectionRejectionReason, DanTermClientError)] = [
+            (.notAdmitted, .notAdmitted),
+            (.identityUnresolved, .identityUnresolved),
+            (.connectionLimit, .connectionLimit),
+            (.auditUnavailable, .auditUnavailable),
+        ]
+
+        for (reason, expectedError) in cases {
+            #expect(throws: expectedError) {
+                try DanTermClientSession(
+                    transport: ScriptedTransport(lines: [encoded(reason.notification)])
+                ).handshake()
+            }
         }
     }
 
     @Test("a line split across chunk boundaries is still one frame")
     func framingSpansChunks() throws {
-        let line = hello(protocol: 1) + "\n"
+        let line = hello(protocol: 1, app: "test") + "\n"
         let split = line.index(line.startIndex, offsetBy: 12)
         let transport = ScriptedTransport(chunks: [
             Data(line[line.startIndex..<split].utf8),
@@ -179,8 +202,14 @@ struct ClientSessionTests {
         #expect(transport.isClosed)
     }
 
-    private func hello(protocol version: Int) -> String {
-        #"{"jsonrpc":"2.0","method":"\#(Methods.hello)","params":{"protocol":\#(version)}}"#
+    private func hello(protocol version: Int, app: String) -> String {
+        encoded(JsonRpcRequest(
+            method: Methods.hello,
+            params: .object([
+                "protocol": .number(Double(version)),
+                "app": .string(app),
+            ])
+        ))
     }
 
     private func reply(id: String, result: JSONValue) -> String {

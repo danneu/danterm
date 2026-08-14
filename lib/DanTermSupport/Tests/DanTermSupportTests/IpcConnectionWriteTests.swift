@@ -6,6 +6,22 @@ import Darwin
 @testable import DanTermSupport
 
 struct IpcConnectionWriteTests {
+    @Test("connection rejection writes its stable notification then closes")
+    func connectionRejectionWritesThenCloses() throws {
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        defer { Darwin.close(descriptors.peer) }
+
+        connection.writeRejected(.connectionLimit)
+
+        let notification = try JSONDecoder().decode(
+            JsonRpcRequest.self,
+            from: readIpcLine(from: descriptors.peer)
+        )
+        #expect(notification == IpcConnectionRejectionReason.connectionLimit.notification)
+        #expect(readByte(from: descriptors.peer) == 0)
+    }
+
     @Test("real socket stream orders start, notifications, end, and close")
     func realSocketStreamOrdersEveryFrame() throws {
         // Intent: production framing flushes the start reply before ordered stream records,

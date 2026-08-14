@@ -296,6 +296,14 @@ struct DanTermCLI {
             return CLIError("DanTerm closed the connection")
         case DanTermClientError.invalidHello:
             return CLIError("invalid hello from DanTerm")
+        case DanTermClientError.notAdmitted:
+            return CLIError("DanTerm refused this device: not admitted")
+        case DanTermClientError.identityUnresolved:
+            return CLIError("DanTerm could not resolve this device's tailnet identity")
+        case DanTermClientError.connectionLimit:
+            return CLIError("DanTerm refused the connection: connection limit reached")
+        case DanTermClientError.auditUnavailable:
+            return CLIError("DanTerm refused the connection: audit unavailable")
         case DanTermClientError.unsupportedProtocol(let version):
             return CLIError("unsupported DanTerm IPC protocol \(version)")
         case DanTermClientError.oversizedLine:

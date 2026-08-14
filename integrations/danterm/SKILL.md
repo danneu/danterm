@@ -831,5 +831,12 @@ a stale hook cannot mutate a replacement session.
   control socket (sandbox or permissions)` error is an access denial: surface
   it to the user instead of treating the app as stopped or retrying blindly.
   Surface other connection errors too; their POSIX reason and socket path are
-  diagnostic context.
+  diagnostic context. A tailnet connection can instead refuse before its hello:
+  `not admitted` means the node id is absent from the configured list;
+  `could not resolve this device's tailnet identity` means identity lookup
+  failed; `connection limit reached` means the server is full; and `audit
+  unavailable` means the server cannot write the record required before remote
+  work. Do not retry any of these in a loop. A protocol-version error requires
+  compatible client and server builds; an app-version difference alone does not
+  refuse the connection.
 - macOS only. If `danterm` is not on PATH, stop.

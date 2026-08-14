@@ -472,7 +472,7 @@ Out of scope for this plan:
       resolver seam with fixture-tested parsing, audit log writer and pure
       redaction descriptor; delete `t5-bridge/` + `t5-run.sh` with docs-lint
       markers. (PO2, PO6)
-- [ ] Handshake and refusal shapes: `rejected` notification, client session
+- [x] Handshake and refusal shapes: `rejected` notification, client session
       surfaces app version and typed rejections, CLI rewired, SKILL.md
       refusal notes. (PO7)
 - [ ] App wiring: config schema and store read, listener enablement with
@@ -491,3 +491,8 @@ Out of scope for this plan:
   truncate authority-bearing command or working-directory text, and it does not
   let one entry violate the size bound. The remote gate treats this append error
   as audit unavailable; local audit remains best-effort.
+- The CLI already used `DanTermClientSession` for its hello before this slice.
+  This slice extends that shared handshake and adds the CLI's typed-refusal
+  messages instead of performing a second rewire.
+- The request-level audit refusal uses JSON-RPC server error code `-32001`, the
+  message `audit unavailable`, and `data.reason` set to `audit-unavailable`.

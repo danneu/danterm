@@ -30,6 +30,34 @@ struct EnvelopeTests {
         #expect(decoded == request)
     }
 
+    @Test("connection rejection notification has the stable wire shape")
+    func connectionRejectionNotificationEncodes() throws {
+        let notification = IpcConnectionRejectionReason.notAdmitted.notification
+
+        let encoded = try sortedEncoder().encode(notification)
+
+        #expect(
+            String(data: encoded, encoding: .utf8)
+                == #"{"jsonrpc":"2.0","method":"rejected","params":{"reason":"not-admitted"}}"#
+        )
+        #expect(IpcConnectionRejectionReason(notification: notification) == .notAdmitted)
+        #expect(IpcConnectionRejectionReason.allCases.map(\.rawValue) == [
+            "not-admitted",
+            "identity-unresolved",
+            "connection-limit",
+            "audit-unavailable",
+        ])
+    }
+
+    @Test("request audit refusal has a stable JSON-RPC error shape")
+    func requestAuditRefusalShape() {
+        #expect(IpcRequestErrors.auditUnavailable == JsonRpcError(
+            code: -32001,
+            message: "audit unavailable",
+            data: .object(["reason": .string("audit-unavailable")])
+        ))
+    }
+
     @Test("error response with data round trips")
     func errorResponseWithDataRoundTrips() throws {
         let response = JsonRpcResponse(
