@@ -1,5 +1,8 @@
 # Findings -- iOS remote client
 
+<!-- docs-lint: allow-missing t5-bridge/ -->
+<!-- docs-lint: allow-missing t5-run.sh -->
+
 Append-only evidence chain for doc 35.
 
 F2 and F4 outgrew this file and live beside it, per the promotion rule in

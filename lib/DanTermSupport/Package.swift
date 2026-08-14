@@ -37,6 +37,7 @@ let package = Package(
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
             ],
             path: "Tests/DanTermSupportTests",
+            resources: [.copy("Fixtures")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

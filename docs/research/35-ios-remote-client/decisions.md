@@ -1,5 +1,7 @@
 # Decisions -- iOS remote client
 
+<!-- docs-lint: allow-missing t5-bridge/ -->
+
 Auditable decision log for doc 35. D7 is reserved as a gate by the task ledger
 in [README.md](README.md) and remains open.
 

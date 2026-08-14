@@ -467,7 +467,7 @@ Out of scope for this plan:
 - [x] Pure caller-identity rule: identity type in DanTermProtocol, the third
       exhaustive switch, `Msg.ipcRequest` carries the caller, dispatch
       refuses remote `quit`; all existing call sites mint local. (PO4, PO10)
-- [ ] Support layer: `TailnetBindAddress` re-implementation with injectable
+- [x] Support layer: `TailnetBindAddress` re-implementation with injectable
       interfaces, the tailnet listener type, peer-address capture, whois
       resolver seam with fixture-tested parsing, audit log writer and pure
       redaction descriptor; delete `t5-bridge/` + `t5-run.sh` with docs-lint
@@ -484,3 +484,10 @@ Out of scope for this plan:
 - [ ] D8 grammar: widened key case with the modifier-required rule, `Insert`,
       CLI tokens, wheel event and its lowering to `sendWheel`, SKILL.md token
       table. (PO8, PO9)
+
+## Implementation notes
+
+- The audit writer rejects an entry larger than its rotation bound. It does not
+  truncate authority-bearing command or working-directory text, and it does not
+  let one entry violate the size bound. The remote gate treats this append error
+  as audit unavailable; local audit remains best-effort.

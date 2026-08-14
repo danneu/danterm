@@ -1,5 +1,8 @@
 # iOS remote client
 
+<!-- docs-lint: allow-missing t5-bridge/ -->
+<!-- docs-lint: allow-missing t5-run.sh -->
+
 Research started: 2026-08-12.
 
 - [findings.md](findings.md) -- the append-only evidence chain.
