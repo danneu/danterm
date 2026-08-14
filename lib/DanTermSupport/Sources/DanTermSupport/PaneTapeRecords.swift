@@ -9,11 +9,25 @@ import DanTermProtocol
 /// Carries every coordinate needed to resume after recorder eviction without estimating loss.
 /// The two byte watermarks stay apart because the feed and write streams are numbered apart.
 struct PaneTapeCursor: Equatable, Sendable {
+    let recorderLifetimeId: UUID
     let nextSequence: UInt64
     let feedBytesBeforeNextSequence: Int
     let writeBytesBeforeNextSequence: Int
 
+    init(
+        recorderLifetimeId: UUID,
+        nextSequence: UInt64,
+        feedBytesBeforeNextSequence: Int,
+        writeBytesBeforeNextSequence: Int
+    ) {
+        self.recorderLifetimeId = recorderLifetimeId
+        self.nextSequence = nextSequence
+        self.feedBytesBeforeNextSequence = feedBytesBeforeNextSequence
+        self.writeBytesBeforeNextSequence = writeBytesBeforeNextSequence
+    }
+
     static let beginning = Self(
+        recorderLifetimeId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
         nextSequence: 0,
         feedBytesBeforeNextSequence: 0,
         writeBytesBeforeNextSequence: 0
@@ -94,6 +108,7 @@ func makePaneTapeStart(
             // past the beginning -- a tail-only follow, or a dump whose head was evicted --
             // reports offsets a reader has no origin for.
             "cursor": .object([
+                "recorderLifetimeId": .string(cursor.recorderLifetimeId.uuidString),
                 "sequence": .number(Double(cursor.nextSequence)),
                 "feedByteOffset": .number(Double(cursor.feedBytesBeforeNextSequence)),
                 "writeByteOffset": .number(Double(cursor.writeBytesBeforeNextSequence)),

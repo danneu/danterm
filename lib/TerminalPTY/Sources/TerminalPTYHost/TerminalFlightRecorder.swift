@@ -83,6 +83,8 @@ public struct TerminalFlightRecordingEvent: Equatable, Sendable {
 
 /// Resumable position whose per-direction watermarks make later eviction gaps exactly measurable.
 public struct TerminalFlightRecordingCursor: Equatable, Sendable {
+    /// Identifies the recorder lifetime whose sequence and byte spaces the cursor names.
+    public let recorderLifetimeId: UUID
     /// Sequence that the next snapshot should attempt to return first.
     public let nextSequence: UInt64
     /// Lifetime feed bytes recorded before `nextSequence`.
@@ -92,6 +94,7 @@ public struct TerminalFlightRecordingCursor: Equatable, Sendable {
 
     /// Starts a backlog read before the recorder's first lifetime event.
     public static let beginning = Self(
+        recorderLifetimeId: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
         nextSequence: 0,
         feedBytesBeforeNextSequence: 0,
         writeBytesBeforeNextSequence: 0
@@ -100,15 +103,26 @@ public struct TerminalFlightRecordingCursor: Equatable, Sendable {
     /// Preserves every coordinate needed to distinguish an exact per-direction gap from
     /// delivered history.
     public init(
+        recorderLifetimeId: UUID,
         nextSequence: UInt64,
         feedBytesBeforeNextSequence: Int,
         writeBytesBeforeNextSequence: Int
     ) {
-        precondition(feedBytesBeforeNextSequence >= 0)
-        precondition(writeBytesBeforeNextSequence >= 0)
+        self.recorderLifetimeId = recorderLifetimeId
         self.nextSequence = nextSequence
         self.feedBytesBeforeNextSequence = feedBytesBeforeNextSequence
         self.writeBytesBeforeNextSequence = writeBytesBeforeNextSequence
+    }
+}
+
+/// Separates a cursor the recorder can place from untrusted coordinates it must not use.
+package enum TerminalFlightRecordingCursorPlacement: Equatable, Sendable {
+    case placed(TerminalFlightRecordingCursorSnapshot)
+    case unplaceable
+
+    /// Lets stream policy branch on invalid provenance without unpacking a valid snapshot.
+    package var isUnplaceable: Bool {
+        if case .unplaceable = self { true } else { false }
     }
 }
 
@@ -173,6 +187,7 @@ package final class TerminalFlightRecorder {
     }
 
     private let initial: NeutralTerminalDimensions
+    private let lifetimeId: UUID
     private var currentDimensions: NeutralTerminalDimensions
     private let configuration: TerminalFlightRecorderConfiguration
     private let now: @Sendable () -> UInt64
@@ -191,6 +206,7 @@ package final class TerminalFlightRecorder {
     private var followNotices: [UUID: FollowNotice] = [:]
 
     package init(
+        lifetimeId: UUID = UUID(),
         initialDimensions: TerminalDimensions,
         configuration: TerminalFlightRecorderConfiguration = .production,
         now: @escaping @Sendable () -> UInt64
@@ -199,6 +215,7 @@ package final class TerminalFlightRecorder {
             columns: initialDimensions.columns,
             rows: initialDimensions.rows
         )
+        self.lifetimeId = lifetimeId
         currentDimensions = initial
         self.configuration = configuration
         self.now = now
@@ -304,9 +321,33 @@ package final class TerminalFlightRecorder {
     package func cursorSnapshot(
         from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingCursorSnapshot {
-        precondition(cursor.nextSequence <= nextSequence)
-        precondition(cursor.feedBytesBeforeNextSequence <= totalFeedBytes)
-        precondition(cursor.writeBytesBeforeNextSequence <= totalWriteBytes)
+        if cursor == .beginning {
+            return uncheckedCursorSnapshot(from: backlogCursor())
+        }
+        guard case .placed(let snapshot) = cursorPlacement(from: cursor) else {
+            preconditionFailure("cursor must be placed before taking a snapshot")
+        }
+        return snapshot
+    }
+
+    /// Validates remote-capable cursor coordinates before any index arithmetic or subtraction.
+    package func cursorPlacement(
+        from cursor: TerminalFlightRecordingCursor
+    ) -> TerminalFlightRecordingCursorPlacement {
+        guard cursor.recorderLifetimeId == lifetimeId,
+              cursor.feedBytesBeforeNextSequence >= 0,
+              cursor.writeBytesBeforeNextSequence >= 0,
+              cursor.nextSequence <= nextSequence,
+              cursor.feedBytesBeforeNextSequence <= totalFeedBytes,
+              cursor.writeBytesBeforeNextSequence <= totalWriteBytes,
+              coordinatesMatchRetainedPosition(cursor)
+        else { return .unplaceable }
+        return .placed(uncheckedCursorSnapshot(from: cursor))
+    }
+
+    private func uncheckedCursorSnapshot(
+        from cursor: TerminalFlightRecordingCursor
+    ) -> TerminalFlightRecordingCursorSnapshot {
 
         let firstRetainedSequence = slots.first?.event.sequence ?? nextSequence
         let firstRetainedFeedBytes = slots.first?.feedBytesBeforeEvent ?? totalFeedBytes
@@ -336,15 +377,45 @@ package final class TerminalFlightRecorder {
 
     /// Pairs recorder birth geometry with the cursor that requests all retained history.
     package func backlogOrigin() -> TerminalFlightRecordingOrigin {
-        TerminalFlightRecordingOrigin(initial: initial, cursor: .beginning)
+        TerminalFlightRecordingOrigin(initial: initial, cursor: backlogCursor())
     }
 
     private func liveCursor() -> TerminalFlightRecordingCursor {
         .init(
+            recorderLifetimeId: lifetimeId,
             nextSequence: nextSequence,
             feedBytesBeforeNextSequence: totalFeedBytes,
             writeBytesBeforeNextSequence: totalWriteBytes
         )
+    }
+
+    private func backlogCursor() -> TerminalFlightRecordingCursor {
+        .init(
+            recorderLifetimeId: lifetimeId,
+            nextSequence: 0,
+            feedBytesBeforeNextSequence: 0,
+            writeBytesBeforeNextSequence: 0
+        )
+    }
+
+    private func coordinatesMatchRetainedPosition(
+        _ cursor: TerminalFlightRecordingCursor
+    ) -> Bool {
+        let firstRetainedSequence = slots.first?.event.sequence ?? nextSequence
+        if cursor.nextSequence < firstRetainedSequence {
+            let firstFeed = slots.first?.feedBytesBeforeEvent ?? totalFeedBytes
+            let firstWrite = slots.first?.writeBytesBeforeEvent ?? totalWriteBytes
+            return cursor.feedBytesBeforeNextSequence <= firstFeed
+                && cursor.writeBytesBeforeNextSequence <= firstWrite
+        }
+        if cursor.nextSequence == nextSequence {
+            return cursor.feedBytesBeforeNextSequence == totalFeedBytes
+                && cursor.writeBytesBeforeNextSequence == totalWriteBytes
+        }
+        let index = Int(cursor.nextSequence - firstRetainedSequence)
+        guard slots.indices.contains(index) else { return false }
+        return cursor.feedBytesBeforeNextSequence == slots[index].feedBytesBeforeEvent
+            && cursor.writeBytesBeforeNextSequence == slots[index].writeBytesBeforeEvent
     }
 
     /// Evicts oldest-first without accumulating loss totals. Loss is not a property of the

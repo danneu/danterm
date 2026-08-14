@@ -36,6 +36,7 @@ func paneTapeDimensions(_ dimensions: NeutralTerminalDimensions) -> PaneTapeDime
 /// Lowers a recorder cursor into the support layer's stream cursor.
 func paneTapeCursor(_ cursor: TerminalFlightRecordingCursor) -> PaneTapeCursor {
     .init(
+        recorderLifetimeId: cursor.recorderLifetimeId,
         nextSequence: cursor.nextSequence,
         feedBytesBeforeNextSequence: cursor.feedBytesBeforeNextSequence,
         writeBytesBeforeNextSequence: cursor.writeBytesBeforeNextSequence
@@ -45,6 +46,7 @@ func paneTapeCursor(_ cursor: TerminalFlightRecordingCursor) -> PaneTapeCursor {
 /// Raises a stream cursor a client resumed from back into the recorder's own cursor.
 func recorderCursor(_ cursor: PaneTapeCursor) -> TerminalFlightRecordingCursor {
     .init(
+        recorderLifetimeId: cursor.recorderLifetimeId,
         nextSequence: cursor.nextSequence,
         feedBytesBeforeNextSequence: cursor.feedBytesBeforeNextSequence,
         writeBytesBeforeNextSequence: cursor.writeBytesBeforeNextSequence

@@ -266,6 +266,7 @@ struct TerminalFlightRecorderTests {
 
         let fromBeginning = recorder.cursorSnapshot(from: .beginning)
         let fromTrailingReader = recorder.cursorSnapshot(from: .init(
+            recorderLifetimeId: recorder.backlogOrigin().cursor.recorderLifetimeId,
             nextSequence: 2,
             feedBytesBeforeNextSequence: 3,
             writeBytesBeforeNextSequence: 2
@@ -279,6 +280,7 @@ struct TerminalFlightRecorderTests {
         #expect(fromTrailingReader.droppedFeedBytes == 1)
         #expect(fromTrailingReader.droppedWriteBytes == 4)
         #expect(fromTrailingReader.nextCursor == .init(
+            recorderLifetimeId: recorder.backlogOrigin().cursor.recorderLifetimeId,
             nextSequence: 6,
             feedBytesBeforeNextSequence: 6,
             writeBytesBeforeNextSequence: 7
@@ -297,6 +299,7 @@ struct TerminalFlightRecorderTests {
 
         let delivered = recorder.cursorSnapshot(from: .beginning)
         let suffix = recorder.cursorSnapshot(from: .init(
+            recorderLifetimeId: recorder.backlogOrigin().cursor.recorderLifetimeId,
             nextSequence: 1,
             feedBytesBeforeNextSequence: 1,
             writeBytesBeforeNextSequence: 0
@@ -309,6 +312,7 @@ struct TerminalFlightRecorderTests {
         #expect(delivered.events.map(\.sequence) == [0, 1])
         #expect(suffix.events.map(\.sequence) == [1])
         #expect(delivered.nextCursor == .init(
+            recorderLifetimeId: recorder.backlogOrigin().cursor.recorderLifetimeId,
             nextSequence: 2,
             feedBytesBeforeNextSequence: 3,
             writeBytesBeforeNextSequence: 0
@@ -318,6 +322,7 @@ struct TerminalFlightRecorderTests {
         #expect(retained.droppedEventCount == 0)
         #expect(retained.droppedFeedBytes == 0)
         #expect(retained.nextCursor == .init(
+            recorderLifetimeId: recorder.backlogOrigin().cursor.recorderLifetimeId,
             nextSequence: 4,
             feedBytesBeforeNextSequence: 7,
             writeBytesBeforeNextSequence: 0
@@ -369,6 +374,7 @@ struct TerminalFlightRecorderTests {
         }
 
         let snapshot = recorder.cursorSnapshot(from: .init(
+            recorderLifetimeId: recorder.backlogOrigin().cursor.recorderLifetimeId,
             nextSequence: 3,
             feedBytesBeforeNextSequence: 6,
             writeBytesBeforeNextSequence: 0
@@ -394,6 +400,7 @@ struct TerminalFlightRecorderTests {
             recorder.record(.feed(Array(repeating: UInt8(payloadSize), count: payloadSize)))
         }
         let cursor = TerminalFlightRecordingCursor(
+            recorderLifetimeId: recorder.backlogOrigin().cursor.recorderLifetimeId,
             nextSequence: 5,
             feedBytesBeforeNextSequence: 15,
             writeBytesBeforeNextSequence: 0
@@ -406,6 +413,74 @@ struct TerminalFlightRecorderTests {
         #expect(snapshot.droppedEventCount == 0)
         #expect(snapshot.droppedFeedBytes == 0)
         #expect(snapshot.nextCursor == cursor)
+    }
+
+    @Test("cursors from another recorder lifetime are unplaceable at every sequence")
+    func foreignLifetimeCursorsAreUnplaceable() {
+        let firstLifetime = UUID()
+        let secondLifetime = UUID()
+        let oldRecorder = TerminalFlightRecorder(
+            lifetimeId: firstLifetime,
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        oldRecorder.record(.feed([1]))
+        let belowNewHead = oldRecorder.capture().snapshot.nextCursor
+        oldRecorder.record(.feed([2]))
+        oldRecorder.record(.feed([3]))
+        oldRecorder.record(.feed([4]))
+        let aboveNewHead = oldRecorder.capture().snapshot.nextCursor
+        let newRecorder = TerminalFlightRecorder(
+            lifetimeId: secondLifetime,
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 1, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        newRecorder.record(.feed([3]))
+        newRecorder.record(.feed([4]))
+        newRecorder.record(.feed([5]))
+
+        #expect(newRecorder.cursorPlacement(from: belowNewHead).isUnplaceable)
+        #expect(newRecorder.cursorPlacement(from: aboveNewHead).isUnplaceable)
+        #expect(newRecorder.cursorPlacement(from: .beginning).isUnplaceable)
+        #expect(belowNewHead.recorderLifetimeId == firstLifetime)
+        #expect(newRecorder.capture().snapshot.nextCursor.recorderLifetimeId == secondLifetime)
+    }
+
+    @Test("out-of-range coordinates in the current lifetime are unplaceable")
+    func outOfRangeCurrentLifetimeCursorIsUnplaceable() {
+        let lifetimeId = UUID()
+        let recorder = TerminalFlightRecorder(
+            lifetimeId: lifetimeId,
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        recorder.record(.feed([1]))
+
+        let future = TerminalFlightRecordingCursor(
+            recorderLifetimeId: lifetimeId,
+            nextSequence: 2,
+            feedBytesBeforeNextSequence: 1,
+            writeBytesBeforeNextSequence: 0
+        )
+        let impossibleWatermark = TerminalFlightRecordingCursor(
+            recorderLifetimeId: lifetimeId,
+            nextSequence: 1,
+            feedBytesBeforeNextSequence: 2,
+            writeBytesBeforeNextSequence: 0
+        )
+        let negativeWatermark = TerminalFlightRecordingCursor(
+            recorderLifetimeId: lifetimeId,
+            nextSequence: 1,
+            feedBytesBeforeNextSequence: -1,
+            writeBytesBeforeNextSequence: 0
+        )
+
+        #expect(recorder.cursorPlacement(from: future).isUnplaceable)
+        #expect(recorder.cursorPlacement(from: impossibleWatermark).isUnplaceable)
+        #expect(recorder.cursorPlacement(from: negativeWatermark).isUnplaceable)
     }
 
     @Test("zero byte budget can fully drain retained events")
@@ -451,6 +526,7 @@ struct TerminalFlightRecorderTests {
         let firstRetainedSequence = UInt64(recordedCount - eventLimit)
         let midSequence = firstRetainedSequence + UInt64(eventLimit / 2)
         let suffix = recorder.cursorSnapshot(from: .init(
+            recorderLifetimeId: recorder.backlogOrigin().cursor.recorderLifetimeId,
             nextSequence: midSequence,
             feedBytesBeforeNextSequence: Int(midSequence),
             writeBytesBeforeNextSequence: 0
@@ -481,6 +557,7 @@ struct TerminalFlightRecorderTests {
         // Both watermarks ride the origin. A tail-only stream that lost the write watermark
         // would report every write byte recorded before it began as loss on its first gap.
         #expect(origin.cursor == .init(
+            recorderLifetimeId: recorder.backlogOrigin().cursor.recorderLifetimeId,
             nextSequence: 3,
             feedBytesBeforeNextSequence: 2,
             writeBytesBeforeNextSequence: 3
@@ -502,7 +579,9 @@ struct TerminalFlightRecorderTests {
 
         let origin = recorder.backlogOrigin()
         #expect(origin.initial == .init(columns: 80, rows: 24))
-        #expect(origin.cursor == .beginning)
+        #expect(origin.cursor.nextSequence == 0)
+        #expect(origin.cursor.feedBytesBeforeNextSequence == 0)
+        #expect(origin.cursor.writeBytesBeforeNextSequence == 0)
 
         // A finite capture is that same origin paired with the read it describes, taken as one
         // moment. Geometry read apart from the events would let a dump state the pane's shape

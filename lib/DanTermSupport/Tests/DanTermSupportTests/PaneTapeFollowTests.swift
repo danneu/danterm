@@ -5,6 +5,8 @@ import DanTermProtocol
 @testable import DanTermSupport
 
 struct PaneTapeFollowTests {
+    private static let lifetimeId = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+
     @Test("a finite dump ends with its own terminator after its gap and events")
     func dumpRecordsEndWithSnapshotComplete() {
         // Intent: everything a finite dump owes after its start record is its loss, then its
@@ -42,6 +44,7 @@ struct PaneTapeFollowTests {
                 droppedFeedBytes: 6,
                 droppedWriteBytes: 0,
                 nextCursor: .init(
+                    recorderLifetimeId: Self.lifetimeId,
                     nextSequence: 6,
                     feedBytesBeforeNextSequence: 8,
                     writeBytesBeforeNextSequence: 0
@@ -85,6 +88,7 @@ struct PaneTapeFollowTests {
                 "rows": .number(40),
             ]),
             "cursor": .object([
+                "recorderLifetimeId": .string(PaneTapeCursor.beginning.recorderLifetimeId.uuidString),
                 "sequence": .number(0),
                 "feedByteOffset": .number(0),
                 "writeByteOffset": .number(0),
@@ -93,6 +97,7 @@ struct PaneTapeFollowTests {
         #expect(backlog.cursor == .beginning)
 
         let tailCursor = PaneTapeCursor(
+            recorderLifetimeId: Self.lifetimeId,
             nextSequence: 9,
             feedBytesBeforeNextSequence: 42,
             writeBytesBeforeNextSequence: 7
@@ -120,6 +125,7 @@ struct PaneTapeFollowTests {
         //   without their baseline, and a reader cannot demand the right terminator without
         //   knowing which capture it is reading.
         let cursor = PaneTapeCursor(
+            recorderLifetimeId: Self.lifetimeId,
             nextSequence: 12,
             feedBytesBeforeNextSequence: 480,
             writeBytesBeforeNextSequence: 36
@@ -135,6 +141,7 @@ struct PaneTapeFollowTests {
         #expect(start.record["capture"] == .string("follow"))
         #expect(start.record["format"] == .string("replay"))
         #expect(start.record["cursor"] == .object([
+            "recorderLifetimeId": .string(Self.lifetimeId.uuidString),
             "sequence": .number(12),
             "feedByteOffset": .number(480),
             "writeByteOffset": .number(36),
@@ -173,6 +180,7 @@ struct PaneTapeFollowTests {
             droppedFeedBytes: 0,
             droppedWriteBytes: 0,
             nextCursor: .init(
+                recorderLifetimeId: Self.lifetimeId,
                 nextSequence: 6,
                 feedBytesBeforeNextSequence: 108,
                 writeBytesBeforeNextSequence: 0
@@ -208,6 +216,7 @@ struct PaneTapeFollowTests {
     @Test("empty cursor snapshot emits nothing and leaves the cursor unchanged")
     func emptySnapshotLeavesCursorUnchanged() {
         let cursor = PaneTapeCursor(
+            recorderLifetimeId: Self.lifetimeId,
             nextSequence: 4,
             feedBytesBeforeNextSequence: 20,
             writeBytesBeforeNextSequence: 0
@@ -233,6 +242,7 @@ struct PaneTapeFollowTests {
             "rows": .number(30),
         ])
         let nextCursor = PaneTapeCursor(
+            recorderLifetimeId: Self.lifetimeId,
             nextSequence: 9,
             feedBytesBeforeNextSequence: 99,
             writeBytesBeforeNextSequence: 0
@@ -302,6 +312,7 @@ struct PaneTapeFollowTests {
             droppedFeedBytes: 0,
             droppedWriteBytes: 0,
             nextCursor: .init(
+                recorderLifetimeId: Self.lifetimeId,
                 nextSequence: 2,
                 feedBytesBeforeNextSequence: 4,
                 writeBytesBeforeNextSequence: 0
@@ -443,6 +454,7 @@ struct PaneTapeFollowTests {
             cursor: .beginning
         )
         let siblingCursor = PaneTapeCursor(
+            recorderLifetimeId: Self.lifetimeId,
             nextSequence: 12,
             feedBytesBeforeNextSequence: 480,
             writeBytesBeforeNextSequence: 0
@@ -535,6 +547,7 @@ struct PaneTapeFollowTests {
             droppedFeedBytes: 0,
             droppedWriteBytes: 0,
             nextCursor: .init(
+                recorderLifetimeId: Self.lifetimeId,
                 nextSequence: nextSequence,
                 feedBytesBeforeNextSequence: Int(nextSequence),
                 writeBytesBeforeNextSequence: 0
