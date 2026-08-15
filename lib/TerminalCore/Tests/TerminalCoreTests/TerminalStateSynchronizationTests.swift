@@ -189,27 +189,6 @@ struct TerminalStateSynchronizationTests {
         expectObservableState(resumed, equals: source, phase: "open cluster")
     }
 
-    @Test("state bytes preserve a repeat cluster larger than one OSC payload")
-    func reconstructsOversizedRepeatCluster() throws {
-        // Intent: split residual state at the parser's OSC bound without truncating REP memory.
-        // Why it exists: a cell cluster has no matching size cap and can outgrow one OSC payload.
-        // Scenario: variation selectors make an erased last cluster slightly larger than 2 MiB encoded.
-        var source = try #require(Terminal(columns: 2, rows: 1))
-        let selector = try #require(Unicode.Scalar(0xE0100))
-        var scalars = [Unicode.Scalar("A")]
-        scalars.append(contentsOf: repeatElement(selector, count: 350_000))
-        source.primeLastPrintedClusterForTesting(TerminalScalars(scalars), cellWidth: 1)
-
-        let synchronization = source.stateSynchronization
-        var resumed = try #require(Terminal(columns: synchronization.columns, rows: synchronization.rows))
-        resumed.feed(synchronization.bytes)
-
-        let continuation = Array("\u{1B}[b".utf8)
-        source.feed(continuation)
-        resumed.feed(continuation)
-        expectObservableState(resumed, equals: source, phase: "oversized repeat")
-    }
-
     @Test("state bytes preserve unfinished input recognition", arguments: [
         (prefix: [0xE2], continuation: [0x82, 0xAC]),
         (prefix: Array("\u{1B}[31".utf8), continuation: Array("mX".utf8)),

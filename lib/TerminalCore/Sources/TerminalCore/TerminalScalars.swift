@@ -91,6 +91,29 @@ public struct TerminalScalars: Sendable {
             storage = .spill(scalars)
         }
     }
+
+    /// Appends only when the resulting UTF-8 payload fits the terminal's retained-cell bound.
+    @discardableResult
+    mutating func append(_ scalar: Unicode.Scalar, upToUTF8ByteCount limit: Int) -> Bool {
+        guard canAppend(scalar, upToUTF8ByteCount: limit) else { return false }
+        append(scalar)
+        return true
+    }
+
+    func canAppend(_ scalar: Unicode.Scalar, upToUTF8ByteCount limit: Int) -> Bool {
+        let scalarByteCount = Self.utf8ByteCount(of: scalar)
+        return scalarByteCount <= limit
+            && reduce(0) { $0 + Self.utf8ByteCount(of: $1) } <= limit - scalarByteCount
+    }
+
+    static func utf8ByteCount(of scalar: Unicode.Scalar) -> Int {
+        switch scalar.value {
+        case 0...0x7F: 1
+        case 0x80...0x7FF: 2
+        case 0x800...0xFFFF: 3
+        default: 4
+        }
+    }
 }
 
 extension TerminalScalars: RandomAccessCollection {

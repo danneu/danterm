@@ -603,6 +603,7 @@ public struct Terminal: Equatable, Sendable {
         var target: CellPosition
         var previousClass: GraphemeBreakClass
         var breakState = GraphemeBreakState()
+        var retainedUTF8ByteCount: Int
     }
 
     /// Owns every piece of terminal state whose meaning is scoped to one screen buffer.
@@ -794,6 +795,17 @@ public struct Terminal: Equatable, Sendable {
     /// constant: the budget-taking initializer stays internal, because the public initializer
     /// enforcing this fixed value is an invariant with its own test.
     public static let scrollbackByteLimit = 16_777_216
+
+    /// Maximum UTF-8 payload retained for one live grapheme and its REP memory.
+    ///
+    /// Real terminals disagree: Alacritty grows zero-width storage without a cap
+    /// (`references/alacritty/alacritty_terminal/src/term/cell.rs#Cell::push_zerowidth`),
+    /// libvterm exposes six code points
+    /// (`references/libvterm/include/vterm.h#VTERM_MAX_CHARS_PER_CELL`), and kitty stops at
+    /// 24 to prevent denial of service (`references/kitty/kitty/screen.c#add_combining_char`).
+    /// A byte limit also bounds synchronization payloads across scalar widths. It preserves
+    /// at least 64 maximum-width scalars or 127 common two-byte combining marks in one cluster.
+    public static let graphemeClusterByteLimit = 256
 
     /// The smallest budget the arena can be built at, which is the store's own precondition.
     ///
@@ -1873,11 +1885,24 @@ public struct Terminal: Equatable, Sendable {
         else { return }
         if var cluster = lastPrintedCluster {
             guard cluster.cellWidth == width else { return }
-            for scalar in appended { cluster.scalars.append(scalar) }
+            for scalar in appended {
+                guard cluster.scalars.append(
+                    scalar,
+                    upToUTF8ByteCount: Self.graphemeClusterByteLimit
+                ) else { break }
+            }
             lastPrintedCluster = cluster
         } else {
+            var retained = TerminalScalars.empty
+            for scalar in appended {
+                guard retained.append(
+                    scalar,
+                    upToUTF8ByteCount: Self.graphemeClusterByteLimit
+                ) else { break }
+            }
+            guard retained.isEmpty == false else { return }
             lastPrintedCluster = LastPrintedCluster(
-                scalars: TerminalScalars(appended),
+                scalars: retained,
                 cellWidth: width
             )
         }
@@ -1916,7 +1941,10 @@ public struct Terminal: Equatable, Sendable {
         clusterContext = ClusterContext(
             target: CellPosition(row: row, column: column),
             previousClass: previousClass,
-            breakState: breakState
+            breakState: breakState,
+            retainedUTF8ByteCount: screen.rows[row].cells[column].scalars.reduce(0) {
+                $0 + TerminalScalars.utf8ByteCount(of: $1)
+            }
         )
     }
 
@@ -2859,11 +2887,6 @@ public struct Terminal: Equatable, Sendable {
         for id in 0..<HyperlinkId.max {
             hyperlinkTargets[id] = TerminalHyperlink(uri: "x")
         }
-    }
-
-    mutating func primeLastPrintedClusterForTesting(_ scalars: TerminalScalars, cellWidth: Int) {
-        lastPrintedCluster = LastPrintedCluster(scalars: scalars, cellWidth: cellWidth)
-        clusterContext = nil
     }
 
     /// Creates the one-operation no-eviction oracle used to isolate eviction side effects.
@@ -6642,7 +6665,8 @@ public struct Terminal: Equatable, Sendable {
 
         clusterContext = ClusterContext(
             target: CellPosition(row: row, column: column + count - 1),
-            previousClass: breakClass
+            previousClass: breakClass,
+            retainedUTF8ByteCount: TerminalScalars.utf8ByteCount(of: scalar(count - 1))
         )
         if column + count == columnCount {
             screen.rows[row].marginErased = false
@@ -6721,6 +6745,13 @@ public struct Terminal: Equatable, Sendable {
             clusterContext = nil
             return false
         }
+        let scalarByteCount = TerminalScalars.utf8ByteCount(of: scalar)
+        guard context.retainedUTF8ByteCount <= Self.graphemeClusterByteLimit - scalarByteCount else {
+            context.previousClass = classification.graphemeBreakClass
+            context.breakState = nextBreakState
+            clusterContext = context
+            return true
+        }
         invalidateInspection(inViewportRows: target.row..<(target.row + 1))
         switch desiredClusterWidth(
             for: scalar,
@@ -6735,11 +6766,12 @@ public struct Terminal: Equatable, Sendable {
             break
         }
 
-        screen.rows[target.row].cells[target.column].scalars.append(scalar)
         context.target = target
         context.previousClass = classification.graphemeBreakClass
         context.breakState = nextBreakState
+        context.retainedUTF8ByteCount += scalarByteCount
         clusterContext = context
+        screen.rows[target.row].cells[target.column].scalars.append(scalar)
         return true
     }
 
@@ -6943,7 +6975,11 @@ public struct Terminal: Equatable, Sendable {
         if screen.cursor.column + 2 == columnCount {
             screen.rows[screen.cursor.row].marginErased = false
         }
-        clusterContext = ClusterContext(target: screen.cursor, previousClass: breakClass)
+        clusterContext = ClusterContext(
+            target: screen.cursor,
+            previousClass: breakClass,
+            retainedUTF8ByteCount: TerminalScalars.utf8ByteCount(of: scalar)
+        )
         advanceCursorPastWideCell(at: screen.cursor)
     }
 
