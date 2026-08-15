@@ -317,3 +317,43 @@ proves.
 - Investigate the parallel-gate-only DanTermMobileKit failures at
   `scripts/run-test-suite.sh:28`. The exact package step and the serial 91-step gate
   passed, but the parallel `just test` run produced nine replica assertion failures.
+
+  **Investigated 2026-08-15; closed operationally as a non-reproducible,
+  process-local anomaly. Root cause unresolved.** The failing run's full output
+  survives in `.build/impl-plan-test.log` (gate finished 15:42). Findings:
+
+  - The failing kit step rebuilt its `.build-gate` at 15:40; the serial gate's kit
+    step at ~15:47 took 4 s -- no recompile -- so the exact same binary that failed
+    then passed. That rules out a deterministic build or source defect; it does not
+    rule out nondeterministic undefined behavior, a compiler or runtime issue, or a
+    latent race the sanitizers missed.
+  - The nine issues came from five of the old archive-based `PaneReplicaTests`, and
+    the signatures are internally inconsistent for a correct execution of pure value
+    code: two `Terminal == Terminal` expectations failed while both sides rendered
+    complete, byte-identical dumps (no floats, so no NaN escape hatch); every
+    multi-row viewport read returned only its last visual row ("first second" ->
+    "cond", "before after" -> "fter") while every single-row viewport test passed;
+    and one `columnCount` read 0 after a resize to 10. The wrongness was systematic
+    across independent, freshly built terminals within that one process.
+  - TerminalCore's own suite passed in the same failing gate run, and the tree state
+    matched commit 82201153's engine change, so the grapheme-retention edit is not
+    implicated.
+  - Nothing reproduces: `swift test --sanitize=thread` and `--sanitize=address` on
+    `ios/DanTermMobileKit` both pass with zero reports; the only concurrency in the
+    package (`MobileConnectionRunner` and its condition-guarded test fakes) audits
+    clean; twelve consecutive reruns of the suite pass; no kernel memory events or
+    relevant crash reports in the failure window (the 15:40 `PTYProbe` report is a
+    deliberate SIGQUIT from the PTY suite). This makes further immediate debugging
+    low-value, not the cause identified.
+
+  Reopen if it recurs. If it does, keep the failing test binary (the gate leaves it
+  in `ios/DanTermMobileKit/.build-gate`) and rerun it directly before rebuilding
+  anything, to separate binary from process.
+
+- Track separately: `Terminal`'s synthesized `==` includes the memoized style-id
+  caches (`currentStyleIdCache`, `backgroundEraseStyleIdCache`) and the
+  history-dependent style intern tables, so equality is path-dependent -- the same
+  principle the type already excludes `ObservationGeneration` and
+  `RowNumberingEpoch` from equality to uphold. Latent today (nothing compares
+  terminals with divergent histories), unrelated to the gate incident above, and
+  worth its own verify-issue or ideal-fix pass.
