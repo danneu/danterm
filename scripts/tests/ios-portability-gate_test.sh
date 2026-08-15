@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Self-test for the iOS portability gate. It builds a fixture tree of tiny packages
-# instead of the engine, so the four claims below are proved in seconds:
+# instead of the engine, so the five claims below are proved in seconds:
 #
 #   1. A pinned package whose every target compiles for iOS passes.
 #   2. A pinned package with a host-bound TARGET fails -- the case that matters,
 #      because SwiftPM would otherwise skip test targets and report success.
 #   3. An unpinned package is not built at all, so it may stay host-bound.
 #   4. An iOS pin on DanTermSupport fails, which is the check PO7 asks for.
+#   5. A pinned package under ios/ is discovered and built.
 #
 # Claim 2 is the one a cheaper gate gets wrong: `Process()` in a pinned target has
 # to fail on the commit that adds it, and only a real compile against the iOS SDK
@@ -70,6 +71,14 @@ write_package Portable '.macOS(.v26), .iOS(.v26)' "$PORTABLE_TEST"
 run_gate || { cat "$TMP/out" >&2; fail "a pinned package whose targets all build for iOS should pass"; }
 grep -q 'building lib/Portable' "$TMP/out" || fail "the gate should report which packages it built"
 
+# 5. Product packages under ios/ are part of the same package-level claim.
+write_package IOSPortable '.macOS(.v26), .iOS(.v26)' "$PORTABLE_TEST"
+mkdir -p "$TMP/root/ios"
+mv "$TMP/root/lib/IOSPortable" "$TMP/root/ios/IOSPortable"
+run_gate || { cat "$TMP/out" >&2; fail "a portable ios/ package should pass"; }
+grep -q 'building ios/IOSPortable' "$TMP/out" \
+    || fail "the gate should discover pinned packages under ios/"
+
 # 3. Unpinned packages are not built, so host-bound code in one is fine.
 write_package Unpinned '.macOS(.v26)' "$HOST_BOUND_TEST"
 run_gate || { cat "$TMP/out" >&2; fail "an unpinned package must not be built for iOS"; }
@@ -89,7 +98,7 @@ grep -q 'DanTermSupport carries Mac-host roles only' "$TMP/out" \
     || fail "the DanTermSupport failure should explain the role boundary"
 
 # A gate that finds nothing to build is a gate that proves nothing.
-rm -rf "$TMP/root/lib/Portable" "$TMP/root/lib/Unpinned"
+rm -rf "$TMP/root/lib/Portable" "$TMP/root/lib/Unpinned" "$TMP/root/ios/IOSPortable"
 sed -i '' 's/, \.iOS(\.v26)//' "$TMP/root/lib/DanTermSupport/Package.swift"
 if run_gate; then fail "the gate must fail when no package declares an iOS platform"; fi
 grep -q 'checking nothing' "$TMP/out" || fail "an empty pinned set should say so"

@@ -25,6 +25,7 @@ export CLANG_MODULE_CACHE_PATH="$REPO_ROOT/.build/clang-module-cache"
 STEPS=(
     'swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate -Xswiftc -Xfrontend -Xswiftc -warn-long-function-bodies=500'
     './scripts/ios-portability-gate.sh'
+    'swift test --package-path ios/DanTermMobileKit --scratch-path ios/DanTermMobileKit/.build-gate'
     './scripts/test-terminal-pty.sh'
     './scripts/tests/terminal-capture-api-gate_test.sh'
     './scripts/tests/terminal-capture-api-gate-cache_test.sh'
@@ -111,6 +112,7 @@ STEPS=(
     './scripts/core-purity-lint.sh --profile portable lib/DanTermSupport/Sources/DanTermSupport'
     './scripts/core-purity-lint.sh --profile portable lib/DanTermProtocol/Sources/DanTermProtocol'
     './scripts/core-purity-lint.sh --profile portable lib/DanTermClient/Sources/DanTermClient'
+    './scripts/core-purity-lint.sh --profile portable ios/DanTermMobileKit/Sources/DanTermMobileKit'
 )
 
 # Test seam: the self-test substitutes a synthetic step list so it can exercise the

@@ -30,7 +30,7 @@ TRIPLE="arm64-apple-ios26.5"
 
 # Packages the tree owns. `references/` and `docs/` hold external and throwaway
 # trees, so a manifest there is not ours to police.
-MANIFESTS=(Package.swift lib/*/Package.swift)
+MANIFESTS=(Package.swift lib/*/Package.swift ios/*/Package.swift)
 
 UNPINNED_BY_DESIGN=(lib/DanTermSupport/Package.swift)
 
