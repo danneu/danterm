@@ -109,9 +109,11 @@ removed. This is the iOS restatement of the register's L1/L3 spirit and the
 direct consequence of D2's energy finding.
 
 **The replica is observe-only (D6 stage 1).** The phone adopts the stream's
-geometry unconditionally, renders remote-sized (aspect-fit at the pane's real
-grid), and never originates a size: no `pane.resize` exists on the wire and
-this plan defines none.
+geometry unconditionally and never originates a size: no `pane.resize` exists
+on the wire and this plan defines none. It renders the remote grid at the
+phone's full width and bottom-aligns it. When the keyboard leaves too little
+height, the upper rows clip until the keyboard is dismissed; the grid does not
+reflow or resize.
 
 **Connection lifecycle: connect, list, subscribe, resume by cursor.** The app
 persists a server target (host:port), connects with the shipped TCP
@@ -425,8 +427,9 @@ SKILL.md` is untouched because no CLI surface changes).
       top of it. (PO7)
 - [x] 3. UIKit shell, `scripts/ios-app.sh`, and the simulator smoke against a
       dev slot. (PO6 shell wiring, PO9 simulator half)
-- [ ] 4. Device smoke on the user's iPhone, then the docs closeout: A1
-      amendment and research/35 ledger update. (PO9 device half)
+- [x] 4. Device smoke and its UIKit presentation fixes on the user's iPhone,
+      then the docs closeout: A1 amendment and research/35 ledger update.
+      (PO9 device half)
 
 ## Implementation notes
 
@@ -442,6 +445,19 @@ SKILL.md` is untouched because no CLI surface changes).
   death. The kit therefore archives the last complete synchronization plus the
   later neutral events and its cursor. The shell coalesces archive writes and
   restores that exact state before it requests continuation from the cursor.
+- The physical-device smoke showed that uniform aspect-fit made the terminal
+  shrink horizontally while the keyboard was visible. The user chose
+  full-width, bottom-aligned presentation with temporary upper-row clipping so
+  typed output stays readable without changing the authoritative remote grid.
+- The 2026-08-15 device smoke used Pelucho over Tailscale through DERP `dfw`.
+  The shipped listener admitted the phone's stable node id, the app connected
+  to DanTerm 0.1.9, and `pane read` confirmed input sent from the phone in the
+  exact source pane. Backgrounding for five seconds and reopening reconnected
+  and retained the command output. The shared config was restored after each
+  isolated-slot launch.
+- The final build was installed over CoreDevice on the home LAN. Pelucho
+  confirmed the full-width terminal, compact one-line key row, readable target
+  controls, and keyboard dismissal with the software keyboard open.
 
 ## Follow Up
 

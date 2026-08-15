@@ -97,11 +97,14 @@ final class TerminalSurfaceView: UIView {
         let width = CGFloat(metrics.cellWidthPixels * geometry.columns) / metrics.displayScale
         let height = CGFloat(metrics.cellHeightPixels * geometry.rows) / metrics.displayScale
         surfaceView.bounds = CGRect(x: 0, y: 0, width: width, height: height)
-        let fit = min(bounds.width / max(width, 1), bounds.height / max(height, 1))
+        let fit = bounds.width / max(width, 1)
+        let scaledHeight = height * fit
         surfaceView.transform = CGAffineTransform(scaleX: fit, y: fit)
+        // Keep typed output readable while the keyboard reduces height. The remote grid stays
+        // authoritative; only its upper pixels clip until the keyboard is dismissed.
         surfaceView.layer.position = CGPoint(
-            x: (bounds.width - width * fit) / 2,
-            y: (bounds.height - height * fit) / 2
+            x: 0,
+            y: bounds.height - scaledHeight
         )
     }
 

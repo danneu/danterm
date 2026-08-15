@@ -7,17 +7,11 @@ import UIKit
 
 /// Keeps every UIKit state transition on the main actor while sessions block elsewhere.
 @MainActor
-final class MobileRootViewController: UIViewController, UITableViewDataSource, UITableViewDelegate,
-    UITextViewDelegate
-{
-    private let hostField = UITextField()
-    private let portField = UITextField()
-    private let connectButton = UIButton(type: .system)
-    private let statusLabel = UILabel()
+final class MobileRootViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
+    private let connectionHeader = ConnectionHeaderView()
     private let paneTable = UITableView(frame: .zero, style: .plain)
     private let terminalView = TerminalSurfaceView()
-    private let inputViewField = TerminalInputTextView()
-    private let accessoryRow = UIStackView()
+    private let composer = TerminalComposerView()
 
     private var panes: [MobilePaneListItem] = []
     private var selectedPaneId: PaneId?
@@ -39,7 +33,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         configureViews()
         configureLifecycle()
         loadTarget()
-        if hostField.text?.isEmpty == false { connect(preferredPane: nil) }
+        if connectionHeader.hostText?.isEmpty == false { connect(preferredPane: nil) }
     }
 
     isolated deinit {
@@ -47,40 +41,6 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         attempt?.cancel()
         runner?.cancel()
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        let safe = view.safeAreaInsets
-        let width = view.bounds.width
-        let top = safe.top + 8
-        hostField.frame = CGRect(x: 12, y: top, width: width - 132, height: 36)
-        portField.frame = CGRect(x: width - 112, y: top, width: 48, height: 36)
-        connectButton.frame = CGRect(x: width - 60, y: top, width: 52, height: 36)
-        statusLabel.frame = CGRect(x: 12, y: top + 40, width: width - 24, height: 22)
-        let tableHeight = min(150, max(80, view.bounds.height * 0.2))
-        paneTable.frame = CGRect(x: 0, y: top + 66, width: width, height: tableHeight)
-        let accessoryHeight: CGFloat = 38
-        let inputHeight: CGFloat = 38
-        let bottom = view.bounds.height - safe.bottom
-        accessoryRow.frame = CGRect(
-            x: 4,
-            y: bottom - accessoryHeight,
-            width: width - 8,
-            height: accessoryHeight
-        )
-        inputViewField.frame = CGRect(
-            x: 8,
-            y: accessoryRow.frame.minY - inputHeight,
-            width: width - 16,
-            height: inputHeight
-        )
-        terminalView.frame = CGRect(
-            x: 0,
-            y: paneTable.frame.maxY,
-            width: width,
-            height: max(0, inputViewField.frame.minY - paneTable.frame.maxY)
-        )
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -106,11 +66,12 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "pane")
-            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "pane")
+        let cell = tableView.dequeueReusableCell(withIdentifier: "pane", for: indexPath)
         let pane = panes[indexPath.row]
-        cell.textLabel?.text = pane.paneTitle
-        cell.detailTextLabel?.text = "\(pane.groupName) / \(pane.tabTitle)"
+        var content = cell.defaultContentConfiguration()
+        content.text = pane.paneTitle
+        content.secondaryText = "\(pane.groupName) / \(pane.tabTitle)"
+        cell.contentConfiguration = content
         cell.accessoryType = pane.paneId == selectedPaneId ? .checkmark : .none
         return cell
     }
@@ -119,58 +80,27 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         connect(preferredPane: panes[indexPath.row].paneId)
     }
 
-    func textView(
-        _ textView: UITextView,
-        shouldChangeTextIn range: NSRange,
-        replacementText text: String
-    ) -> Bool {
-        if text.isEmpty == false { send(inputMapper.text(text)) }
-        return false
-    }
-
     private func configureViews() {
-        hostField.borderStyle = .roundedRect
-        hostField.placeholder = "Mac tailnet host"
-        hostField.autocapitalizationType = .none
-        hostField.autocorrectionType = .no
-        hostField.spellCheckingType = .no
-        portField.borderStyle = .roundedRect
-        portField.placeholder = "7420"
-        portField.keyboardType = .numberPad
-        connectButton.setTitle("Go", for: .normal)
-        connectButton.addTarget(self, action: #selector(connectTapped), for: .touchUpInside)
-        statusLabel.font = .preferredFont(forTextStyle: .caption1)
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.numberOfLines = 1
+        connectionHeader.onConnect = { [weak self] in
+            self?.connect(preferredPane: self?.selectedPaneId)
+        }
         paneTable.dataSource = self
         paneTable.delegate = self
-        paneTable.rowHeight = 52
-        inputViewField.delegate = self
-        inputViewField.onPaste = { [weak self] text in
+        paneTable.rowHeight = UITableView.automaticDimension
+        paneTable.estimatedRowHeight = 52
+        paneTable.register(UITableViewCell.self, forCellReuseIdentifier: "pane")
+        composer.onText = { [weak self] text in
+            self?.send(self?.inputMapper.text(text))
+        }
+        composer.onPaste = { [weak self] text in
             self?.send(self?.inputMapper.paste(text))
         }
-        inputViewField.autocorrectionType = .no
-        inputViewField.autocapitalizationType = .none
-        inputViewField.smartDashesType = .no
-        inputViewField.smartQuotesType = .no
-        inputViewField.smartInsertDeleteType = .no
-        inputViewField.spellCheckingType = .no
-        inputViewField.font = .monospacedSystemFont(ofSize: 16, weight: .regular)
-        inputViewField.layer.borderColor = UIColor.separator.cgColor
-        inputViewField.layer.borderWidth = 1
-        inputViewField.layer.cornerRadius = 6
-        inputViewField.text = ""
-        accessoryRow.axis = .horizontal
-        accessoryRow.distribution = .fillEqually
-        accessoryRow.spacing = 2
-        for entry in accessoryEntries {
-            let button = UIButton(type: .system)
-            button.setTitle(entry.title, for: .normal)
-            button.tag = entry.tag
-            button.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
-            button.addTarget(self, action: #selector(accessoryTapped(_:)), for: .touchUpInside)
-            accessoryRow.addArrangedSubview(button)
+        composer.onAccessoryKey = { [weak self] key in
+            guard let self else { return false }
+            send(inputMapper.accessory(key))
+            return inputMapper.isControlLatched
         }
+        composer.onDismissKeyboard = { [weak self] in self?.view.endEditing(true) }
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
         terminalView.addGestureRecognizer(scroll)
         terminalView.didUpdateArchive = { [weak self] archive in self?.scheduleStore(archive: archive) }
@@ -187,11 +117,42 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
                 break
             }
         }
-        for subview in [hostField, portField, connectButton, statusLabel, paneTable,
-                        terminalView, inputViewField, accessoryRow]
+        for subview in [connectionHeader, paneTable, terminalView, composer]
         {
+            subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
+        configureConstraints()
+    }
+
+    private func configureConstraints() {
+        view.keyboardLayoutGuide.followsUndockedKeyboard = true
+        let preferredTableHeight = paneTable.heightAnchor.constraint(
+            equalTo: view.heightAnchor,
+            multiplier: 0.2
+        )
+        preferredTableHeight.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            connectionHeader.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            connectionHeader.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            connectionHeader.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+
+            paneTable.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            paneTable.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            paneTable.topAnchor.constraint(equalTo: connectionHeader.bottomAnchor, constant: 4),
+            paneTable.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
+            paneTable.heightAnchor.constraint(lessThanOrEqualToConstant: 150),
+            preferredTableHeight,
+
+            terminalView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            terminalView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            terminalView.topAnchor.constraint(equalTo: paneTable.bottomAnchor),
+            terminalView.bottomAnchor.constraint(equalTo: composer.topAnchor),
+
+            composer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            composer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            composer.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+        ])
     }
 
     private func configureLifecycle() {
@@ -218,18 +179,16 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private func loadTarget() {
         let environment = ProcessInfo.processInfo.environment
         let defaults = UserDefaults.standard
-        hostField.text = environment["DANTERM_IOS_HOST"] ?? defaults.string(forKey: "serverHost")
-        portField.text = environment["DANTERM_IOS_PORT"] ?? defaults.string(forKey: "serverPort") ?? "7420"
-    }
-
-    @objc private func connectTapped() {
-        connect(preferredPane: selectedPaneId)
+        connectionHeader.hostText = environment["DANTERM_IOS_HOST"]
+            ?? defaults.string(forKey: "serverHost")
+        connectionHeader.portText = environment["DANTERM_IOS_PORT"]
+            ?? defaults.string(forKey: "serverPort") ?? "7420"
     }
 
     private func connect(preferredPane: PaneId?) {
-        guard let host = hostField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+        guard let host = connectionHeader.hostText?.trimmingCharacters(in: .whitespacesAndNewlines),
               host.isEmpty == false,
-              let portText = portField.text,
+              let portText = connectionHeader.portText,
               let port = UInt16(portText)
         else {
             show(state: .deviceSetupFailure, detail: "Enter a host and port")
@@ -392,15 +351,6 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         }
     }
 
-    @objc private func accessoryTapped(_ sender: UIButton) {
-        guard let key = MobileAccessoryKey(tag: sender.tag) else { return }
-        send(inputMapper.accessory(key))
-        if key == .control {
-            sender.tintColor = inputMapper.isControlLatched ? .systemOrange : view.tintColor
-        }
-        inputViewField.becomeFirstResponder()
-    }
-
     @objc private func scrolled(_ recognizer: UIPanGestureRecognizer) {
         guard recognizer.state == .ended else { return }
         let direction: InputWheelDirection = recognizer.translation(in: terminalView).y > 0 ? .up : .down
@@ -413,8 +363,10 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     }
 
     private func show(state: MobileConnectionState, detail: String? = nil) {
-        statusLabel.text = detail ?? state.label
-        statusLabel.textColor = state.isFailure ? .systemRed : .secondaryLabel
+        connectionHeader.showStatus(
+            detail ?? state.label,
+            color: state.isFailure ? .systemRed : .secondaryLabel
+        )
     }
 
     private func scheduleStore(archive: PaneReplicaArchive) {
@@ -441,39 +393,6 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         guard let data = UserDefaults.standard.data(forKey: "replica.\(pane.rawValue.uuidString)")
         else { return nil }
         return try? JSONDecoder().decode(PaneReplicaArchive.self, from: data)
-    }
-}
-
-/// Separates an explicit paste gesture from ordinary committed keyboard text.
-@MainActor
-private final class TerminalInputTextView: UITextView {
-    var onPaste: ((String) -> Void)?
-
-    override func paste(_ sender: Any?) {
-        if let text = UIPasteboard.general.string { onPaste?(text) }
-    }
-}
-
-private let accessoryEntries: [(title: String, tag: Int)] = [
-    ("Esc", 0), ("Ctrl", 1), ("Tab", 2), ("up", 3), ("down", 4),
-    ("left", 5), ("right", 6), ("|", 7), ("~", 8), ("/", 9),
-]
-
-private extension MobileAccessoryKey {
-    init?(tag: Int) {
-        switch tag {
-        case 0: self = .escape
-        case 1: self = .control
-        case 2: self = .tab
-        case 3: self = .up
-        case 4: self = .down
-        case 5: self = .left
-        case 6: self = .right
-        case 7: self = .pipe
-        case 8: self = .tilde
-        case 9: self = .slash
-        default: return nil
-        }
     }
 }
 

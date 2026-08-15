@@ -95,7 +95,7 @@ Status values:
 
 | id | Decision | Status |
 |---|---|---|
-| A1 | The engine is a DanTerm component for macOS, not a general-purpose or cross-platform terminal framework, and not a reusable public API. | live |
+| A1 | The engine is a DanTerm-internal component used by the macOS app and the in-repo iOS client, not a general-purpose terminal framework or reusable public API. The iOS client consumes the engine packages without changing that ownership boundary (research/35/D3). | live |
 | A2 | The compatibility target is a finite, priority-ordered list: zsh/bash/fish, ssh, tmux, vim/neovim, fzf, more/less, btop/htop, lazygit, Claude Code, Codex. | live |
 | A3 | Apple frameworks are allowed without justification; a third-party dependency is admitted only when its benefit outweighs its release, security, maintenance, and integration cost. | live |
 | A4 | Existing terminal implementations inform design and serve as test references, but none is normative. Protocol specifications and the DanTerm contract decide intended behavior; reference emulator output is evidence, not authority. Accepted risk: differential testing can reproduce a reference's bugs. | live |

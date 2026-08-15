@@ -666,6 +666,16 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   the `vmmap` shell-out and a Swift Testing exit test, both instruments rather
   than behaviors, neither losing macOS coverage.
 
+### Milestone 1 product client
+
+- **T25 DONE** -- The step-0 UIKit client ships the milestone-1 composition as
+  product code: pane discovery, one live replica stream, the D2 presentation
+  contract, D8 input, cursor-backed foreground resume, and explicit failure
+  states. A physical-device smoke on Pelucho connected through the shipped
+  tailnet listener, delivered phone input to the exact Mac pane, and resumed
+  the same terminal state after background and foreground. Plan:
+  [plans/impl/2026-08-14-2129-step0-ios-client-app.md](../../../plans/impl/2026-08-14-2129-step0-ios-client-app.md).
+
 ### Phase 6 -- push notifications and quick replies (after milestone 1)
 
 - **T15 TODO** -- APNs sender **in the app** keyed off the 34/D2 activity
