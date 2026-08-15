@@ -1136,6 +1136,43 @@ public actor TerminalPTYHost {
         }
     }
 
+    package enum InteractionForTesting: Sendable {
+        case pointer(TerminalPointerEvent)
+        case cancelLinkInteraction
+        case clearSelection
+        case beginSearch(String)
+        case selectAll
+        case scrollByRows(Int)
+        case resize(TerminalDimensions)
+    }
+
+    package nonisolated func applyInteractionForTesting(_ interaction: InteractionForTesting) {
+        _ = fence(countsAsProduction: false) { owner in
+            switch interaction {
+            case .pointer(let event):
+                owner.applyPointer(
+                    event,
+                    origin: nil,
+                    onPaneMenu: { _ in },
+                    onOpenLink: { _ in },
+                    onSelectionCompleted: nil
+                )
+            case .cancelLinkInteraction:
+                owner.applyLinkCancellation()
+            case .clearSelection:
+                owner.applyClearSelection()
+            case .beginSearch(let query):
+                owner.applySearch(.begin(query), onStatus: { _ in })
+            case .selectAll:
+                owner.applySelectAll()
+            case .scrollByRows(let rows):
+                owner.applyViewportNavigation(.scrollByRows(rows), publishUpdate: true)
+            case .resize(let dimensions):
+                owner.process(.resize(dimensions))
+            }
+        }
+    }
+
     /// Returns the reported child result without waiting for future lifecycle work.
     public func result() -> PaneProcessLifecycleResult? {
         reportedResult
@@ -1237,7 +1274,6 @@ public actor TerminalPTYHost {
         if decision.inputBytes.isEmpty == false {
             submitInput(decision.inputBytes, origin: origin)
         }
-        let previousTerminal = terminal
         switch decision.selectionMutation {
         case .clear:
             terminal.clearSelection()
@@ -1262,10 +1298,8 @@ public actor TerminalPTYHost {
         }
         applyHoverMutation(decision.hoverMutation)
         applyArmMutation(decision.armMutation)
-        if terminal != previousTerminal {
-            markUpdatePending()
-            publishPendingUpdate()
-        }
+        markFrameUpdatePendingIfNeeded()
+        publishPendingUpdate()
         if let cell = decision.paneMenuCell {
             onPaneMenu(cell)
         }
@@ -1276,12 +1310,10 @@ public actor TerminalPTYHost {
 
     private func applyLinkCancellation() {
         guard teardownFinished == false else { return }
-        let previousTerminal = terminal
         let cancellation = cancelTerminalLinkInteraction(state: &interactionState)
         applyHoverMutation(cancellation.hoverMutation)
         applyArmMutation(cancellation.armMutation)
-        guard terminal != previousTerminal else { return }
-        markUpdatePending()
+        markFrameUpdatePendingIfNeeded()
         publishPendingUpdate()
     }
 
@@ -1309,10 +1341,8 @@ public actor TerminalPTYHost {
 
     private func applyClearSelection() {
         guard teardownFinished == false else { return }
-        let previousTerminal = terminal
         terminal.clearSelection()
-        guard terminal != previousTerminal else { return }
-        markUpdatePending()
+        markFrameUpdatePendingIfNeeded()
         publishPendingUpdate()
     }
 
@@ -1329,28 +1359,23 @@ public actor TerminalPTYHost {
         onStatus: @Sendable (TerminalSearchStatus?) -> Void
     ) {
         guard teardownFinished == false else { return }
-        let previousTerminal = terminal
         switch mutation {
         case .begin(let query): _ = terminal.beginSearch(query)
         case .next: _ = terminal.searchNext()
         case .previous: _ = terminal.searchPrevious()
         case .clear: terminal.clearSearch()
         }
-        // Above the change guard on purpose: a repeated failed needle and a navigate with
-        // only one match mutate nothing, and those are exactly the moments the overlay's
-        // counter has to be told where the search stands.
+        // Always report: a repeated failed needle and a navigate with only one match record
+        // no frame work, and those are exactly the moments the overlay still needs status.
         onStatus(terminal.searchStatus)
-        guard terminal != previousTerminal else { return }
-        markUpdatePending()
+        markFrameUpdatePendingIfNeeded()
         publishPendingUpdate()
     }
 
     private func applySelectAll() {
         guard teardownFinished == false else { return }
-        let previousTerminal = terminal
         terminal.selectAll()
-        guard terminal != previousTerminal else { return }
-        markUpdatePending()
+        markFrameUpdatePendingIfNeeded()
         publishPendingUpdate()
     }
 
@@ -1406,7 +1431,7 @@ public actor TerminalPTYHost {
         publishUpdate: Bool
     ) {
         guard teardownFinished == false else { return }
-        let previousTerminal = terminal
+        let previousViewport = terminal.scrollProjection
         switch navigation {
         case .scrollByRows(let rows): terminal.scroll(byRows: rows)
         case .scrollToTopRow(let row): terminal.scroll(toTopRow: row)
@@ -1416,10 +1441,10 @@ public actor TerminalPTYHost {
                 "applyViewportNavigation takes only .scrollByRows, .scrollToTopRow, .scrollToBottom"
             )
         }
-        if terminal != previousTerminal {
-            markUpdatePending()
+        if terminal.scrollProjection != previousViewport {
             if captureTransitions { appliedTransitions.append(navigation) }
         }
+        markFrameUpdatePendingIfNeeded()
         if publishUpdate { publishPendingUpdate() }
     }
 
@@ -1970,10 +1995,9 @@ public actor TerminalPTYHost {
             ws_ypixel: 0
         )
         guard ioctl(masterFD, TIOCSWINSZ, &size) == 0 else { return }
-        let previousTerminal = terminal
         flightTape.record(.resize(columns: dimensions.columns, rows: dimensions.rows))
         terminal.resize(columns: dimensions.columns, rows: dimensions.rows)
-        if terminal != previousTerminal { markUpdatePending() }
+        markFrameUpdatePendingIfNeeded()
         if captureTransitions {
             appliedTransitions.append(.resize(dimensions))
             capturedSubmittedTransitions.append(.resize(dimensions))
@@ -2207,6 +2231,12 @@ public actor TerminalPTYHost {
         if terminal.hasPendingConsumerWork {
             consumerWorkWasSignaled = true
         }
+    }
+
+    /// Wakes one future frame drain for recorded work not covered by an earlier wake.
+    private func markFrameUpdatePendingIfNeeded() {
+        guard terminal.hasPendingConsumerWork, consumerWorkWasSignaled == false else { return }
+        markUpdatePending()
     }
 
     private func publishPendingUpdate() {

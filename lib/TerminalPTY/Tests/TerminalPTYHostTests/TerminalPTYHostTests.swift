@@ -7,7 +7,7 @@ import Testing
 import TerminalPTYTestSupport
 import TerminalPTYWaitSupport
 import PaneProcessLifecycle
-import TerminalCore
+@testable import TerminalCore
 import TerminalCoreRecording
 
 /// Exercises the native owner only through real PTYs and controlled child behavior.
@@ -249,6 +249,151 @@ struct TerminalPTYHostTests {
         #expect(first.damage == .full)
         #expect(second.damage == .none)
         #expect(await host.snapshot() == second.terminal)
+        await host.close()
+    }
+
+    @Test("frame-only mutations coalesce behind one undrained signal")
+    func frameOnlyMutationsCoalesceBehindUndrainedSignal() async throws {
+        // Intent: one outstanding frame wake covers later interaction work until the frame drains.
+        // Why it exists: signaling every mutation lets pointer backlogs wake the same future drain
+        //   repeatedly even though that drain reads the terminal's final state.
+        // Scenario: full damage is signaled, then Select All lands before the consumer drains it.
+        let host = try makeHost(captureTransitions: false)
+        host.deliverOutputForTesting(Array("alpha".utf8))
+        let afterOutput = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+
+        host.selectAll()
+        _ = host.fencedSnapshot()
+
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterOutput)
+        let frame = host.fencedFrameState()
+        #expect(frame.damage == .full)
+        #expect(frame.terminal.selectedText == "alpha")
+        await host.close()
+    }
+
+    @Test("partial frame damage coalesces disjoint interaction rows")
+    func partialFrameDamageCoalescesDisjointRows() async throws {
+        // Intent: one undrained wake covers later damage outside the first mutation's row set.
+        // Why it exists: signal coalescing is safe only if the eventual drain carries all damage,
+        //   rather than only the rows present when the wake was emitted.
+        // Scenario: two line selections land on different rows before one frame drain.
+        let host = try makeHost(captureTransitions: false)
+        host.deliverOutputForTesting(Array("alpha\r\nbeta\r\ngamma".utf8))
+        _ = host.fencedFrameState()
+        let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+
+        host.sendPointer(.down(.left, column: 1, row: 0, clickCount: 3))
+        _ = host.fencedSnapshot()
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == baseline + 1)
+        host.sendPointer(.up(.left, column: 1, row: 0))
+        _ = host.fencedSnapshot()
+
+        host.sendPointer(.down(.left, column: 1, row: 2, clickCount: 3))
+        _ = host.fencedSnapshot()
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == baseline + 1)
+
+        let frame = host.fencedFrameState()
+        #expect(frame.damage.contains(row: 0))
+        #expect(frame.damage.contains(row: 2))
+        #expect(frame.terminal.selectedText == "gamma")
+        await host.close()
+    }
+
+    @Test("arming an already-hovered link emits no frame signal")
+    func armOnlyLinkTransitionEmitsNoSignal() async throws {
+        // Intent: click reservation stays owner-internal and creates no consumer wakeup.
+        // Why it exists: whole-Terminal inequality treated invisible armed-link state as a frame.
+        // Scenario: Cmd-hover drains, then Cmd-down arms the same URL without changing hover.
+        let host = try makeHost(captureTransitions: false)
+        host.deliverOutputForTesting(Array("https://a.co".utf8))
+        _ = host.fencedFrameState()
+
+        host.sendPointer(.move(column: 3, row: 0, modifiers: [.command]))
+        _ = host.fencedFrameState()
+        let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+
+        host.sendPointer(.down(.left, column: 3, row: 0, modifiers: [.command]))
+        _ = host.fencedSnapshot()
+
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == baseline)
+        #expect(host.fencedFrameState().damage == .none)
+        await host.close()
+    }
+
+    @Test("owner interactions never compare retained terminal history", .timeLimit(.minutes(1)))
+    func ownerInteractionsNeverCompareRetainedHistory() async throws {
+        // Intent: every interaction publication site remains independent of retained depth.
+        // Why it exists: the 2026-08-15 pointer freeze came from whole-Terminal equality on the
+        //   owner queue, and removing only that one call would leave the same failure elsewhere.
+        // Scenario: each interaction class mutates a live host after it has built deep history.
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(command: try scrollbackCommand()))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        _ = host.fencedFrameState()
+
+        let comparisons = WholeStoreEqualityCounter.measure {
+            host.applyInteractionForTesting(.pointer(.move(column: 0, row: 0)))
+            host.applyInteractionForTesting(.cancelLinkInteraction)
+            host.applyInteractionForTesting(.clearSelection)
+            host.applyInteractionForTesting(.beginSearch("line"))
+            host.applyInteractionForTesting(.selectAll)
+            host.applyInteractionForTesting(.scrollByRows(-1))
+            host.applyInteractionForTesting(.resize(.init(columns: 79, rows: 23)))
+        }
+
+        #expect(comparisons == 0)
+        await host.close()
+    }
+
+    @Test("conservative frame recordings still publish after each drain")
+    func conservativeFrameRecordingsStillPublish() async throws {
+        // Intent: publication follows recorded damage even when the visible value is unchanged.
+        // Why it exists: an inequality-based shortcut would strand deliberate repaint records.
+        // Scenario: the same URL is hovered twice and the same successful search is begun twice.
+        let host = try makeHost(captureTransitions: false)
+        host.deliverOutputForTesting(Array("https://a.co hit".utf8))
+        _ = host.fencedFrameState()
+
+        host.sendPointer(.move(column: 3, row: 0, modifiers: [.command]))
+        _ = host.fencedFrameState()
+        let afterFirstHover = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+        host.sendPointer(.move(column: 3, row: 0, modifiers: [.command]))
+        _ = host.fencedSnapshot()
+        #expect(
+            (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+                == afterFirstHover + 1
+        )
+        _ = host.fencedFrameState()
+
+        host.beginSearch("hit")
+        _ = host.fencedFrameState()
+        let afterFirstSearch = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+        host.beginSearch("hit")
+        _ = host.fencedSnapshot()
+        #expect(
+            (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+                == afterFirstSearch + 1
+        )
+        await host.close()
+    }
+
+    @Test("viewport capture records movement under already-pending full damage")
+    func viewportCaptureRecordsMovementUnderPendingFullDamage() async throws {
+        // Intent: transition capture classifies viewport movement from viewport state itself.
+        // Why it exists: pending full damage cannot say whether a later navigation actually moved.
+        // Scenario: output schedules full damage, then a scroll lands before that frame drains.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(command: try scrollbackCommand()))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        _ = host.fencedFrameState()
+        let baseline = await host.transitions().count
+
+        host.deliverOutputForTesting(Array("\u{1B}[2J".utf8))
+        host.scroll(byRows: -1)
+        _ = host.fencedSnapshot()
+
+        #expect(Array((await host.transitions()).dropFirst(baseline)).contains(.scrollByRows(-1)))
         await host.close()
     }
 
@@ -572,12 +717,15 @@ struct TerminalPTYHostTests {
         ))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         #expect(await updates.next() != nil)
+        _ = host.fencedFrameState()
 
         host.resize(.init(columns: 100, rows: 31))
         var observedResize = false
         while let _ = await updates.next() {
-            let snapshot = await host.snapshot()
-            if snapshot.geometry.columns == 100, snapshot.geometry.rows.count == 31 {
+            let frame = host.fencedFrameState()
+            if frame.terminal.geometry.columns == 100,
+               frame.terminal.geometry.rows.count == 31
+            {
                 observedResize = true
                 break
             }
@@ -587,7 +735,7 @@ struct TerminalPTYHostTests {
         host.send(Array("done\n".utf8))
         var observedResult: PaneProcessLifecycleResult?
         while let _ = await updates.next() {
-            observedResult = await host.result()
+            observedResult = host.fencedConsumptionState().result
             if observedResult != nil { break }
         }
         #expect(observedResult == .exited(.exited(0)))
@@ -2174,6 +2322,7 @@ struct TerminalPTYHostTests {
         let host = try makeHost(captureTransitions: false)
         await host.start(makeLaunchInput(command: try scrollbackCommand()))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        _ = host.fencedFrameState()
         let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         let writeBaseline = await host.inputWrites().count
 
@@ -2207,6 +2356,7 @@ struct TerminalPTYHostTests {
         let command = "printf '\\150it\\nmiss\\n\\150it\\n'; exec \(try probeExecutable()) hold \"$0\""
         await host.start(makeLaunchInput(command: command))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        _ = host.fencedFrameState()
         let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
         var iterator = statuses.stream.makeAsyncIterator()
         let report: @Sendable (TerminalSearchStatus?) -> Void = { statuses.continuation.yield($0) }
@@ -2216,32 +2366,33 @@ struct TerminalPTYHostTests {
         #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 2))
         let afterBegin = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         #expect(afterBegin == baseline + 1)
-        #expect(host.fencedSnapshot().activeSearchMatchRange != nil)
+        #expect(host.fencedFrameState().terminal.activeSearchMatchRange != nil)
 
         host.searchNext(onStatus: report)
         #expect(try #require(await iterator.next()) == .matched(selected: 1, total: 2))
         let afterNext = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         #expect(afterNext == afterBegin + 1)
+        _ = host.fencedFrameState()
 
         host.searchPrevious(onStatus: report)
         #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 2))
         let afterPrevious = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         #expect(afterPrevious == afterNext + 1)
+        _ = host.fencedFrameState()
 
         host.clearSearch(onStatus: report)
         #expect(await iterator.next() == .some(nil))
         #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterPrevious + 1)
-        #expect(host.fencedSnapshot().activeSearchMatchRange == nil)
+        #expect(host.fencedFrameState().terminal.activeSearchMatchRange == nil)
         await host.close()
     }
 
     @Test("search mutations that change nothing still report status", .timeLimit(.minutes(1)))
     func ownerUnchangingSearchMutationsStillReportStatus() async throws {
         // Intent: a repeated failed needle and a navigate with only one match report
-        //   status even though the terminal value is untouched.
-        // Why it exists: the status report sits above the `terminal != previousTerminal`
-        //   early return. Below it, the overlay's counter would silently stop updating
-        //   exactly when the user needs to be told the search found nothing / cannot move.
+        //   status even though the mutation records no frame work.
+        // Why it exists: frame publication can skip these no-ops, but the overlay still needs
+        //   to be told that the search found nothing or cannot move.
         // Scenario: typing a needle with no matches, then re-typing it; and pressing
         //   Cmd-G on the only match.
         let host = try makeHost(captureTransitions: false)

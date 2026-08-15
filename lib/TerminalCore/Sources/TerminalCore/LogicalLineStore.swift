@@ -63,6 +63,32 @@ enum LocateCounter {
     }
 }
 
+/// Counts whole retained-store equality checks at architecture boundaries.
+///
+/// Exists so owner-queue tests can prove that mutation publication never falls back to an
+/// O(history) value comparison. The dynamic scope keeps parallel tests independent and adds one
+/// task-local lookup per comparison, with no work on ordinary store reads or mutations.
+enum WholeStoreEqualityCounter {
+    final class Tally: @unchecked Sendable {
+        var count = 0
+    }
+
+    @TaskLocal static var active: Tally?
+
+    @inline(__always)
+    static func record() {
+        active?.count += 1
+    }
+
+    static func measure(_ body: () -> Void) -> Int {
+        let tally = Tally()
+        return $active.withValue(tally) {
+            body()
+            return tally.count
+        }
+    }
+}
+
 /// Counts the display rows a history-text projection materializes and walks.
 ///
 /// Exists so `primaryHistoryTailText`'s reason for existing -- that a bounded read costs the
@@ -1822,11 +1848,12 @@ extension Terminal {
         /// Nothing is decoded and nothing is allocated, which is the whole of the difference
         /// from what this used to do: comparing `recordCells(at:)` per record built a fresh
         /// `[Terminal.GridCell]` for every retained logical line and decoded every cell in it,
-        /// with both side-table probes, on both sides. `Terminal` is `Equatable` and declares
-        /// `history` before `rows`, so a single `terminal != previousTerminal` on the pointer
-        /// path walked all of retained history that way -- `research/31/F13` measured it at 9.3% of
-        /// whole-process CPU under ambient mouse motion.
+        /// with both side-table probes, on both sides. Before owner publication switched to the
+        /// damage accumulator, `Terminal` equality reached this comparison on every pointer move;
+        /// `research/31/F13` measured the decoded form at 9.3% of whole-process CPU under ambient
+        /// mouse motion. Equality remains a value-semantics oracle for tests.
         static func == (lhs: Self, rhs: Self) -> Bool {
+            WholeStoreEqualityCounter.record()
             guard lhs.budget == rhs.budget,
                   lhs.width == rhs.width,
                   lhs.evictedRowCount == rhs.evictedRowCount,

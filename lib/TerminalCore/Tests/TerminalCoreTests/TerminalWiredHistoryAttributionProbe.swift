@@ -218,8 +218,8 @@ struct TerminalWiredHistoryAttributionProbe {
             terminal.feed(Array(bytes[offset..<end]))
             offset = end
         }
-        // Two equal values, which is `applyPointer`'s own case: a pointer move does not touch
-        // history, so `terminal != previousTerminal` compares all of it before answering.
+        // Two equal values model the retired owner-publication comparison: a pointer move did not
+        // touch history, so whole-Terminal inequality walked all of it before answering.
         let other = terminal
         var equal = 0
         for _ in 0..<20 where terminal == other { equal += 1 }
