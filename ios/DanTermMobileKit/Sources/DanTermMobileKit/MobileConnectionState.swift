@@ -38,6 +38,7 @@ public enum MobileConnectionState: Equatable, Sendable {
     /// Exhaustively maps conversation errors without a residual generic state.
     public static func failure(_ error: DanTermClientError) -> Self {
         switch error {
+        case .cancelled: .disconnected
         case .notAdmitted: .refusedByMac(.notAdmitted)
         case .identityUnresolved: .refusedByMac(.identityUnresolved)
         case .connectionLimit: .refusedByMac(.connectionLimit)

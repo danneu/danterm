@@ -34,7 +34,7 @@ public enum UnixSocketTransportError: Error, Equatable {
 /// request expects an answer within seconds, while a followed stream is idle exactly as
 /// long as its subject is quiet, and a timeout there would cut a healthy capture short.
 public final class UnixSocketTransport: DanTermClientTransport {
-    private var descriptor: Int32
+    private let lifetime: SocketDescriptorLifetime
     private let readBufferSize = 64 * 1024
 
     /// Connects to `path`, applying a send timeout always and a receive timeout only when
@@ -53,53 +53,57 @@ public final class UnixSocketTransport: DanTermClientTransport {
             Darwin.close(fd)
             throw error
         }
-        descriptor = fd
+        lifetime = SocketDescriptorLifetime(descriptor: fd)
     }
 
     deinit { close() }
 
     public func send(_ bytes: Data) throws {
-        try bytes.withUnsafeBytes { buffer in
-            guard let base = buffer.baseAddress else { return }
-            var offset = 0
-            while offset < buffer.count {
-                let written = Darwin.write(descriptor, base.advanced(by: offset), buffer.count - offset)
-                if written < 0 {
-                    if errno == EINTR { continue }
-                    if errno == EAGAIN || errno == EWOULDBLOCK {
-                        throw UnixSocketTransportError.timedOut
+        try lifetime.withDescriptor { descriptor in
+            try bytes.withUnsafeBytes { buffer in
+                guard let base = buffer.baseAddress else { return }
+                var offset = 0
+                while offset < buffer.count {
+                    let written = Darwin.write(
+                        descriptor,
+                        base.advanced(by: offset),
+                        buffer.count - offset
+                    )
+                    if written < 0 {
+                        if errno == EINTR { continue }
+                        if errno == EAGAIN || errno == EWOULDBLOCK {
+                            throw UnixSocketTransportError.timedOut
+                        }
+                        throw UnixSocketTransportError.writeFailed
                     }
-                    throw UnixSocketTransportError.writeFailed
+                    if written == 0 { throw UnixSocketTransportError.peerClosed }
+                    offset += written
                 }
-                if written == 0 { throw UnixSocketTransportError.peerClosed }
-                offset += written
             }
         }
     }
 
     public func receive() throws -> Data {
-        var buffer = [UInt8](repeating: 0, count: readBufferSize)
-        while true {
-            let count = buffer.withUnsafeMutableBytes { raw in
-                Darwin.read(descriptor, raw.baseAddress, raw.count)
-            }
-            if count == 0 { return Data() }
-            if count < 0 {
-                if errno == EINTR { continue }
-                if errno == EAGAIN || errno == EWOULDBLOCK {
-                    throw UnixSocketTransportError.timedOut
+        try lifetime.withDescriptor { descriptor in
+            var buffer = [UInt8](repeating: 0, count: readBufferSize)
+            while true {
+                let count = buffer.withUnsafeMutableBytes { raw in
+                    Darwin.read(descriptor, raw.baseAddress, raw.count)
                 }
-                throw UnixSocketTransportError.readFailed
+                if count == 0 { return Data() }
+                if count < 0 {
+                    if errno == EINTR { continue }
+                    if errno == EAGAIN || errno == EWOULDBLOCK {
+                        throw UnixSocketTransportError.timedOut
+                    }
+                    throw UnixSocketTransportError.readFailed
+                }
+                return Data(buffer[0..<count])
             }
-            return Data(buffer[0..<count])
         }
     }
 
-    public func close() {
-        guard descriptor >= 0 else { return }
-        Darwin.close(descriptor)
-        descriptor = -1
-    }
+    public func close() { lifetime.close() }
 
     private static func connect(_ fd: Int32, to path: String) throws {
         var address = sockaddr_un()

@@ -420,7 +420,7 @@ SKILL.md` is untouched because no CLI surface changes).
       pane-list model, presentation policy -- all headless-tested -- plus
       `ios/*/Package.swift` gate discovery and its fixture self-test.
       (PO1-PO6 for the kit-side halves, PO5, PO8, PO10)
-- [ ] 2. `lib/DanTermClient` serialized-send and cancellation contract for
+- [x] 2. `lib/DanTermClient` serialized-send and cancellation contract for
       long-lived sessions, then the kit's connection-runner delivery fence on
       top of it. (PO7)
 - [ ] 3. UIKit shell, `scripts/ios-app.sh`, and the simulator smoke against a
@@ -434,3 +434,7 @@ SKILL.md` is untouched because no CLI surface changes).
   when a running command exists. A custom title or a non-default focused-pane
   title still wins. This makes AR4's running-command fallback reachable without
   changing the Mac's `ls` reply.
+- The connection runner enqueues shell events on an injected serial queue that
+  defaults to the main queue. Each queued callback rechecks the cancellation
+  fence, so a frame already read cannot become a UIKit update after background
+  cancellation returns.

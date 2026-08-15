@@ -36,6 +36,152 @@ final class ScriptedTransport: DanTermClientTransport {
     }
 }
 
+/// A controllable transport that exposes operation boundaries without tying session tests
+/// to a socket implementation.
+private final class BlockingTransport: DanTermClientTransport, @unchecked Sendable {
+    private let condition = NSCondition()
+    private var receiveIsBlocked = false
+    private var writeIsBlocked = false
+    private var allowWriteToFinish = false
+    private var closed = false
+    private var activeSends = 0
+    private var sendCount = 0
+    private var receiveCount = 0
+    private var overlappingSend = false
+    private var closeCount = 0
+
+    func send(_ bytes: Data) throws {
+        condition.lock()
+        sendCount += 1
+        activeSends += 1
+        overlappingSend = overlappingSend || activeSends > 1
+        writeIsBlocked = true
+        condition.broadcast()
+        while allowWriteToFinish == false && closed == false {
+            condition.wait()
+        }
+        activeSends -= 1
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func receive() throws -> Data {
+        condition.lock()
+        receiveCount += 1
+        receiveIsBlocked = true
+        condition.broadcast()
+        while closed == false {
+            condition.wait()
+        }
+        receiveIsBlocked = false
+        condition.unlock()
+        return Data()
+    }
+
+    func close() {
+        condition.lock()
+        closeCount += 1
+        closed = true
+        condition.broadcast()
+        while activeSends > 0 {
+            condition.wait()
+        }
+        condition.unlock()
+    }
+
+    func waitForBlockedReceive() {
+        condition.lock()
+        while receiveIsBlocked == false { condition.wait() }
+        condition.unlock()
+    }
+
+    func waitForBlockedWrite() {
+        condition.lock()
+        while writeIsBlocked == false { condition.wait() }
+        condition.unlock()
+    }
+
+    func releaseWrites() {
+        condition.lock()
+        allowWriteToFinish = true
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    var observedOverlappingSend: Bool {
+        condition.withLock { overlappingSend }
+    }
+
+    var observedCloseCount: Int {
+        condition.withLock { closeCount }
+    }
+
+    var observedSendCount: Int {
+        condition.withLock { sendCount }
+    }
+
+    var observedReceiveCount: Int {
+        condition.withLock { receiveCount }
+    }
+}
+
+/// Returns one final frame when close wakes its blocked receive.
+private final class ClosingFrameTransport: DanTermClientTransport, @unchecked Sendable {
+    private let condition = NSCondition()
+    private let frame: Data
+    private var receiveIsBlocked = false
+    private var closed = false
+
+    init(frame: JsonRpcRequest) throws {
+        self.frame = try encodeIpcLine(frame)
+    }
+
+    func send(_ bytes: Data) throws {}
+
+    func receive() throws -> Data {
+        condition.lock()
+        receiveIsBlocked = true
+        condition.broadcast()
+        while closed == false { condition.wait() }
+        condition.unlock()
+        return frame
+    }
+
+    func close() {
+        condition.lock()
+        closed = true
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func waitForBlockedReceive() {
+        condition.lock()
+        while receiveIsBlocked == false { condition.wait() }
+        condition.unlock()
+    }
+}
+
+/// Stores one cross-thread result for synchronous client-session tests.
+private final class ThreadResult<Value>: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var stored: Value?
+
+    func finish(_ value: Value) {
+        condition.lock()
+        stored = value
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func wait() -> Value {
+        condition.lock()
+        while stored == nil { condition.wait() }
+        let value = stored!
+        condition.unlock()
+        return value
+    }
+}
+
 struct ClientSessionTests {
     @Test("the handshake accepts the protocol version and surfaces the server app version")
     func handshakeAcceptsKnownVersionAndSurfacesAppVersion() throws {
@@ -200,6 +346,116 @@ struct ClientSessionTests {
         let transport = ScriptedTransport(lines: [])
         DanTermClientSession(transport: transport).close()
         #expect(transport.isClosed)
+    }
+
+    @Test("concurrent request sends enter the transport one at a time")
+    func concurrentRequestSendsAreSerialized() {
+        // Intent: each request owns the transport for its complete encoded line.
+        // Why it exists: two phone input sources can send while the reader is blocked.
+        // Scenario: a second sender starts while the first transport write is held open.
+        let transport = BlockingTransport()
+        let session = DanTermClientSession(transport: transport)
+        let firstFinished = ThreadResult<Bool>()
+        let secondFinished = ThreadResult<Bool>()
+        let first = Thread {
+            try? session.send(JsonRpcRequest(id: .number(1), method: "one"))
+            firstFinished.finish(true)
+        }
+        let second = Thread {
+            try? session.send(JsonRpcRequest(id: .number(2), method: "two"))
+            secondFinished.finish(true)
+        }
+
+        first.start()
+        transport.waitForBlockedWrite()
+        second.start()
+        transport.releaseWrites()
+        #expect(firstFinished.wait())
+        #expect(secondFinished.wait())
+
+        #expect(transport.observedOverlappingSend == false)
+    }
+
+    @Test("cancelling a blocked reader returns no frame and closes only once")
+    func cancellationUnblocksReaderWithoutAFrame() throws {
+        // Intent: cancellation is an ordinary empty read result and one transport close.
+        // Why it exists: backgrounding must wake a blocking stream reader without a race.
+        // Scenario: the session is cancelled twice while receive is waiting for bytes.
+        let transport = BlockingTransport()
+        let session = DanTermClientSession(transport: transport)
+        let result = ThreadResult<Result<DanTermClientFrame?, Error>>()
+        let reader = Thread {
+            result.finish(Result { try session.nextFrame() })
+        }
+
+        reader.start()
+        transport.waitForBlockedReceive()
+        session.cancel()
+        session.cancel()
+
+        switch result.wait() {
+        case .success(let frame):
+            #expect(frame == nil)
+        case .failure(let error):
+            Issue.record("Cancellation returned an error: \(error)")
+        }
+        #expect(transport.observedCloseCount == 1)
+        #expect(try session.nextFrame() == nil)
+        #expect(transport.observedReceiveCount == 1)
+    }
+
+    @Test("cancellation discards bytes returned while a blocked reader wakes")
+    func cancellationDiscardsAFrameReturnedByClose() throws {
+        // Intent: cancellation wins over bytes returned by the receive it wakes.
+        // Why it exists: a transport may return buffered bytes instead of EOF on close.
+        // Scenario: close releases a blocked receive with one complete notification.
+        let transport = try ClosingFrameTransport(frame: JsonRpcRequest(method: "too-late"))
+        let session = DanTermClientSession(transport: transport)
+        let result = ThreadResult<Result<DanTermClientFrame?, Error>>()
+        Thread {
+            result.finish(Result { try session.nextFrame() })
+        }.start()
+
+        transport.waitForBlockedReceive()
+        session.cancel()
+
+        switch result.wait() {
+        case .success(let frame):
+            #expect(frame == nil)
+        case .failure(let error):
+            Issue.record("Cancellation returned an error: \(error)")
+        }
+    }
+
+    @Test("cancellation waits for an active send and rejects every later send")
+    func cancellationFencesWritesAndRejectsLaterSends() {
+        // Intent: cancellation outlives old descriptor users and bars new ones.
+        // Why it exists: backgrounding can overlap an asynchronous pane.input write.
+        // Scenario: cancellation begins during a held write, then another request is sent.
+        let transport = BlockingTransport()
+        let session = DanTermClientSession(transport: transport)
+        let sendFinished = ThreadResult<Bool>()
+        let cancelFinished = ThreadResult<Bool>()
+        let sender = Thread {
+            try? session.send(JsonRpcRequest(id: .number(1), method: "one"))
+            sendFinished.finish(true)
+        }
+        let canceller = Thread {
+            session.cancel()
+            cancelFinished.finish(true)
+        }
+
+        sender.start()
+        transport.waitForBlockedWrite()
+        canceller.start()
+        transport.releaseWrites()
+
+        #expect(sendFinished.wait())
+        #expect(cancelFinished.wait())
+        #expect(throws: DanTermClientError.cancelled) {
+            try session.send(JsonRpcRequest(id: .number(2), method: "two"))
+        }
+        #expect(transport.observedSendCount == 1)
     }
 
     private func hello(protocol version: Int, app: String) -> String {

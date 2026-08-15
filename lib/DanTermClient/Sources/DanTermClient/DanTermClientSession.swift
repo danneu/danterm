@@ -10,7 +10,7 @@ import DanTermProtocol
 
 /// One frame off the wire, already classified. A reply the caller is not waiting for and
 /// a notification are both real frames, so both are delivered rather than discarded.
-public enum DanTermClientFrame: Equatable {
+public enum DanTermClientFrame: Equatable, Sendable {
     case response(JsonRpcResponse)
     case notification(method: String, params: JSONValue?)
 }
@@ -18,7 +18,9 @@ public enum DanTermClientFrame: Equatable {
 /// Every way the conversation itself can fail, stated once so a caller never reads errno
 /// or re-derives the handshake rules. Transport failures are not in here: they come from
 /// the transport and pass through untouched.
-public enum DanTermClientError: Error, Equatable {
+public enum DanTermClientError: Error, Equatable, Sendable {
+    /// The caller cancelled this session before the operation began.
+    case cancelled
     /// The peer closed the stream before sending its opening hello.
     case closedBeforeHello
     /// The first line arrived but was not a hello this client can read.
@@ -50,12 +52,26 @@ public struct DanTermServerHello: Equatable, Sendable {
 /// requests keep arriving, and every one of them is a frame the caller may still want.
 /// They are deferred in arrival order instead of being discarded, so awaiting a reply
 /// never loses a tape record that overtook it.
-public final class DanTermClientSession {
+///
+/// Any number of threads may call `send` while one thread owns frame consumption through
+/// `handshake`, `awaitReply`, `nextNotification`, or `nextFrame`. Do not split frame
+/// consumption across threads. `cancel` may run from any thread: it wakes a blocked read,
+/// waits for every active transport operation, and makes later sends throw `cancelled`.
+public final class DanTermClientSession: @unchecked Sendable {
     /// The protocol version this client speaks. A hello naming any other version is
     /// refused before a request is sent.
     public static let supportedProtocolVersion = 1
 
     private let transport: any DanTermClientTransport
+    private let sendLock = NSLock()
+    private let readLock = NSLock()
+    private let lifecycle = NSCondition()
+    private enum LifecycleState {
+        case open
+        case cancelling
+        case cancelled
+    }
+    private var lifecycleState = LifecycleState.open
     private var framer = IpcLineFramer()
     /// Whole lines already framed out of a received chunk, not yet classified.
     private var unread: [Data] = []
@@ -70,28 +86,41 @@ public final class DanTermClientSession {
     /// speak. Call this before sending anything.
     @discardableResult
     public func handshake() throws -> DanTermServerHello {
-        guard let line = try nextLine() else { throw DanTermClientError.closedBeforeHello }
-        guard let notification = try? JSONDecoder().decode(JsonRpcRequest.self, from: line) else {
-            throw DanTermClientError.invalidHello
+        try withReadLock {
+            guard let line = try nextLine() else { throw DanTermClientError.closedBeforeHello }
+            guard let notification = try? JSONDecoder().decode(
+                JsonRpcRequest.self,
+                from: line
+            ) else {
+                throw DanTermClientError.invalidHello
+            }
+            if let rejection = IpcConnectionRejectionReason(notification: notification) {
+                throw Self.clientError(for: rejection)
+            }
+            guard notification.method == Methods.hello,
+                  let versionNumber = notification.params?["protocol"]?.asNumber,
+                  let version = Int(exactly: versionNumber),
+                  let appVersion = notification.params?["app"]?.asString
+            else { throw DanTermClientError.invalidHello }
+            guard version == Self.supportedProtocolVersion else {
+                throw DanTermClientError.unsupportedProtocol(version)
+            }
+            return DanTermServerHello(appVersion: appVersion)
         }
-        if let rejection = IpcConnectionRejectionReason(notification: notification) {
-            throw Self.clientError(for: rejection)
-        }
-        guard notification.method == Methods.hello,
-              let versionNumber = notification.params?["protocol"]?.asNumber,
-              let version = Int(exactly: versionNumber),
-              let appVersion = notification.params?["app"]?.asString
-        else { throw DanTermClientError.invalidHello }
-        guard version == Self.supportedProtocolVersion else {
-            throw DanTermClientError.unsupportedProtocol(version)
-        }
-        return DanTermServerHello(appVersion: appVersion)
     }
 
-    /// Writes one request. Correlating its reply is a separate step, so a caller may have
-    /// more than one request outstanding.
+    /// Writes one complete request without interleaving it with a concurrent sender.
+    /// Correlating its reply is a separate step, so several requests may be outstanding.
     public func send(_ request: JsonRpcRequest) throws {
-        try transport.send(encodeIpcLine(request))
+        try sendLock.withLock {
+            guard cancellationRequested == false else { throw DanTermClientError.cancelled }
+            do {
+                try transport.send(encodeIpcLine(request))
+            } catch {
+                if cancellationRequested { throw DanTermClientError.cancelled }
+                throw error
+            }
+        }
     }
 
     /// Returns the reply to `id`, or nil if the peer closed the stream without sending it.
@@ -99,47 +128,80 @@ public final class DanTermClientSession {
     /// Nil is not always a failure: a request that ends the instance takes the stream down
     /// with it, so only the caller knows whether a missing reply is the expected outcome.
     public func awaitReply(id: JSONValue) throws -> JsonRpcResponse? {
-        if let index = deferred.firstIndex(where: { frame in
-            if case .response(let response) = frame { return response.id == id }
-            return false
-        }) {
-            guard case .response(let response) = deferred.remove(at: index) else { return nil }
-            return response
+        try withReadLock {
+            if let index = deferred.firstIndex(where: { frame in
+                if case .response(let response) = frame { return response.id == id }
+                return false
+            }) {
+                guard case .response(let response) = deferred.remove(at: index) else {
+                    return nil
+                }
+                return response
+            }
+            while let frame = try readFrame() {
+                if case .response(let response) = frame, response.id == id { return response }
+                deferred.append(frame)
+            }
+            return nil
         }
-        while let frame = try readFrame() {
-            if case .response(let response) = frame, response.id == id { return response }
-            deferred.append(frame)
-        }
-        return nil
     }
 
     /// Returns the next server-initiated notification, so a subscription reads as a stream
     /// rather than as a series of replies. Returns nil at end of stream.
     public func nextNotification() throws -> (method: String, params: JSONValue?)? {
-        if let index = deferred.firstIndex(where: { frame in
-            if case .notification = frame { return true }
-            return false
-        }) {
-            guard case .notification(let method, let params) = deferred.remove(at: index) else {
-                return nil
+        try withReadLock {
+            if let index = deferred.firstIndex(where: { frame in
+                if case .notification = frame { return true }
+                return false
+            }) {
+                guard case .notification(let method, let params) = deferred.remove(at: index) else {
+                    return nil
+                }
+                return (method, params)
             }
-            return (method, params)
+            while let frame = try readFrame() {
+                if case .notification(let method, let params) = frame { return (method, params) }
+                deferred.append(frame)
+            }
+            return nil
         }
-        while let frame = try readFrame() {
-            if case .notification(let method, let params) = frame { return (method, params) }
-            deferred.append(frame)
-        }
-        return nil
     }
 
     /// Returns the next frame of any kind, oldest deferred frame first. This is what makes
     /// "no frame is dropped" observable: a reply nobody awaited is still here afterwards.
     public func nextFrame() throws -> DanTermClientFrame? {
-        if deferred.isEmpty == false { return deferred.removeFirst() }
-        return try readFrame()
+        try withReadLock {
+            if deferred.isEmpty == false { return deferred.removeFirst() }
+            return try readFrame()
+        }
     }
 
-    public func close() { transport.close() }
+    /// Cancels the session, waits for active transport operations, and fences later sends.
+    public func cancel() {
+        lifecycle.lock()
+        switch lifecycleState {
+        case .cancelled:
+            lifecycle.unlock()
+            return
+        case .cancelling:
+            while lifecycleState != .cancelled { lifecycle.wait() }
+            lifecycle.unlock()
+            return
+        case .open:
+            lifecycleState = .cancelling
+            lifecycle.unlock()
+        }
+
+        transport.close()
+
+        lifecycle.lock()
+        lifecycleState = .cancelled
+        lifecycle.broadcast()
+        lifecycle.unlock()
+    }
+
+    /// Preserves the short-lived client's close spelling while using cancellation semantics.
+    public func close() { cancel() }
 
     private static func clientError(
         for rejection: IpcConnectionRejectionReason
@@ -172,7 +234,15 @@ public final class DanTermClientSession {
     private func nextLine() throws -> Data? {
         while true {
             if unread.isEmpty == false { return unread.removeFirst() }
-            let chunk = try transport.receive()
+            if cancellationRequested { return nil }
+            let chunk: Data
+            do {
+                chunk = try transport.receive()
+            } catch {
+                if cancellationRequested { return nil }
+                throw error
+            }
+            if cancellationRequested { return nil }
             if chunk.isEmpty { return nil }
             for event in framer.append(chunk) {
                 switch event {
@@ -183,5 +253,15 @@ public final class DanTermClientSession {
                 }
             }
         }
+    }
+
+    private var cancellationRequested: Bool {
+        lifecycle.withLock { lifecycleState != .open }
+    }
+
+    private func withReadLock<T>(_ operation: () throws -> T) rethrows -> T {
+        readLock.lock()
+        defer { readLock.unlock() }
+        return try operation()
     }
 }

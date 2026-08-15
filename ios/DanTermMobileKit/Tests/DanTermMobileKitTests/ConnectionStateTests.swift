@@ -26,6 +26,7 @@ func transportFailureMapping() {
 @Test("Every conversation failure maps without a generic fallback")
 func conversationFailureMapping() {
     let cases: [(DanTermClientError, MobileConnectionState)] = [
+        (.cancelled, .disconnected),
         (.closedBeforeHello, .connectionLost),
         (.invalidHello, .connectionLost),
         (.notAdmitted, .refusedByMac(.notAdmitted)),

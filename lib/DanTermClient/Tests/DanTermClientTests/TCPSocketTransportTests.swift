@@ -56,6 +56,152 @@ struct TCPSocketTransportTests {
             listener.close()
         }
     }
+
+    @Test("concurrent session senders produce complete uninterleaved lines on loopback")
+    func concurrentSendersProduceWholeLines() throws {
+        // Intent: serialization protects real socket framing, not only a test double.
+        // Why it exists: a split JSON line corrupts every request after the collision.
+        // Scenario: 24 large requests race through one loopback session.
+        let requestCount = 24
+        let listener = try TCPTestListener()
+        defer { listener.close() }
+        let received = LockedResult<[JsonRpcRequest]>()
+        let server = Thread {
+            guard let connection = listener.accept() else {
+                received.finish([])
+                return
+            }
+            defer { Darwin.close(connection) }
+            received.finish(readRequests(from: connection, count: requestCount))
+        }
+        server.start()
+
+        let transport = try TCPSocketTransport(
+            host: "127.0.0.1",
+            port: listener.port,
+            connectTimeout: 1,
+            receiveTimeout: nil,
+            sendTimeout: 2
+        )
+        let session = DanTermClientSession(transport: transport)
+        let senders = DispatchGroup()
+        for index in 0..<requestCount {
+            senders.enter()
+            Thread {
+                defer { senders.leave() }
+                let payload = String(repeating: String(index % 10), count: 16 * 1024)
+                try? session.send(JsonRpcRequest(
+                    id: .number(Double(index)),
+                    method: "send-\(index)",
+                    params: .object(["payload": .string(payload)])
+                ))
+            }.start()
+        }
+        senders.wait()
+        session.cancel()
+
+        let requests = received.wait()
+        #expect(requests.count == requestCount)
+        #expect(requests.compactMap { $0.id?.asNumber }.sorted()
+            == (0..<requestCount).map(Double.init))
+        #expect(requests.allSatisfy { request in
+            guard let index = Int(request.method.split(separator: "-").last ?? "") else {
+                return false
+            }
+            return request.params?["payload"]?.asString
+                == String(repeating: String(index % 10), count: 16 * 1024)
+        })
+    }
+
+    @Test("cancelling a loopback session wakes a blocked reader without a frame")
+    func cancellationWakesLoopbackReader() throws {
+        // Intent: socket shutdown wakes a real blocked read before cancellation returns.
+        // Why it exists: backgrounding cannot wait for a quiet pane to emit another byte.
+        // Scenario: a loopback peer accepts the connection and deliberately sends nothing.
+        let listener = try TCPTestListener()
+        defer { listener.close() }
+        let accepted = LockedSignal()
+        let serverFinished = LockedSignal()
+        let server = Thread {
+            guard let connection = listener.accept() else {
+                serverFinished.signal()
+                return
+            }
+            accepted.signal()
+            var byte: UInt8 = 0
+            _ = Darwin.read(connection, &byte, 1)
+            Darwin.close(connection)
+            serverFinished.signal()
+        }
+        server.start()
+
+        let session = DanTermClientSession(transport: try TCPSocketTransport(
+            host: "127.0.0.1",
+            port: listener.port,
+            connectTimeout: 1,
+            receiveTimeout: nil,
+            sendTimeout: 1
+        ))
+        accepted.wait()
+        let readerStarted = LockedSignal()
+        let readerResult = LockedResult<Result<DanTermClientFrame?, Error>>()
+        Thread {
+            readerStarted.signal()
+            readerResult.finish(Result { try session.nextFrame() })
+        }.start()
+        readerStarted.wait()
+
+        session.cancel()
+        session.cancel()
+
+        switch readerResult.wait() {
+        case .success(let frame):
+            #expect(frame == nil)
+        case .failure(let error):
+            Issue.record("Cancellation returned an error: \(error)")
+        }
+        serverFinished.wait()
+    }
+}
+
+/// Moves a value from a server thread to its test without a timing delay.
+private final class LockedResult<Value>: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var value: Value?
+
+    func finish(_ value: Value) {
+        condition.lock()
+        self.value = value
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func wait() -> Value {
+        condition.lock()
+        while value == nil { condition.wait() }
+        let result = value!
+        condition.unlock()
+        return result
+    }
+}
+
+/// Coordinates a test thread with a real socket operation without a timing delay.
+private final class LockedSignal: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var signalled = false
+
+    func signal() {
+        condition.lock()
+        signalled = true
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func wait() {
+        condition.lock()
+        while signalled == false { condition.wait() }
+        condition.unlock()
+    }
 }
 
 private final class TCPTestListener: @unchecked Sendable {
@@ -121,6 +267,25 @@ private func helloLine() -> String {
 private func writeLine(_ line: String, to descriptor: Int32) {
     let bytes = Array((line + "\n").utf8)
     _ = bytes.withUnsafeBytes { Darwin.write(descriptor, $0.baseAddress, $0.count) }
+}
+
+private func readRequests(from descriptor: Int32, count: Int) -> [JsonRpcRequest] {
+    var framer = IpcLineFramer()
+    var requests: [JsonRpcRequest] = []
+    var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+    while requests.count < count {
+        let readCount = buffer.withUnsafeMutableBytes {
+            Darwin.read(descriptor, $0.baseAddress, $0.count)
+        }
+        guard readCount > 0 else { break }
+        for event in framer.append(Data(buffer[0..<readCount])) {
+            guard case .line(let line) = event,
+                  let request = try? JSONDecoder().decode(JsonRpcRequest.self, from: line)
+            else { continue }
+            requests.append(request)
+        }
+    }
+    return requests
 }
 
 private func encoded<T: Encodable>(_ value: T) -> String {

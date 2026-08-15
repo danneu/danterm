@@ -20,7 +20,7 @@ public struct JsonRpcRequest: Codable, Equatable, Sendable {
     }
 }
 
-public struct JsonRpcResponse: Codable, Equatable {
+public struct JsonRpcResponse: Codable, Equatable, Sendable {
     public var jsonrpc: String
     public var id: JSONValue?
     public var result: JSONValue?
@@ -39,7 +39,7 @@ public struct JsonRpcResponse: Codable, Equatable {
     }
 }
 
-public struct JsonRpcError: Codable, Equatable {
+public struct JsonRpcError: Codable, Equatable, Sendable {
     public var code: Int
     public var message: String
     public var data: JSONValue?

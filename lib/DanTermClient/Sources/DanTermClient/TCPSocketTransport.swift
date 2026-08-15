@@ -4,7 +4,7 @@ import Darwin
 import Foundation
 
 /// Distinguishes TCP setup and stream failures so each client can phrase them for its UI.
-public enum TCPSocketTransportError: Error, Equatable {
+public enum TCPSocketTransportError: Error, Equatable, Sendable {
     /// No address could be resolved for the supplied hostname.
     case unresolvedHost(host: String)
     /// Every resolved address refused or failed the connection attempt.
@@ -27,7 +27,7 @@ public enum TCPSocketTransportError: Error, Equatable {
 
 /// A bounded TCP byte stream that tries every resolved address until one connects.
 public final class TCPSocketTransport: DanTermClientTransport {
-    private var descriptor: Int32
+    private let lifetime: SocketDescriptorLifetime
     private let readBufferSize = 64 * 1024
 
     /// Resolves `host`, connects within the shared deadline, and configures bounded IO.
@@ -112,57 +112,57 @@ public final class TCPSocketTransport: DanTermClientTransport {
             }
             throw TCPSocketTransportError.connectFailed(reason: lastReason, target: target)
         }
-        descriptor = connected
+        lifetime = SocketDescriptorLifetime(descriptor: connected)
     }
 
     deinit { close() }
 
     public func send(_ bytes: Data) throws {
-        try bytes.withUnsafeBytes { buffer in
-            guard let base = buffer.baseAddress else { return }
-            var offset = 0
-            while offset < buffer.count {
-                let count = Darwin.write(
-                    descriptor,
-                    base.advanced(by: offset),
-                    buffer.count - offset
-                )
-                if count < 0 {
-                    if errno == EINTR { continue }
-                    if errno == EAGAIN || errno == EWOULDBLOCK {
-                        throw TCPSocketTransportError.timedOut
+        try lifetime.withDescriptor { descriptor in
+            try bytes.withUnsafeBytes { buffer in
+                guard let base = buffer.baseAddress else { return }
+                var offset = 0
+                while offset < buffer.count {
+                    let count = Darwin.write(
+                        descriptor,
+                        base.advanced(by: offset),
+                        buffer.count - offset
+                    )
+                    if count < 0 {
+                        if errno == EINTR { continue }
+                        if errno == EAGAIN || errno == EWOULDBLOCK {
+                            throw TCPSocketTransportError.timedOut
+                        }
+                        throw TCPSocketTransportError.writeFailed
                     }
-                    throw TCPSocketTransportError.writeFailed
+                    if count == 0 { throw TCPSocketTransportError.peerClosed }
+                    offset += count
                 }
-                if count == 0 { throw TCPSocketTransportError.peerClosed }
-                offset += count
             }
         }
     }
 
     public func receive() throws -> Data {
-        var buffer = [UInt8](repeating: 0, count: readBufferSize)
-        while true {
-            let count = buffer.withUnsafeMutableBytes {
-                Darwin.read(descriptor, $0.baseAddress, $0.count)
-            }
-            if count == 0 { return Data() }
-            if count < 0 {
-                if errno == EINTR { continue }
-                if errno == EAGAIN || errno == EWOULDBLOCK {
-                    throw TCPSocketTransportError.timedOut
+        try lifetime.withDescriptor { descriptor in
+            var buffer = [UInt8](repeating: 0, count: readBufferSize)
+            while true {
+                let count = buffer.withUnsafeMutableBytes {
+                    Darwin.read(descriptor, $0.baseAddress, $0.count)
                 }
-                throw TCPSocketTransportError.readFailed
+                if count == 0 { return Data() }
+                if count < 0 {
+                    if errno == EINTR { continue }
+                    if errno == EAGAIN || errno == EWOULDBLOCK {
+                        throw TCPSocketTransportError.timedOut
+                    }
+                    throw TCPSocketTransportError.readFailed
+                }
+                return Data(buffer[0..<count])
             }
-            return Data(buffer[0..<count])
         }
     }
 
-    public func close() {
-        guard descriptor >= 0 else { return }
-        Darwin.close(descriptor)
-        descriptor = -1
-    }
+    public func close() { lifetime.close() }
 
     private static func connect(
         _ fd: Int32,
