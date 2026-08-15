@@ -123,7 +123,10 @@ func acceptTailnetPeer(on listenerFileDescriptor: Int32) throws -> TailnetAccept
         return TailnetAcceptedPeer(
             fileDescriptor: fileDescriptor,
             peer: TailnetPeerAddress(
-                host: String(cString: hostBuffer),
+                host: String(
+                    decoding: hostBuffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) },
+                    as: UTF8.self
+                ),
                 port: UInt16(bigEndian: address.sin_port)
             )
         )

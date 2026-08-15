@@ -96,7 +96,10 @@ private func localIPv4Interfaces() throws -> [TailnetInterface] {
         guard host != nil else { continue }
         result.append(TailnetInterface(
             name: String(cString: entry.pointee.ifa_name),
-            ipv4Address: String(cString: buffer)
+            ipv4Address: String(
+                decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) },
+                as: UTF8.self
+            )
         ))
     }
     return result
