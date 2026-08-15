@@ -28,6 +28,7 @@ let package = Package(
             name: "DanTermMobileKitTests",
             dependencies: [
                 "DanTermMobileKit",
+                .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
                 .product(name: "DanTermClient", package: "DanTermClient"),

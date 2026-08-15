@@ -23,9 +23,18 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private var observers: [NSObjectProtocol] = []
     private var connectionGeneration = 0
     private var didSendSmokeInput = false
-    private var pendingArchive: PaneReplicaArchive?
-    private var archiveSaveTimer: Timer?
+    private var checkpointSaveTimer: Timer?
+    private var checkpointIsDirty = false
     private var isWaitingForGapRepair = false
+    private let checkpointQueue = DispatchQueue(label: "danterm.mobile.checkpoint")
+    private lazy var checkpointStore = PaneReplicaCheckpointStore(
+        directory: FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent("DanTermMobile", isDirectory: true)
+    )
+
+    private static let checkpointInterval: TimeInterval = 30
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -37,7 +46,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     }
 
     isolated deinit {
-        flushArchive()
+        flushCheckpoint(synchronously: true)
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         attempt?.cancel()
         runner?.cancel()
@@ -103,7 +112,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         composer.onDismissKeyboard = { [weak self] in self?.view.endEditing(true) }
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
         terminalView.addGestureRecognizer(scroll)
-        terminalView.didUpdateArchive = { [weak self] archive in self?.scheduleStore(archive: archive) }
+        terminalView.didAdvanceReplica = { [weak self] in self?.scheduleCheckpoint() }
         terminalView.didChangeReplicaState = { [weak self] state in
             guard let self else { return }
             switch state {
@@ -163,7 +172,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.flushArchive()
+                self?.flushCheckpoint(synchronously: true)
                 self?.disconnect()
             }
         })
@@ -196,7 +205,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         }
         UserDefaults.standard.set(host, forKey: "serverHost")
         UserDefaults.standard.set(portText, forKey: "serverPort")
-        flushArchive()
+        flushCheckpoint(synchronously: true)
         disconnect()
         let generation = connectionGeneration
         show(state: .connecting, detail: "Connecting to \(host):\(port)")
@@ -232,8 +241,8 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             selectedPaneId = pane.paneId
             isWaitingForGapRepair = false
             paneTable.reloadData()
-            let archive = storedArchive(for: pane.paneId)
-            let cursor = terminalView.reset(archive: archive)
+            let checkpoint = storedCheckpoint(for: pane.paneId)
+            let cursor = terminalView.reset(checkpoint: checkpoint, for: pane.paneId)
             startStream(bootstrap.session, pane: pane.paneId, cursor: cursor)
             show(state: .ready, detail: "Connected to DanTerm \(bootstrap.serverVersion)")
         }
@@ -369,30 +378,38 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         )
     }
 
-    private func scheduleStore(archive: PaneReplicaArchive) {
-        pendingArchive = archive
-        guard archiveSaveTimer == nil else { return }
-        archiveSaveTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) {
+    private func scheduleCheckpoint() {
+        checkpointIsDirty = true
+        guard checkpointSaveTimer == nil else { return }
+        checkpointSaveTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.checkpointInterval,
+            repeats: false
+        ) {
             [weak self] _ in
-            MainActor.assumeIsolated { self?.flushArchive() }
+            MainActor.assumeIsolated { self?.flushCheckpoint(synchronously: false) }
         }
     }
 
-    private func flushArchive() {
-        archiveSaveTimer?.invalidate()
-        archiveSaveTimer = nil
-        guard let archive = pendingArchive,
-              let pane = selectedPaneId,
-              let data = try? JSONEncoder().encode(archive)
-        else { return }
-        pendingArchive = nil
-        UserDefaults.standard.set(data, forKey: "replica.\(pane.rawValue.uuidString)")
+    private func flushCheckpoint(synchronously: Bool) {
+        checkpointSaveTimer?.invalidate()
+        checkpointSaveTimer = nil
+        let source = checkpointIsDirty ? terminalView.checkpointSource() : nil
+        checkpointIsDirty = false
+        let store = checkpointStore
+        let work: @Sendable () -> Void = {
+            guard let source, let checkpoint = source.replica.checkpoint(for: source.paneId)
+            else { return }
+            try? store.save(checkpoint)
+        }
+        if synchronously {
+            checkpointQueue.sync(execute: work)
+        } else if source != nil {
+            checkpointQueue.async(execute: work)
+        }
     }
 
-    private func storedArchive(for pane: PaneId) -> PaneReplicaArchive? {
-        guard let data = UserDefaults.standard.data(forKey: "replica.\(pane.rawValue.uuidString)")
-        else { return nil }
-        return try? JSONDecoder().decode(PaneReplicaArchive.self, from: data)
+    private func storedCheckpoint(for pane: PaneId) -> PaneReplicaCheckpoint? {
+        checkpointStore.load(for: pane)
     }
 }
 

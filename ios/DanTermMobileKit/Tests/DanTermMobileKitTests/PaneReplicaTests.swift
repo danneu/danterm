@@ -293,36 +293,6 @@ func reconnectRejectsForeignStartCursor() throws {
     #expect(replica.terminal?.viewportText == "old")
 }
 
-@Test("A persisted replica archive restores exact state before cursor resume")
-func replicaArchiveRestoresExactState() throws {
-    var replica = try synchronizedReplica(
-        bytes: Array("before".utf8),
-        cursor: testCursor(sequence: 1, feed: 6)
-    )
-    try replica.apply(eventRecord(
-        sequence: 1,
-        byteOffset: 6,
-        byteLength: 6,
-        event: .feed(Array(" after".utf8))
-    ))
-    let data = try JSONEncoder().encode(#require(replica.archive))
-
-    var restored = try PaneReplica(archive: JSONDecoder().decode(PaneReplicaArchive.self, from: data))
-    try restored.apply(.start(PaneTapeStartRecord(
-        version: 1,
-        capture: .follow,
-        format: .replay,
-        columns: 8,
-        rows: 2,
-        cursor: replica.cursor,
-        reconstructible: true
-    )))
-
-    #expect(restored.terminal?.viewportText == replica.terminal?.viewportText)
-    #expect(restored.cursor == replica.cursor)
-    #expect(restored.state == .exact)
-}
-
 private func synchronizedReplica(
     bytes: [UInt8],
     cursor: PaneTapeCursor,

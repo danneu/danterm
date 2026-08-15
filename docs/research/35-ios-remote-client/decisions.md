@@ -887,3 +887,44 @@ in [README.md](README.md) and remains open.
 - Reopen condition: observed app-version skew causes a behavioral failure that
   the protocol number cannot distinguish. That evidence must define the missing
   compatibility boundary before another hard version field is added.
+
+### D10 -- iOS continuation: the replica synthesizes D5 state checkpoints
+
+- Status: decided and implemented 2026-08-15. This closes the unbounded
+  process-death continuation record in the milestone-1 client without changing
+  the wire.
+- Selected direction: an exact phone replica synthesizes D5's terminal-state
+  bytes from its current engine state and pairs them with its current recorder
+  cursor, geometry, and pane identity. One compact, integrity-checked file
+  atomically replaces the previous checkpoint. The phone restores that state
+  before it asks the existing stream to continue from the paired cursor.
+- Rejected direction: retaining the last server sync plus every later neutral
+  event. That record grows with session age and makes save cost depend on time
+  since the last sync. A cap or periodic reconnect would leave two recovery
+  representations and make exactness depend on a policy threshold.
+- Rationale: D5 already made terminal bytes the exact state representation, and
+  the replica invariant says an exact client at a cursor has the authoritative
+  observable state at that fence. Synthesizing the same representation on the
+  client therefore adds no second state format. The event suffix disappears;
+  checkpoint size depends only on retained engine state. TerminalCore now also
+  bounds live grapheme and REP storage at 256 UTF-8 bytes, closing the last
+  session-age-dependent component serialized by D5.
+- Failure policy: integrity, private-format version, pane identity, cursor
+  coordinates, and geometry are validated before a terminal is constructed.
+  Any failure discards the file and subscribes from now. A stale recorder
+  lifetime or evicted cursor takes D5's existing explicit-gap plus fresh-sync
+  repair, so a stale checkpoint can cost replay or one sync but cannot produce
+  silent wrong state.
+- Lifecycle policy: stream changes arm one 30-second coalescing window.
+  Checkpoint synthesis and atomic file IO run on a serial background queue; app
+  backgrounding and pane switches synchronously drain that queue. The cadence
+  affects only replay cost. It cannot affect correctness because every saved
+  checkpoint is one coherent state-and-cursor fence and each save replaces the
+  previous file.
+- Measurement used before choosing cadence: three debug-build syntheses of a
+  120x40 replica with 2,000 shell-output lines took 196.5-199.3 ms and produced
+  158,895 bytes. Three syntheses after a 1,024x2 replica exceeded the 16 MiB
+  scrollback input budget took 2.632-2.638 s and produced 1,987,152 bytes. Every
+  sample produced a payload. These diagnostic numbers select a deliberately
+  sparse periodic save plus a background flush; they do not freeze a
+  performance threshold.

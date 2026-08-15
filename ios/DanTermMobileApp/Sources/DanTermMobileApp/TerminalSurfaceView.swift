@@ -11,10 +11,12 @@ import UIKit
 /// Owns the replica and reusable surfaces so attached pixels are never mutated.
 @MainActor
 final class TerminalSurfaceView: UIView {
-    var didUpdateArchive: ((PaneReplicaArchive) -> Void)?
+    /// Signals that a new exact cursor can replace the saved continuation checkpoint.
+    var didAdvanceReplica: (() -> Void)?
     var didChangeReplicaState: ((PaneReplicaState) -> Void)?
 
     private var replica = PaneReplica()
+    private var replicaPaneId: PaneId?
     private var metrics: TerminalRenderMetrics?
     private var stores: [TerminalFrameBackingStore] = []
     private var policy: MobilePresentationPolicy<Int>?
@@ -48,8 +50,9 @@ final class TerminalSurfaceView: UIView {
 
     /// Replaces the current stream replica when the user selects another pane.
     @discardableResult
-    func reset(archive: PaneReplicaArchive?) -> PaneTapeCursor? {
-        if let archive, let restored = try? PaneReplica(archive: archive) {
+    func reset(checkpoint: PaneReplicaCheckpoint?, for paneId: PaneId) -> PaneTapeCursor? {
+        replicaPaneId = paneId
+        if let checkpoint, let restored = try? PaneReplica(checkpoint: checkpoint, for: paneId) {
             replica = restored
         } else {
             replica = PaneReplica()
@@ -69,9 +72,12 @@ final class TerminalSurfaceView: UIView {
 
     /// Applies one exact stream record and schedules only the presentation work it creates.
     func apply(_ record: PaneTapeRecord) throws {
+        let previousCursor = replica.cursor
         try replica.apply(record)
         didChangeReplicaState?(replica.state)
-        if let archive = replica.archive { didUpdateArchive?(archive) }
+        if replica.state == .exact, replica.cursor != previousCursor {
+            didAdvanceReplica?()
+        }
         guard replica.state == .exact, let terminal = replica.terminal else { return }
         ensureSurfaces(columns: terminal.geometry.columns, rows: terminal.geometry.rows.count)
         policy?.noteDamage()
@@ -89,6 +95,12 @@ final class TerminalSurfaceView: UIView {
     /// Prevents local viewport scrolling while the remote pane uses its alternate screen.
     var isAlternateScreenActive: Bool {
         replica.terminal?.isAlternateScreenActive == true
+    }
+
+    /// Copies one exact value snapshot so checkpoint synthesis can run off the main actor.
+    func checkpointSource() -> (replica: PaneReplica, paneId: PaneId)? {
+        guard replica.state == .exact, let replicaPaneId else { return nil }
+        return (replica, replicaPaneId)
     }
 
     override func layoutSubviews() {

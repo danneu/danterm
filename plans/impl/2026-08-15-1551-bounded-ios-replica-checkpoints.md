@@ -291,8 +291,7 @@ proves.
 ## Commit progress
 
 - [x] 1. Bound terminal grapheme retention and record the compatibility decision
-- [ ] 2. Replace replica event archives with bounded checkpoints and an atomic store
-- [ ] 3. Wire checkpoint lifecycle into iOS and record the client-state decision
+- [x] 2. Replace replica event archives with bounded checkpoints and wire their lifecycle
 
 ## Implementation notes
 
@@ -303,6 +302,15 @@ proves.
   common two-byte combining marks while bounding serialized size across scalar widths.
 - `ClusterContext` tracks the retained byte count. A continuing stream past the limit
   therefore drops each later scalar in O(1) time instead of rescanning the retained cell.
+- PO6 measured three debug-build checkpoint syntheses per case on 2026-08-15. A 120x40
+  replica with 2,000 ordinary shell-output lines took 196.5-199.3 ms and encoded to
+  158,895 bytes. A 1,024x2 replica past the 16 MiB scrollback input budget took
+  2.632-2.638 s and encoded to 1,987,152 bytes. Every sample produced a payload; no save
+  cadence or performance threshold was frozen from these measurements.
+- The original kit/app split could not leave a valid intermediate commit. Removing the
+  archive API forces its UIKit consumer either to stop saving continuation state or to
+  synthesize a saturated checkpoint on every stream record. The unchecked remainder was
+  therefore re-sliced into one checkpoint-and-lifecycle commit, with the research note.
 
 ## Follow Up
 
