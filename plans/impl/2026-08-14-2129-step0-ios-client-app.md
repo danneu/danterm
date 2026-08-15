@@ -423,7 +423,7 @@ SKILL.md` is untouched because no CLI surface changes).
 - [x] 2. `lib/DanTermClient` serialized-send and cancellation contract for
       long-lived sessions, then the kit's connection-runner delivery fence on
       top of it. (PO7)
-- [ ] 3. UIKit shell, `scripts/ios-app.sh`, and the simulator smoke against a
+- [x] 3. UIKit shell, `scripts/ios-app.sh`, and the simulator smoke against a
       dev slot. (PO6 shell wiring, PO9 simulator half)
 - [ ] 4. Device smoke on the user's iPhone, then the docs closeout: A1
       amendment and research/35 ledger update. (PO9 device half)
@@ -438,3 +438,14 @@ SKILL.md` is untouched because no CLI surface changes).
   defaults to the main queue. Each queued callback rechecks the cancellation
   fence, so a frame already read cannot become a UIKit update after background
   cancellation returns.
+- Cursor-only persistence cannot restore exact terminal state after process
+  death. The kit therefore archives the last complete synchronization plus the
+  later neutral events and its cursor. The shell coalesces archive writes and
+  restores that exact state before it requests continuation from the cursor.
+
+## Follow Up
+
+- `ios/DanTermMobileKit/Sources/DanTermMobileKit/PaneReplica.swift`: replace the
+  replay-suffix archive with a compact portable terminal checkpoint when
+  `TerminalCore` gains state serialization. The current archive grows with the
+  events received after its last complete synchronization.

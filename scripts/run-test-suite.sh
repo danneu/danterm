@@ -45,6 +45,7 @@ STEPS=(
     './scripts/tests/core-purity-lint_test.sh'
     './scripts/tests/run-test-suite_test.sh'
     './scripts/tests/ios-portability-gate_test.sh'
+    './scripts/tests/ios-app_test.sh'
     'swift test --package-path lib/TerminalHostTools --scratch-path lib/TerminalHostTools/.build-gate'
     './scripts/tests/provision-worktree_test.sh'
     './scripts/tests/test-ui-harness_test.sh'

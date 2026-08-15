@@ -18,17 +18,81 @@ public enum PaneReplicaError: Error, Equatable, Sendable {
     case invalidGeometry(columns: Int, rows: Int)
 }
 
+/// Persists enough exact replica evidence to continue from its cursor after relaunch.
+public struct PaneReplicaArchive: Codable, Equatable, Sendable {
+    /// Carries the last complete state synchronization as the restore baseline.
+    public private(set) var synchronizationBytes: [UInt8]
+    /// Gives the baseline terminal width.
+    public private(set) var columns: Int
+    /// Gives the baseline terminal height.
+    public private(set) var rows: Int
+    /// Carries owner-ordered events applied after the baseline synchronization.
+    public private(set) var events: [NeutralTerminalRecordingEvent]
+    /// Identifies the recorder lifetime that produced the continuation cursor.
+    public private(set) var recorderLifetimeId: UUID
+    /// Names the next recorder event needed after archive restoration.
+    public private(set) var nextSequence: UInt64
+    /// Gives the feed-byte offset at the continuation cursor.
+    public private(set) var feedBytesBeforeNextSequence: Int
+    /// Gives the write-byte offset at the continuation cursor.
+    public private(set) var writeBytesBeforeNextSequence: Int
+
+    /// Names the first recorder event after this archived exact state.
+    public var cursor: PaneTapeCursor {
+        PaneTapeCursor(
+            recorderLifetimeId: recorderLifetimeId,
+            nextSequence: nextSequence,
+            feedBytesBeforeNextSequence: feedBytesBeforeNextSequence,
+            writeBytesBeforeNextSequence: writeBytesBeforeNextSequence
+        )
+    }
+
+    fileprivate mutating func append(
+        _ event: NeutralTerminalRecordingEvent,
+        cursor: PaneTapeCursor
+    ) {
+        events.append(event)
+        recorderLifetimeId = cursor.recorderLifetimeId
+        nextSequence = cursor.nextSequence
+        feedBytesBeforeNextSequence = cursor.feedBytesBeforeNextSequence
+        writeBytesBeforeNextSequence = cursor.writeBytesBeforeNextSequence
+    }
+}
+
 /// Applies one pane's recorder stream without ever producing authoritative terminal output.
 public struct PaneReplica: Sendable {
     public private(set) var terminal: Terminal?
     public private(set) var cursor: PaneTapeCursor?
     public private(set) var state = PaneReplicaState.awaitingSynchronization
+    /// Preserves the last exact state and cursor for process-dead continuation.
+    public private(set) var archive: PaneReplicaArchive?
 
     private var syncAssembler = PaneTapeSyncAssembler()
     private var interactionState = TerminalInteractionState()
 
     /// Creates an empty replica that cannot present until exact state arrives.
     public init() {}
+
+    /// Restores exact terminal state before a resumed stream starts at the archived cursor.
+    public init(archive: PaneReplicaArchive) throws {
+        guard archive.feedBytesBeforeNextSequence >= 0,
+              archive.writeBytesBeforeNextSequence >= 0,
+              var terminal = Terminal(columns: archive.columns, rows: archive.rows)
+        else {
+            throw PaneReplicaError.invalidGeometry(columns: archive.columns, rows: archive.rows)
+        }
+        terminal.feed(archive.synchronizationBytes)
+        discardAuthority(from: &terminal)
+        var interactionState = TerminalInteractionState()
+        for event in archive.events {
+            try replay(event, terminal: &terminal, interactionState: &interactionState)
+        }
+        self.terminal = terminal
+        cursor = archive.cursor
+        state = .exact
+        self.archive = archive
+        self.interactionState = interactionState
+    }
 
     /// Applies one decoded record while keeping incomplete synchronization invisible.
     public mutating func apply(_ record: PaneTapeRecord) throws {
@@ -48,6 +112,20 @@ public struct PaneReplica: Sendable {
         }
     }
 
+    /// Moves only the replicated primary-screen viewport for local phone scrolling.
+    public mutating func scrollViewport(byRows rows: Int) {
+        guard state == .exact, terminal?.isAlternateScreenActive == false else { return }
+        terminal?.scroll(byRows: rows)
+    }
+
+    /// Drains engine damage while returning the exact terminal snapshot to present.
+    public mutating func drainPresentation() -> (terminal: Terminal, damage: TerminalDamage)? {
+        guard state == .exact, var terminal else { return nil }
+        let damage = terminal.drainDamage()
+        self.terminal = terminal
+        return (terminal, damage)
+    }
+
     private mutating func applyStart(_ start: PaneTapeStartRecord) throws {
         guard start.columns >= 2, start.rows >= 1 else {
             throw PaneReplicaError.invalidGeometry(columns: start.columns, rows: start.rows)
@@ -61,11 +139,9 @@ public struct PaneReplica: Sendable {
             syncAssembler = PaneTapeSyncAssembler()
             return
         }
-        if terminal == nil {
-            guard let fresh = Terminal(columns: start.columns, rows: start.rows) else {
-                throw PaneReplicaError.invalidGeometry(columns: start.columns, rows: start.rows)
-            }
-            terminal = fresh
+        guard terminal != nil else {
+            state = .gap(.total)
+            return
         }
         cursor = startCursor
         state = .exact
@@ -87,6 +163,16 @@ public struct PaneReplica: Sendable {
         cursor = synchronization.cursor
         state = .exact
         interactionState = TerminalInteractionState()
+        archive = PaneReplicaArchive(
+            synchronizationBytes: synchronization.bytes,
+            columns: synchronization.columns,
+            rows: synchronization.rows,
+            events: [],
+            recorderLifetimeId: synchronization.cursor.recorderLifetimeId,
+            nextSequence: synchronization.cursor.nextSequence,
+            feedBytesBeforeNextSequence: synchronization.cursor.feedBytesBeforeNextSequence,
+            writeBytesBeforeNextSequence: synchronization.cursor.writeBytesBeforeNextSequence
+        )
     }
 
     private mutating func applyEvent(_ record: PaneTapeEventRecord) throws {
@@ -137,6 +223,7 @@ public struct PaneReplica: Sendable {
         }
         self.terminal = terminal
         self.cursor = nextCursor
+        archive?.append(event, cursor: nextCursor)
     }
 
     private func advancedCursor(
@@ -178,6 +265,38 @@ public struct PaneReplica: Sendable {
             feedBytesBeforeNextSequence: feed,
             writeBytesBeforeNextSequence: write
         )
+    }
+}
+
+private func replay(
+    _ event: NeutralTerminalRecordingEvent,
+    terminal: inout Terminal,
+    interactionState: inout TerminalInteractionState
+) throws {
+    switch event {
+    case .feed(let bytes):
+        terminal.feed(bytes)
+        discardAuthority(from: &terminal)
+    case .mouse(let mouse):
+        _ = applyNeutralTerminalMouse(
+            mouse,
+            terminal: &terminal,
+            interactionState: &interactionState
+        )
+        discardAuthority(from: &terminal)
+    case .resize(let columns, let rows):
+        guard columns >= 2, rows >= 1 else {
+            throw PaneReplicaError.invalidGeometry(columns: columns, rows: rows)
+        }
+        terminal.resize(columns: columns, rows: rows)
+    case .viewport(let navigation):
+        switch navigation {
+        case .byRows(let rows): terminal.scroll(byRows: rows)
+        case .toTopRow(let row): terminal.scroll(toTopRow: row)
+        case .toBottom: terminal.scrollToBottom()
+        }
+    case .write, .input, .paste, .focus, .checkpoint:
+        break
     }
 }
 
