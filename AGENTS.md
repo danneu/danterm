@@ -292,6 +292,7 @@ API with a general, reusable command or query and update `SKILL.md`.
 | Adding a metric, freezing a threshold, acting on a difference between two numbers | [agent-docs/measurement-discipline.md](agent-docs/measurement-discipline.md) |
 | `@inlinable`/`@usableFromInline` in `lib/TerminalCore`, or an `outlined copy` profile frame | [docs/design/2026-07-29-cross-module-value-dispatch.md](docs/design/2026-07-29-cross-module-value-dispatch.md) |
 | HiDPI scaling, content scale, zero-frame guards | [docs/design/2026-03-05-display-scaling.md](docs/design/2026-03-05-display-scaling.md) -- rule binds, body is Ghostty-era |
+| Pane layout geometry, divider interaction, or sidebar split structure | [docs/design/2026-08-16-model-owned-pane-geometry.md](docs/design/2026-08-16-model-owned-pane-geometry.md) |
 | Build scripts, the dev/release bundle layout | [agent-docs/build-details.md](agent-docs/build-details.md) |
 | CI, signing, notarization, releases | [docs/ci.md](docs/ci.md) |
 

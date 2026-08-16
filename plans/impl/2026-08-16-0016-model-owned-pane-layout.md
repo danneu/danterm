@@ -265,7 +265,7 @@ implementing.
 - [x] 1. feat(layout): add pure pane layout engine
 - [x] 2. fix(layout): derive pane frames from the model
 - [x] 3. refactor(core): remove container tree patches
-- [ ] 4. docs(layout): record model-owned pane geometry
+- [x] 4. docs(layout): record model-owned pane geometry
 
 ## Implementation notes
 

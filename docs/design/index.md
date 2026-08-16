@@ -62,6 +62,8 @@ without opening it.
 - [2026-05-27: Terminal Focus and Display Link Recovery](2026-05-27-terminal-focus-display-link.md)
   -- Superseded by [2026-08-06: The Swift Terminal Engine](2026-08-06-swift-terminal-engine.md).
 - [2026-05-27: Model-Driven View Reconciliation](2026-05-27-model-driven-view-reconciliation.md) -- Accepted.
+  Amended 2026-08-13 and 2026-08-16; extended by
+  [2026-08-16: Model-Owned Pane Geometry](2026-08-16-model-owned-pane-geometry.md).
 - [2026-05-28: Pure Core Compiled Same-Module via Symlink, Tested via Nested Package](2026-05-28-core-module-via-symlink.md)
   -- Accepted. Amended 2026-08-06: two GhosttyKit details in the body are gone.
 - [2026-05-28: Pure Core / Portable Support / Platform Runtime: a Purity-Enforced Three-Layer Split](2026-05-28-pure-core-support-split.md)
@@ -80,3 +82,4 @@ without opening it.
 - [2026-08-10: Terminal-Reported Pane Facts -- the Model Owns Values, the Stream Owns Lifecycles](2026-08-10-terminal-reported-pane-facts.md)
   -- Superseded by [2026-08-10: Session-Owned Terminal-Reported Facts](2026-08-10-session-owned-terminal-reported-facts.md).
 - [2026-08-10: Session-Owned Terminal-Reported Facts](2026-08-10-session-owned-terminal-reported-facts.md) -- Accepted.
+- [2026-08-16: Model-Owned Pane Geometry](2026-08-16-model-owned-pane-geometry.md) -- Accepted.

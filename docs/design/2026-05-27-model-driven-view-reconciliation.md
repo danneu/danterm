@@ -2,7 +2,17 @@
 
 - Status: Accepted
 - Date: 2026-05-27
-- Amended: 2026-08-13 -- presentation with duration is always a projection
+- Amended: 2026-08-13 -- presentation with duration is always a projection;
+  2026-08-16 -- pane containers became flat model-owned projections
+- Extended by: [Model-Owned Pane Geometry](2026-08-16-model-owned-pane-geometry.md)
+
+> **2026-08-16: pane container mechanism replaced; reconciliation rule
+> retained.** Pane containers no longer use keyed structural view-tree patches,
+> nested split views, wrapper reparenting, or a zoom overlay. A surviving tab
+> receives its current model root, and its flat container derives pane and
+> divider frames through the pure layout defined by the extending note. The
+> general rules below still bind: reconciliation is model-driven, preserves
+> long-lived hosts, runs in order, and does not write AppModel.
 
 ## Context
 
