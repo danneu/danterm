@@ -1,4 +1,4 @@
-// UI-test runner entry point plus shared harness assertions and pane split tests.
+// UI-test runner entry point plus shared harness assertions and pane divider tests.
 import Cocoa
 
 @main
@@ -13,7 +13,7 @@ struct UITestRunner {
         danTermConfigStoreTests()
         swiftTerminalSessionViewTests()
         ioSurfaceLayerContentsTests()
-        paneSplitViewTests()
+        paneDividerViewTests()
         linkPreviewViewTests()
         paneWrapperViewTests()
         observeOnMainTests()
@@ -70,68 +70,58 @@ func uiExpect(_ condition: Bool, _ message: String = "assertion failed", file: S
 
 // MARK: - Tests
 
-func paneSplitViewTests() {
-    print("PaneSplitView")
+func paneDividerViewTests() {
+    print("PaneDividerView")
 
-    uiTest("isApplyingRatio guards splitViewDidResizeSubviews") {
+    uiTest("divider exposes splitter accessibility from model layout") {
         let splitId = SplitId()
-        let splitView = PaneSplitView(splitId: splitId, ratio: 0.7)
+        let divider = PaneDividerView(splitId: splitId)
+        divider.apply(
+            placement: PaneDividerPlacement(
+                direction: .horizontal,
+                splitBounds: PaneLayoutRect(x: 0, y: 0, width: 501, height: 300),
+                firstChildBounds: PaneLayoutRect(x: 0, y: 0, width: 350, height: 300),
+                frame: PaneLayoutRect(x: 350, y: 0, width: 1, height: 300),
+                secondChildBounds: PaneLayoutRect(x: 351, y: 0, width: 150, height: 300),
+                ratio: 0.7
+            ),
+            in: NSRect(x: 0, y: 0, width: 501, height: 300)
+        )
 
-        var ratioChangedCalls: [(SplitId, CGFloat)] = []
-        splitView.onRatioChanged = { id, ratio in
-            ratioChangedCalls.append((id, ratio))
-        }
-
-        splitView.isVertical = true
-        splitView.dividerStyle = .thin
-        splitView.delegate = splitView
-
-        let first = NSView()
-        let second = NSView()
-        first.translatesAutoresizingMaskIntoConstraints = true
-        second.translatesAutoresizingMaskIntoConstraints = true
-        splitView.addArrangedSubview(first)
-        splitView.addArrangedSubview(second)
-
-        // Set guard flag before giving the split view a frame (setting the
-        // frame triggers splitViewDidResizeSubviews synchronously)
-        splitView.isApplyingRatio = true
-        splitView.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
-        splitView.layoutSubtreeIfNeeded()
-
-        // Guard should have prevented onRatioChanged from firing
-        try uiExpect(ratioChangedCalls.isEmpty, "onRatioChanged should not fire while isApplyingRatio is true")
-        // Ratio should be unchanged
-        try uiExpect(splitView.ratio == 0.7, "ratio should remain 0.7, got \(splitView.ratio)")
+        try uiExpect(divider.accessibilityRole() == .splitter, "divider role is not splitter")
+        try uiExpect(divider.accessibilityOrientation() == .vertical,
+            "side-by-side split should expose a vertical divider")
+        try uiExpect((divider.accessibilityValue() as? NSNumber)?.doubleValue == 0.7,
+            "divider accessibility value did not follow model layout")
     }
 
-    uiTest("onRatioChanged fires when isApplyingRatio is false") {
+    uiTest("divider drag reports one clamped ratio and never moves itself") {
         let splitId = SplitId()
-        let splitView = PaneSplitView(splitId: splitId, ratio: 0.5)
+        let divider = PaneDividerView(splitId: splitId)
+        divider.apply(
+            placement: PaneDividerPlacement(
+                direction: .horizontal,
+                splitBounds: PaneLayoutRect(x: 0, y: 0, width: 501, height: 300),
+                firstChildBounds: PaneLayoutRect(x: 0, y: 0, width: 250, height: 300),
+                frame: PaneLayoutRect(x: 250, y: 0, width: 1, height: 300),
+                secondChildBounds: PaneLayoutRect(x: 251, y: 0, width: 250, height: 300),
+                ratio: 0.5
+            ),
+            in: NSRect(x: 0, y: 0, width: 501, height: 300)
+        )
+        let before = divider.frame
+        var changes: [(SplitId, CGFloat)] = []
+        divider.onRatioChanged = { changes.append(($0, $1)) }
 
-        var ratioChangedCalls: [(SplitId, CGFloat)] = []
-        splitView.onRatioChanged = { id, ratio in
-            ratioChangedCalls.append((id, ratio))
-        }
+        divider.drag(to: NSPoint(x: 20, y: 100))
 
-        splitView.isVertical = true
-        splitView.dividerStyle = .thin
-        splitView.delegate = splitView
+        try uiExpect(changes.count == 1, "one drag event should report one ratio")
+        try uiExpect(changes[0].0 == splitId && changes[0].1 == 0.2,
+            "drag should report the shared 100pt clamp")
+        try uiExpect(divider.frame == before, "divider moved before model layout returned")
 
-        let first = NSView()
-        let second = NSView()
-        first.translatesAutoresizingMaskIntoConstraints = true
-        second.translatesAutoresizingMaskIntoConstraints = true
-        splitView.addArrangedSubview(first)
-        splitView.addArrangedSubview(second)
-
-        splitView.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
-
-        // No guard — simulate user drag
-        splitView.isApplyingRatio = false
-        splitView.setPosition(400, ofDividerAt: 0)
-        splitView.layoutSubtreeIfNeeded()
-
-        try uiExpect(!ratioChangedCalls.isEmpty, "onRatioChanged should fire when isApplyingRatio is false")
+        divider.resetToEvenSplit()
+        try uiExpect(changes.last?.1 == 0.5, "double-click reset should report an even ratio")
+        try uiExpect(divider.frame == before, "reset moved the divider directly")
     }
 }

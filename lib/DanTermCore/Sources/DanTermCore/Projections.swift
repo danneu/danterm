@@ -889,12 +889,10 @@ func advanceSidebarCache(
 // MARK: - View Reconciler: Containers (Stage 8)
 //
 // The content area renders one SplitContainerView per tab (eager: every tab's
-// container is mounted; the selected tab's is visible, the rest hidden). A
-// container structure is patched only when its *shape* drifts -- structure + leaf
-// ids + zoom -- NOT on a split-ratio change or any leaf PaneModel payload edit
-// (title/cwd/progress/theme/todo), which now live in the tree. Excluding the
-// payload keeps metadata edits out of structural patches; excluding ratios keeps
-// a divider drag a content-diff no-op.
+// container is mounted; the selected tab's is visible, the rest hidden).
+// Structural changes still use keyed patches during the flat-container
+// transition. Ratio-only changes produce a layout op, while leaf PaneModel
+// payload edits stay excluded.
 
 /// Container-shape projection: one shape per tab in the model -- a *total* projection
 /// of every group's every tab (eager mounting has no "mounted set" side-input).
@@ -986,13 +984,15 @@ enum ContainerOp: Equatable {
   case remove(tabId: TabId)
   case build(tabId: TabId)
   case patch(tabId: TabId, patch: ContainerTreePatch)
+  case setLayout(tabId: TabId)
   case setZoomedPane(tabId: TabId, paneId: PaneId?)
   case setVisible(tabId: TabId, visible: Bool)
 }
 
 /// Diff old vs new container shapes into ops: `.remove` for tabs gone from `new`,
 /// `.build` for a tab absent in `old`, keyed patches for surviving structural
-/// changes, zoom presentation updates, and `.setVisible` for every tab in `new`.
+/// changes, ratio-only layout updates, zoom presentation updates, and `.setVisible`
+/// for every tab in `new`.
 /// Ordered remove -> build/patch/zoom -> setVisible. Pure; unit-tested via model-apply
 /// (apply the ops to a presence/visibility map -> equals new's keys + visibility),
 /// which catches a dropped-hide regression an exact-sequence assert would bless.
@@ -1012,6 +1012,8 @@ func computeContainerOps(
     }
     if let patch = computeContainerTreePatch(old: oldShape.tree, new: shape.tree) {
       ops.append(.patch(tabId: tabId, patch: patch))
+    } else if oldShape.layout != shape.layout {
+      ops.append(.setLayout(tabId: tabId))
     }
     if oldShape.zoomedLeaf != shape.zoomedLeaf {
       ops.append(.setZoomedPane(tabId: tabId, paneId: shape.zoomedLeaf))
@@ -1033,7 +1035,7 @@ func containerOpsStrandVisible(ops: [ContainerOp], previouslyVisibleTabId: TabId
     switch op {
     case .remove(let tabId), .build(let tabId):
       return tabId == visible
-    case .patch, .setZoomedPane:
+    case .patch, .setLayout, .setZoomedPane:
       return false
     case .setVisible(let tabId, let visibleFlag):
       return tabId == visible && !visibleFlag
@@ -1051,7 +1053,7 @@ func containerOpsEditVisibleTree(
     switch op {
     case .patch(let tabId, _), .setZoomedPane(let tabId, _):
       return tabId == visible
-    case .remove, .build, .setVisible:
+    case .remove, .build, .setLayout, .setVisible:
       return false
     }
   }

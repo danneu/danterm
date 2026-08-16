@@ -260,14 +260,14 @@ import Testing
 
     @Test("reconcileDecision coalesces only eligible high-frequency messages")
     func reconcileDecisionCoalescesOnlyEligibleMessages() throws {
-        // Intent: high-frequency split-ratio, search-count, background alert,
-        //   command-event, and connection-declaration messages classify as
+        // Intent: high-frequency search-count, background alert, command-event,
+        //   and connection-declaration messages classify as
         //   coalesce-eligible while all other messages remain inline.
         // Why it exists: pins reconcile coalescing policy against regressions in
         //   message classification and pending-state handling.
-        // Scenario: divider drags, streaming search scans, bell/notification
-        //   storms, and shell-integration command loops emit bursts whose empty
-        //   or cosmetic sweeps defer into the 75 ms timer. Spec-first -- no
+        // Scenario: streaming search scans, bell/notification storms, and
+        //   shell-integration command loops emit bursts whose cosmetic sweeps
+        //   defer into the 75 ms timer. Spec-first -- no
         //   incident to cite, and none should be invented.
         let paneId = PaneId()
         let sessionId = SessionId()
@@ -276,7 +276,6 @@ import Testing
             .sessionReport(sessionId: sessionId, report: .title("vim")),
             .sessionReport(sessionId: sessionId, report: .cwd("/tmp")),
             .sessionReport(sessionId: sessionId, report: .progress(.set(percent: 50))),
-            .splitRatioChanged(splitId: SplitId(), ratio: 0.3),
             .searchTotalReported(paneId: paneId, total: 42),
             .searchSelectionReported(paneId: paneId, selected: 3),
             .sessionBell(sessionId: sessionId),
@@ -326,6 +325,7 @@ import Testing
         ) == .coalesceIntoPending)
 
         let inlineMessages: [Msg] = [
+            .splitRatioChanged(splitId: SplitId(), ratio: 0.3),
             .sessionReport(sessionId: sessionId, report: .integrationReady),
             .sessionReport(sessionId: sessionId, report: .agentAttached(agent)),
             .sessionReport(sessionId: sessionId, report: .agentDetached(agent)),

@@ -1069,8 +1069,7 @@ func update(
     // MARK: - View
 
     case .splitRatioChanged(let splitId, let ratio):
-        // Hidden background containers stay mounted and can fire
-        // splitViewDidResizeSubviews during window resize, so resolve the
+        // Divider gestures can originate in any mounted tab, so resolve the
         // split's own tab instead of assuming the selected tab owns it.
         guard let tab = tabForSplit(splitId, in: model) else { return [] }
         updateTab(tab.id, in: &model) { tab in

@@ -29,8 +29,8 @@ struct ReconcilerCaches {
     // structural container edits do not invalidate either cache.
     var paneToolbar: [PaneId: PaneToolbarRender] = [:]
     var searchOverlay: [PaneId: SearchOverlayRender] = [:]   // key present iff search active
-    // The last container shape reconciled per tab. computeContainerOps diffs new
-    // shapes against this into full builds for new tabs and keyed patches for survivors.
+    // The last container projection reconciled per tab. It includes layout inputs,
+    // so ratio-only changes reach hidden and visible containers alike.
     var containerShape: [TabId: ContainerShape] = [:]
     // Single-struct-compare cache: the last window chrome reconcileWindowChrome applied.
     // Its three hosts (window, chromeView, dock tile) persist across container edits,
@@ -96,7 +96,7 @@ extension AppRuntime {
 
     /// Container pass: reconcile the per-tab SplitContainerViews (eager -- every tab is
     /// mounted, the selected one visible, the rest hidden). Existing containers
-    /// receive keyed structural patches.
+    /// receive keyed structural patches or ratio-only layout updates.
     func reconcileContainers() {
         guard contentArea != nil else { return }
         let new = desiredContainerShapes(in: model)
@@ -124,12 +124,15 @@ extension AppRuntime {
                 guard let tab = tabById(tabId, in: model),
                       let container = tabContainers[tabId] else { break }
                 container.applyTreePatch(patch, rootNode: tab.paneTree.root)
+            case .setLayout(let tabId):
+                guard let tab = tabById(tabId, in: model) else { break }
+                tabContainers[tabId]?.setRootNode(tab.paneTree.root)
             case .setZoomedPane(let tabId, let paneId):
                 tabContainers[tabId]?.setZoomedPane(paneId)
             case .setVisible(let tabId, let visible):
                 guard let container = tabContainers[tabId] else { break }
                 container.isHidden = !visible
-                if visible { container.ensureLaidOut() }
+                container.ensureLaidOut()
             }
         }
         caches.containerShape = new

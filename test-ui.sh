@@ -46,6 +46,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/AgentSession.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ChipKind.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Model.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLayout.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/CoreEnvironment.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Projections.swift" \
@@ -84,13 +85,14 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/IpcConnection.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/PaneTapeRecords.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/PaneTapeFollow.swift" \
+        "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/PaneTapeStreamState.swift" \
         "$SCRIPT_DIR/app/DanTermConfigStore.swift" \
         "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalWheelNormalizer.swift" \
         "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTestShim.swift" \
         "$SCRIPT_DIR/app/SwiftTerminalSessionView.swift" \
         "$SCRIPT_DIR/app/TerminalFrameRateSampler.swift" \
         "$SCRIPT_DIR/app/TerminalDeliveryShapeSampler.swift" \
-        "$SCRIPT_DIR/app/PaneSplitView.swift" \
+        "$SCRIPT_DIR/app/PaneDividerView.swift" \
         "$SCRIPT_DIR/app/TodoInputView.swift" \
         "$SCRIPT_DIR/app/TodoRowView.swift" \
         "$SCRIPT_DIR/app/TodoShortcutHelpView.swift" \

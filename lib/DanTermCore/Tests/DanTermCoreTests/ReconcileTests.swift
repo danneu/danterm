@@ -738,19 +738,34 @@ import Testing
         #expect(live.contains { if case .patch(let id, _) = $0 { return id == tabId }; return false })
     }
 
-    // MARK: - ContainerShape (ratio carveout / payload excluded / structural change)
+    // MARK: - ContainerShape (layout / payload excluded / structural change)
 
-    @Test("ContainerShape: same leaves+splits with different ratios compare equal")
-    func containerShapeIgnoresRatio() {
-        // Intent: split ratio is NOT part of the container shape.
-        // Why it exists: pins the ratio carveout so splitRatioChanged
-        //   never rebuilds the container.
-        // Scenario: spec-first ratio carveout.
+    @Test("a ratio-only container change requests layout without a tree edit")
+    func containerShapeCarriesRatioIntoLayoutOnlyOp() {
+        // Intent: a split ratio changes the mounted tab's layout immediately,
+        //   without classifying the gesture as a structural tree edit.
+        // Why it exists: a divider drag must track the mouse in foreground and
+        //   background tabs without cancelling a pane drag.
+        // Scenario: spec-first ratio-only reconcile.
         let p1 = PaneId(), p2 = PaneId(), sid = SplitId()
-        let lo = TabModel(id: TabId(), paneTree: PaneTree(root: splitNode(sid, p1, p2, ratio: 0.3), focusedPaneId: p1))
-        let hi = TabModel(id: TabId(), paneTree: PaneTree(root: splitNode(sid, p1, p2, ratio: 0.8), focusedPaneId: p1))
-        #expect(containerShape(of: lo) == containerShape(of: hi),
-            "split ratio is excluded -- splitRatioChanged must not rebuild")
+        let tabId = TabId()
+        let lo = TabModel(id: tabId, paneTree: PaneTree(
+            root: splitNode(sid, p1, p2, ratio: 0.3), focusedPaneId: p1))
+        let hi = TabModel(id: tabId, paneTree: PaneTree(
+            root: splitNode(sid, p1, p2, ratio: 0.8), focusedPaneId: p1))
+
+        let ops = computeContainerOps(
+            old: [tabId: containerShape(of: lo)],
+            new: [tabId: containerShape(of: hi)],
+            selectedTabId: nil
+        )
+
+        #expect(ops.contains(.setLayout(tabId: tabId)))
+        #expect(ops.contains { if case .patch = $0 { true } else { false } } == false)
+        #expect(containerOpsEditVisibleTree(
+            ops: ops,
+            previouslyVisibleTabId: tabId
+        ) == false)
     }
 
     @Test("ContainerShape: a leaf PaneModel metadata edit compares equal")
@@ -926,6 +941,7 @@ private func applyContainerOps(_ ops: [ContainerOp], to old: [TabId: Bool]) -> [
         case .remove(let t): state[t] = nil
         case .build(let t): if state[t] == nil { state[t] = false }
         case .patch: break
+        case .setLayout: break
         case .setZoomedPane: break
         case .setVisible(let t, let v): state[t] = v
         }

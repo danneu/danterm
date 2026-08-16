@@ -263,7 +263,7 @@ implementing.
 ## Commit progress
 
 - [x] 1. feat(layout): add pure pane layout engine
-- [ ] 2. fix(layout): derive pane frames from the model
+- [x] 2. fix(layout): derive pane frames from the model
 - [ ] 3. refactor(core): remove container tree patches
 - [ ] 4. docs(layout): record model-owned pane geometry
 
@@ -275,3 +275,12 @@ implementing.
   multiplication, and the second child receives the exact remainder. Layout and
   drag inversion share this rule, so a model round trip cannot move a divider by
   a floating-point epsilon.
+- The flat container keeps the keyed `applyTreePatch` entry point until commit 3,
+  but it applies the new model root directly. The patch projection remains only
+  to classify structural edits during this intermediate commit.
+- The divider uses a 7pt interaction strip centered on the pure layout's 1pt
+  separator. Its accessibility frame and hit testing use the interaction strip;
+  pane geometry still uses only the pure 1pt separator.
+- The UI harness was missing `PaneTapeStreamState` and the wheel-input methods
+  added by an earlier IPC change. Commit 2 adds those test-only inputs so the
+  required AppKit suite compiles and exercises the layout refactor.

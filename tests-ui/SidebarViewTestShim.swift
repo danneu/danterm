@@ -103,6 +103,7 @@ class TerminalView: NSView, TerminalSession {
     func sendText(_ text: String) {}
     func sendInputText(_ text: String) {}
     func sendInputKey(_ key: KeyName, modifiers: KeyMods) {}
+    func sendInputWheel(_ direction: InputWheelDirection, column: Int, row: Int) {}
     func setFocused(_ focused: Bool) {}
     func setVisible(_ visible: Bool) {
         if visible, visibility.last == false {

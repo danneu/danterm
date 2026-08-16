@@ -1,105 +1,232 @@
-// UI-harness tests for SplitContainerView's first-reveal layout lifecycle.
+// UI-harness tests for model-owned pane geometry in the flat tab container.
 import Cocoa
 
 @MainActor
 func splitContainerViewTests() {
     print("SplitContainerView")
 
-    uiTest("rebuild arms ratio guard and ensureLaidOut applies stored ratio") {
-        // Intent: rebuilding a split container constructs the view tree with the
-        //   resize-feedback guard armed, and first reveal applies the stored ratio.
-        // Why it exists: pins the deferred-layout lifecycle so hidden restored tabs
-        //   do not run DanTerm's explicit ratio pass until they are visible.
-        // Scenario: a split tab is restored in the background, then selected for
-        //   the first time. Spec-first -- no incident to cite.
-        let splitId = SplitId()
-        let container = makeSplitContainer(splitId: splitId, ratio: 0.7)
+    uiTest("nested panes and dividers are direct model-laid-out children") {
+        let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
+        let runtime = AppRuntime()
+        runtime.sessions[paneA] = TerminalView()
+        runtime.sessions[paneB] = TerminalView()
+        runtime.sessions[paneC] = TerminalView()
+        let root = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)),
+            second: .split(
+                id: SplitId(), direction: .vertical,
+                first: .leaf(PaneModel(id: paneB)),
+                second: .leaf(PaneModel(id: paneC)), ratio: 0.7),
+            ratio: 0.65)
+        let container = persistentContainer(root: root, runtime: runtime)
 
         container.rebuild()
-        let splitView = try onlyPaneSplitView(in: container)
-        try uiExpect(splitView.isApplyingRatio, "rebuild should leave isApplyingRatio armed")
 
-        container.ensureLaidOut()
-
-        try uiExpect(!splitView.isApplyingRatio, "ensureLaidOut should release isApplyingRatio")
-        try uiExpect(firstSubviewRatio(in: splitView, expectedTotal: 800, expectedRatio: 0.7), "first subview should match stored ratio")
+        let wrappers = try [paneA, paneB, paneC].map { try requireWrapper(runtime, $0) }
+        try uiExpect(wrappers.allSatisfy { $0.superview === container },
+            "every pane wrapper must be a direct container child")
+        try uiExpect(container.subviews.compactMap { $0 as? PaneDividerView }.count == 2,
+            "every split must have one direct divider")
+        let expected = paneLayout(
+            in: PaneLayoutRect(x: 0, y: 0, width: 800, height: 600),
+            tree: root,
+            zoomedPaneId: nil
+        )
+        for wrapper in wrappers {
+            let expectedFrame = expected.paneFrames[wrapper.paneId]!
+            try uiExpect(wrapper.frame == NSRect(
+                x: expectedFrame.x, y: expectedFrame.y,
+                width: expectedFrame.width, height: expectedFrame.height),
+                "wrapper frame did not come from the pure layout")
+        }
+        try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty,
+            "layout must not report ratios back to the model")
     }
 
-    uiTest("deferred container suppresses split resize feedback") {
-        // Intent: a constructed-but-not-revealed split container does not emit
-        //   split-ratio feedback when AppKit lays it out.
-        // Why it exists: guards the deferral window where hidden mounted views may
-        //   still receive layout and resize notifications.
-        // Scenario: a hidden split tab is restored, AppKit performs layout before
-        //   the user ever selects that tab. Spec-first -- no incident to cite.
+    uiTest("hidden and visible containers use identical geometry") {
         let splitId = SplitId()
+        let visible = makeSplitContainer(splitId: splitId, ratio: 0.7)
+        let hidden = makeSplitContainer(splitId: splitId, ratio: 0.7)
+        hidden.isHidden = true
+
+        visible.rebuild()
+        hidden.rebuild()
+
+        try uiExpect(paneDividerViews(in: visible).map(\.placement) ==
+            paneDividerViews(in: hidden).map(\.placement),
+            "visibility changed model-owned geometry")
+    }
+
+    uiTest("reapplying layout writes no pane frame and emits no ratio") {
+        let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
         let runtime = AppRuntime()
-        let container = makeSplitContainer(splitId: splitId, ratio: 0.7, runtime: runtime)
+        let terminalA = FrameRecordingTerminalView()
+        let terminalB = FrameRecordingTerminalView()
+        runtime.sessions[paneA] = terminalA
+        runtime.sessions[paneB] = terminalB
+        let root = SplitNodeModel.split(
+            id: splitId, direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.7)
+        let container = persistentContainer(root: root, runtime: runtime)
+        container.rebuild()
+        container.layoutSubtreeIfNeeded()
+        let counts = (terminalA.frameSizes.count, terminalB.frameSizes.count)
+
+        container.ensureLaidOut()
+        container.layoutSubtreeIfNeeded()
+
+        try uiExpect(terminalA.frameSizes.count == counts.0 && terminalB.frameSizes.count == counts.1,
+            "unchanged layout wrote a terminal frame again")
+        try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty,
+            "unchanged layout emitted ratio feedback")
+    }
+
+    uiTest("Claude Code 2026-08-16 nested split submits only true model slots") {
+        // Intent: splitting one column submits one new grid for each affected pane
+        //   and none for the untouched sibling, whether the tab is visible or hidden.
+        // Why it exists: the 2026-08-16 Claude Code incident submitted a temporary
+        //   container-wide grid before the nested pane reached its true column width.
+        // Scenario: an even left-right split gains an even top-bottom split on the right.
+        for hidden in [false, true] {
+            let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
+            let outerSplit = SplitId(), nestedSplit = SplitId()
+            let controllerA = TerminalPaneSessionController()
+            let controllerB = TerminalPaneSessionController()
+            let controllerC = TerminalPaneSessionController()
+            let runtime = AppRuntime()
+            runtime.sessions[paneA] = SwiftTerminalSessionView(controller: controllerA, fontSize: 13)
+            runtime.sessions[paneB] = SwiftTerminalSessionView(controller: controllerB, fontSize: 13)
+            runtime.sessions[paneC] = SwiftTerminalSessionView(controller: controllerC, fontSize: 13)
+            let oldRoot = SplitNodeModel.split(
+                id: outerSplit, direction: .horizontal,
+                first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+                ratio: 0.5)
+            let newRoot = SplitNodeModel.split(
+                id: outerSplit, direction: .horizontal,
+                first: .leaf(PaneModel(id: paneA)),
+                second: .split(
+                    id: nestedSplit, direction: .vertical,
+                    first: .leaf(PaneModel(id: paneB)),
+                    second: .leaf(PaneModel(id: paneC)), ratio: 0.5),
+                ratio: 0.5)
+            let container = persistentContainer(root: oldRoot, runtime: runtime)
+            container.isHidden = hidden
+            let window = focusTestWindow(content: container)
+            defer { window.close() }
+            container.rebuild()
+            container.layoutSubtreeIfNeeded()
+            let beforeA = controllerA.gridDimensions.count
+            let beforeB = controllerB.gridDimensions.count
+            let columnCount = controllerB.gridDimensions.last?.columns
+            guard let patch = computeContainerTreePatch(
+                old: containerShapeNode(oldRoot), new: containerShapeNode(newRoot)
+            ) else { throw UITestFailure(message: "missing incident split patch") }
+
+            container.applyTreePatch(patch, rootNode: newRoot)
+            container.layoutSubtreeIfNeeded()
+
+            try uiExpect(controllerA.gridDimensions.count == beforeA,
+                "untouched sibling received a grid during nested split")
+            try uiExpect(controllerB.gridDimensions.count == beforeB + 1,
+                "existing affected pane should receive exactly one true grid: before \(beforeB), after \(controllerB.gridDimensions.count)")
+            try uiExpect(controllerC.gridDimensions.count == 1,
+                "new pane should receive exactly one grid and no placeholder: \(controllerC.gridDimensions)")
+            try uiExpect(controllerB.gridDimensions.last?.columns == columnCount &&
+                controllerC.gridDimensions.last?.columns == columnCount,
+                "nested panes received a container-wide column count")
+        }
+    }
+
+    uiTest("only divider gestures change ratios and the model round trip moves them") {
+        // Intent: resize, zoom, reveal, and minimum clamping emit no ratio message;
+        //   a drag emits one clamped ratio and moves only through returned model layout.
+        // Why it exists: AppKit layout used to overwrite stored ratios after a
+        //   minimum clamp and deferred divider motion behind the reconcile timer.
+        // Scenario: an extreme ratio shrinks below two minima, grows, then receives a drag.
+        let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
+        let runtime = AppRuntime()
+        runtime.sessions[paneA] = TerminalView()
+        runtime.sessions[paneB] = TerminalView()
+        var root = SplitNodeModel.split(
+            id: splitId, direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.9)
+        let container = persistentContainer(root: root, runtime: runtime)
+        container.rebuild()
+        container.frame.size.width = 151
+        container.layoutSubtreeIfNeeded()
+        container.frame.size.width = 1001
+        container.layoutSubtreeIfNeeded()
+        container.setZoomedPane(paneA)
+        container.setZoomedPane(nil)
+        container.isHidden = true
+        container.ensureLaidOut()
+        try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty,
+            "non-gesture presentation wrote a ratio into the model")
+
+        let divider = try onlyPaneDivider(in: container)
+        let oldFrame = divider.frame
+        runtime.onSend = { message in
+            guard case .splitRatioChanged(let id, let ratio) = message, id == splitId else { return }
+            root = replacingRatio(in: root, with: ratio)
+            container.setRootNode(root)
+        }
+        divider.drag(to: NSPoint(x: 20, y: 100))
+
+        let messages = splitRatioChangedMessages(runtime.sentMessages)
+        try uiExpect(messages.count == 1 && messages[0].1 == 0.1,
+            "drag should emit one ratio clamped by the pure layout inverse")
+        try uiExpect(divider.frame != oldFrame,
+            "divider did not move within the synchronous model round trip")
+    }
+
+    uiTest("divider hit area and accessibility value follow clamped layout") {
+        let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
+        let runtime = AppRuntime()
+        runtime.sessions[paneA] = TerminalView()
+        runtime.sessions[paneB] = TerminalView()
+        let root = SplitNodeModel.split(
+            id: splitId, direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.99)
+        let container = persistentContainer(root: root, runtime: runtime)
+        container.frame.size.width = 301
+        container.rebuild()
+        let divider = try onlyPaneDivider(in: container)
+        let inside = NSPoint(x: divider.frame.midX, y: divider.frame.midY)
+        let outside = NSPoint(x: divider.frame.minX - 1, y: divider.frame.midY)
+
+        try uiExpect(container.hitTest(inside) === divider,
+            "divider did not own its interaction strip")
+        try uiExpect(container.hitTest(outside) is PaneWrapperView,
+            "pane just outside the strip did not win hit testing")
+        try uiExpect((divider.accessibilityValue() as? NSNumber)?.doubleValue == 2.0 / 3.0,
+            "accessibility value did not report the clamped model layout")
+    }
+
+    uiTest("known wrapper rect derives its terminal grid after fixed chrome") {
+        let paneId = PaneId()
+        let controller = TerminalPaneSessionController()
+        let terminal = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        let runtime = AppRuntime()
+        runtime.sessions[paneId] = terminal
+        let container = persistentContainer(
+            root: .leaf(PaneModel(id: paneId)), runtime: runtime)
+        container.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        let window = NSWindow(
+            contentRect: container.frame,
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = container
+        defer { window.close() }
 
         container.rebuild()
         container.layoutSubtreeIfNeeded()
-        let splitView = try onlyPaneSplitView(in: container)
-        splitView.splitViewDidResizeSubviews(Notification(name: NSSplitView.didResizeSubviewsNotification, object: splitView))
 
-        try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty, "deferred layout should not send splitRatioChanged")
-        try uiExpect(abs(splitView.ratio - 0.7) < 0.0001, "stored ratio should remain 0.7, got \(splitView.ratio)")
-    }
-
-    uiTest("ensureLaidOut is idempotent") {
-        // Intent: first-reveal layout is a one-shot operation for a container build.
-        // Why it exists: reconcile emits setVisible(true) for the selected tab on
-        //   every pass, so repeated calls must be no-ops after first reveal.
-        // Scenario: a visible split tab is reconciled repeatedly after its first
-        //   reveal. Spec-first -- no incident to cite.
-        let splitId = SplitId()
-        let runtime = AppRuntime()
-        let container = makeSplitContainer(splitId: splitId, ratio: 0.7, runtime: runtime)
-
-        container.rebuild()
-        let splitView = try onlyPaneSplitView(in: container)
-        container.ensureLaidOut()
-        let firstWidth = splitView.arrangedSubviews[0].frame.width
-        let messageCount = splitRatioChangedMessages(runtime.sentMessages).count
-
-        container.ensureLaidOut()
-
-        try uiExpect(abs(splitView.arrangedSubviews[0].frame.width - firstWidth) < 0.5, "second ensureLaidOut should keep the divider stable")
-        try uiExpect(splitRatioChangedMessages(runtime.sentMessages).count == messageCount, "second ensureLaidOut should not send splitRatioChanged")
-    }
-
-    uiTest("nested split containers arm guards and apply each stored ratio") {
-        // Intent: nested split containers apply every split node's stored ratio and
-        //   release the resize-feedback guard for every realized PaneSplitView.
-        // Why it exists: pins the exhaustive nested-split behavior that lets the
-        //   split view lookup mechanism change without losing inner split nodes.
-        // Scenario: a restored tab contains a horizontal split whose second pane
-        //   is split vertically, then the tab is revealed. Spec-first -- no
-        //   incident to cite.
-        let outerSplitId = SplitId()
-        let innerSplitId = SplitId()
-        let container = makeNestedSplitContainer(
-            outerSplitId: outerSplitId,
-            innerSplitId: innerSplitId,
-            outerRatio: 0.65,
-            innerRatio: 0.7
-        )
-
-        container.rebuild()
-        let splitViews = paneSplitViews(in: container)
-        try uiExpect(splitViews.count == 2, "expected two PaneSplitViews, got \(splitViews.count)")
-        try uiExpect(splitViews.allSatisfy(\.isApplyingRatio), "rebuild should leave every split guard armed")
-
-        container.ensureLaidOut()
-        let splitViewsById = Dictionary(uniqueKeysWithValues: paneSplitViews(in: container).map { ($0.splitId, $0) })
-        try uiExpect(splitViewsById.count == 2, "expected two indexed PaneSplitViews, got \(splitViewsById.count)")
-        try uiExpect(splitViewsById[outerSplitId] != nil, "missing outer PaneSplitView")
-        try uiExpect(splitViewsById[innerSplitId] != nil, "missing inner PaneSplitView")
-
-        let outerSplitView = splitViewsById[outerSplitId]!
-        let innerSplitView = splitViewsById[innerSplitId]!
-        try uiExpect(!outerSplitView.isApplyingRatio && !innerSplitView.isApplyingRatio, "ensureLaidOut should release every split guard")
-        try uiExpect(firstSubviewRatio(in: outerSplitView, expectedRatio: 0.65), "outer split should match stored ratio")
-        try uiExpect(firstSubviewRatio(in: innerSplitView, expectedRatio: 0.7), "inner split should match stored ratio")
+        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 12, rows: 10),
+            "100x200 wrapper did not subtract fixed chrome: \(controller.gridDimensions)")
     }
 
     uiTest("container rebuild reparents the same pane wrapper") {
@@ -171,7 +298,7 @@ func splitContainerViewTests() {
         try uiExpect(wrapper.frame.width > 0 && wrapperB.frame.width > 0, "first split left a pane with zero width")
         try uiExpect(wrapper.searchOverlay === overlay, "split replaced the active search overlay")
         try uiExpect(wrapper.todoButtonView === todoAnchor, "split replaced the TODO popover anchor")
-        try uiExpect(paneSplitViews(in: container).count == 1, "split patch should create one split view")
+        try uiExpect(paneDividerViews(in: container).count == 1, "split patch should create one divider")
         try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty, "patch layout emitted split-ratio feedback")
 
         let swappedRoot = SplitNodeModel.split(
@@ -201,13 +328,13 @@ func splitContainerViewTests() {
         try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty, "swap or close layout emitted split-ratio feedback")
     }
 
-    uiTest("pane focus reconciliation repairs the 2026-08-12 split incident") {
-        // Intent: after an incremental split strands AppKit first responder, the
-        //   model-selected new pane receives focus before the event completes.
-        // Why it exists: this is the AppKit regression from the 2026-08-12 report
-        //   where the first keystroke after splitting reached no pane.
-        // Scenario: pane A owns focus, a foreground split reparents both wrappers
-        //   and chooses pane B, then the focus pass repairs the stranded window.
+    uiTest("flat split preserves focus before reconciliation selects the new pane") {
+        // Intent: a structural split keeps the existing responder mounted, then
+        //   the model-selected new pane receives focus in the same reconcile.
+        // Why it exists: the 2026-08-12 incident stranded first responder while
+        //   nested split views reparented the focused wrapper.
+        // Scenario: pane A owns focus, a foreground split adds pane B without
+        //   reparenting A, then the focus pass selects B.
         let paneA = PaneId(), paneB = PaneId(), tabId = TabId()
         let oldRoot = SplitNodeModel.leaf(PaneModel(id: paneA))
         let newRoot = SplitNodeModel.split(
@@ -237,8 +364,8 @@ func splitContainerViewTests() {
         ) else { throw UITestFailure(message: "missing split patch") }
         container.applyTreePatch(patch, rootNode: newRoot)
         container.ensureLaidOut()
-        try uiExpect(runtime.paneFocusClaimant() == .none,
-            "split should expose the stranded AppKit responder mechanism")
+        try uiExpect(window.firstResponder === terminalA,
+            "flat split should keep the existing terminal responder mounted")
 
         runtime.model.groups[0].tabs[0].paneTree = PaneTree(
             root: newRoot, focusedPaneId: paneB)
@@ -389,10 +516,13 @@ func splitContainerViewTests() {
         //   child detached, then hid another branch without relaying out the tree.
         // Scenario: the split, split, zoom, unzoom regression reported on 2026-08-11.
         let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
+        let controllerA = TerminalPaneSessionController()
+        let controllerB = TerminalPaneSessionController()
+        let controllerC = TerminalPaneSessionController()
         let runtime = AppRuntime()
-        runtime.sessions[paneA] = TerminalView()
-        runtime.sessions[paneB] = TerminalView()
-        runtime.sessions[paneC] = TerminalView()
+        runtime.sessions[paneA] = SwiftTerminalSessionView(controller: controllerA, fontSize: 13)
+        runtime.sessions[paneB] = SwiftTerminalSessionView(controller: controllerB, fontSize: 13)
+        runtime.sessions[paneC] = SwiftTerminalSessionView(controller: controllerC, fontSize: 13)
         let root = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal, first: .leaf(PaneModel(id: paneA)),
             second: .split(
@@ -405,6 +535,8 @@ func splitContainerViewTests() {
         let wrapperA = try requireWrapper(runtime, paneA)
         let wrapperB = try requireWrapper(runtime, paneB)
         let wrapperC = try requireWrapper(runtime, paneC)
+        let beforeA = controllerA.gridDimensions.count
+        let beforeC = controllerC.gridDimensions.count
 
         container.setZoomedPane(paneB)
         container.ensureLaidOut()
@@ -415,6 +547,9 @@ func splitContainerViewTests() {
         try uiExpect(wrapperB.frame.width > 790, "zoomed pane should fill the container width, got \(wrapperB.frame.width)")
         try uiExpect(wrapperB.isDescendant(of: container), "focused wrapper left the container hierarchy")
         try uiExpect(wrapperA.isDescendant(of: container) && wrapperC.isDescendant(of: container), "zoom removed a sibling wrapper")
+        try uiExpect(
+            controllerA.gridDimensions.count == beforeA && controllerC.gridDimensions.count == beforeC,
+            "zoom submitted a grid for a pane it hid")
 
         container.setZoomedPane(nil)
         container.ensureLaidOut()
@@ -567,21 +702,21 @@ private func makeNestedSplitContainer(outerSplitId: SplitId, innerSplitId: Split
     )
 }
 
-private func onlyPaneSplitView(in view: NSView) throws -> PaneSplitView {
-    let splitViews = paneSplitViews(in: view)
-    try uiExpect(splitViews.count == 1, "expected exactly one PaneSplitView, got \(splitViews.count)")
-    return splitViews[0]
+private func paneDividerViews(in view: NSView) -> [PaneDividerView] {
+    view.subviews.compactMap { $0 as? PaneDividerView }
 }
 
-private func paneSplitViews(in view: NSView) -> [PaneSplitView] {
-    var result: [PaneSplitView] = []
-    if let splitView = view as? PaneSplitView {
-        result.append(splitView)
+private func onlyPaneDivider(in view: NSView) throws -> PaneDividerView {
+    let dividers = paneDividerViews(in: view)
+    try uiExpect(dividers.count == 1, "expected one divider, got \(dividers.count)")
+    return dividers[0]
+}
+
+private func replacingRatio(in node: SplitNodeModel, with ratio: CGFloat) -> SplitNodeModel {
+    guard case .split(let id, let direction, let first, let second, _) = node else {
+        return node
     }
-    for subview in view.subviews {
-        result.append(contentsOf: paneSplitViews(in: subview))
-    }
-    return result
+    return .split(id: id, direction: direction, first: first, second: second, ratio: ratio)
 }
 
 private func isEffectivelyHidden(_ view: NSView) -> Bool {
@@ -593,21 +728,6 @@ private func isEffectivelyHidden(_ view: NSView) -> Bool {
     return false
 }
 
-private func firstSubviewRatio(in splitView: PaneSplitView, expectedTotal: CGFloat, expectedRatio: CGFloat) -> Bool {
-    guard splitView.arrangedSubviews.count == 2 else { return false }
-    let total = splitView.isVertical ? splitView.bounds.width : splitView.bounds.height
-    let first = splitView.isVertical ? splitView.arrangedSubviews[0].frame.width : splitView.arrangedSubviews[0].frame.height
-    return abs(total - expectedTotal) < 0.5 && abs(first - expectedTotal * expectedRatio) < 2
-}
-
-private func firstSubviewRatio(in splitView: PaneSplitView, expectedRatio: CGFloat) -> Bool {
-    guard splitView.arrangedSubviews.count == 2 else { return false }
-    let total = splitView.isVertical ? splitView.bounds.width : splitView.bounds.height
-    guard total > 0 else { return false }
-    let first = splitView.isVertical ? splitView.arrangedSubviews[0].frame.width : splitView.arrangedSubviews[0].frame.height
-    return abs(first - total * expectedRatio) < 2
-}
-
 private func splitRatioChangedMessages(_ messages: [Msg]) -> [(SplitId, CGFloat)] {
     var result: [(SplitId, CGFloat)] = []
     for message in messages {
@@ -616,4 +736,13 @@ private func splitRatioChangedMessages(_ messages: [Msg]) -> [(SplitId, CGFloat)
         }
     }
     return result
+}
+
+private final class FrameRecordingTerminalView: TerminalView {
+    private(set) var frameSizes: [NSSize] = []
+
+    override func setFrameSize(_ newSize: NSSize) {
+        frameSizes.append(newSize)
+        super.setFrameSize(newSize)
+    }
 }

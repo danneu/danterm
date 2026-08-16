@@ -1298,9 +1298,12 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         }
 
         let metricsChanged = metrics != currentMetrics
+        let dimensionsChanged = dimensions != currentDimensions
         currentMetrics = metrics
         currentDimensions = dimensions
-        controller.setGridDimensions(dimensions)
+        if dimensionsChanged {
+            controller.setGridDimensions(dimensions)
+        }
         if metricsChanged {
             emitStateIfNeeded()
             // New cell geometry means new pixel geometry, and no publish need

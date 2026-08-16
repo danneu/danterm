@@ -593,6 +593,14 @@ final class TerminalPaneSessionController {
     func sendWheel(_ event: TerminalWheelEvent, origin: UInt64?) {
         wheelEvents.append(event)
     }
+    func sendWheel(
+        _ event: TerminalWheelEvent,
+        origin: UInt64?,
+        onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?
+    ) {
+        wheelEvents.append(event)
+        Self.complete(onCompletion, with: .delivered)
+    }
     func sendPointer(_ event: TerminalPointerEvent, origin: UInt64?) {
         pointerEvents.append(event)
         if allowsPaneMenu, case let .up(.right, column, row, _) = event {

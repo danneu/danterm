@@ -193,8 +193,8 @@ enum Msg {
 
 extension Msg {
     /// Whether this message is eligible to defer its reconcile() sweep so bursts
-    /// coalesce. A message opts in when its sweep is either empty (split-ratio:
-    /// ContainerShape drops ratios) or merely cosmetic and safe to throttle to ~13 Hz (title/cwd/
+    /// coalesce. A message opts in when its sweep is cosmetic and safe to
+    /// throttle to ~13 Hz (title/cwd/
     /// progress, live search match count, background-pane alert badges, the
     /// remote/agent toolbar + per-pane theme a command event clears). update()
     /// still runs immediately, so the model stays current and the final value is
@@ -209,11 +209,6 @@ extension Msg {
         // real but throttleable diff (tab title/subtitle, progress, the search
         // overlay's live "N/M" match count).
         case .searchTotalReported, .searchSelectionReported:
-            return true
-        // Window/divider live-resize fires this every tick, but ContainerShape
-        // drops split ratios (see ReconcileTests "split ratio is excluded"), so
-        // the sweep is an empty diff -- pure waste; defer it.
-        case .splitRatioChanged:
             return true
         // Background-pane alert badges. A bell/notify storm (spinner, `printf '\a'`
         // loop, OSC 9 burst) fires one full sweep per event; the alert is inserted
