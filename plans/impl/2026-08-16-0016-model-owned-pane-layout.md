@@ -264,7 +264,7 @@ implementing.
 
 - [x] 1. feat(layout): add pure pane layout engine
 - [x] 2. fix(layout): derive pane frames from the model
-- [ ] 3. refactor(core): remove container tree patches
+- [x] 3. refactor(core): remove container tree patches
 - [ ] 4. docs(layout): record model-owned pane geometry
 
 ## Implementation notes
@@ -284,3 +284,6 @@ implementing.
 - The UI harness was missing `PaneTapeStreamState` and the wheel-input methods
   added by an earlier IPC change. Commit 2 adds those test-only inputs so the
   required AppKit suite compiles and exercises the layout refactor.
+- The container projection keeps a structural fingerprint only to distinguish
+  tree edits from ratio-only updates for pane-drag cancellation. Surviving tabs
+  now receive the model root directly, with no keyed patch payload.

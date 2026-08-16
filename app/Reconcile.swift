@@ -96,7 +96,7 @@ extension AppRuntime {
 
     /// Container pass: reconcile the per-tab SplitContainerViews (eager -- every tab is
     /// mounted, the selected one visible, the rest hidden). Existing containers
-    /// receive keyed structural patches or ratio-only layout updates.
+    /// receive direct structural or ratio-only layout updates.
     func reconcileContainers() {
         guard contentArea != nil else { return }
         let new = desiredContainerShapes(in: model)
@@ -111,7 +111,7 @@ extension AppRuntime {
             cancelPaneDrag()
         }
 
-        // Apply ops (remove -> build/patch/zoom -> setVisible).
+        // Apply ops (remove -> build/tree/layout/zoom -> setVisible).
         for op in ops {
             switch op {
             case .remove(let tabId):
@@ -120,10 +120,10 @@ extension AppRuntime {
                 if let tab = tabById(tabId, in: model) {
                     _ = buildAndInsertContainer(for: tab)  // visibility set by the following setVisible op
                 }
-            case .patch(let tabId, let patch):
+            case .setTree(let tabId):
                 guard let tab = tabById(tabId, in: model),
                       let container = tabContainers[tabId] else { break }
-                container.applyTreePatch(patch, rootNode: tab.paneTree.root)
+                container.setRootNode(tab.paneTree.root)
             case .setLayout(let tabId):
                 guard let tab = tabById(tabId, in: model) else { break }
                 tabContainers[tabId]?.setRootNode(tab.paneTree.root)

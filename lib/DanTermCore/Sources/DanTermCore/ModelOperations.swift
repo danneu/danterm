@@ -1025,7 +1025,7 @@ private func sumUnread(in node: SplitNodeModel, byPane: [PaneId: Int]) -> Int {
   }
 }
 
-/// Structural fingerprint of a split tree for the transitional keyed patch projection.
+/// Structural fingerprint used to distinguish tree edits from ratio-only layout changes.
 indirect enum ContainerShapeNode: Equatable {
   case leaf(PaneId)
   case split(id: SplitId, direction: SplitNodeModel.Direction, first: ContainerShapeNode, second: ContainerShapeNode)
@@ -1049,7 +1049,7 @@ struct ContainerShape: Equatable {
   let layout: ContainerLayoutNode
   let isZoomed: Bool
   // focusedPaneId while zoomed; nil otherwise -- so a focus change in an unzoomed
-  // tab does NOT drift the shape (which is why a pane click needs no tree patch).
+  // tab does NOT drift the shape (which is why a pane click needs no tree update).
   let zoomedLeaf: PaneId?
 
   init(

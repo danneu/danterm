@@ -890,9 +890,8 @@ func advanceSidebarCache(
 //
 // The content area renders one SplitContainerView per tab (eager: every tab's
 // container is mounted; the selected tab's is visible, the rest hidden).
-// Structural changes still use keyed patches during the flat-container
-// transition. Ratio-only changes produce a layout op, while leaf PaneModel
-// payload edits stay excluded.
+// Structural and ratio-only changes update the flat container directly, while
+// leaf PaneModel payload edits stay excluded.
 
 /// Container-shape projection: one shape per tab in the model -- a *total* projection
 /// of every group's every tab (eager mounting has no "mounted set" side-input).
@@ -906,94 +905,23 @@ func desiredContainerShapes(in model: AppModel) -> [TabId: ContainerShape] {
   return result
 }
 
-/// Stable identity for one node in the mounted container tree.
-enum ContainerNodeRef: Hashable {
-  case pane(PaneId)
-  case split(SplitId)
-}
-
-/// The child relationships and orientation a mounted split must have.
-struct ContainerSplitSpec: Equatable {
-  let direction: SplitNodeModel.Direction
-  let first: ContainerNodeRef
-  let second: ContainerNodeRef
-}
-
-/// A keyed structural patch for one existing tab container.
-struct ContainerTreePatch: Equatable {
-  let desiredRoot: ContainerNodeRef
-  let desiredSplits: [SplitId: ContainerSplitSpec]
-  let rootChanged: Bool
-  let changedSplitIds: Set<SplitId>
-  let removedSplitIds: Set<SplitId>
-}
-
-/// Flatten a structural fingerprint into the keyed relationships a patch compares.
-private func flattenedContainerTree(
-  _ node: ContainerShapeNode
-) -> (root: ContainerNodeRef, splits: [SplitId: ContainerSplitSpec]) {
-  var splits: [SplitId: ContainerSplitSpec] = [:]
-
-  func walk(_ node: ContainerShapeNode) -> ContainerNodeRef {
-    switch node {
-    case .leaf(let paneId):
-      return .pane(paneId)
-    case .split(let splitId, let direction, let first, let second):
-      let firstRef = walk(first)
-      let secondRef = walk(second)
-      splits[splitId] = ContainerSplitSpec(
-        direction: direction,
-        first: firstRef,
-        second: secondRef
-      )
-      return .split(splitId)
-    }
-  }
-
-  return (walk(node), splits)
-}
-
-/// Diff two split trees by stable node id, returning nil when no host edge changes.
-func computeContainerTreePatch(
-  old: ContainerShapeNode,
-  new: ContainerShapeNode
-) -> ContainerTreePatch? {
-  let oldTree = flattenedContainerTree(old)
-  let newTree = flattenedContainerTree(new)
-  let changedSplitIds = Set(newTree.splits.compactMap { splitId, spec in
-    oldTree.splits[splitId] == spec ? nil : splitId
-  })
-  let removedSplitIds = Set(oldTree.splits.keys).subtracting(newTree.splits.keys)
-  let rootChanged = oldTree.root != newTree.root
-  guard rootChanged || !changedSplitIds.isEmpty || !removedSplitIds.isEmpty else {
-    return nil
-  }
-  return ContainerTreePatch(
-    desiredRoot: newTree.root,
-    desiredSplits: newTree.splits,
-    rootChanged: rootChanged,
-    changedSplitIds: changedSplitIds,
-    removedSplitIds: removedSplitIds
-  )
-}
-
 /// A single container mutation the thin `reconcileContainers` executor applies.
-/// New tabs receive one full build; surviving tabs receive keyed tree and zoom
-/// presentation patches; `setVisible` toggles `isHidden`.
+/// New tabs receive one full build; surviving tabs receive direct tree, layout,
+/// and zoom updates; `setVisible` toggles `isHidden`.
 enum ContainerOp: Equatable {
   case remove(tabId: TabId)
   case build(tabId: TabId)
-  case patch(tabId: TabId, patch: ContainerTreePatch)
+  case setTree(tabId: TabId)
   case setLayout(tabId: TabId)
   case setZoomedPane(tabId: TabId, paneId: PaneId?)
   case setVisible(tabId: TabId, visible: Bool)
 }
 
 /// Diff old vs new container shapes into ops: `.remove` for tabs gone from `new`,
-/// `.build` for a tab absent in `old`, keyed patches for surviving structural
+/// `.build` for a tab absent in `old`, direct tree updates for surviving structural
 /// changes, ratio-only layout updates, zoom presentation updates, and `.setVisible`
 /// for every tab in `new`.
-/// Ordered remove -> build/patch/zoom -> setVisible. Pure; unit-tested via model-apply
+/// Ordered remove -> build/tree/layout/zoom -> setVisible. Pure; unit-tested via model-apply
 /// (apply the ops to a presence/visibility map -> equals new's keys + visibility),
 /// which catches a dropped-hide regression an exact-sequence assert would bless.
 func computeContainerOps(
@@ -1010,8 +938,8 @@ func computeContainerOps(
       ops.append(.build(tabId: tabId))
       continue
     }
-    if let patch = computeContainerTreePatch(old: oldShape.tree, new: shape.tree) {
-      ops.append(.patch(tabId: tabId, patch: patch))
+    if oldShape.tree != shape.tree {
+      ops.append(.setTree(tabId: tabId))
     } else if oldShape.layout != shape.layout {
       ops.append(.setLayout(tabId: tabId))
     }
@@ -1035,7 +963,7 @@ func containerOpsStrandVisible(ops: [ContainerOp], previouslyVisibleTabId: TabId
     switch op {
     case .remove(let tabId), .build(let tabId):
       return tabId == visible
-    case .patch, .setLayout, .setZoomedPane:
+    case .setTree, .setLayout, .setZoomedPane:
       return false
     case .setVisible(let tabId, let visibleFlag):
       return tabId == visible && !visibleFlag
@@ -1051,7 +979,7 @@ func containerOpsEditVisibleTree(
   guard let visible = previouslyVisibleTabId else { return false }
   return ops.contains { op in
     switch op {
-    case .patch(let tabId, _), .setZoomedPane(let tabId, _):
+    case .setTree(let tabId), .setZoomedPane(let tabId, _):
       return tabId == visible
     case .remove, .build, .setLayout, .setVisible:
       return false

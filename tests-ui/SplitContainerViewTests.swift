@@ -120,11 +120,7 @@ func splitContainerViewTests() {
             let beforeA = controllerA.gridDimensions.count
             let beforeB = controllerB.gridDimensions.count
             let columnCount = controllerB.gridDimensions.last?.columns
-            guard let patch = computeContainerTreePatch(
-                old: containerShapeNode(oldRoot), new: containerShapeNode(newRoot)
-            ) else { throw UITestFailure(message: "missing incident split patch") }
-
-            container.applyTreePatch(patch, rootNode: newRoot)
+            container.setRootNode(newRoot)
             container.layoutSubtreeIfNeeded()
 
             try uiExpect(controllerA.gridDimensions.count == beforeA,
@@ -257,8 +253,8 @@ func splitContainerViewTests() {
         try uiExpect(firstWrapper === secondWrapper, "rebuild should preserve wrapper chrome")
     }
 
-    uiTest("tree patch preserves wrapper and search overlay without ratio feedback") {
-        // Intent: splitting a pane patches one live tree while preserving the
+    uiTest("tree update preserves wrapper and search overlay without ratio feedback") {
+        // Intent: splitting a pane updates one live tree while preserving the
         //   pane wrapper, its search overlay, and every stored split ratio.
         // Why it exists: the old whole-tab rebuild discarded pane chrome and
         //   could feed layout-produced divider positions back into the model.
@@ -283,12 +279,7 @@ func splitContainerViewTests() {
         wrapper.showSearchOverlay(search: SearchModel(needle: "needle"), runtime: runtime)
         let overlay = wrapper.searchOverlay
         let todoAnchor = wrapper.todoButtonView
-        guard let patch = computeContainerTreePatch(
-            old: containerShapeNode(oldRoot),
-            new: containerShapeNode(newRoot)
-        ) else { throw UITestFailure(message: "missing split patch") }
-
-        container.applyTreePatch(patch, rootNode: newRoot)
+        container.setRootNode(newRoot)
         container.ensureLaidOut()
 
         try uiExpect(runtime.findPaneWrapper(for: paneA) === wrapper, "split replaced the original wrapper")
@@ -298,8 +289,8 @@ func splitContainerViewTests() {
         try uiExpect(wrapper.frame.width > 0 && wrapperB.frame.width > 0, "first split left a pane with zero width")
         try uiExpect(wrapper.searchOverlay === overlay, "split replaced the active search overlay")
         try uiExpect(wrapper.todoButtonView === todoAnchor, "split replaced the TODO popover anchor")
-        try uiExpect(paneDividerViews(in: container).count == 1, "split patch should create one divider")
-        try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty, "patch layout emitted split-ratio feedback")
+        try uiExpect(paneDividerViews(in: container).count == 1, "split should create one divider")
+        try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty, "tree layout emitted split-ratio feedback")
 
         let swappedRoot = SplitNodeModel.split(
             id: splitId,
@@ -308,18 +299,10 @@ func splitContainerViewTests() {
             second: .leaf(PaneModel(id: paneA)),
             ratio: 0.7
         )
-        guard let swapPatch = computeContainerTreePatch(
-            old: containerShapeNode(newRoot),
-            new: containerShapeNode(swappedRoot)
-        ) else { throw UITestFailure(message: "missing swap patch") }
-        container.applyTreePatch(swapPatch, rootNode: swappedRoot)
+        container.setRootNode(swappedRoot)
         container.ensureLaidOut()
 
-        guard let closePatch = computeContainerTreePatch(
-            old: containerShapeNode(swappedRoot),
-            new: containerShapeNode(.leaf(PaneModel(id: paneA)))
-        ) else { throw UITestFailure(message: "missing close patch") }
-        container.applyTreePatch(closePatch, rootNode: .leaf(PaneModel(id: paneA)))
+        container.setRootNode(.leaf(PaneModel(id: paneA)))
         container.ensureLaidOut()
 
         try uiExpect(runtime.findPaneWrapper(for: paneA) === wrapper, "swap or sibling close replaced the wrapper")
@@ -359,10 +342,7 @@ func splitContainerViewTests() {
         container.ensureLaidOut()
         try uiExpect(window.makeFirstResponder(terminalA), "window refused pane A")
 
-        guard let patch = computeContainerTreePatch(
-            old: containerShapeNode(oldRoot), new: containerShapeNode(newRoot)
-        ) else { throw UITestFailure(message: "missing split patch") }
-        container.applyTreePatch(patch, rootNode: newRoot)
+        container.setRootNode(newRoot)
         container.ensureLaidOut()
         try uiExpect(window.firstResponder === terminalA,
             "flat split should keep the existing terminal responder mounted")
@@ -386,7 +366,7 @@ func splitContainerViewTests() {
 
     uiTest("pane focus reconciliation repairs a reparented search field") {
         // Intent: an active search field remains the desired responder across a
-        //   pane-tree patch even though AppKit discards its field editor.
+        //   pane-tree update even though AppKit discards its field editor.
         // Why it exists: search ownership is the second pane-local focus target;
         //   treating every active search as field-owned would steal focus from a
         //   terminal the user deliberately returned to.
@@ -419,10 +399,7 @@ func splitContainerViewTests() {
         let field = wrapper.searchOverlay!.searchField
         try uiExpect(window.makeFirstResponder(field), "window refused the search field")
 
-        guard let patch = computeContainerTreePatch(
-            old: containerShapeNode(oldRoot), new: containerShapeNode(newRoot)
-        ) else { throw UITestFailure(message: "missing split patch") }
-        container.applyTreePatch(patch, rootNode: newRoot)
+        container.setRootNode(newRoot)
         container.ensureLaidOut()
         runtime.model.groups[0].tabs[0].paneTree = PaneTree(root: newRoot)
         runtime.reconcilePaneFocus()
@@ -562,9 +539,9 @@ func splitContainerViewTests() {
             "unzoom should restore nonzero geometry for every pane")
     }
 
-    uiTest("cross-tab patches preserve a moved wrapper in either patch order") {
+    uiTest("cross-tab tree updates preserve a moved wrapper in either order") {
         // Intent: moving a pane between tabs reparents its one wrapper even when
-        //   the destination patch runs before the source patch.
+        //   the destination update runs before the source update.
         // Why it exists: container op order follows dictionary iteration, so one
         //   tab must not tear a wrapper back out of its new parent.
         // Scenario: the incremental-container reconciliation performance fix.
@@ -586,18 +563,11 @@ func splitContainerViewTests() {
         source.rebuild()
         destination.rebuild()
         let movedWrapper = try requireWrapper(runtime, paneA)
-        guard let sourcePatch = computeContainerTreePatch(
-            old: containerShapeNode(sourceOld), new: containerShapeNode(sourceNew)),
-              let destinationPatch = computeContainerTreePatch(
-                old: containerShapeNode(destinationOld), new: containerShapeNode(destinationNew)) else {
-            throw UITestFailure(message: "missing cross-tab patches")
-        }
-
-        destination.applyTreePatch(destinationPatch, rootNode: destinationNew)
-        source.applyTreePatch(sourcePatch, rootNode: sourceNew)
+        destination.setRootNode(destinationNew)
+        source.setRootNode(sourceNew)
 
         try uiExpect(runtime.findPaneWrapper(for: paneA) === movedWrapper, "move replaced the pane wrapper")
-        try uiExpect(movedWrapper.isDescendant(of: destination), "source patch detached the moved wrapper from its destination")
+        try uiExpect(movedWrapper.isDescendant(of: destination), "source update detached the moved wrapper from its destination")
     }
 
     uiTest("removing the runtime host releases pane chrome") {

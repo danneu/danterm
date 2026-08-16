@@ -32,14 +32,7 @@ class SplitContainerView: NSView {
         applyModelLayout()
     }
 
-    /// Applies the next model tree while the keyed projection remains during migration.
-    func applyTreePatch(_ patch: ContainerTreePatch, rootNode newRootNode: SplitNodeModel) {
-        _ = patch
-        rootNode = newRootNode
-        applyModelLayout()
-    }
-
-    /// Applies a ratio-only model update without classifying it as a structural edit.
+    /// Applies the next model tree without rebuilding surviving pane wrappers.
     func setRootNode(_ newRootNode: SplitNodeModel) {
         rootNode = newRootNode
         applyModelLayout()
