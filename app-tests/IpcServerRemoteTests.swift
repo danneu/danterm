@@ -30,7 +30,7 @@ struct IpcServerRemoteTests {
         let server = try IpcServer(
             socketPath: fixture.socketURL,
             auditWriter: fixture.auditWriter,
-            runtime: nil
+            runtimeDispatch: nil
         )
         defer { server.stop() }
 
@@ -52,7 +52,7 @@ struct IpcServerRemoteTests {
                 admittedNodeIds: ["node-phone"]
             ),
             auditWriter: fixture.auditWriter,
-            runtime: nil
+            runtimeDispatch: nil
         )
         defer { server.stop() }
 
@@ -88,7 +88,7 @@ struct IpcServerRemoteTests {
                     interfaceName: "lo0"
                 )
             },
-            runtime: nil
+            runtimeDispatch: nil
         )
         defer { server.stop() }
 
@@ -105,7 +105,7 @@ struct IpcServerRemoteTests {
         let fixture = try RemoteIpcServerFixture()
         defer { fixture.remove() }
         try fixture.breakAuditSink()
-        let server = try fixture.makeServer(runtime: nil)
+        let server = try fixture.makeServer(runtimeDispatch: nil)
         defer { server.stop() }
 
         await server.start()
@@ -121,7 +121,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
         defer { runtime.shutdown() }
-        let server = try fixture.makeServer(runtime: runtime)
+        let server = try fixture.makeServer(runtimeDispatch: runtime.makeIpcDispatch())
         defer { server.stop() }
 
         await server.start()
@@ -149,7 +149,7 @@ struct IpcServerRemoteTests {
         let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
         defer { runtime.shutdown() }
         let server = try fixture.makeServer(
-            runtime: runtime,
+            runtimeDispatch: runtime.makeIpcDispatch(),
             livenessBound: try #require(IpcLivenessBound(seconds: 6))
         )
         defer { server.stop() }
@@ -187,7 +187,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         let bound = try #require(IpcLivenessBound(seconds: 0.5))
         let server = try fixture.makeServer(
-            runtime: nil,
+            runtimeDispatch: nil,
             remoteConnectionLimit: 1,
             livenessBound: bound
         )
@@ -227,7 +227,7 @@ struct IpcServerRemoteTests {
         let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
         defer { runtime.shutdown() }
         let server = try fixture.makeServer(
-            runtime: runtime,
+            runtimeDispatch: runtime.makeIpcDispatch(),
             livenessBound: try #require(IpcLivenessBound(seconds: 0.4))
         )
         defer { server.stop() }
@@ -259,7 +259,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
         defer { runtime.shutdown() }
-        let server = try fixture.makeServer(runtime: runtime)
+        let server = try fixture.makeServer(runtimeDispatch: runtime.makeIpcDispatch())
         defer { server.stop() }
 
         await server.start()
@@ -306,7 +306,7 @@ struct IpcServerRemoteTests {
                 machineName: "iphone"
             )
         }
-        let server = try fixture.makeServer(runtime: nil, whoisResolver: resolver)
+        let server = try fixture.makeServer(runtimeDispatch: nil, whoisResolver: resolver)
         defer { server.stop() }
 
         await server.start()
@@ -338,7 +338,7 @@ struct IpcServerRemoteTests {
             resolver = TailnetWhoisResolver { _ in throw TailnetWhoisResolver.Error.invalidOutput }
             expected = .identityUnresolved
         }
-        let server = try fixture.makeServer(runtime: nil, whoisResolver: resolver)
+        let server = try fixture.makeServer(runtimeDispatch: nil, whoisResolver: resolver)
         defer { server.stop() }
 
         await server.start()
@@ -354,7 +354,7 @@ struct IpcServerRemoteTests {
     func connectionCapBoundsRemotePeers() async throws {
         let fixture = try RemoteIpcServerFixture()
         defer { fixture.remove() }
-        let server = try fixture.makeServer(runtime: nil, remoteConnectionLimit: 1)
+        let server = try fixture.makeServer(runtimeDispatch: nil, remoteConnectionLimit: 1)
         defer { server.stop() }
 
         await server.start()
@@ -388,7 +388,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         let bound = try #require(IpcLivenessBound(seconds: 6))
         let server = try fixture.makeServer(
-            runtime: nil,
+            runtimeDispatch: nil,
             remoteConnectionLimit: 1,
             livenessBound: bound
         )
@@ -423,7 +423,7 @@ struct IpcServerRemoteTests {
             )
         }
         let server = try fixture.makeServer(
-            runtime: nil,
+            runtimeDispatch: nil,
             whoisResolver: resolver,
             remoteConnectionLimit: 1
         )
@@ -466,7 +466,7 @@ struct IpcServerRemoteTests {
                 machineName: "iphone"
             )
         }
-        let server = try fixture.makeServer(runtime: nil, whoisResolver: resolver)
+        let server = try fixture.makeServer(runtimeDispatch: nil, whoisResolver: resolver)
 
         await server.start()
         let peer = try RemotePeer(port: try #require(server.tailnetPort))
@@ -487,7 +487,7 @@ struct IpcServerRemoteTests {
     func shutdownAuditsConnectionClose() async throws {
         let fixture = try RemoteIpcServerFixture()
         defer { fixture.remove() }
-        let server = try fixture.makeServer(runtime: nil)
+        let server = try fixture.makeServer(runtimeDispatch: nil)
 
         await server.start()
         let peer = try RemotePeer(port: try #require(server.tailnetPort))
@@ -508,7 +508,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
         defer { runtime.shutdown() }
-        let server = try fixture.makeServer(runtime: runtime)
+        let server = try fixture.makeServer(runtimeDispatch: runtime.makeIpcDispatch())
         defer { server.stop() }
 
         await server.start()
@@ -556,7 +556,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
         defer { runtime.shutdown() }
-        let server = try fixture.makeServer(runtime: runtime)
+        let server = try fixture.makeServer(runtimeDispatch: runtime.makeIpcDispatch())
         defer { server.stop() }
 
         await server.start()
@@ -622,7 +622,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
         defer { runtime.shutdown() }
-        let server = try fixture.makeServer(runtime: runtime)
+        let server = try fixture.makeServer(runtimeDispatch: runtime.makeIpcDispatch())
         defer { server.stop() }
 
         await server.start()
@@ -669,7 +669,7 @@ struct IpcServerRemoteTests {
         let fixture = try RemoteIpcServerFixture()
         defer { fixture.remove() }
         let server = try fixture.makeServer(
-            runtime: nil,
+            runtimeDispatch: nil,
             livenessBound: try #require(IpcLivenessBound(seconds: exitCase == .silent ? 0.5 : 30))
         )
         defer { server.stop() }
@@ -706,7 +706,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
         defer { runtime.shutdown() }
-        var server: IpcServer? = try fixture.makeServer(runtime: runtime)
+        var server: IpcServer? = try fixture.makeServer(runtimeDispatch: runtime.makeIpcDispatch())
         await server?.start()
 
         let peer = try RemotePeer(socketPath: fixture.socketURL)
@@ -748,7 +748,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
         defer { runtime.shutdown() }
-        let server = try fixture.makeServer(runtime: runtime)
+        let server = try fixture.makeServer(runtimeDispatch: runtime.makeIpcDispatch())
         defer { server.stop() }
 
         await server.start()
@@ -781,7 +781,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
         defer { runtime.shutdown() }
-        let server = try fixture.makeServer(runtime: runtime)
+        let server = try fixture.makeServer(runtimeDispatch: runtime.makeIpcDispatch())
         defer { server.stop() }
 
         await server.start()
@@ -796,6 +796,129 @@ struct IpcServerRemoteTests {
             let entries = try await fixture.auditEntriesWhenConnectionCloses(count: iteration)
             #expect(entries.suffix(2).map(\.event.kind) == [.requestDropped, .connectionClosed])
         }
+    }
+
+    @Test("a dispatch in flight leaves no runtime reference on the server's executor")
+    func inFlightDispatchHoldsNoRuntimeReference() async throws {
+        // Intent: while a request's main-actor delivery is still parked, releasing the
+        //   owner's reference deallocates the runtime, so nothing on the server's executor
+        //   can be the last owner.
+        // Why it exists: the server used to read the runtime into a strong local before its
+        //   main-actor hop. A request in flight therefore made the server's own task the
+        //   last owner, and a main-actor object was destroyed on a cooperative thread.
+        // Scenario: a remote request arrives at the instant the app releases its runtime.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        var runtime: AppRuntime? = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        weak let releasedRuntime = runtime
+        let server = try fixture.makeServer(runtimeDispatch: runtime?.makeIpcDispatch())
+        defer { server.stop() }
+
+        await server.start()
+        let peer = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { peer.close() }
+        _ = try await peer.readRequest()
+
+        try peer.writeRequest(method: IpcRequestMethod.ls.rawValue, id: .number(1))
+        // Nothing below suspends, so this test keeps the main actor for the rest of its
+        // body: the delivery the server hands off cannot run, and the request stays parked
+        // at the boundary while the owner's reference goes away.
+        try waitForRemoteRequestStart(fixture)
+        // The record above is written just before the handoff. This gives the server's
+        // executor time to reach the boundary; it is meant to expire, and holding the main
+        // actor means no wait here can overshoot the handoff.
+        blockCallingThread(seconds: handoffSettleSeconds)
+        runtime?.shutdown()
+        runtime = nil
+
+        #expect(releasedRuntime == nil)
+    }
+
+    @Test("closing a peer retires the runtime state its pending request owns")
+    func peerCloseRetiresPendingRuntimeState() async throws {
+        // Intent: a peer that hangs up while a request is still pending has that request's
+        //   transport retired on the runtime, not only recorded in the server's audit log.
+        // Why it exists: the close travels from the server to the runtime, so a handle that
+        //   answers the request path but drops the close would strand every stream and
+        //   pending reply a dead socket owns, with the audit log still looking correct.
+        // Scenario: a phone closes its connection while a tab it asked for is still spawning.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(runtimeDispatch: runtime.makeIpcDispatch())
+        defer { server.stop() }
+
+        await server.start()
+        let peer = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { peer.close() }
+        _ = try await peer.readRequest()
+
+        // The new tab's session never reports its process start under these ports, so this
+        // request stays pending and keeps its transport registered on the runtime.
+        let group = try #require(runtime.model.groups.first?.id)
+        try peer.writeRequest(
+            method: IpcRequestMethod.tabNew.rawValue,
+            id: .number(1),
+            params: .object(["group": .string(group.rawValue.uuidString)])
+        )
+        let registered = try await runtime.liveSubscriptions(until: { $0 > 0 })
+
+        peer.closeWriteEnd()
+        _ = try await runtime.liveSubscriptions(until: { $0 < registered })
+        // Shutdown answers whatever pending IPC the runtime still owns. The peer therefore
+        // sees an answer for its abandoned request if -- and only if -- the close never
+        // reached the runtime.
+        runtime.shutdown()
+
+        #expect(try await peer.readByte() == 0)
+    }
+}
+
+/// How long a dispatch in flight is given to reach the main-actor boundary.
+///
+/// This is a probe that is meant to expire, not a hang guard: the test that uses it holds
+/// the main actor, so the request cannot proceed past the boundary however long this waits.
+private let handoffSettleSeconds = 0.25
+
+/// Blocks until the server records that it started a remote request.
+///
+/// Synchronous on purpose: its caller must keep the main actor while it waits, so this
+/// cannot suspend. The deadline is a hang guard -- nothing here measures server speed.
+private func waitForRemoteRequestStart(_ fixture: RemoteIpcServerFixture) throws {
+    let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
+    while ContinuousClock.now < deadline {
+        if let entries = try? fixture.auditEntries(),
+           entries.contains(where: { $0.event.kind == .requestStarted })
+        {
+            return
+        }
+        blockCallingThread(seconds: 0.001)
+    }
+    throw POSIXError(.ETIMEDOUT)
+}
+
+/// Waits without suspending, which is what a caller holding the main actor needs: a
+/// `Task.sleep` would hand the main actor to the very work the caller is holding back.
+private func blockCallingThread(seconds: Double) {
+    usleep(useconds_t(seconds * 1_000_000))
+}
+
+@MainActor
+extension AppRuntime {
+    /// Waits until this runtime's live-subscription count satisfies `condition`, reporting it.
+    ///
+    /// Server-driven runtime work lands through a main-actor hop, so a test that wants to
+    /// act after it has to wait for the runtime's own census rather than for the server.
+    /// The deadline is a hang guard: no caller measures how fast the hop happens.
+    fileprivate func liveSubscriptions(until condition: (Int) -> Bool) async throws -> Int {
+        let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
+        while ContinuousClock.now < deadline {
+            let live = schedulingLifecycle.captureOwnerCensus()[.subscription] ?? 0
+            if condition(live) { return live }
+            await Task.yield()
+        }
+        throw POSIXError(.ETIMEDOUT)
     }
 }
 
@@ -839,7 +962,7 @@ private struct RemoteIpcServerFixture {
     }
 
     func makeServer(
-        runtime: AppRuntime?,
+        runtimeDispatch: AppRuntimeIpcDispatch?,
         whoisResolver: TailnetWhoisResolver = TailnetWhoisResolver { _ in
             TailnetPeerIdentity(nodeId: "node-phone", user: "dan@example.com", machineName: "iphone")
         },
@@ -860,7 +983,7 @@ private struct RemoteIpcServerFixture {
             resolveTailnetBindAddress: { _ in
                 TailnetBindAddress(address: "127.0.0.1", port: 0, interfaceName: "lo0")
             },
-            runtime: runtime
+            runtimeDispatch: runtimeDispatch
         )
     }
 

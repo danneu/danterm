@@ -15,9 +15,9 @@ struct IpcServerOwnershipTests {
         //   loses the bind race, and quits before A later quits normally.
         let fixture = try IpcServerSocketFixture()
         defer { fixture.remove() }
-        let owner = try IpcServer(socketPath: fixture.socketURL, runtime: nil)
+        let owner = try IpcServer(socketPath: fixture.socketURL, runtimeDispatch: nil)
 
-        let contender = try? IpcServer(socketPath: fixture.socketURL, runtime: nil)
+        let contender = try? IpcServer(socketPath: fixture.socketURL, runtimeDispatch: nil)
         #expect(contender == nil)
         contender?.stop()
 

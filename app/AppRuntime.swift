@@ -247,7 +247,7 @@ class AppRuntime {
                 let server = try IpcServer(
                     socketPath: controlSocketPath(),
                     tailnetConfig: launchConfig.tailnet,
-                    runtime: self
+                    runtimeDispatch: makeIpcDispatch()
                 )
                 self.ipcServer = server
                 self.ipcServerToken = schedulingLifecycle.arm(.ipcServer) {
@@ -499,6 +499,24 @@ class AppRuntime {
 
     var ipcSocketPath: URL? {
         ipcServer?.socketPath
+    }
+
+    /// Builds the IPC server's view of this runtime: main-actor closures over a weak self.
+    ///
+    /// Handing the server this instead of `self` is what keeps the runtime's last release on
+    /// the main actor. The server owns no runtime reference to drop, so no request in flight
+    /// can make the server's own executor the one that destroys a main-actor object.
+    func makeIpcDispatch() -> AppRuntimeIpcDispatch {
+        AppRuntimeIpcDispatch(
+            serve: { [weak self] connection, reqId, audit, message in
+                guard let self else { return }
+                self.registerIpcConnection(connection, for: reqId, audit: audit)
+                self.send(message)
+            },
+            connectionClosed: { [weak self] connectionId in
+                self?.ipcConnectionClosed(connectionId)
+            }
+        )
     }
 
     func registerIpcConnection(

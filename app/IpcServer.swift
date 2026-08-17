@@ -47,6 +47,21 @@ struct IpcRequestTransport: Sendable {
     }
 }
 
+/// The runtime entry points `IpcServer` may reach, as a main-actor-bound handle.
+///
+/// The server holds this instead of the runtime itself. Each closure captures the runtime
+/// weakly and strengthens it only inside its own main-actor body, so a strong runtime
+/// reference never exists on the server's executor and the server can never perform the
+/// runtime's last release -- which would destroy main-actor state on a cooperative thread.
+/// The server has no object to capture, so that holds for call sites added later too.
+struct AppRuntimeIpcDispatch: Sendable {
+    /// Registers this request's transport and sends its message in one main-actor body, so
+    /// nothing can run between them and get ahead of a connection's own ordering.
+    let serve: @MainActor @Sendable (IpcConnection, UUID, IpcRequestAudit?, Msg) -> Void
+    /// Retires the runtime state owned by a connection that has gone.
+    let connectionClosed: @MainActor @Sendable (UUID) -> Void
+}
+
 /// Keeps remote-cap accounting synchronous at accept time and independent of actor scheduling.
 private final class RemoteConnectionSlots: Sendable {
     private let limit: Int
@@ -104,7 +119,7 @@ actor IpcServer {
     nonisolated private let tailnetListener: TailnetListener?
     nonisolated let tailnetPort: UInt16?
 
-    private weak var runtime: AppRuntime?
+    private let runtimeDispatch: AppRuntimeIpcDispatch?
     private let appVersion: String
     private let livenessBound: IpcLivenessBound
     private let auditWriter: IpcAuditLogWriter
@@ -127,7 +142,7 @@ actor IpcServer {
         resolveTailnetBindAddress: @Sendable (String) throws -> TailnetBindAddress = {
             try TailnetBindAddress.resolve($0)
         },
-        runtime: AppRuntime?
+        runtimeDispatch: AppRuntimeIpcDispatch?
     ) throws {
         self.socketPath = socketPath
         self.listener = try ControlSocketListener.open(at: socketPath)
@@ -137,7 +152,7 @@ actor IpcServer {
         self.whoisResolver = whoisResolver
         self.admittedNodeIds = Set(tailnetConfig?.admittedNodeIds ?? [])
         self.remoteSlots = RemoteConnectionSlots(limit: remoteConnectionLimit)
-        self.runtime = runtime
+        self.runtimeDispatch = runtimeDispatch
 
         var openedTailnetListener: TailnetListener?
         if let tailnetConfig, tailnetConfig.admittedNodeIds.isEmpty == false {
@@ -379,7 +394,9 @@ actor IpcServer {
             reason: reason,
             servedRequests: state.servedRequests
         ))
-        await runtime?.ipcConnectionClosed(connection.id)
+        if let runtimeDispatch {
+            await runtimeDispatch.connectionClosed(connection.id)
+        }
     }
 
     private func dispatch(_ request: JsonRpcRequest, from connection: IpcConnection) async {
@@ -472,10 +489,8 @@ actor IpcServer {
         // "requests this connection was actually served" rather than "lines that arrived".
         // A connection a starved instance never dispatched for still reports zero.
         connections[connection.id]?.servedRequests += 1
-        let runtime = self.runtime
-        await MainActor.run {
-            runtime?.registerIpcConnection(connection, for: reqId, audit: audit)
-            runtime?.send(message)
+        if let runtimeDispatch {
+            await runtimeDispatch.serve(connection, reqId, audit, message)
         }
     }
 }
