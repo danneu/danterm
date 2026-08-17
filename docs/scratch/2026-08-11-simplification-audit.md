@@ -189,7 +189,7 @@ in itself.
 | b0952f47 | [S33](#s33) | 15    | 3   | 5   | sidebar        | medium | Give the sidebar reconcile pipeline one implementation the UI tests drive                                               |
 | cfcbb40f | [S34](#s34) | 15    | 3   | 5   | terminal-core  | medium | Give anchored ranges one registry instead of six hand-written enumerations                                            |
 |        | [S35](#s35) | 15    | 3   | 5   | terminal-views | medium | Stop re-implementing grid and cell geometry in the UI-test shim                                                         |
-| 974c9563 c6da2c6d | [S36](#s36) | 15    | 3   | 5   | tests          | small  | Retire the whole-AppModel golden snapshot; it ratchets on behavior-preserving refactors                                 |
+| d18ac7dc 25835bc9 | [S36](#s36) | 15    | 3   | 5   | tests          | small  | Retire the whole-AppModel golden snapshot; it ratchets on behavior-preserving refactors                                 |
 |        | [S37](#s37) | 15    | 3   | 5   | tests          | small  | Move the nine frozen research probes out of the default TerminalCore test target                                        |
 | 6b2e27f0 | [S38](#s38) | 12    | 3   | 4   | app-runtime    | medium | Key pane-tape follow state once, by subscription, instead of four sidecar maps                                  |
 |        | [S39](#s39) | 12    | 3   | 4   | build          | small  | Drop .build-gate by deleting the unenforced -warn-long-function-bodies flag                                             |
