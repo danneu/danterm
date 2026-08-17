@@ -452,13 +452,14 @@ class AppRuntime {
         return popover
     }
 
-    /// Re-reads every live session's backing scale after the window changes screens.
-    /// Deferred one main-loop turn because AppKit can skip the automatic
-    /// backing-properties callback on a screen change.
+    /// Re-checks every live session's presentation inputs after the window changes
+    /// screens -- the backing scale and the window's color space alike. Deferred one
+    /// main-loop turn because AppKit can skip the automatic backing-properties
+    /// callback on a screen change.
     func refreshSessionsForScreenChange() {
         guard let callback = captureDeferredCallback({ runtime in
             for host in runtime.paneHosts.values {
-                host.session.refreshBackingProperties()
+                host.session.refreshPresentation()
             }
         }) else { return }
         DispatchQueue.main.async {

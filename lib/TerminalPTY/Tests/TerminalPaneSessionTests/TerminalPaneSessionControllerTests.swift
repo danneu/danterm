@@ -1354,6 +1354,40 @@ struct TerminalPaneSessionControllerTests {
         #expect((await host.resourceSnapshot()).isReleased)
     }
 
+    @Test("a quiet resize republishes a complete frame at the new grid", .timeLimit(.minutes(1)))
+    func quietResizeRepublishesCompleteFrameAtNewGrid() async throws {
+        // Intent: a visible session whose grid changes republishes one complete
+        //   frame at the new dimensions, with nothing printing.
+        // Why it exists: the pane view deliberately declines to render its current
+        //   plan under newly computed dimensions -- that plan was built for the old
+        //   shape -- so the republish is the only thing that puts the new shape on
+        //   screen. Every other resize test here prints output alongside the resize,
+        //   which leaves the quiet case, the one the view depends on, unproven.
+        // Scenario: spec-first -- a user drags a divider on a pane sitting at an
+        //   idle shell.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        let frames = AsyncStream<TerminalPaneFrame>.makeStream()
+        var iterator = frames.stream.makeAsyncIterator()
+        controller.onFrame = { frames.continuation.yield($0) }
+
+        controller.setGridDimensions(.init(columns: 40, rows: 12))
+
+        var resized: TerminalPaneFrame?
+        while resized == nil, let frame = await iterator.next() {
+            if frame.plan.columns == 40 { resized = frame }
+        }
+        let frame = try #require(resized)
+        #expect(frame.plan.rows == 12)
+        #expect(frame.damage == .full)
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("teardown suppresses exit callbacks and releases controller and host", .timeLimit(.minutes(1)))
     func teardownSuppressesCallbacksAndReleasesOwners() async throws {
         // Intent: repeated pane teardown suppresses child-ended callbacks and

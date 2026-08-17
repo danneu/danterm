@@ -50,7 +50,7 @@ private final class HeadlessPaneHostSession: NSView, TerminalSession {
     func setFocused(_ focused: Bool) {}
     func setVisible(_ visible: Bool) {}
     func setRenderingAvailable(_ available: Bool) {}
-    func refreshBackingProperties() {}
+    func refreshPresentation() {}
     func applyTheme(_ themeName: String) {}
     func clearTheme() {}
     func setFontSize(_ size: Double) {}

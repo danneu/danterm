@@ -152,7 +152,10 @@ protocol TerminalSession: AnyObject {
     func setFocused(_ focused: Bool)
     func setVisible(_ visible: Bool)
     func setRenderingAvailable(_ available: Bool)
-    func refreshBackingProperties()
+    /// Re-checks every input that decides the session's pixels -- backing scale, cell
+    /// geometry, and the window's color space -- and re-renders if one moved. The
+    /// runtime calls it on a screen change, where AppKit can skip its own callback.
+    func refreshPresentation()
     func applyTheme(_ themeName: String)
     func clearTheme()
     func setFontSize(_ size: Double)

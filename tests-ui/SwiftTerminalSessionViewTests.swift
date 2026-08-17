@@ -131,7 +131,7 @@ func swiftTerminalSessionViewTests() {
         //   leaves the pane with valid metrics and grid dimensions, both at creation and
         //   on a live change away from a working family.
         // Why it exists: an unusable configured face must fall back to system monospace;
-        //   synchronizeGeometry used to bail outright on nil metrics, leaving a new pane
+        //   synchronizePresentation used to bail outright on nil metrics, leaving a new pane
         //   blank and freezing an existing pane on its old grid until restart.
         // Scenario: spec-first -- an installed but degenerate face named in config.
         let created = TerminalPaneSessionController()
@@ -671,6 +671,164 @@ func swiftTerminalSessionViewTests() {
                 == [Set(0..<RenderFramePlan.rowsForTesting)],
             "the color-space change did not render a complete frame: "
                 + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+        )
+    }
+
+    uiTest("the screen-change refresh sees a window color-space move") {
+        // Intent: the runtime's screen-change entry point applies the same
+        //   presentation-input test the AppKit callback does, so a window that
+        //   reaches a display with a different profile at the same backing scale
+        //   rebuilds its buffers and renders again.
+        // Why it exists: `AppRuntime.refreshSessionsForScreenChange` exists only
+        //   because AppKit can skip `viewDidChangeBackingProperties` on a screen
+        //   change, and it reached the view through a metrics-only check. An idle
+        //   pane therefore kept the previous profile's colors until its next byte
+        //   of output -- and a pane with no output never caught up at all.
+        // Scenario: a user drags a window holding a quiet pane onto a display with
+        //   a different color profile at the same backing scale.
+        TerminalFrameSwapchain.resetForTesting()
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        guard let window = pane.window else {
+            throw UITestFailure(message: "the mounted pane has no window")
+        }
+        let before = window.colorSpace
+        TerminalFrameSwapchain.resetForTesting()
+
+        window.colorSpace = before == NSColorSpace.displayP3
+            ? NSColorSpace.sRGB
+            : NSColorSpace.displayP3
+        pane.refreshPresentation()
+
+        try uiExpect(
+            TerminalFrameSwapchain.creationCountForTesting == 1,
+            "the screen-change refresh did not replace the swapchain: "
+                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+        )
+        try uiExpect(
+            TerminalFrameSwapchain.renderedRowSetsForTesting
+                == [Set(0..<RenderFramePlan.rowsForTesting)],
+            "the screen-change refresh did not render a complete frame: "
+                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+        )
+    }
+
+    uiTest("a resize that changes the grid leaves the render to the republish") {
+        // Intent: a resize submits the new grid and stops there. The view does not
+        //   render the plan it is holding, because that plan was built for the old
+        //   shape; the engine's republish is what puts the new shape on screen.
+        // Why it exists: the presentation-input test reads columns and rows off the
+        //   live swapchain rather than off the dimensions just computed. Reading
+        //   them off the new dimensions would render a stale plan and build buffers
+        //   the next publish immediately throws away.
+        // Scenario: a user drags a divider, narrowing a pane by whole cells.
+        TerminalFrameSwapchain.resetForTesting()
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        let gridsAtMount = controller.gridDimensions.count
+        TerminalFrameSwapchain.resetForTesting()
+        pane.resetSurfaceCountersForTesting()
+
+        pane.setFrameSize(NSSize(width: 40, height: 160))
+
+        try uiExpect(
+            controller.gridDimensions.count == gridsAtMount + 1,
+            "the resize did not submit one new grid: \(controller.gridDimensions)"
+        )
+        try uiExpect(
+            TerminalFrameSwapchain.creationCountForTesting == 0,
+            "the resize built a swapchain before the republish: "
+                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+        )
+        try uiExpect(
+            pane.renderCountForTesting == 0,
+            "the resize rendered the stale plan: \(pane.renderCountForTesting)"
+        )
+
+        controller.currentPlan = RenderFramePlan(
+            defaultBackground: RenderTheme.dark.defaultBackground,
+            columns: 5
+        )
+        controller.emitFrameForTest(damage: .full)
+
+        try uiExpect(
+            TerminalFrameSwapchain.creationCountForTesting == 1,
+            "the republish did not replace the swapchain: "
+                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+        )
+        try uiExpect(
+            pane.renderCountForTesting == 1,
+            "the republish did not render once: \(pane.renderCountForTesting)"
+        )
+    }
+
+    uiTest("a pane resized to a zero dimension submits nothing and renders nothing") {
+        // Intent: bounds with no area leave the grid, the swapchain, and the frame
+        //   on screen exactly as they were.
+        // Why it exists: scale and pixel size are one invariant
+        //   (docs/design/2026-03-05-display-scaling.md), so a zero-area surface has
+        //   no valid geometry to derive. A zero dimension reaching the child is an
+        //   invalid winsize, and a zero-sized swapchain is an allocation that fails.
+        // Scenario: a user drags a divider fully shut, or a pane's host collapses it
+        //   to a zero-height strip during a layout pass.
+        TerminalFrameSwapchain.resetForTesting()
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        let gridsAtMount = controller.gridDimensions.count
+        TerminalFrameSwapchain.resetForTesting()
+        pane.resetSurfaceCountersForTesting()
+
+        pane.setFrameSize(NSSize(width: 80, height: 0))
+
+        try uiExpect(
+            controller.gridDimensions.count == gridsAtMount,
+            "a zero-height pane submitted a grid: \(controller.gridDimensions)"
+        )
+        try uiExpect(
+            TerminalFrameSwapchain.creationCountForTesting == 0,
+            "a zero-height pane built a swapchain: "
+                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+        )
+        try uiExpect(
+            pane.renderCountForTesting == 0,
+            "a zero-height pane rendered: \(pane.renderCountForTesting)"
+        )
+    }
+
+    uiTest("a metrics change publishes the new cell geometry to the state observer") {
+        // Intent: new cell metrics reach the state observer, not just the pane's own
+        //   live `state` getter.
+        // Why it exists: `ScrollableTerminalView` is that observer and re-reads state
+        //   on each callback, so a dropped emit leaves the scrollbar on its old
+        //   document geometry until some unrelated event forces a sync. The existing
+        //   font-size coverage reads `pane.state.cellHeight`, which is a live getter
+        //   and stays correct even with the emit gone.
+        // Scenario: a user changes the terminal font size in Preferences.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+        let observer = SwiftPaneStateObserver()
+        pane.stateObserver = observer
+
+        pane.setFontSize(26)
+
+        try uiExpect(
+            observer.states.last?.cellHeight == 32,
+            "the metrics change published no new cell height: "
+                + "\(String(describing: observer.states.last?.cellHeight))"
         )
     }
 

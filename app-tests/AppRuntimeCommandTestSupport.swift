@@ -115,7 +115,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     func setRenderingAvailable(_ available: Bool) {
         renderingAvailableValues.append(available)
     }
-    func refreshBackingProperties() {}
+    func refreshPresentation() {}
     func applyTheme(_ themeName: String) {}
     func clearTheme() {}
     func setFontSize(_ size: Double) {}

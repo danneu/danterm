@@ -483,21 +483,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         present(plan: plan, damage: .full, metrics: metrics)
     }
 
-    /// Re-renders when a presentation input has moved under the live swapchain.
-    /// Backing scale and window color space both change without any publish, and
-    /// buffers rendered under the old values cannot be brought current by damage.
-    private func rerenderIfSurfaceInputsChanged() {
-        guard let swapchainInputs, let metrics = currentMetrics else { return }
-        let live = SurfaceInputs(
-            columns: swapchainInputs.columns,
-            rows: swapchainInputs.rows,
-            metrics: metrics,
-            colorSpace: window?.colorSpace
-        )
-        guard live != swapchainInputs else { return }
-        rerenderCurrentPlan()
-    }
-
     /// One presentation attempt: render if the swapchain can acquire a buffer,
     /// show it, and arm the retry if the plan is still waiting. Publish and
     /// retry share it so the two cannot drift apart.
@@ -630,7 +615,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         // neither discard them nor leave a clipped-away row showing bare layer
         // background. A grid resize republishes through the engine, and a
         // sub-cell resize only moves where the letterbox strip falls.
-        synchronizeGeometry()
+        synchronizePresentation()
     }
 
     override func layout() {
@@ -645,17 +630,14 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        synchronizeGeometry()
-        rerenderIfSurfaceInputsChanged()
+        synchronizePresentation()
     }
 
     // Backing scale and window color space both arrive here, and a color-space
-    // move at unchanged scale changes no metric -- so the surface inputs are
-    // checked directly rather than inferred from a geometry change.
+    // move at unchanged scale changes no metric at all.
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        synchronizeGeometry()
-        rerenderIfSurfaceInputsChanged()
+        synchronizePresentation()
     }
 
     override func updateTrackingAreas() {
@@ -1001,8 +983,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller.setRenderingAvailable(available)
     }
 
-    func refreshBackingProperties() {
-        synchronizeGeometry()
+    func refreshPresentation() {
+        synchronizePresentation()
     }
 
     func applyTheme(_ themeName: String) {
@@ -1016,13 +998,13 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     func setFontSize(_ size: Double) {
         guard size.isFinite, size > 0, CGFloat(size) != fontSize else { return }
         fontSize = CGFloat(size)
-        synchronizeGeometry()
+        synchronizePresentation()
     }
 
     func setFontFamily(_ family: String?) {
         guard family != fontFamily else { return }
         fontFamily = family
-        synchronizeGeometry()
+        synchronizePresentation()
     }
 
     /// Installing the handler is the whole gate: with it absent the engine never extracts
@@ -1283,7 +1265,18 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         }
     }
 
-    private func synchronizeGeometry() {
+    /// The view's only presentation-input detector, and the only place that decides
+    /// whether the buffers on screen can still be trusted (research/33 T25 I3).
+    /// Every entry point that can move an input arrives here -- resize, window
+    /// mount, backing properties, font size, font family, and the runtime's
+    /// screen-change refresh -- so none of them can re-render on a narrower test
+    /// than the whole `SurfaceInputs` tuple.
+    ///
+    /// The bail below is the display-scaling invariant, not a defensive check
+    /// (docs/design/2026-03-05-display-scaling.md): a zero-area surface, an absent
+    /// window, unusable metrics, or refused grid dimensions leave no geometry to
+    /// derive, so the pane keeps the frame and grid it already has.
+    private func synchronizePresentation() {
         guard isTornDown == false,
               bounds.width > 0, bounds.height > 0,
               let scale = window?.backingScaleFactor,
@@ -1306,15 +1299,41 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         if dimensionsChanged {
             controller.setGridDimensions(dimensions)
         }
+        // Cell height is the only state-channel field this method moves -- the
+        // viewport projection arrives on the controller's own state callback. An
+        // unconditional emit would read the viewport once per frame of a divider
+        // drag, since `setFrameSize` fires throughout one, for no observable gain.
         if metricsChanged {
             emitStateIfNeeded()
-            // New cell geometry means new pixel geometry, and no publish need
-            // follow: a scale or font change leaves the terminal's content
-            // untouched, so the view re-renders the current plan itself. The
-            // layer's contents scale rides the surface it shows, set in
-            // `attach`, so nothing is set here.
-            rerenderCurrentPlan()
         }
+
+        // No publish need follow a moved input: a scale, cell-geometry, or
+        // color-space change leaves the terminal's content untouched, so the view
+        // re-renders the current plan itself. The layer's contents scale rides the
+        // surface it shows, set in `attach`, so nothing is set here.
+        //
+        // Columns and rows come from the live swapchain, not from `dimensions`, and
+        // that is deliberate rather than an omission: a grid resize republishes
+        // through `controller.setGridDimensions`, so presenting the *old* plan under
+        // the *new* shape would render a stale frame and build buffers the next
+        // publish immediately replaces. They live in `SurfaceInputs` to key
+        // swapchain identity, not to drive this test.
+        //
+        // With no live swapchain the current plan has never reached the screen, so
+        // it always renders. A swapchain that keeps failing to allocate therefore
+        // retries on every entry, which is the right response to that state.
+        guard let swapchainInputs else {
+            rerenderCurrentPlan()
+            return
+        }
+        let live = SurfaceInputs(
+            columns: swapchainInputs.columns,
+            rows: swapchainInputs.rows,
+            metrics: metrics,
+            colorSpace: window?.colorSpace
+        )
+        guard live != swapchainInputs else { return }
+        rerenderCurrentPlan()
     }
 
     /// Metrics for the configured family, falling back to the system monospace font
@@ -1322,7 +1341,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     ///
     /// Passing the availability probe does not guarantee usable grid geometry -- a
     /// face can be installed and still lack the nominal `M` glyph the cell box is
-    /// derived from. Without this retry `synchronizeGeometry` would bail, leaving a
+    /// derived from. Without this retry `synchronizePresentation` would bail, leaving a
     /// new pane with no geometry and an existing pane frozen on its old grid.
     private func resolvedMetrics(displayScale: CGFloat) -> TerminalRenderMetrics? {
         if let fontFamily,
