@@ -331,10 +331,12 @@ change; `integrations/danterm/SKILL.md` is untouched.
 
 ## Follow Up
 
-- PO7 is unrun: the live smoke is manual and needs hardware. Airplane mode on and
-  off with the app foregrounded (heals with no tap, resumes exactly via the
-  t9-checkpoint instrument), and a sleeping Mac (bounded visible retries, then a
-  legible rest).
+- PO7's airplane-mode half ran on hardware and passed; it is recorded as F10 in
+  `docs/research/35-ios-remote-client/findings.md`, with the exactness measured
+  on scrollback depth and viewport digest. The unreachable-Mac half is still
+  unrun. F10 also records why the cheap way to stage it is wrong: `SIGSTOP` on
+  the Mac leaves the kernel completing TCP handshakes, so it reproduces F8's
+  accepted-but-never-served deafness rather than a Mac that never answers.
 - The phone has no disconnect control, so `MobileReconnectEvent.userCancelled`
   has no producer. Adding a stop affordance to `ConnectionHeaderView` would give
   the user a way to end an episode without backgrounding the app.

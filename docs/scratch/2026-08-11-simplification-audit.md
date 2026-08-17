@@ -183,7 +183,7 @@ in itself.
 |        | [S27](#s27) | 15    | 3   | 5   | ipc-cli        | small  | Make --socket work for `doctor` instead of intercepting local commands before the flag parser                           |
 |        | [S28](#s28) | 15    | 3   | 5   | ipc-cli        | small  | Replace the CLI's two hand-rolled per-byte line readers with the shared framer                                          |
 | part 2fc9f971 | [S29](#s29) | 15    | 3   | 5   | pty            | medium | Record transitions once: fold TerminalPTYAppliedTransition into the flight recorder            |
-|        | [S30](#s30) | 15    | 3   | 5   | pty            | small  | Replace the fence operation/output enum pair with typed fence methods                                                   |
+| 271fddbd | [S30](#s30) | 15    | 3   | 5   | pty            | small  | Replace the fence operation/output enum pair with typed fence methods                                                   |
 |        | [S31](#s31) | 15    | 3   | 5   | scrollback     | medium | Give the record side tables one owner that maintains its own byte charge                                                |
 |        | [S32](#s32) | 15    | 3   | 5   | scrollback     | small  | Collapse the seven copy-pasted task-local counters and move them out of the store file                                  |
 | b0952f47 | [S33](#s33) | 15    | 3   | 5   | sidebar        | medium | Give the sidebar reconcile pipeline one implementation the UI tests drive                                               |

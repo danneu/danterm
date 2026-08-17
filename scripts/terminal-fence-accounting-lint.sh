@@ -47,7 +47,7 @@ call_count="$(printf '%s\n' "$call_matches" | sed '/^$/d' | wc -l | tr -d ' ')"
     || fail "expected one controller production-fence call, found $call_count"
 
 accounted_start="$(
-    rg -n '^[[:space:]]*private static func performAccountedFence\(' "$CONTROLLER" \
+    rg -n '^[[:space:]]*private static func performAccountedFence[<(]' "$CONTROLLER" \
         | cut -d: -f1
 )"
 [[ -n "$accounted_start" ]] || fail "missing controller accounted-fence choke point"

@@ -470,16 +470,13 @@ public final class TerminalPaneSessionController {
         }
     ) {
         var initialMetrics = TerminalPaneFenceMetrics()
-        let initialFence = Self.performAccountedFence(
+        let initialFrameState = Self.performAccountedFence(
             host: host,
             kind: .initialization,
             operation: .frameState,
             clock: fenceClock,
             metrics: &initialMetrics
-        )
-        guard case .frameState(let initialFrameState) = initialFence.output else {
-            preconditionFailure("frame-state fence returned the wrong payload")
-        }
+        ).payload
 
         self.host = host
         self.fenceClock = fenceClock
@@ -501,7 +498,7 @@ public final class TerminalPaneSessionController {
         if isVisible { planIfNeeded(cachedTerminal) }
 
         let deliveryBoundary = deliveryBoundary
-        _ = performAccountedFence(
+        performAccountedFence(
             kind: .initialization,
             operation: .installUpdateHandler { signal in
                 deliveryBoundary.scheduleUpdate(signal) { [weak self] merged in
@@ -584,14 +581,10 @@ public final class TerminalPaneSessionController {
         guard isTornDown == false else { return }
         // Drained synchronously: damage handoff and `consume` stay in one
         // main-actor step, so a checkpoint fence cannot strand moved rows.
-        let fence = performAccountedFence(kind: .delivery, operation: .consumptionState)
-        guard case .consumptionState(
-            let frameState,
-            let result,
-            let transitions
-        ) = fence else {
-            preconditionFailure("consumption fence returned the wrong payload")
-        }
+        let (frameState, result, transitions) = performAccountedFence(
+            kind: .delivery,
+            operation: .consumptionState
+        )
         consume(
             frameState: frameState,
             result: result,
@@ -778,11 +771,7 @@ public final class TerminalPaneSessionController {
         isRenderingAvailable = available
         guard available else { return }
         pendingDamage.formUnion(.full)
-        let fence = performAccountedFence(kind: .checkpoint, operation: .frameState)
-        guard case .frameState(let frameState) = fence else {
-            preconditionFailure("frame-state fence returned the wrong payload")
-        }
-        consume(frameState: frameState, result: nil, transitions: nil)
+        applyCheckpointFrame()
     }
 
     /// Applies one complete theme, deferring its full repaint through existing visibility gates.
@@ -798,10 +787,14 @@ public final class TerminalPaneSessionController {
     /// Fences host work and applies the newest state before a synchronous checkpoint read.
     public func synchronizeState() {
         guard isTornDown == false else { return }
-        let fence = performAccountedFence(kind: .checkpoint, operation: .frameState)
-        guard case .frameState(let frameState) = fence else {
-            preconditionFailure("frame-state fence returned the wrong payload")
-        }
+        applyCheckpointFrame()
+    }
+
+    /// The one checkpoint read: fence the host and apply the frame it hands back, in one
+    /// synchronous main-actor step. Callers keep their own torn-down guard, their own
+    /// full-damage prefix, and their own tail; this is only the shape they share.
+    private func applyCheckpointFrame() {
+        let frameState = performAccountedFence(kind: .checkpoint, operation: .frameState)
         consume(frameState: frameState, result: nil, transitions: nil)
     }
 
@@ -823,11 +816,10 @@ public final class TerminalPaneSessionController {
         guard isTornDown == false else { return false }
         cancelDeferredFenceIfArmed()
         deliveryBoundary.stop()
-        let fence = performAccountedFence(kind: .teardown, operation: .beginCloseAndSnapshot)
-        guard case .closeSnapshot(let terminal) = fence else {
-            preconditionFailure("close fence returned the wrong payload")
-        }
-        cachedTerminal = terminal
+        cachedTerminal = performAccountedFence(
+            kind: .teardown,
+            operation: .beginCloseAndSnapshot
+        )
         return true
     }
 
@@ -878,11 +870,7 @@ public final class TerminalPaneSessionController {
     /// Fences pending pointer work, refreshes cached state, and returns finalized selection text.
     public func readSelectedTextSynchronizing() -> String? {
         guard isTornDown == false else { return nil }
-        let fence = performAccountedFence(kind: .checkpoint, operation: .frameState)
-        guard case .frameState(let frameState) = fence else {
-            preconditionFailure("frame-state fence returned the wrong payload")
-        }
-        consume(frameState: frameState, result: nil, transitions: nil)
+        applyCheckpointFrame()
         return cachedTerminal.selectedText
     }
 
@@ -965,20 +953,6 @@ public final class TerminalPaneSessionController {
         host.fencedFlightRecordingCapture()
     }
 
-    /// Fences exact pane state with the recorder position that continues after it.
-    public func flightRecordingStateSynchronization()
-        -> TerminalFlightRecordingStateSynchronization
-    {
-        let fence = performAccountedFence(kind: .checkpoint, operation: .stateSynchronization)
-        guard case .stateSynchronization(let terminal, let cursor) = fence else {
-            preconditionFailure("state synchronization fence returned the wrong payload")
-        }
-        return TerminalFlightRecordingStateSynchronization(
-            state: terminal.stateSynchronization,
-            cursor: cursor
-        )
-    }
-
     /// Fences every value needed to choose raw events or exact reconstructible state.
     public func flightRecordingStreamFence(
         from cursor: TerminalFlightRecordingCursor
@@ -1034,10 +1008,10 @@ public final class TerminalPaneSessionController {
 
     /// Test harness seam that fences live evidence without changing completion eligibility.
     package func diagnosticCapture(test: String) -> TerminalPaneDiagnosticCapture {
-        let fence = performAccountedFence(kind: .diagnostic, operation: .diagnosticState)
-        guard case .diagnosticState(let frameState, let transitions) = fence else {
-            preconditionFailure("diagnostic fence returned the wrong payload")
-        }
+        let (frameState, transitions) = performAccountedFence(
+            kind: .diagnostic,
+            operation: .diagnosticState
+        )
         cachedTerminal = frameState.terminal
         // The fence drains the host's damage, so this is the only route by which the
         // terminal can advance without `consume` recording which rows moved. Folding it
@@ -1099,10 +1073,10 @@ public final class TerminalPaneSessionController {
         onSearchStatus = nil
     }
 
-    private func performAccountedFence(
+    private func performAccountedFence<Payload: Sendable>(
         kind: TerminalPaneFenceKind,
-        operation: TerminalPTYProductionFenceOperation
-    ) -> TerminalPTYProductionFenceOutput {
+        operation: TerminalPTYProductionFenceOperation<Payload>
+    ) -> Payload {
         let measured = Self.performAccountedFence(
             host: host,
             kind: kind,
@@ -1113,16 +1087,16 @@ public final class TerminalPaneSessionController {
         if kind == .delivery {
             unflushedDeliveryFenceWaitNanoseconds += measured.waitNanoseconds
         }
-        return measured.output
+        return measured.payload
     }
 
-    private static func performAccountedFence(
+    private static func performAccountedFence<Payload: Sendable>(
         host: TerminalPTYHost,
         kind: TerminalPaneFenceKind,
-        operation: TerminalPTYProductionFenceOperation,
+        operation: TerminalPTYProductionFenceOperation<Payload>,
         clock: () -> UInt64,
         metrics: inout TerminalPaneFenceMetrics
-    ) -> (output: TerminalPTYProductionFenceOutput, waitNanoseconds: UInt64) {
+    ) -> (payload: Payload, waitNanoseconds: UInt64) {
         let started = clock()
         let result = host.performProductionFence(operation)
         let waitNanoseconds = clock() - started
@@ -1131,7 +1105,7 @@ public final class TerminalPaneSessionController {
             waitNanoseconds: waitNanoseconds,
             hostEntryCount: result.entryCount
         )
-        return (result.output, waitNanoseconds)
+        return (result.payload, waitNanoseconds)
     }
 
     private func consume(
