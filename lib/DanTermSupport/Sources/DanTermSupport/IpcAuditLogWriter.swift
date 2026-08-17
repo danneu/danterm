@@ -26,6 +26,8 @@ struct IpcAuditEvent: Codable, Equatable, Sendable {
     let request: IpcAuditRequestDescriptor?
     let rawMethod: String?
     let outcome: String?
+    /// How many requests a closing connection was served. Absent on every other kind.
+    let servedRequests: Int?
     let reason: String?
 
     /// Records a listener failure without pretending that a connection existed.
@@ -61,17 +63,25 @@ struct IpcAuditEvent: Codable, Equatable, Sendable {
         )
     }
 
-    /// Records the final lifecycle edge for a serviced connection.
+    /// Records the final lifecycle edge for a serviced connection, why it ended, and how
+    /// many requests it was served.
+    ///
+    /// The count includes heartbeats, which earn no record of their own, so a connection
+    /// that was admitted and then never read stays distinguishable from one that talked.
     static func connectionClosed(
         transport: String,
         peerAddress: String,
-        caller: IpcCallerIdentity
+        caller: IpcCallerIdentity,
+        reason: IpcConnectionCloseReason,
+        servedRequests: Int
     ) -> IpcAuditEvent {
         IpcAuditEvent(
             kind: .connectionClosed,
             transport: transport,
             peerAddress: peerAddress,
-            caller: IpcAuditCaller(caller)
+            caller: IpcAuditCaller(caller),
+            servedRequests: servedRequests,
+            reason: reason.rawValue
         )
     }
 
@@ -145,6 +155,7 @@ struct IpcAuditEvent: Codable, Equatable, Sendable {
         request: IpcAuditRequestDescriptor? = nil,
         rawMethod: String? = nil,
         outcome: String? = nil,
+        servedRequests: Int? = nil,
         reason: String? = nil
     ) {
         self.kind = kind
@@ -154,6 +165,7 @@ struct IpcAuditEvent: Codable, Equatable, Sendable {
         self.request = request
         self.rawMethod = rawMethod
         self.outcome = outcome
+        self.servedRequests = servedRequests
         self.reason = reason
     }
 }

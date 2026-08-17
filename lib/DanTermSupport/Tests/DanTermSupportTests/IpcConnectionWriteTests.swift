@@ -69,7 +69,7 @@ struct IpcConnectionWriteTests {
                     )
                 }
             },
-            onClose: { connection in closed.record(connection.id) }
+            onClose: { connection, _ in closed.record(connection.id) }
         )
 
         let hello = try JSONDecoder().decode(
@@ -114,7 +114,7 @@ struct IpcConnectionWriteTests {
         let closed = ConnectionCloseProbe()
         connection.startReading(
             onRequest: { _, _ in },
-            onClose: { connection in closed.record(connection.id) }
+            onClose: { connection, _ in closed.record(connection.id) }
         )
 
         Darwin.close(descriptors.peer)
@@ -301,7 +301,7 @@ struct IpcConnectionWriteTests {
         connection.startReading(
             onRequest: { _, _ in },
             onMalformedRequest: { method, _ in malformed.record(method) },
-            onClose: { _ in }
+            onClose: { _, _ in }
         )
 
         let line = Data((#"{"jsonrpc":2,"id":1,"method":"pane.read","params":{}}"# + "\n").utf8)

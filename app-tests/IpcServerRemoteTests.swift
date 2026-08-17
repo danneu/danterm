@@ -160,6 +160,121 @@ struct IpcServerRemoteTests {
         #expect(kinds.contains(.requestCompleted) == false)
     }
 
+    @Test("a silent remote peer is reclaimed at the bound and gives its slot back")
+    func silentRemotePeerReleasesItsSlot() async throws {
+        // Intent: a remote connection that stops sending is closed within the bound, the
+        //   close names the liveness reason, and the freed slot admits the next peer.
+        // Why it exists: measured on hardware, a phone in airplane mode holds the socket
+        //   ESTABLISHED with no audit event and no slot returned. A phone that never
+        //   comes back -- flat battery, out of range overnight -- leaked that slot for
+        //   good, against a cap the app cannot raise its way out of.
+        // Scenario: the connection cap is one, and its holder goes quiet forever.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let server = try fixture.makeServer(
+            runtime: nil,
+            remoteConnectionLimit: 1,
+            livenessBound: try #require(IpcLivenessBound(seconds: 0.5))
+        )
+        defer { server.stop() }
+
+        await server.start()
+        let port = try #require(server.tailnetPort)
+        let silent = try RemotePeer(port: port)
+        defer { silent.close() }
+        #expect(try await silent.readRequest().method == Methods.hello)
+
+        let excess = try RemotePeer(port: port)
+        defer { excess.close() }
+        #expect(try await excess.readRequest() == IpcConnectionRejectionReason.connectionLimit.notification)
+
+        let entries = try await fixture.auditEntriesWhenConnectionCloses()
+        let closed = try #require(entries.last { $0.event.kind == .connectionClosed })
+        #expect(closed.event.reason == "peer-silent")
+        #expect(closed.event.servedRequests == 0)
+
+        let replacement = try await fixture.connectWhenSlotReleases(port: port)
+        replacement.close()
+    }
+
+    @Test("a local connection idles past the remote bound and is still served")
+    func localConnectionIsExemptFromTheBound() async throws {
+        // Intent: the silence bound governs remote connections only.
+        // Why it exists: a local caller cannot die without its socket closing, and a CLI
+        //   pane follow legitimately waits hours for the next byte of output. Reclaiming
+        //   it would break a working feature to solve a problem it does not have.
+        // Scenario: an agent follows a quiet pane over the local control socket.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(
+            runtime: runtime,
+            livenessBound: try #require(IpcLivenessBound(seconds: 0.4))
+        )
+        defer { server.stop() }
+
+        await server.start()
+        let local = try RemotePeer(socketPath: fixture.socketURL)
+        defer { local.close() }
+        #expect(try await local.readRequest().method == Methods.hello)
+
+        try await Task.sleep(for: .seconds(1.2))
+        try local.writeRequest(method: IpcRequestMethod.ls.rawValue, id: .number(3))
+        let response = try await local.readResponse()
+        #expect(response.id == .number(3))
+        #expect(response.error == nil)
+    }
+
+    @Test("close records tell a served connection from one that only pinged or never talked")
+    func closeAccountingSeparatesServedFromSilentConnections() async throws {
+        // Intent: the audit log can reconstruct, for a connection that has ended, whether
+        //   it was served real requests, only kept itself alive, or was admitted and then
+        //   never read.
+        // Why it exists: the log recorded an admitted connection and nothing more, so a
+        //   Mac too starved to read a request looked exactly like one doing the work.
+        //   Heartbeats deliberately earn no record of their own, so without close-time
+        //   accounting the pinging connection would look starved too.
+        // Scenario: three phones connect -- one works, one sits idle keeping its
+        //   connection, one connects and leaves.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(runtime: runtime)
+        defer { server.stop() }
+
+        await server.start()
+        let port = try #require(server.tailnetPort)
+
+        let working = try RemotePeer(port: port)
+        _ = try await working.readRequest()
+        try working.writeRequest(method: IpcRequestMethod.ls.rawValue, id: .number(1))
+        #expect(try await working.readResponse().error == nil)
+        working.close()
+        _ = try await fixture.auditEntriesWhenConnectionCloses(count: 1)
+
+        let idle = try RemotePeer(port: port)
+        _ = try await idle.readRequest()
+        try idle.writeRequest(method: IpcRequestMethod.ping.rawValue, id: .number(2))
+        #expect(try await idle.readResponse().error == nil)
+        idle.close()
+        _ = try await fixture.auditEntriesWhenConnectionCloses(count: 2)
+
+        let mute = try RemotePeer(port: port)
+        _ = try await mute.readRequest()
+        mute.close()
+        let entries = try await fixture.auditEntriesWhenConnectionCloses(count: 3)
+
+        let closes = entries.filter { $0.event.kind == .connectionClosed }
+        #expect(closes.map(\.event.servedRequests) == [1, 1, 0])
+        #expect(closes.allSatisfy { $0.event.reason == "peer-closed" })
+        // One durable request record in total: the worked connection's. So the first two
+        // closes are told apart by the log, not by their accounting alone.
+        #expect(entries.count(where: { $0.event.kind == .requestStarted }) == 1)
+        #expect(entries.count(where: { $0.event.kind == .requestCompleted }) == 1)
+    }
+
     @Test("remote identity resolution receives the accepted source address")
     func resolverReceivesPeerAddress() async throws {
         let fixture = try RemoteIpcServerFixture()
@@ -322,6 +437,8 @@ struct IpcServerRemoteTests {
         #expect(try await peer.readByte() == 0)
         let entries = try await fixture.auditEntriesWhenConnectionCloses()
         #expect(entries.last?.event.kind == .connectionClosed)
+        // The peer was there the whole time, so blaming it would misread the log.
+        #expect(entries.last?.event.reason == "server-stopped")
     }
 
     @Test("remote request audit failure blocks only that connection and retries on the next request")
@@ -496,11 +613,13 @@ private struct RemoteIpcServerFixture {
         }
     }
 
-    func auditEntriesWhenConnectionCloses() async throws -> [IpcAuditLogEntry] {
-        let deadline = ContinuousClock.now + .seconds(2)
+    func auditEntriesWhenConnectionCloses(
+        count: Int = 1
+    ) async throws -> [IpcAuditLogEntry] {
+        let deadline = ContinuousClock.now + .seconds(4)
         while ContinuousClock.now < deadline {
             if let entries = try? auditEntries(),
-               entries.contains(where: { $0.event.kind == .connectionClosed })
+               entries.count(where: { $0.event.kind == .connectionClosed }) >= count
             {
                 return entries
             }

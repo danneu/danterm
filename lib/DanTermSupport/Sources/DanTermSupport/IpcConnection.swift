@@ -9,6 +9,22 @@ import Foundation
 import DanTermProtocol
 import Darwin
 
+/// Names why a serviced connection ended, so a reader of the audit log can tell a peer
+/// that left from one this server stopped waiting for.
+///
+/// It is exhaustive on purpose: every exit from the read loop names one of these, so no
+/// close reaches the log without a stated cause.
+enum IpcConnectionCloseReason: String, Sendable {
+    /// The peer closed its end of the stream, or the stream failed under it.
+    case peerClosed = "peer-closed"
+    /// No byte arrived within the advertised silence bound, so the peer is treated as gone.
+    case peerSilent = "peer-silent"
+    /// The peer sent a line past the framing bound, so the server ended the conversation.
+    case oversizedRequest = "oversized-request"
+    /// The server itself is going away and is closing what it still holds.
+    case serverStopped = "server-stopped"
+}
+
 final class IpcConnection: @unchecked Sendable {
     let id: UUID
 
@@ -25,18 +41,36 @@ final class IpcConnection: @unchecked Sendable {
         Self.disableSigPipe(on: fd)
     }
 
+    /// Reads request lines until the peer leaves or, on a connection under the liveness
+    /// contract, until the bound passes with no arriving byte.
+    ///
+    /// A nil `livenessBound` exempts the connection, which is what a local peer gets: it
+    /// cannot die without its socket closing, and a local follow may idle forever.
     func startReading(
+        livenessBound: IpcLivenessBound? = nil,
         onRequest: @escaping @Sendable (JsonRpcRequest, IpcConnection) -> Void,
         onMalformedRequest: @escaping @Sendable (String?, IpcConnection) -> Void = { _, _ in },
-        onClose: @escaping @Sendable (IpcConnection) -> Void
+        onClose: @escaping @Sendable (IpcConnection, IpcConnectionCloseReason) -> Void
     ) {
+        if let livenessBound { Self.armReceiveDeadline(livenessBound, on: fd) }
         DispatchQueue.global(qos: .utility).async { [self] in
             var framer = IpcLineFramer()
             var buffer = [UInt8](repeating: 0, count: 4096)
+            var reason = IpcConnectionCloseReason.peerClosed
 
             while true {
                 let count = Darwin.read(fd, &buffer, buffer.count)
-                if count < 0 && errno == EINTR { continue }
+                if count < 0 {
+                    if errno == EINTR { continue }
+                    // The armed deadline reports itself as a would-block read, and it is
+                    // rearmed by every read that returns data. That makes the silence this
+                    // measures byte-level: a line still arriving in pieces keeps feeding it,
+                    // and only a stream with nothing at all on it runs out.
+                    if livenessBound != nil, errno == EAGAIN || errno == EWOULDBLOCK {
+                        reason = .peerSilent
+                    }
+                    break
+                }
                 guard count > 0 else { break }
 
                 let data = Data(buffer.prefix(Int(count)))
@@ -62,14 +96,15 @@ final class IpcConnection: @unchecked Sendable {
                             message: "request line too large",
                             closeAfterWrite: true
                         )
-                        onClose(self)
+                        onClose(self, .oversizedRequest)
                         return
                     }
                 }
             }
 
+            if reason == .peerSilent { shutdownIfOpen() }
             close()
-            onClose(self)
+            onClose(self, reason)
         }
     }
 
@@ -163,6 +198,20 @@ final class IpcConnection: @unchecked Sendable {
         }
     }
 
+    /// Fails a write parked on this socket, so the close queued behind it can run.
+    ///
+    /// `close()` only enqueues the descriptor's close on the write queue, and a peer that
+    /// stopped reading parks that queue in a blocking write -- so without this the bound
+    /// would bound the read loop and not the descriptor. It runs under the same lock that
+    /// guards `closed`, which is what keeps it from touching a descriptor number the
+    /// queued close has already released and the kernel has already handed to someone else.
+    private func shutdownIfOpen() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed else { return }
+        Darwin.shutdown(fd, SHUT_RDWR)
+    }
+
     private func takeResponseId(_ reqId: UUID) -> JSONValue? {
         lock.lock()
         defer { lock.unlock() }
@@ -223,6 +272,21 @@ final class IpcConnection: @unchecked Sendable {
                 close()
             }
         }
+    }
+
+    /// Arms the kernel's own receive deadline on this socket.
+    ///
+    /// The deadline belongs on the read that waits for the bytes, rather than on a separate
+    /// timer beside it: one clock, and no way for the two to disagree about the same stream.
+    /// The clamp only keeps an absurd advertised bound from overflowing `timeval`; any bound
+    /// that survives it is measured exactly.
+    private static func armReceiveDeadline(_ bound: IpcLivenessBound, on fd: Int32) {
+        let seconds = min(bound.seconds, TimeInterval(Int32.max))
+        var deadline = timeval(
+            tv_sec: Int(seconds),
+            tv_usec: Int32((seconds - seconds.rounded(.down)) * 1_000_000)
+        )
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &deadline, socklen_t(MemoryLayout<timeval>.size))
     }
 
     private static func disableSigPipe(on fd: Int32) {

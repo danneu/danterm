@@ -406,6 +406,21 @@ in [README.md](README.md) and remains open.
     names, or encoded PTY bytes. Key identity is content, so logging names would
     turn the stated blind spot into a keylogger. This amendment supersedes F8's
     PTY-byte wording without changing its privacy requirement.
+  - **2026-08-17 audit amendment: a close states its reason and its request count,
+    and a heartbeat earns no record.** D4 said every remote request is recorded,
+    and F9 then measured what that leaves out: a connection reads as admitted and
+    nothing more, so an instance too starved to read a request looks exactly like
+    one doing the work, and a connection reclaimed for silence looks exactly like
+    a peer that hung up. `connectionClosed` therefore carries why the connection
+    ended and how many requests it was served. The count includes `ping`, which is
+    the one method exempted from the per-request rule: it exercises no authority
+    and names no target, and one record every half-bound would evict the events
+    the log exists for. It bypasses the write-ahead gate for the same reason --
+    there is nothing to reconstruct after the fact. The exemption is safe only
+    because the count exists: without it a connection that only pinged would be
+    indistinguishable from one that was never read. The connection cap this
+    decision required is also now enforceable against a peer that stops answering,
+    which is the case it could not previously reclaim.
 - What this declines, knowingly:
   - **Reachability without Tailscale.** The client cannot be used from a network
     the phone has not joined to the tailnet, and Tailscale becomes a hard

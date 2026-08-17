@@ -76,7 +76,9 @@ struct IpcAuditLogWriterTests {
         let sample = IpcAuditEvent.connectionClosed(
             transport: "tailnet",
             peerAddress: "100.98.63.67:49152",
-            caller: .remote(nodeId: "node", user: "user", machineName: "machine")
+            caller: .remote(nodeId: "node", user: "user", machineName: "machine"),
+            reason: .peerClosed,
+            servedRequests: 3
         )
         let measuringWriter = IpcAuditLogWriter(
             directory: directory,

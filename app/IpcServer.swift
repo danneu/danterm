@@ -92,6 +92,11 @@ actor IpcServer {
         let transport: String
         let peerAddress: String
         let holdsRemoteSlot: Bool
+        /// Whether this connection lives under the liveness contract, decided once at
+        /// admission. Nil exempts it, which is what every local caller gets.
+        let livenessBound: IpcLivenessBound?
+        /// Requests handed to the runtime on this connection, heartbeats included.
+        var servedRequests = 0
     }
 
     nonisolated let socketPath: URL
@@ -222,7 +227,9 @@ actor IpcServer {
             try? auditWriter.append(.connectionClosed(
                 transport: state.transport,
                 peerAddress: state.peerAddress,
-                caller: state.caller
+                caller: state.caller,
+                reason: .serverStopped,
+                servedRequests: state.servedRequests
             ))
             if state.holdsRemoteSlot { remoteSlots.release() }
         }
@@ -240,7 +247,8 @@ actor IpcServer {
             caller: .local,
             transport: "local",
             peerAddress: socketPath.path,
-            holdsRemoteSlot: false
+            holdsRemoteSlot: false,
+            livenessBound: nil
         )
         connections[connection.id] = state
         try? auditWriter.append(.connectionOpened(
@@ -294,7 +302,8 @@ actor IpcServer {
             caller: caller,
             transport: "tailnet",
             peerAddress: peerAddress,
-            holdsRemoteSlot: true
+            holdsRemoteSlot: true,
+            livenessBound: livenessBound
         )
         connections[connection.id] = state
         beginService(state)
@@ -318,6 +327,7 @@ actor IpcServer {
         let caller = state.caller
         state.connection.writeHello(appVersion: appVersion, livenessBound: livenessBound)
         state.connection.startReading(
+            livenessBound: state.livenessBound,
             onRequest: { [weak self] request, connection in
                 Task { await self?.dispatch(request, from: connection) }
             },
@@ -328,19 +338,21 @@ actor IpcServer {
                     outcome: "error"
                 ))
             },
-            onClose: { [weak self] connection in
-                Task { await self?.close(connection) }
+            onClose: { [weak self] connection, reason in
+                Task { await self?.close(connection, reason: reason) }
             }
         )
     }
 
-    private func close(_ connection: IpcConnection) async {
+    private func close(_ connection: IpcConnection, reason: IpcConnectionCloseReason) async {
         guard let state = connections.removeValue(forKey: connection.id) else { return }
         if state.holdsRemoteSlot { remoteSlots.release() }
         try? auditWriter.append(.connectionClosed(
             transport: state.transport,
             peerAddress: state.peerAddress,
-            caller: state.caller
+            caller: state.caller,
+            reason: reason,
+            servedRequests: state.servedRequests
         ))
         await runtime?.ipcConnectionClosed(connection.id)
     }
@@ -431,6 +443,10 @@ actor IpcServer {
         reqId: UUID,
         audit: IpcRequestAudit?
     ) async {
+        // The one funnel every serviced request passes through, so the close-time count is
+        // "requests this connection was actually served" rather than "lines that arrived".
+        // A connection a starved instance never dispatched for still reports zero.
+        connections[connection.id]?.servedRequests += 1
         let runtime = self.runtime
         await MainActor.run {
             runtime?.registerIpcConnection(connection, for: reqId, audit: audit)

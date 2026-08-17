@@ -290,5 +290,38 @@ updated with the IPC surface change in the same change.
 ## Commit progress
 
 - [x] 1. feat(ipc): advertise one silence bound and answer ping through dispatch
-- [ ] 2. feat(ipc): reclaim a silent remote connection and audit why
+- [x] 2. feat(ipc): reclaim a silent remote connection and audit why
 - [ ] 3. feat(client): keep a remote session alive on the advertised bound
+
+## Implementation notes
+
+- **Server deadline mechanism: `SO_RCVTIMEO` on the accepted descriptor.** The
+  discretion clause offered a scanner as the alternative; the socket option
+  wins because it puts the deadline on the read that is already waiting for the
+  bytes. That makes the silence byte-level by construction rather than by
+  bookkeeping -- every read that returns data rearms it -- and it needs no timer,
+  no per-connection state, and nothing for a starved worker pool to skip. It
+  also keeps reclamation on the read loop's existing exit, which is the single
+  close/release/audit route the plan required.
+- **Shutdown before close, on the liveness exit only.** The plan named the
+  parked-writer trap. `close()` only enqueues the descriptor's close behind the
+  write queue, so a peer that stopped reading would hold the descriptor past the
+  bound. `shutdown(fd, SHUT_RDWR)` from the read thread fails that write first.
+  It is deliberately not applied to the ordinary peer-closed exit, where
+  truncating a flush that is still draining would be a behavior change with no
+  liveness reason behind it.
+- **Close reason is an exhaustive enum, not a free string.** Four cases --
+  peer-closed, peer-silent, oversized-request, server-stopped -- so every exit
+  from the read loop and every server-side close has to name one, and no close
+  can reach the audit log with an unstated cause.
+- **Served-request accounting counts at `dispatchToRuntime`.** That is the one
+  funnel every serviced request passes through, so the number means "requests
+  this connection was served" rather than "lines that arrived". A connection an
+  instance was too starved to dispatch for still reports zero, which is the
+  distinction the amendment claims the log can now make.
+- **The new socket-level tests suspend rather than block.** A first version used
+  `Thread.sleep` and `DispatchSemaphore.wait`, and it starved sibling tests in
+  the same package into timing out: these tests park real reader threads, and
+  blocked test threads beside them left other suites' connection callbacks
+  unscheduled. Waiting through `Task.sleep` fixed it, and the reproduction is
+  the reason the file says so in its header.
