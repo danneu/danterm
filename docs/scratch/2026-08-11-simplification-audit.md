@@ -202,7 +202,7 @@ in itself.
 |        | [S46](#s46) | 12    | 3   | 4   | terminal-views | medium | Let the swapchain own its construction inputs instead of mirroring them in the view                                     |
 | c38ace17 | [S47](#s47) | 10    | 2   | 5   | build          | small  | `just clean` misses two of the five build trees it is supposed to remove                                                |
 |        | [S48](#s48) | 10    | 2   | 5   | build          | small  | Stop running DanTermProtocolTests twice in the gate                                                                     |
-|        | [S49](#s49) | 10    | 2   | 5   | core-model     | small  | Delete the three unread-alert reference implementations no render path calls                                            |
+| e7e30252 | [S49](#s49) | 10    | 2   | 5   | core-model     | small  | Delete the three unread-alert reference implementations no render path calls                                            |
 | 5a296702 | [S50](#s50) | 10    | 2   | 5   | core-reducer   | small  | Move the IPC dispatcher out of Update.swift; the file is two subsystems                                               |
 | 3b95df8f | [S51](#s51) | 10    | 2   | 5   | ipc-cli        | small  | Give todo ids the same phantom-typed treatment as every other entity id                                         |
 |        | [S52](#s52) | 10    | 2   | 5   | ipc-cli        | medium | Derive the CLI help text from the parser instead of hand-syncing three copies                                           |
