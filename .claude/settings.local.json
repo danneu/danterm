@@ -14,8 +14,16 @@
       "Skill(danterm)",
       "Bash(danterm tab *)",
       "Bash(swift --version)",
+      "Bash(swift build:*)",
+      "Bash(swift test:*)",
       "Bash(./test.sh)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(just launch-slot *)",
+      "Bash(just stop-slot:*)",
+      "Bash(just stop-slots:*)",
+      "Bash(just provision-worktree:*)",
+      "Bash(\"/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/apps/DanTerm Dev \\(1\\).app/Contents/Helpers/danterm\" --socket /Users/dan/Library/Caches/com.danneu.danterm-dev.1/control.sock ls)",
+      "Bash(/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/apps/DanTerm Dev \\(1\\).app/Contents/Helpers/danterm *)"
     ]
   },
   "autoMemoryEnabled": false
