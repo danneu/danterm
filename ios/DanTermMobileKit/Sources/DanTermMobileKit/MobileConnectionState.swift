@@ -1,6 +1,5 @@
 // Defines the phone's complete user-facing connection and service-ending vocabulary.
 import DanTermClient
-import DanTermProtocol
 
 /// Names each Mac admission refusal separately because each one has a different remedy.
 public enum MobileMacRefusal: Equatable, Sendable {
@@ -67,45 +66,4 @@ public enum MobileConnectionState: Equatable, Sendable {
 
     /// Preserves a server error reply and its reason independently from transport state.
     public static func requestRefused(reason: String) -> Self { .requestRefused(reason) }
-}
-
-/// Holds reconnect progress and one resumable cursor per pane independently from UIKit.
-public struct MobileConnectionModel: Equatable, Sendable {
-    public private(set) var state = MobileConnectionState.disconnected
-    public private(set) var target: String?
-    private var cursorsByPane: [PaneId: PaneTapeCursor] = [:]
-
-    /// Creates a disconnected model with no saved stream positions.
-    public init() {}
-
-    /// Begins a first connection or explicit retry without discarding resume positions.
-    public mutating func connect(to target: String) {
-        self.target = target
-        state = .connecting
-    }
-
-    /// Advances from the protocol handshake to the one explicit pane-list refresh.
-    public mutating func didHandshake() {
-        state = .listingPanes
-    }
-
-    /// Marks the connection ready after its pane list has loaded.
-    public mutating func didLoadPanes() {
-        state = .ready
-    }
-
-    /// Records a terminal connection outcome while retaining every resume cursor.
-    public mutating func didEnd(with state: MobileConnectionState) {
-        self.state = state
-    }
-
-    /// Saves only the newest exact cursor that the replica has applied.
-    public mutating func record(_ cursor: PaneTapeCursor, forPane paneId: PaneId) {
-        cursorsByPane[paneId] = cursor
-    }
-
-    /// Starts a new pane at an exact fence and resumes a known pane from its last cursor.
-    public func startPosition(forPane paneId: PaneId) -> PaneTapeStartPosition {
-        cursorsByPane[paneId].map(PaneTapeStartPosition.cursor) ?? .now
-    }
 }

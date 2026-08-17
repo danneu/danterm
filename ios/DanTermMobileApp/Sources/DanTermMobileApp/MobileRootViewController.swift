@@ -30,8 +30,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private var resumePolicy = MobileResumePolicy()
     private var retryTimer: Timer?
     private let pathMonitor = NWPathMonitor()
-    private var presentedState = MobileConnectionState.disconnected
-    private var presentedDetail: String?
+    private var status = MobileStatus()
     private var attempt: MobileSessionAttempt?
     private var runner: MobileConnectionRunner?
     private var runnerThread: Thread?
@@ -42,7 +41,6 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private var didSendSmokeInput = false
     private var checkpointSaveTimer: Timer?
     private var checkpointIsDirty = false
-    private var isWaitingForGapRepair = false
     private let checkpointQueue = DispatchQueue(label: "danterm.mobile.checkpoint")
     private lazy var checkpointStore = PaneReplicaCheckpointStore(
         directory: FileManager.default.urls(
@@ -134,22 +132,18 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         terminalView.didAdvanceReplica = { [weak self] in self?.scheduleCheckpoint() }
         terminalView.didChangeReplicaState = { [weak self] state in
             guard let self else { return }
+            status.noteStream(state)
             switch state {
             // The producer never learns of a gap the replica found for itself, so it sends
             // no repair. Ending the connection is what puts the one recovery mechanism in
             // charge of it, and the next attempt starts away from the disputed position.
             case .gap(.detected):
                 fail(.streamDesynchronized)
-            case .gap(.declared):
-                isWaitingForGapRepair = true
-                show(state: .connectionLost, detail: "Stream gap; waiting for exact state")
             case .exact:
                 resumePolicy.replicaBecameExact()
-                guard isWaitingForGapRepair else { break }
-                isWaitingForGapRepair = false
-                show(state: .ready, detail: "Stream repaired with exact state")
-            case .awaitingSynchronization:
-                break
+                refreshStatus()
+            case .gap(.declared), .awaitingSynchronization:
+                refreshStatus()
             }
         }
         for subview in [connectionHeader, paneTable, terminalView, composer]
@@ -313,7 +307,6 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
                 return
             }
             selectedPaneId = pane.paneId
-            isWaitingForGapRepair = false
             paneTable.reloadData()
             let checkpoint = resumePolicy.resumeCheckpoint(
                 stored: storedCheckpoint(for: pane.paneId)
@@ -384,17 +377,23 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         case .response(let response):
             if let error = response.error {
                 // Only the tape subscription's refusal ends the connection, because the
-                // subscription is what the connection is for. A refused input request
-                // leaves a stream that is still serving.
+                // subscription is what the connection is for. A refused input request is
+                // the newest outcome on a stream that is still serving, and the next
+                // completed request replaces it.
                 if response.id == tapeRequestId {
                     fail(.requestRefused(reason: error.message))
                 } else {
-                    show(state: .requestRefused(reason: error.message))
+                    status.noteRequestOutcome(.refused(reason: error.message))
+                    refreshStatus()
                 }
                 return
             }
-            guard response.id == tapeRequestId,
-                  let value = response.result,
+            guard response.id == tapeRequestId else {
+                status.noteRequestOutcome(.succeeded)
+                refreshStatus()
+                return
+            }
+            guard let value = response.result,
                   let record = decodePaneTapeRecord(value)
             else { return }
             apply(record)
@@ -431,6 +430,10 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     }
 
     private func disconnect() {
+        // The stream condition and the last request outcome both describe the connection
+        // that is going away, so they go with it rather than being shown beside the next.
+        status.noteStream(nil)
+        status.noteRequestOutcome(nil)
         connectionGeneration += 1
         attempt?.cancel()
         attempt = nil
@@ -471,22 +474,17 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     }
 
     private func show(state: MobileConnectionState, detail: String? = nil) {
-        presentedState = state
-        presentedDetail = detail
+        status.noteConnection(state, detail: detail)
         refreshStatus()
     }
 
-    /// Presents the causal state with the pending recovery beside it, never instead of it:
-    /// the user needs both what happened and what the app is doing about it, and rest after
-    /// give-up is the plain state with its own manual remedy.
+    /// Reads the recovery phase, which only the policy knows, and renders whatever the four
+    /// facts compose to. No wording or severity is decided here.
     private func refreshStatus() {
         let moment = ProcessInfo.processInfo.systemUptime
-        let causal = presentedDetail ?? presentedState.label
-        let recovery = reconnectPolicy.recoveryPhase(at: moment).label(at: moment)
-        connectionHeader.showStatus(
-            recovery.map { "\(causal) - \($0)" } ?? causal,
-            color: presentedState.isFailure ? .systemRed : .secondaryLabel
-        )
+        status.noteRecovery(reconnectPolicy.recoveryPhase(at: moment))
+        let line = status.line(at: moment)
+        connectionHeader.showStatus(line.text, color: line.severity.color)
     }
 
     private func cancelRetryTimer() {
@@ -536,14 +534,13 @@ private struct MobileServerTarget {
     let port: UInt16
 }
 
-private extension MobileRecoveryPhase {
-    /// Words the pending recovery, or nothing when there is none to report.
-    func label(at now: TimeInterval) -> String? {
+private extension MobileStatusSeverity {
+    /// The one UIKit decision the composed status leaves to the shell.
+    var color: UIColor {
         switch self {
-        case .none: nil
-        case .attempting: "reconnecting"
-        case .waiting(let until): "retrying in \(Int(max(0, until - now).rounded(.up)))s"
-        case .waitingForNetwork: "waiting for network"
+        case .normal: .secondaryLabel
+        case .degraded: .systemOrange
+        case .failed: .systemRed
         }
     }
 }
@@ -576,44 +573,6 @@ private extension UIKeyboardHIDUsage {
         case .keyboardInsert: .insert
         case .keyboardDeleteForward: .delete
         default: nil
-        }
-    }
-}
-
-private extension MobileConnectionState {
-    var label: String {
-        switch self {
-        case .disconnected: "Disconnected"
-        case .connecting: "Connecting"
-        case .listingPanes: "Loading panes"
-        case .ready: "Connected"
-        case .hostNotFound: "Host not found"
-        case .serverUnreachable: "Server unreachable"
-        case .refusedByMac(let reason): "Refused by the Mac: \(reason.label)"
-        case .versionMismatch(let version): "Version mismatch: protocol \(version)"
-        case .connectionLost: "Connection lost"
-        case .deviceSetupFailure: "Device setup failure"
-        case .streamEnded(let reason): "Stream ended\(reason.map { ": \($0)" } ?? "")"
-        case .requestRefused(let reason): "Request refused: \(reason)"
-        case .streamDesynchronized: "Stream out of step with the Mac"
-        }
-    }
-
-    var isFailure: Bool {
-        switch self {
-        case .disconnected, .connecting, .listingPanes, .ready: false
-        default: true
-        }
-    }
-}
-
-private extension MobileMacRefusal {
-    var label: String {
-        switch self {
-        case .notAdmitted: "node not admitted"
-        case .identityUnresolved: "identity unresolved"
-        case .connectionLimit: "connection limit"
-        case .auditUnavailable: "audit unavailable"
         }
     }
 }

@@ -7,9 +7,9 @@
 // the whole decision here is what makes the retry rules testable without a device, and
 // what keeps retry from becoming a second path that mutates resume state.
 //
-// What does not belong here: the user-facing wording of a failure (the shell's), how an
-// attempt is performed (`MobileSessionAttempt`'s), and any stored resume position
-// (`MobileConnectionModel`'s).
+// What does not belong here: the user-facing wording of a failure (`MobileStatus`'s), how
+// an attempt is performed (`MobileSessionAttempt`'s), and where the next attempt resumes
+// from (`MobileResumePolicy`'s).
 import DanTermClient
 import DanTermProtocol
 import Foundation

@@ -258,7 +258,7 @@ on its own and the header never states a wait that cannot end.
 ## Commit progress
 - [x] 1. Give the replica's gap state its provenance (I3; PO1, PO2)
 - [x] 2. Route a detected gap through the reconnect policy from a fresh position (I1, I2, I4, I4a, I4b, I5; PO3, PO3a, PO4, PO8)
-- [ ] 3. Compose the phone's status line in the kit (I6, I7, I8, I8a, I9; PO5, PO6, PO7)
+- [x] 3. Compose the phone's status line in the kit (I6, I7, I8, I8a, I9; PO5, PO6, PO7)
 
 ## Implementation notes
 
@@ -282,3 +282,24 @@ on its own and the header never states a wait that cannot end.
   already observes through `didChangeReplicaState`. No new observation point was
   needed, and no attempt outcome clears it, which is what makes it outlive the
   attempt that follows the gap.
+- Commit 3 spells the composition as `MobileStatus`, a kit value holding the four
+  facts with one setter each and a `line(at:)` that renders them. The plan left
+  the spelling and placement to discretion. The stream fact is `PaneReplicaState?`
+  rather than a second vocabulary of its own, so the replica's state needs no
+  translation and cannot drift from it.
+- Two facts -- the stream condition and the last non-tape request outcome --
+  describe a connection that is serving, so composition drops them beside any
+  other connection state. That, rather than a caller who remembers to clear them,
+  is what stops a stale claim from appearing next to a failure.
+- Severity gained a third level, `degraded`, because I8a needs a serving
+  connection with something wrong on it to read as neither normal nor failed. The
+  shell's only remaining presentation decision is the color for each level.
+- `MobileConnectionModel` was deleted rather than absorbed. Its state half is the
+  connection fact in `MobileStatus`, and its cursor half was already superseded by
+  the checkpoint store, so nothing was left to move.
+
+## Follow Up
+
+- Run the live end-to-end check the proof obligations name: drive a pane from the
+  phone against real hardware, force a desynchronization, and confirm the app
+  recovers on its own and the header never states a wait that cannot end.
