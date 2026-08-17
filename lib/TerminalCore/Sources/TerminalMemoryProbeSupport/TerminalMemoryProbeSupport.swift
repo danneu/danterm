@@ -74,6 +74,21 @@ public struct MemoryProbePayloadReport: Codable, Equatable, Sendable {
     public var heapBefore: MallocHeapSnapshot
     public var heapAfter: MallocHeapSnapshot
 
+    /// Bytes the allocator said it released when the probe asked it to settle immediately before
+    /// the opening samples, and immediately before the closing ones.
+    ///
+    /// Both are required fields, not optional or defaulted, and that is the point of them: the
+    /// request is best effort, so "the allocator released nothing" is a real outcome that must stay
+    /// distinguishable from "the reading was never taken". A report written before this instrument
+    /// existed fails to decode rather than reading as a pair of zeroes.
+    ///
+    /// They qualify `footprintDeltaBytes` and do not correct it. A nonzero opening reading would say
+    /// the window started from a heap sitting on free pages; a nonzero closing one that the window's
+    /// own churn left some behind. Neither can be subtracted from the delta to yield "retained
+    /// bytes". Both read zero on macOS 26, where the request is inert -- see `settleAllocator`.
+    public var releasedBeforeFootprintBytes: UInt64
+    public var releasedAfterFootprintBytes: UInt64
+
     /// Process pages charged while this payload was resident. Signed: the allocator can return
     /// pages, and a negative delta is information rather than an error.
     public var footprintDeltaBytes: Int64 {
@@ -262,6 +277,29 @@ public func mallocHeapSnapshot() -> MallocHeapSnapshot {
     )
 }
 
+/// Asks every malloc zone to hand back as much free memory as it can, and returns the bytes it
+/// says it released.
+///
+/// Asked because `phys_footprint` charges pages the allocator has merely *touched*: building a
+/// payload's byte array allocates and frees tens of megabytes, and an opening sample taken over a
+/// heap still sitting on those pages describes the build rather than the terminal.
+///
+/// **On macOS 26 the request is inert, and the point of this function is to say so out loud.**
+/// Measured on Darwin 25.5: the process has one zone, `DefaultMallocZone` at version 16, whose
+/// `pressure_relief` hook is present and therefore really is called -- and after churning and
+/// freeing 400,000 256-byte, 30,000 8 KB, and 4,000 64 KB blocks, it returned 0 and `phys_footprint`
+/// did not move by a single page. So the readings this returns are expected to be zero here, and a
+/// zero is the finding, not a missing measurement.
+///
+/// A goal of zero asks for the maximum the zones are willing to give. The return value is what they
+/// managed, not what was asked for -- `malloc_zone_pressure_relief` promises best effort only -- so
+/// no caller may subtract it from a footprint delta and call the remainder retained bytes. Kept, and
+/// kept reported, because the number moves on its own if a later OS starts honoring the request;
+/// deleting it would leave the next reader to re-derive the measurement above.
+public func settleAllocator() -> UInt64 {
+    UInt64(malloc_zone_pressure_relief(nil, 0))
+}
+
 /// Feeds one payload to a fresh terminal and reports what it cost.
 ///
 /// The terminal is held until after the census and the closing footprint read, so neither can race
@@ -281,6 +319,7 @@ public func measure(
     chunkBytes: Int? = defaultFeedChunkBytes,
     whileResident: ((TerminalMemoryCensus) -> Void)? = nil
 ) -> MemoryProbePayloadReport? {
+    let releasedBefore = settleAllocator()
     let heapBefore = mallocHeapSnapshot()
     let before = processPhysicalFootprintBytes()
     // The public initializer, so the probe always measures the production budget. The
@@ -302,6 +341,9 @@ public func measure(
     }
 
     let census = terminal.memoryCensus
+    // Settled with the terminal still alive, so what goes back is free pages the feed churned
+    // through and never the grid's own storage.
+    let releasedAfter = settleAllocator()
     let heapAfter = mallocHeapSnapshot()
     let after = processPhysicalFootprintBytes()
     whileResident?(census)
@@ -317,7 +359,9 @@ public func measure(
         footprintBeforeBytes: before,
         footprintAfterBytes: after,
         heapBefore: heapBefore,
-        heapAfter: heapAfter
+        heapAfter: heapAfter,
+        releasedBeforeFootprintBytes: releasedBefore,
+        releasedAfterFootprintBytes: releasedAfter
     )
 }
 
@@ -348,7 +392,10 @@ public func runMatrix(
             )
         }
     return MemoryProbeReport(
-        schemaVersion: 1,
+        // 2 since each payload carries the allocator's released-byte readings beside its footprint
+        // samples. A version 1 report has no such fields, and must not be read as one that reported
+        // zero.
+        schemaVersion: 2,
         columns: columns,
         rows: rows,
         scrollbackBudgetBytes: Terminal.scrollbackByteLimit,

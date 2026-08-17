@@ -7,6 +7,7 @@
 // be sized against it. These tests assert
 // the payloads' observable effect on terminal state rather than their bytes, so the payload text
 // can be rewritten freely as long as it still exercises the axis it is named for.
+import Foundation
 import Testing
 import TerminalCore
 @testable import TerminalMemoryProbeSupport
@@ -197,6 +198,60 @@ struct TerminalMemoryProbeSupportTests {
     // its neighbours. Delta-based claims (bucket rounding, coverage) are made by the probe binary,
     // which owns its process. What stays testable here is the single-snapshot invariant below and
     // everything derived from the census, which is exact and process-independent.
+
+    @Test("both footprint samples carry a released-byte reading")
+    func footprintSamplesCarryReleasedByteReadings() throws {
+        // Intent: every footprint sample in a report is accompanied by the bytes the allocator said
+        //   it released just before that sample was taken, and both readings are required fields of
+        //   the encoded report.
+        // Why it exists: the footprint delta is only interpretable if the reader can see how much
+        //   allocator hysteresis was cleared before each end of the window. `malloc_zone_pressure_relief`
+        //   promises only best effort, so a reading of zero -- the allocator released nothing -- is a
+        //   real and different outcome from the reading never having been taken. Making both fields
+        //   required in the encoding is what keeps those two cases apart for anyone decoding a report.
+        let report = try #require(measure(
+            payload: payload(named: "scrollback-plain"),
+            columns: Self.geometry.columns,
+            rows: Self.geometry.rows
+        ))
+
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(report)
+        let fields = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        #expect(fields["releasedBeforeFootprintBytes"] != nil)
+        #expect(fields["releasedAfterFootprintBytes"] != nil)
+        // The readings belong to this report's own window, so they must survive a round trip
+        // alongside the samples they qualify.
+        let decoded = try JSONDecoder().decode(MemoryProbePayloadReport.self, from: data)
+        #expect(decoded == report)
+    }
+
+    @Test("a report from before the readings existed no longer decodes")
+    func reportWithoutReleasedReadingsIsRejected() throws {
+        // Intent: a report that carries no released-byte readings is not silently read as one whose
+        //   allocator released nothing.
+        // Why it exists: this is the other half of the distinction above, and the half a decoder
+        //   could quietly erase. If the fields were optional or defaulted, every archived report from
+        //   before this instrument existed would decode as "released 0 bytes" and its footprint
+        //   deltas would be over-trusted.
+        let report = try #require(measure(
+            payload: payload(named: "empty"),
+            columns: Self.geometry.columns,
+            rows: Self.geometry.rows
+        ))
+        var fields = try #require(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(report)) as? [String: Any]
+        )
+        fields.removeValue(forKey: "releasedBeforeFootprintBytes")
+        fields.removeValue(forKey: "releasedAfterFootprintBytes")
+        let stripped = try JSONSerialization.data(withJSONObject: fields)
+
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(MemoryProbePayloadReport.self, from: stripped)
+        }
+    }
 
     @Test("feeding in chunks reaches the same terminal state as feeding all at once")
     func chunkedFeedMatchesSingleShotFeed() throws {

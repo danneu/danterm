@@ -186,6 +186,26 @@ if wantsJSON {
         )
     }
 
+    // What each end of the footprint window was cleared of before it was sampled. Its own table
+    // rather than two more columns above, because these numbers qualify the footprint column --
+    // they are not another cost, and are never subtracted from it.
+    //
+    // Expect zeroes on macOS 26: the request is inert there, which `settleAllocator` documents with
+    // the measurement. The table stays because a reader comparing two footprint deltas needs to see
+    // that the allocator was asked and gave nothing back, rather than assume it was never asked.
+    print("")
+    print("allocator settled before each footprint sample (best effort; qualifies the delta above)")
+    print("payload                released before   released after")
+    print("-------------------------------------------------------")
+    for payload in report.payloads {
+        let name = payload.name.padding(toLength: 20, withPad: " ", startingAt: 0)
+        print(
+            name
+                + megabytes(Int64(payload.releasedBeforeFootprintBytes)).leftPadded(to: 18)
+                + megabytes(Int64(payload.releasedAfterFootprintBytes)).leftPadded(to: 17)
+        )
+    }
+
     if vmmapLines.isEmpty == false {
         print("")
         print("vmmap --summary, sampled while the terminal was resident (DIRTY is what the footprint charges)")
