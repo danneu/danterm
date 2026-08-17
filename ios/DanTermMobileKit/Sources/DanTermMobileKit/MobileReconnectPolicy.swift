@@ -211,7 +211,11 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
 
     private let schedule: Schedule
     private var standing = Standing.clear
-    private var attemptsUsed = 0
+    /// The episode's remaining effort: the delays of the automatic attempts it may still
+    /// schedule, in order. An authorized automatic attempt consumes the head, so an
+    /// exhausted budget is an empty slice rather than a count compared against a limit --
+    /// which is why nothing here grows without bound and no range check guards a lookup.
+    private var remainingDelays: ArraySlice<TimeInterval>
     private var attemptInFlight = false
     private var foregrounded = true
     private var pathUsable = true
@@ -219,6 +223,7 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
 
     public init(schedule: Schedule = .standard) {
         self.schedule = schedule
+        self.remainingDelays = schedule.delays[...]
     }
 
     /// Advances the policy by one event and states what the shell should do next.
@@ -265,7 +270,7 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
             // The gesture is the manual remedy itself, so it restores the whole policy
             // from any class or phase and answers to neither the path nor a class floor.
             connectedAt = nil
-            attemptsUsed = 0
+            remainingDelays = schedule.delays[...]
             standing = .clear
             guard attemptInFlight == false else { return .rest }
             attemptInFlight = true
@@ -288,7 +293,9 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
         guard case .waiting(let scheduledAt, _) = standing else { return .rest }
         guard scheduledAt <= now else { return .wait(until: scheduledAt) }
         attemptInFlight = true
-        attemptsUsed += 1
+        // Empty already means the budget is spent, so the one attempt a signal buys after
+        // give-up takes nothing from it and leaves nothing to take.
+        remainingDelays = remainingDelays.dropFirst()
         standing = .clear
         return .attemptNow
     }
@@ -302,15 +309,12 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
         case .manual:
             return .manual
         case .transient:
-            guard attemptsUsed < schedule.delays.count else { return .gaveUp(notBefore: now) }
-            return .waiting(scheduledAt: now + schedule.delays[attemptsUsed], notBefore: now)
+            guard let delay = remainingDelays.first else { return .gaveUp(notBefore: now) }
+            return .waiting(scheduledAt: now + delay, notBefore: now)
         case .capacity(let bound):
             let floor = now + bound.seconds
-            guard attemptsUsed < schedule.delays.count else { return .gaveUp(notBefore: floor) }
-            return .waiting(
-                scheduledAt: max(now + schedule.delays[attemptsUsed], floor),
-                notBefore: floor
-            )
+            guard let delay = remainingDelays.first else { return .gaveUp(notBefore: floor) }
+            return .waiting(scheduledAt: max(now + delay, floor), notBefore: floor)
         }
     }
 
@@ -327,7 +331,9 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
     }
 
     private mutating func rearmIfConnectionWasStable(endingAt now: TimeInterval) {
-        if let connectedAt, now - connectedAt >= schedule.stabilityWindow { attemptsUsed = 0 }
+        if let connectedAt, now - connectedAt >= schedule.stabilityWindow {
+            remainingDelays = schedule.delays[...]
+        }
         connectedAt = nil
     }
 }
