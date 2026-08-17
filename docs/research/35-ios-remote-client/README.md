@@ -771,8 +771,19 @@ issues `pane.split`. Reopen on user request only.
   as two problems. Both now rest on one number the server states in its hello:
   the client pings every half-bound, either end treats byte-silence past the
   bound as peer death, and the Mac's close names the reason and releases the
-  slot. Local connections are exempt. The automatic-retry policy T25 deferred is
-  still open and is its own plan.
+  slot. Local connections are exempt. The automatic-retry policy T25 deferred
+  followed it and is shipped too (`a0a956b9`, `60531a02`, `d2fff224`): a pure
+  kit-owned policy schedules on the typed cause rather than the collapsed state,
+  signals (foreground return, a restored network path) trigger an attempt at
+  once while the clock covers only what the phone cannot observe, a capacity
+  refusal now carries the refusing Mac's own reclamation bound and waits it out,
+  and the automatic phase is finite -- five attempts over about a minute, then
+  rest in the plain failure state. What is still unmeasured is the behavior on
+  hardware: that plan's acceptance smoke is unrun, and it is the same pair of
+  cases F9 ran by hand. Airplane mode off and on with the app foregrounded
+  should now heal with no tap and resume exactly on scrollback depth and
+  viewport digest through the `t9-checkpoint/` instrument, and a sleeping Mac
+  should show bounded visible retries and then a legible rest.
 - **Distribution.** Personal use with a paid account: TestFlight internal or
   direct device install both work; nothing here needs App Store review. Record
   the choice when it first matters (push entitlements).
