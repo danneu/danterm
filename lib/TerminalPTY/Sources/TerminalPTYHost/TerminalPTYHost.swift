@@ -1126,14 +1126,24 @@ public actor TerminalPTYHost {
     }
     #endif
 
-    /// Applies output synchronously so delivery-fence tests can queue callbacks without yielding main.
-    package nonisolated func deliverOutputForTesting(_ bytes: [UInt8]) {
+    #if DEBUG
+    /// Stages output on a host that a test is using as a fixture, so a consumer's own
+    /// behavior can be asserted against a known screen.
+    ///
+    /// This is not a way to drive the host: it skips the read path entirely, and the host's
+    /// own suite must reach the byte plane through a real PTY master descriptor instead
+    /// (`scripts/terminal-pty-host-test-seam-lint.sh` enforces that). It exists for a
+    /// consumer test -- pane-session publish deadlines and synchronization fences -- that
+    /// needs a screen to assert against and does not care how the bytes arrived. Applying
+    /// synchronously lets such a test queue callbacks without yielding main.
+    package nonisolated func stageFixtureOutput(_ bytes: [UInt8]) {
         guard bytes.isEmpty == false else { return }
         _ = fence(countsAsProduction: false) { owner in
             owner.applyOutput(bytes)
             owner.publishPendingUpdate()
         }
     }
+    #endif
 
     package enum InteractionForTesting: Sendable {
         case pointer(TerminalPointerEvent)

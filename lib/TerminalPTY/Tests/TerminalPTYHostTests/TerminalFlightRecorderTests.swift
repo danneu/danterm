@@ -603,7 +603,7 @@ struct TerminalFlightRecorderTests {
             bootstrapExecutable: "/unused"
         )
 
-        host.deliverOutputForTesting(Array("retained".utf8))
+        host.stageFixtureOutput(Array("retained".utf8))
 
         #expect(
             host.fencedFlightRecordingCapture().snapshot.events.map(\.event)

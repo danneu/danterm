@@ -212,7 +212,7 @@ suite once into a file under `.build/` and grep the file.
 - [x] 3. refactor(pty): prove input-write failure with a real descriptor (D4, I1, I5, PO3)
 - [x] 4. test(pty): drive the host suite through childless PTY channels (D4, D7, I2, PO4)
 - [x] 5. test(pty): serialize only the tests that share machine state (D6, I4)
-- [ ] 6. refactor(pty): keep fixture output staging out of shipping builds (D5, I1, PO5)
+- [x] 6. refactor(pty): keep fixture output staging out of shipping builds (D5, I1, PO5)
 
 ## Implementation notes
 
@@ -284,6 +284,17 @@ suite once into a file under `.build/` and grep the file.
 - Serialization is now scoped, so the two suites run against each other in parallel. That is
   safe because the unserialized half forks nothing, and the process-census tests were already
   written to name their own child rather than count children process-wide.
+
+- The PO5 ban is scoped to one file, `TerminalPTYHostTests.swift`, not to the whole
+  `TerminalPTYHostTests` target. `TerminalFlightRecorderTests` lives in that target and stages
+  fixture output on a host built through the shipping initializer, which takes no spawner and so
+  cannot adopt a channel; its claim is about that initializer, so it is a consumer of a host
+  fixture in the D5 sense rather than a host-suite bypass.
+- The banned pattern lists the old name `deliverOutputForTesting` next to the new
+  `stageFixtureOutput`, so reintroducing the bypass under its former name fails too.
+- The lint now fails when either scanned file is missing, and the self-test covers the missing
+  suite as well as the missing host source. Without that, renaming the suite file would disarm
+  the new check silently.
 
 ## Follow Up
 

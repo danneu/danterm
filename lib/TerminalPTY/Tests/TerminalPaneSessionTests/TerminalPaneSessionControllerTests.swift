@@ -63,7 +63,7 @@ struct TerminalPaneSessionControllerTests {
             }
         )
 
-        host.deliverOutputForTesting(Array("delivery".utf8))
+        host.stageFixtureOutput(Array("delivery".utf8))
         controller.consumePendingHostUpdateForTesting()
         controller.synchronizeState()
         _ = controller.diagnosticCapture(test: "fence-accounting")
@@ -90,7 +90,7 @@ struct TerminalPaneSessionControllerTests {
         _ = host.fencedDiagnosticState()
         _ = host.setTestUpdateHandler { _ in }
         _ = host.observeTestOutput { _ in false }
-        host.deliverOutputForTesting(Array("test".utf8))
+        host.stageFixtureOutput(Array("test".utf8))
 
         #expect(host.productionFenceEntryCountForTesting() == 0)
     }
@@ -113,18 +113,18 @@ struct TerminalPaneSessionControllerTests {
             }
         )
 
-        host.deliverOutputForTesting(Array("\u{1B}[?2026hfirst".utf8))
+        host.stageFixtureOutput(Array("\u{1B}[?2026hfirst".utf8))
         controller.consumePendingHostUpdateForTesting()
         #expect(controller.lastFenceStallNanoseconds == 0)
         #expect(controller.unflushedDeliveryFenceWaitNanoseconds == 10)
 
-        host.deliverOutputForTesting(Array("second\u{1B}[?2026l".utf8))
+        host.stageFixtureOutput(Array("second\u{1B}[?2026l".utf8))
         controller.consumePendingHostUpdateForTesting()
         #expect(controller.lastFenceStallNanoseconds == 20)
         #expect(controller.unflushedDeliveryFenceWaitNanoseconds == 0)
 
         controller.setVisible(false)
-        host.deliverOutputForTesting(Array("checkpoint".utf8))
+        host.stageFixtureOutput(Array("checkpoint".utf8))
         controller.synchronizeState()
         controller.setVisible(true)
         #expect(controller.lastFenceStallNanoseconds == 0)
@@ -153,15 +153,15 @@ struct TerminalPaneSessionControllerTests {
         )
         var flushedWaitNanoseconds: UInt64 = 0
 
-        host.deliverOutputForTesting(Array("\u{1B}[?2026hfirst".utf8))
+        host.stageFixtureOutput(Array("\u{1B}[?2026hfirst".utf8))
         controller.consumePendingHostUpdateForTesting()
-        host.deliverOutputForTesting(Array("second\u{1B}[?2026l".utf8))
-        controller.consumePendingHostUpdateForTesting()
-        flushedWaitNanoseconds += controller.lastFenceStallNanoseconds
-        host.deliverOutputForTesting(Array("accepted".utf8))
+        host.stageFixtureOutput(Array("second\u{1B}[?2026l".utf8))
         controller.consumePendingHostUpdateForTesting()
         flushedWaitNanoseconds += controller.lastFenceStallNanoseconds
-        host.deliverOutputForTesting(Array("\u{1B}[?2026hpending".utf8))
+        host.stageFixtureOutput(Array("accepted".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        flushedWaitNanoseconds += controller.lastFenceStallNanoseconds
+        host.stageFixtureOutput(Array("\u{1B}[?2026hpending".utf8))
         controller.consumePendingHostUpdateForTesting()
 
         #expect(flushedWaitNanoseconds == 30)
@@ -472,7 +472,7 @@ struct TerminalPaneSessionControllerTests {
             timeout: .seconds(10)
         ))
 
-        host.deliverOutputForTesting(
+        host.stageFixtureOutput(
             Array("\u{1B}]8;;https://a.co\u{7}link\u{1B}]8;;\u{7}".utf8)
         )
         let snapshot = host.fencedSnapshot()
@@ -534,7 +534,7 @@ struct TerminalPaneSessionControllerTests {
         var copied: [String] = []
         controller.onSelectionCopy = { copied.append($0) }
 
-        host.deliverOutputForTesting(Array("\u{1B}[2J\u{1B}[Halpha beta".utf8))
+        host.stageFixtureOutput(Array("\u{1B}[2J\u{1B}[Halpha beta".utf8))
         let lines = host.fencedSnapshot().viewportText
             .split(separator: "\n", omittingEmptySubsequences: false)
         let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
@@ -544,10 +544,10 @@ struct TerminalPaneSessionControllerTests {
         controller.sendPointer(.down(.left, column: column, row: row, clickCount: 2))
         // Overwrites the selected columns before the release is applied, so the text the
         // owner captures is "gamm" -- what the highlight covers at completion, not "beta".
-        host.deliverOutputForTesting(Array("\u{1B}[Halpha gamma".utf8))
+        host.stageFixtureOutput(Array("\u{1B}[Halpha gamma".utf8))
         controller.sendPointer(.up(.left, column: column, row: row))
         // Applied after the release, so it can only corrupt a main-actor re-read.
-        host.deliverOutputForTesting(Array("\u{1B}[Halpha delta".utf8))
+        host.stageFixtureOutput(Array("\u{1B}[Halpha delta".utf8))
         await drainMainQueue()
 
         #expect(copied == ["gamm"])
@@ -609,7 +609,7 @@ struct TerminalPaneSessionControllerTests {
             timeout: .seconds(10)
         ))
 
-        host.deliverOutputForTesting(Array("\u{1B}[2J\u{1B}[Halpha beta".utf8))
+        host.stageFixtureOutput(Array("\u{1B}[2J\u{1B}[Halpha beta".utf8))
         let lines = host.fencedSnapshot().viewportText
             .split(separator: "\n", omittingEmptySubsequences: false)
         let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
@@ -651,7 +651,7 @@ struct TerminalPaneSessionControllerTests {
         var copied: [String] = []
         controller.onSelectionCopy = { copied.append($0) }
 
-        host.deliverOutputForTesting(Array("\u{1B}[2J\u{1B}[Halpha beta".utf8))
+        host.stageFixtureOutput(Array("\u{1B}[2J\u{1B}[Halpha beta".utf8))
         let lines = host.fencedSnapshot().viewportText
             .split(separator: "\n", omittingEmptySubsequences: false)
         let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
@@ -812,12 +812,12 @@ struct TerminalPaneSessionControllerTests {
         #expect(frames.last?.damage == .full)
         #expect(frames.last?.plan.defaultBackground == RenderTheme.dark.defaultBackground)
 
-        host.deliverOutputForTesting(Array("\u{1B}[?2026h".utf8))
+        host.stageFixtureOutput(Array("\u{1B}[?2026h".utf8))
         controller.consumePendingHostUpdateForTesting()
         let synchronizedBaseline = frames.count
         controller.setTheme(themed)
         #expect(frames.count == synchronizedBaseline)
-        host.deliverOutputForTesting(Array("\u{1B}[?2026l".utf8))
+        host.stageFixtureOutput(Array("\u{1B}[?2026l".utf8))
         controller.consumePendingHostUpdateForTesting()
         #expect(frames.count == synchronizedBaseline + 1)
         #expect(frames.last?.damage == .full)
@@ -839,11 +839,11 @@ struct TerminalPaneSessionControllerTests {
         )
         let query = Array("\u{1B}]10;?\u{07}\u{1B}]11;?\u{1B}\\".utf8)
 
-        host.deliverOutputForTesting(query)
+        host.stageFixtureOutput(query)
         controller.setTheme(makeRenderTheme(seed: 20))
-        host.deliverOutputForTesting(query)
+        host.stageFixtureOutput(query)
         controller.setTheme(.dark)
-        host.deliverOutputForTesting(query)
+        host.stageFixtureOutput(query)
 
         let replies = await host.replyWrites().flatMap { $0 }
         #expect(replies == Array(
@@ -1233,7 +1233,7 @@ struct TerminalPaneSessionControllerTests {
 
         controller.setRenderingAvailable(false)
         controller.setRenderingAvailable(false)
-        host.deliverOutputForTesting(Array("sleeping\u{1B}]2;sleep-title\u{7}".utf8))
+        host.stageFixtureOutput(Array("sleeping\u{1B}]2;sleep-title\u{7}".utf8))
         controller.consumePendingHostUpdateForTesting()
 
         #expect(frames.isEmpty)
@@ -1241,7 +1241,7 @@ struct TerminalPaneSessionControllerTests {
         #expect(semantics == [.title("sleep-title")])
         #expect(recoveryMutationCount == 1)
 
-        host.deliverOutputForTesting(Array("wake-edge".utf8))
+        host.stageFixtureOutput(Array("wake-edge".utf8))
         controller.setRenderingAvailable(true)
         #expect(frames.count == 1)
         #expect(frames[0].damage == .full)
@@ -1283,7 +1283,7 @@ struct TerminalPaneSessionControllerTests {
         controller.onFrame = { frames.append($0) }
 
         controller.setRenderingAvailable(false)
-        host.deliverOutputForTesting(Array("hidden-asleep".utf8))
+        host.stageFixtureOutput(Array("hidden-asleep".utf8))
         controller.consumePendingHostUpdateForTesting()
         controller.setRenderingAvailable(true)
 
@@ -2005,7 +2005,7 @@ struct TerminalPaneSessionControllerTests {
             host: host,
             launchInput: makeLaunchInput(command: "exec sleep 30")
         )
-        host.deliverOutputForTesting(Array("hit\r\n".utf8))
+        host.stageFixtureOutput(Array("hit\r\n".utf8))
         controller.consumePendingHostUpdateForTesting()
         var reported: [TerminalSearchStatus?] = []
 
@@ -2018,7 +2018,7 @@ struct TerminalPaneSessionControllerTests {
             controller.beginSearch("hit")
             controller.synchronizeState()
 
-            host.deliverOutputForTesting(Array("hit\r\n".utf8))
+            host.stageFixtureOutput(Array("hit\r\n".utf8))
             controller.consumePendingHostUpdateForTesting()
         }
 

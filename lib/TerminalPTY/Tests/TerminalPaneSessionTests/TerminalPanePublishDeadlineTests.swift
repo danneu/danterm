@@ -84,13 +84,13 @@ struct TerminalPanePublishDeadlineTests {
         let settleTimers = timer.scheduled.count
         now = 100_000
 
-        host.deliverOutputForTesting(Array("first".utf8))
+        host.stageFixtureOutput(Array("first".utf8))
         await drainMainQueue()
         #expect(frames.count == 1)
         #expect(timer.scheduled.count == settleTimers)
 
         now = 100_400
-        host.deliverOutputForTesting(Array("second".utf8))
+        host.stageFixtureOutput(Array("second".utf8))
         await drainMainQueue()
         #expect(frames.count == 1)
         #expect(timer.scheduled.count == settleTimers + 1)
@@ -130,10 +130,10 @@ struct TerminalPanePublishDeadlineTests {
         let settleTimers = timer.scheduled.count
         now = 100_000
 
-        host.deliverOutputForTesting(Array("first".utf8))
+        host.stageFixtureOutput(Array("first".utf8))
         await drainMainQueue()
         now = 100_400
-        host.deliverOutputForTesting(Array("second".utf8))
+        host.stageFixtureOutput(Array("second".utf8))
         await drainMainQueue()
         #expect(timer.scheduled.count == settleTimers + 1)
 
@@ -174,12 +174,12 @@ struct TerminalPanePublishDeadlineTests {
         let settleTimers = timer.scheduled.count
         now = 100_000
 
-        host.deliverOutputForTesting(Array("first".utf8))
+        host.stageFixtureOutput(Array("first".utf8))
         await drainMainQueue()
         #expect(frames.count == 1)
 
         now = 105_000
-        host.deliverOutputForTesting(Array("second".utf8))
+        host.stageFixtureOutput(Array("second".utf8))
         await drainMainQueue()
         #expect(frames.count == 2)
         #expect(timer.scheduled.count == settleTimers)
@@ -221,13 +221,13 @@ struct TerminalPanePublishDeadlineTests {
         let settleTimers = timer.scheduled.count
         now = 100_000
 
-        host.deliverOutputForTesting(Array("seed".utf8))
+        host.stageFixtureOutput(Array("seed".utf8))
         await drainMainQueue()
         #expect(frames.count == 1)
         let mutationsAfterSeed = historyMutations
 
         now = 100_100
-        host.deliverOutputForTesting(
+        host.stageFixtureOutput(
             Array("\u{07}\u{1B}]52;c;aGVsbG8=\u{07}payload line\n".utf8)
         )
         await drainMainQueue()
@@ -266,7 +266,7 @@ struct TerminalPanePublishDeadlineTests {
         }
         controller.onFrame = { _ in order.append("frame") }
 
-        host.deliverOutputForTesting(Array("ding\u{07}".utf8))
+        host.stageFixtureOutput(Array("ding\u{07}".utf8))
         controller.synchronizeState()
         #expect(order.first == "bell")
         #expect(order.contains("frame"))
