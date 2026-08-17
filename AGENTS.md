@@ -158,6 +158,13 @@ would lose nothing a reader could not recover from the code, don't write it.
 - **AppKit delegate methods.** Name the protocol being satisfied, so the method
   doesn't read as a custom addition: `// NSSplitViewDelegate: called on divider
   double-click.`
+- **Stored callbacks that survive a traversal.** When a collection holds
+  callbacks and an element goes back into it after the loop reads it out, keep
+  each callback behind a reference-typed box instead of storing the loop-bound
+  function value. `for x in array` over a function-typed element hands you a
+  fresh wrapper around the original closure, so re-storing it adds one layer per
+  round and releasing the result recurses one stack frame per layer. A
+  collection that only calls its elements and discards them is unaffected.
 
 ### Prose
 

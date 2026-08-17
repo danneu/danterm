@@ -1257,6 +1257,106 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
+    @Test("an observed host takes a megabyte of output without exhausting the stack", .timeLimit(.minutes(1)))
+    func observedHostTakesLargeOutput() async throws {
+        // Intent: how many chunks an observer receives does not bound how much output the
+        //   host can take -- applying thousands of chunks to an observed host costs no more
+        //   stack than applying one.
+        // Why it exists: the failure this guards is process death, not a failed
+        //   expectation. Before the fix this test killed the whole test process a few
+        //   hundred kilobytes in, reported as `exited with unexpected signal code 10` and
+        //   naming no test at all -- so nothing below asserts on stack depth, and the byte
+        //   count is the whole point of the test.
+        // Scenario: an armed wait keeps a bare observer subscribed for the entire stream,
+        //   which is what every `expectOutput` before a chatty child looks like.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        // Never unsubscribes, so every chunk of the flood passes through it.
+        _ = host.observeTestOutput { _ in true }
+        let tail = host.expectOutput(containing: Array("__TAIL__".utf8))
+
+        let flood = [UInt8](repeating: UInt8(ascii: "x"), count: 64 * 1024)
+        for _ in 0..<16 { #expect(pane.channel.writeFromChild(flood)) }
+        #expect(pane.channel.writeFromChild(Array("\r\n__TAIL__".utf8)))
+
+        #expect(await tail.satisfied())
+        #expect(host.fencedSnapshot().screenText.contains("__TAIL__"))
+        await host.close()
+    }
+
+    @Test("an observer sees the lookback and the stream after it as one run of bytes", .timeLimit(.minutes(1)))
+    func observerSeesLookbackJoinedToStream() async throws {
+        // Intent: an observer registered after output has already been applied sees the
+        //   retained lookback as its first chunk and every later chunk in stream order,
+        //   with no gap across the join between replay and stream; and an observer that
+        //   returns false receives nothing afterwards.
+        // Why it exists: `expectOutput` matches incrementally and never rescans, so a byte
+        //   dropped at the replay-to-stream join, or a chunk delivered to an observer that
+        //   already unsubscribed, is invisible until a wait fails for the wrong reason.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("ALPHA"))
+
+        let stream = ObservedChunks()
+        _ = host.observeTestOutput { chunk in
+            stream.append(chunk)
+            return true
+        }
+        // Unsubscribes on its first streamed chunk, having accepted the lookback.
+        let dropped = ObservedChunks()
+        _ = host.observeTestOutput { chunk in
+            dropped.append(chunk)
+            return dropped.count == 1
+        }
+
+        #expect(await pane.writeFromChild("BETA"))
+        #expect(await pane.writeFromChild("GAMMA"))
+
+        // The lookback is the whole applied stream so far, and this channel has carried
+        // nothing but `ALPHA`: the child end is raw, so the launch line the host wrote to
+        // the PTY is not echoed back.
+        #expect(stream.firstText == "ALPHA")
+        #expect(stream.joinedText == "ALPHABETAGAMMA")
+        #expect(dropped.count == 2)
+        await host.close()
+    }
+
+    @Test("teardown releases an observer that never unsubscribed", .timeLimit(.minutes(1)))
+    func teardownReleasesSubscribedObserver() async throws {
+        // Intent: a host that has quiesced holds nothing an observer captured, and no
+        //   further chunk reaches it.
+        // Why it exists: an armed wait that is never satisfied leaves its observer
+        //   subscribed, so the host is the last owner of whatever the test captured. A host
+        //   that kept it would keep a whole test's fixtures alive past the test.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        let seen = ObservedChunks()
+        var witness: ObserverWitness? = ObserverWitness()
+        weak let releasedWitness = witness
+        do {
+            let captured = try #require(witness)
+            _ = host.observeTestOutput { chunk in
+                // Load-bearing: this capture is what makes the host the witness's last
+                // owner. Without it the closure holds nothing and the weak reference below
+                // reports nil whatever the host does with the closure.
+                _ = captured
+                seen.append(chunk)
+                return true
+            }
+        }
+        witness = nil
+        #expect(await pane.writeFromChild("BEFORE"))
+        let deliveredBeforeTeardown = seen.count
+
+        await host.close()
+
+        // The release is the whole proof that no later chunk can reach this observer: the
+        // host was its last owner, so a host that still held it would still be able to call
+        // it. The count guards the teardown ladder itself, which runs after the last chunk.
+        #expect(releasedWitness == nil)
+        #expect(seen.count == deliveredBeforeTeardown)
+    }
+
     @Test("a host on a childless channel lives and quiesces with nothing to reap", .timeLimit(.minutes(1)))
     func childlessChannelHostReachesQuiescence() async throws {
         // Intent: a host whose PTY has no child behind it starts, takes output,
@@ -2958,6 +3058,35 @@ private struct ChildlessHost {
         await writeFromChild(Array(text.utf8))
     }
 }
+
+/// Records the chunks one test-output observer received, in the order they arrived.
+///
+/// A class so the observer closure can keep writing to it after the test frame that made it
+/// has moved on, which is what an observer subscribed to a live host does.
+private final class ObservedChunks: Sendable {
+    private let chunks = Mutex<[[UInt8]]>([])
+
+    var count: Int { chunks.withLock(\.count) }
+
+    /// The first chunk as text -- for an observer, the lookback replayed at subscription.
+    var firstText: String? {
+        guard let first = chunks.withLock(\.first) else { return nil }
+        return String(decoding: first, as: UTF8.self)
+    }
+
+    /// Every chunk run together, so a gap at a chunk boundary shows up as missing bytes.
+    var joinedText: String {
+        String(decoding: chunks.withLock { $0.flatMap { $0 } }, as: UTF8.self)
+    }
+
+    func append(_ chunk: [UInt8]) {
+        chunks.withLock { $0.append(chunk) }
+    }
+}
+
+/// Stands in for whatever a test captures in an observer closure, so a weak reference to it
+/// reports whether the host still holds that closure.
+private final class ObserverWitness: Sendable {}
 
 /// Starts a host on a PTY with no child and returns once its launch line has crossed.
 ///

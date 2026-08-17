@@ -279,9 +279,28 @@ public actor TerminalPTYHost {
     /// separates "these bytes never arrived" from "this host can no longer know",
     /// which is the difference between a failing wait and a hanging one.
     private var testOutputDiscardedByteCount = 0
+    /// One subscribed chunk observer, held by reference so that no traversal of the
+    /// observer list can copy the closure out as a function value.
+    ///
+    /// A Swift `Array` whose `Element` is a function type hands `for x in array` a fresh
+    /// reabstraction thunk that captures the original closure. Storing that loop-bound
+    /// value back into the array -- which is what the copy-empty-refill step below does --
+    /// grows the stored closure by one wrapper layer per chunk, and releasing the result
+    /// recurses one stack frame per layer, so a few hundred kilobytes of observed output
+    /// exhausted the stack and killed the test process. A class reference is copied
+    /// verbatim by every traversal form, so no later edit to that loop can rebuild the
+    /// chain.
+    private final class TestOutputObserver {
+        let receive: @Sendable ([UInt8]) -> Bool
+
+        init(receive: @escaping @Sendable ([UInt8]) -> Bool) {
+            self.receive = receive
+        }
+    }
+
     /// Chunk observers, each dropped as soon as it reports it is done, so a satisfied
     /// wait costs nothing afterwards. Bounded by the number of live waits on this host.
-    private var testOutputObservers: [@Sendable ([UInt8]) -> Bool] = []
+    private var testOutputObservers: [TestOutputObserver] = []
     private static let testOutputWindowLimit = 64 * 1024
     #endif
     private var interactionState = TerminalInteractionState()
@@ -1119,7 +1138,7 @@ public actor TerminalPTYHost {
         fence(countsAsProduction: false) { owner in
             let wantsMore = observer(owner.testOutputWindow)
             if wantsMore, owner.teardownFinished == false {
-                owner.testOutputObservers.append(observer)
+                owner.testOutputObservers.append(TestOutputObserver(receive: observer))
             }
             return owner.testOutputDiscardedByteCount
         }.value
@@ -1956,7 +1975,7 @@ public actor TerminalPTYHost {
         // one -- or one that unsubscribes itself by returning false -- is not lost.
         let observers = testOutputObservers
         testOutputObservers.removeAll(keepingCapacity: true)
-        for observer in observers where observer(bytes) {
+        for observer in observers where observer.receive(bytes) {
             testOutputObservers.append(observer)
         }
     }
