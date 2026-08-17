@@ -247,6 +247,19 @@ inside the `just test` gate.
 - `test-ui.sh` gains `Debouncer.swift`: the harness compiles `PaneHost.swift`, and
   the record now owns its search debouncer.
 
+- Commit 3 makes `makeTerminalSession` return the pane's whole record rather than a session
+  plus a token, which retires the `CreatedSession` pair commit 2 introduced. The replay file
+  is the one resource written before the record exists, so it is passed in and, when the
+  backend refuses the session, deleted there: with no record to own it, no caller is left to
+  remember it.
+- PO3's test needed a two-pane restore. A restore that fails on its only pane stages no
+  record at all, so the assertion that discarding does not reach a live pane sharing the id
+  was vacuous. The test now lets the restore stage a finished record under the live pane's id
+  and fail on a second pane; both halves were confirmed to fail under ablation -- ending the
+  follow stream in the discard path, and discarding without teardown.
+- `RecordingTerminalSession` gained a real follow opening and notice registration, which is
+  what lets an app-test hold a live tape-follow stream open with no terminal engine behind it.
+
 ## Commit progress
 
 - [x] 1. Make the pane host the runtime's only pane-keyed table. The session
@@ -258,6 +271,6 @@ inside the `just test` gate.
       visibility, the replay file, the search debouncer and its token, and the
       session subscription -- and make scheduled search work capture its target
       when it is armed. Covers I1, I3, I6, PO2, PO5.
-- [ ] 3. Stage a restore as whole records: staging builds them, commit installs
+- [x] 3. Stage a restore as whole records: staging builds them, commit installs
       the staged table wholesale, and the discard path runs the same record
       teardown. Covers I5 and the staged half of I2, PO3.

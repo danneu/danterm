@@ -115,18 +115,11 @@ private struct PaneTapeFollowTransport {
 // pure update function, and bridges model changes into AppKit objects and live sessions.
 @MainActor
 class AppRuntime {
+    /// A restore built whole but not yet live. Its panes are finished records, so committing
+    /// is a table swap and discarding is the same per-record teardown a live pane gets.
     private struct StagedRestoreSession {
         let model: AppModel
-        let sessions: [PaneId: CreatedSession]
-        let replayFiles: [PaneId: URL]
-    }
-
-    /// A freshly built session together with the scheduling token that owns its callbacks.
-    /// The token is armed before the pane's record exists, so it travels with the session
-    /// from creation until the record takes ownership of it at install.
-    private struct CreatedSession {
-        let session: any TerminalSession
-        let subscriptionToken: AppRuntimeSchedulingToken?
+        let hosts: [PaneId: PaneHost]
     }
 
     var model: AppModel
@@ -137,8 +130,8 @@ class AppRuntime {
     // is the pane's -- session, pane chrome, pushed visibility, replay file, search
     // debounce, session subscription -- so a container only reparents wrappers and
     // nothing else indexes a pane. `private(set)` because installing and removing a pane
-    // are the only two ways to write it -- see `installTerminalSession` and
-    // `tearDownSession`.
+    // are the only ways to write it -- see `installPane` and `tearDownSession`, plus the
+    // restore commit, which installs a whole staged table into an emptied one.
     private(set) var paneHosts: [PaneId: PaneHost] = [:]
     // Kept separate from pane visibility so an occluded wake remains deferred.
     var renderingAvailable = true
@@ -952,7 +945,7 @@ class AppRuntime {
                 ipcSocketPath: ipcSocketPath?.path,
                 paneId: paneId
             )
-            guard let created = makeTerminalSession(
+            guard let host = makeTerminalSession(
                 sessionId: sessionId,
                 paneId: paneId,
                 workingDirectory: cwd,
@@ -971,11 +964,7 @@ class AppRuntime {
                 send(.sessionCreationFailed(sessionId: sessionId))
                 break
             }
-            installTerminalSession(
-                created.session,
-                paneId: paneId,
-                subscriptionToken: created.subscriptionToken
-            )
+            installPane(host, paneId: paneId)
 
         case .sendText(let paneId, let text, let submissionId):
             guard let submissionId else {
@@ -1724,9 +1713,10 @@ class AppRuntime {
     }
 
     /// Build all runtime objects for a validated restore without touching the live session.
+    /// Each pane is staged as the finished record it will be installed as, so nothing is
+    /// reconstructed at commit and a failed build has one thing per pane to destroy.
     private func stageValidatedRestore(_ loaded: ValidatedAppRestore) throws -> StagedRestoreSession {
-        var stagedSessions: [PaneId: CreatedSession] = [:]
-        var stagedReplayFiles: [PaneId: URL] = [:]
+        var stagedHosts: [PaneId: PaneHost] = [:]
         // A snapshot carries structure, not appearance, so the rebuilt model arrives
         // with its config and resolved font family at the defaults. Carry the live
         // ones on before anything reads them: sessions below are built from this
@@ -1743,19 +1733,17 @@ class AppRuntime {
                     for paneId in allPaneIds(tab.paneTree.root) {
                         let ps = loaded.paneSnapshots[paneId]
                         let resolved = ps.map { resolveLaunch($0) }
-                        var scrollbackFilePath: String?
-                        if let replayText = recoveryReplayText(scrollback: ps?.scrollback, agentSession: ps?.agentSession),
-                           let replayURL = writeReplayFile(scrollback: replayText) {
-                            stagedReplayFiles[paneId] = replayURL
-                            scrollbackFilePath = replayURL.path
+                        var replayFile: URL?
+                        if let replayText = recoveryReplayText(scrollback: ps?.scrollback, agentSession: ps?.agentSession) {
+                            replayFile = writeReplayFile(scrollback: replayText)
                         }
                         let envVars = restoreLaunchEnvironment(
                             ipcSocketPath: ipcSocketPath?.path,
                             paneId: paneId,
-                            scrollbackFilePath: scrollbackFilePath,
+                            scrollbackFilePath: replayFile?.path,
                             command: resolved?.command
                         )
-                        guard let created = makeTerminalSession(
+                        guard let host = makeTerminalSession(
                             sessionId: restoredModel.pane(paneId)!.session!.id,
                             paneId: paneId,
                             workingDirectory: resolved?.cwd,
@@ -1769,26 +1757,19 @@ class AppRuntime {
                             fontSize: restoredModel.pane(paneId).map {
                                 effectiveFontSize(for: $0, config: restoredModel.config)
                             } ?? restoredModel.config.resolvedFontSize,
-                            fontFamily: restoredModel.resolvedFontFamily
+                            fontFamily: restoredModel.resolvedFontFamily,
+                            replayFile: replayFile
                         ) else {
                             throw RestoreBuildError.sessionCreationFailed
                         }
-                        stagedSessions[paneId] = created
+                        stagedHosts[paneId] = host
                     }
                 }
             }
 
-            return StagedRestoreSession(
-                model: restoredModel,
-                sessions: stagedSessions,
-                replayFiles: stagedReplayFiles
-            )
+            return StagedRestoreSession(model: restoredModel, hosts: stagedHosts)
         } catch {
-            discardRestoreSession(StagedRestoreSession(
-                model: restoredModel,
-                sessions: stagedSessions,
-                replayFiles: stagedReplayFiles
-            ))
+            discardRestoreSession(StagedRestoreSession(model: restoredModel, hosts: stagedHosts))
             throw error
         }
     }
@@ -1826,14 +1807,9 @@ class AppRuntime {
     private func commitRestoreSession(_ staged: StagedRestoreSession) {
         tearDownCurrentSession()
         model = staged.model
-        for (paneId, created) in staged.sessions {
-            installTerminalSession(
-                created.session,
-                paneId: paneId,
-                subscriptionToken: created.subscriptionToken,
-                replayFile: staged.replayFiles[paneId]
-            )
-        }
+        // tearDownCurrentSession emptied the table, so the staged one becomes the live one
+        // whole. The records were finished at staging; nothing is rebuilt here.
+        paneHosts = staged.hosts
         lightCheckpointBaseline = currentLightCheckpointProjection()
         cancelCoalescedReconcile()
 
@@ -1850,18 +1826,24 @@ class AppRuntime {
 
     }
 
-    /// Dispose of a staged restore after a failed build so no temp state leaks into the live session.
+    /// Dispose of a staged restore after a failed build so no temp state leaks into the live
+    /// session. This is the record teardown a live pane gets, and only that: a staged record
+    /// can carry the same pane id as a live pane, so the id-scoped half of `tearDownSession`
+    /// -- which would end that live pane's tape-follow streams -- must not run here.
     private func discardRestoreSession(_ staged: StagedRestoreSession) {
-        for created in staged.sessions.values {
-            schedulingLifecycle.cancel(created.subscriptionToken)
-            created.session.tearDown()
-        }
-        for url in staged.replayFiles.values {
-            try? FileManager.default.removeItem(at: url)
+        for host in staged.hosts.values {
+            host.tearDown(scheduling: schedulingLifecycle)
         }
     }
 
-    /// Construct one backend session and install its pane-scoped event translation.
+    /// Build one pane's whole runtime record: a backend session with its pane-scoped event
+    /// translation armed, wrapped in the record that owns both for the pane's lifetime. Both
+    /// callers -- the create-session command and restore staging -- get a finished record, so
+    /// no pane exists in a state where its session is live but its chrome is not.
+    ///
+    /// `replayFile` is the one resource written before the record exists. If the backend
+    /// refuses the session there is no record to own it, so it is deleted here rather than
+    /// left for a caller to remember.
     private func makeTerminalSession(
         sessionId: SessionId,
         paneId: PaneId,
@@ -1872,8 +1854,9 @@ class AppRuntime {
         envVars: [(String, String)],
         themeName: String?,
         fontSize: Double,
-        fontFamily: String?
-    ) -> CreatedSession? {
+        fontFamily: String?,
+        replayFile: URL? = nil
+    ) -> PaneHost? {
         let request = TerminalSessionRequest(
             workingDirectory: workingDirectory,
             command: command,
@@ -1885,7 +1868,10 @@ class AppRuntime {
             fontSize: fontSize,
             fontFamily: fontFamily
         )
-        guard let session = ports.createTerminalSession(request) else { return nil }
+        guard let session = ports.createTerminalSession(request) else {
+            if let replayFile { try? FileManager.default.removeItem(at: replayFile) }
+            return nil
+        }
         session.onEvent = { [weak self, weak session] event in
             #if DANTERM_TERMINAL_CHARACTERIZATION
             recordTerminalCharacterizationEvent(event)
@@ -1911,7 +1897,13 @@ class AppRuntime {
         if hasCheckpointableScrollback(initialRecoveryCandidate) {
             notePrimaryHistoryMutation()
         }
-        return CreatedSession(session: session, subscriptionToken: subscriptionToken)
+        return PaneHost(
+            paneId: paneId,
+            session: session,
+            runtime: self,
+            subscriptionToken: subscriptionToken,
+            replayFile: replayFile
+        )
     }
 
     private func importErrorMessage(for error: AppInitFileLoadError) -> String {
@@ -1931,24 +1923,16 @@ class AppRuntime {
 
     // MARK: - Pane Toolbars
 
-    /// The only way a pane enters the runtime. `internal` so tests install panes the
-    /// way production does instead of writing a session in behind this path.
-    ///
-    /// The two resources built before the record exists arrive here: the token that owns
-    /// the session's callbacks, and the replay file a restored pane's shell reads.
-    func installTerminalSession(
-        _ session: any TerminalSession,
-        paneId: PaneId,
-        subscriptionToken: AppRuntimeSchedulingToken? = nil,
-        replayFile: URL? = nil
-    ) {
-        paneHosts[paneId] = PaneHost(
-            paneId: paneId,
-            session: session,
-            runtime: self,
-            subscriptionToken: subscriptionToken,
-            replayFile: replayFile
-        )
+    /// The way one pane enters the runtime, given the record session creation produced.
+    private func installPane(_ host: PaneHost, paneId: PaneId) {
+        paneHosts[paneId] = host
+    }
+
+    /// Wraps a bare session in its record and installs it, for a caller that has a session
+    /// rather than a restore or a create-session command behind it. `internal` so tests
+    /// install panes the way production does instead of writing one in behind this path.
+    func installTerminalSession(_ session: any TerminalSession, paneId: PaneId) {
+        installPane(PaneHost(paneId: paneId, session: session, runtime: self), paneId: paneId)
     }
 
     /// Returns the pane's record, or nil when no pane is installed under that id.

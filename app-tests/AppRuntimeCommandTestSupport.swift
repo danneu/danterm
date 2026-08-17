@@ -28,6 +28,10 @@ final class RecordingAppRuntimePorts {
     /// that reuses a pane id needs to tell the replacement pane's session apart from the
     /// session of the pane it replaced.
     var queuedSessions: [RecordingTerminalSession] = []
+    /// How many sessions the fixture hands out in total before it refuses every later
+    /// request. `nil` never refuses. A test that needs a restore to fail partway through
+    /// building its panes counts the ones it wants built first.
+    var sessionsBeforeFailure: Int?
 
     init(session: RecordingTerminalSession = RecordingTerminalSession()) {
         self.session = session
@@ -37,6 +41,9 @@ final class RecordingAppRuntimePorts {
         AppRuntimePorts(
             createTerminalSession: { [self] request in
                 sessionRequests.append(request)
+                if let sessionsBeforeFailure, sessionRequests.count > sessionsBeforeFailure {
+                    return nil
+                }
                 return queuedSessions.isEmpty ? session : queuedSessions.removeFirst()
             },
             deliverNotification: { [self] request in
@@ -76,6 +83,12 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var fullHistoryText: String?
     var rowStructure: [TerminalSessionRowStructure]?
     var paneTapeOpenings: [(PaneTapeCaptureMode, PaneTapeStartPosition, PaneTapeStreamMode)] = []
+    /// The opening this session hands a tape reader. `nil` reports "no terminal to read",
+    /// so a test that wants a live follow stream on this pane assigns one.
+    var tapeOpening: PaneTapeOpening?
+    /// Counts follow notices the runtime retired, which is how a stream ending shows up on
+    /// the session side.
+    var cancelledTapeNotices = 0
     var sentText: [String] = []
     var sentInputText: [String] = []
     var sentInputKeys: [(key: KeyName, modifiers: KeyMods)] = []
@@ -87,6 +100,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var searchNeedles: [String] = []
     var searchDirections: [SearchDirection] = []
     var endSearchCount = 0
+    var tearDownCount = 0
 
     func sendText(_ text: String) { sentText.append(text) }
     func sendInputText(_ text: String) { sentInputText.append(text) }
@@ -125,14 +139,26 @@ final class RecordingTerminalSession: NSView, TerminalSession {
         mode: PaneTapeStreamMode
     ) -> (@Sendable () throws -> PaneTapeOpening)? {
         paneTapeOpenings.append((capture, start, mode))
-        return nil
+        guard let tapeOpening else { return nil }
+        return { tapeOpening }
+    }
+
+    func addPaneTapeFollowNotice(
+        id: UUID,
+        cursor: PaneTapeCursor,
+        notify: @escaping @Sendable () -> Void
+    ) -> PaneTapeFollowNoticeRegistration? {
+        guard tapeOpening != nil else { return nil }
+        return PaneTapeFollowNoticeRegistration(cancel: { [weak self] in
+            self?.cancelledTapeNotices += 1
+        })
     }
     func scroll(toRow row: Int) {}
     func copySelection() {}
     func pasteClipboard() {}
     func requestClose() {}
     func fenceForApplicationExit() {}
-    func tearDown() {}
+    func tearDown() { tearDownCount += 1 }
 }
 
 @MainActor
@@ -224,7 +250,29 @@ private func waitUntilCommandReadable(_ descriptor: Int32) -> Bool {
     }
 }
 
-func makeCommandSnapshot(paneId: PaneId, scrollback: String? = nil) -> AppModelSnapshot {
+/// An opening that carries no prefix records, so a test can hold a real follow stream open
+/// against a recording session with no terminal engine behind it.
+func makeEmptyPaneTapeOpening() -> PaneTapeOpening {
+    let cursor = PaneTapeCursor(
+        recorderLifetimeId: UUID(),
+        nextSequence: 0,
+        feedBytesBeforeNextSequence: 0,
+        writeBytesBeforeNextSequence: 0
+    )
+    return PaneTapeOpening(
+        start: PaneTapeStart(record: .object(["type": .string("start")]), cursor: cursor),
+        records: [],
+        nextCursor: cursor
+    )
+}
+
+/// `splitWith` puts a second pane beside the first, so a test can let a restore stage the
+/// first pane's record and then fail on the second.
+func makeCommandSnapshot(
+    paneId: PaneId,
+    scrollback: String? = nil,
+    splitWith siblingPaneId: PaneId? = nil
+) -> AppModelSnapshot {
     let groupId = GroupId(rawValue: UUID())
     let tabId = TabId(rawValue: UUID())
     let pane = PaneSnapshot(
@@ -235,6 +283,23 @@ func makeCommandSnapshot(paneId: PaneId, scrollback: String? = nil) -> AppModelS
         scrollback: scrollback,
         theme: nil
     )
+    var rootNode = SplitNodeSnapshot.leaf(pane)
+    if let siblingPaneId {
+        rootNode = .split(
+            id: UUID().uuidString,
+            direction: "horizontal",
+            first: .leaf(pane),
+            second: .leaf(PaneSnapshot(
+                id: siblingPaneId.rawValue.uuidString,
+                title: "Terminal",
+                cwd: "/tmp/project",
+                command: nil,
+                scrollback: nil,
+                theme: nil
+            )),
+            ratio: 0.5
+        )
+    }
     return AppModelSnapshot(
         groups: [GroupSnapshot(
             id: groupId.rawValue.uuidString,
@@ -244,7 +309,7 @@ func makeCommandSnapshot(paneId: PaneId, scrollback: String? = nil) -> AppModelS
                 id: tabId.rawValue.uuidString,
                 customTitle: nil,
                 focusedPaneId: paneId.rawValue.uuidString,
-                rootNode: .leaf(pane),
+                rootNode: rootNode,
                 color: nil
             )]
         )],

@@ -233,6 +233,71 @@ struct AppRuntimeSessionCommandTests {
         #expect(discarded.searchNeedles.isEmpty)
     }
 
+    // Intent: a restore that fails while it builds its panes changes nothing about the
+    // panes that were live before it, and leaves no staged replay file behind.
+    // Why it exists: staging builds whole pane records now, and a discarded record can
+    // carry the same pane id as a live pane. Destroying one through the live per-pane path
+    // would reach into that live pane and end its tape-follow streams.
+    // Scenario: a pane is live with an open follow stream when a two-pane restore stages a
+    // record under that same pane id and then runs out of sessions on its second pane.
+    @Test("a restore that fails while building leaves live panes and their follow streams alone")
+    func failedRestoreLeavesLivePanesUntouched() async throws {
+        let live = RecordingTerminalSession()
+        let stagedSession = RecordingTerminalSession()
+        live.tapeOpening = makeEmptyPaneTapeOpening()
+        let fixture = RecordingAppRuntimePorts()
+        fixture.queuedSessions = [live, stagedSession]
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+
+        let follow = try CommandIpcConnectionFixture()
+        defer {
+            follow.connection.close()
+            follow.closePeer()
+        }
+        let followId = UUID()
+        follow.remember(reqId: followId, rpcId: .number(1))
+        runtime.registerIpcConnection(follow.connection, for: followId)
+        runtime.perform(.streamPaneTape(
+            reqId: followId,
+            paneId: paneId,
+            capture: .follow,
+            start: .now,
+            mode: .raw
+        ))
+        _ = try follow.readResponse()
+        // The stream is registered only once the start reply's completion hops back to the
+        // main queue, so the restore below must not run before that has happened.
+        try await Task.sleep(for: .milliseconds(200))
+
+        // One more session, so the restore stages its first pane and then fails on its second.
+        let stagedRequestIndex = fixture.sessionRequests.count
+        fixture.sessionsBeforeFailure = stagedRequestIndex + 1
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(
+            paneId: paneId,
+            scrollback: "staged history\n",
+            splitWith: PaneId(rawValue: UUID())
+        ))
+
+        let stagedReplayPath = try #require(
+            fixture.sessionRequests[stagedRequestIndex].environment.first {
+                $0.0 == "DANTERM_RESTORE_SCROLLBACK_FILE"
+            }?.1
+        )
+        #expect(stagedSession.tearDownCount == 1, "the staged record must be destroyed")
+        #expect(FileManager.default.fileExists(atPath: stagedReplayPath) == false)
+        #expect(runtime.paneHosts[paneId]?.session === live)
+        runtime.perform(.sendText(paneId: paneId, text: "still usable"))
+        #expect(live.sentText == ["still usable"])
+        #expect(
+            follow.hasReadableData() == false,
+            "discarding a staged record must not end a live pane's follow stream"
+        )
+        #expect(live.cancelledTapeNotices == 0)
+    }
+
     // Intent: a pane installed under a reused pane id gets the visibility push its own
     // state calls for.
     // Why it exists: the last pushed visibility used to live in a runtime table that pane
