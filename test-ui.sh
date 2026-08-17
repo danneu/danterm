@@ -71,6 +71,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/PaneInputOrigin.swift" \
         "$SCRIPT_DIR/app/TerminalLinkURL.swift" \
         "$SCRIPT_DIR/app/DragDropPasteboard.swift" \
+        "$SCRIPT_DIR/app/TextPasteboard.swift" \
         "$SCRIPT_DIR/app/SingleLineLabel.swift" \
         "$SCRIPT_DIR/app/BadgeLabel.swift" \
         "$SCRIPT_DIR/app/ChipArtwork.swift" \
@@ -127,6 +128,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/ThemeBrowserView.swift" \
         "$SCRIPT_DIR/app/RemoteThemePickerSheet.swift" \
         "$SCRIPT_DIR/app/PreferencesPanel.swift" \
+        "$SCRIPT_DIR/app/ConfirmationPanel.swift" \
         "$SCRIPT_DIR/tests-ui/ChipViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneStripViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/MenuCommandPolicyTests.swift" \
@@ -153,6 +155,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/IOSurfaceLayerContentsTests.swift" \
         "$SCRIPT_DIR/tests-ui/AlertsPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PreferencesPanelTests.swift" \
+        "$SCRIPT_DIR/tests-ui/ConfirmationPanelTests.swift" \
         "$SCRIPT_DIR/tests-ui/SingleLineLabelTests.swift" \
         -framework Cocoa
 )

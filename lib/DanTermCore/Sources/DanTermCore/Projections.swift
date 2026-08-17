@@ -1053,7 +1053,10 @@ struct ConfirmationProjection: Equatable {
   let id: ConfirmationId
   let title: DisplayLine
   let informativeText: String
-  let commandDetail: DisplayLine?
+  /// Every running command the confirmed action would end, in pane order. The
+  /// panel presents as many as fit and scrolls the rest; nothing here is
+  /// shortened, so the copy affordance can hand over the whole list.
+  let commands: [DisplayLine]
   let confirmTitle: DisplayLine
   let secondaryTitle: DisplayLine?
 }
@@ -1069,7 +1072,10 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       id: pending.id,
       title: "Quit DanTerm?",
       informativeText: "This will close \(sessions).",
-      commandDetail: nil,
+      // Quit has no frozen impact on purpose: its copy is a live rollup that
+      // follows the model while the panel is open, so the command list is read
+      // from the live panes the same way the session count is.
+      commands: model.allPanes.compactMap(\.runningCommand).map { DisplayLine($0) },
       confirmTitle: "Quit",
       secondaryTitle: nil
     )
@@ -1084,7 +1090,7 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       id: pending.id,
       title: "Close pane?",
       informativeText: copy.informativeText,
-      commandDetail: copy.commandDetail,
+      commands: copy.commands,
       confirmTitle: "Close Pane",
       secondaryTitle: nil
     )
@@ -1102,7 +1108,7 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       id: pending.id,
       title: DisplayLine("Close tab \"\(tabTitle.text)\"?"),
       informativeText: copy.informativeText,
-      commandDetail: copy.commandDetail,
+      commands: copy.commands,
       confirmTitle: "Close Tab",
       secondaryTitle: nil
     )
@@ -1120,7 +1126,7 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
         ? "Close \(tabCount) tabs and quit DanTerm?"
         : "Close \(tabCount) tabs?"),
       informativeText: copy.informativeText,
-      commandDetail: copy.commandDetail,
+      commands: copy.commands,
       confirmTitle: DisplayLine("Close \(tabCount) Tabs"),
       secondaryTitle: nil
     )
@@ -1135,7 +1141,7 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       id: pending.id,
       title: DisplayLine("Delete group \"\(group.name)\"?"),
       informativeText: "This group has \(frozen.tabIds.count) tab(s).",
-      commandDetail: nil,
+      commands: [],
       confirmTitle: DisplayLine("Move to \(destination.name)"),
       secondaryTitle: "Close Tabs"
     )

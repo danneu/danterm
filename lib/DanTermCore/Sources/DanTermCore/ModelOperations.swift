@@ -762,15 +762,7 @@ func closeImpact(for subject: ConfirmationSubject, in model: AppModel) -> CloseI
   }
 
   return CloseImpact(
-    panes: panes.map { pane in
-      let runningCommand: String?
-      if case .running(let command) = pane.session?.command {
-        runningCommand = command
-      } else {
-        runningCommand = nil
-      }
-      return CloseImpact.Pane(paneId: pane.id, runningCommand: runningCommand)
-    },
+    panes: panes.map { CloseImpact.Pane(paneId: $0.id, runningCommand: $0.runningCommand) },
     uncompletedTodoCount: uncompletedTodoCount
   )
 }
@@ -900,19 +892,10 @@ func closeConfirmationCopy(
     informativeText = sentence
   }
 
-  let commandDetail = runningCommands.count == 1
-    ? boundedCommandDetail(runningCommands[0])
-    : nil
   return CloseConfirmationCopy(
     informativeText: informativeText,
-    commandDetail: commandDetail
+    commands: runningCommands.map { DisplayLine($0) }
   )
-}
-
-private func boundedCommandDetail(_ command: String) -> DisplayLine {
-  let normalized = DisplayLine(command)
-  guard normalized.text.count > 60 else { return normalized }
-  return DisplayLine(String(normalized.text.prefix(59)) + "\u{2026}")
 }
 
 // MARK: - Alert Helpers

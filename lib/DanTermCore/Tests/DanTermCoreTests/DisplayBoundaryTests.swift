@@ -129,7 +129,17 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
             _ = update(&closeModel, .requestCloseTab(id: tabId))
             if let projection = desiredConfirmation(in: closeModel) {
                 expectFlat(projection.title, "close-tab confirmation title", input: hostile)
-                expectFlat(projection.commandDetail, "close confirmation command detail", input: hostile)
+                for command in projection.commands {
+                    expectFlat(command, "close confirmation command", input: hostile)
+                }
+            }
+
+            var quitModel = model
+            _ = update(&quitModel, .requestQuit)
+            if let projection = desiredConfirmation(in: quitModel) {
+                for command in projection.commands {
+                    expectFlat(command, "quit confirmation command", input: hostile)
+                }
             }
         }
     }

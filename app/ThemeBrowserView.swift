@@ -8,15 +8,6 @@ enum ThemeBrowserFocusTarget {
     case table
 }
 
-/// Minimal clipboard surface ThemeBrowserView needs, split out so lifetime
-/// tests can observe Copy Name without touching AppKit pasteboard services.
-protocol ThemeNamePasteboard: AnyObject {
-    @discardableResult func clearContents() -> Int
-    @discardableResult func setString(_ string: String, forType dataType: NSPasteboard.PasteboardType) -> Bool
-}
-
-extension NSPasteboard: ThemeNamePasteboard {}
-
 /// Table view that builds a fresh context menu per right-click, so the browser
 /// never stores a menu that could anchor itself through `representedObject`.
 class ThemeBrowserTableView: NSTableView {
@@ -49,7 +40,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
     private var currentThemeName: String?
     /// Pasteboard seam for Copy Name. Production uses the general pasteboard;
     /// tests inject a recorder so assertions never touch clipboard services.
-    var pasteboard: ThemeNamePasteboard = NSPasteboard.general
+    var pasteboard: TextPasteboard = NSPasteboard.general
 
     /// Strong context-menu payload that keeps this ephemeral browser alive for
     /// the menu item's lifetime while carrying the stable copied theme name.

@@ -535,7 +535,7 @@ private func menuPayload(from item: NSMenuItem) throws -> ThemeBrowserView.MenuP
     return payload
 }
 
-private final class RecordingThemePasteboard: ThemeNamePasteboard {
+private final class RecordingThemePasteboard: TextPasteboard {
     private var value: String?
 
     @discardableResult

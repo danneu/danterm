@@ -20,7 +20,7 @@ struct CloseConfirmationTests {
         #expect(close.id == model.pendingConfirmation?.id)
         #expect(close.title == "Close tab \"Terminal\"?")
         #expect(close.informativeText == "This tab has a running command.")
-        #expect(close.commandDetail == "npm run dev")
+        #expect(close.commands == ["npm run dev"])
         #expect(close.confirmTitle == "Close Tab")
 
         _ = update(&model, .requestQuit)
@@ -28,7 +28,7 @@ struct CloseConfirmationTests {
         #expect(quit.id == model.pendingConfirmation?.id)
         #expect(quit.title == "Quit DanTerm?")
         #expect(quit.informativeText == "This will close 2 terminal sessions.")
-        #expect(quit.commandDetail == nil)
+        #expect(quit.commands == ["npm run dev"])
         #expect(quit.confirmTitle == "Quit")
     }
 
@@ -385,7 +385,7 @@ struct CloseConfirmationTests {
         _ = confirmPending(&tabModel)
 
         #expect(tabById(tabId, in: tabModel) != nil)
-        #expect(closeConfirmation(in: tabModel)?.copy.commandDetail == "make test")
+        #expect(closeConfirmation(in: tabModel)?.copy.commands == ["make test"])
 
         var batchModel = makeModel()
         createTab(&batchModel)
@@ -400,7 +400,7 @@ struct CloseConfirmationTests {
 
         #expect(subjectIds.allSatisfy { tabById($0, in: batchModel) != nil })
         #expect(closeConfirmation(in: batchModel)?.subject == .tabs(subjectIds))
-        #expect(closeConfirmation(in: batchModel)?.copy.commandDetail == "rsync source dest")
+        #expect(closeConfirmation(in: batchModel)?.copy.commands == ["rsync source dest"])
     }
 
     @Test("pane confirm closes and pane cancel leaves it intact")
@@ -458,15 +458,23 @@ struct CloseConfirmationTests {
         )
 
         #expect(tabCopy.informativeText == "This tab has 2 terminal panes, a running command and 1 unfinished task. Closing it will quit DanTerm.")
-        #expect(tabCopy.commandDetail == "npm run dev")
+        #expect(tabCopy.commands == ["npm run dev"])
         #expect(paneCopy.informativeText == "This pane has a running command.")
-        #expect(paneCopy.commandDetail == tabCopy.commandDetail)
+        #expect(paneCopy.commands == tabCopy.commands)
     }
 
-    @Test("command detail is normalized and bounded after normalization")
-    func commandDetailIsNormalizedAndBounded() {
+    @Test("a command is flattened but never shortened")
+    func commandIsFlattenedButNeverShortened() {
+        // Intent: the display boundary strips controls and bidi overrides, and
+        //   that is the only thing standing between the raw command and the
+        //   projection -- no length rule survives it.
+        // Why it exists: the copy affordance can only hand over the whole command
+        //   if the model kept the whole command. A length bound here is what made
+        //   copying an ellipsis possible.
+        // Scenario: a hostile command far past the old 60-character bound.
         let paneId = PaneId()
-        let hostile = "\u{1B}[31m\u{202E}" + String(repeating: "a", count: 61)
+        let tail = String(repeating: "a", count: 300)
+        let hostile = "\u{1B}[31m\u{202E}" + tail
         let impact = CloseImpact(
             panes: [.init(paneId: paneId, runningCommand: hostile)],
             uncompletedTodoCount: 0
@@ -474,13 +482,13 @@ struct CloseConfirmationTests {
 
         let copy = closeConfirmationCopy(subject: .pane(paneId), impact: impact, quitAuthorized: false)
 
-        #expect(copy.commandDetail?.text == "[31m" + String(repeating: "a", count: 55) + "\u{2026}")
-        #expect(copy.commandDetail?.text.count == 60)
-        #expect(copy.commandDetail?.text.contains("\u{1B}") == false)
-        #expect(copy.commandDetail?.text.contains("\u{202E}") == false)
+        #expect(copy.commands.map(\.text) == ["[31m" + tail])
+        #expect(copy.commands[0].text.contains("\u{2026}") == false)
+        #expect(copy.commands[0].text.contains("\u{1B}") == false)
+        #expect(copy.commands[0].text.contains("\u{202E}") == false)
     }
 
-    @Test("batch fallback, plural commands, and command detail boundaries are exact")
+    @Test("batch fallback, plural commands, and verbatim command text are exact")
     func remainingCopyFormsAreExact() {
         let paneA = PaneId()
         let paneB = PaneId()
@@ -515,10 +523,12 @@ struct CloseConfirmationTests {
             quitAuthorized: false
         )
         #expect(plural.informativeText == "These tabs have 2 running commands.")
-        #expect(plural.commandDetail == nil)
+        // Plural is the case that used to name no command at all.
+        #expect(plural.commands.map(\.text) == ["one", "two"])
 
         for command in [
             String(repeating: "a", count: 60),
+            String(repeating: "b", count: 61),
             "say \"double\" and 'single'",
         ] {
             let copy = closeConfirmationCopy(
@@ -529,18 +539,8 @@ struct CloseConfirmationTests {
                 ),
                 quitAuthorized: false
             )
-            #expect(copy.commandDetail?.text == command)
+            #expect(copy.commands.map(\.text) == [command])
         }
-        let long = String(repeating: "b", count: 61)
-        let bounded = closeConfirmationCopy(
-            subject: .pane(paneA),
-            impact: CloseImpact(
-                panes: [.init(paneId: paneA, runningCommand: long)],
-                uncompletedTodoCount: 0
-            ),
-            quitAuthorized: false
-        )
-        #expect(bounded.commandDetail?.text == String(repeating: "b", count: 59) + "\u{2026}")
     }
 }
 

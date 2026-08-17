@@ -181,6 +181,15 @@ struct PaneModel: Equatable {
     /// `paneFontSizeStepRange` -- every ingress bounds it.
     var fontSizeSteps: Int = 0
     var todos: [TodoItem] = []
+
+    /// The command this pane is running, if any. The single place that turns the
+    /// session's command state into the optional every close-impact and
+    /// confirmation rollup wants, so the two cannot disagree about what
+    /// "running" means.
+    var runningCommand: String? {
+        guard case .running(let command) = session?.command else { return nil }
+        return command
+    }
 }
 
 indirect enum SplitNodeModel: Equatable {
@@ -447,10 +456,14 @@ struct CloseImpact: Equatable {
     }
 }
 
-/// Carries pure alert copy and the separately rendered command detail.
+/// Carries pure alert copy and the full command list the close would end.
 struct CloseConfirmationCopy: Equatable {
     let informativeText: String
-    let commandDetail: DisplayLine?
+    /// One entry per running command among the affected panes, in pane order,
+    /// flattened by the display boundary but never shortened by length. The view
+    /// decides how much of it to draw; the model keeps all of it so a copy can
+    /// hand over what the user was asked to decide about.
+    let commands: [DisplayLine]
 }
 
 /// Freezes the tabs and destination named by a delete-group confirmation.

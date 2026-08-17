@@ -1474,6 +1474,37 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             "projection reflects the decremented live pane count")
     }
 
+    @Test("a pending quit names every running command app-wide and drops each as its pane closes")
+    func desiredConfirmationRollsUpQuitCommands() throws {
+        // Intent: the quit confirmation names the commands quitting would end,
+        //   across every tab, in pane order, and the list follows the live model
+        //   the same way the session count does.
+        // Why it exists: quit is the most destructive path and used to name no
+        //   command at all. Deriving the list from the live model rather than a
+        //   frozen impact is what keeps it honest while the panel is open.
+        // Scenario: spec-first -- two tabs, three panes, two of them running;
+        //   close one running pane and the projection drops that command only.
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = try #require(selectedTab(in: model)?.id)
+        let firstPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+        _ = update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let firstTabPanes = allPaneIds(try #require(tabById(firstTabId, in: model)).paneTree.root)
+        createTab(&model)
+        let secondTabPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+        model.updatePane(firstTabPanes[0]) { $0.session?.command = .running("make test") }
+        model.updatePane(secondTabPaneId) { $0.session?.command = .running("npm run dev") }
+        model.pendingConfirmation = pendingAppConfirmation()
+
+        #expect(desiredConfirmation(in: model)?.commands.map(\.text) == ["make test", "npm run dev"],
+            "quit names both running commands in pane order and skips the idle pane")
+
+        _ = update(&model, .closePane(paneId: firstTabPanes[0]))
+
+        #expect(desiredConfirmation(in: model)?.commands.map(\.text) == ["npm run dev"],
+            "closing a running pane drops its command from the live rollup")
+    }
+
     // MARK: - resolveContextTargets (sidebar Finder/Mail rule)
 
     @Test("resolveContextTargets clicked row in selection returns selection in row order")
