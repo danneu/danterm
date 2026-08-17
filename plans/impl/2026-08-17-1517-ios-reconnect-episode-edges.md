@@ -233,7 +233,7 @@ failure vocabulary, the wire, the Mac, or the CLI;
 ## Commit progress
 - [x] 1. the reconnect deadline survives a drag and a clock correction
 - [x] 2. form validation leaves the connection status channel
-- [ ] 3. the retry budget is what remains, not what was spent
+- [x] 3. the retry budget is what remains, not what was spent
 
 ## Implementation notes
 
@@ -266,6 +266,19 @@ failure vocabulary, the wire, the Mac, or the CLI;
   what a usable port is, exactly as before, so port 0 is still accepted and the
   wording says so. Narrowing the range is a change to what the app accepts and
   is not this plan's.
+- **The remaining effort is a slice of the schedule's delays.** The policy holds
+  `ArraySlice<TimeInterval>` and consumes the head when it authorizes an
+  automatic attempt, so the delay lookup is `first` rather than an index, and the
+  attempt a signal buys after give-up drops the head of an already empty slice --
+  a no-op, which is exactly "neither restores the effort nor draws on it". The
+  slice keeps the schedule's `delays` as the single statement of the episode's
+  total effort, so nothing had to be restated.
+- **PO4's long sequence passes on the old representation too.** The counter was
+  already safe, because the budget check ran before the delay lookup; the defect
+  was that a reader had to prove that. So the new test is a behavioral pin, not a
+  failing-first test, and I6's structural half stays an obligation discharged by
+  review: the policy now holds no quantity that grows and no range check guards a
+  lookup.
 - **The clock became a named kit value.** `MobileMonotonicClock.now` replaces the
   shell's direct `ProcessInfo.processInfo.systemUptime` readings, so the base the
   policy schedules on and the base the timer delivers on are one declaration

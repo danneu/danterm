@@ -252,6 +252,24 @@ func signalAfterGiveUpBuysOneAttempt() {
     #expect(policy.handle(.clockFired, at: 900) == .rest)
 }
 
+@Test("A long run of signals after give-up buys one attempt each, forever")
+func signalsAfterGiveUpNeverCompound() {
+    // Intent: after give-up, any number of signal-then-failure rounds authorizes exactly
+    //   one attempt per signal, and the policy never rests differently for having run
+    //   longer.
+    // Why it exists: the spent budget is what bounds a flapping path, and a policy that
+    //   accumulated anything per post-give-up attempt would either drift or stop being
+    //   safe after enough rounds. A long run is the only way to see that.
+    var policy = exhaustedPolicy(startingAt: 100)
+    var now = 500.0
+    for _ in 0..<200 {
+        #expect(policy.handle(.appForegrounded, at: now) == .attemptNow)
+        #expect(policy.handle(.attemptFailed(lostConnection()), at: now + 1) == .rest)
+        #expect(policy.handle(.clockFired, at: now + 2) == .rest)
+        now += 10
+    }
+}
+
 @Test("A user gesture restores the whole budget from a rested state")
 func gestureRestoresTheBudget() {
     var policy = exhaustedPolicy(startingAt: 100)
