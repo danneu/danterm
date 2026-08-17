@@ -52,8 +52,9 @@ struct IpcConnectionWriteTests {
         defer { Darwin.close(descriptors.peer) }
 
         connection.writeHello(appVersion: "test", livenessBound: .standard)
-        connection.startReading(
-            onRequest: { request, connection in
+        connection.startReading { event, connection in
+            switch event {
+            case .request(let request):
                 connection.rememberRequest(reqId: requestId, rpcId: request.id)
                 connection.writeSuccess(
                     reqId: requestId,
@@ -84,9 +85,12 @@ struct IpcConnectionWriteTests {
                         closeAfterWrite: true
                     )
                 }
-            },
-            onClose: { connection, _ in closed.record(connection.id) }
-        )
+            case .malformedRequest:
+                break
+            case .closed:
+                closed.record(connection.id)
+            }
+        }
 
         let hello = try JSONDecoder().decode(
             JsonRpcRequest.self,
@@ -128,10 +132,9 @@ struct IpcConnectionWriteTests {
         let descriptors = try socketPair()
         let connection = IpcConnection(fileDescriptor: descriptors.connection)
         let closed = ConnectionCloseProbe()
-        connection.startReading(
-            onRequest: { _, _ in },
-            onClose: { connection, _ in closed.record(connection.id) }
-        )
+        connection.startReading { event, connection in
+            if case .closed = event { closed.record(connection.id) }
+        }
 
         Darwin.close(descriptors.peer)
         #expect(try closed.wait() == connection.id)
@@ -311,6 +314,8 @@ struct IpcConnectionWriteTests {
 
     @Test("a malformed envelope reports its readable raw method")
     func malformedEnvelopeReportsMethod() throws {
+        // The reply this line earns is written by the connection's owner, not here, so
+        // the wire assertion for it lives beside that owner in the app tests.
         let descriptors = try socketPair()
         let connection = IpcConnection(fileDescriptor: descriptors.connection)
         let malformed = MalformedRequestProbe()
@@ -318,21 +323,14 @@ struct IpcConnectionWriteTests {
             connection.close()
             Darwin.close(descriptors.peer)
         }
-        connection.startReading(
-            onRequest: { _, _ in },
-            onMalformedRequest: { method, _ in malformed.record(method) },
-            onClose: { _, _ in }
-        )
+        connection.startReading { event, _ in
+            if case .malformedRequest(let method) = event { malformed.record(method) }
+        }
 
         let line = Data((#"{"jsonrpc":2,"id":1,"method":"pane.read","params":{}}"# + "\n").utf8)
         _ = line.withUnsafeBytes { Darwin.write(descriptors.peer, $0.baseAddress, $0.count) }
 
         #expect(try malformed.wait() == "pane.read")
-        let response = try JSONDecoder().decode(
-            JsonRpcResponse.self,
-            from: readIpcLine(from: descriptors.peer)
-        )
-        #expect(response.error?.code == -32700)
     }
 
     private func socketPair() throws -> (connection: Int32, peer: Int32) {

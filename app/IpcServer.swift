@@ -160,11 +160,15 @@ actor IpcServer {
     }
 
     /// Makes both listener surfaces unreachable before returning to synchronous app exit.
+    ///
+    /// The cleanup task holds the server strongly: it is the only thing that closes the
+    /// descriptors the readers are parked on, so letting the server go first would skip it
+    /// and leave every idle reader blocked on a socket nobody closes.
     nonisolated func stop() {
         stopState.markStopped()
         listener.close()
         tailnetListener?.close()
-        Task { [weak self] in await self?.closeConnections() }
+        Task { await self.closeConnections() }
     }
 
     private func startLocalAcceptLoop() {
@@ -223,7 +227,9 @@ actor IpcServer {
 
     private func closeConnections() {
         for state in connections.values {
-            state.connection.close()
+            // Forced, because a peer that stopped reading must not be able to keep a
+            // descriptor -- and a reader thread parked on it -- past the server's own life.
+            state.connection.forceClose()
             try? auditWriter.append(.connectionClosed(
                 transport: state.transport,
                 peerAddress: state.peerAddress,
@@ -323,25 +329,43 @@ actor IpcServer {
     }
 
     private func beginService(_ state: ConnectionState) {
-        let auditWriter = auditWriter
-        let caller = state.caller
         state.connection.writeHello(appVersion: appVersion, livenessBound: livenessBound)
-        state.connection.startReading(
-            livenessBound: state.livenessBound,
-            onRequest: { [weak self] request, connection in
-                Task { await self?.dispatch(request, from: connection) }
-            },
-            onMalformedRequest: { method, _ in
-                try? auditWriter.append(.requestDecodeFailed(
-                    caller: caller,
-                    rawMethod: method ?? "<unparseable>",
-                    outcome: "error"
-                ))
-            },
-            onClose: { [weak self] connection, reason in
-                Task { await self?.close(connection, reason: reason) }
+        state.connection.startReading(livenessBound: state.livenessBound) { [weak self] event, connection in
+            // The reader thread waits here, so this connection's next event does not exist
+            // until this one has been handled. That is the whole ordering guarantee: there
+            // is never a second event to get ahead of the first. The semaphore is signalled
+            // by the submitted task itself rather than by the server, so a server that has
+            // gone away leaves no reader stranded.
+            let handled = DispatchSemaphore(value: 0)
+            Task {
+                defer { handled.signal() }
+                await self?.handle(event, from: connection)
             }
-        )
+            handled.wait()
+        }
+    }
+
+    /// Acts on one connection event, on the actor, while its reader waits.
+    private func handle(_ event: IpcConnectionEvent, from connection: IpcConnection) async {
+        switch event {
+        case .request(let request):
+            await dispatch(request, from: connection)
+        case .malformedRequest(let rawMethod):
+            recordMalformedRequest(rawMethod, from: connection)
+        case .closed(let reason):
+            await close(connection, reason: reason)
+        }
+    }
+
+    /// Records an unparseable line and answers it, in that order, on this connection's timeline.
+    private func recordMalformedRequest(_ rawMethod: String?, from connection: IpcConnection) {
+        guard let state = connections[connection.id] else { return }
+        try? auditWriter.append(.requestDecodeFailed(
+            caller: state.caller,
+            rawMethod: rawMethod ?? "<unparseable>",
+            outcome: "error"
+        ))
+        connection.writeErrorResponse(id: .null, code: -32700, message: "parse error")
     }
 
     private func close(_ connection: IpcConnection, reason: IpcConnectionCloseReason) async {

@@ -36,11 +36,9 @@ struct IpcConnectionLivenessTests {
         defer { Darwin.close(descriptors.peer) }
 
         let started = ContinuousClock().now
-        connection.startReading(
-            livenessBound: try #require(IpcLivenessBound(seconds: 0.4)),
-            onRequest: { _, _ in },
-            onClose: { _, reason in closed.record(reason) }
-        )
+        connection.startReading(livenessBound: try #require(IpcLivenessBound(seconds: 0.4))) { event, _ in
+            if case .closed(let reason) = event { closed.record(reason) }
+        }
 
         #expect(try await closed.wait() == .peerSilent)
         let elapsed = ContinuousClock().now - started
@@ -70,11 +68,13 @@ struct IpcConnectionLivenessTests {
             Darwin.close(descriptors.peer)
         }
 
-        connection.startReading(
-            livenessBound: try #require(IpcLivenessBound(seconds: 0.4)),
-            onRequest: { request, _ in served.record(request.method) },
-            onClose: { _, reason in closed.record(reason) }
-        )
+        connection.startReading(livenessBound: try #require(IpcLivenessBound(seconds: 0.4))) { event, _ in
+            switch event {
+            case .request(let request): served.record(request.method)
+            case .malformedRequest: break
+            case .closed(let reason): closed.record(reason)
+            }
+        }
 
         let line = try encodeIpcLine(
             JsonRpcRequest(id: .string("R1"), method: IpcRequestMethod.ls.rawValue)
@@ -105,10 +105,9 @@ struct IpcConnectionLivenessTests {
         let connection = IpcConnection(fileDescriptor: descriptors.connection)
         let closed = CloseReasonProbe()
 
-        connection.startReading(
-            onRequest: { _, _ in },
-            onClose: { _, reason in closed.record(reason) }
-        )
+        connection.startReading { event, _ in
+            if case .closed(let reason) = event { closed.record(reason) }
+        }
 
         try await Task.sleep(for: .seconds(1))
         #expect(closed.recorded == nil, "an exempt connection must survive silence")
@@ -132,11 +131,9 @@ struct IpcConnectionLivenessTests {
         let closed = CloseReasonProbe()
         defer { Darwin.close(descriptors.peer) }
 
-        connection.startReading(
-            livenessBound: try #require(IpcLivenessBound(seconds: 0.4)),
-            onRequest: { _, _ in },
-            onClose: { _, reason in closed.record(reason) }
-        )
+        connection.startReading(livenessBound: try #require(IpcLivenessBound(seconds: 0.4))) { event, _ in
+            if case .closed(let reason) = event { closed.record(reason) }
+        }
         // Far past any socket buffer, so the writer is certainly parked in `write`.
         connection.writeNotification(
             method: Methods.paneTapeEvent,

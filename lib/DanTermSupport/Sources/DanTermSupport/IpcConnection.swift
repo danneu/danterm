@@ -1,6 +1,10 @@
 // Unix-socket connection lifecycle and JSON-RPC response writing for DanTerm IPC; line framing
 // lives in DanTermProtocol (IpcLineFramer).
 //
+// Reads leave through one callback carrying one ordered event sequence, and the reader waits
+// for each event before it reads on. What the owner does with an event is its own business;
+// what this file guarantees is that it never learns about two at once.
+//
 // Writes are queued and their completions are delivered on the main queue, always: the app state
 // a completion feeds lives on the main actor, so the completions are typed `@MainActor` and every
 // exit routes through `deliver`. The uniformity is the point -- an early exit that reported
@@ -8,6 +12,20 @@
 import Foundation
 import DanTermProtocol
 import Darwin
+
+/// One thing that happened on a connection, in the order the bytes for it arrived.
+///
+/// It is one type with one delivery callback because the reader produces one ordered
+/// sequence. Separate callbacks per kind invited separate routings, and out-of-order
+/// handling followed; with a single sequence there is nothing left to reorder.
+enum IpcConnectionEvent: Sendable {
+    /// A well-formed JSON-RPC envelope.
+    case request(JsonRpcRequest)
+    /// A line that is not a JSON-RPC envelope, with whatever method name survived it.
+    case malformedRequest(rawMethod: String?)
+    /// The read loop is done. Emitted exactly once, on every exit, and nothing follows it.
+    case closed(IpcConnectionCloseReason)
+}
 
 /// Names why a serviced connection ended, so a reader of the audit log can tell a peer
 /// that left from one this server stopped waiting for.
@@ -46,11 +64,14 @@ final class IpcConnection: @unchecked Sendable {
     ///
     /// A nil `livenessBound` exempts the connection, which is what a local peer gets: it
     /// cannot die without its socket closing, and a local follow may idle forever.
+    ///
+    /// `onEvent` runs on the reader thread, and the next byte of this connection is not
+    /// read until it returns. A handler that hands the event to something asynchronous
+    /// must therefore wait for that work before returning: the order the handler acts in
+    /// is the wire order only because at most one event exists at a time.
     func startReading(
         livenessBound: IpcLivenessBound? = nil,
-        onRequest: @escaping @Sendable (JsonRpcRequest, IpcConnection) -> Void,
-        onMalformedRequest: @escaping @Sendable (String?, IpcConnection) -> Void = { _, _ in },
-        onClose: @escaping @Sendable (IpcConnection, IpcConnectionCloseReason) -> Void
+        onEvent: @escaping @Sendable (IpcConnectionEvent, IpcConnection) -> Void
     ) {
         if let livenessBound { Self.armReceiveDeadline(livenessBound, on: fd) }
         DispatchQueue.global(qos: .utility).async { [self] in
@@ -78,33 +99,39 @@ final class IpcConnection: @unchecked Sendable {
                     switch event {
                     case .line(let line):
                         guard !line.isEmpty else { continue }
-                        do {
-                            let request = try JSONDecoder().decode(JsonRpcRequest.self, from: line)
-                            onRequest(request, self)
-                        } catch {
+                        if let request = try? JSONDecoder().decode(
+                            JsonRpcRequest.self,
+                            from: line
+                        ) {
+                            onEvent(.request(request), self)
+                        } else {
                             let method = try? JSONDecoder().decode(
                                 IpcMalformedRequestProbe.self,
                                 from: line
                             ).method
-                            onMalformedRequest(method, self)
-                            writeErrorResponse(id: .null, code: -32700, message: "parse error")
+                            onEvent(.malformedRequest(rawMethod: method), self)
                         }
                     case .oversized:
+                        // The refusal closes the socket once its line is flushed, so this
+                        // exit hands the descriptor to the write queue rather than closing
+                        // it here and cutting off the explanation.
                         writeErrorResponse(
                             id: .null,
                             code: -32600,
                             message: "request line too large",
                             closeAfterWrite: true
                         )
-                        onClose(self, .oversizedRequest)
+                        onEvent(.closed(.oversizedRequest), self)
                         return
                     }
                 }
             }
 
-            if reason == .peerSilent { shutdownIfOpen() }
-            close()
-            onClose(self, reason)
+            // A reclaimed peer is one that stopped reading too, so its queued writes must
+            // not decide when the descriptor goes. A peer that left of its own accord is
+            // still owed the answer to the last request it sent.
+            if reason == .peerSilent { forceClose() } else { close() }
+            onEvent(.closed(reason), self)
         }
     }
 
@@ -187,6 +214,11 @@ final class IpcConnection: @unchecked Sendable {
         )
     }
 
+    /// Releases the descriptor once the writes already queued on it have gone out.
+    ///
+    /// The release rides the write queue, so the answer to the peer's last request still
+    /// reaches it. That also means a peer which stopped reading holds the descriptor for
+    /// as long as it likes -- `forceClose` is for the cases that cannot allow that.
     func close() {
         lock.lock()
         let shouldClose = !closed
@@ -198,18 +230,19 @@ final class IpcConnection: @unchecked Sendable {
         }
     }
 
-    /// Fails a write parked on this socket, so the close queued behind it can run.
+    /// Releases the descriptor now, failing whatever write is parked on it.
     ///
-    /// `close()` only enqueues the descriptor's close on the write queue, and a peer that
-    /// stopped reading parks that queue in a blocking write -- so without this the bound
-    /// would bound the read loop and not the descriptor. It runs under the same lock that
-    /// guards `closed`, which is what keeps it from touching a descriptor number the
-    /// queued close has already released and the kernel has already handed to someone else.
-    private func shutdownIfOpen() {
+    /// Reclamation at the silence bound and server stop both end connections the peer is
+    /// no longer reading, where waiting for the write queue to drain means waiting on a
+    /// peer that has stopped participating. The shutdown runs under the same lock that
+    /// guards `closed`, which keeps it from touching a descriptor number the queued close
+    /// has already released and the kernel has already handed to someone else.
+    func forceClose() {
         lock.lock()
-        defer { lock.unlock() }
-        guard !closed else { return }
-        Darwin.shutdown(fd, SHUT_RDWR)
+        let shouldShutDown = !closed
+        if shouldShutDown { Darwin.shutdown(fd, SHUT_RDWR) }
+        lock.unlock()
+        close()
     }
 
     private func takeResponseId(_ reqId: UUID) -> JSONValue? {

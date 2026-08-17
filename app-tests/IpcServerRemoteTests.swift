@@ -560,6 +560,215 @@ struct IpcServerRemoteTests {
         let localEntry = try #require(entries.first { $0.event.kind == .localRequest })
         #expect(localEntry.event.caller?.kind == .local)
     }
+
+    @Test("one connection's records follow the order its lines arrived in")
+    func recordsFollowTheOrderLinesArrived() async throws {
+        // Intent: a good request, an unparseable line, and another good request, written
+        //   as one blob, are recorded in exactly that order.
+        // Why it exists: the server routed each kind of event its own way -- requests
+        //   through one unstructured task, decode failures inline on the reader thread --
+        //   and unstructured tasks have no order between them, so the log's order for one
+        //   connection was decided by scheduling.
+        // Scenario: a client pipelines three lines without waiting for a reply between
+        //   them, which is what hides the defect: a reply round trip would order them.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(runtime: runtime)
+        defer { server.stop() }
+
+        await server.start()
+        let remote = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { remote.close() }
+        _ = try await remote.readRequest()
+
+        try remote.writeLines([
+            encodeIpcLine(JsonRpcRequest(id: .number(1), method: IpcRequestMethod.ls.rawValue)),
+            Data((#"{"jsonrpc":2,"id":2,"method":"pane.read","params":{}}"# + "\n").utf8),
+            encodeIpcLine(JsonRpcRequest(id: .number(3), method: IpcRequestMethod.ls.rawValue)),
+        ])
+        remote.closeWriteEnd()
+
+        let entries = try await fixture.auditEntriesWhenConnectionCloses()
+        #expect(entries.map(\.event.kind) == [
+            .connectionOpened,
+            .requestStarted,
+            .requestCompleted,
+            .requestDecodeFailed,
+            .requestStarted,
+            .requestCompleted,
+            .connectionClosed,
+        ])
+        // The answer to the malformed line rides the same ordered handoff as its record.
+        var replies: [JsonRpcResponse] = []
+        for _ in 0..<3 { replies.append(try await remote.readResponse()) }
+        // The refusal carries no id, because the line it refuses had no readable one.
+        #expect(replies.map(\.id) == [.number(1), nil, .number(3)])
+        #expect(replies[1].error?.code == -32700)
+    }
+
+    @Test("every way a connection can end records exactly one close", arguments: [
+        ConnectionExitCase.peerClosed,
+        ConnectionExitCase.silent,
+        ConnectionExitCase.oversizedLine,
+    ])
+    func eachExitRecordsExactlyOneClose(_ exitCase: ConnectionExitCase) async throws {
+        // Intent: each exit from the read loop reports its close once, and names its cause.
+        // Why it exists: the oversized-line exit returns from inside the framing loop, so
+        //   it is the one that can leave without reporting at all -- and a close reported
+        //   twice would double-count a connection in the log.
+        // Scenario: spec-first, one case per way a connection ends.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let server = try fixture.makeServer(
+            runtime: nil,
+            livenessBound: try #require(IpcLivenessBound(seconds: exitCase == .silent ? 0.5 : 30))
+        )
+        defer { server.stop() }
+
+        await server.start()
+        let peer = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { peer.close() }
+        _ = try await peer.readRequest()
+
+        switch exitCase {
+        case .peerClosed: peer.closeWriteEnd()
+        case .silent: break
+        case .oversizedLine: await peer.writeOversizedLine()
+        }
+
+        let entries = try await fixture.auditEntriesWhenConnectionCloses()
+        #expect(entries.last?.event.reason == exitCase.expectedReason)
+        // A second close would be appended after the first, so this waits for one that
+        // must never come. It is meant to expire; keep it short.
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(try fixture.auditEntries().count(where: { $0.event.kind == .connectionClosed }) == 1)
+    }
+
+    @Test("server stop releases a connection whose write is parked at an unreading peer")
+    func stopReleasesAConnectionParkedOnItsWrite() async throws {
+        // Intent: after the server stops, a peer that stopped reading still reaches end of
+        //   stream -- and it does so with nothing outside the server holding the server up.
+        // Why it exists: the cleanup that closes these descriptors used to hold the server
+        //   weakly, so a server released at stop skipped it entirely, and the close it did
+        //   run only enqueued behind a write parked at the dead peer. Either one leaves a
+        //   reader thread blocked on a descriptor nobody closes, for good.
+        // Scenario: the app quits while a phone that froze mid-stream is still connected.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        var server: IpcServer? = try fixture.makeServer(runtime: runtime)
+        await server?.start()
+
+        let peer = try RemotePeer(socketPath: fixture.socketURL)
+        defer { peer.close() }
+        _ = try await peer.readRequest()
+
+        // The peer reads none of the answers, so they fill the socket and park the write
+        // queue in `write` long before the last of them is sent.
+        let requestCount = 200
+        var requests = Data()
+        for id in 0..<requestCount {
+            requests += try encodeIpcLine(
+                JsonRpcRequest(id: .number(Double(id)), method: IpcRequestMethod.ls.rawValue)
+            )
+        }
+        await peer.writeOffThread(requests)
+        // A local request's record is written as its answer is queued, so this waits for
+        // the whole batch to be served without reading a byte of it back.
+        _ = try await fixture.auditEntries(untilCount: requestCount, ofKind: .localRequest)
+
+        server?.stop()
+        // Dropping the last outside reference here is the point: production releases the
+        // server at stop, so a test that held one would prove a teardown nobody performs.
+        server = nil
+
+        #expect(await peer.reachedEndOfStream())
+    }
+
+    @Test("a request written just before the peer's close is served and counted")
+    func requestBeforeCloseIsServedAndCounted() async throws {
+        // Intent: the last request a peer sends before hanging up is dispatched, answered,
+        //   and included in that connection's served-request total.
+        // Why it exists: the close and the dispatch used to be two independent tasks, and
+        //   the close removes the connection state the dispatch requires. When the close
+        //   won, the request was silently gone: not performed, not audited, not counted.
+        // Scenario: a CLI call writes its request and exits immediately, as one-shot
+        //   commands do. Twenty iterations, because the pre-fix loss is a race.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(runtime: runtime)
+        defer { server.stop() }
+
+        await server.start()
+        let port = try #require(server.tailnetPort)
+        for iteration in 1...raceIterations {
+            let peer = try RemotePeer(port: port)
+            defer { peer.close() }
+            _ = try await peer.readRequest()
+            try peer.writeRequest(method: IpcRequestMethod.ls.rawValue, id: .number(1))
+            peer.closeWriteEnd()
+
+            let response = try await peer.readResponse()
+            #expect(response.id == .number(1))
+            #expect(response.error == nil)
+            let entries = try await fixture.auditEntriesWhenConnectionCloses(count: iteration)
+            #expect(entries.last?.event.kind == .connectionClosed)
+            #expect(entries.last?.event.servedRequests == 1)
+        }
+    }
+
+    @Test("a dropped request written just before the peer's close is recorded before it")
+    func droppedRequestBeforeCloseIsRecordedBeforeTheClose() async throws {
+        // Intent: a request with no id that arrives before the peer's close is recorded as
+        //   dropped, and that record precedes the connection's close record.
+        // Why it exists: this is the observed flake -- the audit-sequence test failed under
+        //   gate load reporting one missing `requestDropped`, and passed in isolation.
+        // Scenario: the same one-shot client, sending a notification it wants no answer to.
+        //   Twenty iterations, because the pre-fix loss is a race.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(runtime: runtime)
+        defer { server.stop() }
+
+        await server.start()
+        let port = try #require(server.tailnetPort)
+        for iteration in 1...raceIterations {
+            let peer = try RemotePeer(port: port)
+            defer { peer.close() }
+            _ = try await peer.readRequest()
+            try peer.writeRequest(method: IpcRequestMethod.ls.rawValue, id: nil)
+            peer.closeWriteEnd()
+
+            let entries = try await fixture.auditEntriesWhenConnectionCloses(count: iteration)
+            #expect(entries.suffix(2).map(\.event.kind) == [.requestDropped, .connectionClosed])
+        }
+    }
+}
+
+/// How many times the two race-shaped tests repeat, so a lost request has to survive
+/// twenty independent schedulings rather than one lucky ordering.
+private let raceIterations = 20
+
+/// The three ways a serviced connection's read loop can exit, one per test case.
+enum ConnectionExitCase: Sendable {
+    case peerClosed
+    case silent
+    case oversizedLine
+
+    var expectedReason: String {
+        switch self {
+        case .peerClosed: "peer-closed"
+        case .silent: "peer-silent"
+        case .oversizedLine: "oversized-request"
+        }
+    }
 }
 
 enum RemoteAdmissionCase: Sendable {
@@ -630,10 +839,17 @@ private struct RemoteIpcServerFixture {
     func auditEntriesWhenConnectionCloses(
         count: Int = 1
     ) async throws -> [IpcAuditLogEntry] {
+        try await auditEntries(untilCount: count, ofKind: .connectionClosed)
+    }
+
+    func auditEntries(
+        untilCount count: Int,
+        ofKind kind: IpcAuditEvent.Kind
+    ) async throws -> [IpcAuditLogEntry] {
         let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
         while ContinuousClock.now < deadline {
             if let entries = try? auditEntries(),
-               entries.count(where: { $0.event.kind == .connectionClosed }) >= count
+               entries.count(where: { $0.event.kind == kind }) >= count
             {
                 return entries
             }
@@ -747,6 +963,94 @@ private final class RemotePeer: @unchecked Sendable {
 
     func writeRawLine(_ source: String) throws {
         try write(Data((source + "\n").utf8))
+    }
+
+    /// Writes several framed lines in one syscall, so the server sees them with no reply
+    /// round trip between them -- which is what a misordered handoff needs to show itself.
+    func writeLines(_ lines: [Data]) throws {
+        try write(lines.reduce(into: Data()) { $0 += $1 })
+    }
+
+    /// Half-closes: the server reads what was already sent, then reaches end of stream.
+    ///
+    /// A full close would leave this peer's buffered replies unread, and TCP answers an
+    /// unread receive queue with a reset that can destroy the very lines under test.
+    func closeWriteEnd() {
+        Darwin.shutdown(fileDescriptor, SHUT_WR)
+    }
+
+    /// Sends one line past the framing bound, off the caller's thread.
+    ///
+    /// It is written in chunks and gives up quietly once the server stops reading, because
+    /// the server giving up on the line is the outcome under test.
+    func writeOversizedLine() async {
+        await offCallerThread {
+            let chunk = Data(repeating: UInt8(ascii: "a"), count: 64 * 1024)
+            var remaining = IpcLineFramer.maxLineBytes + 1
+            while remaining > 0 {
+                let size = min(remaining, chunk.count)
+                self.writeWhatItCan(size == chunk.count ? chunk : chunk.prefix(size))
+                remaining -= size
+            }
+        }
+    }
+
+    /// Writes off the caller's thread, so a caller on the main actor cannot deadlock.
+    ///
+    /// A bulk write parks until the server drains it, and the server drains it by
+    /// dispatching each request on the main actor. Writing from the main actor would
+    /// therefore have each side waiting for the other.
+    func writeOffThread(_ data: Data) async {
+        await offCallerThread { self.writeWhatItCan(data) }
+    }
+
+    /// Reports whether the stream ended, treating a reset as an ending.
+    ///
+    /// A reset and an orderly end both prove the server released the descriptor, which is
+    /// the claim. Only the deadline says otherwise, and there "it never ended" and "this
+    /// stopped waiting" are the same observation, so a bool states it honestly.
+    func reachedEndOfStream() async -> Bool {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async { [fileDescriptor] in
+                var buffer = [UInt8](repeating: 0, count: 65_536)
+                while true {
+                    let count = Darwin.read(fileDescriptor, &buffer, buffer.count)
+                    if count == 0 { return continuation.resume(returning: true) }
+                    if count < 0 {
+                        if errno == EINTR { continue }
+                        let ended = errno != EAGAIN && errno != EWOULDBLOCK
+                        return continuation.resume(returning: ended)
+                    }
+                }
+            }
+        }
+    }
+
+    private func offCallerThread(_ body: @escaping @Sendable () -> Void) async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                body()
+                continuation.resume()
+            }
+        }
+    }
+
+    /// Writes every byte it can and stops without complaint when the peer has gone.
+    private func writeWhatItCan(_ data: Data) {
+        data.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else { return }
+            var written = 0
+            while written < bytes.count {
+                let result = Darwin.write(
+                    fileDescriptor,
+                    baseAddress.advanced(by: written),
+                    bytes.count - written
+                )
+                if result < 0 && errno == EINTR { continue }
+                guard result > 0 else { return }
+                written += result
+            }
+        }
     }
 
     private func write(_ data: Data) throws {
