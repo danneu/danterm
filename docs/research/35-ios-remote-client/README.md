@@ -778,12 +778,18 @@ issues `pane.split`. Reopen on user request only.
   once while the clock covers only what the phone cannot observe, a capacity
   refusal now carries the refusing Mac's own reclamation bound and waits it out,
   and the automatic phase is finite -- five attempts over about a minute, then
-  rest in the plain failure state. What is still unmeasured is the behavior on
-  hardware: that plan's acceptance smoke is unrun, and it is the same pair of
-  cases F9 ran by hand. Airplane mode off and on with the app foregrounded
-  should now heal with no tap and resume exactly on scrollback depth and
-  viewport digest through the `t9-checkpoint/` instrument, and a sleeping Mac
-  should show bounded visible retries and then a legible rest.
+  rest in the plain failure state. Half of that is now measured on hardware
+  (F10): airplane mode off and on heals with no tap and resumes exactly --
+  scrollback 506 to 808 with the viewport digest matching the source pane on
+  both sides and the recorder lifetime unchanged, so it is a cursor resume and
+  not a covering sync -- while the Mac reclaims the slot at the advertised bound
+  to the second, and the restored network path acts as a signal rather than a
+  clock tick. What is still unmeasured is a Mac the phone cannot reach at all.
+  F10 records why the cheap way to stage that tests something else: `SIGSTOP`
+  leaves the kernel completing handshakes, so it reproduces F8's deafness rather
+  than a sleeping Mac. Both are worth a run, and an episode against a deaf Mac
+  costs about two and a half minutes because each attempt spends a full
+  establishment bound.
 - **Distribution.** Personal use with a paid account: TestFlight internal or
   direct device install both work; nothing here needs App Store review. Record
   the choice when it first matters (push entitlements).

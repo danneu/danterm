@@ -1116,3 +1116,74 @@ itself.
   an admitted connection was never serviced -- amends D4 rather than replacing
   it. F5's UI question about the multi-second freeze is the same question this
   finding answers for the disconnect case, and still has no owner.
+
+### F10 -- the automatic reconnect heals a real outage without a tap, and resumes exactly
+
+Discharges the live acceptance smoke (PO7) that the automatic-reconnect plan
+shipped unrun. Reproduction: the same [t9-checkpoint/](t9-checkpoint/)
+instrument F9 built, unchanged.
+
+- Status: settled for the airplane-mode case, on one device over one tailnet,
+  one clean run after one aborted run. The second case PO7 names -- an
+  unreachable Mac -- is **not** examined here and stays open; see the last bullet
+  for why the obvious way to stage it tests something else.
+- Date and investigator: 2026-08-17, agent, with the user holding the device,
+  toggling airplane mode, and reporting what the header said.
+- Commit and worktree state: `b0ad9b99`, the tip of the reconnect work
+  (`a0a956b9`, `60531a02`, `d2fff224`) plus its three edge repairs
+  (`58214135`, `e9133256`, `b0ad9b99`). Nothing changed for the run.
+- Environment: as F9 -- one `just launch-slot` instance listening on
+  `100.106.152.106:7420`, one pane at 179x66, iPhone 13 mini "Pelucho" at
+  `100.98.63.67` running the `scripts/ios-app.sh device` build. The shared
+  config carried the `tailnet` block for the run and was restored afterwards.
+- **The predictions were stated before each observation**, so the run is a test
+  rather than a demonstration. All three held.
+- Result: **an outage the phone can see the end of heals with no tap, and the
+  resume is exact.** Measurements, per D5's acceptance rule:
+
+  | | before the outage | after the heal |
+  |---|---|---|
+  | `totalRows` | 506 | 808 (+302: 300 seeded lines and 2 prompt lines) |
+  | `recorderLifetimeId` | `AA750A58` | `AA750A58`, unchanged |
+  | `nextSequence` | 64 | 84 |
+  | `viewportDigest` | `67cb439a005e7858` | `24f802545f4a405b` |
+  | the pane's own `pane read` | `67cb439a005e7858` | `24f802545f4a405b` |
+
+  The digest agrees with the source pane on both sides of the outage and the
+  recorder lifetime never changed, so this was a cursor resume and not a fresh
+  sync covering a gap. That distinction is the entire reason the acceptance rule
+  asks for scrollback depth: a `--from-now` rejoin would have shown a correct
+  prompt above 300 missing lines.
+- **The Mac reclaimed the slot at 30 seconds, the advertised bound, to the
+  second.** Measured by polling the socket census once a second across the
+  outage. F9 recorded this reclamation as entirely absent, so the server half of
+  the liveness contract is now confirmed on hardware and not only in the suite.
+- **The restored path acted as a signal, not as a clock tick.** The Mac saw the
+  new connection within one second of airplane mode going off, and the header
+  read `Connection lost - waiting for network` for the whole outage rather than
+  counting down. That is the policy suspending its clock while no path exists,
+  which also means the outage spent none of the episode's five attempts however
+  long it lasted -- so outage length does not consume the budget that a later
+  real failure needs.
+- **The phone keeps one checkpoint, so switching panes discards the previous
+  pane's resume cursor.** Found by accident: the first run was aborted when a
+  stray tab appeared in the pane list, the user tapped it, and the single
+  `pane-replica-checkpoint.plist` was overwritten with the new pane's state -- a
+  different `recorderLifetimeId` and `totalRows` back to 66. Tapping back does
+  not resume the first pane exactly; it takes a fresh sync. This is consistent
+  with D5, which injects a sync exactly when the requested position is
+  unreachable, and it is invisible while the client watches one pane at a time.
+  It becomes a real cost the moment the client is expected to hold more than one
+  pane, which is where D5's own T20 sizing question lands.
+- **Uncertainty: staging the unreachable-Mac case is harder than it looks, and
+  the cheap way stages a different failure.** `SIGSTOP` on the Mac process
+  leaves the kernel completing TCP handshakes into the accept backlog, so the
+  phone's `connect` succeeds and then waits for a hello that never arrives. That
+  reproduces F8's thread-pool deafness -- accepted but never served, the one
+  state I7 forbids -- rather than a sleeping Mac, which does not answer the SYN
+  at all. Both are worth running and they are not the same test. Note for
+  whoever runs either: an attempt that fails by establishment silence costs a
+  full bound, so a five-attempt episode against a deaf Mac lasts about two and a
+  half minutes rather than the minute the delay schedule alone suggests -- in
+  that failure mode the per-attempt timeout dominates the backoff, and the
+  plan's stated episode length describes only the case where attempts fail fast.
