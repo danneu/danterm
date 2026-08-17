@@ -206,6 +206,56 @@ struct TerminalPTYResourceSnapshot: Equatable, Sendable {
     }
 }
 
+/// Pairs serialized terminal state with the first recorder event outside that state.
+///
+/// Only `TerminalFlightRecordingStatePairing.resolve()` can mint one, so every value of
+/// this type carries state bytes and a cursor read in the same owner turn.
+public struct TerminalFlightRecordingStateSynchronization: Equatable, Sendable {
+    /// Terminal-protocol bytes and the geometry needed to replay them.
+    public let state: TerminalStateSynchronization
+
+    /// Recorder position taken in the same owner turn as `state`.
+    public let cursor: TerminalFlightRecordingCursor
+
+    fileprivate init(
+        state: TerminalStateSynchronization,
+        cursor: TerminalFlightRecordingCursor
+    ) {
+        self.state = state
+        self.cursor = cursor
+    }
+}
+
+/// Holds a fence-copied terminal beside the recorder cursor paired with it, and defers the
+/// serialization of that terminal to `resolve()`.
+///
+/// The pairing exists so state and cursor cannot come from different owner turns: only the
+/// isolated mints below can build one, and they derive both ingredients off the owner
+/// themselves rather than taking either from a caller. Serializing is separate because it
+/// walks the whole retained history, which must not run on the owner queue.
+package struct TerminalFlightRecordingStatePairing: Sendable {
+    private let terminal: Terminal
+    private let cursor: TerminalFlightRecordingCursor
+
+    fileprivate init(terminal: Terminal, cursor: TerminalFlightRecordingCursor) {
+        self.terminal = terminal
+        self.cursor = cursor
+    }
+
+    /// Serializes the paired terminal into replay bytes -- the one place in this package
+    /// that does so.
+    ///
+    /// Call it only after the fence that minted the pairing has returned. The cost is
+    /// proportional to retained scrollback, so resolving inside a fence closure would stall
+    /// the owner queue that also ingests PTY output.
+    package func resolve() -> TerminalFlightRecordingStateSynchronization {
+        TerminalFlightRecordingStateSynchronization(
+            state: terminal.stateSynchronization,
+            cursor: cursor
+        )
+    }
+}
+
 /// Owns one pane's mutable terminal, lifecycle reducer, PTY, child, and event sources.
 public actor TerminalPTYHost {
     /// One submission's bytes inside the shared pending-input buffer, paired with where they
@@ -866,16 +916,35 @@ public actor TerminalPTYHost {
         fence(countsAsProduction: false) { owner in owner.flightTape.capture() }.value
     }
 
-    /// Copies terminal state and the recorder continuation cursor in one owner-queue turn.
-    package nonisolated func fencedStateSynchronization()
-        -> TerminalFlightRecordingStateSynchronization
-    {
-        let fenced = fence(countsAsProduction: false) { owner in
-            (owner.terminal, owner.flightTape.liveCursor())
-        }.value
-        return TerminalFlightRecordingStateSynchronization(
-            state: fenced.0.stateSynchronization,
-            cursor: fenced.1
+    /// Pairs the owner's terminal with the recorder's live cursor, taking neither from the
+    /// caller so the two cannot come from different owner turns.
+    fileprivate func liveStatePairing() -> TerminalFlightRecordingStatePairing {
+        TerminalFlightRecordingStatePairing(
+            terminal: terminal,
+            cursor: flightTape.liveCursor()
+        )
+    }
+
+    /// Pairs the owner's terminal with the cursor just past one followed suffix, and hands
+    /// back that suffix because the caller needs the same derived value.
+    /// nil only when this subscription is no longer registered.
+    fileprivate func followedStatePairing(
+        subscriptionId: UUID,
+        from cursor: TerminalFlightRecordingCursor
+    ) -> (
+        snapshot: TerminalFlightRecordingCursorSnapshot,
+        pairing: TerminalFlightRecordingStatePairing
+    )? {
+        guard let snapshot = flightTape.followCursorSnapshot(
+            subscriptionId: subscriptionId,
+            from: cursor
+        ) else { return nil }
+        return (
+            snapshot,
+            TerminalFlightRecordingStatePairing(
+                terminal: terminal,
+                cursor: snapshot.nextCursor
+            )
         )
     }
 
@@ -884,24 +953,18 @@ public actor TerminalPTYHost {
         from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingStreamFence {
         let fenced = fence(countsAsProduction: false) { owner in
-            let terminal = owner.terminal
-            let liveCursor = owner.flightTape.liveCursor()
-            return (
-                terminal,
-                liveCursor,
+            (
+                owner.liveStatePairing(),
                 owner.flightTape.backlogOrigin(),
                 owner.flightTape.cursorSnapshot(from: .beginning),
                 owner.flightTape.cursorPlacement(from: cursor)
             )
         }.value
         return TerminalFlightRecordingStreamFence(
-            origin: fenced.2,
-            retained: fenced.3,
-            requested: fenced.4,
-            synchronization: TerminalFlightRecordingStateSynchronization(
-                state: fenced.0.stateSynchronization,
-                cursor: fenced.1
-            )
+            origin: fenced.1,
+            retained: fenced.2,
+            requested: fenced.3,
+            synchronization: fenced.0.resolve()
         )
     }
 
@@ -919,22 +982,13 @@ public actor TerminalPTYHost {
         subscriptionId: UUID,
         from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingFollowFence? {
-        let fenced: (Terminal, TerminalFlightRecordingCursorSnapshot)? = fence(
-            countsAsProduction: false
-        ) { owner in
-            guard let snapshot = owner.flightTape.followCursorSnapshot(
-                subscriptionId: subscriptionId,
-                from: cursor
-            ) else { return nil }
-            return (owner.terminal, snapshot)
+        let fenced = fence(countsAsProduction: false) { owner in
+            owner.followedStatePairing(subscriptionId: subscriptionId, from: cursor)
         }.value
         guard let fenced else { return nil }
         return TerminalFlightRecordingFollowFence(
-            snapshot: fenced.1,
-            synchronization: TerminalFlightRecordingStateSynchronization(
-                state: fenced.0.stateSynchronization,
-                cursor: fenced.1.nextCursor
-            )
+            snapshot: fenced.snapshot,
+            synchronization: fenced.pairing.resolve()
         )
     }
 

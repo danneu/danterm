@@ -169,24 +169,6 @@ public struct TerminalFlightRecordingCapture: Equatable, Sendable {
     public let snapshot: TerminalFlightRecordingCursorSnapshot
 }
 
-/// Pairs serialized terminal state with the first recorder event outside that state.
-public struct TerminalFlightRecordingStateSynchronization: Equatable, Sendable {
-    /// Terminal-protocol bytes and the geometry needed to replay them.
-    public let state: TerminalStateSynchronization
-
-    /// Recorder position taken in the same owner turn as `state`.
-    public let cursor: TerminalFlightRecordingCursor
-
-    /// Keeps state and continuation position inseparable across the session boundary.
-    public init(
-        state: TerminalStateSynchronization,
-        cursor: TerminalFlightRecordingCursor
-    ) {
-        self.state = state
-        self.cursor = cursor
-    }
-}
-
 /// Captures every input the stream policy needs in one owner-queue turn.
 public struct TerminalFlightRecordingStreamFence: Equatable, Sendable {
     /// Recorder birth geometry and its real lifetime cursor at sequence zero.

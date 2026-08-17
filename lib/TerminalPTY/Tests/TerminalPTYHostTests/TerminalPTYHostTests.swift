@@ -562,12 +562,13 @@ struct TerminalPTYHostTests {
     func stateSynchronizationSharesRecorderFence() async throws {
         // Intent: pair serialized terminal state with the first event not reflected in that state.
         // Why it exists: separate terminal and recorder reads can drop or double-apply output between them.
-        // Scenario: the child prints history, the host fences a sync, and later output resumes at its cursor.
+        // Scenario: the child prints history, a stream fence pairs state with a cursor, and
+        //   later output replays from that cursor onto the replayed state.
         let pane = try await startChildlessHost(captureTransitions: false)
         let host = pane.host
         #expect(await pane.writeFromChild("one\r\n"))
 
-        let fenced = host.fencedStateSynchronization()
+        let fenced = host.fencedFlightRecordingStream(from: .beginning).synchronization
         var resumed = try #require(Terminal(
             columns: fenced.state.columns,
             rows: fenced.state.rows
