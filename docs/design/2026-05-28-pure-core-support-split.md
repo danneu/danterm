@@ -342,8 +342,8 @@ does not carry the model's per-field tax.)
   snapshot-to-disk write in `app`.
 - **Save/send output is machine-independent.** With the home seam closed, the
   recorded snapshot/export fixtures no longer embed the recording machine's HOME,
-  removing a latent cross-machine fragility. `GoldenMasterTests` was already
-  home-clean (it asserts on the model) and needed no change.
+  removing a latent cross-machine fragility. The tests that assert on the model
+  rather than on its saved output were already home-clean and needed no change.
 - **The lint message is the enforcement point.** Because an implementer adding a
   new ambient read hits the lint failure before they hit any doc, the
   inject-vs-ambient rule is restated there and forward-references the

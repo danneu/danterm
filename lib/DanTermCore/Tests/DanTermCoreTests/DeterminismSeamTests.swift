@@ -2,13 +2,16 @@
 // inject-vs-ambient rule from `CoreEnv`/the new ADR at the exact boundaries that
 // matter: the SAVED snapshot (toSnapshot abbreviates against the injected home),
 // the restored model (loadValidatedInitFile expands `~/` against the injected home
-// and mints ids from the injected sequence), and -- the load-bearing premise that
-// keeps the seam narrow -- that `update()` stores the RAW shell-reported cwd/title
-// in the model rather than abbreviating into it. Each test passes `home`/`env`
-// explicitly; none reads the process HOME for its assertion (except
-// model-stays-home-clean, which deliberately aligns the injected home WITH ambient
-// -- see its preamble).
+// and mints ids from the injected sequence), the reducer itself (one message
+// sequence replayed under two identically built envs yields equal models, and the
+// ids and times it writes come from the injected env), and -- the load-bearing
+// premise that keeps the seam narrow -- that `update()` stores the RAW
+// shell-reported cwd/title in the model rather than abbreviating into it. Each test
+// passes `home`/`env` explicitly; none reads the process HOME for its assertion
+// (except model-stays-home-clean, which deliberately aligns the injected home WITH
+// ambient -- see its preamble).
 import Foundation
+import CustomDump
 import Testing
 
 @testable import DanTermCore
@@ -121,6 +124,224 @@ import Testing
         #expect(loaded.model.allPanes[0].session?.id == SessionId(rawValue: s), "session id minted from sequence[3]")
     }
 
+    // MARK: - replay determinism (the model is a pure function of (messages, env))
+
+    private static let replayNow = Date(timeIntervalSince1970: 1_700_000_000)
+
+    // The reqIds the driver puts on its IPC messages. These are caller-supplied,
+    // NOT env-minted: the reducer parks the split's reqId in
+    // pendingSessionCreations, so it is deliberately outside the id assertion.
+    private static let splitReqId = UUID(uuidString: "11111111-1111-4111-8111-000000000001")!
+    private static let focusReqId = UUID(uuidString: "11111111-1111-4111-8111-000000000002")!
+
+    // 64 fixed ids under one prefix, with headroom over what the driver consumes.
+    // Two sequences from different prefixes share no value, so an id-axis
+    // comparison cannot pass on an incidental collision.
+    private static func replayIds(prefix: String) -> [UUID] {
+        (0..<64).map {
+            UUID(uuidString: "\(prefix)-0000-4000-8000-\(String(format: "%012x", $0))")!
+        }
+    }
+
+    /// Drives the message sequence every replay test shares. It covers top-level
+    /// mints, recursive `update()` forwarding (createGroup -> createTab), IPC
+    /// dispatch, `navigateToPane`, and both alert clock sites, and it forwards
+    /// `env` on every `update()` call -- the `TestSupport` helpers do not, so
+    /// routing through them would silently drop the seam under test.
+    ///
+    /// Takes the base model by value so callers can replay one env-free base
+    /// twice. Starting from `makeModel(env:)` instead would mint the seed group id
+    /// from the sequence, and two runs would then differ for a reason outside the
+    /// reducer.
+    private static func replay(_ base: AppModel, env: CoreEnv) -> AppModel {
+        var model = base
+        _ = update(&model, .createTabInSelectedGroup(), env: env)
+        let firstPane = model.groups[0].tabs[0].paneTree.focusedPaneId
+        _ = update(&model, .splitPane(paneId: firstPane, direction: .horizontal), env: env)
+
+        _ = update(&model, .createGroup(name: "Replay"), env: env)
+        let secondGroupPane = model.groups[1].tabs[0].paneTree.focusedPaneId
+
+        // The raw request message, not UpdateIpcTests' private `sendIpc` helper:
+        // that helper auto-fires sessionProcessStarted for every createSession
+        // command, which would retire pendingSessionCreations before the
+        // comparison sees it mid-flight.
+        _ = update(&model, .ipcRequest(
+            reqId: splitReqId,
+            caller: .local,
+            request: .paneSplit(
+                pane: secondGroupPane,
+                direction: .vertical,
+                launch: nil,
+                background: false
+            )
+        ), env: env)
+
+        _ = update(&model, .ipcRequest(
+            reqId: focusReqId,
+            caller: .local,
+            request: .paneFocus(pane: firstPane)
+        ), env: env)
+
+        // Inactive, so the focused pane still follows the normal alert path.
+        _ = update(&model, .appResignedActive, env: env)
+        _ = update(&model, .sessionBell(sessionId: sessionId(for: firstPane, in: model)), env: env)
+        _ = update(&model, .sessionNotification(
+            sessionId: sessionId(for: firstPane, in: model),
+            title: "Done",
+            body: "Task finished"
+        ), env: env)
+        return model
+    }
+
+    @Test("one message sequence replayed under two identically built envs yields equal models")
+    func replayUnderIdenticalEnvsYieldsEqualModels() {
+        // Intent: the whole AppModel is a pure function of (messages, env).
+        // Why it exists: this is the total guard against an ambient UUID() or
+        //   Date() read anywhere in the reducer. AppModel's Equatable is
+        //   compiler-synthesized, so it covers every field -- including fields
+        //   added long after this test -- with nothing recorded to bless.
+        // Scenario: spec-first. Two runs of one sequence, each against its own
+        //   freshly built but identically parameterized env, from one shared
+        //   env-free base model.
+        let base = makeModel()
+        let first = Self.replay(base, env: makeTestEnv(
+            now: Self.replayNow, idSequence: Self.replayIds(prefix: "5eed0001")))
+        let second = Self.replay(base, env: makeTestEnv(
+            now: Self.replayNow, idSequence: Self.replayIds(prefix: "5eed0001")))
+
+        expectNoDifference(first, second)
+    }
+
+    @Test("varying only the injected id sequence changes the replayed model")
+    func replayDependsOnTheInjectedIdSequence() {
+        // Intent: the id axis of the env still reaches the model.
+        // Why it exists: keeps the replay-equality test from going vacuous. If a
+        //   later refactor stopped threading env.newId() through these handlers,
+        //   equality would pass for the wrong reason and only this test would fail.
+        // Scenario: spec-first. Two runs differing in id sequence alone -- the
+        //   clock is held constant, so the two axes cannot mask each other.
+        let base = makeModel()
+        let a = Self.replay(base, env: makeTestEnv(
+            now: Self.replayNow, idSequence: Self.replayIds(prefix: "5eed0001")))
+        let b = Self.replay(base, env: makeTestEnv(
+            now: Self.replayNow, idSequence: Self.replayIds(prefix: "5eed0002")))
+
+        // The Bool is computed first on purpose: `#expect(a != b)` captures both
+        // operands and dumps two whole AppModels into the failure message.
+        let differs = a != b
+        #expect(differs, "a different injected id sequence must produce a different model")
+    }
+
+    @Test("varying only the injected clock changes the replayed model")
+    func replayDependsOnTheInjectedClock() {
+        // Intent: the clock axis of the env still reaches the model.
+        // Why it exists: the id axis alone would keep replay-equality honest about
+        //   ids while the clock quietly went ambient. Varying the clock on its own
+        //   is what makes the two axes independent.
+        // Scenario: spec-first. Two runs differing in `now` alone; the id sequence
+        //   is identical.
+        let base = makeModel()
+        let ids = Self.replayIds(prefix: "5eed0001")
+        let a = Self.replay(base, env: makeTestEnv(now: Self.replayNow, idSequence: ids))
+        let b = Self.replay(
+            base, env: makeTestEnv(now: Self.replayNow.addingTimeInterval(3600), idSequence: ids))
+
+        let differs = a != b
+        #expect(differs, "a different injected clock must produce a different model")
+    }
+
+    /// The ids the replay's actions minted, grouped by entity kind, so the
+    /// provenance test can assert membership per kind without pinning mint order
+    /// or mint count -- neither of which is observable behavior.
+    private struct MintedIds {
+        var groups: [UUID] = []
+        var tabs: [UUID] = []
+        var panes: [UUID] = []
+        var sessions: [UUID] = []
+        var splits: [UUID] = []
+        var alerts: [UUID] = []
+
+        var byKind: [(kind: String, ids: [UUID])] {
+            [("group", groups), ("tab", tabs), ("pane", panes),
+             ("session", sessions), ("split", splits), ("alert", alerts)]
+        }
+    }
+
+    private static func collectMints(_ node: SplitNodeModel, into minted: inout MintedIds) {
+        switch node {
+        case .leaf(let pane):
+            minted.panes.append(pane.id.rawValue)
+            if let session = pane.session { minted.sessions.append(session.id.rawValue) }
+        case .split(let id, _, let first, let second, _):
+            minted.splits.append(id.rawValue)
+            collectMints(first, into: &minted)
+            collectMints(second, into: &minted)
+        }
+    }
+
+    @Test("the entities the replay creates draw their ids from the injected sequence")
+    func replayMintsCreatedEntityIdsFromInjectedSequence() {
+        // Intent: pane, session, split, tab, group, and alert ids created during
+        //   the replay are values of the injected id sequence.
+        // Why it exists: replay-equality proves the model is a function of the env;
+        //   it does not prove the values came from the INJECTED env rather than
+        //   some other deterministic source. This settles provenance.
+        // Scenario: spec-first. Membership only -- which of pane, session, and
+        //   split is minted first is not observable (all three are opaque UUIDs),
+        //   so reordering the mints must keep this passing while a bare UUID()
+        //   must fail it.
+        let base = makeModel()
+        let ids = Self.replayIds(prefix: "5eed0001")
+        let model = Self.replay(base, env: makeTestEnv(now: Self.replayNow, idSequence: ids))
+        let injected = Set(ids)
+
+        // The base model's seed group is minted env-free on purpose (the
+        // sensitivity tests need an env-free base), so it is not a created entity.
+        let seedGroupIds = Set(base.groups.map(\.id.rawValue))
+        var minted = MintedIds()
+        for group in model.groups {
+            if !seedGroupIds.contains(group.id.rawValue) { minted.groups.append(group.id.rawValue) }
+            for tab in group.tabs {
+                minted.tabs.append(tab.id.rawValue)
+                Self.collectMints(tab.paneTree.root, into: &minted)
+            }
+        }
+        minted.alerts = model.alerts.map(\.id.rawValue)
+
+        for (kind, kindIds) in minted.byKind {
+            #expect(!kindIds.isEmpty, "the replay must create at least one \(kind)")
+            #expect(
+                kindIds.allSatisfy(injected.contains),
+                "every created \(kind) id must come from the injected sequence"
+            )
+        }
+    }
+
+    @Test("both alert clock sites write the injected now into createdAt and lastNotificationTime")
+    func alertClockSitesWriteTheInjectedNow() throws {
+        // Intent: the two env.now() reads in the core -- the sessionBell arm and
+        //   desktopAlertCommands -- write the injected instant into the alert's
+        //   createdAt and into lastNotificationTime[pane][kind].
+        // Why it exists: no other test in the suite asserts a createdAt against an
+        //   injected clock, and the retired golden reached only the bell site.
+        // Scenario: spec-first. One replay under a frozen clock raises a bell alert
+        //   and a desktop-notification alert on the same pane.
+        let base = makeModel()
+        let model = Self.replay(base, env: makeTestEnv(
+            now: Self.replayNow, idSequence: Self.replayIds(prefix: "5eed0001")))
+
+        for kind in [AlertKind.bell, .desktopNotification] {
+            let alert = try #require(
+                model.alerts.first { $0.kind == kind }, "the replay must raise a \(kind) alert")
+            #expect(alert.createdAt == Self.replayNow, "\(kind) createdAt from the injected clock")
+            #expect(
+                model.lastNotificationTime[alert.paneId]?[kind] == Self.replayNow,
+                "\(kind) lastNotificationTime from the injected clock"
+            )
+        }
+    }
+
     // MARK: - model-stays-home-clean (the premise that justifies the narrow seam)
 
     @Test("update() stores the raw cwd/title in the model, never abbreviating into it")
@@ -129,7 +350,7 @@ import Testing
         //   into the model; HOME never enters AppModel, only its saved/sent output.
         // Why it exists: this is the load-bearing premise of the WHOLE narrow home
         //   seam -- because the model is home-clean, only save/send/restore needed
-        //   threading, and GoldenMasterTests (asserting on the model) stays
+        //   threading, and the replay tests above (which assert on the model) stay
         //   home-independent. If a handler ever abbreviated into the model the seam
         //   would be unsound.
         // Scenario: spec-first model-purity check. The env's home is bound to the
