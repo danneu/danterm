@@ -28,7 +28,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private var preferredPaneId: PaneId?
     private var reconnectPolicy = MobileReconnectPolicy()
     private var resumePolicy = MobileResumePolicy()
-    private var retryTimer: Timer?
+    private let retryTimer = MobileDeadlineTimer()
     private let pathMonitor = NWPathMonitor()
     private var status = MobileStatus()
     private var attempt: MobileSessionAttempt?
@@ -39,7 +39,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private var observers: [NSObjectProtocol] = []
     private var connectionGeneration = 0
     private var didSendSmokeInput = false
-    private var checkpointSaveTimer: Timer?
+    private let checkpointSaveTimer = MobileDeadlineTimer()
     private var checkpointIsDirty = false
     private let checkpointQueue = DispatchQueue(label: "danterm.mobile.checkpoint")
     private lazy var checkpointStore = PaneReplicaCheckpointStore(
@@ -63,7 +63,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     isolated deinit {
         flushCheckpoint(synchronously: true)
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
-        retryTimer?.invalidate()
+        retryTimer.cancel()
         pathMonitor.cancel()
         attempt?.cancel()
         runner?.cancel()
@@ -249,21 +249,17 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
 
     /// Feeds the policy one event and performs the single decision it returns.
     private func dispatch(_ event: MobileReconnectEvent) {
-        let moment = ProcessInfo.processInfo.systemUptime
+        let moment = MobileMonotonicClock.now
         switch reconnectPolicy.handle(event, at: moment) {
         case .attemptNow:
-            cancelRetryTimer()
+            retryTimer.cancel()
             startAttempt()
         case .wait(let until):
-            cancelRetryTimer()
-            retryTimer = Timer.scheduledTimer(
-                withTimeInterval: max(0, until - moment),
-                repeats: false
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.dispatch(.clockFired) }
-            }
+            // The policy's moment is handed over as it stands. No arithmetic here: the
+            // instrument reads the clock the policy computed `until` on.
+            retryTimer.schedule(until: until) { [weak self] in self?.dispatch(.clockFired) }
         case .rest:
-            cancelRetryTimer()
+            retryTimer.cancel()
         }
         refreshStatus()
     }
@@ -481,32 +477,23 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     /// Reads the recovery phase, which only the policy knows, and renders whatever the four
     /// facts compose to. No wording or severity is decided here.
     private func refreshStatus() {
-        let moment = ProcessInfo.processInfo.systemUptime
+        let moment = MobileMonotonicClock.now
         status.noteRecovery(reconnectPolicy.recoveryPhase(at: moment))
         let line = status.line(at: moment)
         connectionHeader.showStatus(line.text, color: line.severity.color)
     }
 
-    private func cancelRetryTimer() {
-        retryTimer?.invalidate()
-        retryTimer = nil
-    }
-
     private func scheduleCheckpoint() {
         checkpointIsDirty = true
-        guard checkpointSaveTimer == nil else { return }
-        checkpointSaveTimer = Timer.scheduledTimer(
-            withTimeInterval: Self.checkpointInterval,
-            repeats: false
-        ) {
-            [weak self] _ in
-            MainActor.assumeIsolated { self?.flushCheckpoint(synchronously: false) }
+        guard checkpointSaveTimer.isPending == false else { return }
+        checkpointSaveTimer.schedule(until: MobileMonotonicClock.now + Self.checkpointInterval) {
+            [weak self] in
+            self?.flushCheckpoint(synchronously: false)
         }
     }
 
     private func flushCheckpoint(synchronously: Bool) {
-        checkpointSaveTimer?.invalidate()
-        checkpointSaveTimer = nil
+        checkpointSaveTimer.cancel()
         let source = checkpointIsDirty ? terminalView.checkpointSource() : nil
         checkpointIsDirty = false
         let store = checkpointStore
