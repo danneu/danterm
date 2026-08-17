@@ -4,6 +4,9 @@
 - Date: 2026-06-09
 - Amended: 2026-08-06 -- the AppKit rules stand; the Ghostty half of rule 5 is
   gone. See the banner.
+- Amended: 2026-08-17 -- rules 2 and 3 now name the owner-lifetime teardown path
+  rather than `deinit`, because an object whose last reference can be released
+  off the main actor cannot use one.
 
 > **2026-08-06: partly superseded by the libghostty removal.** The AppKit
 > lifetime rules -- undo managers, observers, NSEvent monitors, timers, escaping
@@ -50,11 +53,15 @@ stored-callback code:
    the window field editor: undo applies only while the edit session owns first
    responder focus and does not outlive the field edit.
 2. Every NotificationCenter observer must have an owner-lifetime teardown path:
-   block observers store the token and remove it in `deinit`; selector observers
-   use `self` and remove it in `deinit`; re-registration first removes the old
-   observer.
-3. Every `NSEvent` monitor stores the token, removes it in `deinit`, and uses a
-   `[weak self]` handler.
+   block observers store the token and selector observers use `self`, and both
+   remove the registration on that path; re-registration first removes the old
+   observer. `deinit` is the path for an object whose owner drops it on the main
+   actor. An object whose last reference can be released on any executor uses an
+   explicit terminal teardown call instead, because `deinit` is nonisolated and
+   cannot reach main-actor state without asserting a fact no caller can be held
+   to.
+3. Every `NSEvent` monitor stores the token, uses a `[weak self]` handler, and
+   removes the monitor on the same owner-lifetime teardown path rule 2 defines.
 4. New popover and sheet view controllers use `weak runtime` or another weak
    owner reference. Their delegate clears the owner's retained handle on close,
    and nested popovers close child-before-parent.
@@ -125,8 +132,9 @@ The current high-risk sites are safe for these specific reasons:
   (`app/WindowChromeView.swift:172-187`) and `ScrollableTerminalView` block
   observers (`app/ScrollableTerminalView.swift:74-122`) remove their
   NotificationCenter registrations in `deinit`.
-- `AppRuntime`'s switcher monitor (`app/AppRuntime.swift:103-115`) stores its
-  token, uses `[weak self]`, and removes the monitor in `deinit`.
+- `AppRuntime`'s switcher monitor stores its token, uses `[weak self]`, and is
+  removed by the cancel closure the scheduling lifecycle runs from
+  `AppRuntime.shutdown()`.
 - Popover delegate adapters in `app/AppRuntime.swift` use weak runtime
   references (`app/AppRuntime.swift:1412-1464`), clear or reconcile the retained
   popover handle on close, and close shortcut-help child popovers before parent
@@ -138,12 +146,15 @@ The current high-risk sites are safe for these specific reasons:
   `app/IpcServer.swift:35-69`) use `[weak self]` or explicit close/cancel paths
   so an owner teardown does not leave a strong callback cycle that can message a
   freed owner.
-- Known asymmetry: `AppRuntime.deinit` cancels the local event monitor but not
-  its two `DispatchSourceTimer`s (`app/AppRuntime.swift:103-106,856-899`). That
-  is benign while `AppRuntime` remains the app-lifetime singleton because
-  handlers use `[weak self]`, and the enriched checkpoint timer is cancelled on
-  `.terminate` (`app/AppRuntime.swift:581-584`). If `AppRuntime` ever becomes
-  per-window, add `deinit` timer cancellation.
+- `AppRuntime` has no `deinit`, and must not gain one. Its last reference can be
+  released on any executor -- `IpcServer` runs on its own -- so deallocation-time
+  work cannot reach the runtime's main-actor state. `AppRuntime.shutdown()` is
+  the whole teardown instead: the event monitor, both `DispatchSourceTimer`s, the
+  debouncers, and the IPC server are all armed with the scheduling lifecycle, so
+  one call cancels them together and the owner census proves the set is empty.
+  An owner that releases the runtime without calling `shutdown()` leaks those
+  owners for the process lifetime. That is accepted: `AppDelegate` is the only
+  owner that can arm the monitor, and it always calls `shutdown()`.
 
 No enforcement lint is added for this docs-only hardening pass. If this bug
 class recurs, consider a focused app-lifetime lint for new standalone

@@ -180,9 +180,12 @@ compressed headline-style grammar, no clever compression.
 Never let a longer-lived owner message a shorter-lived AppKit object after
 teardown. A standalone `NSTextView` with `allowsUndo` owns its `UndoManager`
 (not the window's); NotificationCenter observers and NSEvent monitors remove
-their tokens in `deinit`; timers, stored escaping closures, and async hops use
-`[weak self]` or a documented owner-bound lifetime; `Unmanaged`/C `userdata` is
-app-lifetime or stays retained until after the matching `free`.
+their tokens on an owner-lifetime teardown path -- `deinit` for an object whose
+owner drops it on the main actor, an explicit terminal teardown call for an
+object whose last reference can be released anywhere; timers, stored escaping
+closures, and async hops use `[weak self]` or a documented owner-bound lifetime;
+`Unmanaged`/C `userdata` is app-lifetime or stays retained until after the
+matching `free`.
 
 ### Tests
 

@@ -266,14 +266,6 @@ class AppRuntime {
         }
     }
 
-    deinit {
-        // AppDelegate creates, owns, and releases the runtime on the main actor; deinit is
-        // nonisolated in this language mode, so encode that owner guarantee for the fallback.
-        MainActor.assumeIsolated {
-            schedulingLifecycle.shutdown()
-        }
-    }
-
     // MARK: - Ephemeral Mode Event Monitor
 
     private func installSwitcherEventMonitor() {

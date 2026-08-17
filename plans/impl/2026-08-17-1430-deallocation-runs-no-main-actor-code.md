@@ -157,7 +157,7 @@ row in `docs/design/index.md`.
 
 ## Commit progress
 - [x] 1. Give IpcServer a main-actor dispatch handle instead of the runtime
-- [ ] 2. Delete AppRuntime.deinit and amend the lifetime-safety rules
+- [x] 2. Delete AppRuntime.deinit and amend the lifetime-safety rules
 
 ## Implementation notes
 
@@ -182,3 +182,17 @@ row in `docs/design/index.md`.
   registered. It syncs on the runtime's own subscription census, then proves
   the retirement through the socket -- `shutdown()` answers pending IPC, so the
   peer reads an answer instead of end-of-stream if the close never arrived.
+- Rules 2 and 3 were amended by naming the general shape -- an owner-lifetime
+  teardown path, with `deinit` as the case for an object whose owner drops it on
+  the main actor -- rather than by carving out an `AppRuntime` exception. A rule
+  that named the exception would have to be re-read every time another object
+  gained an off-main releaser.
+- The plan calls the switcher-monitor `Consequences` paragraph stale because it
+  described the deinit. Its replacement states where the monitor is really
+  removed: the cancel closure the scheduling lifecycle runs from `shutdown()`.
+  The second paragraph absorbed AR1, so the accepted leak is recorded in the
+  note rather than only in this plan.
+- Verification step 5 was run against slot 1: `ls` returned the model, a
+  `pane tape --follow` stream carried live write and feed events while input was
+  sent to the pane, and `quit` shut the instance down with no crash or trap in
+  the slot log. The slot was released afterward.

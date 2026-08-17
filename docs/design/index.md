@@ -70,6 +70,8 @@ without opening it.
   -- Accepted. Amended 2026-08-06 and 2026-08-12.
 - [2026-06-09: AppKit / Ghostty Lifetime Safety](2026-06-09-appkit-lifetime-safety.md)
   -- Accepted. Amended 2026-08-06: the Ghostty half of rule 5 is gone.
+  Amended 2026-08-17: rules 2 and 3 name the owner-lifetime teardown path, not
+  `deinit`.
 - [2026-07-20: Terminal Engine Experiment Decision (Milestone 5)](2026-07-20-terminal-engine-experiment-decision.md)
   -- Superseded by [2026-08-06: The Swift Terminal Engine](2026-08-06-swift-terminal-engine.md).
 - [2026-07-27: Benchmark Routing for Damage-Scoped Render Changes](2026-07-27-damage-render-benchmark-routing.md) -- Accepted.
