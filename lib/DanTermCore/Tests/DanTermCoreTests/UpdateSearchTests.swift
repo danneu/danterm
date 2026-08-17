@@ -109,6 +109,69 @@ import Testing
         #expect(commands.isEmpty)
     }
 
+    @Test("a search-field focus report adopts its pane along with field ownership")
+    func searchFieldFocusReportAdoptsItsPane() {
+        // Intent: the report of a click into a pane's search field focuses that
+        //   pane, clears its alerts under the focus clear mode, and hands search
+        //   ownership to the field -- all from the one message.
+        // Why it exists: the gesture is reported by the click, and one message
+        //   has to carry the whole gesture. A report that only set ownership
+        //   would leave the pane unfocused, so the sweep it triggers would pull
+        //   the responder back out of the field the user just clicked.
+        var model = makeModel()
+        createTab(&model)
+        let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
+        update(&model, .splitFocusedPane(direction: .horizontal))
+        let paneB = selectedTab(in: model)!.paneTree.focusedPaneId
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
+        update(&model, .searchStarted(paneId: paneB, needle: "hit"))
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let commands = update(&model, .searchFieldBecameFirstResponder(paneId: paneB))
+
+        #expect(selectedTab(in: model)?.paneTree.focusedPaneId == paneB,
+            "the field click did not focus its own pane")
+        #expect(model.searchState[paneB]?.focusOwner == .field)
+        #expect(model.alerts[0].isUnread == false,
+            "focusing a pane through its search field did not clear that pane's alerts")
+        #expect(desiredPaneFocus(in: model) == .searchField(paneB),
+            "the projection must name the clicked field so the next sweep keeps it")
+        #expect(commands.isEmpty)
+    }
+
+    @Test("a search-field focus report for a pane outside the selected tab changes nothing")
+    func searchFieldFocusReportForForeignPaneChangesNothing() {
+        // Intent: a report carrying a pane that does not live in the selected
+        //   tab leaves focus, alerts, and search ownership alone.
+        // Why it exists: the handler adopts a pane now, so its stray fence is
+        //   load-bearing -- a mis-carried pane id must not move the selected
+        //   tab's focus or read a background tab's alerts.
+        var model = makeModel()
+        createTab(&model)
+        let foregroundPane = selectedTab(in: model)!.paneTree.focusedPaneId
+        let firstTabId = model.selectedTabId
+        createTab(&model)
+        let secondTabPane = selectedTab(in: model)!.paneTree.focusedPaneId
+        update(&model, .searchStarted(paneId: secondTabPane, needle: "hit"))
+        update(&model, .selectTab(id: firstTabId!))
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: secondTabPane,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let commands = update(&model, .searchFieldBecameFirstResponder(paneId: secondTabPane))
+
+        #expect(selectedTab(in: model)?.paneTree.focusedPaneId == foregroundPane,
+            "a foreign pane's field report moved the selected tab's focus")
+        #expect(model.alerts[0].isUnread, "a foreign pane's field report cleared its alerts")
+        #expect(desiredPaneFocus(in: model) == .terminal(foregroundPane))
+        #expect(commands.isEmpty)
+    }
+
     @Test("searchNeedleChanged updates needle and clears the stale match status")
     func searchNeedleChangedUpdatesNeedleClearsStaleCounts() {
         // Intent: searchNeedleChanged installs the new needle, clears the

@@ -486,9 +486,22 @@ func update(
         return []
 
     case .searchFieldBecameFirstResponder(let paneId):
+        // The click into a search field is one gesture, so this message carries
+        // the whole of it: the pane the field belongs to takes focus and its
+        // ownership moves to the field together. Reporting only the ownership
+        // would leave a non-focused pane unfocused, and the sweep this message
+        // triggers would then pull the responder back out of the clicked field.
+        // The fence is the same one the terminal message keeps: a pane outside
+        // the selected tab must not move this tab's focus or read its alerts.
         guard let tab = selectedTab(in: model),
-              tab.paneTree.focusedPaneId == paneId,
+              allPaneIds(tab.paneTree.root).contains(paneId),
               model.searchState[paneId] != nil else { return [] }
+        if paneId != tab.paneTree.focusedPaneId {
+            if model.config.alertClearMode == .focus {
+                markAlertsReadForPane(paneId, in: &model)
+            }
+            updateSelectedTab(&model) { $0.paneTree.focus(paneId) }
+        }
         model.searchState[paneId]?.focusOwner = .field
 
         return []

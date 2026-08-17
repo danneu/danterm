@@ -409,6 +409,88 @@ func splitContainerViewTests() {
             "declarative focus pass did not restore the search field editor")
     }
 
+    uiTest("a click in a pane's search field reports field focus for that pane") {
+        // Intent: the gesture that hands a search field key focus reports it,
+        //   for the focused pane and for one the user clicks into cold.
+        // Why it exists: focus reports come from interaction sites now. Without
+        //   this one the model only learns of field ownership at the first
+        //   keystroke, and any sweep in between repairs focus back to the
+        //   terminal the user just clicked away from.
+        // Scenario: two panes with open search overlays, each field clicked.
+        //   The fields are driven outside a window: AppKit's own mouse tracking
+        //   inside NSSearchField blocks on real events the harness cannot post.
+        let paneA = PaneId(), paneB = PaneId(), tabId = TabId()
+        let root = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.5
+        )
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: root, focusedPaneId: paneA))
+        var model = AppModel(
+            groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
+            selectedTabId: tabId
+        )
+        model.searchState[paneA] = SearchModel(needle: "hit")
+        model.searchState[paneB] = SearchModel(needle: "hit")
+        let runtime = AppRuntime(model: model)
+
+        for paneId in [paneA, paneB] {
+            runtime.sentMessages = []
+            let overlay = SearchOverlayView(paneId: paneId, runtime: runtime)
+
+            overlay.searchField.mouseDown(with: try makeSearchFieldClick())
+
+            try uiExpect(runtime.sentMessages.count == 1,
+                "one field click should report once, got \(runtime.sentMessages)")
+            guard case .searchFieldBecameFirstResponder(let reported) =
+                runtime.sentMessages.first else {
+                throw UITestFailure(message: "field click reported \(runtime.sentMessages)")
+            }
+            try uiExpect(reported == paneId, "the field click reported the wrong pane")
+        }
+    }
+
+    uiTest("the focus pass's search-field repair dispatches nothing") {
+        // Intent: a sweep that repairs the responder to a pane's search field
+        //   originates no Msg.
+        // Why it exists: I1 -- a reconcile pass that sends re-enters the whole
+        //   sweep from inside itself, against caches the outer pass has not
+        //   advanced. The search-field arm is the half a terminal-only proof
+        //   would leave uncovered.
+        // Scenario: the model names pane A's field, the responder sits on the
+        //   terminal, and the pass moves it.
+        let paneId = PaneId(), tabId = TabId()
+        let root = SplitNodeModel.leaf(PaneModel(id: paneId))
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: root, focusedPaneId: paneId))
+        var model = AppModel(
+            groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
+            selectedTabId: tabId
+        )
+        model.searchState[paneId] = SearchModel(needle: "hit")
+        let runtime = AppRuntime(model: model)
+        let terminal = FocusableTerminalView()
+        runtime.installTerminalSession(terminal, paneId: paneId)
+        let container = persistentContainer(root: root, runtime: runtime)
+        let window = focusTestWindow(content: container)
+        defer { window.close() }
+        runtime.window = window
+        container.rebuild()
+        container.ensureLaidOut()
+        let wrapper = try requireWrapper(runtime, paneId)
+        wrapper.showSearchOverlay(search: model.searchState[paneId]!, runtime: runtime)
+        try uiExpect(window.makeFirstResponder(terminal), "window refused the terminal")
+        runtime.sentMessages = []
+
+        runtime.reconcilePaneFocus()
+
+        try uiExpect(runtime.paneFocusClaimant() == .pane(.searchField(paneId)),
+            "the pass did not repair the responder to the search field")
+        try uiExpect(runtime.sentMessages.isEmpty,
+            "the search-field repair originated \(runtime.sentMessages)")
+        try uiExpect(runtime.model.searchState[paneId]?.focusOwner == .field,
+            "the repair changed search focus ownership")
+    }
+
     uiTest("pane focus claimant distinguishes pane, field editor, window, and non-pane focus") {
         // Intent: claimant detection resolves pane terminal and search controls,
         //   treats the window as unclaimed, and preserves deliberate non-pane focus.
@@ -623,6 +705,17 @@ private final class FocusableTerminalView: TerminalView {
     override func keyDown(with event: NSEvent) {
         receivedCharacters.append(event.characters ?? "")
     }
+}
+
+/// One left-button press on a search field, built without a window so the click
+/// can be delivered directly to the production view.
+private func makeSearchFieldClick() throws -> NSEvent {
+    guard let event = NSEvent.mouseEvent(
+        with: .leftMouseDown, location: NSPoint(x: 20, y: 10), modifierFlags: [],
+        timestamp: 0, windowNumber: 0, context: nil,
+        eventNumber: 0, clickCount: 1, pressure: 1
+    ) else { throw UITestFailure(message: "could not create a mouse event") }
+    return event
 }
 
 /// Unwraps one runtime-owned pane wrapper for identity assertions.

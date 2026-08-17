@@ -2,8 +2,26 @@
 // NSSearchField with match counter, prev/next navigation buttons, and close.
 import Cocoa
 
+/// Reports the click that hands the field key focus.
+///
+/// The report has to ride the user's gesture. A responder-state hook would also
+/// fire for the pane-focus pass's own repair, which moves the responder to this
+/// field from mid-sweep -- an AppKit-laundered send out of a reconcile pass.
+/// `mouseDown` cannot be reached that way.
+class PaneSearchField: NSSearchField {
+    var onUserClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        // Before the AppKit tracking loop, not after its mouse-up: the model has
+        // to name this field as the focus target before any sweep runs, or the
+        // sweep repairs the responder back to the terminal mid-gesture.
+        onUserClick?()
+        super.mouseDown(with: event)
+    }
+}
+
 class SearchOverlayView: NSView, NSSearchFieldDelegate {
-    let searchField: NSSearchField
+    let searchField: PaneSearchField
     private let counterLabel: NSTextField
     private let prevButton: NSButton
     private let nextButton: NSButton
@@ -32,7 +50,7 @@ class SearchOverlayView: NSView, NSSearchFieldDelegate {
         backgroundView.layer?.borderColor = NSColor.separatorColor.cgColor
 
         // Native search field
-        searchField = NSSearchField()
+        searchField = PaneSearchField()
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.placeholderString = "Search..."
         searchField.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
@@ -84,6 +102,10 @@ class SearchOverlayView: NSView, NSSearchFieldDelegate {
         translatesAutoresizingMaskIntoConstraints = false
 
         searchField.delegate = self
+        searchField.onUserClick = { [weak self] in
+            guard let self else { return }
+            self.runtime?.send(.searchFieldBecameFirstResponder(paneId: self.paneId))
+        }
         prevButton.target = self
         prevButton.action = #selector(prevMatch)
         nextButton.target = self
