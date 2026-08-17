@@ -351,6 +351,85 @@ import DanTermProtocol
         #expect(encodedPane?["live"] == nil)
     }
 
+    @Test("ls names the row whose inline rename editor is open")
+    func lsNamesOpenInlineRenameTarget() throws {
+        // Intent: the state listing reports the tab or group whose sidebar
+        //   editor is open, and reports nothing while no session exists.
+        // Why it exists: an agent reproducing a rename issue has to be able to
+        //   read whether an editor is open and on which row. Every writer --
+        //   the menu and the double-click alike -- now begins the session
+        //   through the model, so the listing can answer honestly.
+        // Scenario: spec-first -- the user starts renaming a tab, then starts
+        //   renaming a group instead.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = try #require(selectedTab(in: model)).id
+        let groupId = try #require(model.groups.first).id
+
+        #expect(try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.ls.rawValue))["inlineRename"] == nil,
+            "no session is open before any begin")
+
+        _ = update(&model, .beginSidebarRename(target: .tab(tabId)))
+        #expect(try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.ls.rawValue))["inlineRename"]
+            == .object(["type": .string("tab"), "tabId": .string(tabId.rawValue.uuidString)]))
+
+        _ = update(&model, .beginSidebarRename(target: .group(groupId)))
+        #expect(try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.ls.rawValue))["inlineRename"]
+            == .object(["type": .string("group"), "groupId": .string(groupId.rawValue.uuidString)]),
+            "a second begin moves the reported session to its target")
+    }
+
+    @Test("ls reports no open inline rename once the session ends")
+    func lsReportsNoInlineRenameAfterSessionEnds() throws {
+        // Intent: every rename-ending cause the model can reach leaves the
+        //   listing reporting no open session.
+        // Why it exists: a listing that keeps naming a closed editor is worse
+        //   than no listing, because an agent would wait on a session that
+        //   ended.
+        // Scenario: spec-first -- the editor closes on its own, and the row it
+        //   was editing goes away underneath it.
+        func openTabRename(_ model: inout AppModel) throws -> TabId {
+            let tabId = try #require(selectedTab(in: model)).id
+            _ = update(&model, .beginSidebarRename(target: .tab(tabId)))
+            #expect(try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.ls.rawValue))["inlineRename"] != nil)
+            return tabId
+        }
+        func reportedRename(_ model: inout AppModel) throws -> JSONValue? {
+            try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.ls.rawValue))["inlineRename"]
+        }
+
+        // The editor closes and reports the session it ended.
+        var ended = makeModel()
+        createTab(&ended)
+        let endedTabId = try openTabRename(&ended)
+        _ = update(&ended, .sidebarRenameEnded(target: .tab(endedTabId)))
+        #expect(try reportedRename(&ended) == nil)
+
+        // The edited tab is closed while its editor is open.
+        var closedTab = makeModel()
+        createTab(&closedTab)
+        createTab(&closedTab)
+        let closedTabId = try openTabRename(&closedTab)
+        _ = sendIpc(
+            &closedTab,
+            method: IpcRequestMethod.tabClose.rawValue,
+            params: .object(["tab": .string(closedTabId.rawValue.uuidString)])
+        )
+        #expect(try reportedRename(&closedTab) == nil)
+
+        // The edited group is closed while its editor is open.
+        var closedGroup = makeModel()
+        createTab(&closedGroup)
+        _ = update(&closedGroup, .createGroup(name: "Builds"))
+        let closedGroupId = closedGroup.groups[1].id
+        _ = update(&closedGroup, .beginSidebarRename(target: .group(closedGroupId)))
+        #expect(try reportedRename(&closedGroup) != nil)
+        _ = sendIpc(&closedGroup, method: IpcRequestMethod.groupClose.rawValue, params: .object([
+            "group": .string(closedGroupId.rawValue.uuidString),
+        ]))
+        #expect(try reportedRename(&closedGroup) == nil)
+    }
+
     @Test("agent.attach routes through the pane owner before its reply")
     func agentAttachRoutesThroughPaneOwnerBeforeReply() throws {
         // Intent: agent.attach reduces the model before returning its reply.

@@ -14,6 +14,22 @@ struct IpcEntityEncoder {
         if let selectedTabId = model.selectedTabId {
             object["selectedTabId"] = .string(selectedTabId.rawValue.uuidString)
         }
+        // Absent means no editor is open. The model holds the target for every
+        // writer, so this reads as the live session rather than a stale request.
+        switch model.sidebarRenameTarget {
+        case .tab(let id):
+            object["inlineRename"] = .object([
+                "type": .string("tab"),
+                "tabId": .string(id.rawValue.uuidString),
+            ])
+        case .group(let id):
+            object["inlineRename"] = .object([
+                "type": .string("group"),
+                "groupId": .string(id.rawValue.uuidString),
+            ])
+        case nil:
+            break
+        }
         return .object(object)
     }
 

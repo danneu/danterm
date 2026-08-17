@@ -692,13 +692,21 @@ escape sequence. A script that needs one record per pane must use `@tsv` as
 above, which escapes them; string interpolation would let one hostile title
 split a record in two.
 
-`ls` returns `{groups, selectedTabId}`. Each pane lives inline at a split-tree
-leaf: `groups[].tabs[].rootNode` is the per-tab tree, and every
+`ls` returns `{groups, selectedTabId, inlineRename}`. Each pane lives inline at
+a split-tree leaf: `groups[].tabs[].rootNode` is the per-tab tree, and every
 `{ "type": "leaf" }` node carries its pane under `.pane` (`{id, title, cwd,
 command, connection, agent, integration, ...}`). The four lifecycle fields have
 the same typed encoding as `pane info`, so agent lookup uses
 `.agent.session.sessionId`. The `jq` above recurses the tree to list every pane.
 Treat `selectedTabId` as display state, not as a targeting source.
+
+`inlineRename` names the sidebar row whose inline edit field is open right now:
+`{"type": "tab", "tabId": "..."}` or `{"type": "group", "groupId": "..."}`. The
+key is absent when no editor is open, and at most one can be open at a time.
+Every way of starting one -- the context menu, the menubar Rename Tab command,
+a double-click on a row, and creating a group -- is reported here.
+
+    danterm ls | jq -c '.inlineRename // "none"'
 
 ### Inspect live key focus
 

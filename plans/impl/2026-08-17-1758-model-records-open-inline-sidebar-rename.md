@@ -122,10 +122,17 @@ open.
   itself. The UI proof runs the collapsed-group row and an unmounted row far
   below a short window; ablating the report fails it.
 
+- `ls` reports the session under an `inlineRename` key that is absent when no
+  editor is open, matching how `selectedTabId` already omits rather than encodes
+  a null. The value is discriminated -- `{"type": "tab", "tabId": ...}` or
+  `{"type": "group", "groupId": ...}` -- so a reader cannot mistake a tab id for
+  a group id. PO4 runs the three ending causes the model can reach on its own:
+  the named end, closing the edited tab, and closing the edited group.
+
 ## Commit progress
 - [x] 1. The sidebar rename end names the session it ends
 - [x] 2. Every inline sidebar rename begins through the model
-- [ ] 3. The state listing reports the open inline rename
+- [x] 3. The state listing reports the open inline rename
 
 ## Follow Up
 
