@@ -76,8 +76,12 @@ struct CLICharacterizationTests {
         //   missing one, and it is the one a rewrite most easily drops.
         // Scenario: DanTerm is running but its main thread is blocked.
         let run = try withScriptedEndpoint { connection in
-            // Hold the connection open past the CLI's receive timeout without writing.
-            Thread.sleep(forTimeInterval: 8)
+            // Hold the connection open, and silent, for exactly as long as the child
+            // lives: the CLI closes its end when it gives up, which ends this read. A
+            // fixed sleep would have to outlast the CLI's timeout, so it would park this
+            // worker for seconds and would have to be re-tuned whenever that timeout is
+            // supplied a different value.
+            holdUntilEndOfStream(connection)
             Darwin.close(connection)
         } run: { path in
             try runCLI(["ls"], socketPath: path)
@@ -452,6 +456,21 @@ private func writeLine(_ line: String, to fd: Int32) {
             return
         }
         offset += written
+    }
+}
+
+/// Blocks, without writing, until the peer closes its end of `fd`.
+///
+/// This is how a fixture says "stay silent for the child's lifetime" with no clock in it:
+/// the peer's exit closes the socket, the read returns end-of-stream, and the worker is
+/// released at that instant rather than after a duration chosen to outlast it.
+private func holdUntilEndOfStream(_ fd: Int32) {
+    var scratch = [UInt8](repeating: 0, count: 256)
+    while true {
+        let count = scratch.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
+        if count > 0 { continue }
+        if count < 0 && errno == EINTR { continue }
+        return
     }
 }
 

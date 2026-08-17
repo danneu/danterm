@@ -305,7 +305,7 @@ baseline before changing anything:
 
 - [x] 1. Run the pane-tape renderer off the shared dispatch pool and guard its waits legibly
 - [x] 2. Report every remaining test hang-guard expiry as a timeout, and graduate the rule into AGENTS.md
-- [ ] 3. Hold the silent-endpoint fixture for the child's lifetime instead of eight seconds
+- [x] 3. Hold the silent-endpoint fixture for the child's lifetime instead of eight seconds
 - [ ] 4. Supply the CLI's socket timeout from outside the process, and document it
 
 ## Implementation notes
@@ -363,6 +363,20 @@ baseline before changing anything:
 - **PO2 was discharged by ablation, not by inspection.** Dropping the liveness
   guard to 50ms made the expiry surface as `Error Domain=NSPOSIXErrorDomain
   Code=60 "Operation timed out"`, named against the waiting line.
+
+### Slice 3
+
+- **The fixture reads instead of sleeping, and reads are the only way to notice the
+  child's exit without a clock.** A blocking read on the accepted connection returns
+  end-of-stream the moment the CLI closes its end, which is exactly the child's lifetime.
+  The read discards whatever the CLI writes, which is the same silence the sleep gave it:
+  the fixture never writes, so the CLI still fails on its own receive timeout.
+- **PO7 was discharged by the drop in the test's own duration.** The silent-endpoint test
+  ran 8 seconds before -- the sleep -- and now finishes in 5.02, the CLI's own timeout. The
+  fixture releases the worker at the child's exit, not at a duration of its own.
+- **The drain carries no guard of its own.** Adding one would put a wall-clock value back
+  into the fixture, against I9. The bound is the child's lifetime, and `runCLI` on the
+  calling thread already waits for exactly that.
 
 ## Follow Up
 
