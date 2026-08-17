@@ -34,6 +34,10 @@ public enum UnixSocketTransportError: Error, Equatable {
 /// request expects an answer within seconds, while a followed stream is idle exactly as
 /// long as its subject is quiet, and a timeout there would cut a healthy capture short.
 public final class UnixSocketTransport: DanTermClientTransport {
+    /// A local peer cannot die without its socket closing, and a local follow is idle for
+    /// exactly as long as its pane is quiet, so no silence bound applies to these streams.
+    public static let livenessPolicy = DanTermClientLivenessPolicy.exempt
+
     private let lifetime: SocketDescriptorLifetime
     private let readBufferSize = 64 * 1024
 

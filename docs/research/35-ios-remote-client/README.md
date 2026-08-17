@@ -762,14 +762,17 @@ issues `pane.split`. Reopen on user request only.
   connection dies on backgrounding by design, and a foreground return needs no
   re-sync at all -- the D5 cursor backfills exactly, measured on scrollback depth
   rather than on the screen.
-- **Nothing checks that a peer is alive, in either direction.** F9's open
-  consequence, and one gap rather than two: no `SO_KEEPALIVE`, heartbeat, or
-  idle timeout lets the Mac reclaim a slot from a phone that vanished, and no
-  receive timeout lets the client bound a handshake against a Mac that accepted
-  and never read. The visible symptoms are opposite -- a stale "Connected" and an
-  unbounded "Connecting" -- which is why they read as two problems. Whoever next
-  owns the client's connection lifecycle should take both, along with the
-  automatic-retry policy T25 deferred.
+- **Nothing checks that a peer is alive, in either direction.** *Closed by one
+  advertised silence bound.* F9's open consequence was one gap rather than two:
+  no `SO_KEEPALIVE`, heartbeat, or idle timeout let the Mac reclaim a slot from a
+  phone that vanished, and no receive timeout let the client bound a handshake
+  against a Mac that accepted and never read. The visible symptoms are opposite
+  -- a stale "Connected" and an unbounded "Connecting" -- which is why they read
+  as two problems. Both now rest on one number the server states in its hello:
+  the client pings every half-bound, either end treats byte-silence past the
+  bound as peer death, and the Mac's close names the reason and releases the
+  slot. Local connections are exempt. The automatic-retry policy T25 deferred is
+  still open and is its own plan.
 - **Distribution.** Personal use with a paid account: TestFlight internal or
   direct device install both work; nothing here needs App Store review. Record
   the choice when it first matters (push entitlements).

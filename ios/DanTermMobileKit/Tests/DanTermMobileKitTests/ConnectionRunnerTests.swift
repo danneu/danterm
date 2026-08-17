@@ -7,6 +7,8 @@ import DanTermProtocol
 
 /// Returns one frame immediately, then blocks until cancellation closes the transport.
 private final class ImmediateFrameTransport: DanTermClientTransport, @unchecked Sendable {
+    static let livenessPolicy = DanTermClientLivenessPolicy.exempt
+
     private let condition = NSCondition()
     private var frame: Data?
     private var closed = false

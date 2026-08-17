@@ -291,7 +291,7 @@ updated with the IPC surface change in the same change.
 
 - [x] 1. feat(ipc): advertise one silence bound and answer ping through dispatch
 - [x] 2. feat(ipc): reclaim a silent remote connection and audit why
-- [ ] 3. feat(client): keep a remote session alive on the advertised bound
+- [x] 3. feat(client): keep a remote session alive on the advertised bound
 
 ## Implementation notes
 
@@ -325,3 +325,58 @@ updated with the IPC surface change in the same change.
   blocked test threads beside them left other suites' connection callbacks
   unscheduled. Waiting through `Task.sleep` fixed it, and the reproduction is
   the reason the file says so in its header.
+- **The client's mechanism is a per-session watchdog, not a socket option.** The
+  discretion clause left the client half's shape open. A watchdog thread that both
+  pings and measures how long the reader has waited needs no new call on
+  `DanTermClientTransport`, covers the pre-hello phase the socket option could not
+  (the bound is not known yet), and works against the in-memory doubles -- so the
+  whole client half is provable without opening a descriptor. It wakes a parked
+  read the same way cancellation already does, through `transport.close()`.
+- **Silence is what a waiting reader observes.** The monitor measures the age of
+  the session's current `receive` call rather than a "last byte seen" timestamp.
+  That makes it byte-level for free -- every chunk that returns ends one wait and
+  starts the next -- and it refuses to declare death while nobody is reading,
+  where the client has no evidence either way. A "last byte" clock would have
+  killed a session whose consumer was busy for longer than the bound.
+- **The pre-hello bound is the client's own, and it is the only number the client
+  owns.** It governs one phase: the wait before the server has stated its bound.
+  The moment hello arrives the advertised number replaces it for everything after,
+  the first reply included. The phone gets it from the session default rather than
+  a constant repeated at the call site, and its TCP socket keeps no receive timeout
+  of its own, so no second silence rule exists on that stream.
+- **A hello under the contract must carry a bound.** A remote stream whose server
+  advertises no number leaves the client with nothing it is allowed to apply, and
+  inventing one is the disagreement this plan exists to prevent. Such a hello is
+  refused as `invalidHello`, which keeps I6 total instead of quietly restoring an
+  unbounded wait. An exempt stream still accepts a hello without one.
+- **The establishment-phase wording lives in `DanTermMobileKit`, not the app.**
+  `MobileConnectionState.establishmentFailure` overrides only silence, to
+  `serverUnreachable`; every other error words identically in both phases. Putting
+  it beside the total reducer keeps the phase distinction testable without a UIKit
+  host, and leaves the total error-to-state map free of phase.
+- **A cancel the owner asked for keeps the owner's outcome.** The watchdog can
+  race a cancel -- its ping fails because the transport is already closing -- and
+  reporting that as peer death would show a user their own action as a lost
+  connection. Death is recorded only while the session is still open.
+
+## Follow Up
+
+- `cli-tests/PaneTapeStreamTests.swift` fails the gate under load with a
+  misleading message. Its `readDescriptorLine` helper throws
+  `CocoaError(.coderReadCorrupt)` when its 2-second `poll` returns nothing, so a
+  parallel worker that starves the renderer for two seconds reports "The data
+  couldn't be read because it isn't in the correct format" rather than a
+  timeout. Seen once during this work's gate runs and not reproducible in
+  isolation. Give the helper a longer budget and a timeout error that says so.
+- `app-tests/IpcServerRemoteTests.swift` has a race in
+  `completeAuditSequence`. It writes an id-less request and closes the socket in
+  the next statement, then waits for the close record; when the drop record
+  loses that race the assertion reports one missing `requestDropped`. Seen once
+  under gate load and not reproducible in isolation, and it predates this work.
+  Make the test wait for the drop record before it closes.
+- The automatic client retry and backoff policy is still unwritten. This plan
+  created the facts it consumes -- `peerSilent` on the client and a
+  liveness-reasoned close on the server -- and until it lands, a declared death
+  ends in a manual reconnect. It is a designated follow-on plan (user decision,
+  2026-08-17), together with the readiness-based connection reader that AR1
+  names as the fix for the starvation this contract cannot survive.

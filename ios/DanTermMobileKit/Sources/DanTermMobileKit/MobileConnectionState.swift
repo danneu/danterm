@@ -44,8 +44,18 @@ public enum MobileConnectionState: Equatable, Sendable {
         case .connectionLimit: .refusedByMac(.connectionLimit)
         case .auditUnavailable: .refusedByMac(.auditUnavailable)
         case .unsupportedProtocol(let version): .versionMismatch(version)
-        case .closedBeforeHello, .invalidHello, .oversizedLine: .connectionLost
+        case .closedBeforeHello, .invalidHello, .oversizedLine, .peerSilent: .connectionLost
         }
+    }
+
+    /// Words the same failures for a connection that was still being established.
+    ///
+    /// Only silence changes meaning with the phase, and the phase is what the caller
+    /// knows: a stream that never started serving did not go down, it never answered, and
+    /// the remedy the user needs is the one for a Mac that is not reachable. Keeping this
+    /// distinction here leaves the total error-to-state map above free of phase.
+    public static func establishmentFailure(_ error: DanTermClientError) -> Self {
+        error == .peerSilent ? .serverUnreachable : failure(error)
     }
 
     /// Preserves the producer's ordinary end reason as an ending rather than a failure.

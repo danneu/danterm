@@ -35,9 +35,38 @@ func conversationFailureMapping() {
         (.auditUnavailable, .refusedByMac(.auditUnavailable)),
         (.unsupportedProtocol(7), .versionMismatch(7)),
         (.oversizedLine, .connectionLost),
+        (.peerSilent, .connectionLost),
     ]
     for (failure, expected) in cases {
         #expect(MobileConnectionState.failure(failure) == expected)
+    }
+}
+
+@Test("Only silence changes meaning while a connection is still being established")
+func establishmentFailureMapping() {
+    // Intent: a stream that never answered presents "Server unreachable", while the same
+    //   silence on a working connection presents "Connection lost". Every other failure
+    //   words the same in both phases.
+    // Why it exists: the phone's state vocabulary has to stay total without growing a
+    //   state, and the two remedies are different: one is "the Mac is not there", the
+    //   other is "reconnect to the Mac that was".
+    #expect(MobileConnectionState.establishmentFailure(.peerSilent) == .serverUnreachable)
+    #expect(MobileConnectionState.failure(.peerSilent) == .connectionLost)
+    for error in [
+        DanTermClientError.cancelled,
+        .closedBeforeHello,
+        .invalidHello,
+        .notAdmitted,
+        .identityUnresolved,
+        .connectionLimit,
+        .auditUnavailable,
+        .unsupportedProtocol(7),
+        .oversizedLine,
+    ] {
+        #expect(
+            MobileConnectionState.establishmentFailure(error)
+                == MobileConnectionState.failure(error)
+        )
     }
 }
 

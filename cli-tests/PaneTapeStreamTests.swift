@@ -287,6 +287,8 @@ struct PaneTapeStreamTests {
 /// Feeds a client session from a raw descriptor, so these fixtures can keep writing frames
 /// one at a time into a real socket and still exercise the renderer's actual input path.
 private final class DescriptorTransport: DanTermClientTransport {
+    static let livenessPolicy = DanTermClientLivenessPolicy.exempt
+
     private let descriptor: Int32
 
     init(_ descriptor: Int32) {

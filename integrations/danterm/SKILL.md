@@ -854,4 +854,14 @@ a stale hook cannot mutate a replacement session.
   The TCP target is always explicit. It uses the same handshake, typed refusal
   errors, commands, and output shapes as a Unix-socket target. Remote `quit` is
   sent normally and refused by the server while the app stays running.
+- A TCP connection lives under a liveness contract, and the server owns its one
+  number: its hello carries `silenceSeconds`, the longest the connection may go
+  with no arriving byte. Both ends apply that bound. The CLI pays the client's
+  side automatically -- it sends a `ping` request every half-bound and absorbs
+  the reply, so nothing appears in command output -- and reports `DanTerm
+  stopped responding: no data within the liveness bound` when no byte arrives in
+  time. The server closes a connection that goes silent and gives its slot back.
+  Pings produce no audit records of their own. A local `--socket` connection is
+  exempt from all of this and may idle forever, which is what lets `pane tape
+  --follow` sit on a quiet pane indefinitely.
 - macOS only. If `danterm` is not on PATH, stop.

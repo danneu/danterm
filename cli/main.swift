@@ -339,6 +339,8 @@ struct DanTermCLI {
             return CLIError("unsupported DanTerm IPC protocol \(version)")
         case DanTermClientError.oversizedLine:
             return CLIError("response line too large")
+        case DanTermClientError.peerSilent:
+            return CLIError("DanTerm stopped responding: no data within the liveness bound")
         default:
             return error
         }

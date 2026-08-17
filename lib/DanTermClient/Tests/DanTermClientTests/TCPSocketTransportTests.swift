@@ -254,13 +254,16 @@ private final class TCPTestListener: @unchecked Sendable {
     deinit { close() }
 }
 
+/// Mirrors the server's real hello, silence bound included: a TCP stream lives under the
+/// liveness contract, and a hello that states no bound is not one this client can serve.
 private func helloLine() -> String {
     encoded(JsonRpcRequest(
         method: Methods.hello,
-        params: .object([
-            "protocol": .number(1),
-            "app": .string("test"),
-        ])
+        params: IpcHello.params(
+            protocolVersion: 1,
+            appVersion: "test",
+            livenessBound: .standard
+        )
     ))
 }
 

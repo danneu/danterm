@@ -35,6 +35,11 @@ final class MobileSessionAttempt: @unchecked Sendable {
     func start(deliver: @Sendable @escaping (MobileSessionBootstrapResult) -> Void) {
         let thread = Thread { [self] in
             do {
+                // No socket receive timeout: a TCP stream is under the liveness contract,
+                // so the session's own watchdog bounds the wait -- by its establishment
+                // policy until hello arrives, and by the server's advertised bound after.
+                // A socket timeout here would be a second, differently tuned silence rule
+                // about the same connection.
                 let transport = try TCPSocketTransport(
                     host: host,
                     port: port,
@@ -81,7 +86,9 @@ final class MobileSessionAttempt: @unchecked Sendable {
             } catch let error as TCPSocketTransportError {
                 deliver(.failed(.failure(error)))
             } catch let error as DanTermClientError {
-                deliver(.failed(.failure(error)))
+                // Everything this closure does is establishment, up to and including the
+                // first pane list, so silence here means the Mac never answered.
+                deliver(.failed(.establishmentFailure(error)))
             } catch {
                 deliver(.failed(.deviceSetupFailure))
             }

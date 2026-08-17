@@ -9,6 +9,8 @@ import DanTermProtocol
 /// A transport backed by two byte buffers, so a whole conversation can be scripted in
 /// memory. Its existence is the evidence that the seam admits more than one transport.
 final class ScriptedTransport: DanTermClientTransport {
+    static let livenessPolicy = DanTermClientLivenessPolicy.exempt
+
     private var inbound: [Data]
     private(set) var sent = Data()
     private(set) var isClosed = false
@@ -39,6 +41,8 @@ final class ScriptedTransport: DanTermClientTransport {
 /// A controllable transport that exposes operation boundaries without tying session tests
 /// to a socket implementation.
 private final class BlockingTransport: DanTermClientTransport, @unchecked Sendable {
+    static let livenessPolicy = DanTermClientLivenessPolicy.exempt
+
     private let condition = NSCondition()
     private var receiveIsBlocked = false
     private var writeIsBlocked = false
@@ -127,6 +131,8 @@ private final class BlockingTransport: DanTermClientTransport, @unchecked Sendab
 
 /// Returns one final frame when close wakes its blocked receive.
 private final class ClosingFrameTransport: DanTermClientTransport, @unchecked Sendable {
+    static let livenessPolicy = DanTermClientLivenessPolicy.exempt
+
     private let condition = NSCondition()
     private let frame: Data
     private var receiveIsBlocked = false

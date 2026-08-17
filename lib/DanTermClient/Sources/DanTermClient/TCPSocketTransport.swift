@@ -27,6 +27,10 @@ public enum TCPSocketTransportError: Error, Equatable, Sendable {
 
 /// A bounded TCP byte stream that tries every resolved address until one connects.
 public final class TCPSocketTransport: DanTermClientTransport {
+    /// A network peer can vanish with the socket left established -- a phone in airplane
+    /// mode is the measured case -- so these streams live under the liveness contract.
+    public static let livenessPolicy = DanTermClientLivenessPolicy.underContract
+
     private let lifetime: SocketDescriptorLifetime
     private let readBufferSize = 64 * 1024
 
