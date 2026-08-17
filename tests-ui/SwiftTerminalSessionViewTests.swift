@@ -1,6 +1,7 @@
 // UI-harness coverage for native pointer, wheel, copy, and scrollbar routing in the Swift pane.
 import Cocoa
 import CoreGraphics
+import PaneProcessLifecycle
 
 @MainActor private var retainedSwiftPaneWindows: [NSWindow] = []
 
@@ -162,6 +163,54 @@ func swiftTerminalSessionViewTests() {
 
         try uiExpect(live.gridDimensions.last == TerminalDimensions(columns: 12, rows: 12),
                      "an unusable family froze an existing pane on its old grid")
+    }
+
+    uiTest("a pane smaller than one cell still reports the floored grid") {
+        // Intent: a pane whose bounds do not hold a whole grid reports the sizing floors --
+        //   two columns and one row -- rather than a zero-width or zero-height grid.
+        // Why it exists: a zero dimension reaches the child as an invalid winsize, and the
+        //   floors are the only thing between a dragged-shut divider and that state. The
+        //   harness used to re-declare the sizing function without them, so the app could
+        //   have lost the floors with every UI test still green.
+        // Scenario: spec-first -- the user drags a divider until the pane is a sliver.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        pane.frame = NSRect(x: 0, y: 0, width: 10, height: 10)
+        mountInTestWindow(pane, frame: pane.frame)
+
+        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 2, rows: 1),
+                     "a sliver pane did not report the floored grid: \(controller.gridDimensions)")
+    }
+
+    uiTest("geometry that is not finite or is out of Int range yields no grid and no cell") {
+        // Intent: both pure geometry conversions the pane view calls refuse an unusable
+        //   input instead of returning a value built from it.
+        // Why it exists: `Int(_:)` on a non-finite or out-of-range Double traps, so a
+        //   refusal is what stands between an infinite layout value and a crash. The
+        //   harness used to compile copies of both functions with no such guard.
+        // Scenario: spec-first -- AppKit hands the view an infinite bound or a pointer
+        //   location far outside the window.
+        let unusable: [(TerminalPointSize, TerminalPointSize)] = [
+            (.init(width: .infinity, height: 100), .init(width: 8, height: 16)),
+            (.init(width: 100, height: .nan), .init(width: 8, height: 16)),
+            (.init(width: 100, height: 100), .init(width: .infinity, height: 16)),
+            (.init(width: 1e300, height: 100), .init(width: 1e-300, height: 16)),
+        ]
+        for (size, cellSize) in unusable {
+            try uiExpect(terminalGridDimensions(size: size, cellSize: cellSize) == nil,
+                         "unusable geometry produced a grid: \(size) over \(cellSize)")
+        }
+
+        let unusablePoints: [(TerminalPoint, TerminalCellSize)] = [
+            (.init(x: .infinity, y: 0), .init(width: 8, height: 16)),
+            (.init(x: 0, y: .nan), .init(width: 8, height: 16)),
+            (.init(x: 0, y: 0), .init(width: .nan, height: 16)),
+            (.init(x: 1e300, y: 0), .init(width: 1e-300, height: 16)),
+        ]
+        for (point, cellSize) in unusablePoints {
+            try uiExpect(terminalCell(at: point, cellSize: cellSize, columns: 80, rows: 24) == nil,
+                         "unusable geometry produced a cell: \(point) over \(cellSize)")
+        }
     }
 
     uiTest("initial theme fills before draw and the retained first plan publishes on mount") {
@@ -1310,6 +1359,61 @@ func swiftTerminalSessionViewTests() {
 
         try uiExpect(controller.deliveredTextInputs == ["k"],
                      "process start did not deliver the buffered GUI keystroke exactly once")
+    }
+
+    uiTest("a refused submission names its reason and reaches the app boundary rejected") {
+        // Intent: when lifecycle policy refuses a submission, the reason stays attached to
+        //   the terminal result, and the pane reports the refusal to the app as a rejection.
+        // Why it exists: an input that never crossed the descriptor must not read as
+        //   delivered anywhere. The harness used to model the result as a payload-free
+        //   `rejected`, so no UI test could tell one refusal from another -- or check that
+        //   a refusal leaves the delivered-input record untouched.
+        // Scenario: spec-first -- the pane's pending-input bound is already full when the
+        //   user pastes, and then the child's shell fails to launch at all.
+        let controller = TerminalPaneSessionController()
+        controller.submissionFailure = .bufferLimitExceeded
+        let pane = SwiftTerminalSessionView(controller: controller)
+        var results: [TerminalInputSubmissionResult] = []
+        pane.sendInputText("ls") { results.append($0) }
+        controller.submissionFailure = .launchFailed(.noUsableShell)
+        pane.sendInputText("pwd") { results.append($0) }
+
+        pumpRunLoop(untilTrue: { results.count == 2 })
+
+        try uiExpect(
+            controller.completedResults == [
+                .rejected(.bufferLimitExceeded),
+                .rejected(.launchFailed(.noUsableShell)),
+            ],
+            "a refused submission lost the reason it was refused: \(controller.completedResults)"
+        )
+        try uiExpect(results == [.rejected, .rejected],
+                     "a refused submission did not reach the app as a rejection: \(results)")
+        try uiExpect(controller.deliveredTextInputs.isEmpty,
+                     "a refused submission was recorded as delivered: \(controller.deliveredTextInputs)")
+    }
+
+    uiTest("the pane forwards a session result carrying what ended the child") {
+        // Intent: the result the pane hands its owner is the whole lifecycle result, exit
+        //   status and launch failure included, and each arm still emits its own event.
+        // Why it exists: the owner decides whether to keep a pane open from why the child
+        //   ended. The harness used to model the result as two payload-free cases, so a
+        //   view that dropped the payload would have kept every UI test green.
+        // Scenario: spec-first -- one child is killed by a signal, and a second pane's
+        //   shell cannot be launched at all.
+        let controller = TerminalPaneSessionController()
+        var results: [PaneProcessLifecycleResult] = []
+        let pane = SwiftTerminalSessionView(controller: controller) { results.append($0) }
+        var events: [TerminalSessionEvent] = []
+        pane.onEvent = { events.append($0) }
+
+        controller.onSessionEnded?(.exited(.signaled(9)))
+        controller.onSessionEnded?(.launchFailed(.noUsableShell))
+
+        try uiExpect(results == [.exited(.signaled(9)), .launchFailed(.noUsableShell)],
+                     "the pane dropped the payload explaining the session result: \(results)")
+        try uiExpect(events == [.processExited, .processLaunchFailed],
+                     "the session result arms did not emit their own events: \(events)")
     }
 
     uiTest("input the app originates carries the time it entered the pane") {

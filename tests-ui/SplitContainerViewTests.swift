@@ -1,5 +1,6 @@
 // UI-harness tests for model-owned pane geometry in the flat tab container.
 import Cocoa
+import PaneProcessLifecycle
 
 @MainActor
 func splitContainerViewTests() {

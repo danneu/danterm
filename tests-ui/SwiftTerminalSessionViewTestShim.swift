@@ -1,17 +1,11 @@
 // Test-only terminal-engine values and controller used to compile the real Swift pane view.
+// A fake survives here only where the real source cannot compile in the harness -- the
+// renderer and IOSurface types, the geometry types that drag the engine's scalars and
+// styles behind them, and the live session controller. Everything else is the real
+// production declaration, compiled or imported.
 import Cocoa
 import IOSurface
-
-enum PaneProcessLifecycleResult {
-    case exited
-    case launchFailed
-}
-
-/// Matches the production controller's terminal result for one bounded input submission.
-enum PaneInputSubmissionResult {
-    case delivered
-    case rejected
-}
+import PaneProcessLifecycle
 
 enum TerminalCellKind {
     case padding
@@ -29,40 +23,6 @@ struct TerminalRowStructure {
     let width: Int
     let marginCellKind: TerminalCellKind
     let staleWrapClaim: Bool
-}
-
-enum TerminalSearchStatus {
-    case empty
-    case matched(selected: Int, total: Int)
-}
-
-enum TerminalSemanticEvent {
-    case title(String)
-    case workingDirectory(String?)
-    case bell
-    case integrationReady
-    case commandStarted(String)
-    case commandEnded(exitStatus: UInt8)
-    case connectionDeclared(TerminalConnectionState)
-    case desktopNotification(title: String, body: String)
-    case progress(TerminalProgress?)
-}
-
-enum TerminalConnectionState {
-    case local
-    case remote(identity: TerminalRemoteIdentity?)
-}
-
-struct TerminalRemoteIdentity {
-    let user: String
-    let host: String
-}
-
-enum TerminalProgress {
-    case set(percent: UInt8)
-    case indeterminate
-    case error(percent: UInt8?)
-    case pause(percent: UInt8?)
 }
 
 struct RenderColor: Equatable {
@@ -267,11 +227,6 @@ struct TerminalPaneFrame {
     let damage: TerminalDamage
 }
 
-struct TerminalDimensions: Equatable {
-    let columns: Int
-    let rows: Int
-}
-
 struct TerminalRenderMetrics: Equatable {
     /// A family that would pass an availability probe yet yields no usable cell
     /// geometry -- the real metrics refuse a face with no nominal `M` glyph, or one
@@ -297,24 +252,6 @@ struct TerminalRenderMetrics: Equatable {
     }
 }
 
-func terminalGridDimensions(
-    size: TerminalRenderExecutionSize,
-    cellSize: TerminalRenderExecutionSize
-) -> TerminalDimensions? {
-    guard size.width > 0, size.height > 0, cellSize.width > 0, cellSize.height > 0 else {
-        return nil
-    }
-    return TerminalDimensions(
-        columns: Int(size.width / cellSize.width),
-        rows: Int(size.height / cellSize.height)
-    )
-}
-
-struct TerminalRenderExecutionSize {
-    let width: Double
-    let height: Double
-}
-
 struct TerminalScrollProjection: Equatable {
     let totalRows: Int
     let topRow: Int
@@ -327,18 +264,6 @@ struct TerminalPaneViewportState: Equatable {
     let projection: TerminalScrollProjection
 }
 
-struct TerminalViewportCell: Equatable {
-    let column: Int
-    let row: Int
-    let offsetX: Double
-
-    init(column: Int, row: Int, offsetX: Double = 0) {
-        self.column = column
-        self.row = row
-        self.offsetX = offsetX
-    }
-}
-
 struct TerminalHyperlink: Equatable {
     let uri: String
     let explicitId: String?
@@ -347,85 +272,6 @@ struct TerminalHyperlink: Equatable {
         self.uri = uri
         self.explicitId = explicitId
     }
-}
-
-enum TerminalPointerEvent: Equatable {
-    case down(
-        TerminalMouseButton,
-        column: Int,
-        row: Int,
-        offsetX: Double = 0,
-        modifiers: TerminalKeyModifiers = [],
-        clickCount: Int = 1
-    )
-    case up(
-        TerminalMouseButton,
-        column: Int,
-        row: Int,
-        modifiers: TerminalKeyModifiers = []
-    )
-    case move(column: Int, row: Int, offsetX: Double = 0, modifiers: TerminalKeyModifiers = [])
-}
-
-enum TerminalWheelPhase: Equatable {
-    case began
-    case changed
-    case ended
-    case momentumBegan
-    case momentumChanged
-    case momentumEnded
-    case standalone
-}
-
-struct TerminalWheelEvent: Equatable {
-    let rowDelta: Double
-    let column: Int
-    let row: Int
-    let modifiers: TerminalKeyModifiers
-    let phase: TerminalWheelPhase
-
-    init(
-        rowDelta: Double,
-        column: Int,
-        row: Int,
-        modifiers: TerminalKeyModifiers = [],
-        phase: TerminalWheelPhase = .standalone
-    ) {
-        self.rowDelta = rowDelta
-        self.column = column
-        self.row = row
-        self.modifiers = modifiers
-        self.phase = phase
-    }
-}
-
-func terminalCell(
-    at point: TerminalPoint,
-    cellSize: TerminalCellSize,
-    columns: Int,
-    rows: Int
-) -> TerminalViewportCell? {
-    guard cellSize.width > 0, cellSize.height > 0, columns > 0, rows > 0 else { return nil }
-    let scaledColumn = point.x / cellSize.width
-    let column = Int(scaledColumn.rounded(.down))
-    let clampedColumn = min(max(column, 0), columns - 1)
-    return TerminalViewportCell(
-        column: clampedColumn,
-        row: min(max(Int((point.y / cellSize.height).rounded(.down)), 0), rows - 1),
-        offsetX: column == clampedColumn
-            ? min(max(scaledColumn - scaledColumn.rounded(.down), 0), 1)
-            : (column < clampedColumn ? 0 : 1)
-    )
-}
-
-struct TerminalPoint {
-    let x: Double
-    let y: Double
-}
-
-struct TerminalCellSize {
-    let width: Double
-    let height: Double
 }
 
 struct TerminalPaneFenceMetrics {
@@ -467,6 +313,10 @@ final class TerminalPaneSessionController {
     private(set) var scrolledTopRows: [Int] = []
     private(set) var textInputs: [String] = []
     private(set) var inputBytes: [[UInt8]] = []
+    /// Every terminal result this controller resolved, in resolution order and with its payload
+    /// intact, so a test can name the reason a submission was refused. The view flattens the
+    /// reason away at the app boundary, so this is the only place it stays observable.
+    private(set) var completedResults: [PaneInputSubmissionResult] = []
     private(set) var deliveredTextInputs: [String] = []
     private(set) var deliveredInputBytes: [[UInt8]] = []
     /// Origin stamps in submission order, so a test can assert which moment the pane view
@@ -482,6 +332,10 @@ final class TerminalPaneSessionController {
     private(set) var synchronizedSelectionReads = 0
     private(set) var linkInteractionCancellations = 0
     var allowsPaneMenu = true
+    /// Stands in for lifecycle policy refusing a submission -- a full pending-input buffer, a
+    /// failed launch, a closed descriptor. When set, no submission is recorded as delivered and
+    /// every completion names this reason, which is what lets a test observe why input was lost.
+    var submissionFailure: PaneInputSubmissionFailure?
     var cachedHasSelection = false
     var selectedTextOnFence: String?
     var hoveredLinkForCommandMove: TerminalHyperlink?
@@ -517,10 +371,7 @@ final class TerminalPaneSessionController {
     ) {
         textInputs.append(text)
         inputOrigins.append(origin)
-        deliverOrBuffer { [weak self] in
-            self?.deliveredTextInputs.append(text)
-            Self.complete(onCompletion, with: .delivered)
-        }
+        deliverOrBuffer(onCompletion) { $0.deliveredTextInputs.append(text) }
     }
     func sendKey(
         _ key: TerminalInputKey,
@@ -531,10 +382,7 @@ final class TerminalPaneSessionController {
         let bytes = encodeTerminalKey(key, modifiers: modifiers, modes: inputModes)
         inputBytes.append(bytes)
         inputOrigins.append(origin)
-        deliverOrBuffer { [weak self] in
-            self?.deliveredInputBytes.append(bytes)
-            Self.complete(onCompletion, with: .delivered)
-        }
+        deliverOrBuffer(onCompletion) { $0.deliveredInputBytes.append(bytes) }
     }
     func sendPaste(
         _ text: String,
@@ -544,10 +392,7 @@ final class TerminalPaneSessionController {
         let bytes = encodeTerminalPaste(text, modes: inputModes)
         inputBytes.append(bytes)
         inputOrigins.append(origin)
-        deliverOrBuffer { [weak self] in
-            self?.deliveredInputBytes.append(bytes)
-            Self.complete(onCompletion, with: .delivered)
-        }
+        deliverOrBuffer(onCompletion) { $0.deliveredInputBytes.append(bytes) }
     }
 
     func emitProcessStarted() {
@@ -559,7 +404,22 @@ final class TerminalPaneSessionController {
         for delivery in deliveries { delivery() }
     }
 
-    private func deliverOrBuffer(_ delivery: @escaping () -> Void) {
+    /// Records one submission and resolves it, or holds both until the process starts.
+    /// `record` runs only on the delivered path, so a refused submission leaves the
+    /// delivered-input logs untouched the way a refused write leaves the descriptor untouched.
+    private func deliverOrBuffer(
+        _ onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?,
+        recording record: @escaping (TerminalPaneSessionController) -> Void
+    ) {
+        let delivery: () -> Void = { [weak self] in
+            guard let self else { return }
+            if let submissionFailure {
+                complete(onCompletion, with: .rejected(submissionFailure))
+            } else {
+                record(self)
+                complete(onCompletion, with: .delivered)
+            }
+        }
         if processIsRunning {
             delivery()
         } else {
@@ -567,10 +427,11 @@ final class TerminalPaneSessionController {
         }
     }
 
-    private static func complete(
+    private func complete(
         _ completion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?,
         with result: PaneInputSubmissionResult
     ) {
+        completedResults.append(result)
         guard let completion else { return }
         DispatchQueue.main.async {
             MainActor.assumeIsolated { completion(result) }
@@ -599,7 +460,7 @@ final class TerminalPaneSessionController {
         onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?
     ) {
         wheelEvents.append(event)
-        Self.complete(onCompletion, with: .delivered)
+        complete(onCompletion, with: submissionFailure.map { .rejected($0) } ?? .delivered)
     }
     func sendPointer(_ event: TerminalPointerEvent, origin: UInt64?) {
         pointerEvents.append(event)

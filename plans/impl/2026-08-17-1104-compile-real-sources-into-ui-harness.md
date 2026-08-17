@@ -196,5 +196,28 @@ every fake deleted here is one the refactor no longer has to unwind.
 
 ## Commit progress
 - [x] 1. refactor(terminal-core): split the interaction vocabulary out of the policy file
-- [ ] 2. test(ui): compile the real geometry and semantic sources into the UI harness
+- [x] 2. test(ui): compile the real geometry and semantic sources into the UI harness
 - [ ] 3. docs(scratch): record S35's landing commit in the simplification audit
+
+## Implementation notes
+
+- The shim's `TerminalRenderExecutionSize` was the fake standing in for production's
+  `TerminalPointSize`, under a name production does not use. Both view call sites pass
+  `.init(...)` and infer the type, so deleting the fake needed no view edit.
+- The `PaneProcessLifecycle` pre-build lists its two sources by path rather than globbing
+  them the way the `DanTermProtocol` pre-build does. The PO3 gate pins each source by path,
+  and the fake `xcrun` in `scripts/tests/test-ui-harness_test.sh` runs against a checkout
+  that holds only `test-ui.sh`, so a glob never expands there and could not be pinned.
+- The PO3 gate keeps its own list of harness-compiled sources rather than deriving one from
+  `test-ui.sh`. A derived list would make the drop-out half of the gate vacuous: a source
+  removed from `test-ui.sh` would simply vanish from the list it is checked against. The
+  gate's list is the contract and `test-ui.sh` is the implementation of it, so the two are
+  meant to be compared, not shared.
+- Making a refusal observable took two additions to the shim controller: a
+  `submissionFailure` knob standing in for lifecycle policy refusing a submission, and a
+  `completedResults` log. The view flattens `.rejected(reason)` to a payload-free
+  `TerminalInputSubmissionResult.rejected` at the app boundary, so the reason is only
+  observable controller-side, and that is where the PO4 test reads it.
+- All 17 fakes the plan targets are gone, and no existing UI expectation moved: the suite
+  went from 296 to 300 tests, all passing, with no edit to an existing assertion (AR3 stayed
+  latent, as premised).

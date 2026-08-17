@@ -2,8 +2,10 @@
 // and the stable DanTerm TerminalSession boundary live here and nowhere else.
 import Cocoa
 import DanTermProtocol
-#if !DANTERM_UI_TEST
+// A leaf module with no engine dependency, so both the app build and the UI harness
+// resolve it and the view can name one lifecycle vocabulary in either build.
 import PaneProcessLifecycle
+#if !DANTERM_UI_TEST
 import TerminalCore
 import TerminalCoreRecording
 import TerminalPaneSession

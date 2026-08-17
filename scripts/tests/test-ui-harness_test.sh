@@ -105,6 +105,44 @@ pane_tape_source_count="$(grep -c '/PaneTapeRecords.swift$' "$UI_SOURCE_LOG" || 
 [[ "$pane_tape_source_count" -eq 2 ]] \
     || fail "expected PaneTapeRecords.swift in both UI compiler invocations"
 
+# Intent: every production source the harness is able to compile stays in the compiler
+#   invocation, and `tests-ui/` re-declares none of the names those sources supply.
+# Why it exists: the harness used to fake these declarations, and the copies drifted from
+#   production while every UI test stayed green. Both halves are needed -- dropping a source
+#   and restoring its fake removes the very name a collision check would compare against.
+# Scenario: someone deletes a source from the list, or adds a convenient local copy of a
+#   production type back into `tests-ui/`.
+HARNESS_COMPILED_SOURCES=(
+    "lib/TerminalPTY/Sources/PaneProcessLifecycle/LaunchPolicy.swift"
+    "lib/TerminalPTY/Sources/PaneProcessLifecycle/PaneProcessLifecycle.swift"
+    "lib/TerminalPTY/Sources/TerminalPaneSession/TerminalGridSizing.swift"
+    "lib/TerminalCore/Sources/TerminalCore/TerminalInteractionVocabulary.swift"
+    "lib/TerminalCore/Sources/TerminalCore/TerminalSemanticEvent.swift"
+    "lib/TerminalCore/Sources/TerminalCore/TerminalSearchStatus.swift"
+)
+
+for source in "${HARNESS_COMPILED_SOURCES[@]}"; do
+    count="$(grep -c "/${source}\$" "$UI_SOURCE_LOG" || true)"
+    [[ "$count" -eq 2 ]] \
+        || fail "expected $source in both UI harness builds, saw it $count time(s)"
+done
+
+# Only column-0 declarations count: a nested type inside a fake legitimately reuses a name.
+declaration_names() {
+    grep -hoE '^(public )?(final )?(struct|enum|class|actor|protocol|func) [A-Za-z_][A-Za-z0-9_]*' "$@" \
+        | awk '{ print $NF }' | sort -u
+}
+
+absolute_sources=()
+for source in "${HARNESS_COMPILED_SOURCES[@]}"; do
+    absolute_sources+=("$REPO_ROOT/$source")
+done
+shadowed="$(comm -12 \
+    <(declaration_names "${absolute_sources[@]}") \
+    <(declaration_names "$REPO_ROOT"/tests-ui/*.swift))"
+[[ -z "$shadowed" ]] \
+    || fail "tests-ui re-declares harness-compiled production names: $(tr '\n' ' ' <<< "$shadowed")"
+
 for path in "${compile_paths[@]}"; do
     printf '%s\n' "${run_paths[@]}" | grep -qFx "$path" \
         || fail "compiled UI binary was not the one executed: $path"

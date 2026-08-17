@@ -34,6 +34,17 @@ xcrun swiftc \
     -o "$PROTO_BUILD/libDanTermProtocol.a" \
     "$SCRIPT_DIR"/lib/DanTermProtocol/Sources/DanTermProtocol/*.swift
 
+# A leaf target with no imports and no dependencies, built as a module so the harness
+# compiles the real lifecycle and geometry vocabulary instead of re-declaring it.
+echo "Compiling PaneProcessLifecycle..."
+xcrun swiftc \
+    -emit-module -emit-library -static \
+    -module-name PaneProcessLifecycle \
+    -emit-module-path "$PROTO_BUILD/PaneProcessLifecycle.swiftmodule" \
+    -o "$PROTO_BUILD/libPaneProcessLifecycle.a" \
+    "$SCRIPT_DIR/lib/TerminalPTY/Sources/PaneProcessLifecycle/LaunchPolicy.swift" \
+    "$SCRIPT_DIR/lib/TerminalPTY/Sources/PaneProcessLifecycle/PaneProcessLifecycle.swift"
+
 echo "Compiling UI tests..."
 (
     cd "$PROTO_BUILD"
@@ -42,6 +53,7 @@ echo "Compiling UI tests..."
         -I "$PROTO_BUILD" \
         -L "$PROTO_BUILD" \
         -lDanTermProtocol \
+        -lPaneProcessLifecycle \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DisplayLine.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/AgentSession.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ChipKind.swift" \
@@ -68,6 +80,9 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DragDropInput.swift" \
         "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/TerminalInputEncoding.swift" \
         "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/ActivatableWebURI.swift" \
+        "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/TerminalInteractionVocabulary.swift" \
+        "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/TerminalSemanticEvent.swift" \
+        "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/TerminalSearchStatus.swift" \
         "$SCRIPT_DIR/app/PaneInputOrigin.swift" \
         "$SCRIPT_DIR/app/TerminalLinkURL.swift" \
         "$SCRIPT_DIR/app/DragDropPasteboard.swift" \
@@ -89,6 +104,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/PaneTapeStreamState.swift" \
         "$SCRIPT_DIR/app/DanTermConfigStore.swift" \
         "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalWheelNormalizer.swift" \
+        "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalGridSizing.swift" \
         "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTestShim.swift" \
         "$SCRIPT_DIR/app/SwiftTerminalSessionView.swift" \
         "$SCRIPT_DIR/app/TerminalFrameRateSampler.swift" \
