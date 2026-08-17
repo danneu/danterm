@@ -197,7 +197,7 @@ every fake deleted here is one the refactor no longer has to unwind.
 ## Commit progress
 - [x] 1. refactor(terminal-core): split the interaction vocabulary out of the policy file
 - [x] 2. test(ui): compile the real geometry and semantic sources into the UI harness
-- [ ] 3. docs(scratch): record S35's landing commit in the simplification audit
+- [x] 3. docs(scratch): record S35's landing commit in the simplification audit
 
 ## Implementation notes
 
