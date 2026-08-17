@@ -284,5 +284,22 @@ change; `integrations/danterm/SKILL.md` is untouched.
 
 ## Commit progress
 - [x] 1. the capacity refusal carries the server's reclamation bound
-- [ ] 2. a kit-owned pure reconnect policy decides when to attempt
+- [x] 2. a kit-owned pure reconnect policy decides when to attempt
 - [ ] 3. the phone's shell executes the reconnect policy's decisions
+
+## Implementation notes
+
+- `closedBeforeHello` is classified transient, not a protocol violation. A peer
+  that closed before speaking has said nothing wrong, so it reads as the same
+  interruption a `peerClosed` transport failure names. The bounded budget caps
+  the cost if a Mac ever closes that way persistently.
+- Schedule constants (free per Implementation discretion): delays
+  `[0, 2, 5, 15, 30]` seconds and a 60-second stability window. The delay count
+  *is* the attempt budget, so one episode's total effort is stated once and
+  spans about a minute.
+- Stability is judged when a connection ends, not by a second timer: at failure
+  time the policy compares how long the connection served against the window.
+  The observable rule of I4 is unchanged and the shell owns one timer, not two.
+- `MobileRecoveryPhase` ships with the policy because the phase is decided, not
+  worded. The wording that decorates the causal state is the shell's, so it
+  lands with commit 3.
