@@ -59,8 +59,8 @@ extension AppRuntime {
         guard schedulingLifecycle.isActive else { return }
         guard renderingAvailable != available else { return }
         renderingAvailable = available
-        for session in sessions.values {
-            session.setRenderingAvailable(available)
+        for host in paneHosts.values {
+            host.session.setRenderingAvailable(available)
         }
     }
 
@@ -70,19 +70,19 @@ extension AppRuntime {
         let windowVisible = window?.occlusionState.contains(.visible) ?? true
         let desired = effectivePaneVisibility(in: model, windowVisible: windowVisible)
 
-        for (paneId, session) in sessions {
+        for (paneId, host) in paneHosts {
             let visible = desired[paneId] ?? true
             if paneVisibility[paneId] != visible {
                 #if DANTERM_TERMINAL_CHARACTERIZATION
                 recordTerminalCharacterizationVisibilityChange(paneId: paneId, visible: visible)
                 #endif
-                session.setVisible(visible)
+                host.session.setVisible(visible)
                 paneVisibility[paneId] = visible
             }
         }
 
         paneVisibility = paneVisibility.filter { paneId, _ in
-            sessions[paneId] != nil
+            paneHosts[paneId] != nil
         }
     }
 }

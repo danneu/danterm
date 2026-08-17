@@ -97,7 +97,7 @@ struct AppRuntimeIpcCommandTests {
             marginKind: "padding",
             staleWrapClaim: true
         )]
-        runtime.sessions[paneId] = ports.session
+        runtime.installTerminalSession(ports.session, paneId: paneId)
         let viewport = try CommandIpcConnectionFixture()
         let history = try CommandIpcConnectionFixture()
         let rows = try CommandIpcConnectionFixture()
@@ -139,7 +139,7 @@ struct AppRuntimeIpcCommandTests {
         let runtime = makeCommandTestRuntime(ports)
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
-        runtime.sessions[paneId] = ports.session
+        runtime.installTerminalSession(ports.session, paneId: paneId)
         let dump = try CommandIpcConnectionFixture()
         let follow = try CommandIpcConnectionFixture()
         defer {
@@ -250,7 +250,7 @@ struct AppRuntimeIpcCommandTests {
         let paneId = PaneId(rawValue: UUID())
         let requestId = UUID()
         let submissionId = InputSubmissionId(rawValue: UUID())
-        runtime.sessions[paneId] = ports.session
+        runtime.installTerminalSession(ports.session, paneId: paneId)
         wire.remember(reqId: requestId, rpcId: .number(10))
         runtime.registerIpcConnection(wire.connection, for: requestId)
         runtime.model.pendingInputRequests[requestId] = PendingInputRequest(

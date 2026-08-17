@@ -22,8 +22,8 @@ struct ReconcilerCaches {
     // focusBorders rides the runtime-owned PaneHost's wrapper, which survives
     // container edits, so this cache needs no cross-pass invalidation.
     var focusBorders: [PaneId: BorderState] = [:]
-    // paneConfig also rides the persisted terminal session in `sessions`, so the
-    // cache needs no cross-pass invalidation.
+    // paneConfig also rides the terminal session the PaneHost owns, so the cache
+    // needs no cross-pass invalidation.
     var paneConfig: [PaneId: PaneConfigKey] = [:]
     // Pane toolbar and search overlay state rides the runtime-owned PaneHost, so
     // structural container edits do not invalidate either cache.
@@ -84,12 +84,12 @@ extension AppRuntime {
         syncPaneVisibility()  // existing occlusion pass; stays last
     }
 
-    /// Tear down sessions whose pane left the model after containers detach wrappers.
-    /// Selection is the pure `sessionsToTearDown` (= live sessions - model.allPaneIds);
-    /// the executor body is the former teardown command. Session *creation* stays
+    /// Tear down panes that left the model after containers detach wrappers.
+    /// Selection is the pure `sessionsToTearDown` (= live panes - model.allPaneIds);
+    /// the executor body is the former teardown command. Pane *creation* stays
     /// a command, so the reconciler only ever destroys.
     func reconcileSessionExistence() {
-        for paneId in sessionsToTearDown(liveSessionIds: Set(sessions.keys), model: model) {
+        for paneId in sessionsToTearDown(liveSessionIds: Set(paneHosts.keys), model: model) {
             tearDownSession(paneId)
         }
     }
@@ -155,12 +155,12 @@ extension AppRuntime {
     /// the paneConfig cache. A disappearing key clears the pane override.
     func reconcilePaneConfig() {
         applyDiff(desiredPaneConfig(in: model), &caches.paneConfig, apply: { paneId, key in
-            sessions[paneId]?.applyTheme(key.theme)
-            sessions[paneId]?.setFontSize(key.fontSize)
-            sessions[paneId]?.setFontFamily(key.fontFamily)
-            sessions[paneId]?.setCopyOnSelect(key.copyOnSelect)
+            paneSession(for: paneId)?.applyTheme(key.theme)
+            paneSession(for: paneId)?.setFontSize(key.fontSize)
+            paneSession(for: paneId)?.setFontFamily(key.fontFamily)
+            paneSession(for: paneId)?.setCopyOnSelect(key.copyOnSelect)
         }, remove: { paneId in
-            sessions[paneId]?.clearTheme()
+            paneSession(for: paneId)?.clearTheme()
         })
     }
 

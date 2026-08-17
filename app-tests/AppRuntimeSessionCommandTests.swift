@@ -31,8 +31,9 @@ struct AppRuntimeSessionCommandTests {
         #expect(request.environment.contains { key, value in
             key == EnvVars.pane && value == paneId.rawValue.uuidString
         })
-        #expect(runtime.sessions[paneId] === fixture.session)
-        #expect(runtime.paneHosts[paneId]?.session === fixture.session)
+        let host = try #require(runtime.paneHosts[paneId])
+        #expect(host.session === fixture.session)
+        #expect(host.wrapper.terminalSession === fixture.session)
         #expect(fixture.session.renderingAvailableValues == [true])
         #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.subscription] == 1)
     }
@@ -43,7 +44,7 @@ struct AppRuntimeSessionCommandTests {
         let runtime = makeCommandTestRuntime(fixture)
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
-        runtime.sessions[paneId] = fixture.session
+        runtime.installTerminalSession(fixture.session, paneId: paneId)
 
         runtime.perform(.sendText(paneId: paneId, text: "pasted"))
         runtime.perform(.sendInputText(paneId: paneId, text: "typed"))
@@ -90,7 +91,7 @@ struct AppRuntimeSessionCommandTests {
         let runtime = makeCommandTestRuntime(fixture)
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
-        runtime.sessions[paneId] = fixture.session
+        runtime.installTerminalSession(fixture.session, paneId: paneId)
 
         runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "go"))
 
@@ -102,5 +103,84 @@ struct AppRuntimeSessionCommandTests {
         #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == nil)
         #expect(fixture.session.searchNeedles.isEmpty)
         #expect(fixture.session.endSearchCount == 1)
+    }
+
+    // Intent: a pane's session and its chrome enter and leave the runtime together.
+    // Why it exists: they used to live in two tables written by different call sites,
+    // so one could survive the other.
+    // Scenario: create a pane through the command interpreter, then tear it down.
+    @Test("pane teardown drops the session and the pane chrome together")
+    func tearDownRemovesSessionAndChrome() throws {
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+
+        runtime.perform(.createSession(
+            sessionId: SessionId(rawValue: UUID()),
+            paneId: paneId,
+            cwd: nil,
+            command: nil,
+            launchCommand: nil
+        ))
+
+        #expect(runtime.paneSession(for: paneId) === fixture.session)
+        #expect(runtime.findPaneWrapper(for: paneId) != nil)
+
+        runtime.tearDownSession(paneId)
+
+        #expect(runtime.paneSession(for: paneId) == nil)
+        #expect(runtime.findPaneWrapper(for: paneId) == nil)
+        #expect(runtime.paneHosts[paneId] == nil)
+    }
+
+    // Intent: the reconcile pass destroys a pane the model no longer has.
+    // Why it exists: the reconciler selects panes from the runtime's live table, and
+    // that table is now the pane records rather than a separate session map.
+    @Test("reconcile tears down a pane that left the model")
+    func reconcileTearsDownAbsentPane() {
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        runtime.installTerminalSession(fixture.session, paneId: paneId)
+
+        runtime.reconcileSessionExistence()
+
+        #expect(runtime.paneHosts[paneId] == nil)
+    }
+
+    // Intent: replacing the whole session tears every live pane down through the same
+    // body the per-pane path uses -- record, replay file, and scheduled search work.
+    // Why it exists: the whole-session path used to repeat that body inline and omit
+    // the search debouncer, so a restore during a short needle's debounce left an armed
+    // owner alive past the session it belonged to.
+    // Scenario: a restored pane is mid-debounce on a two-character needle when a second
+    // restore lands.
+    @Test("a whole-session restore tears down every live pane and its scheduled work")
+    func wholeSessionRestoreTearsDownLivePanes() throws {
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let livePaneId = PaneId(rawValue: UUID())
+        let replacementPaneId = PaneId(rawValue: UUID())
+
+        runtime.bootstrapFromSnapshot(
+            makeCommandSnapshot(paneId: livePaneId, scrollback: "restored history\n")
+        )
+        let replayPath = try #require(fixture.sessionRequests.first?.environment.first {
+            $0.0 == "DANTERM_RESTORE_SCROLLBACK_FILE"
+        }?.1)
+        #expect(FileManager.default.fileExists(atPath: replayPath))
+        runtime.perform(.sendSearchNeedle(paneId: livePaneId, needle: "go"))
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == 1)
+
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: replacementPaneId))
+
+        #expect(runtime.paneHosts[livePaneId] == nil)
+        #expect(runtime.paneHosts[replacementPaneId] != nil)
+        #expect(FileManager.default.fileExists(atPath: replayPath) == false)
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == nil)
+        #expect(fixture.session.searchNeedles.isEmpty)
     }
 }

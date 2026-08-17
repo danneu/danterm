@@ -40,7 +40,7 @@ struct AppRuntimeAmbientCommandTests {
         let paneId = PaneId(rawValue: UUID())
         let snapshot = makeCommandSnapshot(paneId: paneId)
         fixture.session.primaryHistoryTail = "first line\nsecond line\n"
-        runtime.sessions[paneId] = fixture.session
+        runtime.installTerminalSession(fixture.session, paneId: paneId)
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("danterm-export-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

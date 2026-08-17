@@ -990,8 +990,8 @@ func containerOpsEditVisibleTree(
 /// Sessions to tear down: live sessions whose pane no longer exists in the model.
 /// With tree-owns-panes, "desired sessions" is exactly `model.allPaneIds`, so a pure
 /// set difference selects the dead ones. `reconcileSessionExistence` runs this over
-/// `Set(sessions.keys)` and tears down each selected pane. Session *creation* stays a
-/// command (it forks a PTY), so the reconciler only ever destroys.
+/// the runtime's live pane records and tears down each selected pane. Session
+/// *creation* stays a command (it forks a PTY), so the reconciler only ever destroys.
 func sessionsToTearDown(liveSessionIds: Set<PaneId>, model: AppModel) -> Set<PaneId> {
   liveSessionIds.subtracting(Set(model.allPaneIds))
 }

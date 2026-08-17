@@ -9,9 +9,9 @@ func splitContainerViewTests() {
     uiTest("nested panes and dividers are direct model-laid-out children") {
         let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
         let runtime = AppRuntime()
-        runtime.sessions[paneA] = TerminalView()
-        runtime.sessions[paneB] = TerminalView()
-        runtime.sessions[paneC] = TerminalView()
+        runtime.installTerminalSession(TerminalView(), paneId: paneA)
+        runtime.installTerminalSession(TerminalView(), paneId: paneB)
+        runtime.installTerminalSession(TerminalView(), paneId: paneC)
         let root = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
             first: .leaf(PaneModel(id: paneA)),
@@ -64,8 +64,8 @@ func splitContainerViewTests() {
         let runtime = AppRuntime()
         let terminalA = FrameRecordingTerminalView()
         let terminalB = FrameRecordingTerminalView()
-        runtime.sessions[paneA] = terminalA
-        runtime.sessions[paneB] = terminalB
+        runtime.installTerminalSession(terminalA, paneId: paneA)
+        runtime.installTerminalSession(terminalB, paneId: paneB)
         let root = SplitNodeModel.split(
             id: splitId, direction: .horizontal,
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
@@ -97,9 +97,9 @@ func splitContainerViewTests() {
             let controllerB = TerminalPaneSessionController()
             let controllerC = TerminalPaneSessionController()
             let runtime = AppRuntime()
-            runtime.sessions[paneA] = SwiftTerminalSessionView(controller: controllerA, fontSize: 13)
-            runtime.sessions[paneB] = SwiftTerminalSessionView(controller: controllerB, fontSize: 13)
-            runtime.sessions[paneC] = SwiftTerminalSessionView(controller: controllerC, fontSize: 13)
+            runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerA, fontSize: 13), paneId: paneA)
+            runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerB, fontSize: 13), paneId: paneB)
+            runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerC, fontSize: 13), paneId: paneC)
             let oldRoot = SplitNodeModel.split(
                 id: outerSplit, direction: .horizontal,
                 first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
@@ -144,8 +144,8 @@ func splitContainerViewTests() {
         // Scenario: an extreme ratio shrinks below two minima, grows, then receives a drag.
         let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
         let runtime = AppRuntime()
-        runtime.sessions[paneA] = TerminalView()
-        runtime.sessions[paneB] = TerminalView()
+        runtime.installTerminalSession(TerminalView(), paneId: paneA)
+        runtime.installTerminalSession(TerminalView(), paneId: paneB)
         var root = SplitNodeModel.split(
             id: splitId, direction: .horizontal,
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
@@ -182,8 +182,8 @@ func splitContainerViewTests() {
     uiTest("divider hit area and accessibility value follow clamped layout") {
         let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
         let runtime = AppRuntime()
-        runtime.sessions[paneA] = TerminalView()
-        runtime.sessions[paneB] = TerminalView()
+        runtime.installTerminalSession(TerminalView(), paneId: paneA)
+        runtime.installTerminalSession(TerminalView(), paneId: paneB)
         let root = SplitNodeModel.split(
             id: splitId, direction: .horizontal,
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
@@ -208,7 +208,7 @@ func splitContainerViewTests() {
         let controller = TerminalPaneSessionController()
         let terminal = SwiftTerminalSessionView(controller: controller, fontSize: 13)
         let runtime = AppRuntime()
-        runtime.sessions[paneId] = terminal
+        runtime.installTerminalSession(terminal, paneId: paneId)
         let container = persistentContainer(
             root: .leaf(PaneModel(id: paneId)), runtime: runtime)
         container.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
@@ -235,7 +235,7 @@ func splitContainerViewTests() {
         let paneId = PaneId()
         let terminal = TerminalView()
         let runtime = AppRuntime()
-        runtime.sessions[paneId] = terminal
+        runtime.installTerminalSession(terminal, paneId: paneId)
         let root = SplitNodeModel.leaf(PaneModel(id: paneId))
         let container = SplitContainerView(
             rootNode: root,
@@ -263,8 +263,8 @@ func splitContainerViewTests() {
         let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
         let terminalA = TerminalView(), terminalB = TerminalView()
         let runtime = AppRuntime()
-        runtime.sessions[paneA] = terminalA
-        runtime.sessions[paneB] = terminalB
+        runtime.installTerminalSession(terminalA, paneId: paneA)
+        runtime.installTerminalSession(terminalB, paneId: paneB)
         let oldRoot = SplitNodeModel.leaf(PaneModel(id: paneA))
         let newRoot = SplitNodeModel.split(
             id: splitId,
@@ -333,8 +333,8 @@ func splitContainerViewTests() {
         ))
         let terminalA = FocusableTerminalView()
         let terminalB = FocusableTerminalView()
-        runtime.sessions[paneA] = terminalA
-        runtime.sessions[paneB] = terminalB
+        runtime.installTerminalSession(terminalA, paneId: paneA)
+        runtime.installTerminalSession(terminalB, paneId: paneB)
         let container = persistentContainer(root: oldRoot, runtime: runtime)
         let window = focusTestWindow(content: container)
         defer { window.close() }
@@ -387,8 +387,8 @@ func splitContainerViewTests() {
         )
         model.searchState[paneA] = SearchModel(needle: "hit")
         let runtime = AppRuntime(model: model)
-        runtime.sessions[paneA] = FocusableTerminalView()
-        runtime.sessions[paneB] = FocusableTerminalView()
+        runtime.installTerminalSession(FocusableTerminalView(), paneId: paneA)
+        runtime.installTerminalSession(FocusableTerminalView(), paneId: paneB)
         let container = persistentContainer(root: oldRoot, runtime: runtime)
         let window = focusTestWindow(content: container)
         defer { window.close() }
@@ -425,7 +425,7 @@ func splitContainerViewTests() {
         model.searchState[paneId] = SearchModel()
         let runtime = AppRuntime(model: model)
         let terminal = FocusableTerminalView()
-        runtime.sessions[paneId] = terminal
+        runtime.installTerminalSession(terminal, paneId: paneId)
         let container = persistentContainer(root: root, runtime: runtime)
         let nonPaneField = NSTextField(string: "sidebar")
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
@@ -498,9 +498,9 @@ func splitContainerViewTests() {
         let controllerB = TerminalPaneSessionController()
         let controllerC = TerminalPaneSessionController()
         let runtime = AppRuntime()
-        runtime.sessions[paneA] = SwiftTerminalSessionView(controller: controllerA, fontSize: 13)
-        runtime.sessions[paneB] = SwiftTerminalSessionView(controller: controllerB, fontSize: 13)
-        runtime.sessions[paneC] = SwiftTerminalSessionView(controller: controllerC, fontSize: 13)
+        runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerA, fontSize: 13), paneId: paneA)
+        runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerB, fontSize: 13), paneId: paneB)
+        runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerC, fontSize: 13), paneId: paneC)
         let root = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal, first: .leaf(PaneModel(id: paneA)),
             second: .split(
@@ -548,9 +548,9 @@ func splitContainerViewTests() {
         // Scenario: the incremental-container reconciliation performance fix.
         let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
         let runtime = AppRuntime()
-        runtime.sessions[paneA] = TerminalView()
-        runtime.sessions[paneB] = TerminalView()
-        runtime.sessions[paneC] = TerminalView()
+        runtime.installTerminalSession(TerminalView(), paneId: paneA)
+        runtime.installTerminalSession(TerminalView(), paneId: paneB)
+        runtime.installTerminalSession(TerminalView(), paneId: paneC)
         let sourceOld = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)), ratio: 0.5)
@@ -583,11 +583,10 @@ func splitContainerViewTests() {
         weak var wrapperObserver: PaneWrapperView?
 
         autoreleasepool {
-            runtime.sessions[paneId] = TerminalView()
+            runtime.installTerminalSession(TerminalView(), paneId: paneId)
             hostObserver = runtime.paneHost(for: paneId)
             wrapperObserver = hostObserver?.wrapper
-            runtime.paneHosts.removeValue(forKey: paneId)
-            runtime.sessions.removeValue(forKey: paneId)
+            runtime.tearDownSession(paneId)
         }
 
         try uiExpect(hostObserver == nil, "runtime released its host but the host stayed alive")

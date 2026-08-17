@@ -189,7 +189,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         benchmarkGeometryController = TerminalBenchmarkGeometryController(
             window: window,
             environment: ProcessInfo.processInfo.environment,
-            session: { [weak benchmarkRuntime] in benchmarkRuntime?.sessions.values.first }
+            session: { [weak benchmarkRuntime] in benchmarkRuntime?.paneHosts.values.first?.session }
         )
         benchmarkGeometryController?.start()
         benchmarkStateRecorder = TerminalBenchmarkStateRecorder(

@@ -54,7 +54,8 @@ extension AppRuntime {
         guard let window, let responder = window.firstResponder else { return .none }
         if responder === window { return .none }
 
-        for (paneId, session) in sessions {
+        for (paneId, host) in paneHosts {
+            let session = host.session
             if responder === session.hostView {
                 return .pane(.terminal(paneId))
             }
@@ -78,7 +79,7 @@ extension AppRuntime {
     private func applyPaneFocus(_ target: PaneFocusTarget) {
         switch target {
         case .terminal(let paneId):
-            guard let session = sessions[paneId] else { return }
+            guard let session = paneSession(for: paneId) else { return }
             window?.makeFirstResponder(session.hostView)
         case .searchField(let paneId):
             guard let field = findPaneWrapper(for: paneId)?.searchOverlay?.searchField else {

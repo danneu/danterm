@@ -8,8 +8,7 @@ final class AppRuntime {
     // UI tests always construct it on the main thread.
     let schedulingLifecycle = MainActor.assumeIsolated { AppRuntimeSchedulingLifecycle() }
     var model: AppModel
-    var sessions: [PaneId: any TerminalSession] = [:]
-    var paneHosts: [PaneId: PaneHost] = [:]
+    private(set) var paneHosts: [PaneId: PaneHost] = [:]
     var paneVisibility: [PaneId: Bool] = [:]
     var renderingAvailable = true
     weak var window: NSWindow?
@@ -39,14 +38,27 @@ final class AppRuntime {
         focusedPaneSessions.append(paneId)
     }
 
-    /// Mirrors production's lazy host seam for UI tests that inject sessions.
+    /// Mirrors production's install path so UI tests never put a session into the
+    /// runtime behind it.
+    @MainActor
+    func installTerminalSession(_ session: any TerminalSession, paneId: PaneId) {
+        paneHosts[paneId] = PaneHost(paneId: paneId, session: session, runtime: self)
+    }
+
+    /// Mirrors production's teardown path: a pane leaves the table as a whole record.
+    @MainActor
+    func tearDownSession(_ paneId: PaneId) {
+        paneHosts.removeValue(forKey: paneId)
+    }
+
     @MainActor
     func paneHost(for paneId: PaneId) -> PaneHost? {
-        if let host = paneHosts[paneId] { return host }
-        guard let session = sessions[paneId] else { return nil }
-        let host = PaneHost(paneId: paneId, session: session, runtime: self)
-        paneHosts[paneId] = host
-        return host
+        paneHosts[paneId]
+    }
+
+    @MainActor
+    func paneSession(for paneId: PaneId) -> (any TerminalSession)? {
+        paneHosts[paneId]?.session
     }
 
     /// Resolves a persistent wrapper through the test host index.

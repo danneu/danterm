@@ -125,9 +125,11 @@ class AppRuntime {
     private let configStore: DanTermConfigStore
     private let ports: AppRuntimePorts
     private var pendingConfigError: Error?
-    var sessions: [PaneId: any TerminalSession] = [:]
-    // Runtime lifetime roots for pane chrome. A container only reparents wrappers.
-    var paneHosts: [PaneId: PaneHost] = [:]
+    // The one pane-keyed table of live panes. Each record owns its session and its
+    // pane chrome, so a container only reparents wrappers and nothing else indexes a
+    // pane. `private(set)` because installing and removing a pane are the only two
+    // ways to write it -- see `installTerminalSession` and `tearDownSession`.
+    private(set) var paneHosts: [PaneId: PaneHost] = [:]
     // Last occlusion value pushed for each live session.
     // Cleared on teardown because restore/import can reuse pane IDs for fresh sessions.
     // Cross-file presentation lifecycle forwarding diffs effective visibility here.
@@ -460,8 +462,8 @@ class AppRuntime {
     /// backing-properties callback on a screen change.
     func refreshSessionsForScreenChange() {
         guard let callback = captureDeferredCallback({ runtime in
-            for session in runtime.sessions.values {
-                session.refreshBackingProperties()
+            for host in runtime.paneHosts.values {
+                host.session.refreshBackingProperties()
             }
         }) else { return }
         DispatchQueue.main.async {
@@ -671,7 +673,7 @@ class AppRuntime {
         guard succeeded else { return }
         // The pane went away between the start reply and this callback. The client is owed the
         // same terminator a pane close writes; its socket stays open for its other work.
-        guard let session = sessions[paneId] else {
+        guard let session = paneSession(for: paneId) else {
             writePaneTapeRecords(
                 [makePaneTapeEndRecord(reason: .paneClosed)],
                 connection: connection,
@@ -753,7 +755,7 @@ class AppRuntime {
         }
         let connection = transport.connection
         let paneId = PaneId(rawValue: fetch.paneId)
-        guard let session = sessions[paneId] else {
+        guard let session = paneSession(for: paneId) else {
             endPaneTapeFollowers(for: paneId)
             return
         }
@@ -918,9 +920,9 @@ class AppRuntime {
         }
         ipcConnections.removeAll()
         ipcConnectionTokens.removeAll()
-        for session in sessions.values {
-            session.onEvent = nil
-            session.onPrimaryHistoryMutation = nil
+        for host in paneHosts.values {
+            host.session.onEvent = nil
+            host.session.onPrimaryHistoryMutation = nil
         }
         sessionSubscriptionTokens.removeAll()
 
@@ -972,10 +974,10 @@ class AppRuntime {
 
         case .sendText(let paneId, let text, let submissionId):
             guard let submissionId else {
-                sessions[paneId]?.sendText(text)
+                paneSession(for: paneId)?.sendText(text)
                 break
             }
-            guard let session = sessions[paneId] else {
+            guard let session = paneSession(for: paneId) else {
                 send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
                 break
             }
@@ -988,10 +990,10 @@ class AppRuntime {
 
         case .sendInputText(let paneId, let text, let submissionId):
             guard let submissionId else {
-                sessions[paneId]?.sendInputText(text)
+                paneSession(for: paneId)?.sendInputText(text)
                 break
             }
-            guard let session = sessions[paneId] else {
+            guard let session = paneSession(for: paneId) else {
                 send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
                 break
             }
@@ -1004,10 +1006,10 @@ class AppRuntime {
 
         case .sendInputKey(let paneId, let key, let mods, let submissionId):
             guard let submissionId else {
-                sessions[paneId]?.sendInputKey(key, modifiers: mods)
+                paneSession(for: paneId)?.sendInputKey(key, modifiers: mods)
                 break
             }
-            guard let session = sessions[paneId] else {
+            guard let session = paneSession(for: paneId) else {
                 send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
                 break
             }
@@ -1026,10 +1028,10 @@ class AppRuntime {
             let submissionId
         ):
             guard let submissionId else {
-                sessions[paneId]?.sendInputWheel(direction, column: column, row: row)
+                paneSession(for: paneId)?.sendInputWheel(direction, column: column, row: row)
                 break
             }
-            guard let session = sessions[paneId] else {
+            guard let session = paneSession(for: paneId) else {
                 send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
                 break
             }
@@ -1041,7 +1043,7 @@ class AppRuntime {
             }
 
         case .focusSession(let paneId, let focused):
-            sessions[paneId]?.setFocused(focused)
+            paneSession(for: paneId)?.setFocused(focused)
 
         case .sendNotification(let alertId, let paneId, let title, let subtitle, let body):
             let content = UNMutableNotificationContent()
@@ -1113,7 +1115,7 @@ class AppRuntime {
 
         case .readPaneText(let reqId, let paneId, let lineLimit):
             guard let connection = takeIpcConnection(for: reqId) else { break }
-            guard let session = sessions[paneId] else {
+            guard let session = paneSession(for: paneId) else {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
                 break
             }
@@ -1127,7 +1129,7 @@ class AppRuntime {
 
         case .readPaneRowStructure(let reqId, let paneId):
             guard let connection = takeIpcConnection(for: reqId) else { break }
-            guard let session = sessions[paneId] else {
+            guard let session = paneSession(for: paneId) else {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
                 break
             }
@@ -1150,7 +1152,7 @@ class AppRuntime {
 
         case .streamPaneTape(let reqId, let paneId, let capture, let start, let mode):
             guard let connection = takeIpcConnection(for: reqId) else { break }
-            guard let session = sessions[paneId] else {
+            guard let session = paneSession(for: paneId) else {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
                 break
             }
@@ -1209,14 +1211,14 @@ class AppRuntime {
         // Search commands
 
         case .sendStartSearch(let paneId):
-            sessions[paneId]?.startSearch()
+            paneSession(for: paneId)?.startSearch()
 
         case .sendSearchNeedle(let paneId, let needle):
             // Debounce: immediate for empty or 3+ chars, 300ms for 1-2 chars
             let delay: TimeInterval = (needle.isEmpty || needle.count >= 3) ? 0 : 0.3
             let sendNeedle = { [weak self] in
                 guard let self else { return }
-                self.sessions[paneId]?.setSearchNeedle(needle)
+                self.paneSession(for: paneId)?.setSearchNeedle(needle)
             }
 
             if delay == 0 {
@@ -1241,12 +1243,12 @@ class AppRuntime {
             }
 
         case .sendSearchNavigate(let paneId, let direction):
-            sessions[paneId]?.navigateSearch(direction)
+            paneSession(for: paneId)?.navigateSearch(direction)
 
         case .sendEndSearch(let paneId):
             schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
             searchDebouncers.removeValue(forKey: paneId)
-            sessions[paneId]?.endSearch()
+            paneSession(for: paneId)?.endSearch()
 
         }
     }
@@ -1270,20 +1272,18 @@ class AppRuntime {
         }
     }
 
-    /// Tear down all runtime resources for one pane's session. The former command
-    /// executor body is now owned by `reconcileSessionExistence` (which
-    /// calls it for every pane absent from `model.allPaneIds`). `internal` so the
+    /// The only way a pane leaves the runtime. `reconcileSessionExistence` calls it for
+    /// every pane absent from `model.allPaneIds`, and the whole-session swap calls it for
+    /// every live pane, so a step added here applies on both paths. `internal` so the
     /// cross-file reconcile extension can reach it.
     func tearDownSession(_ paneId: PaneId) {
         endPaneTapeFollowers(for: paneId)
         cleanupReplayFile(for: paneId)
         schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
         searchDebouncers.removeValue(forKey: paneId)
-        paneHosts.removeValue(forKey: paneId)
-        if let session = sessions.removeValue(forKey: paneId) {
-            cancelSessionSubscriptions(session)
-            session.tearDown()
-        }
+        guard let host = paneHosts.removeValue(forKey: paneId) else { return }
+        cancelSessionSubscriptions(host.session)
+        host.session.tearDown()
     }
 
     /// Delete this identity's replay files from prior sessions.
@@ -1377,8 +1377,8 @@ class AppRuntime {
         schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
         enrichedCheckpointTimerToken = nil
         enrichedCheckpointTimer = nil
-        for session in sessions.values {
-            session.fenceForApplicationExit()
+        for host in paneHosts.values {
+            host.session.fenceForApplicationExit()
         }
         _ = recoveryPolicy.terminate()
         performEnrichedCheckpoint(async: false)
@@ -1472,7 +1472,8 @@ class AppRuntime {
         keeping retention: ScrollbackRetention
     ) -> [PaneId: CheckpointScrollbackRead] {
         var reads: [PaneId: CheckpointScrollbackRead] = [:]
-        for (paneId, session) in sessions {
+        for (paneId, host) in paneHosts {
+            let session = host.session
             if let deferred = session.primaryHistoryTailReader() {
                 reads[paneId] = deferred
             } else if let text = session.readPrimaryHistoryTail(
@@ -1809,14 +1810,8 @@ class AppRuntime {
             removeTabContainer(tabId)
         }
 
-        for paneId in Array(sessions.keys) {
-            endPaneTapeFollowers(for: paneId)
-            cleanupReplayFile(for: paneId)
-            paneHosts.removeValue(forKey: paneId)
-            if let session = sessions.removeValue(forKey: paneId) {
-                cancelSessionSubscriptions(session)
-                session.tearDown()
-            }
+        for paneId in Array(paneHosts.keys) {
+            tearDownSession(paneId)
         }
         paneVisibility.removeAll()
         // The switcher panel persists across sessions; hide it before resetting
@@ -1835,10 +1830,9 @@ class AppRuntime {
     private func commitRestoreSession(_ staged: StagedRestoreSession) {
         tearDownCurrentSession()
         model = staged.model
-        sessions = staged.sessions
-        paneHosts = Dictionary(uniqueKeysWithValues: staged.sessions.map { paneId, session in
-            (paneId, PaneHost(paneId: paneId, session: session, runtime: self))
-        })
+        for (paneId, session) in staged.sessions {
+            installTerminalSession(session, paneId: paneId)
+        }
         replayFiles = staged.replayFiles
         lightCheckpointBaseline = currentLightCheckpointProjection()
         cancelCoalescedReconcile()
@@ -1945,19 +1939,21 @@ class AppRuntime {
 
     // MARK: - Pane Toolbars
 
-    /// Installs one session and its runtime-owned wrapper host as a single lifetime unit.
-    private func installTerminalSession(_ session: any TerminalSession, paneId: PaneId) {
-        sessions[paneId] = session
+    /// The only way a pane enters the runtime. `internal` so tests install panes the
+    /// way production does instead of writing a session in behind this path.
+    func installTerminalSession(_ session: any TerminalSession, paneId: PaneId) {
         paneHosts[paneId] = PaneHost(paneId: paneId, session: session, runtime: self)
     }
 
-    /// Returns the persistent pane host, lazily covering test-injected sessions.
+    /// Returns the pane's record, or nil when no pane is installed under that id.
     func paneHost(for paneId: PaneId) -> PaneHost? {
-        if let host = paneHosts[paneId] { return host }
-        guard let session = sessions[paneId] else { return nil }
-        let host = PaneHost(paneId: paneId, session: session, runtime: self)
-        paneHosts[paneId] = host
-        return host
+        paneHosts[paneId]
+    }
+
+    /// Reads the live session out of the pane's record. Every caller that used to
+    /// index a separate session table goes through here.
+    func paneSession(for paneId: PaneId) -> (any TerminalSession)? {
+        paneHosts[paneId]?.session
     }
 
     // Resolve through the runtime-owned host so wrapper identity does not depend on

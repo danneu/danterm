@@ -9,7 +9,7 @@ func appPresentationLifecycleTests() {
         let runtime = AppRuntime()
         let paneId = PaneId()
         let session = TerminalView()
-        runtime.sessions[paneId] = session
+        runtime.installTerminalSession(session, paneId: paneId)
         let delegate = AppDelegate()
         delegate.runtime = runtime
         let center = NSWorkspace.shared.notificationCenter
@@ -43,7 +43,7 @@ func appPresentationLifecycleTests() {
             groups: [GroupModel(id: groupId, name: "General", tabs: [tab])]
         )
         runtime.model.selectedTabId = tabId
-        runtime.sessions[paneId] = session
+        runtime.installTerminalSession(session, paneId: paneId)
         let window = PresentationLifecycleTestWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
             styleMask: [.titled],
