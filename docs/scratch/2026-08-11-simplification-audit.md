@@ -172,7 +172,7 @@ in itself.
 | 9f0742c3 | [S16](#s16) | 20    | 4   | 5   | terminal-core  | large  | Unify the two search matchers and lift search out of Terminal                                                         |
 | cafc46a7 | [S17](#s17) | 16    | 4   | 4   | pty            | medium | Model master-close asynchrony in the reducer instead of deferring a command tail                                        |
 |        | [S18](#s18) | 16    | 4   | 4   | scrollback     | medium | Derive the grand row/content totals from the block index instead of storing them                                        |
-|        | [S19](#s19) | 16    | 4   | 4   | terminal-views | small  | Collapse the two presentation-input change detectors into one entry point                                               |
+| d9ab5942 | [S19](#s19) | 16    | 4   | 4   | terminal-views | small  | Collapse the two presentation-input change detectors into one entry point                                               |
 | fc6e0659 a3f38257 5156cbad 927caac6 53308921 a483af03 | [S20](#s20) | 16    | 4   | 4   | tests          | medium | Stop forking a PTY child for tests that only exercise engine policy                                                     |
 | 6977454e b910eaba 2d9d4dd4 | [S21](#s21) | 16    | 4   | 4   | tests          | large  | The Command interpreter, the app's highest-churn logic, has no automated coverage                                       |
 | ee646ebf 2fc9a3d8 af00a593 | [S22](#s22) | 15    | 3   | 5   | app-runtime    | medium | Collapse the parallel `sessions` and `paneHosts` maps into one pane map                                                 |

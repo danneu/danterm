@@ -156,7 +156,7 @@ the final documentation commit; a commit cannot record its own SHA.
 
 ## Commit progress
 - [x] 1. One presentation-input detector in the pane view (merge, rename, tests)
-- [ ] 2. Record S19's landing SHA in the simplification audit
+- [x] 2. Record S19's landing SHA in the simplification audit
 
 ## Implementation notes
 
