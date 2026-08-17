@@ -918,21 +918,11 @@ func alertsEmptyText(tab: AlertTab) -> String {
 
 // MARK: - Shared Pure Helpers
 //
-// Cross-layer pure feeders that belong to no single projection: each has a caller
-// outside the projection cluster (Update / AppRuntime / a view) as well as inside it,
-// so it stays in the lean core instead of rebuilding a grab-bag inside Projections.swift.
-// The dependency runs one way -- Projections.swift -> here (e.g. `desiredContainerShapes`
-// calls `containerShape(of:)`), never the reverse.
-
-func formatToolbarLabel(title: String, cwd: String?) -> String {
-  guard let cwd else { return title }
-  let shortCwd = abbreviateHome(cwd)
-  if title == cwd {
-    return shortCwd
-  } else {
-    return "\(title) \u{2013} \(shortCwd)"
-  }
-}
+// Pure feeders and the types they build, kept out of Projections.swift because the
+// runtime consumes them too: reconcile calls `unreadAlertTally` itself and holds
+// `ContainerShape` values across passes. The dependency runs one way --
+// Projections.swift -> here (e.g. `desiredContainerShapes` calls
+// `containerShape(of:)`), never the reverse.
 
 // MARK: - Unread Alert Tally
 //
