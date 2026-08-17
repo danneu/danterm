@@ -916,10 +916,6 @@ func alertsEmptyText(tab: AlertTab) -> String {
     }
 }
 
-func paneHasUnreadAlert(_ paneId: PaneId, alerts: [AlertModel]) -> Bool {
-  alerts.contains { $0.isUnread && $0.paneId == paneId }
-}
-
 // MARK: - Shared Pure Helpers
 //
 // Cross-layer pure feeders that belong to no single projection: each has a caller
@@ -938,35 +934,18 @@ func formatToolbarLabel(title: String, cwd: String?) -> String {
   }
 }
 
-func unreadAlertCount(for tab: TabModel, alerts: [AlertModel]) -> Int {
-  let paneIds = Set(allPaneIds(tab.paneTree.root))
-  return alerts.filter { $0.isUnread && paneIds.contains($0.paneId) }.count
-}
-
-/// Reference implementation only: no render path calls this. `UnreadAlertTally`
-/// rolls the same number up once per reconcile sweep and the sidebar projection
-/// carries it to the group row, so this survives as the per-group definition
-/// `UnreadAlertTallyTests` checks the tally against.
-func groupUnreadAlertCount(for group: GroupModel, alerts: [AlertModel]) -> Int {
-  group.tabs.reduce(0) { $0 + unreadAlertCount(for: $1, alerts: alerts) }
-}
-
-func totalUnreadAlertCount(model: AppModel) -> Int {
-  model.alerts.filter(\.isUnread).count
-}
-
 // MARK: - Unread Alert Tally
 //
-// This single-pass rollup must stay numerically equivalent to
-// `paneHasUnreadAlert`, `unreadAlertCount`, `groupUnreadAlertCount`, and
-// `totalUnreadAlertCount`. It exists so reconcile can compute alert counts once
-// and thread them through every alert-consuming projection.
+// The one definition of "how many unread alerts". It exists so reconcile can
+// compute alert counts once and thread them through every alert-consuming
+// projection.
 
 /// Precomputed unread-alert counts for one AppModel snapshot.
 ///
 /// `total` counts every unread alert, including stale-pane alerts whose pane no
-/// longer appears in any split tree. `byTab` and `byGroup` are tree-restricted,
-/// matching the tab/group helper semantics.
+/// longer appears in any split tree. `byTab` and `byGroup` are tree-restricted:
+/// they count only alerts on panes reachable from that tab's or group's pane
+/// tree, and every live tab and group gets a key even when its count is zero.
 struct UnreadAlertTally: Equatable {
   var byPane: [PaneId: Int]
   var byTab: [TabId: Int]

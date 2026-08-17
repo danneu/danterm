@@ -1,6 +1,6 @@
-// Tests for the single-pass unread-alert tally. These pin numerical equivalence
-// to the retained helper functions, including the stale-pane distinction between
-// global totals and tree-restricted tab/group rollups.
+// Tests for the single-pass unread-alert tally, the only definition of "how many
+// unread alerts". Each expectation is a literal count, including the stale-pane
+// distinction between the global total and the tree-restricted tab/group rollups.
 import Foundation
 import Testing
 
@@ -29,56 +29,59 @@ private func splitTab(_ tabId: TabId, _ first: PaneId, _ second: PaneId) -> TabM
 }
 
 @Suite struct UnreadAlertTallyTests {
-    @Test("unreadAlertTally matches retained alert helpers")
-    func unreadAlertTallyMatchesHelpers() {
-        // Intent: the new single-pass tally returns the same per-pane,
-        //   per-tab, per-group, and total counts as the retained helpers.
-        // Why it exists: the tally replaces repeated helper scans on the
-        //   reconcile hot path, so it must remain a numerical equivalent.
-        // Scenario: spec-first representative model -- two groups, split
-        //   and leaf tabs, read and unread alerts, and repeated alerts on
-        //   one pane.
+    @Test("unreadAlertTally rolls unread alerts up to pane, tab, group, and total")
+    func unreadAlertTallyRollsUpEveryLevel() {
+        // Intent: the tally reports the unread count at every level, summing
+        //   a split tab's panes and a group's tabs, and ignoring read alerts.
+        // Why it exists: the tally is the only definition of "how many unread
+        //   alerts", so every level it reports has to be stated outright.
+        // Scenario: spec-first representative model -- two groups, split and
+        //   leaf tabs, a read alert, and repeated alerts on one pane.
         let g1 = GroupId(), g2 = GroupId()
-        let t1 = TabId(), t2 = TabId(), t3 = TabId()
+        let t1 = TabId(), t2 = TabId(), t3 = TabId(), t4 = TabId()
         let p1 = PaneId(), p2 = PaneId(), p3 = PaneId(), p4 = PaneId(), p5 = PaneId()
-        let tab1 = splitTab(t1, p1, p2)
-        let tab2 = TabModel(id: t2, paneTree: PaneTree(root: .leaf(PaneModel(id: p3)), focusedPaneId: p3))
-        let tab3 = splitTab(t3, p4, p5)
+        let tab1 = TabModel(id: t1, paneTree: PaneTree(root: .leaf(PaneModel(id: p1)), focusedPaneId: p1))
+        let tab2 = TabModel(id: t2, paneTree: PaneTree(root: .leaf(PaneModel(id: p2)), focusedPaneId: p2))
+        let tab3 = splitTab(t3, p3, p4)
+        let tab4 = TabModel(id: t4, paneTree: PaneTree(root: .leaf(PaneModel(id: p5)), focusedPaneId: p5))
         var model = AppModel(groups: [
             GroupModel(id: g1, name: "Work", tabs: [tab1, tab2]),
-            GroupModel(id: g2, name: "Home", tabs: [tab3]),
+            GroupModel(id: g2, name: "Home", tabs: [tab3, tab4]),
         ], selectedTabId: t1)
         model.alerts = [
-            testAlert(p1, offset: 1),
-            testAlert(p1, offset: 2),
-            testAlert(p2, unread: false, offset: 3),
-            testAlert(p3, offset: 4),
+            testAlert(p1, unread: false, offset: 1),
+            testAlert(p2, offset: 2),
+            testAlert(p3, offset: 3),
+            testAlert(p4, offset: 4),
             testAlert(p5, offset: 5),
-            testAlert(p5, unread: false, offset: 6),
+            testAlert(p5, offset: 6),
         ]
 
         let tally = unreadAlertTally(for: model)
 
-        for paneId in model.allPaneIds {
-            let unreadCount = model.alerts.count { $0.isUnread && $0.paneId == paneId }
-            #expect((tally.byPane[paneId] ?? 0) == unreadCount)
-            #expect(((tally.byPane[paneId] ?? 0) > 0) == paneHasUnreadAlert(paneId, alerts: model.alerts))
-        }
-        for group in model.groups {
-            #expect((tally.byGroup[group.id] ?? -1) == groupUnreadAlertCount(for: group, alerts: model.alerts))
-            for tab in group.tabs {
-                #expect((tally.byTab[tab.id] ?? -1) == unreadAlertCount(for: tab, alerts: model.alerts))
-            }
-        }
-        #expect(tally.total == totalUnreadAlertCount(model: model))
+        #expect((tally.byPane[p1] ?? 0) == 0)
+        #expect((tally.byPane[p2] ?? 0) == 1)
+        #expect((tally.byPane[p3] ?? 0) == 1)
+        #expect((tally.byPane[p4] ?? 0) == 1)
+        #expect((tally.byPane[p5] ?? 0) == 2)
+
+        #expect((tally.byTab[t1] ?? -1) == 0)
+        #expect((tally.byTab[t2] ?? -1) == 1)
+        #expect((tally.byTab[t3] ?? -1) == 2)
+        #expect((tally.byTab[t4] ?? -1) == 2)
+
+        #expect((tally.byGroup[g1] ?? -1) == 1)
+        #expect((tally.byGroup[g2] ?? -1) == 4)
+
+        #expect(tally.total == 5)
     }
 
     @Test("unreadAlertTally counts stale-pane alerts only in total")
     func unreadAlertTallyCountsStalePaneAlertsOnlyInTotal() {
         // Intent: stale-pane unread alerts contribute to the global total
         //   without appearing in any tab or group rollup.
-        // Why it exists: totalUnreadAlertCount intentionally counts every
-        //   unread alert, while tab/group helpers are tree-restricted.
+        // Why it exists: `total` intentionally counts every unread alert,
+        //   while the tab and group buckets are tree-restricted.
         // Scenario: stale alert shape handled by activateAlert when the
         //   pane no longer exists.
         let livePane = PaneId()
@@ -91,7 +94,6 @@ private func splitTab(_ tabId: TabId, _ first: PaneId, _ second: PaneId) -> TabM
         let tally = unreadAlertTally(for: model)
 
         #expect(tally.total == 1)
-        #expect(tally.total == totalUnreadAlertCount(model: model))
         #expect(tally.byPane[stalePane] == 1)
         #expect((tally.byTab[tab.id] ?? -1) == 0)
         #expect((tally.byGroup[group.id] ?? -1) == 0)

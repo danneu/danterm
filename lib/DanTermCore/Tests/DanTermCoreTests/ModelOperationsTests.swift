@@ -915,63 +915,6 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(model.lastNotificationTime[paneId] == nil, "throttle data should be removed")
     }
 
-    // MARK: - bellCount / groupBellCount
-
-    @Test("testUnreadAlertCount")
-    func testUnreadAlertCount() {
-        // Intent: unreadAlertCount sums unread alerts whose paneId is in
-        //   the tab's tree.
-        // Why it exists: pins the tab-level rollup the sidebar bell badge
-        //   reads.
-        // Scenario: spec-first rollup -- a two-pane tab with one alert per
-        //   pane reports 2 unread.
-        let a = PaneId(), b = PaneId()
-        let tabId = TabId()
-        let tab = TabModel(id: tabId, paneTree: PaneTree(root: .split(
-                id: SplitId(), direction: .horizontal,
-                first: .leaf(PaneModel(id: a)),
-                second: .leaf(PaneModel(id: b)),
-                ratio: 0.5
-            ), focusedPaneId: a))
-        var alerts: [AlertModel] = []
-        #expect(unreadAlertCount(for: tab, alerts: alerts) == 0)
-
-        alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: a,
-            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
-        ), at: 0)
-        #expect(unreadAlertCount(for: tab, alerts: alerts) == 1)
-
-        alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: b,
-            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
-        ), at: 0)
-        #expect(unreadAlertCount(for: tab, alerts: alerts) == 2)
-    }
-
-    @Test("testGroupUnreadAlertCount")
-    func testGroupUnreadAlertCount() {
-        // Intent: groupUnreadAlertCount sums unread alerts across every
-        //   tab in the group.
-        // Why it exists: pins the group-level rollup the sidebar group
-        //   header bell reads.
-        // Scenario: spec-first rollup -- two tabs in one group, one alert
-        //   in the second tab, returns 1.
-        let a = PaneId(), b = PaneId()
-        let tabId1 = TabId(), tabId2 = TabId()
-        let tab1 = TabModel(id: tabId1, paneTree: PaneTree(root: .leaf(PaneModel(id: a)), focusedPaneId: a))
-        let tab2 = TabModel(id: tabId2, paneTree: PaneTree(root: .leaf(PaneModel(id: b)), focusedPaneId: b))
-        let group = GroupModel(id: GroupId(), name: "Test", tabs: [tab1, tab2])
-        var alerts: [AlertModel] = []
-
-        #expect(groupUnreadAlertCount(for: group, alerts: alerts) == 0)
-        alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: b,
-            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
-        ), at: 0)
-        #expect(groupUnreadAlertCount(for: group, alerts: alerts) == 1)
-    }
-
     // MARK: - moveToFront
 
     @Test("moveToFront empty array is no-op")
