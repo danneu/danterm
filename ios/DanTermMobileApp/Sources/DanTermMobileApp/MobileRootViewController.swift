@@ -24,11 +24,11 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     /// The target and pane the current episode is about. Every attempt in an episode --
     /// the gesture's and the policy's alike -- reuses them, so an automatic retry cannot
     /// silently follow a half-typed host field.
-    private var target: MobileServerTarget?
+    private var connectTarget = MobileConnectTarget()
     private var preferredPaneId: PaneId?
     private var reconnectPolicy = MobileReconnectPolicy()
     private var resumePolicy = MobileResumePolicy()
-    private var retryTimer: Timer?
+    private let retryTimer = MobileDeadlineTimer()
     private let pathMonitor = NWPathMonitor()
     private var status = MobileStatus()
     private var attempt: MobileSessionAttempt?
@@ -39,7 +39,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private var observers: [NSObjectProtocol] = []
     private var connectionGeneration = 0
     private var didSendSmokeInput = false
-    private var checkpointSaveTimer: Timer?
+    private let checkpointSaveTimer = MobileDeadlineTimer()
     private var checkpointIsDirty = false
     private let checkpointQueue = DispatchQueue(label: "danterm.mobile.checkpoint")
     private lazy var checkpointStore = PaneReplicaCheckpointStore(
@@ -56,14 +56,17 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         view.backgroundColor = .systemBackground
         configureViews()
         configureLifecycle()
-        loadTarget()
-        if connectionHeader.hostText?.isEmpty == false { requestConnect(preferredPane: nil) }
+        loadDraftFields()
+        // A first launch with no stored host has nothing to say about the empty field yet.
+        if connectionHeader.hostText?.isEmpty == false {
+            requestConnectToTypedTarget(preferredPane: nil)
+        }
     }
 
     isolated deinit {
         flushCheckpoint(synchronously: true)
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
-        retryTimer?.invalidate()
+        retryTimer.cancel()
         pathMonitor.cancel()
         attempt?.cancel()
         runner?.cancel()
@@ -103,12 +106,12 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        requestConnect(preferredPane: panes[indexPath.row].paneId)
+        requestConnectToPane(panes[indexPath.row].paneId)
     }
 
     private func configureViews() {
         connectionHeader.onConnect = { [weak self] in
-            self?.requestConnect(preferredPane: self?.selectedPaneId)
+            self?.requestConnectToTypedTarget(preferredPane: self?.selectedPaneId)
         }
         paneTable.dataSource = self
         paneTable.delegate = self
@@ -216,7 +219,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         pathMonitor.start(queue: DispatchQueue(label: "danterm.mobile.path"))
     }
 
-    private func loadTarget() {
+    private func loadDraftFields() {
         let environment = ProcessInfo.processInfo.environment
         let defaults = UserDefaults.standard
         connectionHeader.hostText = environment["DANTERM_IOS_HOST"]
@@ -225,53 +228,64 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             ?? defaults.string(forKey: "serverPort") ?? "7420"
     }
 
-    /// Starts an episode from the user's own gesture: the Go button, a pane row, or launch.
+    /// The gesture that names a server: the Go button, or the attempt made at launch.
+    private func requestConnectToTypedTarget(preferredPane: PaneId?) {
+        let draft = MobileTargetDraft(
+            host: connectionHeader.hostText,
+            port: connectionHeader.portText
+        )
+        startEpisode(connectTarget.setTarget(from: draft), preferredPane: preferredPane)
+    }
+
+    /// The gesture that names a pane inside the episode that produced the list. It never
+    /// consults the text fields, so editing them cannot retarget or block it.
+    private func requestConnectToPane(_ pane: PaneId) {
+        startEpisode(connectTarget.reuseTarget(), preferredPane: pane)
+    }
+
+    /// Starts an episode from the user's own gesture, or reports why it cannot.
     ///
     /// The gesture is the manual remedy itself, so it goes to the policy rather than
     /// straight to a socket -- that is what lets it restore the budget from any rest.
-    private func requestConnect(preferredPane: PaneId?) {
-        guard let host = connectionHeader.hostText?.trimmingCharacters(in: .whitespacesAndNewlines),
-              host.isEmpty == false,
-              let portText = connectionHeader.portText,
-              let port = UInt16(portText)
-        else {
-            // No target means no episode to start. The policy is left alone deliberately:
-            // a typo in the field must not cancel a retry already owed to a good target.
-            show(state: .deviceSetupFailure, detail: "Enter a host and port")
-            return
+    private func startEpisode(_ gesture: MobileConnectGesture, preferredPane: PaneId?) {
+        switch gesture {
+        case .connect(let target):
+            connectionHeader.showDraftProblem(nil)
+            UserDefaults.standard.set(target.host, forKey: "serverHost")
+            UserDefaults.standard.set(String(target.port), forKey: "serverPort")
+            preferredPaneId = preferredPane
+            dispatch(.userRequestedConnect)
+        case .reportDraft(let problem):
+            // A field problem is reported beside its field and nowhere else. The policy is
+            // left alone deliberately: a typo must not cancel a retry already owed to a
+            // good target.
+            connectionHeader.showDraftProblem(problem.label)
+        case .ignore:
+            break
         }
-        UserDefaults.standard.set(host, forKey: "serverHost")
-        UserDefaults.standard.set(portText, forKey: "serverPort")
-        target = MobileServerTarget(host: host, port: port)
-        preferredPaneId = preferredPane
-        dispatch(.userRequestedConnect)
     }
 
     /// Feeds the policy one event and performs the single decision it returns.
     private func dispatch(_ event: MobileReconnectEvent) {
-        let moment = ProcessInfo.processInfo.systemUptime
+        let moment = MobileMonotonicClock.now
         switch reconnectPolicy.handle(event, at: moment) {
         case .attemptNow:
-            cancelRetryTimer()
+            retryTimer.cancel()
             startAttempt()
         case .wait(let until):
-            cancelRetryTimer()
-            retryTimer = Timer.scheduledTimer(
-                withTimeInterval: max(0, until - moment),
-                repeats: false
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.dispatch(.clockFired) }
-            }
+            // The policy's moment is handed over as it stands. No arithmetic here: the
+            // instrument reads the clock the policy computed `until` on.
+            retryTimer.schedule(until: until) { [weak self] in self?.dispatch(.clockFired) }
         case .rest:
-            cancelRetryTimer()
+            retryTimer.cancel()
         }
         refreshStatus()
     }
 
     private func startAttempt() {
         // The policy only says `attemptNow` inside an episode a gesture started, and a
-        // gesture always validates the target first.
-        guard let target else { return }
+        // gesture only starts one against a target it resolved.
+        guard let target = connectTarget.established else { return }
         flushCheckpoint(synchronously: true)
         disconnect()
         let generation = connectionGeneration
@@ -481,32 +495,23 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     /// Reads the recovery phase, which only the policy knows, and renders whatever the four
     /// facts compose to. No wording or severity is decided here.
     private func refreshStatus() {
-        let moment = ProcessInfo.processInfo.systemUptime
+        let moment = MobileMonotonicClock.now
         status.noteRecovery(reconnectPolicy.recoveryPhase(at: moment))
         let line = status.line(at: moment)
         connectionHeader.showStatus(line.text, color: line.severity.color)
     }
 
-    private func cancelRetryTimer() {
-        retryTimer?.invalidate()
-        retryTimer = nil
-    }
-
     private func scheduleCheckpoint() {
         checkpointIsDirty = true
-        guard checkpointSaveTimer == nil else { return }
-        checkpointSaveTimer = Timer.scheduledTimer(
-            withTimeInterval: Self.checkpointInterval,
-            repeats: false
-        ) {
-            [weak self] _ in
-            MainActor.assumeIsolated { self?.flushCheckpoint(synchronously: false) }
+        guard checkpointSaveTimer.isPending == false else { return }
+        checkpointSaveTimer.schedule(until: MobileMonotonicClock.now + Self.checkpointInterval) {
+            [weak self] in
+            self?.flushCheckpoint(synchronously: false)
         }
     }
 
     private func flushCheckpoint(synchronously: Bool) {
-        checkpointSaveTimer?.invalidate()
-        checkpointSaveTimer = nil
+        checkpointSaveTimer.cancel()
         let source = checkpointIsDirty ? terminalView.checkpointSource() : nil
         checkpointIsDirty = false
         let store = checkpointStore
@@ -525,13 +530,6 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private func storedCheckpoint(for pane: PaneId) -> PaneReplicaCheckpoint? {
         checkpointStore.load(for: pane)
     }
-}
-
-/// One validated server address, so an automatic attempt reuses what the gesture checked
-/// rather than re-reading text fields the user may be halfway through editing.
-private struct MobileServerTarget {
-    let host: String
-    let port: UInt16
 }
 
 private extension MobileStatusSeverity {

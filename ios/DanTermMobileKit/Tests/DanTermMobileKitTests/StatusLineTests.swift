@@ -140,6 +140,35 @@ func severityIsTotalOverTheVocabulary() {
     }
 }
 
+@Test("Every causal state composes with every recovery phase")
+func causeAndRecoveryCompose() {
+    // Intent: the composed text of each reachable cause-and-recovery pair, including that
+    //   rest after give-up shows the plain terminal state with no recovery clause.
+    // Why it exists: the composition used to live in the shell, which has no tests, so the
+    //   one rule that both halves are always shown together had no proof anywhere.
+    let causes: [(MobileConnectionState, String)] = [
+        (.connectionLost, "Connection lost"),
+        (.serverUnreachable, "Server unreachable"),
+        (.streamDesynchronized, "Stream out of step with the Mac"),
+        (.streamEnded("paneClosed"), "Stream ended: paneClosed"),
+    ]
+    let phases: [(MobileRecoveryPhase, String?)] = [
+        (.none, nil),
+        (.attempting, "reconnecting"),
+        (.waiting(until: 30), "retrying in 5s"),
+        (.waitingForNetwork, "waiting for network"),
+    ]
+    for (state, causeText) in causes {
+        for (phase, recoveryText) in phases {
+            var status = MobileStatus()
+            status.noteConnection(state)
+            status.noteRecovery(phase)
+            let expected = [causeText, recoveryText].compactMap(\.self).joined(separator: " - ")
+            #expect(status.line(at: 25).text == expected, "\(state) \(phase)")
+        }
+    }
+}
+
 @Test("Every stream condition words a claim that is true while it is shown")
 func streamConditionWording() {
     var status = MobileStatus()
