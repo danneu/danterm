@@ -21,11 +21,9 @@ struct CLIError: Error {
 }
 
 struct DanTermCLI {
-    private static let socketTimeoutSeconds = 5
-
     // Top-level help text. Kept in sync by hand with `parseCLI` and the `EnvVars`
-    // constants read by `selectConnectionTarget(...)` -- there is no automated check,
-    // so any change to either touches this string too.
+    // constants read by `selectConnectionTarget(...)` and `selectSocketTimeout(...)` --
+    // there is no automated check, so any change to either touches this string too.
     private static let usageText: String = """
         danterm -- control DanTerm from the shell
 
@@ -127,6 +125,9 @@ struct DanTermCLI {
                          non-empty DANTERM_SOCK, socket lookup fails closed.
           DANTERM_SOCK   Path to the DanTerm control socket
           DANTERM_PANE   Pane id exported for callers to pass explicitly
+          DANTERM_SOCKET_TIMEOUT
+                         Seconds to wait on the control socket (default 5).
+                         Must be a positive number; anything else is refused.
 
         """
 
@@ -154,6 +155,7 @@ struct DanTermCLI {
             let invocation = try parseCLIInvocation(rawArgs)
             let command = invocation.command
             let environment = ProcessInfo.processInfo.environment
+            let socketTimeout = try selectSocketTimeout(environment: environment)
             let target = try selectConnectionTarget(
                 explicit: invocation.target,
                 environment: environment,
@@ -164,12 +166,17 @@ struct DanTermCLI {
             // go through the single-result request path below.
             if case .tapeStream(let format) = command.outputMode {
                 signal(SIGPIPE, SIG_IGN)
-                try requestPaneTape(command, target: target, format: format)
+                try requestPaneTape(
+                    command,
+                    target: target,
+                    format: format,
+                    socketTimeout: socketTimeout
+                )
                 exit(0)
             }
             // A nil reply means the app closed the connection and the method
             // expected that -- a quit it honored exits before it can answer.
-            if let response = try request(command, target: target) {
+            if let response = try request(command, target: target, socketTimeout: socketTimeout) {
                 if let error = response.error {
                     throw CLIError(error.message)
                 }
@@ -192,9 +199,14 @@ struct DanTermCLI {
     /// under the request because that is what the request asked for.
     private static func request(
         _ command: CLICommand,
-        target: CLIResolvedTarget
+        target: CLIResolvedTarget,
+        socketTimeout: Double
     ) throws -> JsonRpcResponse? {
-        let session = try openSession(target: target, receiveTimeout: true)
+        let session = try openSession(
+            target: target,
+            receiveTimeout: true,
+            socketTimeout: socketTimeout
+        )
         defer { session.close() }
 
         let (requestId, request) = makeRequest(command)
@@ -211,9 +223,14 @@ struct DanTermCLI {
     private static func requestPaneTape(
         _ command: CLICommand,
         target: CLIResolvedTarget,
-        format: PaneTapeFormat
+        format: PaneTapeFormat,
+        socketTimeout: Double
     ) throws {
-        let session = try openSession(target: target, receiveTimeout: false)
+        let session = try openSession(
+            target: target,
+            receiveTimeout: false,
+            socketTimeout: socketTimeout
+        )
         defer { session.close() }
 
         let (requestId, request) = makeRequest(command)
@@ -235,23 +252,24 @@ struct DanTermCLI {
     /// protocol version it has not agreed with.
     private static func openSession(
         target: CLIResolvedTarget,
-        receiveTimeout: Bool
+        receiveTimeout: Bool,
+        socketTimeout: Double
     ) throws -> DanTermClientSession {
         let transport: any DanTermClientTransport = try reporting {
             switch target {
             case .unixSocket(let path):
                 return try UnixSocketTransport(
                     path: path,
-                    receiveTimeout: receiveTimeout ? Double(socketTimeoutSeconds) : nil,
-                    sendTimeout: Double(socketTimeoutSeconds)
+                    receiveTimeout: receiveTimeout ? socketTimeout : nil,
+                    sendTimeout: socketTimeout
                 )
             case .tcp(let host, let port):
                 return try TCPSocketTransport(
                     host: host,
                     port: port,
-                    connectTimeout: Double(socketTimeoutSeconds),
-                    receiveTimeout: receiveTimeout ? Double(socketTimeoutSeconds) : nil,
-                    sendTimeout: Double(socketTimeoutSeconds)
+                    connectTimeout: socketTimeout,
+                    receiveTimeout: receiveTimeout ? socketTimeout : nil,
+                    sendTimeout: socketTimeout
                 )
             }
         }
@@ -362,15 +380,18 @@ struct DanTermCLI {
             throw CLIParseError("unexpected argument: \(arg)")
         }
 
+        // Resolved here, and not swallowed with the app query below, so a malformed
+        // supplied timeout is reported by every command that would use one.
+        let socketTimeout = try selectSocketTimeout(environment: ProcessInfo.processInfo.environment)
         let checks = evaluateDoctor(gatherDoctorFacts(
-            permissions: gatherDoctorPermissions()
+            permissions: gatherDoctorPermissions(socketTimeout: socketTimeout)
         ))
         print(renderDoctorReport(checks), terminator: "")
         exit(doctorExitCode(for: checks))
     }
 
     /// Best-effort app query: local doctor checks remain useful when no instance is running.
-    private static func gatherDoctorPermissions() -> DoctorFacts.Permissions {
+    private static func gatherDoctorPermissions(socketTimeout: Double) -> DoctorFacts.Permissions {
         let environment = ProcessInfo.processInfo.environment
         guard let target = try? selectConnectionTarget(
             explicit: nil,
@@ -379,7 +400,7 @@ struct DanTermCLI {
             method: .doctorPermissions
         ) else { return .unavailable }
         let command = CLICommand(request: .doctorPermissions, outputMode: .none)
-        let reply = try? request(command, target: target)
+        let reply = try? request(command, target: target, socketTimeout: socketTimeout)
         guard let response = reply ?? nil,
               response.error == nil,
               let result = response.result,
@@ -448,6 +469,27 @@ func resolveReply(_ reply: JsonRpcResponse?, method: IpcRequestMethod) throws ->
         throw CLIError("DanTerm closed the connection")
     }
     return nil
+}
+
+/// Resolves how long this run waits on its control socket, in seconds.
+///
+/// The value is an ordinary duration read from the environment, so a test's short value
+/// and a user's long one are the same input: nothing downstream can tell them apart. An
+/// unusable value is refused rather than replaced by the default, because a caller who
+/// asked for a different timeout must not silently get this one.
+///
+/// The default lives in the body rather than in a top-level constant: `main.swift`'s
+/// globals are initialized by running its top-level code, which the test target never
+/// does, so a global here would read as zero from every test.
+func selectSocketTimeout(environment: [String: String]) throws -> Double {
+    let defaultSeconds = 5.0
+    let raw = environment[EnvVars.socketTimeout]?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if raw.isEmpty { return defaultSeconds }
+    guard let seconds = Double(raw), seconds.isFinite, seconds > 0 else {
+        throw CLIError("\(EnvVars.socketTimeout) must be a positive number of seconds: \(raw)")
+    }
+    return seconds
 }
 
 /// Holds the endpoint choice after ambient local-socket resolution is complete.

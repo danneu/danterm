@@ -71,7 +71,8 @@ struct CLICharacterizationTests {
     @Test("an endpoint that never speaks reports that DanTerm is not responding")
     func silentEndpointReportsNotResponding() throws {
         // Intent: an accepted connection that sends nothing fails on the receive
-        //   timeout rather than hanging forever.
+        //   timeout rather than hanging forever, and it fails on the timeout the caller
+        //   supplied rather than on a constant compiled into the binary.
         // Why it exists: this is the only path that distinguishes a wedged app from a
         //   missing one, and it is the one a rewrite most easily drops.
         // Scenario: DanTerm is running but its main thread is blocked.
@@ -84,12 +85,39 @@ struct CLICharacterizationTests {
             holdUntilEndOfStream(connection)
             Darwin.close(connection)
         } run: { path in
-            try runCLI(["ls"], socketPath: path)
+            try runCLI(
+                ["ls"],
+                environment: ["DANTERM_SOCK": path, "DANTERM_SOCKET_TIMEOUT": "0.25"]
+            )
         }
 
         #expect(run.status == 1)
         #expect(run.stdout == "")
         #expect(run.stderr == "danterm: DanTerm is not responding\n")
+    }
+
+    @Test("a supplied socket timeout that is not a positive duration is refused")
+    func malformedSuppliedTimeoutIsRefused() throws {
+        // Intent: the binary rejects an unusable supplied timeout before it contacts
+        //   anything, and says which input was wrong.
+        // Why it exists: the value is inherited by every pane's shell, so a typo must
+        //   surface as its own failure instead of leaving the caller with a timeout
+        //   they did not choose.
+        // Scenario: a shell profile exports the value with a unit suffix.
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+
+        let run = try runCLI(
+            ["ls"],
+            environment: [
+                "DANTERM_SOCK": directory + "/absent.sock",
+                "DANTERM_SOCKET_TIMEOUT": "5s",
+            ]
+        )
+
+        #expect(run.status == 1)
+        #expect(run.stdout == "")
+        #expect(run.stderr == "danterm: DANTERM_SOCKET_TIMEOUT must be a positive number of seconds: 5s\n")
     }
 
     @Test("a first line that is not a hello is rejected")

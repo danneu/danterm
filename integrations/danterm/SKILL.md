@@ -150,6 +150,19 @@ If these are absent, the user may be outside DanTerm. You may still use
 `danterm` only with explicit ids derived from `danterm ls` and unique
 user-provided criteria.
 
+## Env vars you set
+
+DanTerm never sets this one; the caller does.
+
+- `DANTERM_SOCKET_TIMEOUT` -- seconds the CLI waits on the control socket,
+  default 5. Set it below the default when you expect an unresponsive instance
+  and do not want to wait, or above it when a busy instance is answering slowly.
+  It must be a positive number: any other value fails the command with
+  `danterm: DANTERM_SOCKET_TIMEOUT must be a positive number of seconds: <value>`
+  rather than falling back to the default. It never cuts a `pane tape` capture
+  short: a tape connection carries no receive timeout at all, because a followed
+  stream is idle whenever its pane is.
+
 ## Isolated source-tree instances
 
 In a fresh linked worktree, run `just provision-worktree` before the first

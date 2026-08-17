@@ -306,7 +306,7 @@ baseline before changing anything:
 - [x] 1. Run the pane-tape renderer off the shared dispatch pool and guard its waits legibly
 - [x] 2. Report every remaining test hang-guard expiry as a timeout, and graduate the rule into AGENTS.md
 - [x] 3. Hold the silent-endpoint fixture for the child's lifetime instead of eight seconds
-- [ ] 4. Supply the CLI's socket timeout from outside the process, and document it
+- [x] 4. Supply the CLI's socket timeout from outside the process, and document it
 
 ## Implementation notes
 
@@ -378,7 +378,26 @@ baseline before changing anything:
   into the fixture, against I9. The bound is the child's lifetime, and `runCLI` on the
   calling thread already waits for exactly that.
 
-## Follow Up
+### Slice 4
+
+- **The default lives inside the resolver, not in a top-level constant.** A `let` at
+  file scope in `cli/main.swift` is top-level code: it is initialized by running that
+  code, which the test target never does, so the first version of this read as zero from
+  every test and the two default tests failed. Keeping the number in the function body
+  makes the resolver a pure function of its argument no matter who links it.
+- **`doctor` resolves the timeout with `try`, not `try?`.** Its app query is best-effort
+  and swallows every failure, so a malformed supplied value would have been invisible in
+  exactly the command a person runs to find out what is wrong. It is resolved once before
+  the checks run, so `doctor` refuses the bad input the same way every other command does.
+- **Empty reads as unsupplied, non-positive reads as an error.** Every pane's shell
+  inherits this variable, so `export DANTERM_SOCKET_TIMEOUT=` must take the default rather
+  than fail every command; a value that is present but unusable is the typo I10 is about.
+  `inf` and `nan` parse as `Double` and are refused on the same branch.
+- **PO3 and PO4 are discharged by the same characterization test.** The silent-endpoint
+  test still asserts "DanTerm is not responding" against the real binary and a real
+  socket, now with a supplied 0.25-second timeout: it proves the message and proves the
+  supplied value is honored end-to-end. Its duration fell from 5.02 seconds to under 0.2,
+  which was the remaining gate wall-clock this slice set out to remove.
 
 - `lib/DanTermSupport/Tests/DanTermSupportTests/IpcConnectionLivenessTests.swift:50`
   asserts `elapsed < .seconds(2)` after a 0.4-second liveness bound. The lower
