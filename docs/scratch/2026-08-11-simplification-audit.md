@@ -173,7 +173,7 @@ in itself.
 | cafc46a7 | [S17](#s17) | 16    | 4   | 4   | pty            | medium | Model master-close asynchrony in the reducer instead of deferring a command tail                                        |
 |        | [S18](#s18) | 16    | 4   | 4   | scrollback     | medium | Derive the grand row/content totals from the block index instead of storing them                                        |
 |        | [S19](#s19) | 16    | 4   | 4   | terminal-views | small  | Collapse the two presentation-input change detectors into one entry point                                               |
-|        | [S20](#s20) | 16    | 4   | 4   | tests          | medium | Stop forking a PTY child for tests that only exercise engine policy                                                     |
+| fc6e0659 a3f38257 5156cbad 927caac6 53308921 a483af03 | [S20](#s20) | 16    | 4   | 4   | tests          | medium | Stop forking a PTY child for tests that only exercise engine policy                                                     |
 | 6977454e b910eaba 2d9d4dd4 | [S21](#s21) | 16    | 4   | 4   | tests          | large  | The Command interpreter, the app's highest-churn logic, has no automated coverage                                       |
 |        | [S22](#s22) | 15    | 3   | 5   | app-runtime    | medium | Collapse the parallel `sessions` and `paneHosts` maps into one pane map                                                 |
 |        | [S23](#s23) | 15    | 3   | 5   | app-runtime    | small  | Delete the divergent inline copy of tearDownSession in tearDownCurrentSession                                           |
@@ -537,6 +537,26 @@ presentation shape described below no longer exist.
 `tests` &middot; testing &middot; impact 4, confidence 4 &middot; effort medium
 
 `lib/TerminalPTY/Tests/TerminalPTYHostTests/TerminalPTYHostTests.swift#TerminalPTYHostTests`, `lib/TerminalPTY/Tests/TerminalPTYHostTests/TerminalPTYHostTests.swift#capturedShiftSelectionReplays`, `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift#TerminalPTYHost`, `lib/TerminalCore/Tests/TerminalCoreTests/TerminalInteractionPolicyTests.swift`, `scripts/test-terminal-pty.sh`
+
+**Status note.** Landed, by a different route than the ideal fix below, and
+with one half of the finding dropped on evidence. The fork went away, but not
+via an injectable in-memory transport: that was rejected because it creates a
+second byte path that can drift from the real read loop, which is the risk this
+section names against itself under **Risk**. Tests instead adopt a real PTY
+channel with no child, so the host keeps its own `read`/`write`/`ioctl` on a
+real master descriptor and nothing about the read turn is simulated. The
+serialization split landed as described, each remaining serialized test naming
+the shared resource it needs. `deliverOutputForTesting` did not become "the
+normal way to drive a host" as proposed -- the opposite: it is now
+`stageFixtureOutput`, `#if DEBUG`, banned in the host's own suite by
+`scripts/terminal-pty-host-test-seam-lint.sh`, and kept only as fixture setup
+for consumer tests. The half proposing that policy tests move to TerminalCore
+was investigated and dropped: those cases assert bytes at the child descriptor,
+owner-queue frame publication, and update-signal counts, none of which
+TerminalCore can observe. They are not duplicates. Test count rose from 83 to
+86; nothing was deleted. Three follow-ons finished clearing test-only state out
+of the host and belong to S12's account rather than this one: `fca0ea42`,
+`f43be9ae`, `788d94e4`.
 
 **Problem.** TerminalPTYHostTests is a single `@Suite(.serialized)` of 61 tests; 58 of them call `await host.start(...)` and fork a real `/bin/sh` plus a probe child, several with literal `sleep 0.1`/`sleep 0.2`/`sleep 30` in the child command. A large block of those tests (wheel routing, Shift-extension selection, SGR pointer reports, click granularity, OSC 52, OSC 8 link hover/open, search begin/navigate/clear) asserts behavior that TerminalCore already covers headlessly and exhaustively. Because the suite is serialized and every case pays fork + child-readiness latency, it is the second-listed long pole in the gate and it runs as two separate `swift test` invocations. The result is that the slowest gate step spends most of its wall clock re-proving engine policy through a process boundary that contributes no extra signal.
 
