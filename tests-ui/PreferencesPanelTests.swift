@@ -76,6 +76,70 @@ func preferencesPanelTests() {
         )
     }
 
+    uiTest("the label column reserves no width beyond its widest label") {
+        // Intent: the right-aligned label column shrink-wraps its widest label,
+        //   so every spare point of the form goes to the input controls.
+        // Why it exists: NSGridView hands 100% of a grid's surplus width to
+        //   column 0 and ignores content hugging entirely, so a form wider than
+        //   its content pads the labels and starves the inputs. The panel used
+        //   to assert a fixed 420pt window width, which produced exactly that.
+        // Scenario: the reported gap between the window edge and "Remote Theme".
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        fx.panel.apply(makeProjection(themeText: "Monokai Remastered", remoteThemeText: "Purplepeter"))
+        fx.panel.contentView?.layoutSubtreeIfNeeded()
+        guard let grid = fx.panel.contentView?.subviews.compactMap({ $0 as? NSGridView }).first else {
+            throw UITestFailure(message: "expected settings grid")
+        }
+        let labels = rowLabels(in: grid)
+        try uiExpect(labels.count >= 5, "expected the form's row labels, found \(labels.count)")
+
+        let widest = try uiRequire(labels.min { $0.frame.minX < $1.frame.minX }, "expected a widest label")
+        let deadSpace = widest.frame.minX - grid.bounds.minX
+
+        try uiExpect(deadSpace < 4,
+                     "the widest label '\(widest.stringValue)' should start at the form's leading edge, "
+                     + "but \(deadSpace)pt of the label column is unused")
+    }
+
+    uiTest("the settings window is exactly as wide as its content needs") {
+        // Intent: the panel's width is derived from its content, never asserted.
+        // Why it exists: this is the invariant that makes the label-padding bug
+        //   impossible. Any surplus width the window carries is surplus the grid
+        //   will dump into the label column, so the fix is to have no surplus.
+        // Scenario: spec-first.
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        fx.panel.contentView?.layoutSubtreeIfNeeded()
+        guard let contentView = fx.panel.contentView else {
+            throw UITestFailure(message: "expected a content view")
+        }
+
+        try uiExpect(
+            abs(contentView.frame.width - contentView.fittingSize.width) < 0.5,
+            "the window should size to its content: frame \(contentView.frame.width), "
+            + "fitting \(contentView.fittingSize.width)"
+        )
+    }
+
+    uiTest("the input controls get the full width the labels do not need") {
+        // Intent: the control column is at least as wide as the panel declares
+        //   it wants, so themes and font families stay readable.
+        // Why it exists: before the width became content-driven, the controls
+        //   were capped at the natural width of the two config buttons and every
+        //   extra point went to the labels instead.
+        // Scenario: spec-first.
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        fx.panel.apply(makeProjection(themeText: "Monokai Remastered"))
+        fx.panel.contentView?.layoutSubtreeIfNeeded()
+
+        try uiExpect(
+            fx.panel.fontFamilyCombo.frame.width >= preferencesControlColumnWidth,
+            "the font-family combo should fill the control column, got \(fx.panel.fontFamilyCombo.frame.width)"
+        )
+    }
+
     uiTest("theme fallback warnings show inline and collapse when resolved") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
@@ -325,6 +389,16 @@ private func descendantControlTitles(in view: NSView?) -> [String] {
         ownTitle = []
     }
     return ownTitle + view.subviews.flatMap { descendantControlTitles(in: $0) }
+}
+
+/// The right-aligned form labels in the grid's first column, in row order.
+private func rowLabels(in grid: NSGridView) -> [NSTextField] {
+    (0..<grid.numberOfRows).compactMap { row in
+        guard let label = grid.cell(atColumnIndex: 0, rowIndex: row).contentView as? NSTextField,
+              label.alignment == .right
+        else { return nil }
+        return label
+    }
 }
 
 private func descendantTextFields(in view: NSView?) -> [NSTextField] {

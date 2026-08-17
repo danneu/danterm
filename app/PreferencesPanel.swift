@@ -2,6 +2,13 @@
 import Cocoa
 import DanTermProtocol
 
+/// The width the settings form gives its input controls. This is the only width
+/// the panel states: the label column measures itself from its widest label, and
+/// the window sizes to the sum. Nothing here may assert a window width -- an
+/// NSGridView hands every surplus point to column 0 and ignores content hugging,
+/// so a window wider than its content pads the labels and starves the inputs.
+let preferencesControlColumnWidth: CGFloat = 320
+
 /// Owns the application-wide settings controls and commits each completed edit.
 class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
     weak var runtime: AppRuntime?
@@ -31,8 +38,10 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
+        // A placeholder rect. The form's real size comes from its content below,
+        // so no dimension is stated here.
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 10),
+            contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -43,6 +52,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         isExcludedFromWindowsMenu = true  // keep out of the Window menu's auto window list
         delegate = self
         buildUI()
+        if let contentView { setContentSize(contentView.fittingSize) }
         center()
     }
 
@@ -72,8 +82,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
             ])),
         ])
         grid.translatesAutoresizingMaskIntoConstraints = false
-        themeControls.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        remoteThemeControls.setContentHuggingPriority(.defaultLow, for: .horizontal)
         grid.column(at: 0).xPlacement = .trailing
         grid.column(at: 1).xPlacement = .fill
         // Vertically center labels with their adjacent controls. NSGridView rows
@@ -91,11 +99,22 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         remoteThemeWarningRow = grid.row(at: 8)
         remoteThemeWarningRow?.isHidden = true
 
+        // State the control column's width on the cells themselves, so the grid
+        // has no surplus to hand column 0. Every row is constrained, not one
+        // chosen row, so reordering or removing a row cannot silently drop it.
+        for row in 0..<grid.numberOfRows {
+            guard let content = grid.cell(atColumnIndex: 1, rowIndex: row).contentView,
+                  content !== NSGridCell.emptyContentView
+            else { continue }
+            content.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: preferencesControlColumnWidth
+            ).isActive = true
+        }
+
         // Configure terminal appearance controls.
         themeField.isEditable = false
         themeField.isSelectable = true
         themeField.placeholderString = DanTermConfig.default.resolvedDefaultTheme
-        themeField.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         themeBrowseButton.title = "Browse…"
         themeBrowseButton.bezelStyle = .push
@@ -112,15 +131,15 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         fontFamilyCombo.isEditable = true
         fontFamilyCombo.completes = true
         fontFamilyCombo.numberOfVisibleItems = 12
-        fontFamilyCombo.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         configureWarningLabel(themeWarningLabel)
         configureWarningLabel(fontFamilyWarningLabel)
         configureWarningLabel(remoteThemeWarningLabel)
         // NSGridView gives a wrapping label no width to wrap against, so it would
-        // otherwise stretch the panel to one long line.
+        // otherwise stretch the panel to one long line. Wrap at the control
+        // column so a warning never widens the form past the row it explains.
         for label in [themeWarningLabel, fontFamilyWarningLabel, remoteThemeWarningLabel] {
-            label.preferredMaxLayoutWidth = 250
+            label.preferredMaxLayoutWidth = preferencesControlColumnWidth
             label.isHidden = true
         }
 
@@ -152,7 +171,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         remoteThemeField.isEditable = false
         remoteThemeField.isSelectable = true
         remoteThemeField.placeholderString = DanTermConfig.default.remoteTheme
-        remoteThemeField.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         browseButton.title = "Browse…"
         browseButton.bezelStyle = .push
@@ -170,8 +188,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
             grid.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: padding),
             grid.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -padding),
             grid.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -padding),
-            themeControls.trailingAnchor.constraint(equalTo: grid.trailingAnchor),
-            remoteThemeControls.trailingAnchor.constraint(equalTo: grid.trailingAnchor),
         ])
     }
 
