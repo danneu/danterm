@@ -175,8 +175,8 @@ in itself.
 |        | [S19](#s19) | 16    | 4   | 4   | terminal-views | small  | Collapse the two presentation-input change detectors into one entry point                                               |
 | fc6e0659 a3f38257 5156cbad 927caac6 53308921 a483af03 | [S20](#s20) | 16    | 4   | 4   | tests          | medium | Stop forking a PTY child for tests that only exercise engine policy                                                     |
 | 6977454e b910eaba 2d9d4dd4 | [S21](#s21) | 16    | 4   | 4   | tests          | large  | The Command interpreter, the app's highest-churn logic, has no automated coverage                                       |
-|        | [S22](#s22) | 15    | 3   | 5   | app-runtime    | medium | Collapse the parallel `sessions` and `paneHosts` maps into one pane map                                                 |
-|        | [S23](#s23) | 15    | 3   | 5   | app-runtime    | small  | Delete the divergent inline copy of tearDownSession in tearDownCurrentSession                                           |
+| ee646ebf 2fc9a3d8 af00a593 | [S22](#s22) | 15    | 3   | 5   | app-runtime    | medium | Collapse the parallel `sessions` and `paneHosts` maps into one pane map                                                 |
+| ee646ebf 2fc9a3d8 af00a593 | [S23](#s23) | 15    | 3   | 5   | app-runtime    | small  | Delete the divergent inline copy of tearDownSession in tearDownCurrentSession                                           |
 | part 6b2e27f0 | [S24](#s24) | 15    | 3   | 5   | app-runtime    | medium | Give scheduled work one handle instead of a handle plus a shadow token                                     |
 |        | [S25](#s25) | 15    | 3   | 5   | core-model     | small  | Compute a tab's chrome once instead of four times per sidebar row                                                       |
 |        | [S26](#s26) | 15    | 3   | 5   | core-reducer   | medium | Derive preferences-draft sync instead of enumerating the six fields in five places                                      |
