@@ -11,6 +11,11 @@ public enum IpcCallerIdentity: Equatable, Sendable {
 
 /// Names every client-to-daemon request method admitted by DanTerm.
 public enum IpcRequestMethod: String, CaseIterable, Sendable {
+    /// Asks the instance to prove it is still servicing requests. Takes no target:
+    /// the answer is about the connection the request arrived on. It is an ordinary
+    /// method on purpose -- a reply that came from anywhere but dispatch would say
+    /// nothing about whether this instance can still do work.
+    case ping
     /// Requests the app-owned permission facts used by `danterm doctor`.
     case doctorPermissions = "doctor.permissions"
     /// Requests the complete inspectable application snapshot.
@@ -86,7 +91,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
         switch self {
         case .quit:
             return true
-        case .doctorPermissions, .ls, .focusInfo, .groupNew,
+        case .ping, .doctorPermissions, .ls, .focusInfo, .groupNew,
              .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
@@ -101,7 +106,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     /// Makes target classification exhaustive when a method joins the catalog.
     public var isTargeting: Bool {
         switch self {
-        case .doctorPermissions, .ls, .focusInfo, .quit, .groupNew:
+        case .ping, .doctorPermissions, .ls, .focusInfo, .quit, .groupNew:
             return false
         case .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
@@ -119,7 +124,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
         switch self {
         case .quit:
             return true
-        case .doctorPermissions, .ls, .focusInfo, .groupNew,
+        case .ping, .doctorPermissions, .ls, .focusInfo, .groupNew,
              .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
@@ -128,6 +133,28 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
              .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
              .todoDelete, .todoClearCompleted:
             return false
+        }
+    }
+
+    /// Makes durable-audit classification exhaustive when a method joins the catalog.
+    ///
+    /// Only a heartbeat is exempt: it exercises no authority and names no target, and
+    /// one record every half-bound would evict the events the log exists for. Close-time
+    /// accounting still counts pings, so a connection that only ever pinged stays
+    /// distinguishable from one that was admitted and never read.
+    public var producesAuditRecord: Bool {
+        switch self {
+        case .ping:
+            return false
+        case .quit, .doctorPermissions, .ls, .focusInfo, .groupNew,
+             .groupRename, .groupClose,
+             .tabNew, .tabRename, .tabClose,
+             .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
+             .paneRead, .paneRows, .paneZoom, .paneTape, .paneSnapshot, .themeSet,
+             .agentAttach, .agentActivity, .agentDetach,
+             .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
+             .todoDelete, .todoClearCompleted:
+            return true
         }
     }
 }
@@ -220,6 +247,9 @@ public enum IpcRequestDecodeError: Error, Equatable, Sendable {
 
 /// Represents every admitted IPC request with non-optional typed targets.
 public enum IpcRequest: Equatable, Sendable {
+    /// Asks for proof of service without a target. Its reply carries no facts: the
+    /// fact it establishes is that dispatch produced a reply at all.
+    case ping
     /// Defers permission probing to the app runtime.
     case doctorPermissions
     /// Requests the complete application snapshot without a target.
@@ -295,6 +325,7 @@ public enum IpcRequest: Equatable, Sendable {
     /// Identifies the wire method for this catalog case.
     public var method: IpcRequestMethod {
         switch self {
+        case .ping: return .ping
         case .doctorPermissions: return .doctorPermissions
         case .ls: return .ls
         case .focusInfo: return .focusInfo
@@ -332,7 +363,7 @@ public enum IpcRequest: Equatable, Sendable {
     /// Names every target key this request can carry.
     public var targetParameterKeys: [String] {
         switch self {
-        case .doctorPermissions, .ls, .focusInfo, .quit, .groupNew:
+        case .ping, .doctorPermissions, .ls, .focusInfo, .quit, .groupNew:
             return []
         case .groupRename, .groupClose:
             return ["group"]
@@ -356,7 +387,7 @@ public enum IpcRequest: Equatable, Sendable {
     /// Encodes this typed request into its JSON-RPC parameter object.
     public var params: [String: JSONValue] {
         switch self {
-        case .doctorPermissions, .ls, .focusInfo, .quit:
+        case .ping, .doctorPermissions, .ls, .focusInfo, .quit:
             return [:]
         case .groupNew(let name, let launch, let background):
             var object = launchParams(launch, background: background)
@@ -442,6 +473,7 @@ public enum IpcRequest: Equatable, Sendable {
         let object = params.asObject
 
         switch method {
+        case .ping: return .ping
         case .doctorPermissions: return .doctorPermissions
         case .ls: return .ls
         case .focusInfo: return .focusInfo

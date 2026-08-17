@@ -35,7 +35,7 @@ struct IpcConnectionWriteTests {
         let closed = ConnectionCloseProbe()
         defer { Darwin.close(descriptors.peer) }
 
-        connection.writeHello(appVersion: "test")
+        connection.writeHello(appVersion: "test", livenessBound: .standard)
         connection.startReading(
             onRequest: { request, connection in
                 connection.rememberRequest(reqId: requestId, rpcId: request.id)

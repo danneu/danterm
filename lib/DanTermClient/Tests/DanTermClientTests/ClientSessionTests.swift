@@ -194,6 +194,30 @@ struct ClientSessionTests {
         #expect(server.appVersion == "9.4.1")
     }
 
+    @Test("the handshake surfaces the silence bound the server advertised")
+    func handshakeSurfacesTheAdvertisedBound() throws {
+        // Intent: the client reads its liveness bound off the wire, never from a
+        //   constant of its own.
+        // Why it exists: only one end may define the number. A client constant would
+        //   be a second, independently tuned rule about the same connection.
+        let session = DanTermClientSession(
+            transport: ScriptedTransport(lines: [hello(protocol: 1, app: "test", silenceBound: 4)])
+        )
+
+        let server = try session.handshake()
+
+        #expect(server.livenessBound == IpcLivenessBound(seconds: 4))
+        #expect(server.livenessBound?.pingInterval == 2)
+    }
+
+    @Test("a hello with no readable bound advertises none")
+    func handshakeReportsAnAbsentBound() throws {
+        let line = #"{"jsonrpc":"2.0","method":"hello","params":{"protocol":1,"app":"test"}}"#
+        let session = DanTermClientSession(transport: ScriptedTransport(lines: [line]))
+
+        #expect(try session.handshake().livenessBound == nil)
+    }
+
     @Test("the handshake reports a stream that closed, a bad hello, and an unknown version apart")
     func handshakeDistinguishesItsFailures() throws {
         // Intent: the three ways a handshake can fail stay three outcomes.
@@ -458,13 +482,14 @@ struct ClientSessionTests {
         #expect(transport.observedSendCount == 1)
     }
 
-    private func hello(protocol version: Int, app: String) -> String {
+    private func hello(protocol version: Int, app: String, silenceBound: Double = 30) -> String {
         encoded(JsonRpcRequest(
             method: Methods.hello,
-            params: .object([
-                "protocol": .number(Double(version)),
-                "app": .string(app),
-            ])
+            params: IpcHello.params(
+                protocolVersion: version,
+                appVersion: app,
+                livenessBound: IpcLivenessBound(seconds: silenceBound) ?? .standard
+            )
         ))
     }
 

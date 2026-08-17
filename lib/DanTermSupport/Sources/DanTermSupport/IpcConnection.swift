@@ -79,13 +79,14 @@ final class IpcConnection: @unchecked Sendable {
         lock.unlock()
     }
 
-    func writeHello(appVersion: String) {
+    func writeHello(appVersion: String, livenessBound: IpcLivenessBound) {
         let hello = JsonRpcRequest(
             method: Methods.hello,
-            params: .object([
-                "protocol": .number(1),
-                "app": .string(appVersion),
-            ])
+            params: IpcHello.params(
+                protocolVersion: 1,
+                appVersion: appVersion,
+                livenessBound: livenessBound
+            )
         )
         writeLine(hello)
     }

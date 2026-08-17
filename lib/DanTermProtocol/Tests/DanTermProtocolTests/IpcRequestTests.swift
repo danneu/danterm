@@ -175,6 +175,7 @@ struct IpcRequestTests {
 
         return [
             CLICommand(request: .doctorPermissions, outputMode: .none),
+            CLICommand(request: .ping, outputMode: .none),
             try parseCLI(["ls"]),
             try parseCLI(["focus"]),
             try parseCLI(["quit"]),

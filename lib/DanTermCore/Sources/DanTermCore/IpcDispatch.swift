@@ -44,6 +44,12 @@ private func dispatchIpc(
     }
 
     switch request {
+    case .ping:
+        // Deliberately here and nowhere else. The reply's only content is the fact
+        // that this function ran, so an instance too starved to service requests
+        // fails liveness instead of answering from a cheaper layer.
+        return [.ipcReply(reqId: reqId, result: okResult())]
+
     case .doctorPermissions:
         return [.readDoctorPermissions(reqId: reqId)]
 

@@ -101,6 +101,7 @@ actor IpcServer {
 
     private weak var runtime: AppRuntime?
     private let appVersion: String
+    private let livenessBound: IpcLivenessBound
     private let auditWriter: IpcAuditLogWriter
     private let whoisResolver: TailnetWhoisResolver
     private let admittedNodeIds: Set<String>
@@ -113,6 +114,7 @@ actor IpcServer {
     init(
         socketPath: URL = controlSocketPath(),
         appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev",
+        livenessBound: IpcLivenessBound = .standard,
         tailnetConfig: DanTermTailnetConfig? = nil,
         auditWriter: IpcAuditLogWriter = IpcAuditLogWriter(directory: recoveryDirectoryURL()),
         whoisResolver: TailnetWhoisResolver = .live,
@@ -125,6 +127,7 @@ actor IpcServer {
         self.socketPath = socketPath
         self.listener = try ControlSocketListener.open(at: socketPath)
         self.appVersion = appVersion
+        self.livenessBound = livenessBound
         self.auditWriter = auditWriter
         self.whoisResolver = whoisResolver
         self.admittedNodeIds = Set(tailnetConfig?.admittedNodeIds ?? [])
@@ -313,7 +316,7 @@ actor IpcServer {
     private func beginService(_ state: ConnectionState) {
         let auditWriter = auditWriter
         let caller = state.caller
-        state.connection.writeHello(appVersion: appVersion)
+        state.connection.writeHello(appVersion: appVersion, livenessBound: livenessBound)
         state.connection.startReading(
             onRequest: { [weak self] request, connection in
                 Task { await self?.dispatch(request, from: connection) }
@@ -385,13 +388,20 @@ actor IpcServer {
             return
         }
 
-        let audit = IpcRequestAudit(
-            writer: auditWriter,
-            caller: state.caller,
-            request: typedRequest.auditDescriptor,
-            isRemote: state.holdsRemoteSlot
-        )
-        if state.holdsRemoteSlot {
+        // A method that earns no durable record also skips the write-ahead gate that
+        // makes remote service depend on the log. A heartbeat exercises no authority
+        // and names no target, and one record every half-bound would evict the events
+        // the log exists for.
+        let isAudited = typedRequest.method.producesAuditRecord
+        let audit = isAudited
+            ? IpcRequestAudit(
+                writer: auditWriter,
+                caller: state.caller,
+                request: typedRequest.auditDescriptor,
+                isRemote: state.holdsRemoteSlot
+            )
+            : nil
+        if isAudited, state.holdsRemoteSlot {
             do {
                 try auditWriter.append(.requestStarted(
                     caller: state.caller,

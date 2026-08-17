@@ -122,6 +122,44 @@ struct IpcServerRemoteTests {
         #expect(response.error == nil)
     }
 
+    @Test("hello advertises the server's silence bound and ping is served through dispatch")
+    func helloAdvertisesBoundAndPingIsServed() async throws {
+        // Intent: the number both ends apply is stated once, by the server, in the
+        //   hello it already sends first -- and a ping is answered by the same
+        //   dispatch path that answers `ls`.
+        // Why it exists: PO8 and I3. A client that derived the bound from its own
+        //   constant could disagree with the server about one connection, and a ping
+        //   answered below dispatch would report a starved Mac as alive.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(
+            runtime: runtime,
+            livenessBound: try #require(IpcLivenessBound(seconds: 6))
+        )
+        defer { server.stop() }
+
+        await server.start()
+        let peer = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { peer.close() }
+
+        let hello = try await peer.readRequest()
+        #expect(hello.method == Methods.hello)
+        #expect(IpcHello.livenessBound(from: hello.params) == IpcLivenessBound(seconds: 6))
+
+        try peer.writeRequest(method: IpcRequestMethod.ping.rawValue, id: .number(11))
+        let pong = try await peer.readResponse()
+        #expect(pong.id == .number(11))
+        #expect(pong.error == nil)
+
+        // The pong proves dispatch ran, so any request record for it would already be
+        // on disk. A ping every half-bound would evict the events the log exists for.
+        let kinds = try fixture.auditEntries().map(\.event.kind)
+        #expect(kinds.contains(.requestStarted) == false)
+        #expect(kinds.contains(.requestCompleted) == false)
+    }
+
     @Test("remote identity resolution receives the accepted source address")
     func resolverReceivesPeerAddress() async throws {
         let fixture = try RemoteIpcServerFixture()
@@ -418,11 +456,13 @@ private struct RemoteIpcServerFixture {
         whoisResolver: TailnetWhoisResolver = TailnetWhoisResolver { _ in
             TailnetPeerIdentity(nodeId: "node-phone", user: "dan@example.com", machineName: "iphone")
         },
-        remoteConnectionLimit: Int = 4
+        remoteConnectionLimit: Int = 4,
+        livenessBound: IpcLivenessBound = .standard
     ) throws -> IpcServer {
         try IpcServer(
             socketPath: socketURL,
             appVersion: "test",
+            livenessBound: livenessBound,
             tailnetConfig: DanTermTailnetConfig(
                 listen: "100.99.4.1:24863",
                 admittedNodeIds: ["node-phone"]

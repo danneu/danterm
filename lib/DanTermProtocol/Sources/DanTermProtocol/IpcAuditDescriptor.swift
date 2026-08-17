@@ -90,7 +90,7 @@ public extension IpcRequest {
 
     private var auditTarget: [String: String] {
         switch self {
-        case .doctorPermissions, .ls, .focusInfo, .quit, .groupNew:
+        case .ping, .doctorPermissions, .ls, .focusInfo, .quit, .groupNew:
             return [:]
         case .groupRename(let group, _), .groupClose(let group, _):
             return ["group": auditId(group)]

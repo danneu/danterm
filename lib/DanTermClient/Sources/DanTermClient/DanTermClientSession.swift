@@ -43,6 +43,10 @@ public enum DanTermClientError: Error, Equatable, Sendable {
 public struct DanTermServerHello: Equatable, Sendable {
     /// The app version is advisory, so callers can warn about skew without refusing it.
     public let appVersion: String
+    /// The silence bound this server advertised, or nil when it advertised none this
+    /// client can use. The number is the server's to state: a client constant would be
+    /// a second, independently tuned rule about the same connection.
+    public let livenessBound: IpcLivenessBound?
 }
 
 /// Drives a DanTerm control conversation over one transport.
@@ -105,7 +109,10 @@ public final class DanTermClientSession: @unchecked Sendable {
             guard version == Self.supportedProtocolVersion else {
                 throw DanTermClientError.unsupportedProtocol(version)
             }
-            return DanTermServerHello(appVersion: appVersion)
+            return DanTermServerHello(
+                appVersion: appVersion,
+                livenessBound: IpcHello.livenessBound(from: notification.params)
+            )
         }
     }
 

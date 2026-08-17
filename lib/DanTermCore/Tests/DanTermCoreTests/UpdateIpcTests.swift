@@ -25,6 +25,38 @@ import DanTermProtocol
 @testable import DanTermCore
 
 @Suite struct UpdateIpcTests {
+    @Test("ping is answered by the same dispatch that services every other request")
+    func pingIsAnsweredThroughDispatch() throws {
+        // Intent: a pong is an ordinary reply produced by `update`, for a local and
+        //   a remote caller alike, and it changes nothing in the model.
+        // Why it exists: the pong is the client's proof that the Mac is servicing
+        //   requests. If anything below dispatch could answer it, a Mac too starved
+        //   to run a request would still report itself alive.
+        let callers: [IpcCallerIdentity] = [
+            .local,
+            .remote(nodeId: "node-phone", user: "dan@example.com", machineName: "iphone"),
+        ]
+
+        for caller in callers {
+            var model = makeModel()
+            createTab(&model)
+            let before = model
+            let commands = sendIpc(
+                &model,
+                method: IpcRequestMethod.ping.rawValue,
+                caller: caller
+            )
+
+            #expect(commands.count == 1)
+            guard case .ipcReply(_, let result)? = commands.first else {
+                Issue.record("ping produced \(commands) instead of a reply")
+                return
+            }
+            #expect(result == .object(["ok": .bool(true)]))
+            #expect(model == before)
+        }
+    }
+
     @Test("every targeting IPC method rejects an absent target without mutation")
     func everyTargetingMethodRejectsAbsentTarget() throws {
         let todoId = UUID().uuidString
