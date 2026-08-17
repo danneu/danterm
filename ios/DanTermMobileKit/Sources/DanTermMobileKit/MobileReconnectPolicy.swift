@@ -36,6 +36,10 @@ public enum MobileConnectionFailure: Equatable, Sendable {
     case conversation(DanTermClientError, phase: MobileConnectionPhase)
     case streamEnded(reason: String?)
     case requestRefused(reason: String)
+    /// The phone could not make sense of what it got, or of its own setup: a reply with
+    /// neither result nor error, a replica that rejected the stream, an error no typed
+    /// layer produced. It is the phone's own defect, so no server can change it.
+    case deviceSetup
 
     /// The remedy this failure presents to the user. The vocabulary is unchanged by retry:
     /// recovery decorates this state, it never replaces it.
@@ -49,6 +53,7 @@ public enum MobileConnectionFailure: Equatable, Sendable {
         case .conversation(let error, .established): MobileConnectionState.failure(error)
         case .streamEnded(let reason): MobileConnectionState.streamEnded(reason: reason)
         case .requestRefused(let reason): MobileConnectionState.requestRefused(reason: reason)
+        case .deviceSetup: MobileConnectionState.deviceSetupFailure
         }
     }
 
@@ -75,8 +80,9 @@ public enum MobileConnectionFailure: Equatable, Sendable {
                  .notAdmitted, .identityUnresolved, .auditUnavailable: .manual
             }
         // A producer that ended its stream and a server that refused a request both
-        // answered; repeating the question gets the same answer.
-        case .streamEnded, .requestRefused: .manual
+        // answered; repeating the question gets the same answer, and a defect on this
+        // phone reruns unchanged on the next attempt.
+        case .streamEnded, .requestRefused, .deviceSetup: .manual
         }
     }
 }
@@ -217,8 +223,15 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
         case .appBackgrounded:
             // The shell cancels the attempt on its way out, and iOS suspends the app, so
             // nothing may remain scheduled. The standing survives, because foreground
-            // return is itself the trigger that resumes the episode.
+            // return is itself the trigger that resumes the episode. A connection or
+            // attempt the shell dropped on the way out is one the app still owes, so it
+            // becomes due the moment the app returns -- without restoring the budget,
+            // which only stability or a gesture does.
             foregrounded = false
+            if connectedAt != nil || attemptInFlight {
+                rearmIfConnectionWasStable(endingAt: now)
+                standing = .waiting(scheduledAt: now, notBefore: now)
+            }
             attemptInFlight = false
             connectedAt = nil
         case .userCancelled:

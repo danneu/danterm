@@ -50,6 +50,7 @@ func failureClassification() {
         (.conversation(.peerSilent, phase: .established), .transient, .connectionLost),
         (.streamEnded(reason: "paneClosed"), .manual, .streamEnded("paneClosed")),
         (.requestRefused(reason: "pane not found"), .manual, .requestRefused("pane not found")),
+        (.deviceSetup, .manual, .deviceSetupFailure),
     ]
     for (failure, expectedClass, expectedState) in cases {
         #expect(failure.retryClass == expectedClass)
@@ -109,6 +110,7 @@ func manualCausesNeverSchedule() {
         .conversation(.oversizedLine, phase: .established),
         .streamEnded(reason: nil),
         .requestRefused(reason: "pane not found"),
+        .deviceSetup,
     ]
     for failure in manual {
         var policy = MobileReconnectPolicy()
@@ -270,6 +272,42 @@ func restAfterBackgroundingAndCancel() {
     #expect(cancelled.handle(.clockFired, at: 500) == .rest)
     #expect(cancelled.handle(.networkPathChanged(usable: true), at: 501) == .rest)
     #expect(cancelled.handle(.userRequestedConnect, at: 502) == .attemptNow)
+}
+
+@Test("A connection dropped for backgrounding is owed again on return")
+func backgroundingOwesTheConnectionItDropped() {
+    // Intent: the app tears its own connection down on the way out, so returning to the
+    //   foreground reconnects without a tap.
+    // Why it exists: backgrounding is not a failure, so nothing else would leave an
+    //   attempt owed, and the phone would come back to a dead pane until the user tapped.
+    var connected = MobileReconnectPolicy()
+    #expect(connected.handle(.userRequestedConnect, at: 100) == .attemptNow)
+    #expect(connected.handle(.attemptConnected, at: 101) == .rest)
+    #expect(connected.handle(.appBackgrounded, at: 102) == .rest)
+    #expect(connected.handle(.appForegrounded, at: 900) == .attemptNow)
+
+    // An attempt still in flight is owed the same way: the shell cancelled it, so nothing
+    // is going to report its outcome.
+    var attempting = MobileReconnectPolicy()
+    #expect(attempting.handle(.userRequestedConnect, at: 100) == .attemptNow)
+    #expect(attempting.handle(.appBackgrounded, at: 101) == .rest)
+    #expect(attempting.handle(.appForegrounded, at: 102) == .attemptNow)
+}
+
+@Test("Backgrounding an idle policy leaves nothing owed")
+func backgroundingWithoutAConnectionOwesNothing() {
+    // Intent: the round trip through the background does not become a trigger of its own.
+    // Why it exists: a manual-class rest must stay resting, and a give-up must not gain a
+    //   free episode, just because the user switched apps and came back.
+    var manual = MobileReconnectPolicy()
+    #expect(manual.handle(.attemptFailed(.conversation(.notAdmitted, phase: .establishing)), at: 100)
+        == .rest)
+    #expect(manual.handle(.appBackgrounded, at: 101) == .rest)
+    #expect(manual.handle(.appForegrounded, at: 102) == .rest)
+
+    var fresh = MobileReconnectPolicy()
+    #expect(fresh.handle(.appBackgrounded, at: 100) == .rest)
+    #expect(fresh.handle(.appForegrounded, at: 101) == .rest)
 }
 
 @Test("Foreground return during the automatic phase attempts at once")

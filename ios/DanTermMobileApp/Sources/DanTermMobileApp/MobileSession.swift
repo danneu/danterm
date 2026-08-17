@@ -12,10 +12,13 @@ struct MobileSessionBootstrap: Sendable {
     let serverVersion: String
 }
 
-/// Keeps background setup failures inside the shell's complete state vocabulary.
+/// Keeps establishment failures inside the shell's complete typed-cause vocabulary.
+///
+/// It carries the cause rather than the user-facing state because the shell's reconnect
+/// policy schedules on the cause; the state it presents is derived from it.
 enum MobileSessionBootstrapResult: Sendable {
     case connected(MobileSessionBootstrap)
-    case failed(MobileConnectionState)
+    case failed(MobileConnectionFailure)
 }
 
 /// Owns a cancellable connection attempt before the long-lived runner takes over.
@@ -64,8 +67,10 @@ final class MobileSessionAttempt: @unchecked Sendable {
                     method: IpcRequestMethod.ls.rawValue,
                     params: .object([:])
                 ))
+                // No reply and no error: the frames ran out, which is the peer closing
+                // the connection it had already handshaken on.
                 guard let reply = try opened.awaitReply(id: requestId) else {
-                    deliver(.failed(.connectionLost))
+                    deliver(.failed(.transport(.peerClosed, phase: .establishing)))
                     return
                 }
                 if let error = reply.error {
@@ -73,7 +78,7 @@ final class MobileSessionAttempt: @unchecked Sendable {
                     return
                 }
                 guard let result = reply.result else {
-                    deliver(.failed(.deviceSetupFailure))
+                    deliver(.failed(.deviceSetup))
                     return
                 }
                 let panes = try projectPaneList(from: result)
@@ -84,13 +89,13 @@ final class MobileSessionAttempt: @unchecked Sendable {
                     serverVersion: hello.appVersion
                 )))
             } catch let error as TCPSocketTransportError {
-                deliver(.failed(.failure(error)))
+                deliver(.failed(.transport(error, phase: .establishing)))
             } catch let error as DanTermClientError {
                 // Everything this closure does is establishment, up to and including the
                 // first pane list, so silence here means the Mac never answered.
-                deliver(.failed(.establishmentFailure(error)))
+                deliver(.failed(.conversation(error, phase: .establishing)))
             } catch {
-                deliver(.failed(.deviceSetupFailure))
+                deliver(.failed(.deviceSetup))
             }
         }
         thread.name = "danterm-mobile-connect"

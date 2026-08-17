@@ -285,7 +285,7 @@ change; `integrations/danterm/SKILL.md` is untouched.
 ## Commit progress
 - [x] 1. the capacity refusal carries the server's reclamation bound
 - [x] 2. a kit-owned pure reconnect policy decides when to attempt
-- [ ] 3. the phone's shell executes the reconnect policy's decisions
+- [x] 3. the phone's shell executes the reconnect policy's decisions
 
 ## Implementation notes
 
@@ -303,3 +303,45 @@ change; `integrations/danterm/SKILL.md` is untouched.
 - `MobileRecoveryPhase` ships with the policy because the phase is decided, not
   worded. The wording that decorates the causal state is the shell's, so it
   lands with commit 3.
+- Wiring the shell needed two additions the plan did not spell out.
+  - `MobileConnectionFailure.deviceSetup`: the shell has three outcomes no typed
+    transport or conversation error names -- a reply carrying neither result nor
+    error, a replica that rejected the stream, and an untyped `catch`. Without a
+    cause for them, either the classification stops being total over what the
+    shell actually reports, or the shell has to invent a cause. It is manual: a
+    defect on this phone reruns unchanged on the next attempt.
+  - Backgrounding leaves an owed attempt when a connection or attempt was live.
+    The app tears its own connection down on the way out, and that teardown is
+    not a failure, so nothing else would leave anything owed and the shipped
+    reconnect-on-foreground behavior would be lost. It does not restore the
+    budget, so I4 and I5 read exactly as written.
+- Reporting the ending cause tears the connection down first. That is what makes
+  the cause unique per connection: the runner's delivery fence then drops the
+  read error that follows a stream the shell already ended, so the policy cannot
+  receive two differently classified causes for one connection.
+- Only the tape subscription's refusal ends the connection. A refused input
+  request presents its reason and leaves the stream serving, which is the shipped
+  behavior; making every error reply terminal would have been a regression the
+  plan did not ask for.
+- The shell reads time from `ProcessInfo.systemUptime`, so a wall-clock
+  correction cannot move a pending retry.
+- `MobileReconnectEvent.userCancelled` has no producer yet: the phone has no
+  disconnect control today. The policy handles it, and the affordance is
+  follow-up work.
+
+## Follow Up
+
+- PO7 is unrun: the live smoke is manual and needs hardware. Airplane mode on and
+  off with the app foregrounded (heals with no tap, resumes exactly via the
+  t9-checkpoint instrument), and a sleeping Mac (bounded visible retries, then a
+  legible rest).
+- The phone has no disconnect control, so `MobileReconnectEvent.userCancelled`
+  has no producer. Adding a stop affordance to `ConnectionHeaderView` would give
+  the user a way to end an episode without backgrounding the app.
+- `ios/DanTermMobileApp/Sources/DanTermMobileApp/MobileRootViewController.swift`
+  presents `retrying in Ns` once, at scheduling time, and does not count down. A
+  ticking label would need a second timer; decide whether the countdown is worth
+  one.
+- The replica's `.gap` state still presents as `connectionLost` with a detail
+  string while the connection is alive and healthy, which now reads oddly beside
+  the recovery decoration. It predates this plan and deserves its own state.

@@ -8,10 +8,11 @@ import DanTermProtocol
 public enum MobileConnectionRunnerEvent: Equatable, Sendable {
     /// Delivers one classified frame from the session reader.
     case frame(DanTermClientFrame)
-    /// Delivers a named user-facing failure while the connection still accepts output.
-    case failure(MobileConnectionState)
-    /// Reports an ordinary peer close while the connection still accepts output.
-    case ended
+    /// Reports the typed cause that ended this connection. It is typed rather than a
+    /// user-facing state because the shell's reconnect policy schedules on the cause: a
+    /// dropped stream is worth another attempt and a malformed line is not, and both
+    /// present the same words.
+    case failed(MobileConnectionFailure)
 }
 
 /// Runs one session reader and guarantees that cancellation outlives all shell callbacks.
@@ -44,15 +45,16 @@ public final class MobileConnectionRunner: @unchecked Sendable {
             while let frame = try session.nextFrame() {
                 enqueue(.frame(frame))
             }
-            enqueue(.ended)
+            // A clean end of frames is the peer closing the connection it was serving.
+            enqueue(.failed(.transport(.peerClosed, phase: .established)))
         } catch let error as TCPSocketTransportError {
-            enqueue(.failure(.failure(error)))
+            enqueue(.failed(.transport(error, phase: .established)))
         } catch let error as DanTermClientError {
-            enqueue(.failure(.failure(error)))
+            enqueue(.failed(.conversation(error, phase: .established)))
         } catch {
             // A non-TCP transport is outside the mobile runner's production path. Treat
-            // its untyped failure as a local setup defect instead of inventing a UI state.
-            enqueue(.failure(.deviceSetupFailure))
+            // its untyped failure as a local defect instead of inventing a cause.
+            enqueue(.failed(.deviceSetup))
         }
     }
 
@@ -62,7 +64,8 @@ public final class MobileConnectionRunner: @unchecked Sendable {
     }
 
     /// Stops delivery before waking and joining every active transport operation. The
-    /// shell calls this outside the delivery closure, such as from its background handler.
+    /// delivery lock is recursive so the shell may also call this from inside a delivery,
+    /// which is how one connection's first reported cause fences every later one.
     public func cancel() {
         deliveryLock.withLock { acceptsDelivery = false }
         session.cancel()

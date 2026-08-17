@@ -1,8 +1,14 @@
 // Owns connection lifecycle, pane selection, and normalized phone input for the UIKit shell.
+//
+// Reconnect timing is not decided here. `MobileReconnectPolicy` answers when an attempt may
+// run; this file only supplies the things a pure state machine cannot observe -- the clock,
+// the network path, the app's lifecycle, the user's gestures, and the typed cause each
+// connection ended with -- and performs the one decision it gets back.
 import DanTermClient
 import DanTermMobileKit
 import DanTermProtocol
 import Foundation
+import Network
 import UIKit
 
 /// Keeps every UIKit state transition on the main actor while sessions block elsewhere.
@@ -15,6 +21,16 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
 
     private var panes: [MobilePaneListItem] = []
     private var selectedPaneId: PaneId?
+    /// The target and pane the current episode is about. Every attempt in an episode --
+    /// the gesture's and the policy's alike -- reuses them, so an automatic retry cannot
+    /// silently follow a half-typed host field.
+    private var target: MobileServerTarget?
+    private var preferredPaneId: PaneId?
+    private var reconnectPolicy = MobileReconnectPolicy()
+    private var retryTimer: Timer?
+    private let pathMonitor = NWPathMonitor()
+    private var presentedState = MobileConnectionState.disconnected
+    private var presentedDetail: String?
     private var attempt: MobileSessionAttempt?
     private var runner: MobileConnectionRunner?
     private var runnerThread: Thread?
@@ -42,12 +58,14 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         configureViews()
         configureLifecycle()
         loadTarget()
-        if connectionHeader.hostText?.isEmpty == false { connect(preferredPane: nil) }
+        if connectionHeader.hostText?.isEmpty == false { requestConnect(preferredPane: nil) }
     }
 
     isolated deinit {
         flushCheckpoint(synchronously: true)
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        retryTimer?.invalidate()
+        pathMonitor.cancel()
         attempt?.cancel()
         runner?.cancel()
     }
@@ -86,12 +104,12 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        connect(preferredPane: panes[indexPath.row].paneId)
+        requestConnect(preferredPane: panes[indexPath.row].paneId)
     }
 
     private func configureViews() {
         connectionHeader.onConnect = { [weak self] in
-            self?.connect(preferredPane: self?.selectedPaneId)
+            self?.requestConnect(preferredPane: self?.selectedPaneId)
         }
         paneTable.dataSource = self
         paneTable.delegate = self
@@ -172,8 +190,12 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.flushCheckpoint(synchronously: true)
-                self?.disconnect()
+                guard let self else { return }
+                self.flushCheckpoint(synchronously: true)
+                self.disconnect()
+                // After the teardown, so the policy learns that this connection is one the
+                // app dropped itself and still owes on return.
+                self.dispatch(.appBackgrounded)
             }
         })
         observers.append(center.addObserver(
@@ -181,8 +203,15 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.connect(preferredPane: self?.selectedPaneId) }
+            MainActor.assumeIsolated { self?.dispatch(.appForegrounded) }
         })
+        // The phone's own side of the world is observable, so the policy is told about it
+        // instead of discovering it by failing an attempt that never had a chance.
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let usable = path.status == .satisfied
+            Task { @MainActor in self?.dispatch(.networkPathChanged(usable: usable)) }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "danterm.mobile.path"))
     }
 
     private func loadTarget() {
@@ -194,22 +223,58 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             ?? defaults.string(forKey: "serverPort") ?? "7420"
     }
 
-    private func connect(preferredPane: PaneId?) {
+    /// Starts an episode from the user's own gesture: the Go button, a pane row, or launch.
+    ///
+    /// The gesture is the manual remedy itself, so it goes to the policy rather than
+    /// straight to a socket -- that is what lets it restore the budget from any rest.
+    private func requestConnect(preferredPane: PaneId?) {
         guard let host = connectionHeader.hostText?.trimmingCharacters(in: .whitespacesAndNewlines),
               host.isEmpty == false,
               let portText = connectionHeader.portText,
               let port = UInt16(portText)
         else {
+            // No target means no episode to start. The policy is left alone deliberately:
+            // a typo in the field must not cancel a retry already owed to a good target.
             show(state: .deviceSetupFailure, detail: "Enter a host and port")
             return
         }
         UserDefaults.standard.set(host, forKey: "serverHost")
         UserDefaults.standard.set(portText, forKey: "serverPort")
+        target = MobileServerTarget(host: host, port: port)
+        preferredPaneId = preferredPane
+        dispatch(.userRequestedConnect)
+    }
+
+    /// Feeds the policy one event and performs the single decision it returns.
+    private func dispatch(_ event: MobileReconnectEvent) {
+        let moment = ProcessInfo.processInfo.systemUptime
+        switch reconnectPolicy.handle(event, at: moment) {
+        case .attemptNow:
+            cancelRetryTimer()
+            startAttempt()
+        case .wait(let until):
+            cancelRetryTimer()
+            retryTimer = Timer.scheduledTimer(
+                withTimeInterval: max(0, until - moment),
+                repeats: false
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.dispatch(.clockFired) }
+            }
+        case .rest:
+            cancelRetryTimer()
+        }
+        refreshStatus()
+    }
+
+    private func startAttempt() {
+        // The policy only says `attemptNow` inside an episode a gesture started, and a
+        // gesture always validates the target first.
+        guard let target else { return }
         flushCheckpoint(synchronously: true)
         disconnect()
         let generation = connectionGeneration
-        show(state: .connecting, detail: "Connecting to \(host):\(port)")
-        let attempt = MobileSessionAttempt(host: host, port: port)
+        show(state: .connecting, detail: "Connecting to \(target.host):\(target.port)")
+        let attempt = MobileSessionAttempt(host: target.host, port: target.port)
         self.attempt = attempt
         attempt.start { [weak self] result in
             Task { @MainActor in
@@ -217,25 +282,26 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
                     if case .connected(let bootstrap) = result { bootstrap.session.cancel() }
                     return
                 }
-                self?.finish(result, preferredPane: preferredPane)
+                self?.finish(result)
             }
         }
     }
 
-    private func finish(_ result: MobileSessionBootstrapResult, preferredPane: PaneId?) {
+    private func finish(_ result: MobileSessionBootstrapResult) {
         attempt = nil
         switch result {
-        case .failed(let state):
-            show(state: state)
+        case .failed(let failure):
+            fail(failure)
         case .connected(let bootstrap):
             panes = bootstrap.panes
             paneTable.reloadData()
-            guard let pane = preferredPane.flatMap({ wanted in panes.first { $0.paneId == wanted } })
+            guard let pane = preferredPaneId
+                .flatMap({ wanted in panes.first { $0.paneId == wanted } })
                 ?? panes.first(where: { $0.isSelectedTab && $0.isFocused })
                 ?? panes.first
             else {
                 bootstrap.session.cancel()
-                show(state: .requestRefused(reason: "The Mac has no panes"))
+                fail(.requestRefused(reason: "The Mac has no panes"))
                 return
             }
             selectedPaneId = pane.paneId
@@ -243,16 +309,20 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             paneTable.reloadData()
             let checkpoint = storedCheckpoint(for: pane.paneId)
             let cursor = terminalView.reset(checkpoint: checkpoint, for: pane.paneId)
-            startStream(bootstrap.session, pane: pane.paneId, cursor: cursor)
+            guard startStream(bootstrap.session, pane: pane.paneId, cursor: cursor) else { return }
             show(state: .ready, detail: "Connected to DanTerm \(bootstrap.serverVersion)")
+            dispatch(.attemptConnected)
         }
     }
 
+    /// Subscribes the chosen pane's tape and starts its reader. Returns false when the
+    /// subscription itself failed, so the caller does not report a connection that is
+    /// already over.
     private func startStream(
         _ session: DanTermClientSession,
         pane: PaneId,
         cursor: PaneTapeCursor?
-    ) {
+    ) -> Bool {
         let requestId = JSONValue.string(UUID().uuidString)
         let request = IpcRequest.paneTape(
             pane: pane,
@@ -268,8 +338,8 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             ))
         } catch {
             session.cancel()
-            show(state: .connectionLost)
-            return
+            fail(.transport(.writeFailed, phase: .established))
+            return false
         }
         tapeRequestId = requestId
         let runner = MobileConnectionRunner(session: session) { [weak self] event in
@@ -287,14 +357,13 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             didSendSmokeInput = true
             send(inputMapper.text(smokeInput))
         }
+        return true
     }
 
     private func receive(_ event: MobileConnectionRunnerEvent) {
         switch event {
-        case .ended:
-            show(state: .connectionLost)
-        case .failure(let state):
-            show(state: state)
+        case .failed(let failure):
+            fail(failure)
         case .frame(let frame):
             receive(frame)
         }
@@ -304,7 +373,14 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         switch frame {
         case .response(let response):
             if let error = response.error {
-                show(state: .requestRefused(reason: error.message))
+                // Only the tape subscription's refusal ends the connection, because the
+                // subscription is what the connection is for. A refused input request
+                // leaves a stream that is still serving.
+                if response.id == tapeRequestId {
+                    fail(.requestRefused(reason: error.message))
+                } else {
+                    show(state: .requestRefused(reason: error.message))
+                }
                 return
             }
             guard response.id == tapeRequestId,
@@ -324,11 +400,23 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         do {
             try terminalView.apply(record)
             if case .end(let reason) = record {
-                show(state: .streamEnded(reason: reason?.rawValue))
+                fail(.streamEnded(reason: reason?.rawValue))
             }
         } catch {
-            show(state: .deviceSetupFailure, detail: "Replica rejected the stream")
+            fail(.deviceSetup, detail: "Replica rejected the stream")
         }
+    }
+
+    /// Ends the current connection on one typed cause and lets the policy decide what
+    /// follows it.
+    ///
+    /// The teardown comes first and is what makes the cause unique: it fences the runner,
+    /// so a stream that ended and then reported its read error cannot hand the policy a
+    /// second, differently classified cause for the same connection.
+    private func fail(_ failure: MobileConnectionFailure, detail: String? = nil) {
+        disconnect()
+        show(state: failure.state, detail: detail)
+        dispatch(.attemptFailed(failure))
     }
 
     private func disconnect() {
@@ -355,7 +443,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
                     params: .object(request.params)
                 ))
             } catch {
-                show(state: .connectionLost)
+                fail(.transport(.writeFailed, phase: .established))
             }
         }
     }
@@ -372,10 +460,27 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     }
 
     private func show(state: MobileConnectionState, detail: String? = nil) {
+        presentedState = state
+        presentedDetail = detail
+        refreshStatus()
+    }
+
+    /// Presents the causal state with the pending recovery beside it, never instead of it:
+    /// the user needs both what happened and what the app is doing about it, and rest after
+    /// give-up is the plain state with its own manual remedy.
+    private func refreshStatus() {
+        let moment = ProcessInfo.processInfo.systemUptime
+        let causal = presentedDetail ?? presentedState.label
+        let recovery = reconnectPolicy.recoveryPhase(at: moment).label(at: moment)
         connectionHeader.showStatus(
-            detail ?? state.label,
-            color: state.isFailure ? .systemRed : .secondaryLabel
+            recovery.map { "\(causal) - \($0)" } ?? causal,
+            color: presentedState.isFailure ? .systemRed : .secondaryLabel
         )
+    }
+
+    private func cancelRetryTimer() {
+        retryTimer?.invalidate()
+        retryTimer = nil
     }
 
     private func scheduleCheckpoint() {
@@ -410,6 +515,25 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
 
     private func storedCheckpoint(for pane: PaneId) -> PaneReplicaCheckpoint? {
         checkpointStore.load(for: pane)
+    }
+}
+
+/// One validated server address, so an automatic attempt reuses what the gesture checked
+/// rather than re-reading text fields the user may be halfway through editing.
+private struct MobileServerTarget {
+    let host: String
+    let port: UInt16
+}
+
+private extension MobileRecoveryPhase {
+    /// Words the pending recovery, or nothing when there is none to report.
+    func label(at now: TimeInterval) -> String? {
+        switch self {
+        case .none: nil
+        case .attempting: "reconnecting"
+        case .waiting(let until): "retrying in \(Int(max(0, until - now).rounded(.up)))s"
+        case .waitingForNetwork: "waiting for network"
+        }
     }
 }
 
