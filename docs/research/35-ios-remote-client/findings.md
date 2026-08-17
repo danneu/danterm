@@ -955,3 +955,164 @@ command that produced it.
 - Next action: D4 takes the identity model, the connection bound, and the audit
   log. T9 takes the reconnect consequence of the flood, and should assume a
   reconnect can be denied by something other than the network.
+
+### F9 -- reconnect is exact and cheap when the socket closes, and invisible when it does not
+
+Discharges T9. Reproduction: [t9-checkpoint/](t9-checkpoint/), which replays the
+shipped client's own persisted replica checkpoint into a headless `TerminalCore`
+so a reconnect's exactness is asserted on state the screen does not restore by
+itself.
+
+- Status: settled for the three lifecycle cases T9 names, on one device over one
+  tailnet, one run per scenario. Timings are diagnostic, not benchmark: the
+  audit log's resolution is one second and the phone-side clock is the user
+  reading a header. Focus-report semantics, which D8 deferred to T9, are **not**
+  examined here and stay open.
+- Date and investigator: 2026-08-17, agent (T9), with the user holding the
+  device and reporting what the screen said.
+- Commit and worktree state: `5156cbad`, plus the reproduction package this
+  finding adds. Nothing in `lib/`, `app/`, or `ios/` changed: the subject is the
+  shipped T25 client against the shipped D4 listener and the shipped D5 sync.
+- Environment: DanTerm 0.1.10 in one `just launch-slot` instance, tailnet
+  listener on `100.106.152.106:7420` admitting the phone's stable node id
+  `nYLVaWdKL811CNTRL`, one pane at 179x66. iPhone 13 mini "Pelucho" on iOS 26 at
+  `100.98.63.67`, running the `scripts/ios-app.sh device` build of
+  `ios/DanTermMobileApp`. The shared config carried the `tailnet` block for the
+  run and was restored afterwards.
+- **The instrument trap F5 recorded is avoided by not instrumenting the phone
+  over the network at all.** `scripts/ios-app.sh` already launches detached, so
+  nothing SIGTERMs the app when wifi drops. Three records replace the console:
+  the Mac's `ipc-audit.jsonl` for the connection and request timeline, a socket
+  census (`lsof`/`netstat`) for what the Mac still believes it holds, and -- the
+  load-bearing one -- the client's own
+  `Library/Application Support/DanTermMobile/pane-replica-checkpoint.plist`,
+  pulled with `devicectl device copy from` and replayed by `t9-checkpoint/`.
+  That yields the resume cursor, scrollback depth, input modes, and a viewport
+  digest computed the same way as the source pane's own `pane read`. The chain
+  was validated before any scenario ran: the phone's baseline digest and the
+  pane's were both `444a926491065d7a`.
+  The USB transport that would have kept `devicectl` alive through airplane mode
+  was not achieved -- the device stayed on `transportType: localNetwork` -- so
+  the phone's user-facing states are the user's reading, as in F3.
+- Result: **backgrounding and app death are clean teardowns, and both resume
+  exactly.** The measurements are scrollback depth and the digest, per D5's
+  acceptance rule, not the visible screen.
+
+  | | at baseline | background/foreground | kill/cold relaunch |
+  |---|---|---|---|
+  | lines emitted while away | -- | 300 | 300 |
+  | `nextSequence` before / after | 13 | 29 / 47 | 47 / 66 |
+  | `totalRows` before / after | 66 | 66 / 307 | 307 / 609 |
+  | digest after | `444a9264...` | `bed678be9f790071` | `4d0e7317cd73b611` |
+  | matches `pane read` | yes | yes | yes |
+
+  The Mac logged one `connectionClosed` on each teardown (14:27:50 backgrounding,
+  14:31:12 kill) and released the remote slot both times. Each reconnect's
+  `connectionOpened`, `ls`, and `pane.tape` landed inside the same audit second.
+  Scrollback depth is what makes this an assertion rather than a look at the
+  screen: a `--from-now` rejoin would have left `totalRows` at 66 with a
+  correct-looking prompt, which is exactly the false pass F4 warned about.
+- Result: **a cold start transiently needs two of the eight remote slots.** It
+  opened `100.98.63.67:64306` and `:64307` in the same second and closed the
+  first immediately; a foreground return from background opened one. Nothing
+  failed, and it is recorded because the D4 cap is 8 and this halves the
+  headroom arithmetic for a client that reconnects often.
+- Result: **an abrupt loss of the socket is invisible to both ends until the
+  network returns.** With the app in the foreground, airplane mode on:
+  - The Mac never learned. No `connectionClosed`, no audit event of any kind,
+    and `netstat` still reported the connection `ESTABLISHED`.
+  - The phone never learned either. The header read "Connected" for the whole
+    outage, over a minute, with no error, no spinner, and no state change.
+  - Pushing 3,000 lines at the dead peer accumulated 103,318 unacknowledged
+    bytes in the Mac's send queue and cost the app nothing else: a local `ls`
+    answered in 13ms and a fresh remote connection got its hello normally.
+  - The abandoned connection **held a remote slot**. With it held, exactly 7
+    further remote connections were admitted before a typed `connection-limit`
+    rejection, which places the phone's ghost on the eighth.
+  - On airplane mode off, the phone's own stack reset the socket: the Mac logged
+    `connectionClosed` at 14:37:27 and released the slot, and the phone showed
+    "Connection lost" a few seconds later. The screen held the last partial
+    record it had received -- the echoed command line, without its output.
+  - **There is no automatic retry.** It stayed in "Connection lost" until the
+    user tapped Go.
+- Result: **a reconnect refused for capacity is legible; a reconnect refused by
+  deafness is not, and reads as a hang.** Both were driven deliberately.
+  - Holding all 8 remote slots from the Mac and tapping Go produced "Refused by
+    the Mac: connection limit", immediately. That is D4's cap doing the job F8
+    asked of it, and I7's per-reason state earning its keep.
+  - Holding 70 idle connections on the *local* control socket reproduced F8's
+    thread-pool starvation (a local `ls` got no answer at all). The phone's
+    connection then reached `ESTABLISHED`, received the hello, and its 88-byte
+    `ls` sat **unread in the Mac's receive queue**. The header stayed
+    "Connecting to ..." with no timeout and no other state.
+    `MobileSessionAttempt` builds its `TCPSocketTransport` with
+    `receiveTimeout: nil`, so the wait is unbounded by construction. Releasing
+    the idle connections let the phone's `ls` and `pane.tape` complete at
+    14:45:19 and the app reached Connected, about two minutes after the tap.
+  - The audit log recorded `connectionOpened` for that starved connection and
+    nothing further. A reader cannot distinguish "admitted and served" from
+    "admitted and never read", which is the one question this failure raises.
+- Result: after every disturbance in the session the replica reconverged with
+  the source pane: `nextSequence=139`, `totalRows=3611`, digest
+  `7fe9395860a98638` on both sides.
+- Inference: **F5's narrowing is complete, and the remaining cases split in
+  two.** Where the process closes its socket -- backgrounding, kill, cold
+  relaunch -- D5 resume works, costs one connection and three requests inside a
+  second, and is exact down to scrollback depth. Where the socket is abandoned
+  rather than closed, neither end has any way to notice, and the whole cost of
+  the case is that ignorance rather than anything in the resume machinery.
+- Inference: **the client's failure vocabulary is total for errors and blind to
+  silence.** I7 requires that no state read as a hang, and the two states the
+  client cannot produce are exactly the silent ones: "the link is gone" (it says
+  Connected) and "the Mac is deaf" (it says Connecting, forever). Both are
+  reported as the wrong thing rather than as nothing, which is worse than a
+  missing state.
+- Inference: **one absent mechanism explains both directions.** There is no
+  `SO_KEEPALIVE` anywhere in the tree, no application heartbeat, no idle timeout
+  on the server, and no receive timeout on the client's handshake path. The
+  server cannot reclaim a slot it cannot prove is dead, and the client cannot
+  bound a wait it cannot prove is progressing. Naming that as one gap rather
+  than two is what keeps the repair from becoming two unrelated timeouts.
+- Inference: **the slot leak is bounded by the phone coming back, not by the
+  server.** Reclamation happened because the phone's stack reset the socket on
+  its return, not because the Mac timed anything out. For a phone that returns
+  to the tailnet the leak self-heals; for one that does not -- flat battery, out
+  of range overnight -- nothing in the Mac reclaims the slot, and with a cap of 8
+  and a cold start needing 2, the headroom is thin.
+- Inference: **F8's denial-of-reconnect crossed to the phone with a twist.** D4's
+  connection cap converted the capacity case into a clean typed refusal, which
+  is what F8 asked for. The thread-pool deafness F8 originally measured is
+  untouched by that cap, and it is precisely the case the client cannot name.
+  So the repair F8 handed to D4 fixed the half that was already legible.
+- Competing interpretations: the two-connection cold start was read as scene
+  activation racing `viewDidLoad`, but nothing here probes the client's launch
+  path; only the wire behavior is established. The reclamation at 14:37:27 was
+  attributed to the phone's reset rather than the Mac's retransmission timeout
+  on the evidence of timing -- it landed within seconds of airplane mode ending,
+  where a retransmission timeout on 103KB would have taken minutes -- but no
+  packet capture separated them.
+- Uncertainty: **the idle-zombie case is untested.** The abandoned connection
+  carried 103KB of queued output, so the phone had something to reset against.
+  Whether a zombie on a quiet pane, with nothing queued in either direction, is
+  reclaimed the same way is not established, and it is the case that decides
+  whether the leak is real in ordinary use.
+- Uncertainty: one device, one tailnet, one physical location, one run per
+  scenario. Airplane mode from Control Center is not a phone that walks out of
+  range, which F5 already flagged for the mobility case.
+- Uncertainty: whether the final recovery was a cursor resume or a fresh sync
+  was not distinguished, because the audit's `pane.tape` descriptor records the
+  pane and not the requested start position. The background and cold-relaunch
+  scenarios are the clean cursor-resume evidence; the last one is only
+  convergence. That audit gap is worth its own line: the log cannot tell a
+  resume from a fresh join.
+- Uncertainty: Mac sleep is still untouched and still belongs to nobody, and
+  the session-length battery question is unmeasured, both as the doc's open
+  questions already say.
+- Next action: the repairs this finding implies are not T9's to make. A liveness
+  check on an established stream and a bounded wait on the handshake are one
+  decision, not two, and they belong with whoever next owns the client's
+  connection lifecycle; automatic reconnect policy sits with them. The server
+  half -- reclaiming a slot whose peer cannot be shown alive, and recording that
+  an admitted connection was never serviced -- amends D4 rather than replacing
+  it. F5's UI question about the multi-second freeze is the same question this
+  finding answers for the disconnect case, and still has no owner.

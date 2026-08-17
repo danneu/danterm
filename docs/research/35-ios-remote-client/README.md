@@ -27,6 +27,11 @@ Research started: 2026-08-12.
 - [t7-connection-probe.py](t7-connection-probe.py) -- F8's reproduction: holds
   idle connections against a dev slot and shows that past the reader-thread bound
   the app stops answering new callers while established ones keep working.
+- [t9-checkpoint/](t9-checkpoint/) -- F9's phone-side instrument: replays the iOS
+  client's own persisted replica checkpoint into a headless `TerminalCore` and
+  reports the resume cursor, scrollback depth, input modes, and a viewport digest
+  comparable with the source pane's `pane read`. It reads a file and talks to no
+  device, so it survives the network outages the scenarios create.
 - [briefing.md](briefing.md) -- the initiating brainstorm dump: repo census, IPC
   surface, portability inference, candidate directions. Census-grade evidence;
   every claim that carries weight is re-verified by a Phase 1 task before a
@@ -213,11 +218,17 @@ so server-side buffering cannot be needed to paper over it, and Tailscale's
 background behavior did not dominate because the app stayed in the foreground
 throughout.
 
-What that leaves open is the half where the process really does lose its socket:
-backgrounding, app death, and cold relaunch, which is T9. The freeze is also a
-UI question nobody owns yet -- the client is unresponsive for several seconds
-with nothing to show, and no protocol signal distinguishes a slow network from a
-dead one.
+The half where the process really does lose its socket is now closed by F9, and
+it splits in two. A socket the client *closes* -- backgrounding, app death, cold
+relaunch -- resumes exactly and cheaply through the D5 cursor. A socket the
+client *abandons* -- airplane mode -- is invisible to both ends: the Mac holds it
+`ESTABLISHED` and keeps spending a remote slot on it, and the phone reports
+"Connected" throughout. So mobility survivability was never the risk; noticing
+was.
+
+The freeze F5 measured and the silence F9 measured are the same UI question, and
+it still has no owner: no protocol signal distinguishes a slow network from a
+dead one, and the client has no liveness check that would let it ask.
 
 F5 tested no TLS, so the encrypted-listener half of the original hypothesis was
 untested rather than disproved. D4 has since decided it: TLS is declined over a
@@ -565,17 +576,33 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   state until the flood ends and then sync once. Under sustained flood the first
   can thrash, on exactly the deep-history pane where sync is largest. Sizes
   decide it; the buffering bound itself is not in question and belongs to T5.
-- **T9 TODO** -- Reconnect behavior on the phone against the T5 bridge and the
-  T8 protocol: airplane-mode toggles, backgrounding, cold relaunch. Record what
-  each recovery actually required in a finding. F5 narrowed this: a wifi-to-cell
-  switch needs no reconnect at all, so what is left is the cases where the
-  process genuinely loses its socket. Take the instrument trap with it --
-  `devicectl process launch --console` streams over the wifi these tests
-  interrupt, and devicectl SIGTERMs the app when that drops, so a detached launch
-  plus a phone-side transcript is the only shape that works. F8 adds a second
-  case to distinguish: a reconnect can be refused by the Mac rather than by the
-  network, because idle connections make the app deaf to new ones while
-  established conversations keep answering.
+- **T9 DONE** (F9) -- Reconnect behavior on a real iPhone, against the shipped
+  tailnet listener and the shipped D5 sync. The cases split cleanly in two.
+  Where the process *closes* its socket -- backgrounding, kill, cold relaunch --
+  resume works and is exact: one connection and three requests inside a second,
+  with scrollback depth going 66 to 307 to 609 across two absences of 300 lines
+  each and the phone's viewport digest matching the pane's own `pane read` every
+  time. Asserting on scrollback is what makes that a result, since a `--from-now`
+  rejoin would have shown a correct prompt over an empty history.
+  Where the socket is *abandoned* -- airplane mode -- neither end notices. The
+  Mac keeps the connection `ESTABLISHED` with no audit event and holds one of its
+  eight remote slots; the phone says "Connected" for the whole outage and only
+  reports "Connection lost" once the network returns, then waits for a manual
+  tap. There is no `SO_KEEPALIVE`, heartbeat, or idle timeout anywhere, which is
+  the single absent mechanism behind both halves.
+  F8's second case split too. D4's connection cap turned the capacity refusal
+  into an immediate, typed "Refused by the Mac: connection limit" -- legible, as
+  I7 requires. The thread-pool deafness F8 actually measured is untouched by that
+  cap: the phone's connection is accepted, its `ls` sits unread in the Mac's
+  receive queue, and because the client's transport is built with
+  `receiveTimeout: nil` the header stays "Connecting" without bound. That is the
+  one state I7 forbids, and the audit log records the connection as admitted with
+  nothing to say it was never served.
+  The instrument trap was avoided rather than paid: `scripts/ios-app.sh` already
+  launches detached, and the phone-side record is the client's own persisted
+  replica checkpoint pulled with `devicectl device copy from` and replayed into a
+  headless `TerminalCore` by [t9-checkpoint/](t9-checkpoint/). Focus-report
+  semantics, which D8 deferred to T9, are not examined and stay open.
 
 ### Phase 4 -- geometry and input semantics
 
@@ -731,9 +758,18 @@ issues `pane.split`. Reopen on user request only.
 - **Multi-client conflict.** The Mac GUI, the CLI, agents, and the phone can
   all send `pane.input` and focus changes concurrently. Today's answer is
   "last writer wins"; decide whether that is acceptable or needs surfacing.
-- **iOS background execution.** The connection dies on backgrounding by design;
-  the open part is how much re-sync a foreground return needs, which is T8/T9
-  territory.
+- **iOS background execution.** Answered by F9 and kept for the pointer: the
+  connection dies on backgrounding by design, and a foreground return needs no
+  re-sync at all -- the D5 cursor backfills exactly, measured on scrollback depth
+  rather than on the screen.
+- **Nothing checks that a peer is alive, in either direction.** F9's open
+  consequence, and one gap rather than two: no `SO_KEEPALIVE`, heartbeat, or
+  idle timeout lets the Mac reclaim a slot from a phone that vanished, and no
+  receive timeout lets the client bound a handshake against a Mac that accepted
+  and never read. The visible symptoms are opposite -- a stale "Connected" and an
+  unbounded "Connecting" -- which is why they read as two problems. Whoever next
+  owns the client's connection lifecycle should take both, along with the
+  automatic-retry policy T25 deferred.
 - **Distribution.** Personal use with a paid account: TestFlight internal or
   direct device install both work; nothing here needs App Store review. Record
   the choice when it first matters (push entitlements).
