@@ -252,7 +252,7 @@ Each commit is independently green and carries its own tests and doc updates.
   and carry the bytes it reports released into the report beside that sample.
   Discharges PO5. Independent of everything below; lands first because the code it
   is modelled on is in a file commit 3 removes.
-- [ ] **2. Give the surviving probes their own footing.** Move the three surviving
+- [x] **2. Give the surviving probes their own footing.** Move the three surviving
   helpers into one file in the test target, and delete the wired-history probe's
   spent equality arm. Additive and neutral -- the six files still exist and still
   compile, so the survivors can be run and compared before anything is removed.
@@ -319,6 +319,36 @@ A consequence worth carrying into commit 3: the eviction probe's own
 deltas -- discards the return value and, by this measurement, was very likely
 doing nothing by the time it was last touched. That probe is deleted in commit 3
 regardless, so nothing turns on it.
+
+**Commit 2: PO3 discharged, and the baseline needs one file, not two.** The three
+surviving helpers moved to
+`lib/TerminalCore/Tests/TerminalCoreTests/ProbeHostMeasurements.swift`.
+`residentHeapBytes()` and `vmmapSummaryLines()` stayed in the eviction probe,
+because only that probe calls them and it is deleted in commit 3.
+
+The spent equality arm went outright, which is the first of the two options the
+plan left open. Nothing had to move into the historical record first: the probe's
+header enumerates three readings and equality was never one of them, so no claim
+in the file outlived the arm. Doc 31's `DD52` equality residual is a recorded
+finding and stands unedited, per I4.
+
+The baseline check ran against a detached worktree at `28c54e18`, release
+configuration, with the edited `TerminalWiredHistoryAttributionProbe.swift`
+copied in and nothing else changed. Both remaining arms ran: `drain` over the
+1,525,000-byte `scrollback-stream` stimulus and `browse` at 9,935 retained rows.
+Copying `ProbeHostMeasurements.swift` in as well does **not** build -- `28c54e1`
+still defines all three helpers at file scope in its own probe files, so the
+copy collides. The probe's header now says to carry that file only to a revision
+that lacks them, which is the honest instruction and keeps the property I3 asks
+for.
+
+**The moved `settleAllocator()`'s comment no longer credits it with an effect.**
+The eviction-probe original said it was why an early residency invocation stopped
+reporting negative deltas. Commit 1 measured the call as inert on Darwin 25.5, so
+carrying that claim into the new file would have re-published a number the same
+plan had just retired. The moved copy states the duplication AR3 requires, points
+at `TerminalMemoryProbeSupport#settleAllocator` for the full measurement, and
+says no probe may credit the call with an effect on its readings.
 
 **Both released-byte fields are required, not optional.** `MemoryProbeReport`'s
 `schemaVersion` moved to 2 to match. A defaulted or optional field would decode

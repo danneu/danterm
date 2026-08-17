@@ -18,7 +18,9 @@
 // paired against, so every ratio it reports has a same-session control the change cannot reach
 // (`agent-docs/measurement-discipline.md`). It uses only API both revisions expose: `Terminal.init`,
 // `feed`, `scroll(toTopRow:)`, `geometry`, `forEachViewportCell(row:_:)` and `scrollbackRowCount`.
-// Copy the file into a checkout of the baseline and run the same command there.
+// Copy the file into a checkout of the baseline and run the same command there. It needs
+// `settleAllocator()` and `residentFootprintBytes()`, which `28c54e1` already defines in its own
+// probe files; copy `ProbeHostMeasurements.swift` alongside it only for a revision that does not.
 //
 // Three readings, each answering one question `research/31/F11` left open:
 //
@@ -199,40 +201,6 @@ struct TerminalWiredHistoryAttributionProbe {
             == browse (retained-browse stimulus, \(terminal.scrollbackRowCount) retained rows) ==
               geometry pass  \(geometryElapsed / UInt64(frames)) ns/frame  checksum \(kindChecksum)
               cell pass      \(cellElapsed / UInt64(frames)) ns/frame  checksum \(cellChecksum)
-            """
-        )
-    }
-
-    // MARK: Equality
-
-    @Test(
-        "equality: what one whole-terminal comparison of a saturated pane costs",
-        .enabled(if: probeIsEnabled)
-    )
-    func equalityAttribution() {
-        var terminal = Terminal(columns: Self.columns, rows: Self.rows)!
-        let bytes = Self.streamBytes()
-        var offset = 0
-        while offset < bytes.count {
-            let end = min(offset + Self.chunkBytes, bytes.count)
-            terminal.feed(Array(bytes[offset..<end]))
-            offset = end
-        }
-        // Two equal values model the retired owner-publication comparison: a pointer move did not
-        // touch history, so whole-Terminal inequality walked all of it before answering.
-        let other = terminal
-        var equal = 0
-        for _ in 0..<20 where terminal == other { equal += 1 }
-
-        let comparisons = 200
-        let started = DispatchTime.now().uptimeNanoseconds
-        for _ in 0..<comparisons where terminal == other { equal += 1 }
-        let elapsed = DispatchTime.now().uptimeNanoseconds - started
-
-        print(
-            """
-            == equality (\(terminal.scrollbackRowCount) retained rows, equal values) ==
-              \(elapsed / UInt64(comparisons)) ns per comparison  (\(equal) equal)
             """
         )
     }

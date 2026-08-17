@@ -252,10 +252,3 @@ struct TerminalLogicalLineIndexProbe {
         }
     }
 }
-
-/// The one-minute load average, or an explicit "unavailable" -- never a 0 that reads as calm.
-func loadAverageDescription() -> String {
-    var averages = [Double](repeating: 0, count: 3)
-    guard getloadavg(&averages, 3) == 3 else { return "unavailable" }
-    return String(format: "%.2f", averages[0])
-}

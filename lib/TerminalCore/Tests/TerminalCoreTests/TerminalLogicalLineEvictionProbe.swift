@@ -509,42 +509,11 @@ struct GranularityArena {
 
 // MARK: - Residency instrumentation
 
-/// The process's physical footprint, the same `task_vm_info.phys_footprint` quantity
-/// `TerminalMemoryProbeSupport#processPhysicalFootprintBytes` reads.
-///
-/// Reproduced here rather than imported for the reason `research/31/F8` records as `research/31/DD31`:
-/// `Terminal.LogicalLineStore` is internal to `TerminalCore`, so the probe **binary** cannot see the
-/// arena at all, and the reading has to run where `@testable import` reaches it. The mechanism is
-/// the probe's; only the caller moved.
-func residentFootprintBytes() -> UInt64 {
-    var info = task_vm_info_data_t()
-    var count = mach_msg_type_number_t(
-        MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size
-    )
-    let status = withUnsafeMutablePointer(to: &info) { pointer in
-        pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rebound in
-            task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), rebound, &count)
-        }
-    }
-    return status == KERN_SUCCESS ? info.phys_footprint : 0
-}
-
 /// Live and obtained bytes across every malloc zone, as `#mallocHeapSnapshot` reads them.
 func residentHeapBytes() -> (inUse: UInt64, allocated: UInt64) {
     var statistics = malloc_statistics_t()
     malloc_zone_statistics(nil, &statistics)
     return (UInt64(statistics.size_in_use), UInt64(statistics.size_allocated))
-}
-
-/// Returns every free page the allocator is sitting on to the OS, so a footprint sample measures
-/// what is *retained* rather than what has merely been touched at some point.
-///
-/// Needed on both sides of the residency window: building the source rows allocates and frees tens
-/// of megabytes, and without this the "before" sample carries pages the fill then hands back --
-/// which is why the first residency invocation reported *negative* deltas on four states and was
-/// voided for it.
-func settleAllocator() {
-    malloc_zone_pressure_relief(nil, 0)
 }
 
 /// `vmmap --summary`'s MALLOC / VIRTUAL / TOTAL lines, dumped verbatim.
