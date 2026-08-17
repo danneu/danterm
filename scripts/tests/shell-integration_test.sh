@@ -35,7 +35,14 @@ assert_not_contains() {
     esac
 }
 
-command_text='printf "hola 世界; $HOME"'
+# Long on purpose, and it must stay long: `base64` wraps its output at 76
+# columns, so a command under 57 bytes encodes to a single line and never
+# exercises the unwrapping every asset has to do. A short fixture here let a
+# fish bug ship that cut every reported command at 57 bytes. 120 bytes encodes
+# to three lines, so two joins have to happen. The multibyte run and the
+# unexpanded `$HOME` are load-bearing too -- they check that nothing re-encodes
+# or expands the text on its way out.
+command_text='printf "hola 世界; $HOME" --flag-alpha --flag-bravo --flag-charlie --flag-delta --flag-echo --flag-foxtrot --flag-golf'
 encoded_command="$(printf '%s' "$command_text" | base64 | tr -d '\n')"
 encoded_user="$(printf '%s' 'user name' | base64 | tr -d '\n')"
 encoded_host="$(printf '%s' 'host.example' | base64 | tr -d '\n')"

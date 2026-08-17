@@ -163,9 +163,10 @@ PO3 through PO5 need a new `tests-ui/ConfirmationPanelTests.swift`, following
 
 ## Follow Up
 
-- `integrations/shell-integration/danterm.fish:38` shortens every reported
-  command to 57 bytes, so a fish user's confirmation still names a partial
-  command -- not because the model shortens it, but because the shell never
+- **Resolved by the commit after this one.**
+  `integrations/shell-integration/danterm.fish:38` shortened every reported
+  command to 57 bytes, so a fish user's confirmation still named a partial
+  command -- not because the model shortened it, but because the shell never
   reported the rest. macOS `base64` wraps its output at 76 columns, and
   `string replace -a '\n' ''` matches the two characters backslash and n, not a
   real newline, so the wrapped payload survives and the value is cut at the

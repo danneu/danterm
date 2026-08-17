@@ -34,8 +34,14 @@ else
 end
 set -g _danterm_st (printf '\e\\')
 
+# `base64` wraps its output at 76 columns, so anything over 57 bytes arrives as
+# several lines and the payload has to be rejoined. `string join` is what does
+# that: inside single quotes fish reads `\n` as the two characters backslash and
+# n, so the `string replace -a '\n' ''` this used to call matched nothing and
+# left real newlines in the OSC payload -- which cut every reported command at
+# 57 bytes.
 function danterm_base64
-    printf %s "$argv[1]" | base64 | string collect | string replace -a '\n' ''
+    printf %s "$argv[1]" | base64 | string join ''
 end
 function danterm_emit
     test -n "$_danterm_enabled"; or return 0
