@@ -267,7 +267,6 @@ public actor TerminalPTYHost {
     private var inputCompletions: [
         PaneInputSubmissionId: @Sendable (PaneInputSubmissionResult) -> Void
     ] = [:]
-    private var injectedInputWriteErrno: Int32?
     private var pendingEvents: [PaneProcessLifecycleEvent] = []
     private var isReducing = false
 
@@ -1526,11 +1525,6 @@ public actor TerminalPTYHost {
         }
     }
 
-    /// Test-support: makes the next pending-input flush take the hard write-failure edge.
-    package func injectInputWriteFailure(_ code: Int32) {
-        injectedInputWriteErrno = code
-    }
-
     /// Test-support: drives the host-bound phase without relying on an elapsed
     /// timer while source acknowledgements are controlled separately.
     package func forceExitBoundForTesting() {
@@ -1685,12 +1679,6 @@ public actor TerminalPTYHost {
     private func flushInput() {
         guard descriptorOwnershipSealed == false, masterFD >= 0 else {
             rejectPendingInput(because: .processEnded)
-            cancelWriteSource()
-            return
-        }
-        if let code = injectedInputWriteErrno {
-            injectedInputWriteErrno = nil
-            rejectPendingInput(because: .writeFailed(code))
             cancelWriteSource()
             return
         }

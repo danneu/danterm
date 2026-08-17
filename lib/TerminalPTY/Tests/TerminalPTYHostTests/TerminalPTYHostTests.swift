@@ -160,11 +160,18 @@ struct TerminalPTYHostTests {
     func hardWriteFailureRejectsInput() async throws {
         // Intent: a hard descriptor error rejects bytes that never crossed the PTY master.
         // Why it exists: enqueue success is not delivery when the later write can fail.
-        // Scenario: the injected next-write edge returns EIO for one complete submission.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: "\(printMarker("READY")); exec sleep 30"))
+        // Scenario: the test closes the child end, then submits one whole payload.
+        let channel = try ChildlessPTYChannel()
+        let host = try makeHost(spawner: channel)
+        await host.start(makeLaunchInput(command: "no command runs on a childless channel"))
+        channel.writeFromChild(Array("__READY__".utf8))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        await host.injectInputWriteFailure(EIO)
+
+        // Closing the child end is the real end-of-output edge: the host's read
+        // reports end of file, so the host drops its descriptor-backed read source.
+        // Waiting for that orders the submission strictly after the close.
+        channel.closeChildEnd()
+        #expect(await host.drainedDescriptorSourceCount() == 0)
         let completion = InputCompletionRecorder(expecting: 1)
 
         host.send(Array("cannot-write".utf8)) {
@@ -178,13 +185,17 @@ struct TerminalPTYHostTests {
 
     @Test("descriptor close rejects a partially written submission", .timeLimit(.minutes(1)))
     func descriptorCloseRejectsPartiallyWrittenInput() async throws {
-        // Intent: one submission stays incomplete until every byte crosses the descriptor.
-        // Why it exists: a successful prefix must not turn later discarded bytes into success.
-        // Scenario: a child stops reading after readiness, then its pane closes under backpressure.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
-            command: "stty raw -echo; exec \(try probeExecutable()) stalled \"$0\""
-        ))
+        // Intent: one submission stays incomplete until every byte crosses the descriptor,
+        //   and a descriptor that dies mid-submission rejects the whole of it as a write
+        //   failure rather than as a process that ended.
+        // Why it exists: a successful prefix must not turn later discarded bytes into
+        //   success, and the two failure reasons tell a caller different things.
+        // Scenario: nobody reads the child end, so a large submission stalls under real
+        //   backpressure with its prefix already across the master; then the end closes.
+        let channel = try ChildlessPTYChannel()
+        let host = try makeHost(spawner: channel)
+        await host.start(makeLaunchInput(command: "no command runs on a childless channel"))
+        channel.writeFromChild(Array("__READY__".utf8))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let completion = InputCompletionRecorder(expecting: 1)
         host.send([UInt8](repeating: 0x61, count: 4 * 1024 * 1024)) {
@@ -193,10 +204,11 @@ struct TerminalPTYHostTests {
 
         #expect(await host.settledPendingInputByteCount() > 0)
         #expect(completion.results.isEmpty)
-        await host.close()
+        channel.closeChildEnd()
 
         #expect(completion.waitForAll(within: .seconds(20)))
-        #expect(completion.results == [.rejected(.processEnded)])
+        #expect(completion.results == [.rejected(.writeFailed(EIO))])
+        await host.close()
     }
 
     @Test("Cmd link interaction publishes hover and opens once without PTY input", .timeLimit(.minutes(1)))
@@ -2869,6 +2881,23 @@ private extension TerminalPTYHost {
             do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
         return resourceSnapshot().pendingInputByteCount
+    }
+
+    /// Polls until the host holds no descriptor-backed source, and returns what is
+    /// left if the bound elapses first.
+    ///
+    /// This is how end of output becomes observable: the host cancels its read source
+    /// when the descriptor reports EOF, and cancellation is acknowledged on the host
+    /// queue rather than at the call that closed the other end.
+    func drainedDescriptorSourceCount(within limit: Duration = .seconds(20)) async -> Int {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: limit)
+        while clock.now < deadline {
+            let sample = resourceSnapshot().descriptorSourceCount
+            if sample == 0 { return 0 }
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
+        }
+        return resourceSnapshot().descriptorSourceCount
     }
 
     /// Polls until the pending-input buffer is empty, and returns what is left if

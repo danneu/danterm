@@ -19,6 +19,11 @@ if "$LINT" "$TMP/allowed" >/dev/null 2>&1; then
     fail "a removed spawn seam should fail"
 fi
 
+printf 'func injectInputWriteFailure(_ code: Int32) {}\n' > "$host_dir/TerminalPTYHost.swift"
+if "$LINT" "$TMP/allowed" >/dev/null 2>&1; then
+    fail "a removed write-failure fault flag should fail"
+fi
+
 if "$LINT" "$TMP/missing" >/dev/null 2>&1; then
     fail "a missing host source should fail"
 fi

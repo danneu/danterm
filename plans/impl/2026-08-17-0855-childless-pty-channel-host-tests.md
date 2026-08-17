@@ -209,7 +209,7 @@ suite once into a file under `.build/` and grep the file.
 
 - [x] 1. docs(design): record the test-seam rule for owning components (D1, I6)
 - [x] 2. feat(pty): let a host adopt a PTY channel with no child (D2, D3, I2, I3, PO1, PO2, PO6)
-- [ ] 3. refactor(pty): prove input-write failure with a real descriptor (D4, I1, I5, PO3)
+- [x] 3. refactor(pty): prove input-write failure with a real descriptor (D4, I1, I5, PO3)
 - [ ] 4. test(pty): drive the host suite through childless PTY channels (D4, D7, I2, PO4)
 - [ ] 5. test(pty): serialize only the tests that share machine state (D6, I4)
 - [ ] 6. refactor(pty): keep fixture output staging out of shipping builds (D5, I1, PO5)
@@ -228,3 +228,17 @@ suite once into a file under `.build/` and grep the file.
 - The two-way byte test asserts the whole transmission, not a suffix of it. The
   launch command line is itself written to the PTY before any test input, so a
   childless channel receives exactly what a shell would.
+- The partial-write test changes what it asserts, not only how. It closed the host
+  and expected `.processEnded`; it now closes the child end and expects
+  `.writeFailed(EIO)`, which is the distinction PO3 asks for. Closing the host was
+  never a descriptor failure, so the old test could not tell the two reasons apart.
+- The two failure edges of a closed child end are not the same call. On macOS the
+  master's read reports end of file (0 bytes), and only the master's write returns
+  EIO. Verified with a standalone `openpty` probe before either test was written.
+- End of output has no dedicated fact on the host, so the first test anchors on the
+  descriptor-source census the suite already asserts elsewhere: the host cancels its
+  descriptor-backed read source on the EOF edge, so the count reaching zero is the
+  synchronization point that orders the later submission after the close.
+- The removed seam's names join the lint's banned list in the same commit that
+  deletes them, with a self-test case, so the seam cannot return unnoticed between
+  here and the PO5 slice.
