@@ -232,7 +232,7 @@ failure vocabulary, the wire, the Mac, or the CLI;
 
 ## Commit progress
 - [x] 1. the reconnect deadline survives a drag and a clock correction
-- [ ] 2. form validation leaves the connection status channel
+- [x] 2. form validation leaves the connection status channel
 - [ ] 3. the retry budget is what remains, not what was spent
 
 ## Implementation notes
@@ -250,6 +250,22 @@ failure vocabulary, the wire, the Mac, or the CLI;
   cancellation. The mode claim joins I2 as an obligation discharged by
   implementation review: the instrument creates no `Timer` and registers on no run
   loop.
+- **Half of I3 and I5 had already shipped.** The commit before this plan
+  (`feat(ios): compose the phone's status from facts that own themselves`) had
+  already made the connection status channel typed and moved the wording into
+  the kit, so slice 2 did not have to build that. What was left was the form
+  problem's own channel, the two gestures, and PO2 -- which the shipped tests
+  covered only for severity, not for the composed text of each cause-and-recovery
+  pair.
+- **A gesture answers with a target or with a problem, never with both.**
+  `MobileConnectTarget` returns one `MobileConnectGesture`, and only the
+  target-setting gesture takes a draft at all: `reuseTarget()` has no parameter
+  for one, so a pane tap has no way to read the text fields. That is what makes
+  I4 structural rather than a rule the shell has to keep.
+- **The port vocabulary keeps the shipped parse.** `UInt16(portText)` decides
+  what a usable port is, exactly as before, so port 0 is still accepted and the
+  wording says so. Narrowing the range is a change to what the app accepts and
+  is not this plan's.
 - **The clock became a named kit value.** `MobileMonotonicClock.now` replaces the
   shell's direct `ProcessInfo.processInfo.systemUptime` readings, so the base the
   policy schedules on and the base the timer delivers on are one declaration

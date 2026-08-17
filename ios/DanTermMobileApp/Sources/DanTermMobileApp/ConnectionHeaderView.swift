@@ -10,6 +10,7 @@ final class ConnectionHeaderView: UIView {
     private let portField = UITextField()
     private let connectButton = UIButton(type: .system)
     private let statusLabel = UILabel()
+    private let draftProblemLabel = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -35,6 +36,12 @@ final class ConnectionHeaderView: UIView {
     func showStatus(_ text: String, color: UIColor) {
         statusLabel.text = text
         statusLabel.textColor = color
+    }
+
+    /// Reports a problem with the target fields, or clears it with `nil`. It has its own
+    /// label so it can never be read as part of the connection status beside it.
+    func showDraftProblem(_ text: String?) {
+        draftProblemLabel.text = text
     }
 
     private func configureViews() {
@@ -67,7 +74,12 @@ final class ConnectionHeaderView: UIView {
         statusLabel.textColor = .secondaryLabel
         statusLabel.numberOfLines = 0
 
-        for subview in [hostField, portField, connectButton, statusLabel] {
+        draftProblemLabel.font = .preferredFont(forTextStyle: .caption1)
+        draftProblemLabel.adjustsFontForContentSizeCategory = true
+        draftProblemLabel.textColor = .systemRed
+        draftProblemLabel.numberOfLines = 0
+
+        for subview in [hostField, portField, connectButton, draftProblemLabel, statusLabel] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             addSubview(subview)
         }
@@ -91,9 +103,15 @@ final class ConnectionHeaderView: UIView {
             connectButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
             connectButton.heightAnchor.constraint(equalTo: hostField.heightAnchor),
 
+            // Directly under the fields it describes, and above the connection status line
+            // it must never join. An empty label has no height, so it costs nothing.
+            draftProblemLabel.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            draftProblemLabel.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            draftProblemLabel.topAnchor.constraint(equalTo: hostField.bottomAnchor, constant: 4),
+
             statusLabel.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             statusLabel.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            statusLabel.topAnchor.constraint(equalTo: hostField.bottomAnchor, constant: 4),
+            statusLabel.topAnchor.constraint(equalTo: draftProblemLabel.bottomAnchor, constant: 4),
             statusLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
