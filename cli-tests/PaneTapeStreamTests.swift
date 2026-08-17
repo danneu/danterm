@@ -10,6 +10,14 @@ import DanTermProtocol
 import Darwin
 @testable import DanTermCLI
 
+/// How long any waiter in this file will sit before it declares the renderer hung.
+///
+/// This is a hang guard, not a threshold: nothing here measures how fast the renderer is, so
+/// the only requirement is that a passing run cannot approach it and that it fires before the
+/// suite's time-limit backstop, so the failure names the waiter instead of the whole test.
+private let hangGuardSeconds = 30.0
+
+@Suite(.timeLimit(.minutes(1)))
 struct PaneTapeStreamTests {
     @Test("the renderer flushes each record and stops after end")
     func rendererWritesImmediateLinesThroughProductionDescriptors() throws {
@@ -24,7 +32,7 @@ struct PaneTapeStreamTests {
             Darwin.close(output.read)
         }
 
-        DispatchQueue.global().async {
+        runOnItsOwnThread {
             do {
                 completion.finish(try renderPaneTapeStream(
                     session: tapeSession(socket.connection),
@@ -345,8 +353,8 @@ private final class StreamCompletionProbe: @unchecked Sendable {
     }
 
     func wait() throws -> PaneTapeStreamOutcome {
-        guard semaphore.wait(timeout: .now() + 2) == .success else {
-            throw CocoaError(.coderReadCorrupt)
+        guard semaphore.wait(timeout: .now() + hangGuardSeconds) == .success else {
+            throw POSIXError(.ETIMEDOUT)
         }
         lock.lock()
         defer { lock.unlock() }
@@ -359,6 +367,19 @@ private final class StreamCompletionProbe: @unchecked Sendable {
         lock.unlock()
         semaphore.signal()
     }
+}
+
+/// Runs `body` on a thread of its own, so the renderer never queues behind a sibling test.
+///
+/// The obvious `DispatchQueue.global().async` cannot be used here. Eleven tests in this same
+/// binary park a global-queue worker inside a blocking `accept()`, and a non-overcommit root
+/// queue does not grow on demand: it asks the kernel workqueue for a worker and collapses
+/// further requests while one is already outstanding. Under the gate's deprioritized,
+/// oversubscribed pool that delay is measurable and grows with load, and the renderer must
+/// already be running before the first frame is written.
+private func runOnItsOwnThread(_ body: @escaping @Sendable () -> Void) {
+    let thread = Thread(block: body)
+    thread.start()
 }
 
 private func descriptorPair() throws -> DescriptorPair {
@@ -410,9 +431,9 @@ private func readDescriptorLine(_ descriptor: Int32) throws -> String? {
     var byte: UInt8 = 0
     while true {
         var readiness = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-        let ready = Darwin.poll(&readiness, 1, 2_000)
+        let ready = Darwin.poll(&readiness, 1, Int32(hangGuardSeconds * 1000))
         if ready < 0 && errno == EINTR { continue }
-        guard ready > 0 else { throw CocoaError(.coderReadCorrupt) }
+        guard ready > 0 else { throw POSIXError(.ETIMEDOUT) }
         let count = Darwin.read(descriptor, &byte, 1)
         if count < 0 && errno == EINTR { continue }
         if count == 0 { return bytes.isEmpty ? nil : String(decoding: bytes, as: UTF8.self) }
