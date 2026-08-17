@@ -83,3 +83,4 @@ without opening it.
   -- Superseded by [2026-08-10: Session-Owned Terminal-Reported Facts](2026-08-10-session-owned-terminal-reported-facts.md).
 - [2026-08-10: Session-Owned Terminal-Reported Facts](2026-08-10-session-owned-terminal-reported-facts.md) -- Accepted.
 - [2026-08-16: Model-Owned Pane Geometry](2026-08-16-model-owned-pane-geometry.md) -- Accepted.
+- [2026-08-17: The Test-Seam Rule -- a Component Never Asks Whether It Is Under Test](2026-08-17-test-seam-rule.md) -- Accepted.
