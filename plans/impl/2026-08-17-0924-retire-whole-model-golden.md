@@ -293,6 +293,23 @@ either order.
   keeps the failure to one line plus the comment. Verified by watching each axis
   fail both ways.
 
+- **The clock is a second `makeTestEnv` overload, not a new parameter.**
+  `makeTestEnv(clock:)` holds the one body; `makeTestEnv(now:)` is sugar that
+  wraps the constant in a `TestClock`. Every existing caller keeps its
+  signature, and there is no conditional "clock or constant" branch inside the
+  builder. The two shared defaults (home directory, identity) moved to named
+  constants so both overloads state them once.
+- **`notificationThrottleInterval` became internal.** It was `private` at file
+  scope in `Update.swift`, so `@testable import` could not reach it and the
+  tests would have had to restate `1`. Advancing the clock by the symbol keeps
+  the tests correct if the policy value changes. This is the commit's only
+  change under `Sources/`.
+- **The delivered side was verified too, not just the throttled side.** Plan
+  verification step 4 (interval `0`) failed exactly the throttled-at-`+0s`
+  expectations. Making `TestClock.advance` a no-op failed exactly the delivered
+  side and its by-value assertion, which is what proves the clock is wired
+  through `env.now()` rather than the assertions passing on a frozen value.
+
 ## Commit progress
 - [x] 1. test(core): assert replay determinism instead of a whole-model golden
-- [ ] 2. test(core): give the test env an advanceable clock and pin the throttle boundary
+- [x] 2. test(core): give the test env an advanceable clock and pin the throttle boundary

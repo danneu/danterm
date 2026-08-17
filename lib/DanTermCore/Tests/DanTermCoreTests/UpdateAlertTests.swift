@@ -259,8 +259,6 @@ import Testing
         }
         #expect(model.alerts.count == 100)
 
-        model.lastNotificationTime[paneId] = [.bell: Date.distantPast]
-
         update(&model, .sessionBell(sessionId: sessionId(for: paneId, in: model)))
         #expect(model.alerts.count == 100, "alerts should be capped at 100")
         #expect(model.alerts[0].body == (model.pane(paneId)?.session?.title ?? ""), "newest alert should be first")

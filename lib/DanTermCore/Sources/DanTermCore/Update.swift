@@ -1915,7 +1915,10 @@ private func rejectPendingCreation(
 }
 
 /// Throttle macOS notification delivery: one per pane per kind every 1 second.
-private let notificationThrottleInterval: TimeInterval = 1
+/// Internal rather than private so the throttle tests pin both sides of the
+/// boundary by advancing their clock exactly this far, instead of restating the
+/// policy's value.
+let notificationThrottleInterval: TimeInterval = 1
 
 /// Raises one pane alert through the shared stored-alert and macOS notification
 /// path after resolving its semantic title tiers.

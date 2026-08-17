@@ -9,6 +9,10 @@
 // `#expect` / `#require` / `expectNoDifference` (from swift-custom-dump)
 // replace them with framework-native diffs, source-location capture, and
 // parallel-safe reporting.
+//
+// The env builders (makeTestEnv, TestClock) did not come from the legacy
+// harness: they are the seam CoreEnv exposes, so a test states the ids, time,
+// home, and identity it runs against instead of inheriting the process's.
 import Foundation
 import Synchronization
 import Testing
@@ -30,15 +34,56 @@ func makeModel(env: CoreEnv) -> AppModel {
     )
 }
 
-/// The identity a test gets unless it asks for another: production, so a test
+/// A clock a test moves by hand, so a test can stand on both sides of a
+/// time-based boundary in the reducer (notification throttling) instead of
+/// depending on how long two `update()` calls take in wall-clock time.
+/// `CoreEnv.now` is `@Sendable`, so the current time lives in a mutex rather
+/// than a captured `var`.
+final class TestClock: Sendable {
+    private let current: Mutex<Date>
+
+    init(_ start: Date = testEpoch) {
+        current = Mutex(start)
+    }
+
+    var now: Date { current.withLock { $0 } }
+
+    func advance(by interval: TimeInterval) {
+        current.withLock { $0 += interval }
+    }
+}
+
+/// The instant a test env reports unless it asks for another. Fixed, so a value
+/// a test asserts against is a value it can write down.
+let testEpoch = Date(timeIntervalSince1970: 1_700_000_000)
+
+private let testHomeDirectory = "/Users/testhome"
+private let testInstanceIdentity = DanTermInstanceIdentity(bundleIdentifier: "com.danneu.danterm")
+
+/// The env for a test whose clock never has to move: `now` is one constant.
+/// The identity a test gets unless it asks for another is production, so a test
 /// that never thinks about identity cannot accidentally hold a privilege.
 func makeTestEnv(
-    now: Date = Date(timeIntervalSince1970: 1_700_000_000),
+    now: Date = testEpoch,
     idSequence: [UUID] = [],
-    homeDirectory: String = "/Users/testhome",
-    instanceIdentity: DanTermInstanceIdentity = DanTermInstanceIdentity(
-        bundleIdentifier: "com.danneu.danterm"
+    homeDirectory: String = testHomeDirectory,
+    instanceIdentity: DanTermInstanceIdentity = testInstanceIdentity
+) -> CoreEnv {
+    makeTestEnv(
+        clock: TestClock(now),
+        idSequence: idSequence,
+        homeDirectory: homeDirectory,
+        instanceIdentity: instanceIdentity
     )
+}
+
+/// The env builder a test uses when it needs to move time mid-sequence. The
+/// constant-`now` form above is sugar over this one, so both share one body.
+func makeTestEnv(
+    clock: TestClock,
+    idSequence: [UUID] = [],
+    homeDirectory: String = testHomeDirectory,
+    instanceIdentity: DanTermInstanceIdentity = testInstanceIdentity
 ) -> CoreEnv {
     // CoreEnv's seams are @Sendable, so the cursor into idSequence cannot be a
     // captured `var`. Tests drive it from one thread; the mutex is what lets the
@@ -56,7 +101,7 @@ func makeTestEnv(
             }
             return idSequence[next]
         },
-        now: { now },
+        now: { clock.now },
         homeDirectory: { homeDirectory },
         instanceIdentity: { instanceIdentity }
     )

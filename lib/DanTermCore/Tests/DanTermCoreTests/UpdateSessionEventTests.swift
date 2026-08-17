@@ -10,6 +10,12 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct UpdateSessionEventTests {
+    // Ids for the throttle tests' env. They mint one alert id per delivered or
+    // throttled alert; the count is headroom, and the values are never asserted.
+    private static let throttleIds: [UUID] = (0..<8).map {
+        UUID(uuidString: "7407711e-0000-4000-8000-\(String(format: "%012x", $0))")!
+    }
+
     @Test("a pending creation replies only when its process starts")
     func pendingCreationRepliesAtProcessStart() throws {
         var model = makeModel()
@@ -237,25 +243,49 @@ import Testing
 
     @Test("testBellThrottling")
     func testBellThrottling() {
-        // Intent: the first bell records a lastNotificationTime; a second
-        //   bell immediately is throttled (no sendNotification).
-        // Why it exists: pins per-pane per-kind throttling so a runaway
-        //   shell doesn't spam notifications.
+        // Intent: the first bell records the injected now as the bell's
+        //   lastNotificationTime; a second bell at that same instant is
+        //   throttled and leaves the recorded time alone; a bell one throttle
+        //   interval later is delivered and moves the time forward.
+        // Why it exists: pins per-pane per-kind throttling so a runaway shell
+        //   doesn't spam notifications, and pins BOTH sides of the interval --
+        //   with a frozen clock the throttled side passes for free.
         // Scenario: spec-first throttle.
+        let clock = TestClock()
+        let env = makeTestEnv(clock: clock, idSequence: Self.throttleIds)
         var model = makeModel()
         createTab(&model)
         let firstTabPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
-        update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)))
-        #expect(model.lastNotificationTime[firstTabPaneId]?[.bell] != nil, "should set lastNotificationTime for bell")
+        update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)), env: env)
+        #expect(
+            model.lastNotificationTime[firstTabPaneId]?[.bell] == testEpoch,
+            "the first bell should record the injected now for bell"
+        )
 
-        let effects2 = update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)))
+        let effects2 = update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)), env: env)
         #expect(!hasEffect(effects2) {
             if case .sendNotification = $0 { return true }
             return false
-        }, "second bell should be throttled (no sendNotification)")
+        }, "a second bell at the same instant should be throttled (no sendNotification)")
+        #expect(
+            model.lastNotificationTime[firstTabPaneId]?[.bell] == testEpoch,
+            "a throttled bell should leave the recorded time alone"
+        )
+
+        clock.advance(by: notificationThrottleInterval)
+        let effects3 = update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)), env: env)
+        #expect(hasEffect(effects3) {
+            if case .sendNotification = $0 { return true }
+            return false
+        }, "a bell one throttle interval later should be delivered")
+        #expect(
+            model.lastNotificationTime[firstTabPaneId]?[.bell]
+                == testEpoch.addingTimeInterval(notificationThrottleInterval),
+            "a delivered bell should record the clock's new now"
+        )
     }
 
     @Test("reconcileDecision coalesces only eligible high-frequency messages")
@@ -674,40 +704,70 @@ import Testing
 
     @Test("testDesktopNotificationThrottlesIndependentlyFromBell")
     func testDesktopNotificationThrottlesIndependentlyFromBell() {
-        // Intent: bell and desktop-notification throttles are independent
-        //   per kind; back-to-back desktop notifications still throttle on
-        //   their own kind.
-        // Why it exists: pins the per-kind throttle structure.
+        // Intent: bell and desktop-notification throttles are independent per
+        //   kind -- a bell at an instant does not throttle a notification at
+        //   that same instant -- while a second notification at that instant
+        //   throttles on its own kind, and one an interval later is delivered.
+        // Why it exists: pins the per-kind throttle structure, and both sides
+        //   of the interval for the notification kind.
         // Scenario: spec-first independent throttle.
+        let clock = TestClock()
+        let env = makeTestEnv(clock: clock, idSequence: Self.throttleIds)
         var model = makeModel()
         createTab(&model)
         let firstTabPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         createTab(&model)
 
-        update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)))
-        #expect(model.lastNotificationTime[firstTabPaneId]?[.bell] != nil, "bell should set lastNotificationTime")
+        update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)), env: env)
+        #expect(
+            model.lastNotificationTime[firstTabPaneId]?[.bell] == testEpoch,
+            "the bell should record the injected now for bell"
+        )
 
         let commands = update(&model, .sessionNotification(
             sessionId: sessionId(for: firstTabPaneId, in: model),
             title: "Done",
             body: "Task finished"
-        ))
+        ), env: env)
         #expect(hasEffect(commands) {
             if case .sendNotification(_, _, let t, _, _) = $0, t == "Done" { return true }
             return false
         }, "desktop notification should not be throttled by bell")
-        #expect(model.lastNotificationTime[firstTabPaneId]?[.desktopNotification] != nil, "should set lastNotificationTime for desktopNotification")
+        #expect(
+            model.lastNotificationTime[firstTabPaneId]?[.desktopNotification] == testEpoch,
+            "the notification should record the injected now for its own kind"
+        )
 
         let effects2 = update(&model, .sessionNotification(
             sessionId: sessionId(for: firstTabPaneId, in: model),
             title: "Done2",
             body: "Again"
-        ))
+        ), env: env)
         #expect(!hasEffect(effects2) {
             if case .sendNotification = $0 { return true }
             return false
-        }, "second desktop notification should be throttled")
+        }, "a second desktop notification at the same instant should be throttled")
+        #expect(
+            model.lastNotificationTime[firstTabPaneId]?[.desktopNotification] == testEpoch,
+            "a throttled notification should leave the recorded time alone"
+        )
+
+        clock.advance(by: notificationThrottleInterval)
+        let effects3 = update(&model, .sessionNotification(
+            sessionId: sessionId(for: firstTabPaneId, in: model),
+            title: "Done3",
+            body: "Once more"
+        ), env: env)
+        #expect(hasEffect(effects3) {
+            if case .sendNotification(_, _, let t, _, _) = $0, t == "Done3" { return true }
+            return false
+        }, "a notification one throttle interval later should be delivered")
+        #expect(
+            model.lastNotificationTime[firstTabPaneId]?[.desktopNotification]
+                == testEpoch.addingTimeInterval(notificationThrottleInterval),
+            "a delivered notification should record the clock's new now"
+        )
     }
 
     // MARK: - Progress
