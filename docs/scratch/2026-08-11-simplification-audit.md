@@ -208,7 +208,7 @@ in itself.
 |        | [S52](#s52) | 10    | 2   | 5   | ipc-cli        | medium | Derive the CLI help text from the parser instead of hand-syncing three copies                                           |
 | b0e2a7f6 | [S53](#s53) | 10    | 2   | 5   | terminal-core  | small  | Move the pure OSC byte helpers off Terminal and split the file at its seams                                           |
 |        | [S54](#s54) | 10    | 2   | 5   | terminal-views | small  | Return the clamp state from terminalCell so the view stops re-deriving grid extents                                     |
-|        | [S55](#s55) | 10    | 2   | 5   | tests          | small  | Split ModelOperationsTests along the boundary its name claims                                                           |
+| 53cef5b7 | [S55](#s55) | 10    | 2   | 5   | tests          | small  | Split ModelOperationsTests along the boundary its name claims                                                           |
 |        | [S56](#s56) | 8     | 2   | 4   | core-model     | small  | Unify the three divergent "the selected tab died" fixups                                                                |
 |        | [S57](#s57) | 8     | 2   | 4   | pty            | medium | Read into one reusable buffer through a single read loop                                                                |
 | e4dd79e1 | [S58](#s58) | 8     | 2   | 4   | sidebar        | medium | Make SidebarItemStore return the outline mutation instead of a Bool the executor re-switches on                         |
