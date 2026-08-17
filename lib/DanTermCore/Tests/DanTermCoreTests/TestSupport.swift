@@ -214,3 +214,16 @@ func makeMruModel(tabCount: Int) -> (model: AppModel, tabIds: [TabId]) {
     }
     return (model, ids)
 }
+
+/// Build a two-pane tab and return the tab plus its panes in display order.
+/// Used by the TabTodo.swift row/resolver tests in TabTodoTests and by the
+/// tab-todo popover projection tests in ProjectionsTests.
+func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, paneA: PaneId, paneB: PaneId) {
+    var model = makeModel()
+    createTab(&model)
+    let tabId = selectedTab(in: model)!.id
+    let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
+    update(&model, .splitPane(paneId: paneA, direction: .horizontal))
+    let paneOrder = allPaneIds(selectedTab(in: model)!.paneTree.root)
+    return (model, tabId, paneOrder[0], paneOrder[1])
+}
