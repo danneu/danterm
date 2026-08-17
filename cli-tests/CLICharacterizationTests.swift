@@ -27,6 +27,14 @@ private struct CLIRun {
 /// the socket is touched, so a placeholder like "p1" would never reach an endpoint.
 private let samplePaneId = "1B4E28BA-2FA1-11D2-883F-0016D3CCA427"
 
+/// How long a waiter in this file sits before it declares the run hung.
+///
+/// This is a hang guard, not a threshold: nothing here measures how fast the CLI or the
+/// endpoint is, so the only requirement is that a passing run cannot approach it and that
+/// it fires before the suite's time-limit backstop, so the failure names the waiter.
+private let hangGuardSeconds = 30.0
+
+@Suite(.timeLimit(.minutes(1)))
 struct CLICharacterizationTests {
     @Test("no socket at the named path reports that DanTerm is not running")
     func missingSocketReportsNotRunning() throws {
@@ -350,7 +358,9 @@ private func withScriptedTCPEndpoint(
         script(connection)
     }
     let result = try run(UInt16(bigEndian: selected.sin_port))
-    _ = accepted.wait(timeout: .now() + 5)
+    guard accepted.wait(timeout: .now() + hangGuardSeconds) == .success else {
+        throw POSIXError(.ETIMEDOUT)
+    }
     return result
 }
 
@@ -382,7 +392,9 @@ private func withScriptedEndpoint(
     let result = try run(path)
     // The script owns the connection and closes it; waiting on the accept alone keeps
     // the listener alive until there is nothing left to accept.
-    _ = accepted.wait(timeout: .now() + 5)
+    guard accepted.wait(timeout: .now() + hangGuardSeconds) == .success else {
+        throw POSIXError(.ETIMEDOUT)
+    }
     return result
 }
 

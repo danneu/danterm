@@ -6,6 +6,13 @@ import Foundation
 import UserNotifications
 @testable import DanTerm
 
+/// How long a read through this fixture waits before it declares the runtime hung.
+///
+/// This is a hang guard, not a threshold: no test using this fixture measures how fast the
+/// runtime answers, so the only requirement is that a passing run cannot approach it and
+/// that it fires before the suite's time-limit backstop, so the failure names the read.
+private let hangGuardMilliseconds: Int32 = 30_000
+
 @MainActor
 final class RecordingAppRuntimePorts {
     let session: RecordingTerminalSession
@@ -175,8 +182,8 @@ struct CommandIpcConnectionFixture {
         return Darwin.poll(&readiness, 1, 0) > 0
     }
 
-    func readByte() -> Int {
-        guard waitUntilCommandReadable(peer) else { return -1 }
+    func readByte() throws -> Int {
+        guard waitUntilCommandReadable(peer) else { throw POSIXError(.ETIMEDOUT) }
         var byte: UInt8 = 0
         return Darwin.read(peer, &byte, 1)
     }
@@ -206,7 +213,7 @@ private func readCommandLine(from descriptor: Int32) throws -> Data {
 private func waitUntilCommandReadable(_ descriptor: Int32) -> Bool {
     var readiness = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
     while true {
-        let result = Darwin.poll(&readiness, 1, 2_000)
+        let result = Darwin.poll(&readiness, 1, hangGuardMilliseconds)
         if result < 0, errno == EINTR { continue }
         return result > 0
     }

@@ -13,6 +13,15 @@ import DanTermProtocol
 import Darwin
 @testable import DanTermSupport
 
+/// How long a waiter in this file sits before it declares the connection hung.
+///
+/// This is a hang guard, not a threshold. The durations these tests do assert on are the
+/// liveness bounds production itself defines; this one measures nothing, so the only
+/// requirement is that a passing run cannot approach it and that it fires before the
+/// suite's time-limit backstop, so the failure names the waiter.
+private let hangGuardSeconds = 30.0
+
+@Suite(.timeLimit(.minutes(1)))
 struct IpcConnectionLivenessTests {
     @Test("a peer that sends no byte within the bound is closed as silent")
     func silentPeerIsReclaimedAtTheBound() async throws {
@@ -33,7 +42,7 @@ struct IpcConnectionLivenessTests {
             onClose: { _, reason in closed.record(reason) }
         )
 
-        #expect(await closed.wait() == .peerSilent)
+        #expect(try await closed.wait() == .peerSilent)
         // Both sides of the bound: a compliant peer must not be reclaimed early, and a
         // dead one must not keep the slot for an unstated stretch past it.
         let elapsed = ContinuousClock().now - started
@@ -77,7 +86,7 @@ struct IpcConnectionLivenessTests {
             offset = end
         }
 
-        #expect(await served.wait() == IpcRequestMethod.ls.rawValue)
+        #expect(try await served.wait() == IpcRequestMethod.ls.rawValue)
         #expect(closed.recorded == nil, "a trickling peer must not be reclaimed")
     }
 
@@ -102,7 +111,7 @@ struct IpcConnectionLivenessTests {
         #expect(closed.recorded == nil, "an exempt connection must survive silence")
 
         Darwin.close(descriptors.peer)
-        #expect(await closed.wait() == .peerClosed)
+        #expect(try await closed.wait() == .peerClosed)
     }
 
     @Test("the bound is honored while a write to an unreading peer is parked")
@@ -131,7 +140,7 @@ struct IpcConnectionLivenessTests {
             params: .object(["record": .string(String(repeating: "x", count: 4_000_000))])
         )
 
-        #expect(await closed.wait() == .peerSilent)
+        #expect(try await closed.wait() == .peerSilent)
         // The peer never reads until here. Reaching the end of the stream proves the
         // socket was torn down rather than left held open by the parked write.
         #expect(reachedEndOfStream(descriptors.peer))
@@ -163,7 +172,7 @@ struct IpcConnectionLivenessTests {
         var buffer = [UInt8](repeating: 0, count: 65_536)
         while true {
             var readiness = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-            let ready = Darwin.poll(&readiness, 1, 2_000)
+            let ready = Darwin.poll(&readiness, 1, Int32(hangGuardSeconds * 1000))
             if ready < 0 && errno == EINTR { continue }
             guard ready > 0 else { return false }
             let count = Darwin.read(descriptor, &buffer, buffer.count)
@@ -189,8 +198,8 @@ private final class CloseReasonProbe: @unchecked Sendable {
         lock.unlock()
     }
 
-    func wait() async -> IpcConnectionCloseReason? {
-        await pollUntilRecorded { recorded }
+    func wait() async throws -> IpcConnectionCloseReason {
+        try await pollUntilRecorded { recorded }
     }
 
     var recorded: IpcConnectionCloseReason? {
@@ -210,8 +219,8 @@ private final class RequestProbe: @unchecked Sendable {
         lock.unlock()
     }
 
-    func wait() async -> String? {
-        await pollUntilRecorded { recorded }
+    func wait() async throws -> String {
+        try await pollUntilRecorded { recorded }
     }
 
     var recorded: String? {
@@ -221,15 +230,19 @@ private final class RequestProbe: @unchecked Sendable {
     }
 }
 
-/// Suspends until the probe holds a value, or gives up so the assertion names the test
-/// rather than letting the whole lane die to an outside deadline.
+/// Suspends until the probe holds a value, or throws so the failure names the wait rather
+/// than letting the whole lane die to an outside deadline.
+///
+/// It throws instead of returning `nil` because callers compare the value against the
+/// outcome they expect. A `nil` return would read as "the connection never closed", which
+/// is a different fact from "this test stopped waiting for it to close".
 private func pollUntilRecorded<Value>(
     _ read: () -> Value?
-) async -> Value? {
-    let deadline = ContinuousClock.now + .seconds(4)
+) async throws -> Value {
+    let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
     while ContinuousClock.now < deadline {
         if let value = read() { return value }
         try? await Task.sleep(for: .milliseconds(10))
     }
-    return read()
+    throw POSIXError(.ETIMEDOUT)
 }

@@ -5,7 +5,15 @@ import DanTermProtocol
 import Testing
 @testable import DanTerm
 
+/// How long a read in this file waits before it declares shutdown hung.
+///
+/// This is a hang guard, not a threshold: nothing here measures how fast shutdown answers,
+/// so the only requirement is that a passing run cannot approach it and that it fires
+/// before the suite's time-limit backstop, so the failure names the read.
+private let hangGuardMilliseconds: Int32 = 30_000
+
 /// Proves shutdown writes terminal errors before it closes pending IPC transports.
+@Suite(.timeLimit(.minutes(1)))
 @MainActor
 struct AppRuntimePendingIpcShutdownTests {
     @Test("shutdown answers pending creation and input before transport close")
@@ -51,8 +59,8 @@ struct AppRuntimePendingIpcShutdownTests {
         let inputReply = try readResponse(from: input.peer)
         #expect(creationReply.error?.code == -32603)
         #expect(inputReply.error?.code == -32603)
-        #expect(readByte(from: creation.peer) == 0)
-        #expect(readByte(from: input.peer) == 0)
+        #expect(try readByte(from: creation.peer) == 0)
+        #expect(try readByte(from: input.peer) == 0)
     }
 }
 
@@ -83,8 +91,8 @@ private func readResponse(from descriptor: Int32) throws -> JsonRpcResponse {
     return try JSONDecoder().decode(JsonRpcResponse.self, from: Data(bytes))
 }
 
-private func readByte(from descriptor: Int32) -> Int {
-    guard waitUntilReadable(descriptor) else { return -1 }
+private func readByte(from descriptor: Int32) throws -> Int {
+    guard waitUntilReadable(descriptor) else { throw POSIXError(.ETIMEDOUT) }
     var byte: UInt8 = 0
     return Darwin.read(descriptor, &byte, 1)
 }
@@ -92,7 +100,7 @@ private func readByte(from descriptor: Int32) -> Int {
 private func waitUntilReadable(_ descriptor: Int32) -> Bool {
     var readiness = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
     while true {
-        let result = Darwin.poll(&readiness, 1, 2_000)
+        let result = Darwin.poll(&readiness, 1, hangGuardMilliseconds)
         if result < 0, errno == EINTR { continue }
         return result > 0
     }

@@ -5,6 +5,22 @@ import DanTermProtocol
 import Darwin
 @testable import DanTermSupport
 
+/// How long a read in this file waits before it declares the connection hung.
+///
+/// This is a hang guard, not a threshold: no assertion here turns on how fast a frame
+/// arrives, so the only requirement is that a passing run cannot approach it and that it
+/// fires before the suite's time-limit backstop, so the failure names the read.
+private let hangGuardSeconds = 30.0
+private let hangGuardMilliseconds = Int32(hangGuardSeconds * 1000)
+
+/// How long the one test that proves the reads give up is willing to spend proving it.
+///
+/// Unlike the hang guard, this one is meant to expire twice over, so keep it short. It is
+/// supplied explicitly at that test's call sites rather than lowering the guard for
+/// everyone, because every other read here expects an answer.
+private let silenceProbeMilliseconds: Int32 = 500
+
+@Suite(.timeLimit(.minutes(1)))
 struct IpcConnectionWriteTests {
     @Test("connection rejection writes its stable notification then closes")
     func connectionRejectionWritesThenCloses() throws {
@@ -101,7 +117,7 @@ struct IpcConnectionWriteTests {
         }
         #expect(kinds == ["event", "gap", "end"])
         #expect(readByte(from: descriptors.peer) == 0)
-        #expect(closed.wait() == connection.id)
+        #expect(try closed.wait() == connection.id)
     }
 
     @Test("client disconnect reaches the production close callback")
@@ -118,7 +134,7 @@ struct IpcConnectionWriteTests {
         )
 
         Darwin.close(descriptors.peer)
-        #expect(closed.wait() == connection.id)
+        #expect(try closed.wait() == connection.id)
     }
 
     @Test("notification completion reports a fully flushed JSON-RPC line")
@@ -282,10 +298,14 @@ struct IpcConnectionWriteTests {
         }
 
         let started = ContinuousClock().now
-        #expect(throws: (any Error).self) { try readIpcLine(from: descriptors.peer) }
-        #expect(readByte(from: descriptors.peer) < 0)
+        #expect(throws: (any Error).self) {
+            try readIpcLine(from: descriptors.peer, timeout: silenceProbeMilliseconds)
+        }
+        #expect(readByte(from: descriptors.peer, timeout: silenceProbeMilliseconds) < 0)
         let elapsed = ContinuousClock().now - started
 
+        // A generous bound that only proves the two reads terminated. Nothing here turns
+        // on how close to the supplied deadline they came.
         #expect(elapsed < .seconds(30), "the silent reads took \(elapsed)")
     }
 
@@ -307,7 +327,7 @@ struct IpcConnectionWriteTests {
         let line = Data((#"{"jsonrpc":2,"id":1,"method":"pane.read","params":{}}"# + "\n").utf8)
         _ = line.withUnsafeBytes { Darwin.write(descriptors.peer, $0.baseAddress, $0.count) }
 
-        #expect(malformed.wait() == "pane.read")
+        #expect(try malformed.wait() == "pane.read")
         let response = try JSONDecoder().decode(
             JsonRpcResponse.self,
             from: readIpcLine(from: descriptors.peer)
@@ -323,11 +343,16 @@ struct IpcConnectionWriteTests {
         return (descriptors[0], descriptors[1])
     }
 
-    private func readIpcLine(from descriptor: Int32) throws -> Data {
+    private func readIpcLine(
+        from descriptor: Int32,
+        timeout: Int32 = hangGuardMilliseconds
+    ) throws -> Data {
         var bytes: [UInt8] = []
         var byte: UInt8 = 0
         while true {
-            guard waitForReadable(descriptor) else { throw POSIXError(.ETIMEDOUT) }
+            guard waitForReadable(descriptor, timeout: timeout) else {
+                throw POSIXError(.ETIMEDOUT)
+            }
             let count = Darwin.read(descriptor, &byte, 1)
             guard count == 1 else {
                 throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
@@ -363,8 +388,8 @@ struct IpcConnectionWriteTests {
     ///
     /// Callers assert on EOF (a zero-length read), so the case this guards against --
     /// a peer that stays open and silent -- is the one they exist to catch.
-    private func readByte(from descriptor: Int32) -> Int {
-        guard waitForReadable(descriptor) else { return -1 }
+    private func readByte(from descriptor: Int32, timeout: Int32 = hangGuardMilliseconds) -> Int {
+        guard waitForReadable(descriptor, timeout: timeout) else { return -1 }
         var byte: UInt8 = 0
         return Darwin.read(descriptor, &byte, 1)
     }
@@ -375,9 +400,9 @@ struct IpcConnectionWriteTests {
     /// Every read in this suite goes through here. A bare `Darwin.read` on a socket
     /// the connection under test never answers parks the thread for good, and no
     /// `.timeLimit` can unwind a synchronous syscall -- the whole lane then dies to an
-    /// outside deadline, naming no test. The bound matches the close probe below, so a
-    /// stalled test fails in seconds and says which read stalled.
-    private func waitForReadable(_ descriptor: Int32, timeout: Int32 = 2_000) -> Bool {
+    /// outside deadline, naming no test. Callers pass the hang guard unless they are the
+    /// one test proving the reads give up, which supplies a deadline meant to expire.
+    private func waitForReadable(_ descriptor: Int32, timeout: Int32) -> Bool {
         while true {
             var readiness = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
             let ready = Darwin.poll(&readiness, 1, timeout)
@@ -420,8 +445,12 @@ private final class ConnectionCloseProbe: @unchecked Sendable {
         semaphore.signal()
     }
 
-    func wait() -> UUID? {
-        guard semaphore.wait(timeout: .now() + 2) == .success else { return nil }
+    /// Throws rather than returning `nil`, so giving up is never mistaken for a close
+    /// that named a different connection.
+    func wait() throws -> UUID? {
+        guard semaphore.wait(timeout: .now() + hangGuardSeconds) == .success else {
+            throw POSIXError(.ETIMEDOUT)
+        }
         lock.lock()
         defer { lock.unlock() }
         return connectionId
@@ -440,8 +469,12 @@ private final class MalformedRequestProbe: @unchecked Sendable {
         semaphore.signal()
     }
 
-    func wait() -> String? {
-        guard semaphore.wait(timeout: .now() + 2) == .success else { return nil }
+    /// Throws rather than returning `nil`, so giving up is never mistaken for a request
+    /// the connection reported with no method at all.
+    func wait() throws -> String? {
+        guard semaphore.wait(timeout: .now() + hangGuardSeconds) == .success else {
+            throw POSIXError(.ETIMEDOUT)
+        }
         lock.lock()
         defer { lock.unlock() }
         return method

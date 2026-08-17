@@ -7,7 +7,16 @@ import Testing
 
 @testable import DanTermSupport
 
-@Suite struct DebouncerTests {
+/// How long a wait in this file sits before it declares the debouncer hung.
+///
+/// This is a hang guard, not a threshold. The durations these tests assert on are the
+/// debounce delays they schedule -- production's own contract -- and this one measures
+/// nothing, so the only requirement is that a passing run cannot approach it and that it
+/// fires before the suite's time-limit backstop.
+private let hangGuardSeconds = 30.0
+
+@Suite(.timeLimit(.minutes(1)))
+struct DebouncerTests {
     @Test("Debouncer: cancel before schedule is a no-op")
     func cancelBeforeScheduleIsNoOp() {
         // Intent: cancelling a never-scheduled debouncer leaves it idle.
@@ -97,7 +106,7 @@ import Testing
             }
         }
 
-        let result = semaphore.wait(timeout: .now() + 3)
+        let result = semaphore.wait(timeout: .now() + hangGuardSeconds)
         #expect(result == .success, "debounced action should fire")
 
         let snapshot = queue.sync { (fires, firedAt, debouncer.isPending) }
@@ -142,7 +151,7 @@ import Testing
             }
         }
 
-        let result = semaphore.wait(timeout: .now() + 3)
+        let result = semaphore.wait(timeout: .now() + hangGuardSeconds)
         #expect(result == .success, "debounced action should fire")
 
         let snapshot = queue.sync { (fired, firedAt, debouncer.isPending) }

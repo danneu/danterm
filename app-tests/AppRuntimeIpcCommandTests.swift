@@ -6,6 +6,7 @@ import Testing
 @testable import DanTerm
 
 /// Proves every IPC Command arm against a real socketpair and locks down re-entry order.
+@Suite(.timeLimit(.minutes(1)))
 @MainActor
 struct AppRuntimeIpcCommandTests {
     @Test("IPC reply and error commands write their JSON-RPC envelopes")
@@ -40,7 +41,7 @@ struct AppRuntimeIpcCommandTests {
         runtime.shutdown()
         reply.connection.close()
 
-        #expect(reply.readByte() == 0, "transport shutdown must be the first source of EOF")
+        #expect(try reply.readByte() == 0, "transport shutdown must be the first source of EOF")
     }
 
     @Test("doctor and focus reads return runtime-owned facts")

@@ -304,7 +304,7 @@ baseline before changing anything:
 ## Commit progress
 
 - [x] 1. Run the pane-tape renderer off the shared dispatch pool and guard its waits legibly
-- [ ] 2. Report every remaining test hang-guard expiry as a timeout, and graduate the rule into AGENTS.md
+- [x] 2. Report every remaining test hang-guard expiry as a timeout, and graduate the rule into AGENTS.md
 - [ ] 3. Hold the silent-endpoint fixture for the child's lifetime instead of eight seconds
 - [ ] 4. Supply the CLI's socket timeout from outside the process, and document it
 
@@ -329,3 +329,48 @@ baseline before changing anything:
   to bound tests that do not yet exist as much as the ones that do, and this file
   is one suite. Guards are 30 seconds against a 1-minute backstop, and the whole
   suite passes in under 0.06 seconds, so I1 and I2 hold with a wide margin.
+
+### Slice 2
+
+- **The mechanical sweep found seven files still holding guards.** `cli-tests/CLICharacterizationTests`
+  (two accept waits whose expiry was discarded outright),
+  `app-tests/IpcServerRemoteTests` (two spin waiters throwing
+  `CocoaError(.fileReadUnknown)`, plus a 2-second `SO_RCVTIMEO` surfacing as
+  `EAGAIN`), `app-tests/AppRuntimePendingIpcShutdownTests` and
+  `app-tests/AppRuntimeCommandTestSupport` (2-second polls whose expiry became a
+  `-1` indistinguishable from a read error),
+  `lib/DanTermSupport/.../IpcConnectionWriteTests` (a defaulted 2-second poll and
+  two 2-second semaphore probes returning `nil`),
+  `lib/DanTermSupport/.../IpcConnectionLivenessTests` (a 2-second poll and a
+  4-second spin waiter returning `nil`), and
+  `lib/DanTermSupport/.../DebouncerTests` (two 3-second semaphore waits). Every
+  guard is now 30 seconds under a 1-minute suite backstop. `lib/TerminalPTY` and
+  `lib/TerminalCore` already conform -- 20-second guards under per-`@Test`
+  1-minute backstops -- so the sweep left them alone.
+- **Two durations are meant to expire, so they are named apart from the guards.**
+  `IpcServerRemoteTests.connectWhenSlotReleases` learns the slot is still held by
+  not being greeted, and `IpcConnectionWriteTests.silentPeerFailsTheRead` exists
+  to prove the reads give up. Raising the shared guard would have made the first
+  loop turn over once in 30 seconds and the second spend a minute. Both now
+  supply a short probe value explicitly at the call site, leaving the guard high
+  for every read that does expect an answer.
+- **Guards that return a bool were kept as bools where the expiry is the negative
+  outcome.** `IpcConnectionLivenessTests.reachedEndOfStream` polls for a teardown;
+  "the deadline passed" and "the socket is still open" are the same observation,
+  so I3's second half has nothing to separate. Every other waiter that returned a
+  bare `false` or `nil` now throws `POSIXError(.ETIMEDOUT)`. The AGENTS.md rule
+  names this exception rather than stating a ban the repo does not keep.
+- **PO2 was discharged by ablation, not by inspection.** Dropping the liveness
+  guard to 50ms made the expiry surface as `Error Domain=NSPOSIXErrorDomain
+  Code=60 "Operation timed out"`, named against the waiting line.
+
+## Follow Up
+
+- `lib/DanTermSupport/Tests/DanTermSupportTests/IpcConnectionLivenessTests.swift:50`
+  asserts `elapsed < .seconds(2)` after a 0.4-second liveness bound. The lower
+  bound is production's own number, but the 1.6 seconds of slop above it is
+  invented by the test, so under gate load this can still fail on "production was
+  fast enough". Left alone because the sweep's criteria name deadlines, not
+  elapsed assertions, and removing the upper bound loses the claim that a dead
+  peer is not held past the bound. Decide whether production should state a
+  reclaim margin the test can assert against instead.

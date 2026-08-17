@@ -6,7 +6,21 @@ import Synchronization
 import Testing
 @testable import DanTerm
 
-@Suite(.serialized)
+/// How long a waiter in this file sits before it declares the server hung.
+///
+/// This is a hang guard, not a threshold: no assertion here turns on how fast the server
+/// answers, so the only requirement is that a passing run cannot approach it and that it
+/// fires before the suite's time-limit backstop, so the failure names the waiter.
+private let hangGuardSeconds = 30.0
+
+/// How long a probe that expects silence waits before it calls the attempt a miss.
+///
+/// Unlike the hang guard, this one is meant to expire: `connectWhenSlotReleases` learns
+/// that the slot is still held by not being greeted, and retries. Keep it short so the
+/// retry loop turns over, and keep it far below the hang guard so the two never blur.
+private let silenceProbeSeconds = 0.5
+
+@Suite(.serialized, .timeLimit(.minutes(1)))
 @MainActor
 struct IpcServerRemoteTests {
     @Test("tailnet service is closed by default")
@@ -616,7 +630,7 @@ private struct RemoteIpcServerFixture {
     func auditEntriesWhenConnectionCloses(
         count: Int = 1
     ) async throws -> [IpcAuditLogEntry] {
-        let deadline = ContinuousClock.now + .seconds(4)
+        let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
         while ContinuousClock.now < deadline {
             if let entries = try? auditEntries(),
                entries.count(where: { $0.event.kind == .connectionClosed }) >= count
@@ -625,20 +639,22 @@ private struct RemoteIpcServerFixture {
             }
             await Task.yield()
         }
-        throw CocoaError(.fileReadUnknown)
+        throw POSIXError(.ETIMEDOUT)
     }
 
     func connectWhenSlotReleases(port: UInt16) async throws -> RemotePeer {
-        let deadline = ContinuousClock.now + .seconds(2)
+        let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
         while ContinuousClock.now < deadline {
-            let peer = try RemotePeer(port: port)
+            // A short receive timeout is the probe: an ungreeted peer is how this learns
+            // the slot is still held, so this read is meant to expire and be retried.
+            let peer = try RemotePeer(port: port, receiveTimeout: silenceProbeSeconds)
             if let first = try? await peer.readRequest(), first.method == Methods.hello {
                 return peer
             }
             peer.close()
             await Task.yield()
         }
-        throw CocoaError(.fileReadUnknown)
+        throw POSIXError(.ETIMEDOUT)
     }
 
     func remove() {
@@ -646,16 +662,39 @@ private struct RemoteIpcServerFixture {
     }
 }
 
+/// Arms the socket's receive deadline, so no read in this file can park a thread for good.
+private func setReceiveTimeout(_ fileDescriptor: Int32, _ seconds: Double) {
+    var timeout = timeval(
+        tv_sec: Int(seconds),
+        tv_usec: suseconds_t((seconds - Double(Int(seconds))) * 1_000_000)
+    )
+    setsockopt(
+        fileDescriptor,
+        SOL_SOCKET,
+        SO_RCVTIMEO,
+        &timeout,
+        socklen_t(MemoryLayout<timeval>.size)
+    )
+}
+
+/// Turns the errno of a failed read into an error, naming a receive-deadline expiry as one.
+///
+/// `SO_RCVTIMEO` reports its expiry as `EAGAIN`, which reads as "try again on a
+/// non-blocking socket" and hides that the peer simply never spoke.
+private func readFailure(errno code: Int32) -> POSIXError {
+    if code == EAGAIN || code == EWOULDBLOCK { return POSIXError(.ETIMEDOUT) }
+    return POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+}
+
 private final class RemotePeer: @unchecked Sendable {
     private let fileDescriptor: Int32
     private let closeLock = NSLock()
     private var isClosed = false
 
-    init(port: UInt16) throws {
+    init(port: UInt16, receiveTimeout: Double = hangGuardSeconds) throws {
         fileDescriptor = socket(AF_INET, SOCK_STREAM, 0)
         guard fileDescriptor >= 0 else { throw POSIXError(.EIO) }
-        var timeout = timeval(tv_sec: 2, tv_usec: 0)
-        setsockopt(fileDescriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        setReceiveTimeout(fileDescriptor, receiveTimeout)
         var address = sockaddr_in()
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         address.sin_family = sa_family_t(AF_INET)
@@ -672,11 +711,10 @@ private final class RemotePeer: @unchecked Sendable {
         }
     }
 
-    init(socketPath: URL) throws {
+    init(socketPath: URL, receiveTimeout: Double = hangGuardSeconds) throws {
         fileDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fileDescriptor >= 0 else { throw POSIXError(.EIO) }
-        var timeout = timeval(tv_sec: 2, tv_usec: 0)
-        setsockopt(fileDescriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        setReceiveTimeout(fileDescriptor, receiveTimeout)
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         let maximumLength = MemoryLayout.size(ofValue: address.sun_path)
@@ -733,9 +771,7 @@ private final class RemotePeer: @unchecked Sendable {
                 var byte: UInt8 = 0
                 let count = Darwin.read(fileDescriptor, &byte, 1)
                 guard count >= 0 else {
-                    continuation.resume(
-                        throwing: POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-                    )
+                    continuation.resume(throwing: readFailure(errno: errno))
                     return
                 }
                 continuation.resume(returning: count == 0 ? 0 : byte)
@@ -764,11 +800,11 @@ private final class RemotePeer: @unchecked Sendable {
                 while true {
                     let count = Darwin.read(fileDescriptor, &byte, 1)
                     guard count > 0 else {
-                        continuation.resume(throwing: POSIXError(
-                            count == 0
-                                ? .ECONNRESET
-                                : (POSIXErrorCode(rawValue: errno) ?? .EIO)
-                        ))
+                        continuation.resume(
+                            throwing: count == 0
+                                ? POSIXError(.ECONNRESET)
+                                : readFailure(errno: errno)
+                        )
                         return
                     }
                     if byte == 0x0A {
