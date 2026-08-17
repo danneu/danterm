@@ -1,15 +1,27 @@
-// Owns exact-or-explicit-gap application of pane-tape records to a headless terminal replica.
+// Owns exact-or-gap application of pane-tape records to a headless terminal replica.
 import DanTermClient
 import DanTermProtocol
 import Foundation
 import TerminalCore
 import TerminalCoreRecording
 
-/// States whether the visible replica is exact or frozen behind an explicit loss report.
+/// Says who found the gap, because that alone decides what can repair it.
+///
+/// A declared gap is the producer's own loss report. The subscription runs in
+/// reconstructible mode, so the replacement sync is already in the stream a few records
+/// behind it and waiting is the whole remedy. A detected gap is the replica's finding that
+/// what arrived disagrees with what it holds: the producer believes the stream is healthy
+/// and will send no further sync, so only a fresh subscription reconciles the two.
+public enum PaneReplicaGap: Equatable, Sendable {
+    case declared(PaneTapeGapRecord.Loss)
+    case detected
+}
+
+/// States whether the visible replica is exact or frozen behind a gap.
 public enum PaneReplicaState: Equatable, Sendable {
     case awaitingSynchronization
     case exact
-    case gap(PaneTapeGapRecord.Loss)
+    case gap(PaneReplicaGap)
 }
 
 /// Rejects malformed stream events before they can weaken the replica's exactness claim.
@@ -65,7 +77,7 @@ public struct PaneReplica: Sendable {
         case .start(let start):
             try applyStart(start)
         case .gap(let gap):
-            state = .gap(gap.loss)
+            state = .gap(.declared(gap.loss))
             syncAssembler = PaneTapeSyncAssembler()
         case .sync(let part):
             guard let synchronization = syncAssembler.ingest(part) else { return }
@@ -100,12 +112,12 @@ public struct PaneReplica: Sendable {
             return
         }
         if terminal != nil, cursor != startCursor {
-            state = .gap(.total)
+            state = .gap(.detected)
             syncAssembler = PaneTapeSyncAssembler()
             return
         }
         guard terminal != nil else {
-            state = .gap(.total)
+            state = .gap(.detected)
             return
         }
         cursor = startCursor
@@ -133,7 +145,7 @@ public struct PaneReplica: Sendable {
     private mutating func applyEvent(_ record: PaneTapeEventRecord) throws {
         guard state == .exact, var terminal, let cursor else { return }
         guard record.sequence == cursor.nextSequence else {
-            state = .gap(.total)
+            state = .gap(.detected)
             syncAssembler = PaneTapeSyncAssembler()
             return
         }
@@ -156,7 +168,7 @@ public struct PaneReplica: Sendable {
             discardAuthority(from: &terminal)
         case .resize(let columns, let rows):
             guard columns >= 2, rows >= 1 else {
-                state = .gap(.total)
+                state = .gap(.detected)
                 syncAssembler = PaneTapeSyncAssembler()
                 return
             }
@@ -172,7 +184,7 @@ public struct PaneReplica: Sendable {
         }
 
         guard let nextCursor = advancedCursor(from: cursor, record: record, event: event) else {
-            state = .gap(.total)
+            state = .gap(.detected)
             syncAssembler = PaneTapeSyncAssembler()
             return
         }

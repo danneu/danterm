@@ -64,11 +64,11 @@ func gapFreezesReplicaUntilRepair() throws {
         cursor: nil
     )))
     #expect(replica.terminal == frozen)
-    #expect(replica.state == .gap(.exact(
+    #expect(replica.state == .gap(.declared(.exact(
         droppedEventCount: 2,
         droppedFeedBytes: 4,
         droppedWriteBytes: 0
-    )))
+    ))))
 
     let repairCursor = testCursor(sequence: 9, feed: 3)
     try replica.apply(.sync(PaneTapeSyncRecord(
@@ -138,7 +138,7 @@ func malformedByteCoordinatesCannotAdvanceExactState() throws {
         cursor: testCursor(sequence: 1, feed: 4)
     )
     try replica.apply(eventRecord(sequence: 1, event: .feed(Array("bad".utf8))))
-    #expect(replica.state == .gap(.total))
+    #expect(replica.state == .gap(.detected))
     #expect(replica.terminal?.viewportText == "old")
     #expect(replica.cursor == testCursor(sequence: 1, feed: 4))
 }
@@ -225,7 +225,7 @@ func invalidResizeBecomesGap() throws {
         rows: 2
     )
     try replica.apply(eventRecord(sequence: 1, event: .resize(columns: 1, rows: 0)))
-    #expect(replica.state == .gap(.total))
+    #expect(replica.state == .gap(.detected))
     #expect(replica.cursor == testCursor(sequence: 1))
     #expect(replica.terminal?.viewportText == "stable")
 }
@@ -289,8 +289,64 @@ func reconnectRejectsForeignStartCursor() throws {
         cursor: foreign,
         reconstructible: true
     )))
-    #expect(replica.state == .gap(.total))
+    #expect(replica.state == .gap(.detected))
     #expect(replica.terminal?.viewportText == "old")
+}
+
+// Intent: every gap the replica reaches on its own finding is marked detected, and only a
+// producer gap record is marked declared.
+//
+// Why it exists: provenance is what decides the remedy. A site left spelled as a declared
+// gap waits for a replacement sync the producer will never send, which is the freeze this
+// enumeration guards. The cases are the complete list of assignments to the gap state in
+// `PaneReplica`, so a new one added without a provenance decision shows up as a case this
+// test does not cover.
+//
+// Scenario: each disagreement a healthy-looking stream can present to a replica, plus the
+// producer's own loss report for contrast.
+@Test("Each way the replica finds a gap for itself is marked detected")
+func replicaMarksItsOwnFindingsAsDetected() throws {
+    let base = testCursor(sequence: 4, feed: 3)
+
+    var foreignStart = try synchronizedReplica(bytes: Array("old".utf8), cursor: base)
+    try foreignStart.apply(startRecord(cursor: testCursor(
+        sequence: 4,
+        feed: 3,
+        lifetime: UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+    )))
+    #expect(foreignStart.state == .gap(.detected))
+
+    var statelessStart = PaneReplica()
+    try statelessStart.apply(startRecord(cursor: base))
+    #expect(statelessStart.state == .gap(.detected))
+
+    var skippedSequence = try synchronizedReplica(bytes: [], cursor: base)
+    try skippedSequence.apply(eventRecord(sequence: 9, event: .checkpoint))
+    #expect(skippedSequence.state == .gap(.detected))
+
+    var degenerateResize = try synchronizedReplica(bytes: [], cursor: base)
+    try degenerateResize.apply(eventRecord(sequence: 4, event: .resize(columns: 1, rows: 0)))
+    #expect(degenerateResize.state == .gap(.detected))
+
+    var unplaceableBytes = try synchronizedReplica(bytes: [], cursor: base)
+    try unplaceableBytes.apply(eventRecord(sequence: 4, event: .feed(Array("x".utf8))))
+    #expect(unplaceableBytes.state == .gap(.detected))
+
+    var producerReported = try synchronizedReplica(bytes: [], cursor: base)
+    try producerReported.apply(.gap(.total))
+    #expect(producerReported.state == .gap(.declared(.total)))
+}
+
+private func startRecord(cursor: PaneTapeCursor) -> PaneTapeRecord {
+    .start(PaneTapeStartRecord(
+        version: 1,
+        capture: .follow,
+        format: .replay,
+        columns: 8,
+        rows: 2,
+        cursor: cursor,
+        reconstructible: true
+    ))
 }
 
 private func synchronizedReplica(

@@ -337,7 +337,7 @@ struct PaneReplicaCheckpointTests {
             cursor: foreign,
             reconstructible: true
         )))
-        #expect(restored.state == .gap(.total))
+        #expect(restored.state == .gap(.detected))
 
         try restored.apply(.sync(.init(
             part: 1,
