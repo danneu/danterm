@@ -270,39 +270,6 @@ public actor TerminalPTYHost {
     private var pendingEvents: [PaneProcessLifecycleEvent] = []
     private var isReducing = false
 
-    #if DEBUG
-    /// Bounded lookback so a test-support wait armed after the fact can still be
-    /// answered from output the child already produced. Capped at
-    /// `testOutputWindowLimit`; every byte pushed out is counted, never forgotten.
-    private var testOutputWindow: [UInt8] = []
-    /// How much output has fallen out of `testOutputWindow`. This is the number that
-    /// separates "these bytes never arrived" from "this host can no longer know",
-    /// which is the difference between a failing wait and a hanging one.
-    private var testOutputDiscardedByteCount = 0
-    /// One subscribed chunk observer, held by reference so that no traversal of the
-    /// observer list can copy the closure out as a function value.
-    ///
-    /// A Swift `Array` whose `Element` is a function type hands `for x in array` a fresh
-    /// reabstraction thunk that captures the original closure. Storing that loop-bound
-    /// value back into the array -- which is what the copy-empty-refill step below does --
-    /// grows the stored closure by one wrapper layer per chunk, and releasing the result
-    /// recurses one stack frame per layer, so a few hundred kilobytes of observed output
-    /// exhausted the stack and killed the test process. A class reference is copied
-    /// verbatim by every traversal form, so no later edit to that loop can rebuild the
-    /// chain.
-    private final class TestOutputObserver {
-        let receive: @Sendable ([UInt8]) -> Bool
-
-        init(receive: @escaping @Sendable ([UInt8]) -> Bool) {
-            self.receive = receive
-        }
-    }
-
-    /// Chunk observers, each dropped as soon as it reports it is done, so a satisfied
-    /// wait costs nothing afterwards. Bounded by the number of live waits on this host.
-    private var testOutputObservers: [TestOutputObserver] = []
-    private static let testOutputWindowLimit = 64 * 1024
-    #endif
     private var interactionState = TerminalInteractionState()
     private var capturedOutput: [UInt8] = []
     private var appliedTransitions: [TerminalPTYAppliedTransition] = []
@@ -1120,32 +1087,6 @@ public actor TerminalPTYHost {
     }
 
     #if DEBUG
-    /// Subscribes a test-support observer to child output, in one owner transaction that
-    /// first replays everything still retained.
-    ///
-    /// The observer sees the retained lookback as its first chunk and every later chunk in
-    /// stream order, with no gap in between -- that ordering is the point of doing this
-    /// under the fence, and it is what lets a caller match incrementally instead of
-    /// rescanning a window that can drop bytes underneath it. Returning `false` unsubscribes.
-    ///
-    /// The returned count is how much output this host has already discarded. A caller that
-    /// has not matched by the time this returns and sees a non-zero count has asked a
-    /// question this host cannot answer, and must say so rather than wait for an answer that
-    /// can never arrive.
-    package nonisolated func observeTestOutput(
-        _ observer: @escaping @Sendable ([UInt8]) -> Bool
-    ) -> Int {
-        fence(countsAsProduction: false) { owner in
-            let wantsMore = observer(owner.testOutputWindow)
-            if wantsMore, owner.teardownFinished == false {
-                owner.testOutputObservers.append(TestOutputObserver(receive: observer))
-            }
-            return owner.testOutputDiscardedByteCount
-        }.value
-    }
-    #endif
-
-    #if DEBUG
     /// Stages output on a host that a test is using as a fixture, so a consumer's own
     /// behavior can be asserted against a known screen.
     ///
@@ -1957,30 +1898,6 @@ public actor TerminalPTYHost {
         process(.outputEOF)
     }
 
-    #if DEBUG
-    /// Feeds child output to the test-support lookback and to every live observer.
-    ///
-    /// Debug-only on purpose: this is the only retention the host does for tests, and a
-    /// shipping build must not pay an append and a window trim on every PTY read.
-    private func recordTestOutput(_ bytes: [UInt8]) {
-        let limit = Self.testOutputWindowLimit
-        testOutputWindow.append(contentsOf: bytes)
-        if testOutputWindow.count > limit {
-            let overflow = testOutputWindow.count - limit
-            testOutputWindow.removeFirst(overflow)
-            testOutputDiscardedByteCount += overflow
-        }
-        guard testOutputObservers.isEmpty == false else { return }
-        // Emptied before the calls, refilled after, so an observer subscribed from within
-        // one -- or one that unsubscribes itself by returning false -- is not lost.
-        let observers = testOutputObservers
-        testOutputObservers.removeAll(keepingCapacity: true)
-        for observer in observers where observer.receive(bytes) {
-            testOutputObservers.append(observer)
-        }
-    }
-    #endif
-
     private func applyOutput(_ bytes: [UInt8]) {
         let previousConsumerWorkGeneration = terminal.pendingConsumerWorkGeneration
         flightTape.record(.feed(bytes))
@@ -1998,9 +1915,6 @@ public actor TerminalPTYHost {
         {
             markUpdatePending()
         }
-        #if DEBUG
-        recordTestOutput(bytes)
-        #endif
         if captureTransitions {
             capturedOutput.append(contentsOf: bytes)
             appliedTransitions.append(.feed(bytes))
@@ -2285,11 +2199,6 @@ public actor TerminalPTYHost {
         shouldFinishUpdates = false
         updateHandler = nil
         testUpdateHandler = nil
-        #if DEBUG
-        // The lookback survives teardown -- a wait armed afterwards can still be answered
-        // from it -- but nothing stays subscribed to a host that will never deliver again.
-        testOutputObservers.removeAll()
-        #endif
         updateSignalFinished = true
         // Last, and on this queue: quiescence is only irreversible once every
         // callback is detached, and the exit path treats completion as exactly that.

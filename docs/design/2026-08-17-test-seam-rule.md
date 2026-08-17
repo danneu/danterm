@@ -88,10 +88,13 @@ debug build.
   real closed descriptor instead, which is also stronger evidence: the injected
   branch proved the host's own rejection bookkeeping and nothing about the
   descriptor.
-- The host's forced exit-bound entry point, its interaction entry point, and its
-  debug output-observer window stay. The first two drive transitions the host's
-  domain already defines (R3), and the third only observes (R3). None asks
-  whether it is under test.
+- The host's forced exit-bound entry point and its interaction entry point stay.
+  Both drive transitions the host's domain already defines (R3), and neither asks
+  whether it is under test. The debug output-observer window was legal under the
+  same reading and is gone anyway: test-support output waits read the pane's
+  flight recorder, which production records for its own reasons, so the window
+  was a second and smaller copy of a facility already on the read path. Being
+  legal is not a reason to keep a duplicate.
 - The existing constructor-injected collaborators for spawning, child-exit
   probing, and source and descriptor lifecycle stay as they are. This rule
   describes the pattern they already follow; it does not introduce it.

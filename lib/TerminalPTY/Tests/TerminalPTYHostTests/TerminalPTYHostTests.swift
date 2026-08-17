@@ -1185,34 +1185,32 @@ struct TerminalPTYHostTests {
         #expect(absences == 0)
     }
 
-    @Test("waiting on output the host already discarded reports why, immediately", .timeLimit(.minutes(1)))
-    func waitForDiscardedOutputFailsImmediately() async throws {
-        // Intent: a wait whose answer can no longer be inside the host's bounded
-        //   evidence resolves at once, as a recorded issue naming the discard, instead
-        //   of suspending on a live pane that will never quiesce.
-        // Why it exists: `waitForOutput` reads a bounded window but reads like an
-        //   unbounded "was this ever printed?" question. When the answer had already
-        //   been discarded the wait was not slow, it was unsatisfiable -- and because a
-        //   live pane never quiesces it burned the whole test time limit before
-        //   reporting anything, pointing at the wait line rather than at the discard.
+    @Test("waiting on output the tape no longer holds reports why, immediately", .timeLimit(.minutes(1)))
+    func waitForEvictedOutputFailsImmediately() async throws {
+        // Intent: a wait whose answer can no longer be inside the pane's flight tape resolves
+        //   at once, as a recorded issue naming the loss, instead of suspending on a live pane
+        //   that will never quiesce.
+        // Why it exists: `waitForOutput` reads bounded evidence but reads like an unbounded
+        //   "was this ever printed?" question. When the answer has already been evicted the
+        //   wait is not slow, it is unsatisfiable -- and because a live pane never quiesces it
+        //   burned the whole test time limit before reporting anything, pointing at the wait
+        //   line rather than at the loss.
         // Scenario: the 2026-08-03 gate hang in
-        //   `applicationTerminationClosesMultipleLivePanes`, where the chatty probe
-        //   printed `__READY__` once and then wrote 4 KiB forever, so sixteen writes
-        //   discarded the marker before the wait for it was armed (fix fdb9ec6).
-        let pane = try await startChildlessHost(captureTransitions: false)
+        //   `applicationTerminationClosesMultipleLivePanes`, where the chatty probe printed
+        //   `__READY__` once and then wrote 4 KiB forever, so the marker was long gone before
+        //   the wait for it was armed (fix fdb9ec6).
+        //
+        // The tape retains nothing at all, so the loss is a property of the host this test
+        // built rather than of how fast a flood raced the machine it runs on.
+        let pane = try await startChildlessHost(
+            captureTransitions: false,
+            flightTapeConfiguration: .retainingNothing
+        )
         let host = pane.host
-        #expect(await pane.writeFromChild("__READY__"))
-
-        // The flood, deterministically: twice the host's retention window, so the marker
-        // cannot still be retained on an idle machine or a loaded one. The trailing
-        // marker is what proves the flood was consumed -- the host applies its output in
-        // order, so the flood is behind that answer -- and it is armed before the flood
-        // because that is the only way to ask about output a flood has already buried.
-        let flooded = host.expectOutput(containing: Array("__FLOODED__".utf8))
-        let flood = [UInt8](repeating: UInt8(ascii: "f"), count: 64 * 1024)
-        for _ in 0..<2 { #expect(pane.channel.writeFromChild(flood)) }
-        #expect(pane.channel.writeFromChild(Array("__FLOODED__".utf8)))
-        #expect(await flooded.satisfied())
+        #expect(pane.channel.writeFromChild(Array("__READY__".utf8)))
+        // Parsed screen state, not the tape: it is the one evidence a zero-retention tape
+        // cannot lose, and it proves the host applied the marker before the wait below.
+        #expect(await host.waitForSnapshot { $0.fencedSnapshot().screenText.contains("__READY__") })
 
         let clock = ContinuousClock()
         let start = clock.now
@@ -1226,6 +1224,95 @@ struct TerminalPTYHostTests {
         // `nil` is the pre-fix outcome: the wait never resumed at all.
         #expect(answer == .some(.some(false)))
         #expect(clock.now - start < .seconds(1))
+        await host.close()
+    }
+
+    @Test("an armed wait outrun by the pane reports the loss instead of waiting on", .timeLimit(.minutes(1)))
+    func armedWaitBeyondRetentionReportsLoss() async throws {
+        // Intent: a wait armed before output that exceeds the tape's retention resolves as a
+        //   loss report rather than as an absence, so the bound on an armed match is loud.
+        // Why it exists: an armed match is bounded by the tape rather than absolute, and the
+        //   whole reason that bound is acceptable is that overrunning it is reported. A silent
+        //   armed wait would be the hang this suite already paid for once, with no clue in it.
+        // Scenario: the wait is armed in time and still cannot answer, which is the failure a
+        //   test author has no other way to tell apart from "the child never printed it".
+        let pane = try await startChildlessHost(
+            captureTransitions: false,
+            flightTapeConfiguration: .retainingNothing
+        )
+        let host = pane.host
+        let marker = host.expectOutput(containing: Array("__MARKER__".utf8))
+
+        var answer: Bool?
+        await withKnownIssue("the wait must say the pane outran it") {
+            #expect(pane.channel.writeFromChild(Array("__MARKER__".utf8)))
+            answer = await value(of: Task { await marker.satisfied() }, withinMilliseconds: 3000)
+        }
+        #expect(answer == .some(false))
+        await host.close()
+    }
+
+    @Test("a needle straddling a reported loss does not satisfy a wait", .timeLimit(.minutes(1)))
+    func needleStraddlingLossDoesNotMatch() async throws {
+        // Intent: a wait reports loss rather than joining output from before a gap to output
+        //   after it, even when the child did print the whole needle contiguously and the tape
+        //   still holds its tail.
+        // Why it exists: a match is decided within one uninterrupted run of output. A matcher
+        //   that carried progress across a gap would answer `true` for a needle the child never
+        //   emitted contiguously, which is worse than any missed match: it would make a wait
+        //   agree with a claim about ordering that the evidence cannot support.
+        // Scenario: the tape holds one event, so the head of the needle is evicted by the tail
+        //   of the needle.
+        let pane = try await startChildlessHost(
+            captureTransitions: false,
+            flightTapeConfiguration: .retainingOneEvent
+        )
+        let host = pane.host
+        #expect(pane.channel.writeFromChild(Array("__HEAD__".utf8)))
+        // Waiting on the screen between the two writes is what makes them two applied chunks,
+        // so the tail's own event is what evicts the head's.
+        #expect(await host.waitForSnapshot { $0.fencedSnapshot().screenText.contains("__HEAD__") })
+        #expect(pane.channel.writeFromChild(Array("__TAIL__".utf8)))
+        #expect(await host.waitForSnapshot {
+            $0.fencedSnapshot().screenText.contains("__HEAD____TAIL__")
+        })
+
+        var answer: Bool?
+        await withKnownIssue("the wait must report the gap rather than match across it") {
+            answer = await value(
+                of: Task { await host.waitForOutput(containing: Array("__HEAD____TAIL__".utf8)) },
+                withinMilliseconds: 3000
+            )
+        }
+        #expect(answer == .some(false))
+        await host.close()
+    }
+
+    @Test("input the host transmits never satisfies a wait on output", .timeLimit(.minutes(1)))
+    func transmittedInputDoesNotSatisfyOutputWait() async throws {
+        // Intent: bytes the host writes toward the child do not answer a wait for the same
+        //   bytes as child output.
+        // Why it exists: the tape carries both directions on one stream, so a wait that read
+        //   every event would be satisfied by the pane's own keystrokes. A test asserting that
+        //   a program echoed something would then pass without the program running at all.
+        // Scenario: the child end is raw, so nothing the host writes comes back as output --
+        //   the only way this wait can be satisfied is by a real write from the child.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        let echoed = host.expectOutput(containing: Array("__PING__".utf8))
+
+        host.sendPaste("__PING__")
+        #expect(await pollUntil(
+            { String(decoding: pane.channel.bytesReceivedFromHost(), as: UTF8.self)
+                .contains("__PING__") },
+            within: .seconds(20)
+        ))
+        // Still unsatisfied after the bytes have crossed the descriptor toward the child.
+        #expect(await value(of: Task { await echoed.satisfied() }, withinMilliseconds: 500) == nil)
+
+        // The positive control: the same bytes, this time printed by the child.
+        #expect(pane.channel.writeFromChild(Array("__PING__".utf8)))
+        #expect(await echoed.satisfied())
         await host.close()
     }
 
@@ -1257,22 +1344,22 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
-    @Test("an observed host takes a megabyte of output without exhausting the stack", .timeLimit(.minutes(1)))
-    func observedHostTakesLargeOutput() async throws {
-        // Intent: how many chunks an observer receives does not bound how much output the
-        //   host can take -- applying thousands of chunks to an observed host costs no more
-        //   stack than applying one.
-        // Why it exists: the failure this guards is process death, not a failed
-        //   expectation. Before the fix this test killed the whole test process a few
-        //   hundred kilobytes in, reported as `exited with unexpected signal code 10` and
-        //   naming no test at all -- so nothing below asserts on stack depth, and the byte
-        //   count is the whole point of the test.
-        // Scenario: an armed wait keeps a bare observer subscribed for the entire stream,
+    @Test("a host with a wait armed for the whole stream takes a megabyte of output", .timeLimit(.minutes(1)))
+    func hostWithArmedWaitTakesLargeOutput() async throws {
+        // Intent: how much output a wait observes does not bound how much output the host can
+        //   take -- applying thousands of chunks with a wait reading every one of them costs no
+        //   more stack, and no more retained output in the wait, than applying one.
+        // Why it exists: the failure this guards is process death, not a failed expectation.
+        //   A wait that accumulated the stream it matched against, or that grew a closure per
+        //   chunk, killed the whole test process a few hundred kilobytes in, reported as
+        //   `exited with unexpected signal code 10` and naming no test at all -- so nothing
+        //   below asserts on stack depth, and the byte count is the whole point of the test.
+        // Scenario: a wait for a marker that never comes stays armed across the entire flood,
         //   which is what every `expectOutput` before a chatty child looks like.
         let pane = try await startChildlessHost(captureTransitions: false)
         let host = pane.host
-        // Never unsubscribes, so every chunk of the flood passes through it.
-        _ = host.observeTestOutput { _ in true }
+        // Never satisfied, so every chunk of the flood is read and matched against it.
+        let never = host.expectOutput(containing: Array("__NEVER__".utf8))
         let tail = host.expectOutput(containing: Array("__TAIL__".utf8))
 
         let flood = [UInt8](repeating: UInt8(ascii: "x"), count: 64 * 1024)
@@ -1280,81 +1367,78 @@ struct TerminalPTYHostTests {
         #expect(pane.channel.writeFromChild(Array("\r\n__TAIL__".utf8)))
 
         #expect(await tail.satisfied())
+        // A satisfied wait implies the terminal has already applied the matched bytes: the tape
+        // records before the terminal feeds, so only the fence the wait reads through puts the
+        // two in this order.
         #expect(host.fencedSnapshot().screenText.contains("__TAIL__"))
+        #expect(host.holdsOutputWaitSubscription(never))
         await host.close()
     }
 
-    @Test("an observer sees the lookback and the stream after it as one run of bytes", .timeLimit(.minutes(1)))
-    func observerSeesLookbackJoinedToStream() async throws {
-        // Intent: an observer registered after output has already been applied sees the
-        //   retained lookback as its first chunk and every later chunk in stream order,
-        //   with no gap across the join between replay and stream; and an observer that
-        //   returns false receives nothing afterwards.
-        // Why it exists: `expectOutput` matches incrementally and never rescans, so a byte
-        //   dropped at the replay-to-stream join, or a chunk delivered to an observer that
-        //   already unsubscribed, is invisible until a wait fails for the wrong reason.
+    @Test("a wait joins retained output to the stream after it as one run of bytes", .timeLimit(.minutes(1)))
+    func waitJoinsRetainedOutputToLaterStream() async throws {
+        // Intent: a wait armed after output has already been applied matches the retained
+        //   output and every later chunk as one ordered stream, with no gap across the join.
+        // Why it exists: a wait matches incrementally and never rescans, so a byte dropped at
+        //   the join between the retained read and the notice-driven reads after it is
+        //   invisible until some later wait fails for the wrong reason. A needle that spans the
+        //   join is the only assertion that cannot pass while such a byte is missing.
+        // Scenario: the child printed before anything asked about it, then keeps printing --
+        //   the shape a pane that is already running when a test arrives always has.
         let pane = try await startChildlessHost(captureTransitions: false)
         let host = pane.host
         #expect(await pane.writeFromChild("ALPHA"))
 
-        let stream = ObservedChunks()
-        _ = host.observeTestOutput { chunk in
-            stream.append(chunk)
-            return true
-        }
-        // Unsubscribes on its first streamed chunk, having accepted the lookback.
-        let dropped = ObservedChunks()
-        _ = host.observeTestOutput { chunk in
-            dropped.append(chunk)
-            return dropped.count == 1
-        }
-
+        // Spans the join twice over: its first five bytes are only in the retained read, and
+        // its last five only arrive after two more read turns.
+        let joined = host.expectOutput(containing: Array("ALPHABETAGAMMA".utf8))
         #expect(await pane.writeFromChild("BETA"))
         #expect(await pane.writeFromChild("GAMMA"))
 
-        // The lookback is the whole applied stream so far, and this channel has carried
-        // nothing but `ALPHA`: the child end is raw, so the launch line the host wrote to
-        // the PTY is not echoed back.
-        #expect(stream.firstText == "ALPHA")
-        #expect(stream.joinedText == "ALPHABETAGAMMA")
-        #expect(dropped.count == 2)
+        #expect(await joined.satisfied())
         await host.close()
     }
 
-    @Test("teardown releases an observer that never unsubscribed", .timeLimit(.minutes(1)))
-    func teardownReleasesSubscribedObserver() async throws {
-        // Intent: a host that has quiesced holds nothing an observer captured, and no
-        //   further chunk reaches it.
-        // Why it exists: an armed wait that is never satisfied leaves its observer
-        //   subscribed, so the host is the last owner of whatever the test captured. A host
-        //   that kept it would keep a whole test's fixtures alive past the test.
+    @Test("a wait gives up its subscription at every terminal outcome", .timeLimit(.minutes(1)))
+    func waitGivesUpSubscriptionAtEveryOutcome() async throws {
+        // Intent: quiescence, cancellation, and a synchronous timeout each end a wait's
+        //   subscription to the pane's tape, and a host reaches quiescence with a wait
+        //   outstanding.
+        // Why it exists: the subscription is the host's only reference to a wait, so it is what
+        //   keeps the wait's matcher -- and every fixture the test that armed it captured --
+        //   alive. Nothing on the host clears recorder notices, so a wait that did not detach
+        //   itself would hold a whole test's fixtures past the test. The notice also fires on
+        //   the host queue, where fencing the host to detach would deadlock the very teardown
+        //   the wait is watching for.
         let pane = try await startChildlessHost(captureTransitions: false)
         let host = pane.host
-        let seen = ObservedChunks()
-        var witness: ObserverWitness? = ObserverWitness()
-        weak let releasedWitness = witness
-        do {
-            let captured = try #require(witness)
-            _ = host.observeTestOutput { chunk in
-                // Load-bearing: this capture is what makes the host the witness's last
-                // owner. Without it the closure holds nothing and the weak reference below
-                // reports nil whatever the host does with the closure.
-                _ = captured
-                seen.append(chunk)
-                return true
-            }
-        }
-        witness = nil
-        #expect(await pane.writeFromChild("BEFORE"))
-        let deliveredBeforeTeardown = seen.count
 
+        let cancelled = host.expectOutput(containing: Array("__CANCELLED__".utf8))
+        let task = Task { await cancelled.satisfied() }
+        #expect(await value(of: task, withinMilliseconds: 200) == nil)
+        task.cancel()
+        #expect(await pollUntil(
+            { host.holdsOutputWaitSubscription(cancelled) == false },
+            within: .seconds(20)
+        ))
+
+        let timedOut = host.expectOutput(containing: Array("__TIMED_OUT__".utf8))
+        #expect(timedOut.satisfied(within: .milliseconds(50)) == false)
+        #expect(await pollUntil(
+            { host.holdsOutputWaitSubscription(timedOut) == false },
+            within: .seconds(20)
+        ))
+
+        // Outstanding across the whole teardown ladder, which is what proves detaching on
+        // quiescence cannot be what lets the host quiesce.
+        let outstanding = host.expectOutput(containing: Array("__OUTSTANDING__".utf8))
+        #expect(host.holdsOutputWaitSubscription(outstanding))
         await host.close()
-
-        // The release is the whole proof that no later chunk can reach this observer: the
-        // host was its last owner, so a host that still held it would still be able to call
-        // it. The count guards the teardown ladder itself, which runs after the last chunk.
-        #expect(releasedWitness == nil)
-        #expect(seen.count == deliveredBeforeTeardown)
+        #expect(await pollUntil(
+            { host.holdsOutputWaitSubscription(outstanding) == false },
+            within: .seconds(20)
+        ))
+        #expect((await host.resourceSnapshot()).isReleased)
     }
 
     @Test("a host on a childless channel lives and quiesces with nothing to reap", .timeLimit(.minutes(1)))
@@ -3059,34 +3143,32 @@ private struct ChildlessHost {
     }
 }
 
-/// Records the chunks one test-output observer received, in the order they arrived.
-///
-/// A class so the observer closure can keep writing to it after the test frame that made it
-/// has moved on, which is what an observer subscribed to a live host does.
-private final class ObservedChunks: Sendable {
-    private let chunks = Mutex<[[UInt8]]>([])
-
-    var count: Int { chunks.withLock(\.count) }
-
-    /// The first chunk as text -- for an observer, the lookback replayed at subscription.
-    var firstText: String? {
-        guard let first = chunks.withLock(\.first) else { return nil }
-        return String(decoding: first, as: UTF8.self)
-    }
-
-    /// Every chunk run together, so a gap at a chunk boundary shows up as missing bytes.
-    var joinedText: String {
-        String(decoding: chunks.withLock { $0.flatMap { $0 } }, as: UTF8.self)
-    }
-
-    func append(_ chunk: [UInt8]) {
-        chunks.withLock { $0.append(chunk) }
+private extension TerminalPTYHost {
+    /// Whether the pane's recorder still holds this wait's append notice, which is the host's
+    /// only reference to the wait and to everything the wait captured. A nil follow snapshot is
+    /// the recorder saying the subscription is not registered.
+    nonisolated func holdsOutputWaitSubscription(
+        _ expectation: TerminalPTYOutputExpectation
+    ) -> Bool {
+        fencedFlightRecordingFollowSnapshot(
+            subscriptionId: expectation.subscriptionId,
+            from: .beginning
+        ) != nil
     }
 }
 
-/// Stands in for whatever a test captures in an observer closure, so a weak reference to it
-/// reports whether the host still holds that closure.
-private final class ObserverWitness: Sendable {}
+private extension TerminalFlightRecorderConfiguration {
+    /// Evicts every event as soon as it is recorded, so output loss is a property of the host
+    /// under test instead of a race between a flood and the machine the suite runs on.
+    static let retainingNothing = Self(budgetBytes: 0, eventLimit: 0, eventOverheadBytes: 0)
+
+    /// Retains exactly the newest event, so the next applied chunk is what evicts the last one.
+    static let retainingOneEvent = Self(
+        budgetBytes: .max,
+        eventLimit: 1,
+        eventOverheadBytes: 0
+    )
+}
 
 /// Starts a host on a PTY with no child and returns once its launch line has crossed.
 ///
@@ -3095,10 +3177,15 @@ private final class ObserverWitness: Sendable {}
 /// counts input writes needs the same anchor before it takes a baseline.
 private func startChildlessHost(
     captureTransitions: Bool = true,
+    flightTapeConfiguration: TerminalFlightRecorderConfiguration = .production,
     sourceLocation: SourceLocation = #_sourceLocation
 ) async throws -> ChildlessHost {
     let channel = try ChildlessPTYChannel()
-    let host = try makeHost(captureTransitions: captureTransitions, spawner: channel)
+    let host = try makeHost(
+        captureTransitions: captureTransitions,
+        flightTapeConfiguration: flightTapeConfiguration,
+        spawner: channel
+    )
     await host.start(makeLaunchInput(command: childlessLaunchCommand))
     let launchLine = Array("\(childlessLaunchCommand)\n".utf8)
     let transmitted = await pollUntil(
@@ -3116,6 +3203,7 @@ private func startChildlessHost(
 
 private func makeHost(
     captureTransitions: Bool = true,
+    flightTapeConfiguration: TerminalFlightRecorderConfiguration = .production,
     applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound,
     childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe(),
     resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle(),
@@ -3125,6 +3213,7 @@ private func makeHost(
         initialDimensions: .init(columns: 80, rows: 24),
         bootstrapExecutable: bootstrapExecutable(),
         captureTransitions: captureTransitions,
+        flightTapeConfiguration: flightTapeConfiguration,
         applicationExitBound: applicationExitBound,
         childExitProbe: childExitProbe,
         resourceLifecycle: resourceLifecycle,

@@ -84,6 +84,7 @@ let package = Package(
                 "PaneProcessLifecycle",
                 "TerminalPTYHost",
                 "TerminalPTYWaitSupport",
+                .product(name: "TerminalCoreRecording", package: "TerminalCore"),
             ],
             path: "TestSupport/TerminalPTYTestSupport",
             swiftSettings: [.swiftLanguageMode(.v6)]

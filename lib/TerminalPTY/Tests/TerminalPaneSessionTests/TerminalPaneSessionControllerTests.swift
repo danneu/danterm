@@ -89,8 +89,14 @@ struct TerminalPaneSessionControllerTests {
         _ = host.fencedConsumptionState()
         _ = host.fencedDiagnosticState()
         _ = host.setTestUpdateHandler { _ in }
-        _ = host.observeTestOutput { _ in false }
         host.stageFixtureOutput(Array("test".utf8))
+        // Arming, draining, and detaching an output wait are three fences of their own, and
+        // this one takes all three: it arms, reads the staged output above, and gives its
+        // subscription up when the blocking wait returns.
+        #expect(host.waitForOutputSynchronously(
+            containing: Array("test".utf8),
+            timeout: .seconds(20)
+        ))
 
         #expect(host.productionFenceEntryCountForTesting() == 0)
     }
