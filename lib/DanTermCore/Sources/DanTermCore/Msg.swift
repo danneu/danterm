@@ -71,7 +71,9 @@ enum Msg {
     case adjustPaneFontSize(paneId: PaneId?, steps: Int)
     case resetPaneFontSize(paneId: PaneId?)
     case renameTab(id: TabId, name: String?)
-    case sidebarRenameEnded
+    // Names the session that ended, so an end arriving after a successor rename
+    // already opened cannot retract the successor's pending target.
+    case sidebarRenameEnded(target: RenameTarget)
 
     // IPC
     case ipcRequest(reqId: UUID, caller: IpcCallerIdentity, request: IpcRequest)
@@ -236,7 +238,7 @@ extension Msg {
 /// for Enter (confirm) vs Esc (cancel).
 func renameCompletionMessages(
     isConfirm: Bool,
-    target: RenameTarget?,
+    target: RenameTarget,
     newName: String
 ) -> [Msg] {
     var msgs: [Msg] = []
@@ -249,10 +251,8 @@ func renameCompletionMessages(
             if !newName.isEmpty {
                 msgs.append(.renameGroup(id: groupId, name: newName))
             }
-        case nil:
-            break
         }
     }
-    msgs.append(.sidebarRenameEnded)
+    msgs.append(.sidebarRenameEnded(target: target))
     return msgs
 }

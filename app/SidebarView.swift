@@ -493,7 +493,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 messages.append(.renameGroup(id: id, name: newName))
             }
         }
-        messages.append(.sidebarRenameEnded)
+        messages.append(.sidebarRenameEnded(target: target))
         return messages
     }
 
@@ -505,7 +505,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         activeRenameSession = nil
         if session.textField.currentEditor() != nil { session.textField.abortEditing() }
         finishInlineRename(textField: session.textField, target: target)
-        return [.sidebarRenameEnded]
+        return [.sidebarRenameEnded(target: target)]
     }
 
     /// Repairs AppKit silently discarding the owned field editor before delegate cleanup.
@@ -516,7 +516,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
               session.textField.currentEditor() == nil else { return [] }
         activeRenameSession = nil
         finishInlineRename(textField: session.textField, target: session.target)
-        return [.sidebarRenameEnded]
+        return [.sidebarRenameEnded(target: session.target)]
     }
 
     /// Restore AppKit selection so multi-selection stays live while the focused
@@ -1358,14 +1358,14 @@ extension SidebarView: NSTextFieldDelegate {
             let name: String? = newName.isEmpty ? nil : newName
             DispatchQueue.main.async { [weak self] in
                 self?.runtime?.send(.renameTab(id: tabId, name: name))
-                self?.runtime?.send(.sidebarRenameEnded)
+                self?.runtime?.send(.sidebarRenameEnded(target: target))
             }
         case .group(let groupId):
             DispatchQueue.main.async { [weak self] in
                 if !newName.isEmpty {
                     self?.runtime?.send(.renameGroup(id: groupId, name: newName))
                 }
-                self?.runtime?.send(.sidebarRenameEnded)
+                self?.runtime?.send(.sidebarRenameEnded(target: target))
             }
         }
 

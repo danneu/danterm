@@ -433,8 +433,13 @@ func update(
         // and the selected tab's window chrome via reconcileWindowChrome.
         return []
 
-    case .sidebarRenameEnded:
-        model.sidebarRenameTarget = nil
+    case .sidebarRenameEnded(let target):
+        // Only the named session retracts the request. An end can arrive after a
+        // successor rename has already claimed the target, and a blanket clear
+        // would leave the model denying a session that is on screen.
+        if model.sidebarRenameTarget == target {
+            model.sidebarRenameTarget = nil
+        }
         return []
 
     case .focusDirection(let direction, let side):

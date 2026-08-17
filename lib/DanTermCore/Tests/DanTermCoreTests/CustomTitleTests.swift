@@ -429,10 +429,11 @@ import Testing
         }
         #expect(id == tabId)
         #expect(name == "New Name")
-        guard case .sidebarRenameEnded = msgs[1] else {
+        guard case .sidebarRenameEnded(let ended) = msgs[1] else {
             Issue.record("expected sidebarRenameEnded")
             return
         }
+        #expect(ended == .tab(tabId), "the end must name the session it ended")
     }
 
     @Test("renameCompletion: Enter with unchanged text still dispatches rename")
@@ -489,10 +490,11 @@ import Testing
         }
         #expect(id == groupId)
         #expect(name == "Release work")
-        guard case .sidebarRenameEnded = msgs[1] else {
+        guard case .sidebarRenameEnded(let ended) = msgs[1] else {
             Issue.record("expected sidebarRenameEnded")
             return
         }
+        #expect(ended == .group(groupId), "the end must name the session it ended")
     }
 
     @Test("renameCompletion: Enter with empty group name skips rename")
@@ -541,20 +543,6 @@ import Testing
         }
     }
 
-    @Test("renameCompletion: nil target dispatches only focus restore")
-    func renameCompletionNilTargetDispatchesOnlyFocusRestore() {
-        // Intent: nil action dispatches only sidebarRenameEnded.
-        // Why it exists: pins the no-target branch.
-        // Scenario: spec-first no target.
-        let msgs = renameCompletionMessages(
-            isConfirm: true, target: nil, newName: "text")
-        #expect(msgs.count == 1)
-        guard case .sidebarRenameEnded = msgs[0] else {
-            Issue.record("expected sidebarRenameEnded")
-            return
-        }
-    }
-
     // MARK: - sidebarRenameEnded update handler
 
     @Test("sidebarRenameEnded leaves active pane as desired focus")
@@ -564,11 +552,37 @@ import Testing
         // Scenario: spec-first focus-restore.
         var model = makeModel()
         createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
         let focusedPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
-        let commands = update(&model, .sidebarRenameEnded)
+        let commands = update(&model, .sidebarRenameEnded(target: .tab(tabId)))
         #expect(commands.isEmpty)
         #expect(desiredPaneFocus(in: model) == .terminal(focusedPaneId))
+    }
+
+    @Test("sidebarRenameEnded retracts only the session it names")
+    func sidebarRenameEndedRetractsOnlyNamedSession() {
+        // Intent: an end naming one target leaves a pending request for a
+        //   different target standing, and clears the request it does name.
+        // Why it exists: a rename that supersedes a live one commits the
+        //   predecessor, so the predecessor's end arrives after the successor
+        //   already claimed the pending target. A blanket clear would leave the
+        //   model denying a session that is open on screen.
+        // Scenario: spec-first -- the shape a second rename takes while the
+        //   first editor is still open.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let groupId = model.groups[0].id
+        model.sidebarRenameTarget = .tab(tabId)
+
+        _ = update(&model, .sidebarRenameEnded(target: .group(groupId)))
+        #expect(model.sidebarRenameTarget == .tab(tabId),
+            "an end for another session must not retract this one")
+
+        _ = update(&model, .sidebarRenameEnded(target: .tab(tabId)))
+        #expect(model.sidebarRenameTarget == nil,
+            "an end naming the pending session retracts it")
     }
 
     @Test("renameTab emits no commands")

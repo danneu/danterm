@@ -23,7 +23,7 @@ import Testing
 
         let created = try #require(model.groups.last)
         #expect(model.sidebarRenameTarget == .group(created.id))
-        _ = update(&model, .sidebarRenameEnded)
+        _ = update(&model, .sidebarRenameEnded(target: .group(created.id)))
         #expect(model.sidebarRenameTarget == nil)
     }
 
