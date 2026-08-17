@@ -2,6 +2,11 @@
 
 <!-- The paths below are deliberately gone; this doc records them as history. -->
 <!-- docs-lint: allow-missing app/TerminalView.swift -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineReadProbe.swift -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineAdmissionProbe.swift -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineBlankIndexProbe.swift -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineWideIndexProbe.swift -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineEvictionProbe.swift -->
 
 Append-only evidence chain for
 [31-logical-line-scrollback](README.md); the contract is

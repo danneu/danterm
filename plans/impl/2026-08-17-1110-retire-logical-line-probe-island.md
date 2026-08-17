@@ -257,7 +257,7 @@ Each commit is independently green and carries its own tests and doc updates.
   spent equality arm. Additive and neutral -- the six files still exist and still
   compile, so the survivors can be run and compared before anything is removed.
   Discharges PO3.
-- [ ] **3. Delete the six retired probes.** Remove 4,145 lines, add the
+- [x] **3. Delete the six retired probes.** Remove 4,145 lines, add the
   allow-missing markers and visible comments to doc 31's `README.md` and
   `findings.md`, and append one subsection to that `README.md`'s existing
   `## Outcome` recording what was deleted, why, and the revision each file last
@@ -349,6 +349,18 @@ carrying that claim into the new file would have re-published a number the same
 plan had just retired. The moved copy states the duplication AR3 requires, points
 at `TerminalMemoryProbeSupport#settleAllocator` for the full measurement, and
 says no probe may credit the call with an effect on its readings.
+
+**Commit 3: the counts, and what the verification glob actually matches.** The
+six files came to **4,107** deleted lines, not the 4,145 the plan states. The
+difference is the three helpers commit 2 moved out of them into
+`ProbeHostMeasurements.swift`, which the plan counted against the six.
+
+The verification bullet asks `wc -l
+lib/TerminalCore/Tests/TerminalCoreTests/*Probe*.swift` to report three files.
+It reports **four, totalling 692 lines**, because `ProbeHostMeasurements.swift`
+also matches `*Probe*`. Three of the four are probes -- history-tail cost,
+pathological, and wired-history attribution -- and the fourth is their shared
+helper file. The bound the bullet sets, under 700 lines against 4,811, holds.
 
 **Both released-byte fields are required, not optional.** `MemoryProbeReport`'s
 `schemaVersion` moved to 2 to match. A defaulted or optional field would decode

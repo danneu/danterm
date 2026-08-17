@@ -1,5 +1,11 @@
 # Logical-line scrollback: store content unwrapped, wrap at read
 
+<!-- The paths below are deliberately gone; this doc records them as history. -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineReadProbe.swift -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineIndexProbe.swift -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineAdmissionProbe.swift -->
+<!-- docs-lint: allow-missing lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineBlankIndexProbe.swift -->
+
 Research started: 2026-08-04. Continues
 [28-retained-row-optimizations](../28-retained-row-optimizations/README.md):
 `28/D8` capped retained depth because resize reflow visits every retained row
@@ -1486,3 +1492,57 @@ is that the change it licensed is not a regression. What is open:
   `DD4`'s fast path that `rowCount` and `firstRowCellEnd` already took. The 40.3x
   cap-region frame cost is not re-measured -- the probe is committed and
   runnable, and no decision waits on the number.
+
+### Six of this campaign's probes are deleted, 2026-08-17
+
+Every finding, number and verdict above stands exactly as written. What changed
+is the tree, not the record: six of the probe files this doc cites no longer
+exist at HEAD. They are recorded here as history, and the allow-missing markers
+at the top of this file and of [findings.md](findings.md) are why `docs-lint`
+still passes over their paths.
+
+Each one is recoverable with `git show <revision>:<path>`, and the revision to
+use is the one where it last produced a number:
+
+| Probe file | Finding | Last ran at |
+|---|---|---|
+| `TerminalLogicalLineReadProbe.swift` | `F1` | `eee1832` |
+| `TerminalLogicalLineIndexProbe.swift` | `F2` | `497d181` |
+| `TerminalLogicalLineAdmissionProbe.swift` | `F3` | `d6c83b0` |
+| `TerminalLogicalLineBlankIndexProbe.swift` | `F7` | `aec227c` |
+| `TerminalLogicalLineWideIndexProbe.swift` | `F9` | `2ac87e1` |
+| `TerminalLogicalLineEvictionProbe.swift` | `F8`, `F10` | `5cf61e0` |
+
+Why they went, in the order the reasons carry weight. **They cannot measure
+anything at this revision.** `DD49` already records that `D4`'s eviction rule and
+its `AR6` residency reading are not re-triggerable here, because both are paired
+against the display-row history store that `9ad7cc55` deleted; their verdicts
+stand as readings of the store at `5cf61e0`. Five of the six name no
+`LogicalLineStore` at all. A re-run would report a ratio whose denominator is an
+unverifiable reproduction of code that no longer exists. **They cost two compiles
+per gate run** -- `scripts/run-test-suite.sh` builds them, and
+`scripts/ios-portability-gate.sh` cross-compiles them again for the iOS triple --
+and they were still being dragged along by production refactors with their own
+verification switched off behind an env var no recipe sets. **They carried a
+hazard**: their shared harness defined a `TerminalCellKind.probeCode` extension,
+a second and divergent coding of the field production codes as `packedCode`,
+visible to every file in the test target. Deleting all six removes the harness,
+that extension, and the prototype stores (`LogicalLineArena`, `GranularityArena`,
+`BudgetEnforcedRowStore`) that reimplemented production in order to measure it.
+
+Three probes remain, env-gated as before: the history-tail cost probe, the
+pathological probe, and the wired-history attribution probe. They drive the
+shipping engine rather than a copy of it, so they still read something. The
+wired-history probe lost one arm in the same work: its equality reading timed a
+path production stopped taking when `b95d703e` removed whole-`Terminal` equality
+from the owner publish path. `DD52`'s equality residual is a recorded finding and
+is unchanged by that -- the arm that went was the probe's timing of the spent
+path, not the residual itself.
+
+One signal is knowingly given up. No surviving instrument times admission or
+eviction at the arena's saturation bound near 36,508 retained rows; the paired
+benchmark ladder runs at roughly 9,935 and 14,382. Correctness at the bound is
+pinned by the live store's tests, speed is not, and whoever attacks the read path
+next should know the signal is absent rather than discover it. The reasoning in
+full is in
+[`plans/impl/2026-08-17-1110-retire-logical-line-probe-island.md`](../../../plans/impl/2026-08-17-1110-retire-logical-line-probe-island.md).
