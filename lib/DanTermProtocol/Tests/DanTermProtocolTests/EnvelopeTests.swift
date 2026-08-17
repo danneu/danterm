@@ -32,7 +32,9 @@ struct EnvelopeTests {
 
     @Test("connection rejection notification has the stable wire shape")
     func connectionRejectionNotificationEncodes() throws {
-        let notification = IpcConnectionRejectionReason.notAdmitted.notification
+        let notification = IpcConnectionRejectionReason.notAdmitted.notification(
+            livenessBound: .standard
+        )
 
         let encoded = try sortedEncoder().encode(notification)
 
@@ -41,6 +43,13 @@ struct EnvelopeTests {
                 == #"{"jsonrpc":"2.0","method":"rejected","params":{"reason":"not-admitted"}}"#
         )
         #expect(IpcConnectionRejectionReason(notification: notification) == .notAdmitted)
+        let capacity = try sortedEncoder().encode(
+            IpcConnectionRejectionReason.connectionLimit.notification(livenessBound: .standard)
+        )
+        #expect(
+            String(data: capacity, encoding: .utf8)
+                == #"{"jsonrpc":"2.0","method":"rejected","params":{"reason":"connection-limit","silenceSeconds":30}}"#
+        )
         #expect(IpcConnectionRejectionReason.allCases.map(\.rawValue) == [
             "not-admitted",
             "identity-unresolved",

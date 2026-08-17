@@ -1,9 +1,11 @@
-// The silence bound that governs a remote IPC connection, and the hello that carries it.
+// The silence bound that governs a remote IPC connection, and the hello that states it.
 //
 // This file holds the bound as wire vocabulary: the server states one number and the
-// client derives everything from it, so the two ends cannot be tuned apart. What does
-// not belong here is either end's enforcement -- the server's receive deadline and the
-// client's ping cadence live with the code that owns those sockets.
+// client derives everything from it, so the two ends cannot be tuned apart. The field
+// name and its reader live on the bound itself, because more than one server-first
+// frame states the number. What does not belong here is either end's enforcement --
+// the server's receive deadline and the client's ping cadence live with the code that
+// owns those sockets.
 import Foundation
 
 /// The single silence bound both ends of a remote connection apply.
@@ -33,14 +35,29 @@ public struct IpcLivenessBound: Equatable, Sendable {
     /// The client's unconditional ping cadence. Half the bound, so a compliant peer
     /// feeds both ends' deadlines twice per bound and one late ping is still not fatal.
     public var pingInterval: TimeInterval { seconds / 2 }
+
+    /// Names the wire field carrying the bound, in seconds.
+    ///
+    /// It lives on the bound rather than on any one frame because more than one
+    /// server-first frame states the number: the hello, and the capacity refusal that
+    /// names the deadline by which a slot is reclaimed. One key means one reader.
+    public static let wireKey = "silenceSeconds"
+
+    /// States the bound as the wire carries it.
+    public var wireValue: JSONValue { .number(seconds) }
+
+    /// Reads a bound back, or nil when the peer stated none this client can use. A
+    /// missing or unusable value is not a broken frame on its own: only the end that
+    /// needs the number decides that.
+    public static func read(from params: JSONValue?) -> IpcLivenessBound? {
+        guard let seconds = params?[wireKey]?.asNumber else { return nil }
+        return IpcLivenessBound(seconds: seconds)
+    }
 }
 
 /// Builds and reads the server's opening hello, so its shape is stated once for the end
 /// that writes it and the end that parses it.
 public enum IpcHello {
-    /// Names the hello field carrying the silence bound, in seconds.
-    public static let silenceBoundKey = "silenceSeconds"
-
     /// States the complete hello parameter object the server sends before service.
     public static func params(
         protocolVersion: Int,
@@ -50,15 +67,7 @@ public enum IpcHello {
         .object([
             "protocol": .number(Double(protocolVersion)),
             "app": .string(appVersion),
-            silenceBoundKey: .number(livenessBound.seconds),
+            IpcLivenessBound.wireKey: livenessBound.wireValue,
         ])
-    }
-
-    /// Reads the advertised bound back, or nil when the peer advertised none this
-    /// client can use. A missing or unusable value is not a broken hello on its own:
-    /// only a connection under the contract needs the number, and that end decides.
-    public static func livenessBound(from params: JSONValue?) -> IpcLivenessBound? {
-        guard let seconds = params?[silenceBoundKey]?.asNumber else { return nil }
-        return IpcLivenessBound(seconds: seconds)
     }
 }

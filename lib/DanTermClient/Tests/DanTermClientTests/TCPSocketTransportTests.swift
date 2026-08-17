@@ -32,12 +32,13 @@ struct TCPSocketTransportTests {
 
     @Test("every TCP connection rejection stays a typed session error")
     func connectionRejectionsStayTyped() throws {
+        let advertised = try #require(IpcLivenessBound(seconds: 7))
         for reason in IpcConnectionRejectionReason.allCases {
             let listener = try TCPTestListener()
             let server = Thread {
                 guard let connection = listener.accept() else { return }
                 defer { Darwin.close(connection) }
-                writeLine(encoded(reason.notification), to: connection)
+                writeLine(encoded(reason.notification(livenessBound: advertised)), to: connection)
             }
             server.start()
 
@@ -49,7 +50,7 @@ struct TCPSocketTransportTests {
                 sendTimeout: 1
             )
             let session = DanTermClientSession(transport: transport)
-            #expect(throws: clientError(for: reason)) {
+            #expect(throws: clientError(for: reason, livenessBound: advertised)) {
                 try session.handshake()
             }
             session.close()
@@ -295,11 +296,14 @@ private func encoded<T: Encodable>(_ value: T) -> String {
     String(decoding: try! JSONEncoder().encode(value), as: UTF8.self)
 }
 
-private func clientError(for reason: IpcConnectionRejectionReason) -> DanTermClientError {
+private func clientError(
+    for reason: IpcConnectionRejectionReason,
+    livenessBound: IpcLivenessBound
+) -> DanTermClientError {
     switch reason {
     case .notAdmitted: .notAdmitted
     case .identityUnresolved: .identityUnresolved
-    case .connectionLimit: .connectionLimit
+    case .connectionLimit: .connectionLimit(livenessBound)
     case .auditUnavailable: .auditUnavailable
     }
 }

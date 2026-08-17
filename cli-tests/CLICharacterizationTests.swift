@@ -168,7 +168,7 @@ struct CLICharacterizationTests {
 
         for (reason, expectedError) in cases {
             let run = try withScriptedEndpoint { connection in
-                writeLine(encoded(reason.notification), to: connection)
+                writeLine(encoded(reason.notification(livenessBound: .standard)), to: connection)
                 Darwin.close(connection)
             } run: { path in
                 try runCLI(["ls"], socketPath: path)
@@ -200,7 +200,7 @@ struct CLICharacterizationTests {
 
         for (reason, expectedError) in cases {
             let run = try withScriptedTCPEndpoint { connection in
-                writeLine(encoded(reason.notification), to: connection)
+                writeLine(encoded(reason.notification(livenessBound: .standard)), to: connection)
                 Darwin.close(connection)
             } run: { port in
                 try runCLI(["--tcp", "127.0.0.1:\(port)", "ls"], environment: [:])

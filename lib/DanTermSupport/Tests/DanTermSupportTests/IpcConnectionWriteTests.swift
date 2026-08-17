@@ -28,13 +28,18 @@ struct IpcConnectionWriteTests {
         let connection = IpcConnection(fileDescriptor: descriptors.connection)
         defer { Darwin.close(descriptors.peer) }
 
-        connection.writeRejected(.connectionLimit)
+        connection.writeRejected(.connectionLimit, livenessBound: .standard)
 
         let notification = try JSONDecoder().decode(
             JsonRpcRequest.self,
             from: readIpcLine(from: descriptors.peer)
         )
-        #expect(notification == IpcConnectionRejectionReason.connectionLimit.notification)
+        #expect(
+            notification
+                == IpcConnectionRejectionReason.connectionLimit.notification(
+                    livenessBound: .standard
+                )
+        )
         #expect(readByte(from: descriptors.peer) == 0)
     }
 

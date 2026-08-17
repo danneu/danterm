@@ -191,6 +191,7 @@ actor IpcServer {
         let slots = remoteSlots
         let resolver = whoisResolver
         let auditWriter = auditWriter
+        let livenessBound = livenessBound
         tailnetAcceptQueue.async { [weak self] in
             while true {
                 let accepted: TailnetAcceptedPeer
@@ -207,7 +208,7 @@ actor IpcServer {
                         peerAddress: accepted.peer.description,
                         reason: IpcConnectionRejectionReason.connectionLimit.rawValue
                     ))
-                    connection.writeRejected(.connectionLimit)
+                    connection.writeRejected(.connectionLimit, livenessBound: livenessBound)
                     continue
                 }
                 Task.detached { [weak self, slots] in
@@ -325,7 +326,7 @@ actor IpcServer {
             peerAddress: peerAddress,
             reason: reason.rawValue
         ))
-        connection.writeRejected(reason)
+        connection.writeRejected(reason, livenessBound: livenessBound)
     }
 
     private func beginService(_ state: ConnectionState) {

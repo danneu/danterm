@@ -154,8 +154,11 @@ final class IpcConnection: @unchecked Sendable {
     }
 
     /// Writes the pre-handshake refusal and closes after its complete line is flushed.
-    func writeRejected(_ reason: IpcConnectionRejectionReason) {
-        writeLine(reason.notification, closeAfterWrite: true)
+    ///
+    /// The bound is the server's current one, and the refusal decides whether to state
+    /// it, so every caller supplies it rather than choosing which refusals carry it.
+    func writeRejected(_ reason: IpcConnectionRejectionReason, livenessBound: IpcLivenessBound) {
+        writeLine(reason.notification(livenessBound: livenessBound), closeAfterWrite: true)
     }
 
     func writeSuccess(

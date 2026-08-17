@@ -245,20 +245,57 @@ struct ClientSessionTests {
     }
 
     @Test("every connection rejection reason becomes its own typed client error")
-    func handshakeDistinguishesConnectionRejections() {
+    func handshakeDistinguishesConnectionRejections() throws {
+        let advertised = try #require(IpcLivenessBound(seconds: 7))
         let cases: [(IpcConnectionRejectionReason, DanTermClientError)] = [
             (.notAdmitted, .notAdmitted),
             (.identityUnresolved, .identityUnresolved),
-            (.connectionLimit, .connectionLimit),
+            (.connectionLimit, .connectionLimit(advertised)),
             (.auditUnavailable, .auditUnavailable),
         ]
 
         for (reason, expectedError) in cases {
             #expect(throws: expectedError) {
                 try DanTermClientSession(
-                    transport: ScriptedTransport(lines: [encoded(reason.notification)])
+                    transport: ScriptedTransport(
+                        lines: [encoded(reason.notification(livenessBound: advertised))]
+                    )
                 ).handshake()
             }
+        }
+    }
+
+    @Test("the capacity refusal's own bound reaches the caller, and its absence is stated")
+    func capacityRefusalSurfacesTheServersBound() throws {
+        // Intent: whatever bound a capacity refusal carries is the bound the typed error
+        //   hands its caller, and a refusal carrying none surfaces nil rather than a
+        //   client-side substitute.
+        // Why it exists: the caller waits on this number before retrying, and only the
+        //   refusing server knows it. A client that read a constant of its own, or that
+        //   silently supplied a default for a refusal that stated nothing, would hide
+        //   which end actually chose the wait.
+        let nonstandard = try #require(IpcLivenessBound(seconds: 3.5))
+        let carried = JsonRpcRequest(
+            method: Methods.rejected,
+            params: .object([
+                "reason": .string(IpcConnectionRejectionReason.connectionLimit.rawValue),
+                IpcLivenessBound.wireKey: nonstandard.wireValue,
+            ])
+        )
+        let bare = JsonRpcRequest(
+            method: Methods.rejected,
+            params: .object([
+                "reason": .string(IpcConnectionRejectionReason.connectionLimit.rawValue),
+            ])
+        )
+
+        #expect(throws: DanTermClientError.connectionLimit(nonstandard)) {
+            try DanTermClientSession(transport: ScriptedTransport(lines: [encoded(carried)]))
+                .handshake()
+        }
+        #expect(throws: DanTermClientError.connectionLimit(nil)) {
+            try DanTermClientSession(transport: ScriptedTransport(lines: [encoded(bare)]))
+                .handshake()
         }
     }
 

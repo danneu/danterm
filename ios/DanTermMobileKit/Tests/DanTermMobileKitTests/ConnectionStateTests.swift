@@ -31,7 +31,10 @@ func conversationFailureMapping() {
         (.invalidHello, .connectionLost),
         (.notAdmitted, .refusedByMac(.notAdmitted)),
         (.identityUnresolved, .refusedByMac(.identityUnresolved)),
-        (.connectionLimit, .refusedByMac(.connectionLimit)),
+        // The bound a capacity refusal carries is scheduling input, not a remedy, so both
+        // spellings present the one state. The state vocabulary stays free of policy.
+        (.connectionLimit(.standard), .refusedByMac(.connectionLimit)),
+        (.connectionLimit(nil), .refusedByMac(.connectionLimit)),
         (.auditUnavailable, .refusedByMac(.auditUnavailable)),
         (.unsupportedProtocol(7), .versionMismatch(7)),
         (.oversizedLine, .connectionLost),
@@ -58,7 +61,7 @@ func establishmentFailureMapping() {
         .invalidHello,
         .notAdmitted,
         .identityUnresolved,
-        .connectionLimit,
+        .connectionLimit(.standard),
         .auditUnavailable,
         .unsupportedProtocol(7),
         .oversizedLine,

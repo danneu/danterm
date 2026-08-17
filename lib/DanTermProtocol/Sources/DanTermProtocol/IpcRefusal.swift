@@ -13,11 +13,18 @@ public enum IpcConnectionRejectionReason: String, Codable, CaseIterable, Sendabl
     case auditUnavailable = "audit-unavailable"
 
     /// Builds the server-first notification that replaces hello on a refused connection.
-    public var notification: JsonRpcRequest {
-        JsonRpcRequest(
-            method: Methods.rejected,
-            params: .object(["reason": .string(rawValue)])
-        )
+    ///
+    /// A capacity refusal carries the server's current silence bound, and no other
+    /// refusal does. That number is the deadline by which this server has provably
+    /// reclaimed a dead peer's slot, so it is the earliest a retry can help -- and only
+    /// the refusing server knows today's value. The remaining refusals name conditions
+    /// the bound does not govern, so carrying it there would invite a pointless wait.
+    public func notification(livenessBound: IpcLivenessBound) -> JsonRpcRequest {
+        var params: [String: JSONValue] = ["reason": .string(rawValue)]
+        if self == .connectionLimit {
+            params[IpcLivenessBound.wireKey] = livenessBound.wireValue
+        }
+        return JsonRpcRequest(method: Methods.rejected, params: .object(params))
     }
 
     /// Reads a connection refusal without treating an unknown notification as one.

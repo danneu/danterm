@@ -29,8 +29,10 @@ public enum DanTermClientError: Error, Equatable, Sendable {
     case notAdmitted
     /// The server could not resolve the connection to a tailnet identity.
     case identityUnresolved
-    /// The server has no connection slot available.
-    case connectionLimit
+    /// The server has no connection slot available, with the silence bound that server
+    /// stated in the refusal -- the deadline by which it has provably reclaimed a dead
+    /// peer's slot, so the earliest a retry can help. Nil when the refusal stated none.
+    case connectionLimit(IpcLivenessBound?)
     /// The server cannot provide the durable audit record required for remote service.
     case auditUnavailable
     /// The server spoke a protocol version this client cannot use.
@@ -134,7 +136,7 @@ public final class DanTermClientSession: @unchecked Sendable {
                 throw DanTermClientError.invalidHello
             }
             if let rejection = IpcConnectionRejectionReason(notification: notification) {
-                throw Self.clientError(for: rejection)
+                throw Self.clientError(for: rejection, params: notification.params)
             }
             guard notification.method == Methods.hello,
                   let versionNumber = notification.params?["protocol"]?.asNumber,
@@ -144,7 +146,7 @@ public final class DanTermClientSession: @unchecked Sendable {
             guard version == Self.supportedProtocolVersion else {
                 throw DanTermClientError.unsupportedProtocol(version)
             }
-            let advertised = IpcHello.livenessBound(from: notification.params)
+            let advertised = IpcLivenessBound.read(from: notification.params)
             if let monitor {
                 // A stream under the contract needs the number, and only the server may
                 // state it. A hello that omits it leaves this client with no bound it is
@@ -253,12 +255,13 @@ public final class DanTermClientSession: @unchecked Sendable {
     public func close() { cancel() }
 
     private static func clientError(
-        for rejection: IpcConnectionRejectionReason
+        for rejection: IpcConnectionRejectionReason,
+        params: JSONValue?
     ) -> DanTermClientError {
         switch rejection {
         case .notAdmitted: .notAdmitted
         case .identityUnresolved: .identityUnresolved
-        case .connectionLimit: .connectionLimit
+        case .connectionLimit: .connectionLimit(IpcLivenessBound.read(from: params))
         case .auditUnavailable: .auditUnavailable
         }
     }

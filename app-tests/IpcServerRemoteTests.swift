@@ -160,7 +160,7 @@ struct IpcServerRemoteTests {
 
         let hello = try await peer.readRequest()
         #expect(hello.method == Methods.hello)
-        #expect(IpcHello.livenessBound(from: hello.params) == IpcLivenessBound(seconds: 6))
+        #expect(IpcLivenessBound.read(from: hello.params) == IpcLivenessBound(seconds: 6))
 
         try peer.writeRequest(method: IpcRequestMethod.ping.rawValue, id: .number(11))
         let pong = try await peer.readResponse()
@@ -185,10 +185,11 @@ struct IpcServerRemoteTests {
         // Scenario: the connection cap is one, and its holder goes quiet forever.
         let fixture = try RemoteIpcServerFixture()
         defer { fixture.remove() }
+        let bound = try #require(IpcLivenessBound(seconds: 0.5))
         let server = try fixture.makeServer(
             runtime: nil,
             remoteConnectionLimit: 1,
-            livenessBound: try #require(IpcLivenessBound(seconds: 0.5))
+            livenessBound: bound
         )
         defer { server.stop() }
 
@@ -200,7 +201,10 @@ struct IpcServerRemoteTests {
 
         let excess = try RemotePeer(port: port)
         defer { excess.close() }
-        #expect(try await excess.readRequest() == IpcConnectionRejectionReason.connectionLimit.notification)
+        #expect(
+            try await excess.readRequest()
+                == IpcConnectionRejectionReason.connectionLimit.notification(livenessBound: bound)
+        )
 
         let entries = try await fixture.auditEntriesWhenConnectionCloses()
         let closed = try #require(entries.last { $0.event.kind == .connectionClosed })
@@ -342,7 +346,7 @@ struct IpcServerRemoteTests {
         defer { peer.close() }
 
         let rejection = try await peer.readRequest()
-        #expect(rejection == expected.notification)
+        #expect(rejection == expected.notification(livenessBound: .standard))
         #expect(try await peer.readByte() == 0)
     }
 
@@ -358,11 +362,49 @@ struct IpcServerRemoteTests {
         _ = try await first.readRequest()
         let excess = try RemotePeer(port: try #require(server.tailnetPort))
         defer { excess.close() }
-        #expect(try await excess.readRequest() == IpcConnectionRejectionReason.connectionLimit.notification)
+        #expect(
+            try await excess.readRequest()
+                == IpcConnectionRejectionReason.connectionLimit.notification(
+                    livenessBound: .standard
+                )
+        )
         first.close()
 
         let replacement = try await fixture.connectWhenSlotReleases(port: try #require(server.tailnetPort))
         replacement.close()
+    }
+
+    @Test("the capacity refusal carries this server's current reclamation bound")
+    func capacityRefusalCarriesTheServersOwnBound() async throws {
+        // Intent: the refusal a full Mac writes states the bound that Mac is running,
+        //   not the shipped constant.
+        // Why it exists: the refused client waits on that number before retrying, and
+        //   the bound is exactly the deadline by which this server has provably
+        //   reclaimed a dead peer's slot. A retuned bound must travel with the refusal,
+        //   or a client would retry into an exhausted cap or wait longer than needed.
+        // Scenario: spec-first. A Mac tuned away from the shipped bound turns away one
+        //   peer too many.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let bound = try #require(IpcLivenessBound(seconds: 6))
+        let server = try fixture.makeServer(
+            runtime: nil,
+            remoteConnectionLimit: 1,
+            livenessBound: bound
+        )
+        defer { server.stop() }
+
+        await server.start()
+        let port = try #require(server.tailnetPort)
+        let holder = try RemotePeer(port: port)
+        defer { holder.close() }
+        #expect(try await holder.readRequest().method == Methods.hello)
+        let excess = try RemotePeer(port: port)
+        defer { excess.close() }
+
+        let refusal = try await excess.readRequest()
+        #expect(IpcConnectionRejectionReason(notification: refusal) == .connectionLimit)
+        #expect(IpcLivenessBound.read(from: refusal.params) == bound)
     }
 
     @Test("the cap rejects a burst while admitted identity resolution is stalled")
@@ -399,7 +441,12 @@ struct IpcServerRemoteTests {
         let excess = try RemotePeer(port: try #require(server.tailnetPort))
         defer { excess.close() }
 
-        #expect(try await excess.readRequest() == IpcConnectionRejectionReason.connectionLimit.notification)
+        #expect(
+            try await excess.readRequest()
+                == IpcConnectionRejectionReason.connectionLimit.notification(
+                    livenessBound: .standard
+                )
+        )
         releaseResolver.signal()
         #expect(try await first.readRequest().method == Methods.hello)
     }

@@ -35,19 +35,41 @@ struct IpcLivenessTests {
             livenessBound: advertised
         )
 
-        #expect(IpcHello.livenessBound(from: hello) == advertised)
+        #expect(IpcLivenessBound.read(from: hello) == advertised)
         #expect(hello["protocol"] == .number(1))
         #expect(hello["app"] == .string("9.4.1"))
     }
 
-    @Test("a hello without a readable bound advertises nothing", arguments: [
+    @Test("a frame without a readable bound advertises nothing", arguments: [
         JSONValue.object([:]),
         .object(["silenceSeconds": .string("30")]),
         .object(["silenceSeconds": .number(0)]),
         .null,
     ])
-    func unreadableHelloBoundIsAbsent(_ params: JSONValue) {
-        #expect(IpcHello.livenessBound(from: params) == nil)
+    func unreadableBoundIsAbsent(_ params: JSONValue) {
+        #expect(IpcLivenessBound.read(from: params) == nil)
+    }
+
+    @Test("only the capacity refusal carries the server's reclamation bound")
+    func capacityRefusalCarriesTheBound() throws {
+        // Intent: the refusal that names an exhausted slot states the server's current
+        //   bound, every other refusal states none, and each still reads back as itself.
+        // Why it exists: the bound is the deadline by which the refusing server has
+        //   provably reclaimed a dead peer's slot, so it is the earliest a retry can
+        //   help -- and only that server knows today's number. A client that guessed it
+        //   would compete for the very resource the refusal named. Carrying it on a
+        //   refusal the bound does not govern would invite an equally pointless wait.
+        let advertised = try #require(IpcLivenessBound(seconds: 7))
+
+        for reason in IpcConnectionRejectionReason.allCases {
+            let notification = reason.notification(livenessBound: advertised)
+
+            #expect(IpcConnectionRejectionReason(notification: notification) == reason)
+            #expect(
+                IpcLivenessBound.read(from: notification.params)
+                    == (reason == .connectionLimit ? advertised : nil)
+            )
+        }
     }
 
     @Test("ping is an ordinary request method with no target and no local-caller rule")
