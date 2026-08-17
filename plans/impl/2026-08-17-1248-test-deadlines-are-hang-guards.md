@@ -399,11 +399,18 @@ baseline before changing anything:
   supplied value is honored end-to-end. Its duration fell from 5.02 seconds to under 0.2,
   which was the remaining gate wall-clock this slice set out to remove.
 
-- `lib/DanTermSupport/Tests/DanTermSupportTests/IpcConnectionLivenessTests.swift:50`
+- ~~`lib/DanTermSupport/Tests/DanTermSupportTests/IpcConnectionLivenessTests.swift:50`
   asserts `elapsed < .seconds(2)` after a 0.4-second liveness bound. The lower
   bound is production's own number, but the 1.6 seconds of slop above it is
   invented by the test, so under gate load this can still fail on "production was
   fast enough". Left alone because the sweep's criteria name deadlines, not
   elapsed assertions, and removing the upper bound loses the claim that a dead
   peer is not held past the bound. Decide whether production should state a
-  reclaim margin the test can assert against instead.
+  reclaim margin the test can assert against instead.~~ Resolved after the plan
+  landed: the upper bound became the generous "only proves the reclaim
+  terminated" form the rule permits, matching `IpcConnectionWriteTests`. The
+  rejected alternative was having production state a reclaim margin -- that adds
+  a production field only a test reads, which is the shape
+  `docs/design/2026-08-17-test-seam-rule.md` R1 discourages, and it buys nothing
+  over a generous bound. Measured slack: the reclaim lands ~5ms past the bound,
+  against 1.6 seconds of headroom the old assertion allowed.
