@@ -117,23 +117,29 @@ private struct PaneTapeFollowTransport {
 class AppRuntime {
     private struct StagedRestoreSession {
         let model: AppModel
-        let sessions: [PaneId: any TerminalSession]
+        let sessions: [PaneId: CreatedSession]
         let replayFiles: [PaneId: URL]
+    }
+
+    /// A freshly built session together with the scheduling token that owns its callbacks.
+    /// The token is armed before the pane's record exists, so it travels with the session
+    /// from creation until the record takes ownership of it at install.
+    private struct CreatedSession {
+        let session: any TerminalSession
+        let subscriptionToken: AppRuntimeSchedulingToken?
     }
 
     var model: AppModel
     private let configStore: DanTermConfigStore
     private let ports: AppRuntimePorts
     private var pendingConfigError: Error?
-    // The one pane-keyed table of live panes. Each record owns its session and its
-    // pane chrome, so a container only reparents wrappers and nothing else indexes a
-    // pane. `private(set)` because installing and removing a pane are the only two
-    // ways to write it -- see `installTerminalSession` and `tearDownSession`.
+    // The one pane-keyed table of live panes. Each record owns everything whose lifetime
+    // is the pane's -- session, pane chrome, pushed visibility, replay file, search
+    // debounce, session subscription -- so a container only reparents wrappers and
+    // nothing else indexes a pane. `private(set)` because installing and removing a pane
+    // are the only two ways to write it -- see `installTerminalSession` and
+    // `tearDownSession`.
     private(set) var paneHosts: [PaneId: PaneHost] = [:]
-    // Last occlusion value pushed for each live session.
-    // Cleared on teardown because restore/import can reuse pane IDs for fresh sessions.
-    // Cross-file presentation lifecycle forwarding diffs effective visibility here.
-    var paneVisibility: [PaneId: Bool] = [:]
     // Kept separate from pane visibility so an occluded wake remains deferred.
     var renderingAvailable = true
     // Per-pass diff caches for the view reconciler (see Reconcile.swift).
@@ -165,7 +171,6 @@ class AppRuntime {
     private var switcherEventMonitor: Any?
     private var switcherEventMonitorToken: AppRuntimeSchedulingToken?
     private var dragCoordinator: PaneDragCoordinator?
-    private var replayFiles: [PaneId: URL] = [:]
     // Session persistence uses two tiers of checkpoints:
     //   Light  -- model-owned recovery state (no scrollback), written in a fixed
     //            2s coalescing window after the persisted projection changes.
@@ -188,8 +193,6 @@ class AppRuntime {
     // multi-megabyte export inside the fence the quit checkpoint drains, so quitting mid-export
     // would wait on it.
     private let exportWriter = CheckpointWriter(label: "danterm.export.io")
-    private var searchDebouncers: [PaneId: Debouncer] = [:]
-    private var searchDebouncerTokens: [PaneId: AppRuntimeSchedulingToken] = [:]
     private var ipcConnections: [UUID: IpcRequestTransport] = [:]
     private var ipcConnectionTokens: [UUID: AppRuntimeSchedulingToken] = [:]
     private var paneTapeFollowSubscriptions = PaneTapeFollowSubscriptions()
@@ -198,7 +201,6 @@ class AppRuntime {
     private var paneTapeFollowTransports: [UUID: PaneTapeFollowTransport] = [:]
     private var ipcServer: IpcServer?
     private var ipcServerToken: AppRuntimeSchedulingToken?
-    private var sessionSubscriptionTokens: [ObjectIdentifier: AppRuntimeSchedulingToken] = [:]
     let schedulingLifecycle = AppRuntimeSchedulingLifecycle()
     private static let checkpointCoalesceInterval: TimeInterval = 2.0
     // Coalescing window for the reconcile pass, sized for its noisiest driver: a
@@ -924,8 +926,9 @@ class AppRuntime {
             host.session.onEvent = nil
             host.session.onPrimaryHistoryMutation = nil
         }
-        sessionSubscriptionTokens.removeAll()
 
+        // Pane-owned scheduling -- each record's session subscription and its armed search
+        // debounce -- is registered in the census, so this one walk retires it.
         schedulingLifecycle.shutdown()
 
         switcherEventMonitor = nil
@@ -936,8 +939,6 @@ class AppRuntime {
         enrichedCheckpointTimerToken = nil
         coalescedReconcileTimer = nil
         coalescedReconcileTimerToken = nil
-        searchDebouncers.removeAll()
-        searchDebouncerTokens.removeAll()
         ipcServer = nil
         ipcServerToken = nil
     }
@@ -951,7 +952,7 @@ class AppRuntime {
                 ipcSocketPath: ipcSocketPath?.path,
                 paneId: paneId
             )
-            guard let session = makeTerminalSession(
+            guard let created = makeTerminalSession(
                 sessionId: sessionId,
                 paneId: paneId,
                 workingDirectory: cwd,
@@ -970,7 +971,11 @@ class AppRuntime {
                 send(.sessionCreationFailed(sessionId: sessionId))
                 break
             }
-            installTerminalSession(session, paneId: paneId)
+            installTerminalSession(
+                created.session,
+                paneId: paneId,
+                subscriptionToken: created.subscriptionToken
+            )
 
         case .sendText(let paneId, let text, let submissionId):
             guard let submissionId else {
@@ -1199,8 +1204,8 @@ class AppRuntime {
             schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
             enrichedCheckpointTimerToken = nil
             enrichedCheckpointTimer = nil
-            for paneId in replayFiles.keys {
-                cleanupReplayFile(for: paneId)
+            for host in paneHosts.values {
+                host.removeReplayFile()
             }
             ports.terminateApp()
 
@@ -1214,30 +1219,30 @@ class AppRuntime {
             paneSession(for: paneId)?.startSearch()
 
         case .sendSearchNeedle(let paneId, let needle):
+            guard let host = paneHost(for: paneId) else { break }
+            // Capture the session now rather than resolving the pane when the delayed
+            // delivery fires: restore reuses pane ids, so a pane looked up at fire time
+            // can be a different pane than the one this needle was typed into.
+            let session = host.session
             // Debounce: immediate for empty or 3+ chars, 300ms for 1-2 chars
             let delay: TimeInterval = (needle.isEmpty || needle.count >= 3) ? 0 : 0.3
-            let sendNeedle = { [weak self] in
-                guard let self else { return }
-                self.paneSession(for: paneId)?.setSearchNeedle(needle)
-            }
+            schedulingLifecycle.cancel(host.searchDebounceToken)
+            host.searchDebounceToken = nil
 
             if delay == 0 {
-                schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
-                sendNeedle()
+                session.setSearchNeedle(needle)
             } else {
-                let debouncer = searchDebouncers[paneId] ?? {
+                let debouncer = host.searchDebouncer ?? {
                     let debouncer = Debouncer(queue: .main)
-                    searchDebouncers[paneId] = debouncer
+                    host.searchDebouncer = debouncer
                     return debouncer
                 }()
-                schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
-                debouncer.schedule(after: delay) { [weak self] in
-                    guard let self,
-                          let token = self.searchDebouncerTokens.removeValue(forKey: paneId)
-                    else { return }
-                    self.schedulingLifecycle.run(token, action: sendNeedle)
+                debouncer.schedule(after: delay) { [weak self, weak host] in
+                    guard let self, let host, let token = host.searchDebounceToken else { return }
+                    host.searchDebounceToken = nil
+                    self.schedulingLifecycle.run(token) { session.setSearchNeedle(needle) }
                 }
-                searchDebouncerTokens[paneId] = schedulingLifecycle.arm(.debouncer) {
+                host.searchDebounceToken = schedulingLifecycle.arm(.debouncer) {
                     debouncer.cancel()
                 }
             }
@@ -1246,9 +1251,11 @@ class AppRuntime {
             paneSession(for: paneId)?.navigateSearch(direction)
 
         case .sendEndSearch(let paneId):
-            schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
-            searchDebouncers.removeValue(forKey: paneId)
-            paneSession(for: paneId)?.endSearch()
+            guard let host = paneHost(for: paneId) else { break }
+            schedulingLifecycle.cancel(host.searchDebounceToken)
+            host.searchDebounceToken = nil
+            host.searchDebouncer = nil
+            host.session.endSearch()
 
         }
     }
@@ -1265,25 +1272,18 @@ class AppRuntime {
         return fileURL
     }
 
-    /// Delete the replay file for a pane if one exists.
-    private func cleanupReplayFile(for paneId: PaneId) {
-        if let url = replayFiles.removeValue(forKey: paneId) {
-            try? FileManager.default.removeItem(at: url)
-        }
-    }
-
     /// The only way a pane leaves the runtime. `reconcileSessionExistence` calls it for
     /// every pane absent from `model.allPaneIds`, and the whole-session swap calls it for
     /// every live pane, so a step added here applies on both paths. `internal` so the
     /// cross-file reconcile extension can reach it.
+    ///
+    /// Two layers, and the split is the point: what the record owns it destroys itself,
+    /// which is also right for a staged record; what is scoped to the pane *id* is retired
+    /// here, because only a live pane may have it.
     func tearDownSession(_ paneId: PaneId) {
         endPaneTapeFollowers(for: paneId)
-        cleanupReplayFile(for: paneId)
-        schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
-        searchDebouncers.removeValue(forKey: paneId)
         guard let host = paneHosts.removeValue(forKey: paneId) else { return }
-        cancelSessionSubscriptions(host.session)
-        host.session.tearDown()
+        host.tearDown(scheduling: schedulingLifecycle)
     }
 
     /// Delete this identity's replay files from prior sessions.
@@ -1725,7 +1725,7 @@ class AppRuntime {
 
     /// Build all runtime objects for a validated restore without touching the live session.
     private func stageValidatedRestore(_ loaded: ValidatedAppRestore) throws -> StagedRestoreSession {
-        var stagedSessions: [PaneId: any TerminalSession] = [:]
+        var stagedSessions: [PaneId: CreatedSession] = [:]
         var stagedReplayFiles: [PaneId: URL] = [:]
         // A snapshot carries structure, not appearance, so the rebuilt model arrives
         // with its config and resolved font family at the defaults. Carry the live
@@ -1755,7 +1755,7 @@ class AppRuntime {
                             scrollbackFilePath: scrollbackFilePath,
                             command: resolved?.command
                         )
-                        guard let session = makeTerminalSession(
+                        guard let created = makeTerminalSession(
                             sessionId: restoredModel.pane(paneId)!.session!.id,
                             paneId: paneId,
                             workingDirectory: resolved?.cwd,
@@ -1773,7 +1773,7 @@ class AppRuntime {
                         ) else {
                             throw RestoreBuildError.sessionCreationFailed
                         }
-                        stagedSessions[paneId] = session
+                        stagedSessions[paneId] = created
                     }
                 }
             }
@@ -1813,7 +1813,6 @@ class AppRuntime {
         for paneId in Array(paneHosts.keys) {
             tearDownSession(paneId)
         }
-        paneVisibility.removeAll()
         // The switcher panel persists across sessions; hide it before resetting
         // caches.switcher so nil continues to mean the panel is already hidden.
         switcherPanel?.orderOut(nil)
@@ -1821,19 +1820,20 @@ class AppRuntime {
         // a clean build, not a stale diff (restore/import can reuse pane IDs).
         caches = ReconcilerCaches()
         sidebarReconcileDriver = SidebarReconcileDriver()
-        for paneId in Array(replayFiles.keys) {
-            cleanupReplayFile(for: paneId)
-        }
     }
 
     /// Swap a fully staged restore into the live runtime and refresh derived UI state.
     private func commitRestoreSession(_ staged: StagedRestoreSession) {
         tearDownCurrentSession()
         model = staged.model
-        for (paneId, session) in staged.sessions {
-            installTerminalSession(session, paneId: paneId)
+        for (paneId, created) in staged.sessions {
+            installTerminalSession(
+                created.session,
+                paneId: paneId,
+                subscriptionToken: created.subscriptionToken,
+                replayFile: staged.replayFiles[paneId]
+            )
         }
-        replayFiles = staged.replayFiles
         lightCheckpointBaseline = currentLightCheckpointProjection()
         cancelCoalescedReconcile()
 
@@ -1852,9 +1852,9 @@ class AppRuntime {
 
     /// Dispose of a staged restore after a failed build so no temp state leaks into the live session.
     private func discardRestoreSession(_ staged: StagedRestoreSession) {
-        for session in staged.sessions.values {
-            cancelSessionSubscriptions(session)
-            session.tearDown()
+        for created in staged.sessions.values {
+            schedulingLifecycle.cancel(created.subscriptionToken)
+            created.session.tearDown()
         }
         for url in staged.replayFiles.values {
             try? FileManager.default.removeItem(at: url)
@@ -1873,7 +1873,7 @@ class AppRuntime {
         themeName: String?,
         fontSize: Double,
         fontFamily: String?
-    ) -> (any TerminalSession)? {
+    ) -> CreatedSession? {
         let request = TerminalSessionRequest(
             workingDirectory: workingDirectory,
             command: command,
@@ -1903,23 +1903,15 @@ class AppRuntime {
         }
         let initialRecoveryCandidate = session.readPrimaryHistoryText() ?? ""
         session.onPrimaryHistoryMutation = { [weak self] in self?.notePrimaryHistoryMutation() }
-        if let token = schedulingLifecycle.arm(.subscription, cancel: {
+        let subscriptionToken = schedulingLifecycle.arm(.subscription, cancel: {
             session.onEvent = nil
             session.onPrimaryHistoryMutation = nil
-        }) {
-            sessionSubscriptionTokens[ObjectIdentifier(session)] = token
-        }
+        })
         session.setRenderingAvailable(renderingAvailable)
         if hasCheckpointableScrollback(initialRecoveryCandidate) {
             notePrimaryHistoryMutation()
         }
-        return session
-    }
-
-    /// Disconnects the two callbacks that let a terminal session schedule runtime work.
-    private func cancelSessionSubscriptions(_ session: any TerminalSession) {
-        let key = ObjectIdentifier(session)
-        schedulingLifecycle.cancel(sessionSubscriptionTokens.removeValue(forKey: key))
+        return CreatedSession(session: session, subscriptionToken: subscriptionToken)
     }
 
     private func importErrorMessage(for error: AppInitFileLoadError) -> String {
@@ -1941,8 +1933,22 @@ class AppRuntime {
 
     /// The only way a pane enters the runtime. `internal` so tests install panes the
     /// way production does instead of writing a session in behind this path.
-    func installTerminalSession(_ session: any TerminalSession, paneId: PaneId) {
-        paneHosts[paneId] = PaneHost(paneId: paneId, session: session, runtime: self)
+    ///
+    /// The two resources built before the record exists arrive here: the token that owns
+    /// the session's callbacks, and the replay file a restored pane's shell reads.
+    func installTerminalSession(
+        _ session: any TerminalSession,
+        paneId: PaneId,
+        subscriptionToken: AppRuntimeSchedulingToken? = nil,
+        replayFile: URL? = nil
+    ) {
+        paneHosts[paneId] = PaneHost(
+            paneId: paneId,
+            session: session,
+            runtime: self,
+            subscriptionToken: subscriptionToken,
+            replayFile: replayFile
+        )
     }
 
     /// Returns the pane's record, or nil when no pane is installed under that id.

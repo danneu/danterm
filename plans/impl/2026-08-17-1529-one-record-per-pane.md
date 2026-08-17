@@ -228,6 +228,25 @@ inside the `just test` gate.
   whole-session-replacement paths are covered by the app-tests that drive
   `bootstrapFromSnapshot` against a real runtime.
 
+- Commit 2 hands the session subscription token from `makeTerminalSession` to the
+  record through a small `CreatedSession` pair, because restore still stages bare
+  sessions until commit 3 turns staging into records. Arming the token at install
+  instead would leave a staged session's callbacks live but outside the census,
+  which is a second way to disconnect them -- exactly the drift this plan removes.
+- PO2's delivery half is not falsifiable by removing only the arm-time capture:
+  commit 1 already made every teardown cancel the debounce, so nothing fires at
+  all. Its test still pins the behavior end to end, and it is not vacuous -- the
+  replacement pane's own needle is asserted to arrive after the same wait, which
+  proves the wait outlasts the debounce window. What the arm-time capture buys is
+  that the hazard cannot come back if a future path forgets to cancel.
+- The record makes one hazard falsifiable that the plan does not name: a short
+  needle addressed to a pane that is not installed used to build a debouncer and
+  arm a census owner that no teardown would ever reach, because both lived in
+  tables keyed by pane id. State that lives in the record cannot exist without the
+  pane, so that case now arms nothing. It has a test.
+- `test-ui.sh` gains `Debouncer.swift`: the harness compiles `PaneHost.swift`, and
+  the record now owns its search debouncer.
+
 ## Commit progress
 
 - [x] 1. Make the pane host the runtime's only pane-keyed table. The session
@@ -235,7 +254,7 @@ inside the `just test` gate.
       that the per-pane and whole-session paths share, the lazy `paneHost(for:)`
       back-fill goes, and tests install through the production path. Covers I2,
       I4, PO1, PO4.
-- [ ] 2. Move the rest of the pane's runtime state into the record -- pane
+- [x] 2. Move the rest of the pane's runtime state into the record -- pane
       visibility, the replay file, the search debouncer and its token, and the
       session subscription -- and make scheduled search work capture its target
       when it is armed. Covers I1, I3, I6, PO2, PO5.

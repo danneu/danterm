@@ -24,6 +24,10 @@ final class RecordingAppRuntimePorts {
     var terminateCount = 0
     var activationCount = 0
     var onNotification: (() -> Void)?
+    /// Sessions handed out in order before the fixture falls back to `session`. A test
+    /// that reuses a pane id needs to tell the replacement pane's session apart from the
+    /// session of the pane it replaced.
+    var queuedSessions: [RecordingTerminalSession] = []
 
     init(session: RecordingTerminalSession = RecordingTerminalSession()) {
         self.session = session
@@ -33,7 +37,7 @@ final class RecordingAppRuntimePorts {
         AppRuntimePorts(
             createTerminalSession: { [self] request in
                 sessionRequests.append(request)
-                return session
+                return queuedSessions.isEmpty ? session : queuedSessions.removeFirst()
             },
             deliverNotification: { [self] request in
                 notifications.append(request)
@@ -77,6 +81,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var sentInputKeys: [(key: KeyName, modifiers: KeyMods)] = []
     var sentInputWheels: [(direction: InputWheelDirection, column: Int, row: Int)] = []
     var focusedValues: [Bool] = []
+    var visibleValues: [Bool] = []
     var renderingAvailableValues: [Bool] = []
     var startSearchCount = 0
     var searchNeedles: [String] = []
@@ -92,7 +97,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
         sentInputWheels.append((direction, column, row))
     }
     func setFocused(_ focused: Bool) { focusedValues.append(focused) }
-    func setVisible(_ visible: Bool) {}
+    func setVisible(_ visible: Bool) { visibleValues.append(visible) }
     func setRenderingAvailable(_ available: Bool) {
         renderingAvailableValues.append(available)
     }

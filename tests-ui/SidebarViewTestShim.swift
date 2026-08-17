@@ -9,7 +9,6 @@ final class AppRuntime {
     let schedulingLifecycle = MainActor.assumeIsolated { AppRuntimeSchedulingLifecycle() }
     var model: AppModel
     private(set) var paneHosts: [PaneId: PaneHost] = [:]
-    var paneVisibility: [PaneId: Bool] = [:]
     var renderingAvailable = true
     weak var window: NSWindow?
     var sentMessages: [Msg] = []
@@ -45,10 +44,11 @@ final class AppRuntime {
         paneHosts[paneId] = PaneHost(paneId: paneId, session: session, runtime: self)
     }
 
-    /// Mirrors production's teardown path: a pane leaves the table as a whole record.
+    /// Mirrors production's teardown path: a pane leaves the table as a whole record, and
+    /// the record destroys what it owns.
     @MainActor
     func tearDownSession(_ paneId: PaneId) {
-        paneHosts.removeValue(forKey: paneId)
+        paneHosts.removeValue(forKey: paneId)?.tearDown(scheduling: schedulingLifecycle)
     }
 
     @MainActor

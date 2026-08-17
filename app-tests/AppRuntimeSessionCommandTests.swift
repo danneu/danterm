@@ -183,4 +183,78 @@ struct AppRuntimeSessionCommandTests {
         #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == nil)
         #expect(fixture.session.searchNeedles.isEmpty)
     }
+
+    // Intent: search work exists only for a pane that exists.
+    // Why it exists: the debouncer and its scheduling token used to live in runtime
+    // tables keyed by pane id, so a needle addressed to no live pane armed an owner
+    // that no teardown would ever reach.
+    @Test("a short needle for a pane that is not installed arms no scheduled work")
+    func shortNeedleForAbsentPaneArmsNothing() {
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+
+        runtime.perform(.sendSearchNeedle(paneId: PaneId(rawValue: UUID()), needle: "go"))
+
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == nil)
+        #expect(fixture.session.searchNeedles.isEmpty)
+    }
+
+    // Intent: a debounced needle reaches the pane it was typed into, and only that pane.
+    // Why it exists: the pending closure used to re-read the pane's session from a table
+    // when it fired, and restore reuses pane ids, so a needle armed by a discarded pane
+    // could be delivered into the session that replaced it.
+    // Scenario: a short needle is still debouncing when a restore replaces the pane under
+    // the same pane id, and the replacement pane then gets a short needle of its own.
+    @Test("a needle pending on a discarded pane never reaches the pane that reuses its id")
+    func pendingNeedleNeverReachesReusedPaneId() async {
+        let discarded = RecordingTerminalSession()
+        let replacement = RecordingTerminalSession()
+        let fixture = RecordingAppRuntimePorts()
+        fixture.queuedSessions = [discarded, replacement]
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "go"))
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == 1)
+
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == nil)
+        runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "up"))
+
+        // Past the 300ms short-needle debounce, so a delivery that was going to happen
+        // has happened. The replacement's own needle arriving is what proves the wait
+        // is long enough for the discarded one to have arrived too.
+        try? await Task.sleep(for: .milliseconds(600))
+
+        #expect(replacement.searchNeedles == ["up"])
+        #expect(discarded.searchNeedles.isEmpty)
+    }
+
+    // Intent: a pane installed under a reused pane id gets the visibility push its own
+    // state calls for.
+    // Why it exists: the last pushed visibility used to live in a runtime table that pane
+    // teardown left behind, so the predecessor's entry suppressed the successor's push and
+    // the new session never learned it was visible.
+    @Test("a pane installed under a reused id receives its own visibility push")
+    func reusedPaneIdReceivesVisibilityPush() {
+        let restored = RecordingTerminalSession()
+        let replacement = RecordingTerminalSession()
+        let fixture = RecordingAppRuntimePorts()
+        fixture.queuedSessions = [restored]
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        #expect(restored.visibleValues == [true])
+
+        runtime.tearDownSession(paneId)
+        runtime.installTerminalSession(replacement, paneId: paneId)
+        runtime.syncPaneVisibility()
+
+        #expect(replacement.visibleValues == [true])
+    }
 }

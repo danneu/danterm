@@ -70,19 +70,17 @@ extension AppRuntime {
         let windowVisible = window?.occlusionState.contains(.visible) ?? true
         let desired = effectivePaneVisibility(in: model, windowVisible: windowVisible)
 
+        // Each record remembers what its own session was last told, so a pane installed
+        // under a reused pane id starts from "nothing pushed yet" and there is no stale
+        // entry left behind to prune.
         for (paneId, host) in paneHosts {
             let visible = desired[paneId] ?? true
-            if paneVisibility[paneId] != visible {
-                #if DANTERM_TERMINAL_CHARACTERIZATION
-                recordTerminalCharacterizationVisibilityChange(paneId: paneId, visible: visible)
-                #endif
-                host.session.setVisible(visible)
-                paneVisibility[paneId] = visible
-            }
-        }
-
-        paneVisibility = paneVisibility.filter { paneId, _ in
-            paneHosts[paneId] != nil
+            guard host.pushedVisibility != visible else { continue }
+            #if DANTERM_TERMINAL_CHARACTERIZATION
+            recordTerminalCharacterizationVisibilityChange(paneId: paneId, visible: visible)
+            #endif
+            host.session.setVisible(visible)
+            host.pushedVisibility = visible
         }
     }
 }
