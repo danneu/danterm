@@ -50,8 +50,9 @@ struct TerminalPaneSessionControllerTests {
         //   host production-entry counter.
         // Why it exists: a new or bypassing fence otherwise silently escapes the
         //   benchmark bracket while the existing delivery-only metric stays plausible.
-        // Scenario: one pane starts, consumes output, checkpoints, captures diagnostics,
-        //   and tears down; its accounting remains internally complete afterward.
+        // Scenario: one pane starts, consumes output, takes each of its three checkpoint
+        //   reads, captures diagnostics, and tears down; its accounting remains internally
+        //   complete afterward.
         var now: UInt64 = 0
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
@@ -66,16 +67,21 @@ struct TerminalPaneSessionControllerTests {
         host.stageFixtureOutput(Array("delivery".utf8))
         controller.consumePendingHostUpdateForTesting()
         controller.synchronizeState()
+        controller.setRenderingAvailable(false)
+        controller.setRenderingAvailable(true)
+        _ = controller.readSelectedTextSynchronizing()
         _ = controller.diagnosticCapture(test: "fence-accounting")
         controller.tearDown()
 
         let metrics = controller.fenceMetrics
         #expect(metrics.initialization == .init(waitNanoseconds: 20, count: 2))
         #expect(metrics.delivery == .init(waitNanoseconds: 10, count: 1))
-        #expect(metrics.checkpoint == .init(waitNanoseconds: 10, count: 1))
+        // Three: `synchronizeState`, revealing rendering, and the synchronizing selection
+        // read all share one checkpoint helper, and each still charges its own fence.
+        #expect(metrics.checkpoint == .init(waitNanoseconds: 30, count: 3))
         #expect(metrics.diagnostic == .init(waitNanoseconds: 10, count: 1))
         #expect(metrics.teardown == .init(waitNanoseconds: 10, count: 1))
-        #expect(metrics.total == .init(waitNanoseconds: 60, count: 6))
+        #expect(metrics.total == .init(waitNanoseconds: 80, count: 8))
         #expect(metrics.hostEntryCount == metrics.total.count)
         await host.close()
     }
