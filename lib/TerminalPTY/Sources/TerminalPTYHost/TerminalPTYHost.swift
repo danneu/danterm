@@ -100,39 +100,65 @@ package enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case scrollToBottom
 }
 
-/// Names the controller-owned synchronous operations that count as production fences.
-package enum TerminalPTYProductionFenceOperation: Sendable {
-    case frameState
-    case consumptionState
-    case diagnosticState
-    case stateSynchronization
-    case beginCloseAndSnapshot
-    case installUpdateHandler(@Sendable (TerminalPTYUpdateSignal) -> Void)
+/// One controller-owned synchronous operation, carrying the payload type its fence returns.
+///
+/// The payload travels with the operation, so `.frameState` can hand back nothing but a frame
+/// state and a caller that reads it as another payload does not compile. Only this file can
+/// mint a value: the factories below are the whole operation set, so the controller picks a
+/// documented owner operation instead of fencing arbitrary owner work.
+package struct TerminalPTYProductionFenceOperation<Payload: Sendable>: Sendable {
+    fileprivate let build: @Sendable (isolated TerminalPTYHost) -> Payload
 }
 
-/// Carries one production fence's payload together with the host's raw entry census.
-package enum TerminalPTYProductionFenceOutput: Sendable {
-    case frameState(TerminalPTYFrameState)
-    case consumptionState(
-        frameState: TerminalPTYFrameState,
-        result: PaneProcessLifecycleResult?,
-        transitions: [TerminalPTYAppliedTransition]?
-    )
-    case diagnosticState(
-        frameState: TerminalPTYFrameState,
-        transitions: [TerminalPTYAppliedTransition]
-    )
-    case stateSynchronization(
-        terminal: Terminal,
-        cursor: TerminalFlightRecordingCursor
-    )
-    case closeSnapshot(Terminal)
-    case updateHandlerInstalled
+extension TerminalPTYProductionFenceOperation where Payload == TerminalPTYFrameState {
+    /// Drains one frame's damage and effects for an initialization or checkpoint read.
+    package static var frameState: Self {
+        Self { owner in owner.drainedFrameState() }
+    }
+}
+
+extension TerminalPTYProductionFenceOperation
+where Payload == (
+    frameState: TerminalPTYFrameState,
+    result: PaneProcessLifecycleResult?,
+    transitions: [TerminalPTYAppliedTransition]?
+) {
+    /// Drains one frame together with the lifecycle evidence a delivery fence consumes.
+    package static var consumptionState: Self {
+        Self { owner in owner.drainedConsumptionState() }
+    }
+}
+
+extension TerminalPTYProductionFenceOperation
+where Payload == (
+    frameState: TerminalPTYFrameState,
+    transitions: [TerminalPTYAppliedTransition]
+) {
+    /// Captures a diagnostic boundary before failure cleanup can discard the evidence.
+    package static var diagnosticState: Self {
+        Self { owner in owner.drainedDiagnosticState() }
+    }
+}
+
+extension TerminalPTYProductionFenceOperation where Payload == Terminal {
+    /// Detaches delivery, starts shutdown, and hands back the terminal to cache.
+    package static var beginCloseAndSnapshot: Self {
+        Self { owner in owner.beginCloseAndSnapshot() }
+    }
+}
+
+extension TerminalPTYProductionFenceOperation where Payload == Void {
+    /// Installs the pane consumer's wakeup unless teardown has already finished.
+    package static func installUpdateHandler(
+        _ handler: @escaping @Sendable (TerminalPTYUpdateSignal) -> Void
+    ) -> Self {
+        Self { owner in owner.installUpdateHandler(handler) }
+    }
 }
 
 /// Lets the controller cross-check its attributed count against the host's raw count.
-package struct TerminalPTYProductionFenceResult: Sendable {
-    package let output: TerminalPTYProductionFenceOutput
+package struct TerminalPTYProductionFenceResult<Payload: Sendable>: Sendable {
+    package let payload: Payload
     package let entryCount: UInt64
 }
 
@@ -819,44 +845,12 @@ public actor TerminalPTYHost {
     // repaint instead of stale rows.
 
     /// Performs every controller-owned fence through the host's one counted sync path.
-    package nonisolated func performProductionFence(
-        _ operation: TerminalPTYProductionFenceOperation
-    ) -> TerminalPTYProductionFenceResult {
-        let fenced = fence(countsAsProduction: true) {
-            owner -> TerminalPTYProductionFenceOutput in
-            switch operation {
-            case .frameState:
-                return .frameState(owner.drainedFrameState())
-            case .consumptionState:
-                let consumption = owner.drainedConsumptionState()
-                return .consumptionState(
-                    frameState: consumption.frameState,
-                    result: consumption.result,
-                    transitions: consumption.transitions
-                )
-            case .diagnosticState:
-                return .diagnosticState(
-                    frameState: owner.drainedFrameState(),
-                    transitions: owner.appliedTransitions
-                )
-            case .stateSynchronization:
-                return .stateSynchronization(
-                    terminal: owner.terminal,
-                    cursor: owner.flightTape.liveCursor()
-                )
-            case .beginCloseAndSnapshot:
-                owner.updateHandler = nil
-                owner.beginShutdown(completion: nil)
-                return .closeSnapshot(owner.terminal)
-            case .installUpdateHandler(let handler):
-                if owner.teardownFinished == false {
-                    owner.updateHandler = handler
-                }
-                return .updateHandlerInstalled
-            }
-        }
+    package nonisolated func performProductionFence<Payload: Sendable>(
+        _ operation: TerminalPTYProductionFenceOperation<Payload>
+    ) -> TerminalPTYProductionFenceResult<Payload> {
+        let fenced = fence(countsAsProduction: true) { owner in operation.build(owner) }
         return TerminalPTYProductionFenceResult(
-            output: fenced.value,
+            payload: fenced.value,
             entryCount: fenced.productionEntryCount
         )
     }
@@ -1009,7 +1003,7 @@ public actor TerminalPTYHost {
     /// two paths. Transitions are selected before the drain, which is the ordering the
     /// hand-over contract above depends on; keeping one copy is what stops the two from
     /// drifting apart.
-    private func drainedConsumptionState() -> (
+    fileprivate func drainedConsumptionState() -> (
         frameState: TerminalPTYFrameState,
         result: PaneProcessLifecycleResult?,
         transitions: [TerminalPTYAppliedTransition]?
@@ -1028,9 +1022,37 @@ public actor TerminalPTYHost {
         frameState: TerminalPTYFrameState,
         transitions: [TerminalPTYAppliedTransition]
     ) {
-        fence(countsAsProduction: false) { owner in
-            (owner.drainedFrameState(), owner.appliedTransitions)
-        }.value
+        fence(countsAsProduction: false) { owner in owner.drainedDiagnosticState() }.value
+    }
+
+    /// The one owner-isolated build of the diagnostic payload, shared by the production fence
+    /// and its test counterpart. The drain precedes the transition read, which is the opposite
+    /// of the consumption payload above: a diagnostic capture wants every transition applied up
+    /// to the boundary the drain just established.
+    fileprivate func drainedDiagnosticState() -> (
+        frameState: TerminalPTYFrameState,
+        transitions: [TerminalPTYAppliedTransition]
+    ) {
+        (drainedFrameState(), appliedTransitions)
+    }
+
+    /// Detaches the pane consumer and starts bounded shutdown, returning the terminal the
+    /// controller caches as its final one. Owner-isolated so the detach, the shutdown, and the
+    /// copy are one indivisible step: a signal delivered between them would reach a consumer
+    /// that has stopped reading.
+    fileprivate func beginCloseAndSnapshot() -> Terminal {
+        updateHandler = nil
+        beginShutdown(completion: nil)
+        return terminal
+    }
+
+    /// Installs the pane consumer's wakeup, dropping it once teardown has finished so a
+    /// late installation cannot resurrect delivery on a host that has stopped.
+    fileprivate func installUpdateHandler(
+        _ handler: @escaping @Sendable (TerminalPTYUpdateSignal) -> Void
+    ) {
+        guard teardownFinished == false else { return }
+        updateHandler = handler
     }
 
     /// Returns the production census without counting the test's own inspection fence.
@@ -1055,7 +1077,7 @@ public actor TerminalPTYHost {
         }
     }
 
-    private func drainedFrameState() -> TerminalPTYFrameState {
+    fileprivate func drainedFrameState() -> TerminalPTYFrameState {
         let damage = terminal.drainDamage()
         let clipboardWrite = terminal.drainPendingClipboardWrite()
         let semanticEvents = terminal.drainSemanticEvents()
