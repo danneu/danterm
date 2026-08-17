@@ -1,4 +1,9 @@
 // Real-system PTY tests for launch ownership, ordered IO, resize, and exit convergence.
+//
+// Two suites, split by what the test needs from the machine: the childless-channel tests own
+// nothing outside their own pair of descriptors and run in parallel, while the tests that fork
+// a real child are serialized on the process-wide state they share. The helpers below serve
+// both, so both suites live in this file.
 import Darwin
 import Foundation
 import Synchronization
@@ -10,8 +15,11 @@ import PaneProcessLifecycle
 @testable import TerminalCore
 import TerminalCoreRecording
 
-/// Exercises the native owner only through real PTYs and controlled child behavior.
-@Suite(.serialized)
+/// Exercises the owner across a real PTY master with no process at the other end.
+///
+/// Nothing here forks, signals, or reaps, so nothing here contends for machine state another
+/// test can observe. These run in parallel; the serialized suite below states what its own
+/// tests share.
 struct TerminalPTYHostTests {
     @Test("character and Insert keys encode at the PTY owner", .timeLimit(.minutes(1)))
     func widenedKeysEncodeAtPTYOwner() async throws {
@@ -255,6 +263,7 @@ struct TerminalPTYHostTests {
         #expect(host.fencedSnapshot().hoveredLink == nil)
         await host.close()
     }
+
     @Test("frame-state reads drain damage without changing ordinary snapshots")
     func frameStateReadsDrainDamage() async throws {
         let host = try makeHost()
@@ -417,34 +426,6 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
-    @Test("consumption fence pairs final frame damage with exit metadata", .timeLimit(.minutes(1)))
-    func consumptionFencePairsFrameAndExitMetadata() async throws {
-        // Intent: one synchronous consumer read returns terminal damage, lifecycle
-        //   result, and captured transitions from the same owner-queue boundary.
-        // Why it exists: reading lifecycle metadata and frame state through separate
-        //   fences both undercounted benchmark stall time and allowed intervening owner
-        //   work to make the values describe different moments.
-        // Scenario: a child prints its final frame and exits; the pane consumes the
-        //   redraw and exit evidence together before publishing the session end.
-        let host = try makeHost(captureTransitions: true)
-        _ = host.fencedFrameState()
-        await host.start(makeLaunchInput(command: "printf '__FINAL_FRAME__'; exit 7"))
-        #expect(await host.waitForResult() == .exited(.exited(7)))
-
-        let consumption = host.fencedConsumptionState()
-
-        #expect(consumption.frameState.damage != .none)
-        #expect(consumption.frameState.terminal.screenText.contains("__FINAL_FRAME__"))
-        #expect(consumption.result == .exited(.exited(7)))
-        #expect(consumption.transitions?.contains {
-            if case let .feed(bytes) = $0 {
-                return String(decoding: bytes, as: UTF8.self).contains("__FINAL_FRAME__")
-            }
-            return false
-        } == true)
-        await host.close()
-    }
-
     @Test("OSC 52 wakes and drains once without sending query data to the child", .timeLimit(.minutes(1)))
     func clipboardWriteFrameStateAndReadDenial() async throws {
         // Intent: owner framing drains completed clipboard writes independently from replies.
@@ -492,6 +473,904 @@ struct TerminalPTYHostTests {
         #expect(complete.damage == .none)
         #expect(complete.clipboardWrite == "hello")
         #expect(host.fencedFrameState().clipboardWrite == nil)
+        await host.close()
+    }
+
+    @Test(
+        "a pointer between two resizes closes the run and observes the earlier grid",
+        .timeLimit(.minutes(1))
+    )
+    func nonResizeSubmissionClosesTheCoalescingRun() async throws {
+        // Intent: coalescing never reaches across a non-resize submission, so
+        //   the pointer still sees the grid of the last resize submitted before
+        //   it and both surrounding resizes apply.
+        // Why it exists: pointer hit-testing reads the grid, so a resize that
+        //   the coalescer skipped because a later one was already queued would
+        //   silently move where a click lands -- the host's joint FIFO order
+        //   promises geometry that a run-wide skip would break.
+        // Scenario: a drag interrupted by a click, with the click's viewport
+        //   row 0 resolving against the taller grid submitted just before it.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
+
+        host.resize(.init(columns: 80, rows: 30))
+        let tallTopLine = topViewportLine(host.fencedSnapshot())
+        host.resize(.init(columns: 80, rows: 10))
+        let shortTopLine = topViewportLine(host.fencedSnapshot())
+        try #require(tallTopLine.isEmpty == false)
+        try #require(tallTopLine != shortTopLine)
+        let baseline = await host.transitions().count
+
+        let owner = OwnerHold()
+        owner.hold(host)
+        host.resize(.init(columns: 80, rows: 30))
+        host.sendPointer(.down(.left, column: 2, row: 0, clickCount: 3))
+        host.resize(.init(columns: 80, rows: 10))
+        owner.release()
+
+        let snapshot = host.fencedSnapshot()
+        let ordered = (await host.transitions()).dropFirst(baseline).filter { transition in
+            switch transition {
+            case .resize: true
+            case .mouse(.down(.left, _, _, _, _, _)): true
+            default: false
+            }
+        }
+        #expect(ordered == [
+            .resize(.init(columns: 80, rows: 30)),
+            .mouse(.down(.left, column: 2, row: 0, clickCount: 3)),
+            .resize(.init(columns: 80, rows: 10)),
+        ])
+        #expect(
+            snapshot.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines) == tallTopLine
+        )
+        #expect(snapshot.geometry.rows.count == 10)
+        await host.close()
+    }
+
+    @Test("a resize with nothing behind it applies without a settle delay", .timeLimit(.minutes(1)))
+    func loneResizeAppliesWithoutWaiting() async throws {
+        // Intent: coalescing costs a lone resize nothing -- the grid is applied
+        //   by the time the next owner-queue fence returns.
+        // Why it exists: the rejected debounce alternative would have made every
+        //   settled resize wait out a timer, and nothing else in this suite fails
+        //   if a delay is added rather than a submission dropped.
+        let host = try await startChildlessHost().host
+
+        host.resize(.init(columns: 100, rows: 31))
+        let snapshot = host.fencedSnapshot()
+
+        #expect(snapshot.geometry.columns == 100)
+        #expect(snapshot.geometry.rows.count == 31)
+        await host.close()
+    }
+
+    @Test("an unchanged terminal emits no update work", .timeLimit(.minutes(1)))
+    func unchangedTerminalEmitsNoUpdate() async throws {
+        let host = try await startChildlessHost(captureTransitions: false).host
+        let signalsBefore = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+
+        host.resize(.init(columns: 80, rows: 24))
+        _ = await host.snapshot()
+
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == signalsBefore)
+        await host.close()
+    }
+
+    @Test("terminal synchronization and recorder cursor share one owner fence", .timeLimit(.minutes(1)))
+    func stateSynchronizationSharesRecorderFence() async throws {
+        // Intent: pair serialized terminal state with the first event not reflected in that state.
+        // Why it exists: separate terminal and recorder reads can drop or double-apply output between them.
+        // Scenario: the child prints history, the host fences a sync, and later output resumes at its cursor.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("one\r\n"))
+
+        let fenced = host.fencedStateSynchronization()
+        var resumed = try #require(Terminal(
+            columns: fenced.state.columns,
+            rows: fenced.state.rows
+        ))
+        resumed.feed(fenced.state.bytes)
+        host.send(Array("\n".utf8))
+        #expect(await pane.writeFromChild("two\r\n"))
+        let suffix = host.fencedFlightRecording(from: fenced.cursor)
+        for recorded in suffix.events {
+            switch recorded.event {
+            case .feed(let bytes):
+                resumed.feed(bytes)
+            case .resize(let columns, let rows):
+                resumed.resize(columns: columns, rows: rows)
+            default:
+                break
+            }
+        }
+        let source = host.fencedSnapshot()
+
+        #expect(resumed.screenText == source.screenText)
+        #expect(resumed.scrollbackRowCount == source.scrollbackRowCount)
+        #expect(suffix.events.contains { if case .feed = $0.event { true } else { false } })
+        await host.close()
+    }
+
+    @Test(
+        "stream fence validates a supplied cursor beside retained tape and exact state",
+        .timeLimit(.minutes(1))
+    )
+    func streamFenceCarriesPlacementAndState() async throws {
+        // Intent: one owner turn returns remote cursor placement, retained events, and state.
+        // Why it exists: separate fences can splice a cursor onto state from another moment.
+        // Scenario: a live pane rejects a foreign cursor while its exact state stays replayable.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("pane-state"))
+        let foreign = TerminalFlightRecordingCursor(
+            recorderLifetimeId: UUID(),
+            nextSequence: 0,
+            feedBytesBeforeNextSequence: 0,
+            writeBytesBeforeNextSequence: 0
+        )
+
+        let fenced = host.fencedFlightRecordingStream(from: foreign)
+        var resumed = try #require(Terminal(
+            columns: fenced.synchronization.state.columns,
+            rows: fenced.synchronization.state.rows
+        ))
+        resumed.feed(fenced.synchronization.state.bytes)
+
+        #expect(fenced.requested.isUnplaceable)
+        #expect(fenced.retained.events.isEmpty == false)
+        #expect(fenced.synchronization.cursor == fenced.retained.nextCursor)
+        #expect(resumed.screenText == host.fencedSnapshot().screenText)
+        await host.close()
+    }
+
+    @Test(
+        "follow fence rearms its notice beside a suffix and exact replacement state",
+        .timeLimit(.minutes(1))
+    )
+    func followFenceCarriesSuffixAndState() async throws {
+        // Intent: a followed suffix and its replacement state end at the same recorder cursor.
+        // Why it exists: eviction during delivery must repair state without losing later output.
+        // Scenario: the child waits between two writes while a follower arms at the first one.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("one"))
+        let origin = host.fencedFlightRecordingOriginFromNow()
+        let subscriptionId = UUID()
+        host.addFlightRecordingFollowNotice(
+            id: subscriptionId,
+            from: origin.cursor,
+            notify: {}
+        )
+        host.send(Array("\n".utf8))
+        #expect(await pane.writeFromChild("two"))
+
+        let fenced = try #require(host.fencedFlightRecordingFollowStream(
+            subscriptionId: subscriptionId,
+            from: origin.cursor
+        ))
+        var resumed = try #require(Terminal(
+            columns: fenced.synchronization.state.columns,
+            rows: fenced.synchronization.state.rows
+        ))
+        resumed.feed(fenced.synchronization.state.bytes)
+
+        #expect(fenced.snapshot.events.isEmpty == false)
+        #expect(fenced.synchronization.cursor == fenced.snapshot.nextCursor)
+        #expect(resumed.screenText == host.fencedSnapshot().screenText)
+        host.removeFlightRecordingFollowNotice(id: subscriptionId)
+        await host.close()
+    }
+
+    @Test("input the child has not accepted stays out of the tape", .timeLimit(.minutes(1)))
+    func backpressuredInputIsRecordedOnlyOnceItCrosses() async throws {
+        // Intent: the tape holds the bytes the PTY accepted and no others, so input still
+        //   waiting in the owner's own buffer leaves no event behind.
+        // Why it exists: an event written when bytes are queued charges the app's own
+        //   backpressure to the child, which is the attribution this facility exists to make.
+        // Scenario: megabytes are submitted to a channel whose child end nobody reads.
+        let host = try await startChildlessHost(captureTransitions: false).host
+
+        let submission = host.fencedFlightRecordingOriginFromNow().cursor
+        let payload = [UInt8](repeating: UInt8(ascii: "A"), count: 4 * 1024 * 1024)
+        host.send(payload, origin: 1)
+        let pending = await host.settledPendingInputByteCount()
+
+        let recorded = host.fencedFlightRecording(from: submission)
+            .events
+            .compactMap(writtenBytes)
+        #expect(pending > 0)
+        #expect(recorded.reduce(0) { $0 + $1.count } == payload.count - pending)
+        #expect(recorded.allSatisfy { $0.allSatisfy { $0 == UInt8(ascii: "A") } })
+
+        await host.close()
+    }
+
+    @Test("a mismatched megabyte is reported, not diffed", .timeLimit(.minutes(1)))
+    func mismatchedPayloadIsReportedWithoutDiffing() {
+        // Intent: comparing megabyte payloads costs one pass whether they match or not.
+        // Why it exists: the incident. `#expect(recorded == payload)` on a 1 MiB array
+        //   failed under load, and Swift Testing rendered that failure by computing
+        //   `BidirectionalCollection.difference(from:)` -- about quadratic, four seconds
+        //   at 32 KiB, and never finishing at a megabyte. The lane died on its deadline
+        //   and left the test binary spinning at full CPU with no parent, which is how
+        //   this was found. A `.timeLimit` cannot catch it, because the diff is
+        //   synchronous and does not yield, so the guard has to be the comparison itself.
+        // Scenario: the shape of a partial drain -- a payload against its own prefix.
+        let payload = (0..<(1024 * 1024)).map { UInt8($0 % 251) }
+        let truncated = Array(payload.prefix(payload.count - 1024))
+
+        let started = ContinuousClock().now
+        withKnownIssue("the payloads are deliberately unequal") {
+            expectBytes(truncated, equal: payload, "deliberate mismatch")
+        }
+        let elapsed = ContinuousClock().now - started
+
+        // Generous on purpose: the failure mode is hours, not milliseconds, so this
+        // separates the two without pinning the comparison to a machine's speed.
+        #expect(elapsed < .seconds(5), "reporting the mismatch took \(elapsed)")
+    }
+
+    @Test("owner-originated bytes cross without an origin stamp", .timeLimit(.minutes(1)))
+    func ownerOriginatedBytesCarryNoOrigin() async throws {
+        // Intent: a terminal reply has no origin earlier than its own transfer, so its event
+        //   carries one stamp, while input submitted with an origin beside it carries two.
+        // Why it exists: I3. An origin defaulted to the transfer time, or to zero, would read
+        //   as a measurement rather than as the absence of one.
+        // Scenario: the child asks for the cursor position and the user types straight after.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+
+        let submission = host.fencedFlightRecordingOriginFromNow().cursor
+        #expect(await pane.writeFromChild("\u{1B}[6n"))
+        let typedOrigin = DispatchTime.now().uptimeNanoseconds
+        host.send(Array("hi".utf8), origin: typedOrigin)
+        #expect(await host.settledPendingInputByteCount() == 0)
+
+        let events = host.fencedFlightRecording(from: submission)
+            .events
+            .filter { writtenBytes($0) != nil }
+        // Row 1 column 1: nothing has been printed to this pane, because the only
+        // thing that could print to it is this test. The coordinates stay exact
+        // because they are what notices output nobody asked for -- and the screen
+        // rides along with a failure, so the next such surprise explains itself
+        // instead of arriving as a byte array.
+        #expect(events.compactMap(writtenBytes) == [
+            Array("\u{1B}[1;1R".utf8),
+            Array("hi".utf8),
+        ], "screen when the cursor was reported:\n\(occupiedScreenText(host))")
+        #expect(events.first?.originElapsedNanoseconds == nil)
+        #expect(events.last?.originElapsedNanoseconds != nil)
+
+        await host.close()
+    }
+
+    @Test("primary wheel intent scrolls locally without writing child bytes", .timeLimit(.minutes(1)))
+    func primaryWheelRoutesLocally() async throws {
+        // Intent: route a wheel step using the authoritative screen selected on the host queue.
+        // Why it exists: deciding from a lagging session snapshot can emit arrows on primary.
+        // Scenario: the user wheels upward through retained output while the child waits.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
+        let writeBaseline = await host.inputWrites().count
+
+        host.sendWheel(.init(rowDelta: -3, column: 0, row: 0))
+        let snapshot = host.fencedSnapshot()
+
+        #expect(snapshot.scrollProjection.isFollowing == false)
+        #expect(snapshot.scrollProjection.topRow == snapshot.scrollbackRowCount - 3)
+        #expect(await host.inputWrites().count == writeBaseline)
+
+        await host.close()
+        host.scrollToBottom()
+        _ = host.fencedSnapshot()
+        #expect((await host.resourceSnapshot()).isReleased)
+    }
+
+    @Test("alternate wheel intent writes counted arrows without local navigation", .timeLimit(.minutes(1)))
+    func alternateWheelRoutesToChild() async throws {
+        // Intent: select the alternate-screen arrow arm exactly once on the owner queue.
+        // Why it exists: wheel routing outside the owner can swallow input during a 1049 race.
+        // Scenario: the user wheels upward three rows while a full-screen application is active.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[?1h\u{1B}[?1049h"))
+        let writeBaseline = await host.inputWrites().count
+        let up = [UInt8]([0x1B, 0x4F, 0x41])
+
+        host.sendWheel(.init(rowDelta: -3, column: 0, row: 0))
+        let snapshot = host.fencedSnapshot()
+        let writes = await host.inputWrites()
+
+        #expect(snapshot.isAlternateScreenActive)
+        #expect(snapshot.scrollProjection.isFollowing)
+        #expect(Array(writes.dropFirst(writeBaseline)) == [up + up + up])
+
+        await host.close()
+    }
+
+    @Test("owner encodes key paste and focus from modes applied by earlier output", .timeLimit(.minutes(1)))
+    func semanticInputUsesAuthoritativeModes() async throws {
+        // Intent: read child-controlled modes, encode semantic input, and write it in one owner turn.
+        // Why it exists: a controller-side mode mirror can lag immediately after a child mode change.
+        // Scenario: a TUI enables DECCKM, bracketed paste, and focus reporting before accepting input.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[?1h\u{1B}[?2004h\u{1B}[?1004h"))
+        let baseline = await host.inputWrites().count
+        let snapshotBeforeFocus = await host.snapshot()
+
+        host.sendKey(.up, modifiers: [])
+        host.sendPaste("one\ntwo")
+        host.sendFocus(true)
+        _ = host.fencedSnapshot()
+
+        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
+            Array("\u{1B}OA".utf8),
+            Array("\u{1B}[200~one\ntwo\u{1B}[201~".utf8),
+            Array("\u{1B}[I".utf8),
+        ])
+        #expect(await host.snapshot() == snapshotBeforeFocus)
+        await host.close()
+    }
+
+    @Test("empty safe paste and focus preserve a browsing viewport", .timeLimit(.minutes(1)))
+    func nonScrollingSemanticInputPreservesViewport() async throws {
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
+        host.scroll(byRows: -3)
+        let browsing = host.fencedSnapshot()
+        let baseline = await host.inputWrites().count
+
+        host.sendPaste("\u{1B}\u{7F}\u{0080}")
+        host.sendFocus(true)
+        _ = host.fencedSnapshot()
+
+        #expect(await host.inputWrites().count == baseline)
+        #expect((await host.snapshot()).scrollProjection == browsing.scrollProjection)
+
+        host.sendPaste("safe")
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing)
+        await host.close()
+    }
+
+    @Test("semantic input capture records normalized events in owner order", .timeLimit(.minutes(1)))
+    func semanticInputCaptureOrder() async throws {
+        let host = try await startChildlessHost().host
+
+        host.sendKey(.f5, modifiers: [.shift])
+        host.sendPaste("paste")
+        host.sendFocus(false)
+        _ = host.fencedSnapshot()
+
+        let events = (await host.transitions()).map(\.recordingEvent)
+        #expect(events.contains(.input(key: .f5, modifiers: [.shift])))
+        #expect(events.contains(.paste("paste")))
+        #expect(events.contains(.focus(false)))
+        await host.close()
+    }
+
+    @Test("wheel races with 1049 transitions use exactly the screen seen by the owner", .timeLimit(.minutes(1)))
+    func wheelTransitionRaceUsesOwnerScreen() async throws {
+        // Intent: prove both race directions resolve on the shared FIFO instead of a caller snapshot.
+        // Why it exists: a primary-to-alt race can leak arrows, while alt-to-primary can swallow them.
+        // Scenario: wheel intent is queued immediately after the commands that make the
+        //   child enter and leave alt screen, and before the child's answer arrives.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
+        let down = [UInt8]([0x1B, 0x5B, 0x42])
+
+        let enter = Array("enter-alt-screen\n".utf8)
+        let enterWriteBaseline = await host.inputWrites().count
+        host.send(enter)
+        host.sendWheel(.init(rowDelta: -1, column: 0, row: 0))
+        _ = host.fencedSnapshot()
+        #expect(Array((await host.inputWrites()).dropFirst(enterWriteBaseline)) == [enter])
+        #expect((await host.transitions()).contains(.scrollByRows(-1)))
+        #expect(await pane.writeFromChild("\u{1B}[?1049h"))
+        #expect(host.fencedSnapshot().isAlternateScreenActive)
+
+        let exit = Array("leave-alt-screen\n".utf8)
+        let exitWriteBaseline = await host.inputWrites().count
+        host.send(exit)
+        host.sendWheel(.init(rowDelta: 2, column: 0, row: 0))
+        _ = host.fencedSnapshot()
+        #expect(Array((await host.inputWrites()).dropFirst(exitWriteBaseline)) == [
+            exit,
+            down + down,
+        ])
+        #expect(await pane.writeFromChild("\u{1B}[?1049l"))
+        #expect(host.fencedSnapshot().isAlternateScreenActive == false)
+
+        await host.close()
+    }
+
+    @Test("captured SGR pointer reports use modes already applied by child output", .timeLimit(.minutes(1)))
+    func capturedPointerUsesAuthoritativeModes() async throws {
+        // Intent: decide and encode pointer input from the terminal modes on the owner FIFO.
+        // Why it exists: mode lookup outside the owner can race child DECSET output.
+        // Scenario: the child enables click tracking and SGR encoding before the user clicks.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[?1000;1006h"))
+        let baseline = await host.inputWrites().count
+
+        host.sendPointer(.down(.left, column: 4, row: 2))
+        host.sendPointer(.up(.left, column: 4, row: 2))
+        _ = host.fencedSnapshot()
+
+        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
+            Array("\u{1B}[<0;5;3M".utf8),
+            Array("\u{1B}[<0;5;3m".utf8),
+        ])
+        await host.close()
+    }
+
+    @Test("Shift extension stays local while captured and replays exactly", .timeLimit(.minutes(1)))
+    func capturedShiftSelectionReplays() async throws {
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[2J\u{1B}[H\u{1B}[?1000halpha beta"))
+        let baseline = await host.inputWrites().count
+        let lines = host.fencedSnapshot().viewportText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
+        let alpha = try #require(lines[row].range(of: "alpha"))
+        let column = lines[row].distance(from: lines[row].startIndex, to: alpha.lowerBound)
+
+        host.sendPointer(.down(
+            .left,
+            column: column,
+            row: row,
+            modifiers: [.shift],
+            clickCount: 2
+        ))
+        host.sendPointer(.up(.left, column: column, row: row, modifiers: [.shift]))
+        // The extending click count maps to line selection on a fresh gesture, but the settled
+        // token granularity wins and entering beta includes that token as one unit.
+        host.sendPointer(.down(
+            .left,
+            column: column + 6,
+            row: row,
+            offsetX: 0.75,
+            modifiers: [.shift],
+            clickCount: 3
+        ))
+        host.sendPointer(.up(.left, column: column + 6, row: row, modifiers: [.shift]))
+        let snapshot = host.fencedSnapshot()
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "captured-shift-selection"),
+            initial: .init(columns: 80, rows: 24),
+            events: (await host.transitions()).map(\.recordingEvent)
+        )
+
+        #expect(snapshot.selectedText == "alpha beta")
+        #expect(snapshot.selectionGranularity == .terminalToken)
+        #expect(await host.inputWrites().count == baseline)
+        #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
+        await host.close()
+    }
+
+    @Test("captured and Shift wheel routes preserve a browsing viewport", .timeLimit(.minutes(1)))
+    func wheelRoutesPreserveBrowsing() async throws {
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines + "\u{1B}[?1000;1006h"))
+        host.scroll(byRows: -3)
+        let browsing = host.fencedSnapshot().scrollProjection
+        let baseline = await host.inputWrites().count
+
+        host.sendWheel(.init(rowDelta: -1, column: 2, row: 3))
+        _ = host.fencedSnapshot()
+        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
+            Array("\u{1B}[<64;3;4M".utf8),
+        ])
+        #expect(host.fencedSnapshot().scrollProjection == browsing)
+
+        let reportCount = await host.inputWrites().count
+        host.sendWheel(.init(rowDelta: -1, column: 2, row: 3, modifiers: [.shift]))
+        let shifted = host.fencedSnapshot().scrollProjection
+        #expect(await host.inputWrites().count == reportCount)
+        #expect(shifted.topRow == browsing.topRow - 1)
+        #expect(shifted.isFollowing == false)
+        await host.close()
+    }
+
+    @Test("uncaptured pane menu is returned only after right-button release", .timeLimit(.minutes(1)))
+    func paneMenuWaitsForRelease() async throws {
+        let host = try await startChildlessHost().host
+        let menus = AsyncStream<TerminalViewportCell>.makeStream()
+        var iterator = menus.stream.makeAsyncIterator()
+
+        host.sendPointer(.down(.right, column: 9, row: 4)) { cell in
+            _ = menus.continuation.yield(cell)
+        }
+        _ = host.fencedSnapshot()
+        host.sendPointer(.up(.right, column: 9, row: 4)) { cell in
+            _ = menus.continuation.yield(cell)
+        }
+
+        #expect(await iterator.next() == .init(column: 9, row: 4))
+        await host.close()
+    }
+
+    @Test("user input snaps browsing to bottom and capture replays the transition", .timeLimit(.minutes(1)))
+    func userInputSnapCaptureEquality() async throws {
+        // Intent: record the local snap before the user write without classifying replies as input.
+        // Why it exists: a non-echoing child cannot reconstruct this viewport mutation from output.
+        // Scenario: the user scrolls up, types into a waiting process, and captures the pane.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
+        host.scroll(byRows: -4)
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing == false)
+
+        host.send(Array("typed".utf8))
+        let transitions = await host.transitions()
+        let snapshot = host.fencedSnapshot()
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "input-snap"),
+            initial: .init(columns: 80, rows: 24),
+            events: transitions.map(\.recordingEvent)
+        )
+
+        #expect(snapshot.scrollProjection.isFollowing)
+        #expect(transitions.contains(.scrollToBottom))
+        #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
+
+        await host.close()
+    }
+
+    @Test("scrollbar commands clamp on the owner queue and emit updates only for changes", .timeLimit(.minutes(1)))
+    func ownerScrollbarCommandsClampAndDedupe() async throws {
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
+        _ = host.fencedFrameState()
+        let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+        let writeBaseline = await host.inputWrites().count
+
+        host.scroll(toTopRow: -100)
+        let top = host.fencedSnapshot()
+        let afterChange = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+        host.scroll(toTopRow: -100)
+        _ = host.fencedSnapshot()
+
+        #expect(top.scrollProjection.topRow == 0)
+        #expect(top.scrollProjection.isFollowing == false)
+        #expect(afterChange == baseline + 1)
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterChange)
+        #expect(await host.inputWrites().count == writeBaseline)
+
+        host.scrollToBottom()
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing)
+        await host.close()
+    }
+
+    @Test("search begin, navigate, and clear publish frames and report status", .timeLimit(.minutes(1)))
+    func ownerSearchMutationsPublishAndReportStatus() async throws {
+        // Intent: each enqueued search mutation lands on the owner queue, republishes a
+        //   frame so the moved highlight redraws, and reports the resulting status.
+        // Why it exists: the highlight is planned from the owner's terminal value, so a
+        //   mutation that never publishes leaves the previous match painted on screen.
+        // Scenario: a pane holding two occurrences of a needle is searched, walked to the
+        //   older match, then cleared.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("hit\r\nmiss\r\nhit\r\n"))
+        _ = host.fencedFrameState()
+        let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
+        var iterator = statuses.stream.makeAsyncIterator()
+        let report: @Sendable (TerminalSearchStatus?) -> Void = { statuses.continuation.yield($0) }
+        let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+
+        host.beginSearch("hit", onStatus: report)
+        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 2))
+        let afterBegin = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+        #expect(afterBegin == baseline + 1)
+        #expect(host.fencedFrameState().terminal.activeSearchMatchRange != nil)
+
+        host.searchNext(onStatus: report)
+        #expect(try #require(await iterator.next()) == .matched(selected: 1, total: 2))
+        let afterNext = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+        #expect(afterNext == afterBegin + 1)
+        _ = host.fencedFrameState()
+
+        host.searchPrevious(onStatus: report)
+        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 2))
+        let afterPrevious = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+        #expect(afterPrevious == afterNext + 1)
+        _ = host.fencedFrameState()
+
+        host.clearSearch(onStatus: report)
+        #expect(await iterator.next() == .some(nil))
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterPrevious + 1)
+        #expect(host.fencedFrameState().terminal.activeSearchMatchRange == nil)
+        await host.close()
+    }
+
+    @Test("search mutations that change nothing still report status", .timeLimit(.minutes(1)))
+    func ownerUnchangingSearchMutationsStillReportStatus() async throws {
+        // Intent: a repeated failed needle and a navigate with only one match report
+        //   status even though the mutation records no frame work.
+        // Why it exists: frame publication can skip these no-ops, but the overlay still needs
+        //   to be told that the search found nothing or cannot move.
+        // Scenario: typing a needle with no matches, then re-typing it; and pressing
+        //   Cmd-G on the only match.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("hit\r\n"))
+        let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
+        var iterator = statuses.stream.makeAsyncIterator()
+        let report: @Sendable (TerminalSearchStatus?) -> Void = { statuses.continuation.yield($0) }
+
+        host.beginSearch("zzz", onStatus: report)
+        #expect(try #require(await iterator.next()) == .empty)
+        let afterFirstMiss = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+
+        host.beginSearch("zzz", onStatus: report)
+        #expect(try #require(await iterator.next()) == .empty)
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterFirstMiss)
+
+        host.beginSearch("hit", onStatus: report)
+        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 1))
+        let afterHit = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
+
+        host.searchNext(onStatus: report)
+        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 1))
+        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterHit)
+        await host.close()
+    }
+
+    @Test("cancelled result and output waits resume promptly without teardown", .timeLimit(.minutes(1)))
+    func cancelledWaitsResumePromptly() async throws {
+        // Intent: cancelling a task suspended in waitForResult/waitForOutput
+        //   resumes it promptly (nil/false) while the pane keeps running.
+        // Why it exists: these waits used bare checked continuations that ignore
+        //   cancellation, so a timed-out Swift Testing test never unwound and the
+        //   whole suite sat idle forever holding the PTY.
+        // Scenario: the 2026-07-22 stress run where launchRecipeAndDuplexIO hit
+        //   its 60s time limit yet the run had to be killed by hand.
+        let host = try await startChildlessHost(captureTransitions: false).host
+
+        let resultTask = Task { await host.waitForResult() }
+        let outputTask = Task { await host.waitForOutput(containing: Array("__NEVER__".utf8)) }
+        try await Task.sleep(for: .milliseconds(50))
+        resultTask.cancel()
+        outputTask.cancel()
+
+        let cancelledResult = await value(of: resultTask, withinMilliseconds: 2000)
+        let cancelledOutput = await value(of: outputTask, withinMilliseconds: 2000)
+        #expect(cancelledResult == .some(nil))
+        #expect(cancelledOutput == false)
+
+        // A wait born already-cancelled must not register a stranded waiter.
+        let bornCancelled = Task { await host.waitForResult() }
+        bornCancelled.cancel()
+        #expect(await value(of: bornCancelled, withinMilliseconds: 2000) == .some(nil))
+
+        await host.close()
+        #expect((await host.resourceSnapshot()).isReleased)
+    }
+
+    @Test("waiting on output a quiesced host already produced never reports absence", .timeLimit(.minutes(1)))
+    func waitForOutputAfterQuiescenceSeesRetainedEvidence() async throws {
+        // Intent: `waitForOutput(containing:)` answers from retained evidence when the
+        //   bytes arrived before the wait started, even though the host has already
+        //   torn down and can never deliver another output callback.
+        // Why it exists: the helper registered its quiescence fallback before consulting
+        //   the evidence it was handed, so the two raced on the host queue. A pane that
+        //   prints and is immediately torn down -- the common shape -- made every such
+        //   wait a coin flip, surfacing as an unexplained `#expect` failure at the wait
+        //   line.
+        // Scenario: `just test` runs its steps as a parallel pool; under that load the
+        //   host queue won the race often enough to fail the gate roughly one run in five.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("__SETTLED__"))
+        await host.close()
+
+        // Re-asking a torn-down host is the whole point: each call reinstalls the
+        // handler that teardown refuses, so only the evidence check can answer. One
+        // call would pass by luck often enough to hide the race; the loop does not.
+        var absences = 0
+        for _ in 0..<200 where await host.waitForOutput(containing: Array("__SETTLED__".utf8)) == false {
+            absences += 1
+        }
+        #expect(absences == 0)
+    }
+
+    @Test("waiting on output the host already discarded reports why, immediately", .timeLimit(.minutes(1)))
+    func waitForDiscardedOutputFailsImmediately() async throws {
+        // Intent: a wait whose answer can no longer be inside the host's bounded
+        //   evidence resolves at once, as a recorded issue naming the discard, instead
+        //   of suspending on a live pane that will never quiesce.
+        // Why it exists: `waitForOutput` reads a bounded window but reads like an
+        //   unbounded "was this ever printed?" question. When the answer had already
+        //   been discarded the wait was not slow, it was unsatisfiable -- and because a
+        //   live pane never quiesces it burned the whole test time limit before
+        //   reporting anything, pointing at the wait line rather than at the discard.
+        // Scenario: the 2026-08-03 gate hang in
+        //   `applicationTerminationClosesMultipleLivePanes`, where the chatty probe
+        //   printed `__READY__` once and then wrote 4 KiB forever, so sixteen writes
+        //   discarded the marker before the wait for it was armed (fix fdb9ec6).
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("__READY__"))
+
+        // The flood, deterministically: twice the host's retention window, so the marker
+        // cannot still be retained on an idle machine or a loaded one. The trailing
+        // marker is what proves the flood was consumed -- the host applies its output in
+        // order, so the flood is behind that answer -- and it is armed before the flood
+        // because that is the only way to ask about output a flood has already buried.
+        let flooded = host.expectOutput(containing: Array("__FLOODED__".utf8))
+        let flood = [UInt8](repeating: UInt8(ascii: "f"), count: 64 * 1024)
+        for _ in 0..<2 { #expect(pane.channel.writeFromChild(flood)) }
+        #expect(pane.channel.writeFromChild(Array("__FLOODED__".utf8)))
+        #expect(await flooded.satisfied())
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        var answer: Bool??
+        await withKnownIssue("the wait must say it cannot be answered") {
+            answer = await value(
+                of: Task { await host.waitForOutput(containing: Array("__READY__".utf8)) },
+                withinMilliseconds: 3000
+            )
+        }
+        // `nil` is the pre-fix outcome: the wait never resumed at all.
+        #expect(answer == .some(.some(false)))
+        #expect(clock.now - start < .seconds(1))
+        await host.close()
+    }
+
+    @Test("a match armed before a flood still sees a marker printed after it", .timeLimit(.minutes(1)))
+    func armedExpectationSurvivesFloodedOutput() async throws {
+        // Intent: once armed, a match is decided by the whole stream from that point on --
+        //   no volume of intervening output, and no chunk boundary inside the marker,
+        //   can lose it.
+        // Why it exists: this is the escape hatch the "already discarded" failure points
+        //   at, so it has to actually work; and it is the property that makes retaining
+        //   output unnecessary in the first place.
+        // Scenario: the shape a chatty pane forces -- the interesting marker arrives after
+        //   noise that no bounded window could have held.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        let expectation = host.expectOutput(containing: Array("__LATE__".utf8))
+        // Armed here for the same reason as the match under test: after the flood,
+        // nothing may ask about output any more. It is what splits the marker across two
+        // applied chunks, which is what a PTY read boundary landing inside it looks like.
+        let firstHalfApplied = host.expectOutput(containing: Array("__LA".utf8))
+
+        let flood = [UInt8](repeating: UInt8(ascii: "f"), count: 64 * 1024)
+        for _ in 0..<2 { #expect(pane.channel.writeFromChild(flood)) }
+        #expect(pane.channel.writeFromChild(Array("__LA".utf8)))
+        #expect(await firstHalfApplied.satisfied())
+        #expect(pane.channel.writeFromChild(Array("TE__".utf8)))
+
+        #expect(await expectation.satisfied())
+        await host.close()
+    }
+
+    @Test("a host on a childless channel lives and quiesces with nothing to reap", .timeLimit(.minutes(1)))
+    func childlessChannelHostReachesQuiescence() async throws {
+        // Intent: a host whose PTY has no child behind it starts, takes output,
+        //   transmits input, resizes, and reaches quiescence owning no process.
+        // Why it exists: source installation was the one process-plane step that
+        //   assumed a child existed, so a channel without one could not converge.
+        // Scenario: the test owns the child end of a real PTY and plays the child.
+        let channel = try ChildlessPTYChannel()
+        let host = try makeHost(spawner: channel)
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        channel.writeFromChild(Array("__READY__".utf8))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        let running = await host.resourceSnapshot()
+        #expect(running.hasOpenMaster)
+        #expect(running.hasLeader == false)
+        #expect(running.hasSession == false)
+
+        host.send(Array("typed".utf8))
+        host.resize(.init(columns: 100, rows: 31))
+        #expect(await host.drainedPendingInputByteCount() == 0)
+        await host.close()
+
+        let released = await host.resourceSnapshot()
+        #expect(released.isReleased)
+        #expect(released.census.forcedQuiescenceCount == 0)
+    }
+
+    @Test("bytes cross a childless channel in both directions", .timeLimit(.minutes(1)))
+    func childlessChannelCarriesBytesBothWays() async throws {
+        // Intent: output written at the child end reaches a fenced snapshot through
+        //   the host's own read path, and input reaches the child end byte for byte.
+        // Why it exists: input capture records what the reducer submitted, not what
+        //   crossed the master, so transmission itself had no coverage.
+        // Scenario: the test writes as the child, then reads back what the host sent.
+        let channel = try ChildlessPTYChannel()
+        let host = try makeHost(spawner: channel)
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+
+        channel.writeFromChild(Array("alpha".utf8))
+        #expect(await host.waitForSnapshot {
+            $0.fencedSnapshot().screenText.contains("alpha")
+        })
+
+        host.send(Array("typed\r".utf8))
+        // The whole transmission, not a suffix of it: the launch command line the
+        // policy hands the host is itself written to the PTY, and a childless channel
+        // receives it exactly as a shell would.
+        let transmitted = Array("\(childlessLaunchCommand)\n".utf8) + Array("typed\r".utf8)
+        #expect(await pollUntil({
+            channel.bytesReceivedFromHost() == transmitted
+        }, within: .seconds(20)))
+        await host.close()
+    }
+
+    @Test("a resize on a childless channel reaches the descriptor", .timeLimit(.minutes(1)))
+    func childlessChannelResizeReachesDescriptor() async throws {
+        // Intent: the host's TIOCSWINSZ lands on the adopted descriptor, and the
+        //   terminal geometry moves with it.
+        // Why it exists: a fixture that only carried bytes could be a socket pair.
+        //   A window size read back at the child end is what proves a real PTY.
+        // Scenario: the test reads TIOCGWINSZ at the child end after a resize.
+        let channel = try ChildlessPTYChannel()
+        let host = try makeHost(spawner: channel)
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        channel.writeFromChild(Array("__READY__".utf8))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        #expect(channel.childWindowSize()?.ws_col == 80)
+
+        host.resize(.init(columns: 100, rows: 31))
+        let snapshot = await host.snapshot()
+
+        #expect(snapshot.geometry.columns == 100)
+        #expect(snapshot.geometry.rows.count == 31)
+        let resized = try #require(channel.childWindowSize())
+        #expect(resized.ws_col == 100)
+        #expect(resized.ws_row == 31)
+        await host.close()
+    }
+}
+
+/// Exercises the owner against a real child process: launch ownership, signals, and exit.
+///
+/// Serialized on three resources that belong to the test process as a whole and cannot be
+/// split between concurrent cases: the child-process table these tests fork into and reap
+/// from, the process groups and sessions they signal, and the descriptor table the census
+/// counts. Two of these running at once would each see the other there.
+@Suite(.serialized)
+struct TerminalPTYHostChildProcessTests {
+    @Test("consumption fence pairs final frame damage with exit metadata", .timeLimit(.minutes(1)))
+    func consumptionFencePairsFrameAndExitMetadata() async throws {
+        // Intent: one synchronous consumer read returns terminal damage, lifecycle
+        //   result, and captured transitions from the same owner-queue boundary.
+        // Why it exists: reading lifecycle metadata and frame state through separate
+        //   fences both undercounted benchmark stall time and allowed intervening owner
+        //   work to make the values describe different moments.
+        // Scenario: a child prints its final frame and exits; the pane consumes the
+        //   redraw and exit evidence together before publishing the session end.
+        let host = try makeHost(captureTransitions: true)
+        _ = host.fencedFrameState()
+        await host.start(makeLaunchInput(command: "printf '__FINAL_FRAME__'; exit 7"))
+        #expect(await host.waitForResult() == .exited(.exited(7)))
+
+        let consumption = host.fencedConsumptionState()
+
+        #expect(consumption.frameState.damage != .none)
+        #expect(consumption.frameState.terminal.screenText.contains("__FINAL_FRAME__"))
+        #expect(consumption.result == .exited(.exited(7)))
+        #expect(consumption.transitions?.contains {
+            if case let .feed(bytes) = $0 {
+                return String(decoding: bytes, as: UTF8.self).contains("__FINAL_FRAME__")
+            }
+            return false
+        } == true)
         await host.close()
     }
 
@@ -645,76 +1524,6 @@ struct TerminalPTYHostTests {
         #expect(await host.waitForResult() == .exited(.exited(0)))
     }
 
-    @Test(
-        "a pointer between two resizes closes the run and observes the earlier grid",
-        .timeLimit(.minutes(1))
-    )
-    func nonResizeSubmissionClosesTheCoalescingRun() async throws {
-        // Intent: coalescing never reaches across a non-resize submission, so
-        //   the pointer still sees the grid of the last resize submitted before
-        //   it and both surrounding resizes apply.
-        // Why it exists: pointer hit-testing reads the grid, so a resize that
-        //   the coalescer skipped because a later one was already queued would
-        //   silently move where a click lands -- the host's joint FIFO order
-        //   promises geometry that a run-wide skip would break.
-        // Scenario: a drag interrupted by a click, with the click's viewport
-        //   row 0 resolving against the taller grid submitted just before it.
-        let pane = try await startChildlessHost()
-        let host = pane.host
-        #expect(await pane.writeFromChild(scrollbackLines))
-
-        host.resize(.init(columns: 80, rows: 30))
-        let tallTopLine = topViewportLine(host.fencedSnapshot())
-        host.resize(.init(columns: 80, rows: 10))
-        let shortTopLine = topViewportLine(host.fencedSnapshot())
-        try #require(tallTopLine.isEmpty == false)
-        try #require(tallTopLine != shortTopLine)
-        let baseline = await host.transitions().count
-
-        let owner = OwnerHold()
-        owner.hold(host)
-        host.resize(.init(columns: 80, rows: 30))
-        host.sendPointer(.down(.left, column: 2, row: 0, clickCount: 3))
-        host.resize(.init(columns: 80, rows: 10))
-        owner.release()
-
-        let snapshot = host.fencedSnapshot()
-        let ordered = (await host.transitions()).dropFirst(baseline).filter { transition in
-            switch transition {
-            case .resize: true
-            case .mouse(.down(.left, _, _, _, _, _)): true
-            default: false
-            }
-        }
-        #expect(ordered == [
-            .resize(.init(columns: 80, rows: 30)),
-            .mouse(.down(.left, column: 2, row: 0, clickCount: 3)),
-            .resize(.init(columns: 80, rows: 10)),
-        ])
-        #expect(
-            snapshot.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines) == tallTopLine
-        )
-        #expect(snapshot.geometry.rows.count == 10)
-        await host.close()
-    }
-
-    @Test("a resize with nothing behind it applies without a settle delay", .timeLimit(.minutes(1)))
-    func loneResizeAppliesWithoutWaiting() async throws {
-        // Intent: coalescing costs a lone resize nothing -- the grid is applied
-        //   by the time the next owner-queue fence returns.
-        // Why it exists: the rejected debounce alternative would have made every
-        //   settled resize wait out a timer, and nothing else in this suite fails
-        //   if a delay is added rather than a submission dropped.
-        let host = try await startChildlessHost().host
-
-        host.resize(.init(columns: 100, rows: 31))
-        let snapshot = host.fencedSnapshot()
-
-        #expect(snapshot.geometry.columns == 100)
-        #expect(snapshot.geometry.rows.count == 31)
-        await host.close()
-    }
-
     @Test("updates cover output, resize, and a later result without polling", .timeLimit(.minutes(1)))
     func updateSignalResignalsAfterConsumerPull() async throws {
         // Intent: each newly applied state after a consumer pull makes another
@@ -754,18 +1563,6 @@ struct TerminalPTYHostTests {
         #expect(observedResult == .exited(.exited(0)))
         while await updates.next() != nil {}
         #expect((await host.resourceSnapshot()).census.updateSignalsAfterTermination == 0)
-    }
-
-    @Test("an unchanged terminal emits no update work", .timeLimit(.minutes(1)))
-    func unchangedTerminalEmitsNoUpdate() async throws {
-        let host = try await startChildlessHost(captureTransitions: false).host
-        let signalsBefore = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
-
-        host.resize(.init(columns: 80, rows: 24))
-        _ = await host.snapshot()
-
-        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == signalsBefore)
-        await host.close()
     }
 
     @Test("query replies precede later user input without causing render updates", .timeLimit(.minutes(1)))
@@ -1044,136 +1841,6 @@ struct TerminalPTYHostTests {
         #expect(liveSuffix.events.isEmpty)
     }
 
-    @Test("terminal synchronization and recorder cursor share one owner fence", .timeLimit(.minutes(1)))
-    func stateSynchronizationSharesRecorderFence() async throws {
-        // Intent: pair serialized terminal state with the first event not reflected in that state.
-        // Why it exists: separate terminal and recorder reads can drop or double-apply output between them.
-        // Scenario: the child prints history, the host fences a sync, and later output resumes at its cursor.
-        let pane = try await startChildlessHost(captureTransitions: false)
-        let host = pane.host
-        #expect(await pane.writeFromChild("one\r\n"))
-
-        let fenced = host.fencedStateSynchronization()
-        var resumed = try #require(Terminal(
-            columns: fenced.state.columns,
-            rows: fenced.state.rows
-        ))
-        resumed.feed(fenced.state.bytes)
-        host.send(Array("\n".utf8))
-        #expect(await pane.writeFromChild("two\r\n"))
-        let suffix = host.fencedFlightRecording(from: fenced.cursor)
-        for recorded in suffix.events {
-            switch recorded.event {
-            case .feed(let bytes):
-                resumed.feed(bytes)
-            case .resize(let columns, let rows):
-                resumed.resize(columns: columns, rows: rows)
-            default:
-                break
-            }
-        }
-        let source = host.fencedSnapshot()
-
-        #expect(resumed.screenText == source.screenText)
-        #expect(resumed.scrollbackRowCount == source.scrollbackRowCount)
-        #expect(suffix.events.contains { if case .feed = $0.event { true } else { false } })
-        await host.close()
-    }
-
-    @Test(
-        "stream fence validates a supplied cursor beside retained tape and exact state",
-        .timeLimit(.minutes(1))
-    )
-    func streamFenceCarriesPlacementAndState() async throws {
-        // Intent: one owner turn returns remote cursor placement, retained events, and state.
-        // Why it exists: separate fences can splice a cursor onto state from another moment.
-        // Scenario: a live pane rejects a foreign cursor while its exact state stays replayable.
-        let pane = try await startChildlessHost(captureTransitions: false)
-        let host = pane.host
-        #expect(await pane.writeFromChild("pane-state"))
-        let foreign = TerminalFlightRecordingCursor(
-            recorderLifetimeId: UUID(),
-            nextSequence: 0,
-            feedBytesBeforeNextSequence: 0,
-            writeBytesBeforeNextSequence: 0
-        )
-
-        let fenced = host.fencedFlightRecordingStream(from: foreign)
-        var resumed = try #require(Terminal(
-            columns: fenced.synchronization.state.columns,
-            rows: fenced.synchronization.state.rows
-        ))
-        resumed.feed(fenced.synchronization.state.bytes)
-
-        #expect(fenced.requested.isUnplaceable)
-        #expect(fenced.retained.events.isEmpty == false)
-        #expect(fenced.synchronization.cursor == fenced.retained.nextCursor)
-        #expect(resumed.screenText == host.fencedSnapshot().screenText)
-        await host.close()
-    }
-
-    @Test(
-        "follow fence rearms its notice beside a suffix and exact replacement state",
-        .timeLimit(.minutes(1))
-    )
-    func followFenceCarriesSuffixAndState() async throws {
-        // Intent: a followed suffix and its replacement state end at the same recorder cursor.
-        // Why it exists: eviction during delivery must repair state without losing later output.
-        // Scenario: the child waits between two writes while a follower arms at the first one.
-        let pane = try await startChildlessHost(captureTransitions: false)
-        let host = pane.host
-        #expect(await pane.writeFromChild("one"))
-        let origin = host.fencedFlightRecordingOriginFromNow()
-        let subscriptionId = UUID()
-        host.addFlightRecordingFollowNotice(
-            id: subscriptionId,
-            from: origin.cursor,
-            notify: {}
-        )
-        host.send(Array("\n".utf8))
-        #expect(await pane.writeFromChild("two"))
-
-        let fenced = try #require(host.fencedFlightRecordingFollowStream(
-            subscriptionId: subscriptionId,
-            from: origin.cursor
-        ))
-        var resumed = try #require(Terminal(
-            columns: fenced.synchronization.state.columns,
-            rows: fenced.synchronization.state.rows
-        ))
-        resumed.feed(fenced.synchronization.state.bytes)
-
-        #expect(fenced.snapshot.events.isEmpty == false)
-        #expect(fenced.synchronization.cursor == fenced.snapshot.nextCursor)
-        #expect(resumed.screenText == host.fencedSnapshot().screenText)
-        host.removeFlightRecordingFollowNotice(id: subscriptionId)
-        await host.close()
-    }
-
-    @Test("input the child has not accepted stays out of the tape", .timeLimit(.minutes(1)))
-    func backpressuredInputIsRecordedOnlyOnceItCrosses() async throws {
-        // Intent: the tape holds the bytes the PTY accepted and no others, so input still
-        //   waiting in the owner's own buffer leaves no event behind.
-        // Why it exists: an event written when bytes are queued charges the app's own
-        //   backpressure to the child, which is the attribution this facility exists to make.
-        // Scenario: megabytes are submitted to a channel whose child end nobody reads.
-        let host = try await startChildlessHost(captureTransitions: false).host
-
-        let submission = host.fencedFlightRecordingOriginFromNow().cursor
-        let payload = [UInt8](repeating: UInt8(ascii: "A"), count: 4 * 1024 * 1024)
-        host.send(payload, origin: 1)
-        let pending = await host.settledPendingInputByteCount()
-
-        let recorded = host.fencedFlightRecording(from: submission)
-            .events
-            .compactMap(writtenBytes)
-        #expect(pending > 0)
-        #expect(recorded.reduce(0) { $0 + $1.count } == payload.count - pending)
-        #expect(recorded.allSatisfy { $0.allSatisfy { $0 == UInt8(ascii: "A") } })
-
-        await host.close()
-    }
-
     @Test("accepted input is recorded as transmitted, under the origin it was submitted with", .timeLimit(.minutes(1)))
     func acceptedInputCarriesItsSubmissionOrigin() async throws {
         // Intent: every byte the child accepted appears in the tape in transmission order,
@@ -1205,65 +1872,6 @@ struct TerminalPTYHostTests {
             guard let originElapsed = event.originElapsedNanoseconds else { return false }
             return event.elapsedNanoseconds - originElapsed >= stallNanoseconds
         })
-
-        await host.close()
-    }
-
-    @Test("a mismatched megabyte is reported, not diffed", .timeLimit(.minutes(1)))
-    func mismatchedPayloadIsReportedWithoutDiffing() {
-        // Intent: comparing megabyte payloads costs one pass whether they match or not.
-        // Why it exists: the incident. `#expect(recorded == payload)` on a 1 MiB array
-        //   failed under load, and Swift Testing rendered that failure by computing
-        //   `BidirectionalCollection.difference(from:)` -- about quadratic, four seconds
-        //   at 32 KiB, and never finishing at a megabyte. The lane died on its deadline
-        //   and left the test binary spinning at full CPU with no parent, which is how
-        //   this was found. A `.timeLimit` cannot catch it, because the diff is
-        //   synchronous and does not yield, so the guard has to be the comparison itself.
-        // Scenario: the shape of a partial drain -- a payload against its own prefix.
-        let payload = (0..<(1024 * 1024)).map { UInt8($0 % 251) }
-        let truncated = Array(payload.prefix(payload.count - 1024))
-
-        let started = ContinuousClock().now
-        withKnownIssue("the payloads are deliberately unequal") {
-            expectBytes(truncated, equal: payload, "deliberate mismatch")
-        }
-        let elapsed = ContinuousClock().now - started
-
-        // Generous on purpose: the failure mode is hours, not milliseconds, so this
-        // separates the two without pinning the comparison to a machine's speed.
-        #expect(elapsed < .seconds(5), "reporting the mismatch took \(elapsed)")
-    }
-
-    @Test("owner-originated bytes cross without an origin stamp", .timeLimit(.minutes(1)))
-    func ownerOriginatedBytesCarryNoOrigin() async throws {
-        // Intent: a terminal reply has no origin earlier than its own transfer, so its event
-        //   carries one stamp, while input submitted with an origin beside it carries two.
-        // Why it exists: I3. An origin defaulted to the transfer time, or to zero, would read
-        //   as a measurement rather than as the absence of one.
-        // Scenario: the child asks for the cursor position and the user types straight after.
-        let pane = try await startChildlessHost(captureTransitions: false)
-        let host = pane.host
-
-        let submission = host.fencedFlightRecordingOriginFromNow().cursor
-        #expect(await pane.writeFromChild("\u{1B}[6n"))
-        let typedOrigin = DispatchTime.now().uptimeNanoseconds
-        host.send(Array("hi".utf8), origin: typedOrigin)
-        #expect(await host.settledPendingInputByteCount() == 0)
-
-        let events = host.fencedFlightRecording(from: submission)
-            .events
-            .filter { writtenBytes($0) != nil }
-        // Row 1 column 1: nothing has been printed to this pane, because the only
-        // thing that could print to it is this test. The coordinates stay exact
-        // because they are what notices output nobody asked for -- and the screen
-        // rides along with a failure, so the next such surprise explains itself
-        // instead of arriving as a byte array.
-        #expect(events.compactMap(writtenBytes) == [
-            Array("\u{1B}[1;1R".utf8),
-            Array("hi".utf8),
-        ], "screen when the cursor was reported:\n\(occupiedScreenText(host))")
-        #expect(events.first?.originElapsedNanoseconds == nil)
-        #expect(events.last?.originElapsedNanoseconds != nil)
 
         await host.close()
     }
@@ -2029,417 +2637,6 @@ struct TerminalPTYHostTests {
         }
     }
 
-    @Test("primary wheel intent scrolls locally without writing child bytes", .timeLimit(.minutes(1)))
-    func primaryWheelRoutesLocally() async throws {
-        // Intent: route a wheel step using the authoritative screen selected on the host queue.
-        // Why it exists: deciding from a lagging session snapshot can emit arrows on primary.
-        // Scenario: the user wheels upward through retained output while the child waits.
-        let pane = try await startChildlessHost()
-        let host = pane.host
-        #expect(await pane.writeFromChild(scrollbackLines))
-        let writeBaseline = await host.inputWrites().count
-
-        host.sendWheel(.init(rowDelta: -3, column: 0, row: 0))
-        let snapshot = host.fencedSnapshot()
-
-        #expect(snapshot.scrollProjection.isFollowing == false)
-        #expect(snapshot.scrollProjection.topRow == snapshot.scrollbackRowCount - 3)
-        #expect(await host.inputWrites().count == writeBaseline)
-
-        await host.close()
-        host.scrollToBottom()
-        _ = host.fencedSnapshot()
-        #expect((await host.resourceSnapshot()).isReleased)
-    }
-
-    @Test("alternate wheel intent writes counted arrows without local navigation", .timeLimit(.minutes(1)))
-    func alternateWheelRoutesToChild() async throws {
-        // Intent: select the alternate-screen arrow arm exactly once on the owner queue.
-        // Why it exists: wheel routing outside the owner can swallow input during a 1049 race.
-        // Scenario: the user wheels upward three rows while a full-screen application is active.
-        let pane = try await startChildlessHost()
-        let host = pane.host
-        #expect(await pane.writeFromChild("\u{1B}[?1h\u{1B}[?1049h"))
-        let writeBaseline = await host.inputWrites().count
-        let up = [UInt8]([0x1B, 0x4F, 0x41])
-
-        host.sendWheel(.init(rowDelta: -3, column: 0, row: 0))
-        let snapshot = host.fencedSnapshot()
-        let writes = await host.inputWrites()
-
-        #expect(snapshot.isAlternateScreenActive)
-        #expect(snapshot.scrollProjection.isFollowing)
-        #expect(Array(writes.dropFirst(writeBaseline)) == [up + up + up])
-
-        await host.close()
-    }
-
-    @Test("owner encodes key paste and focus from modes applied by earlier output", .timeLimit(.minutes(1)))
-    func semanticInputUsesAuthoritativeModes() async throws {
-        // Intent: read child-controlled modes, encode semantic input, and write it in one owner turn.
-        // Why it exists: a controller-side mode mirror can lag immediately after a child mode change.
-        // Scenario: a TUI enables DECCKM, bracketed paste, and focus reporting before accepting input.
-        let pane = try await startChildlessHost()
-        let host = pane.host
-        #expect(await pane.writeFromChild("\u{1B}[?1h\u{1B}[?2004h\u{1B}[?1004h"))
-        let baseline = await host.inputWrites().count
-        let snapshotBeforeFocus = await host.snapshot()
-
-        host.sendKey(.up, modifiers: [])
-        host.sendPaste("one\ntwo")
-        host.sendFocus(true)
-        _ = host.fencedSnapshot()
-
-        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
-            Array("\u{1B}OA".utf8),
-            Array("\u{1B}[200~one\ntwo\u{1B}[201~".utf8),
-            Array("\u{1B}[I".utf8),
-        ])
-        #expect(await host.snapshot() == snapshotBeforeFocus)
-        await host.close()
-    }
-
-    @Test("empty safe paste and focus preserve a browsing viewport", .timeLimit(.minutes(1)))
-    func nonScrollingSemanticInputPreservesViewport() async throws {
-        let pane = try await startChildlessHost()
-        let host = pane.host
-        #expect(await pane.writeFromChild(scrollbackLines))
-        host.scroll(byRows: -3)
-        let browsing = host.fencedSnapshot()
-        let baseline = await host.inputWrites().count
-
-        host.sendPaste("\u{1B}\u{7F}\u{0080}")
-        host.sendFocus(true)
-        _ = host.fencedSnapshot()
-
-        #expect(await host.inputWrites().count == baseline)
-        #expect((await host.snapshot()).scrollProjection == browsing.scrollProjection)
-
-        host.sendPaste("safe")
-        #expect(host.fencedSnapshot().scrollProjection.isFollowing)
-        await host.close()
-    }
-
-    @Test("semantic input capture records normalized events in owner order", .timeLimit(.minutes(1)))
-    func semanticInputCaptureOrder() async throws {
-        let host = try await startChildlessHost().host
-
-        host.sendKey(.f5, modifiers: [.shift])
-        host.sendPaste("paste")
-        host.sendFocus(false)
-        _ = host.fencedSnapshot()
-
-        let events = (await host.transitions()).map(\.recordingEvent)
-        #expect(events.contains(.input(key: .f5, modifiers: [.shift])))
-        #expect(events.contains(.paste("paste")))
-        #expect(events.contains(.focus(false)))
-        await host.close()
-    }
-
-    @Test("wheel races with 1049 transitions use exactly the screen seen by the owner", .timeLimit(.minutes(1)))
-    func wheelTransitionRaceUsesOwnerScreen() async throws {
-        // Intent: prove both race directions resolve on the shared FIFO instead of a caller snapshot.
-        // Why it exists: a primary-to-alt race can leak arrows, while alt-to-primary can swallow them.
-        // Scenario: wheel intent is queued immediately after the commands that make the
-        //   child enter and leave alt screen, and before the child's answer arrives.
-        let pane = try await startChildlessHost()
-        let host = pane.host
-        #expect(await pane.writeFromChild(scrollbackLines))
-        let down = [UInt8]([0x1B, 0x5B, 0x42])
-
-        let enter = Array("enter-alt-screen\n".utf8)
-        let enterWriteBaseline = await host.inputWrites().count
-        host.send(enter)
-        host.sendWheel(.init(rowDelta: -1, column: 0, row: 0))
-        _ = host.fencedSnapshot()
-        #expect(Array((await host.inputWrites()).dropFirst(enterWriteBaseline)) == [enter])
-        #expect((await host.transitions()).contains(.scrollByRows(-1)))
-        #expect(await pane.writeFromChild("\u{1B}[?1049h"))
-        #expect(host.fencedSnapshot().isAlternateScreenActive)
-
-        let exit = Array("leave-alt-screen\n".utf8)
-        let exitWriteBaseline = await host.inputWrites().count
-        host.send(exit)
-        host.sendWheel(.init(rowDelta: 2, column: 0, row: 0))
-        _ = host.fencedSnapshot()
-        #expect(Array((await host.inputWrites()).dropFirst(exitWriteBaseline)) == [
-            exit,
-            down + down,
-        ])
-        #expect(await pane.writeFromChild("\u{1B}[?1049l"))
-        #expect(host.fencedSnapshot().isAlternateScreenActive == false)
-
-        await host.close()
-    }
-
-    @Test("captured SGR pointer reports use modes already applied by child output", .timeLimit(.minutes(1)))
-    func capturedPointerUsesAuthoritativeModes() async throws {
-        // Intent: decide and encode pointer input from the terminal modes on the owner FIFO.
-        // Why it exists: mode lookup outside the owner can race child DECSET output.
-        // Scenario: the child enables click tracking and SGR encoding before the user clicks.
-        let pane = try await startChildlessHost()
-        let host = pane.host
-        #expect(await pane.writeFromChild("\u{1B}[?1000;1006h"))
-        let baseline = await host.inputWrites().count
-
-        host.sendPointer(.down(.left, column: 4, row: 2))
-        host.sendPointer(.up(.left, column: 4, row: 2))
-        _ = host.fencedSnapshot()
-
-        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
-            Array("\u{1B}[<0;5;3M".utf8),
-            Array("\u{1B}[<0;5;3m".utf8),
-        ])
-        await host.close()
-    }
-
-    @Test("Shift extension stays local while captured and replays exactly", .timeLimit(.minutes(1)))
-    func capturedShiftSelectionReplays() async throws {
-        let pane = try await startChildlessHost()
-        let host = pane.host
-        #expect(await pane.writeFromChild("\u{1B}[2J\u{1B}[H\u{1B}[?1000halpha beta"))
-        let baseline = await host.inputWrites().count
-        let lines = host.fencedSnapshot().viewportText
-            .split(separator: "\n", omittingEmptySubsequences: false)
-        let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
-        let alpha = try #require(lines[row].range(of: "alpha"))
-        let column = lines[row].distance(from: lines[row].startIndex, to: alpha.lowerBound)
-
-        host.sendPointer(.down(
-            .left,
-            column: column,
-            row: row,
-            modifiers: [.shift],
-            clickCount: 2
-        ))
-        host.sendPointer(.up(.left, column: column, row: row, modifiers: [.shift]))
-        // The extending click count maps to line selection on a fresh gesture, but the settled
-        // token granularity wins and entering beta includes that token as one unit.
-        host.sendPointer(.down(
-            .left,
-            column: column + 6,
-            row: row,
-            offsetX: 0.75,
-            modifiers: [.shift],
-            clickCount: 3
-        ))
-        host.sendPointer(.up(.left, column: column + 6, row: row, modifiers: [.shift]))
-        let snapshot = host.fencedSnapshot()
-        let recording = NeutralTerminalRecording(
-            provenance: .danTerm(test: "captured-shift-selection"),
-            initial: .init(columns: 80, rows: 24),
-            events: (await host.transitions()).map(\.recordingEvent)
-        )
-
-        #expect(snapshot.selectedText == "alpha beta")
-        #expect(snapshot.selectionGranularity == .terminalToken)
-        #expect(await host.inputWrites().count == baseline)
-        #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
-        await host.close()
-    }
-
-    @Test("captured and Shift wheel routes preserve a browsing viewport", .timeLimit(.minutes(1)))
-    func wheelRoutesPreserveBrowsing() async throws {
-        let pane = try await startChildlessHost()
-        let host = pane.host
-        #expect(await pane.writeFromChild(scrollbackLines + "\u{1B}[?1000;1006h"))
-        host.scroll(byRows: -3)
-        let browsing = host.fencedSnapshot().scrollProjection
-        let baseline = await host.inputWrites().count
-
-        host.sendWheel(.init(rowDelta: -1, column: 2, row: 3))
-        _ = host.fencedSnapshot()
-        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
-            Array("\u{1B}[<64;3;4M".utf8),
-        ])
-        #expect(host.fencedSnapshot().scrollProjection == browsing)
-
-        let reportCount = await host.inputWrites().count
-        host.sendWheel(.init(rowDelta: -1, column: 2, row: 3, modifiers: [.shift]))
-        let shifted = host.fencedSnapshot().scrollProjection
-        #expect(await host.inputWrites().count == reportCount)
-        #expect(shifted.topRow == browsing.topRow - 1)
-        #expect(shifted.isFollowing == false)
-        await host.close()
-    }
-
-    @Test("uncaptured pane menu is returned only after right-button release", .timeLimit(.minutes(1)))
-    func paneMenuWaitsForRelease() async throws {
-        let host = try await startChildlessHost().host
-        let menus = AsyncStream<TerminalViewportCell>.makeStream()
-        var iterator = menus.stream.makeAsyncIterator()
-
-        host.sendPointer(.down(.right, column: 9, row: 4)) { cell in
-            _ = menus.continuation.yield(cell)
-        }
-        _ = host.fencedSnapshot()
-        host.sendPointer(.up(.right, column: 9, row: 4)) { cell in
-            _ = menus.continuation.yield(cell)
-        }
-
-        #expect(await iterator.next() == .init(column: 9, row: 4))
-        await host.close()
-    }
-
-    @Test("user input snaps browsing to bottom and capture replays the transition", .timeLimit(.minutes(1)))
-    func userInputSnapCaptureEquality() async throws {
-        // Intent: record the local snap before the user write without classifying replies as input.
-        // Why it exists: a non-echoing child cannot reconstruct this viewport mutation from output.
-        // Scenario: the user scrolls up, types into a waiting process, and captures the pane.
-        let pane = try await startChildlessHost()
-        let host = pane.host
-        #expect(await pane.writeFromChild(scrollbackLines))
-        host.scroll(byRows: -4)
-        #expect(host.fencedSnapshot().scrollProjection.isFollowing == false)
-
-        host.send(Array("typed".utf8))
-        let transitions = await host.transitions()
-        let snapshot = host.fencedSnapshot()
-        let recording = NeutralTerminalRecording(
-            provenance: .danTerm(test: "input-snap"),
-            initial: .init(columns: 80, rows: 24),
-            events: transitions.map(\.recordingEvent)
-        )
-
-        #expect(snapshot.scrollProjection.isFollowing)
-        #expect(transitions.contains(.scrollToBottom))
-        #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
-
-        await host.close()
-    }
-
-    @Test("scrollbar commands clamp on the owner queue and emit updates only for changes", .timeLimit(.minutes(1)))
-    func ownerScrollbarCommandsClampAndDedupe() async throws {
-        let pane = try await startChildlessHost(captureTransitions: false)
-        let host = pane.host
-        #expect(await pane.writeFromChild(scrollbackLines))
-        _ = host.fencedFrameState()
-        let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
-        let writeBaseline = await host.inputWrites().count
-
-        host.scroll(toTopRow: -100)
-        let top = host.fencedSnapshot()
-        let afterChange = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
-        host.scroll(toTopRow: -100)
-        _ = host.fencedSnapshot()
-
-        #expect(top.scrollProjection.topRow == 0)
-        #expect(top.scrollProjection.isFollowing == false)
-        #expect(afterChange == baseline + 1)
-        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterChange)
-        #expect(await host.inputWrites().count == writeBaseline)
-
-        host.scrollToBottom()
-        #expect(host.fencedSnapshot().scrollProjection.isFollowing)
-        await host.close()
-    }
-
-    @Test("search begin, navigate, and clear publish frames and report status", .timeLimit(.minutes(1)))
-    func ownerSearchMutationsPublishAndReportStatus() async throws {
-        // Intent: each enqueued search mutation lands on the owner queue, republishes a
-        //   frame so the moved highlight redraws, and reports the resulting status.
-        // Why it exists: the highlight is planned from the owner's terminal value, so a
-        //   mutation that never publishes leaves the previous match painted on screen.
-        // Scenario: a pane holding two occurrences of a needle is searched, walked to the
-        //   older match, then cleared.
-        let pane = try await startChildlessHost(captureTransitions: false)
-        let host = pane.host
-        #expect(await pane.writeFromChild("hit\r\nmiss\r\nhit\r\n"))
-        _ = host.fencedFrameState()
-        let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
-        var iterator = statuses.stream.makeAsyncIterator()
-        let report: @Sendable (TerminalSearchStatus?) -> Void = { statuses.continuation.yield($0) }
-        let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
-
-        host.beginSearch("hit", onStatus: report)
-        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 2))
-        let afterBegin = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
-        #expect(afterBegin == baseline + 1)
-        #expect(host.fencedFrameState().terminal.activeSearchMatchRange != nil)
-
-        host.searchNext(onStatus: report)
-        #expect(try #require(await iterator.next()) == .matched(selected: 1, total: 2))
-        let afterNext = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
-        #expect(afterNext == afterBegin + 1)
-        _ = host.fencedFrameState()
-
-        host.searchPrevious(onStatus: report)
-        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 2))
-        let afterPrevious = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
-        #expect(afterPrevious == afterNext + 1)
-        _ = host.fencedFrameState()
-
-        host.clearSearch(onStatus: report)
-        #expect(await iterator.next() == .some(nil))
-        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterPrevious + 1)
-        #expect(host.fencedFrameState().terminal.activeSearchMatchRange == nil)
-        await host.close()
-    }
-
-    @Test("search mutations that change nothing still report status", .timeLimit(.minutes(1)))
-    func ownerUnchangingSearchMutationsStillReportStatus() async throws {
-        // Intent: a repeated failed needle and a navigate with only one match report
-        //   status even though the mutation records no frame work.
-        // Why it exists: frame publication can skip these no-ops, but the overlay still needs
-        //   to be told that the search found nothing or cannot move.
-        // Scenario: typing a needle with no matches, then re-typing it; and pressing
-        //   Cmd-G on the only match.
-        let pane = try await startChildlessHost(captureTransitions: false)
-        let host = pane.host
-        #expect(await pane.writeFromChild("hit\r\n"))
-        let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
-        var iterator = statuses.stream.makeAsyncIterator()
-        let report: @Sendable (TerminalSearchStatus?) -> Void = { statuses.continuation.yield($0) }
-
-        host.beginSearch("zzz", onStatus: report)
-        #expect(try #require(await iterator.next()) == .empty)
-        let afterFirstMiss = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
-
-        host.beginSearch("zzz", onStatus: report)
-        #expect(try #require(await iterator.next()) == .empty)
-        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterFirstMiss)
-
-        host.beginSearch("hit", onStatus: report)
-        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 1))
-        let afterHit = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
-
-        host.searchNext(onStatus: report)
-        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 1))
-        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterHit)
-        await host.close()
-    }
-
-    @Test("cancelled result and output waits resume promptly without teardown", .timeLimit(.minutes(1)))
-    func cancelledWaitsResumePromptly() async throws {
-        // Intent: cancelling a task suspended in waitForResult/waitForOutput
-        //   resumes it promptly (nil/false) while the pane keeps running.
-        // Why it exists: these waits used bare checked continuations that ignore
-        //   cancellation, so a timed-out Swift Testing test never unwound and the
-        //   whole suite sat idle forever holding the PTY.
-        // Scenario: the 2026-07-22 stress run where launchRecipeAndDuplexIO hit
-        //   its 60s time limit yet the run had to be killed by hand.
-        let host = try await startChildlessHost(captureTransitions: false).host
-
-        let resultTask = Task { await host.waitForResult() }
-        let outputTask = Task { await host.waitForOutput(containing: Array("__NEVER__".utf8)) }
-        try await Task.sleep(for: .milliseconds(50))
-        resultTask.cancel()
-        outputTask.cancel()
-
-        let cancelledResult = await value(of: resultTask, withinMilliseconds: 2000)
-        let cancelledOutput = await value(of: outputTask, withinMilliseconds: 2000)
-        #expect(cancelledResult == .some(nil))
-        #expect(cancelledOutput == false)
-
-        // A wait born already-cancelled must not register a stranded waiter.
-        let bornCancelled = Task { await host.waitForResult() }
-        bornCancelled.cancel()
-        #expect(await value(of: bornCancelled, withinMilliseconds: 2000) == .some(nil))
-
-        await host.close()
-        #expect((await host.resourceSnapshot()).isReleased)
-    }
-
     @Test("child exit report survives a transient waitid race", .timeLimit(.minutes(1)))
     func childExitReportSurvivesTransientWaitidRace() async throws {
         // Intent: a NOTE_EXIT delivered before the child's wait status is
@@ -2468,185 +2665,6 @@ struct TerminalPTYHostTests {
         )
         #expect(closed != nil)
         #expect((await host.resourceSnapshot()).isReleased)
-    }
-
-    @Test("waiting on output a quiesced host already produced never reports absence", .timeLimit(.minutes(1)))
-    func waitForOutputAfterQuiescenceSeesRetainedEvidence() async throws {
-        // Intent: `waitForOutput(containing:)` answers from retained evidence when the
-        //   bytes arrived before the wait started, even though the host has already
-        //   torn down and can never deliver another output callback.
-        // Why it exists: the helper registered its quiescence fallback before consulting
-        //   the evidence it was handed, so the two raced on the host queue. A pane that
-        //   prints and is immediately torn down -- the common shape -- made every such
-        //   wait a coin flip, surfacing as an unexplained `#expect` failure at the wait
-        //   line.
-        // Scenario: `just test` runs its steps as a parallel pool; under that load the
-        //   host queue won the race often enough to fail the gate roughly one run in five.
-        let pane = try await startChildlessHost()
-        let host = pane.host
-        #expect(await pane.writeFromChild("__SETTLED__"))
-        await host.close()
-
-        // Re-asking a torn-down host is the whole point: each call reinstalls the
-        // handler that teardown refuses, so only the evidence check can answer. One
-        // call would pass by luck often enough to hide the race; the loop does not.
-        var absences = 0
-        for _ in 0..<200 where await host.waitForOutput(containing: Array("__SETTLED__".utf8)) == false {
-            absences += 1
-        }
-        #expect(absences == 0)
-    }
-
-    @Test("waiting on output the host already discarded reports why, immediately", .timeLimit(.minutes(1)))
-    func waitForDiscardedOutputFailsImmediately() async throws {
-        // Intent: a wait whose answer can no longer be inside the host's bounded
-        //   evidence resolves at once, as a recorded issue naming the discard, instead
-        //   of suspending on a live pane that will never quiesce.
-        // Why it exists: `waitForOutput` reads a bounded window but reads like an
-        //   unbounded "was this ever printed?" question. When the answer had already
-        //   been discarded the wait was not slow, it was unsatisfiable -- and because a
-        //   live pane never quiesces it burned the whole test time limit before
-        //   reporting anything, pointing at the wait line rather than at the discard.
-        // Scenario: the 2026-08-03 gate hang in
-        //   `applicationTerminationClosesMultipleLivePanes`, where the chatty probe
-        //   printed `__READY__` once and then wrote 4 KiB forever, so sixteen writes
-        //   discarded the marker before the wait for it was armed (fix fdb9ec6).
-        let pane = try await startChildlessHost(captureTransitions: false)
-        let host = pane.host
-        #expect(await pane.writeFromChild("__READY__"))
-
-        // The flood, deterministically: twice the host's retention window, so the marker
-        // cannot still be retained on an idle machine or a loaded one. The trailing
-        // marker is what proves the flood was consumed -- the host applies its output in
-        // order, so the flood is behind that answer -- and it is armed before the flood
-        // because that is the only way to ask about output a flood has already buried.
-        let flooded = host.expectOutput(containing: Array("__FLOODED__".utf8))
-        let flood = [UInt8](repeating: UInt8(ascii: "f"), count: 64 * 1024)
-        for _ in 0..<2 { #expect(pane.channel.writeFromChild(flood)) }
-        #expect(pane.channel.writeFromChild(Array("__FLOODED__".utf8)))
-        #expect(await flooded.satisfied())
-
-        let clock = ContinuousClock()
-        let start = clock.now
-        var answer: Bool??
-        await withKnownIssue("the wait must say it cannot be answered") {
-            answer = await value(
-                of: Task { await host.waitForOutput(containing: Array("__READY__".utf8)) },
-                withinMilliseconds: 3000
-            )
-        }
-        // `nil` is the pre-fix outcome: the wait never resumed at all.
-        #expect(answer == .some(.some(false)))
-        #expect(clock.now - start < .seconds(1))
-        await host.close()
-    }
-
-    @Test("a match armed before a flood still sees a marker printed after it", .timeLimit(.minutes(1)))
-    func armedExpectationSurvivesFloodedOutput() async throws {
-        // Intent: once armed, a match is decided by the whole stream from that point on --
-        //   no volume of intervening output, and no chunk boundary inside the marker,
-        //   can lose it.
-        // Why it exists: this is the escape hatch the "already discarded" failure points
-        //   at, so it has to actually work; and it is the property that makes retaining
-        //   output unnecessary in the first place.
-        // Scenario: the shape a chatty pane forces -- the interesting marker arrives after
-        //   noise that no bounded window could have held.
-        let pane = try await startChildlessHost(captureTransitions: false)
-        let host = pane.host
-        let expectation = host.expectOutput(containing: Array("__LATE__".utf8))
-        // Armed here for the same reason as the match under test: after the flood,
-        // nothing may ask about output any more. It is what splits the marker across two
-        // applied chunks, which is what a PTY read boundary landing inside it looks like.
-        let firstHalfApplied = host.expectOutput(containing: Array("__LA".utf8))
-
-        let flood = [UInt8](repeating: UInt8(ascii: "f"), count: 64 * 1024)
-        for _ in 0..<2 { #expect(pane.channel.writeFromChild(flood)) }
-        #expect(pane.channel.writeFromChild(Array("__LA".utf8)))
-        #expect(await firstHalfApplied.satisfied())
-        #expect(pane.channel.writeFromChild(Array("TE__".utf8)))
-
-        #expect(await expectation.satisfied())
-        await host.close()
-    }
-
-    @Test("a host on a childless channel lives and quiesces with nothing to reap", .timeLimit(.minutes(1)))
-    func childlessChannelHostReachesQuiescence() async throws {
-        // Intent: a host whose PTY has no child behind it starts, takes output,
-        //   transmits input, resizes, and reaches quiescence owning no process.
-        // Why it exists: source installation was the one process-plane step that
-        //   assumed a child existed, so a channel without one could not converge.
-        // Scenario: the test owns the child end of a real PTY and plays the child.
-        let channel = try ChildlessPTYChannel()
-        let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
-        channel.writeFromChild(Array("__READY__".utf8))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-
-        let running = await host.resourceSnapshot()
-        #expect(running.hasOpenMaster)
-        #expect(running.hasLeader == false)
-        #expect(running.hasSession == false)
-
-        host.send(Array("typed".utf8))
-        host.resize(.init(columns: 100, rows: 31))
-        #expect(await host.drainedPendingInputByteCount() == 0)
-        await host.close()
-
-        let released = await host.resourceSnapshot()
-        #expect(released.isReleased)
-        #expect(released.census.forcedQuiescenceCount == 0)
-    }
-
-    @Test("bytes cross a childless channel in both directions", .timeLimit(.minutes(1)))
-    func childlessChannelCarriesBytesBothWays() async throws {
-        // Intent: output written at the child end reaches a fenced snapshot through
-        //   the host's own read path, and input reaches the child end byte for byte.
-        // Why it exists: input capture records what the reducer submitted, not what
-        //   crossed the master, so transmission itself had no coverage.
-        // Scenario: the test writes as the child, then reads back what the host sent.
-        let channel = try ChildlessPTYChannel()
-        let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
-
-        channel.writeFromChild(Array("alpha".utf8))
-        #expect(await host.waitForSnapshot {
-            $0.fencedSnapshot().screenText.contains("alpha")
-        })
-
-        host.send(Array("typed\r".utf8))
-        // The whole transmission, not a suffix of it: the launch command line the
-        // policy hands the host is itself written to the PTY, and a childless channel
-        // receives it exactly as a shell would.
-        let transmitted = Array("\(childlessLaunchCommand)\n".utf8) + Array("typed\r".utf8)
-        #expect(await pollUntil({
-            channel.bytesReceivedFromHost() == transmitted
-        }, within: .seconds(20)))
-        await host.close()
-    }
-
-    @Test("a resize on a childless channel reaches the descriptor", .timeLimit(.minutes(1)))
-    func childlessChannelResizeReachesDescriptor() async throws {
-        // Intent: the host's TIOCSWINSZ lands on the adopted descriptor, and the
-        //   terminal geometry moves with it.
-        // Why it exists: a fixture that only carried bytes could be a socket pair.
-        //   A window size read back at the child end is what proves a real PTY.
-        // Scenario: the test reads TIOCGWINSZ at the child end after a resize.
-        let channel = try ChildlessPTYChannel()
-        let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
-        channel.writeFromChild(Array("__READY__".utf8))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        #expect(channel.childWindowSize()?.ws_col == 80)
-
-        host.resize(.init(columns: 100, rows: 31))
-        let snapshot = await host.snapshot()
-
-        #expect(snapshot.geometry.columns == 100)
-        #expect(snapshot.geometry.rows.count == 31)
-        let resized = try #require(channel.childWindowSize())
-        #expect(resized.ws_col == 100)
-        #expect(resized.ws_row == 31)
-        await host.close()
     }
 }
 

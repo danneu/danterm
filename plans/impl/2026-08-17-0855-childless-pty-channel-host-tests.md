@@ -211,7 +211,7 @@ suite once into a file under `.build/` and grep the file.
 - [x] 2. feat(pty): let a host adopt a PTY channel with no child (D2, D3, I2, I3, PO1, PO2, PO6)
 - [x] 3. refactor(pty): prove input-write failure with a real descriptor (D4, I1, I5, PO3)
 - [x] 4. test(pty): drive the host suite through childless PTY channels (D4, D7, I2, PO4)
-- [ ] 5. test(pty): serialize only the tests that share machine state (D6, I4)
+- [x] 5. test(pty): serialize only the tests that share machine state (D6, I4)
 - [ ] 6. refactor(pty): keep fixture output staging out of shipping builds (D5, I1, PO5)
 
 ## Implementation notes
@@ -267,6 +267,23 @@ suite once into a file under `.build/` and grep the file.
   directly. It is a claim about the shipping initializer, which takes no spawner, so it
   cannot adopt a channel. The PO5 lint has to name the host's own suite rather than the
   whole target, or that test needs another route to output.
+
+- The serialized/unserialized line is drawn by whether a case starts a host on the production
+  spawner, which is the only thing in this file that forks. That splits the 86 host tests into
+  48 unserialized and 38 serialized. Two cases start no host at all -- the frame-damage drain
+  and the megabyte mismatch report -- and they join the unserialized suite for the same reason
+  the childless ones do: nothing they touch is process-wide.
+- The split is two suites in one file, not two files. Every test in both halves calls the same
+  file-private helpers, and Swift Testing serializes per suite, so a second suite in the same
+  file is the whole mechanism.
+- The serialized suite names three shared resources, not one: the child-process table it forks
+  into and reaps from, the process groups and sessions it signals, and the process-wide
+  descriptor table. The third one already had its own lane -- `test-terminal-pty.sh` filters
+  `rapidCloseStressLeavesNoResources` into a separate process -- and that filter matches by
+  test name, so moving the case into a new suite left the lane split working.
+- Serialization is now scoped, so the two suites run against each other in parallel. That is
+  safe because the unserialized half forks nothing, and the process-census tests were already
+  written to name their own child rather than count children process-wide.
 
 ## Follow Up
 

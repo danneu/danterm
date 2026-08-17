@@ -71,7 +71,7 @@ Supported protocol families, with their evidence suite:
 |---|---|
 | `da1-dsr-cpr-deccpr-decrqm` | TerminalQueryTests |
 | `xtversion` | TerminalQueryTests |
-| `osc-10-11-default-color-queries` | TerminalQueryTests, TerminalPTYHostTests, RenderFramePlanningTests |
+| `osc-10-11-default-color-queries` | TerminalQueryTests, TerminalPTYHostChildProcessTests, RenderFramePlanningTests |
 | `kitty-keyboard` | TerminalKeyEncodingTests |
 | `legacy-xterm-keyboard` | TerminalKeyEncodingTests |
 | `legacy-and-sgr-mouse` | TerminalMouseEncodingTests |
