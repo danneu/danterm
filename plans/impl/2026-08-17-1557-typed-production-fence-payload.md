@@ -212,7 +212,7 @@ authoritative signal that its source reading is stale.
 ## Commit progress
 
 - [x] 1. refactor(pty): give each production fence a typed payload
-- [ ] 2. docs(scratch): mark S30 landed in the simplification audit
+- [x] 2. docs(scratch): mark S30 landed in the simplification audit
 
 The audit tick is its own commit because the cell it fills is the landing
 commit's SHA, which cannot exist inside that commit.
