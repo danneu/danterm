@@ -264,7 +264,7 @@ Each commit is independently green and carries its own tests and doc updates.
   ran at. Markers and record ship together so `docs-lint` passes at this commit
   and no marker points at an absent section. Discharges PO1 and PO2, and the doc
   31 part of PO4.
-- [ ] **4. Close S37 in the simplification audit.** After commit 3 exists, put
+- [x] **4. Close S37 in the simplification audit.** After commit 3 exists, put
   its SHA in S37's authoritative Status cell and add a Status note to S37 that
   records the final disposition: six obsolete probes were deleted and three
   valid probes remain env-gated by deliberate decision. This separate commit is
@@ -361,6 +361,19 @@ It reports **four, totalling 692 lines**, because `ProbeHostMeasurements.swift`
 also matches `*Probe*`. Three of the four are probes -- history-tail cost,
 pathological, and wired-history attribution -- and the fourth is their shared
 helper file. The bound the bullet sets, under 700 lines against 4,811, holds.
+
+**Commit 4: S37's own path citations need no allow-missing markers.** The
+finding's file list names four of the six deleted probes, so it now cites paths
+that do not resolve. `docs-lint` skips `docs/scratch/`, so the gate does not see
+them and a marker would forgive nothing. Adding markers anyway would have been
+an edit to the historical finding that I4 refuses, so the Status note says
+instead that four of the listed paths are among the deleted files. A reader who
+follows one of them lands on the note directly above it.
+
+The Status cell carries commit 3's sha only, matching what the plan asked for.
+The Status note names all three implementation commits, because the audit header
+says a sha in the cell means the finding has landed and the note is where the
+detail goes.
 
 **Both released-byte fields are required, not optional.** `MemoryProbeReport`'s
 `schemaVersion` moved to 2 to match. A defaulted or optional field would decode

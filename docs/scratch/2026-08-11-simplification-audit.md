@@ -190,7 +190,7 @@ in itself.
 | cfcbb40f | [S34](#s34) | 15    | 3   | 5   | terminal-core  | medium | Give anchored ranges one registry instead of six hand-written enumerations                                            |
 | e5d82ad8 31d4d252 | [S35](#s35) | 15    | 3   | 5   | terminal-views | medium | Stop re-implementing grid and cell geometry in the UI-test shim                                                         |
 | d18ac7dc 25835bc9 | [S36](#s36) | 15    | 3   | 5   | tests          | small  | Retire the whole-AppModel golden snapshot; it ratchets on behavior-preserving refactors                                 |
-|        | [S37](#s37) | 15    | 3   | 5   | tests          | small  | Move the nine frozen research probes out of the default TerminalCore test target                                        |
+| 2eec1c03 | [S37](#s37) | 15    | 3   | 5   | tests          | small  | Move the nine frozen research probes out of the default TerminalCore test target                                        |
 | 6b2e27f0 | [S38](#s38) | 12    | 3   | 4   | app-runtime    | medium | Key pane-tape follow state once, by subscription, instead of four sidecar maps                                  |
 |        | [S39](#s39) | 12    | 3   | 4   | build          | small  | Drop .build-gate by deleting the unenforced -warn-long-function-bodies flag                                             |
 |        | [S40](#s40) | 12    | 3   | 4   | core-model     | medium | Nest per-pane search and notification state in PaneModel so cleanup is structural                                       |
@@ -837,6 +837,25 @@ value, and the test-side pipeline copies were deleted.
 `tests` &middot; dead-code &middot; impact 3, confidence 5 &middot; effort small
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineEvictionProbe.swift`, `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineReadProbe.swift`, `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineAdmissionProbe.swift`, `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineWideIndexProbe.swift`, `lib/TerminalCore/Tests/TerminalCoreTests/TerminalHistoryTailCostProbe.swift`, `lib/TerminalCore/Tests/TerminalCoreTests/TerminalWiredHistoryAttributionProbe.swift`
+
+**Status note.** Closed by `ee5e6432`, `7f5e83b6`, and `2eec1c03`, with a
+different disposition than this finding proposed. Six probes are deleted --
+read, index, wide-index, blank-index, admission, and eviction, 4,107 lines --
+because the display-row history store their comparison arms were paired against
+no longer exists, so they could not be re-run at any revision after `9ad7cc55`.
+Deleting them also removed the shared harness and the prototype stores
+(`LogicalLineArena`, `GranularityArena`, `BudgetEnforcedRowStore`) this finding's
+folded-in half named. Four of the paths listed above are among the deleted files.
+
+The remaining three -- history-tail cost, pathological, and wired-history
+attribution -- stay in `TerminalCoreTests`, still env-gated, by deliberate
+decision. They read the shipped engine, so they are instruments rather than
+documents. The proposed separate target does not work as a gate: both gate steps
+build every target in the package, so only a sibling package or deletion removes
+a compile, and a package no gate step names rots while looking preserved.
+Relocating the pathological probe would also have forced a public forwarder for
+the record-split cap, which a measurement tool does not earn. The three
+survivors plus their shared helper file now total 692 lines, down from 4,811.
 
 **Problem.** Nine `*Probe.swift` files totalling 4,803 lines -- 15.5% of the TerminalCore test target's 30,945 lines -- are research instruments gated behind `DANTERM_LOGICAL_LINE_PROBE`, so they never execute in the gate. They are frozen artifacts of completed findings and, by their own admission, hand-reproduce private production internals rather than calling them. That means they compile against the engine on every run of the gate's longest step and have to be edited whenever the engine changes, while producing no signal when they are edited wrong -- a maintenance tax with the verification switched off.
 
