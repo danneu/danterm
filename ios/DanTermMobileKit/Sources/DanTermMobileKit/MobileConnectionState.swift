@@ -24,6 +24,10 @@ public enum MobileConnectionState: Equatable, Sendable {
     case deviceSetupFailure
     case streamEnded(String?)
     case requestRefused(String)
+    /// The replica and the producer disagreed about the stream, so this connection ended.
+    /// It names a cause like every other state here, not the live condition of a serving
+    /// stream: the disagreement is what the phone is reconnecting away from.
+    case streamDesynchronized
 
     /// Exhaustively maps every public TCP error to one user-facing remedy.
     public static func failure(_ error: TCPSocketTransportError) -> Self {

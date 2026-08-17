@@ -257,7 +257,7 @@ on its own and the header never states a wait that cannot end.
 
 ## Commit progress
 - [x] 1. Give the replica's gap state its provenance (I3; PO1, PO2)
-- [ ] 2. Route a detected gap through the reconnect policy from a fresh position (I1, I2, I4, I4a, I4b, I5; PO3, PO3a, PO4, PO8)
+- [x] 2. Route a detected gap through the reconnect policy from a fresh position (I1, I2, I4, I4a, I4b, I5; PO3, PO3a, PO4, PO8)
 - [ ] 3. Compose the phone's status line in the kit (I6, I7, I8, I8a, I9; PO5, PO6, PO7)
 
 ## Implementation notes
@@ -271,3 +271,14 @@ on its own and the header never states a wait that cannot end.
   their own. The repetition is deliberate: PO1 asks for the coverage floor to
   be enumerated from the code, and one test holding the complete list is what a
   reader can audit against `PaneReplica` in a single pass.
+- Commit 2 puts the refusal of a disputed position in its own kit value,
+  `MobileResumePolicy`, rather than inside `MobileReconnectPolicy`. The
+  reconnect policy states in its own header that no resume position belongs to
+  it, and the two answer different questions: when an attempt runs, and where it
+  starts. The link between them is one exhaustive switch,
+  `MobileConnectionFailure.preservesResumePosition`, so the failure vocabulary
+  stays the single place a new cause has to be classified.
+- The refusal is cleared when the replica reports exact state, which the shell
+  already observes through `didChangeReplicaState`. No new observation point was
+  needed, and no attempt outcome clears it, which is what makes it outlive the
+  attempt that follows the gap.

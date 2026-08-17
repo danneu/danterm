@@ -51,6 +51,7 @@ func failureClassification() {
         (.streamEnded(reason: "paneClosed"), .manual, .streamEnded("paneClosed")),
         (.requestRefused(reason: "pane not found"), .manual, .requestRefused("pane not found")),
         (.deviceSetup, .manual, .deviceSetupFailure),
+        (.streamDesynchronized, .transient, .streamDesynchronized),
     ]
     for (failure, expectedClass, expectedState) in cases {
         #expect(failure.retryClass == expectedClass)
@@ -199,6 +200,41 @@ func boundedAutomaticPhase() {
         #expect(policy.handle(.clockFired, at: tick) == .rest)
     }
     #expect(policy.recoveryPhase(at: now + 100_000) == .none)
+}
+
+@Test("A stream that keeps desynchronizing spends the one budget and then rests")
+func desynchronizationUsesTheOneEpisodeBudget() {
+    // Intent: a replica that detects a gap on every connection retries automatically, draws
+    //   on the same episode budget as any other transient failure, and comes to rest with a
+    //   manual remedy instead of looping.
+    // Why it exists: routing the detected gap through this policy is what forbids a second,
+    //   unbounded repair mechanism of its own. A desync after a connection that served long
+    //   enough to prove stable is a rare incident, not accumulated evidence, so it starts a
+    //   fresh episode.
+    var policy = MobileReconnectPolicy()
+    var now = 100.0
+    for delay in schedule.delays {
+        let decision = policy.handle(.attemptFailed(.streamDesynchronized), at: now)
+        if delay == 0 {
+            #expect(decision == .attemptNow)
+        } else {
+            #expect(decision == .wait(until: now + delay))
+            now += delay
+            #expect(policy.handle(.clockFired, at: now) == .attemptNow)
+        }
+        now += 1
+    }
+    #expect(policy.handle(.attemptFailed(.streamDesynchronized), at: now) == .rest)
+    #expect(policy.handle(.clockFired, at: now + 100_000) == .rest)
+    #expect(policy.recoveryPhase(at: now + 100_000) == .none)
+
+    var stable = MobileReconnectPolicy()
+    #expect(stable.handle(.userRequestedConnect, at: 100) == .attemptNow)
+    #expect(stable.handle(.attemptConnected, at: 101) == .rest)
+    let proven = 101 + schedule.stabilityWindow
+    #expect(stable.handle(.attemptFailed(.streamDesynchronized), at: proven) == .attemptNow)
+    #expect(stable.handle(.attemptFailed(.streamDesynchronized), at: proven + 1)
+        == .wait(until: proven + 1 + schedule.delays[1]))
 }
 
 @Test("An automatic signal after give-up buys one attempt and no more")

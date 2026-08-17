@@ -27,6 +27,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private var target: MobileServerTarget?
     private var preferredPaneId: PaneId?
     private var reconnectPolicy = MobileReconnectPolicy()
+    private var resumePolicy = MobileResumePolicy()
     private var retryTimer: Timer?
     private let pathMonitor = NWPathMonitor()
     private var presentedState = MobileConnectionState.disconnected
@@ -134,13 +135,20 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         terminalView.didChangeReplicaState = { [weak self] state in
             guard let self else { return }
             switch state {
-            case .gap:
+            // The producer never learns of a gap the replica found for itself, so it sends
+            // no repair. Ending the connection is what puts the one recovery mechanism in
+            // charge of it, and the next attempt starts away from the disputed position.
+            case .gap(.detected):
+                fail(.streamDesynchronized)
+            case .gap(.declared):
                 isWaitingForGapRepair = true
                 show(state: .connectionLost, detail: "Stream gap; waiting for exact state")
-            case .exact where isWaitingForGapRepair:
+            case .exact:
+                resumePolicy.replicaBecameExact()
+                guard isWaitingForGapRepair else { break }
                 isWaitingForGapRepair = false
                 show(state: .ready, detail: "Stream repaired with exact state")
-            case .awaitingSynchronization, .exact:
+            case .awaitingSynchronization:
                 break
             }
         }
@@ -307,7 +315,9 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             selectedPaneId = pane.paneId
             isWaitingForGapRepair = false
             paneTable.reloadData()
-            let checkpoint = storedCheckpoint(for: pane.paneId)
+            let checkpoint = resumePolicy.resumeCheckpoint(
+                stored: storedCheckpoint(for: pane.paneId)
+            )
             let cursor = terminalView.reset(checkpoint: checkpoint, for: pane.paneId)
             guard startStream(bootstrap.session, pane: pane.paneId, cursor: cursor) else { return }
             show(state: .ready, detail: "Connected to DanTerm \(bootstrap.serverVersion)")
@@ -416,6 +426,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private func fail(_ failure: MobileConnectionFailure, detail: String? = nil) {
         disconnect()
         show(state: failure.state, detail: detail)
+        resumePolicy.connectionEnded(with: failure)
         dispatch(.attemptFailed(failure))
     }
 
@@ -584,6 +595,7 @@ private extension MobileConnectionState {
         case .deviceSetupFailure: "Device setup failure"
         case .streamEnded(let reason): "Stream ended\(reason.map { ": \($0)" } ?? "")"
         case .requestRefused(let reason): "Request refused: \(reason)"
+        case .streamDesynchronized: "Stream out of step with the Mac"
         }
     }
 

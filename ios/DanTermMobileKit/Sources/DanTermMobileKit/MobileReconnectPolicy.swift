@@ -36,6 +36,10 @@ public enum MobileConnectionFailure: Equatable, Sendable {
     case conversation(DanTermClientError, phase: MobileConnectionPhase)
     case streamEnded(reason: String?)
     case requestRefused(reason: String)
+    /// The replica found that what arrived disagrees with the state it holds. The producer
+    /// believes the stream is healthy and will send no repair of its own, so the connection
+    /// has to end: only a fresh subscription reconciles the two.
+    case streamDesynchronized
     /// The phone could not make sense of what it got, or of its own setup: a reply with
     /// neither result nor error, a replica that rejected the stream, an error no typed
     /// layer produced. It is the phone's own defect, so no server can change it.
@@ -54,6 +58,21 @@ public enum MobileConnectionFailure: Equatable, Sendable {
         case .streamEnded(let reason): MobileConnectionState.streamEnded(reason: reason)
         case .requestRefused(let reason): MobileConnectionState.requestRefused(reason: reason)
         case .deviceSetup: MobileConnectionState.deviceSetupFailure
+        case .streamDesynchronized: MobileConnectionState.streamDesynchronized
+        }
+    }
+
+    /// Whether the position the replica stored is still worth resuming from.
+    ///
+    /// Only the disagreement discredits it, and it discredits it precisely because the
+    /// stored position may be what caused the disagreement: resuming there would reproduce
+    /// it on every attempt and spend the whole budget failing the same way. Every other
+    /// failure is about the connection rather than the position, so discarding it there
+    /// would throw away exact scrollback the reconnect can still restore.
+    public var preservesResumePosition: Bool {
+        switch self {
+        case .transport, .conversation, .streamEnded, .requestRefused, .deviceSetup: true
+        case .streamDesynchronized: false
         }
     }
 
@@ -83,6 +102,10 @@ public enum MobileConnectionFailure: Equatable, Sendable {
         // answered; repeating the question gets the same answer, and a defect on this
         // phone reruns unchanged on the next attempt.
         case .streamEnded, .requestRefused, .deviceSetup: .manual
+        // A fresh subscription is exactly what reconciles the disagreement, so an automatic
+        // attempt can change this outcome -- and it draws on the one episode budget, which
+        // is what bounds a stream that desynchronizes over and over.
+        case .streamDesynchronized: .transient
         }
     }
 }
