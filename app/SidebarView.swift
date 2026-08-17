@@ -295,6 +295,15 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     // MARK: - Reconcile & Reload
 
+    // reconcile-pass-lint: no-send begin
+    //
+    // Everything down to the matching end marker runs inside the sidebar
+    // reconcile pass. A pass originates no Msg: a fact it discovers travels back
+    // in its return value and the runtime dispatches it after the sweep, once
+    // every pass cache has advanced. See the Read-Only Model Rule in
+    // docs/design/2026-05-27-model-driven-view-reconciliation.md.
+    // scripts/reconcile-pass-lint.sh enforces this region.
+
     /// Executes row ops for `SidebarReconcileDriver`, its only production caller, then
     /// reapplies the view-owned selection. `isReloading` suppresses the
     /// selectionDidChange / collapse feedback loop while we mutate. Mirrors what the old
@@ -305,12 +314,19 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     ///
     /// `projection` paints the rows and supplies every interaction fact, so handlers
     /// always describe the same state that NSOutlineView currently displays.
+    ///
+    /// `followUps` carries back every fact the pass discovered about the view --
+    /// today, that a live rename ended and what its draft was. The pass must not
+    /// send them itself: a send from mid-traversal re-enters the whole sweep
+    /// before the driver advances its projection cache, so the nested pass would
+    /// diff the new model against a stale cache and issue row ops against an
+    /// outline that is mid-mutation.
     @discardableResult
     func applySidebarOps(
         _ ops: [SidebarRowOp],
         projection: SidebarProjection,
         renameTargetToEnd: RenameTarget?
-    ) -> (tabs: Set<TabId>, groups: Set<GroupId>) {
+    ) -> (tabs: Set<TabId>, groups: Set<GroupId>, followUps: [Msg]) {
         isReloading = true
         defer { isReloading = false }
         let priorFocusedTabId = appliedProjection?.selectedTabId
@@ -318,13 +334,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         appliedProjection = projection
         var unappliedTabIds = Set<TabId>()
         var unappliedGroupIds = Set<GroupId>()
+        var followUps: [Msg] = []
 
         // End an orphaned inline edit before its row is removed or moved. The view
         // clears its session first, so a resign-triggered delegate callback is a no-op.
         if let renameTargetToEnd {
-            endActiveRename(renameTargetToEnd)
+            followUps += endActiveRename(renameTargetToEnd)
         } else {
-            cancelAbandonedInlineRenameIfNeeded()
+            followUps += cancelAbandonedInlineRenameIfNeeded()
         }
 
         // Snapshot the user's multi-selection by tab id BEFORE the rows move.
@@ -349,7 +366,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             selectedTabId: projection.selectedTabId,
             projection: projection,
             unappliedTabIds: &unappliedTabIds,
-            unappliedGroupIds: &unappliedGroupIds)
+            unappliedGroupIds: &unappliedGroupIds,
+            followUps: &followUps)
         // Empty-op cosmetic sweeps can leave already-visible row emphasis alone.
         // New/reused rows get their flag when NSOutlineView asks for a row view.
         if !ops.isEmpty || priorFocusedTabId != projection.selectedTabId {
@@ -367,9 +385,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         if let target = projection.renameTarget,
            target != priorRenameTarget,
            activeRenameTarget != target {
-            beginRenaming(target: target)
+            followUps += beginRenaming(target: target)
         }
-        return (unappliedTabIds, unappliedGroupIds)
+        return (unappliedTabIds, unappliedGroupIds, followUps)
     }
 
     /// Apply one ordered op by obeying the outline mutation accepted by the store.
@@ -449,53 +467,56 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         textField.isEditable = false
     }
 
-    /// Commit a live rename before an outline interaction lets AppKit change selection.
-    /// The delegate's click-away path deliberately leaves the clicked destination focused.
-    func finishActiveRenameForPointerInteraction() {
-        guard let session = activeRenameSession else { return }
+    /// Commits and tears down the live rename, returning the messages its caller
+    /// owes the model: the commit carrying the draft text, then the end of
+    /// ownership. A pointer interaction dispatches them in the same turn; a
+    /// reconcile pass reports them back through `applySidebarOps`.
+    private func finishActiveRename() -> [Msg] {
+        guard let session = activeRenameSession else { return [] }
         let target = session.target
         let textField = session.textField
         guard textField.currentEditor() != nil else {
-            cancelAbandonedInlineRenameIfNeeded()
-            return
+            return cancelAbandonedInlineRenameIfNeeded()
         }
         let newName = textField.stringValue.trimmingCharacters(in: .whitespaces)
         activeRenameSession = nil
         textField.abortEditing()
         finishInlineRename(textField: textField, target: target)
 
+        var messages: [Msg] = []
         switch target {
         case .tab(let id):
             let name: String? = newName.isEmpty ? nil : newName
-            runtime?.send(.renameTab(id: id, name: name))
+            messages.append(.renameTab(id: id, name: name))
         case .group(let id):
             if !newName.isEmpty {
-                runtime?.send(.renameGroup(id: id, name: newName))
+                messages.append(.renameGroup(id: id, name: newName))
             }
         }
-        runtime?.send(.sidebarRenameEnded)
+        messages.append(.sidebarRenameEnded)
+        return messages
     }
 
     /// Ends the matching view-owned session before a structural operation invalidates it.
-    func endActiveRename(_ target: RenameTarget) {
-        guard let session = activeRenameSession, session.target == target else { return }
+    /// Returns the end for its caller to report; the projection guard has already
+    /// decided this rename is over, so the view only tears the session down.
+    func endActiveRename(_ target: RenameTarget) -> [Msg] {
+        guard let session = activeRenameSession, session.target == target else { return [] }
         activeRenameSession = nil
         if session.textField.currentEditor() != nil { session.textField.abortEditing() }
         finishInlineRename(textField: session.textField, target: target)
-        DispatchQueue.main.async { [weak self] in
-            self?.runtime?.send(.sidebarRenameEnded)
-        }
+        return [.sidebarRenameEnded]
     }
 
     /// Repairs AppKit silently discarding the owned field editor before delegate cleanup.
-    private func cancelAbandonedInlineRenameIfNeeded() {
+    /// Returns the end for whichever caller invoked it, so the same repair serves a
+    /// pointer interaction and a pass without either one guessing how to dispatch.
+    private func cancelAbandonedInlineRenameIfNeeded() -> [Msg] {
         guard let session = activeRenameSession,
-              session.textField.currentEditor() == nil else { return }
+              session.textField.currentEditor() == nil else { return [] }
         activeRenameSession = nil
         finishInlineRename(textField: session.textField, target: session.target)
-        DispatchQueue.main.async { [weak self] in
-            self?.runtime?.send(.sidebarRenameEnded)
-        }
+        return [.sidebarRenameEnded]
     }
 
     /// Restore AppKit selection so multi-selection stays live while the focused
@@ -505,7 +526,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         selectedTabId: TabId?,
         projection: SidebarProjection,
         unappliedTabIds: inout Set<TabId>,
-        unappliedGroupIds: inout Set<GroupId>
+        unappliedGroupIds: inout Set<GroupId>,
+        followUps: inout [Msg]
     ) {
         var nonFocusRows = IndexSet()
         var focusRow: Int? = nil
@@ -541,7 +563,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             let willChangeSelection = (focusRow != nil || !nonFocusRows.isEmpty || !restoreSet.isEmpty)
                 && intended != outlineView.selectedRowIndexes
             if willChangeSelection {
-                endActiveRename(target)
+                followUps += endActiveRename(target)
                 switch target {
                 case .tab(let id):
                     if let item = store.updateTabItem(tabId: id, projection: projection),
@@ -576,6 +598,49 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             outlineView.selectRowIndexes(
                 IndexSet(), byExtendingSelection: false)
         }
+    }
+
+    /// Hands the field editor to `target`, returning whatever the predecessor
+    /// session owed the model. The model can move a live rename to a successor
+    /// row, so this runs inside the pass as well as from a menu command -- which
+    /// is why it reports rather than sends.
+    private func beginRenaming(target: RenameTarget) -> [Msg] {
+        var followUps: [Msg] = []
+        if activeRenameSession != nil {
+            followUps = finishActiveRename()
+        }
+        let item: SidebarItem? = {
+            switch target {
+            case .tab(let id): return tabItemCache[id]
+            case .group(let id): return groupItemCache[id]
+            }
+        }()
+        guard let item else { return followUps }
+        let row = outlineView.row(forItem: item)
+        guard row >= 0 else { return followUps }
+        guard let cellView = outlineView.view(
+            atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView
+        else { return followUps }
+        guard let textField = cellView.textField else { return followUps }
+        activeRenameSession = (target, textField)
+        textField.isEditable = true
+        textField.selectText(nil)
+        window?.makeFirstResponder(textField)
+        return followUps
+    }
+
+    // reconcile-pass-lint: no-send end
+
+    /// Dispatches facts discovered by a genuine user interaction in the same turn
+    /// as the interaction, rather than reporting them to a sweep that is not running.
+    private func sendNow(_ messages: [Msg]) {
+        for message in messages { runtime?.send(message) }
+    }
+
+    /// Commit a live rename before an outline interaction lets AppKit change selection.
+    /// The delegate's click-away path deliberately leaves the clicked destination focused.
+    func finishActiveRenameForPointerInteraction() {
+        sendNow(finishActiveRename())
     }
 
     /// Recompute row emphasis in place after a selection-only update.
@@ -639,33 +704,20 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     // MARK: - Inline Rename
 
+    // A menu- or pointer-driven rename commits the predecessor and dispatches that
+    // commit BEFORE the successor takes ownership, so a late callback from the old
+    // field cannot arrive while the new session is already installed. The pass path
+    // cannot do this -- it has no turn to dispatch in -- which is why `beginRenaming`
+    // reports instead, and why these two callers finish first rather than relying on
+    // the finish inside it.
     func beginRenamingGroup(_ groupId: GroupId) {
-        beginRenaming(target: .group(groupId))
+        sendNow(finishActiveRename())
+        _ = beginRenaming(target: .group(groupId))
     }
 
     func beginRenamingTab(_ tabId: TabId) {
-        beginRenaming(target: .tab(tabId))
-    }
-
-    private func beginRenaming(target: RenameTarget) {
-        if activeRenameSession != nil {
-            finishActiveRenameForPointerInteraction()
-        }
-        let item: SidebarItem? = {
-            switch target {
-            case .tab(let id): return tabItemCache[id]
-            case .group(let id): return groupItemCache[id]
-            }
-        }()
-        guard let item else { return }
-        let row = outlineView.row(forItem: item)
-        guard row >= 0 else { return }
-        guard let cellView = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView else { return }
-        guard let textField = cellView.textField else { return }
-        activeRenameSession = (target, textField)
-        textField.isEditable = true
-        textField.selectText(nil)
-        window?.makeFirstResponder(textField)
+        sendNow(finishActiveRename())
+        _ = beginRenaming(target: .tab(tabId))
     }
 
     // MARK: - NSOutlineViewDataSource
@@ -1287,6 +1339,12 @@ extension SidebarView: NSTextFieldDelegate {
 
     /// Click-away path: commits the rename without restoring focus because the user
     /// moved focus intentionally. A callback from any field except the owned one is inert.
+    ///
+    /// The one deferral in this file that survives the "a pass never sends" rule, and
+    /// it is not ours to remove: returning `true` is what permits AppKit to go on
+    /// tearing down the field editor after this callback returns, so a synchronous
+    /// send would reconcile -- and reload the row whose editor AppKit still holds --
+    /// mid-teardown. The hazard is AppKit's ordering, not DanTerm's structure.
     func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool {
         guard let textField = control as? NSTextField,
               let session = activeRenameSession,

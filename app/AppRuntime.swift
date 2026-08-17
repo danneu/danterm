@@ -179,6 +179,9 @@ class AppRuntime {
     )
     private var coalescedReconcileTimer: DispatchSourceTimer?   // rate-limited whole-model sweep
     private var coalescedReconcileTimerToken: AppRuntimeSchedulingToken?
+    // What reconcile passes reported plus the send-frame depth that decides when it
+    // may be dispatched. Owned here because only send() opens and closes a frame.
+    private var followUps = ReconcileFollowUps()
     // Serializes checkpoint encode+write work and gives sync flushes one fence for pending I/O.
     private let checkpointWriter = CheckpointWriter()
     // Export gets its own queue rather than sharing the checkpoint one. Nothing orders an export
@@ -384,7 +387,19 @@ class AppRuntime {
     }
 
     func send(_ msg: Msg) {
+        dispatch(msg)
+        drainFollowUps()
+    }
+
+    /// One send frame: translate, perform, sweep. Follow-ups the sweep's passes
+    /// reported accumulate for the outermost frame and are never dispatched here,
+    /// which is what stops a send arriving mid-sweep -- including one laundered
+    /// through AppKit's own dispatch -- from re-entering a pass against a stale
+    /// projection cache.
+    private func dispatch(_ msg: Msg) {
         guard schedulingLifecycle.isActive else { return }
+        followUps.enterFrame()
+        defer { followUps.leaveFrame() }
         let commands = update(&model, msg)
         for command in commands {
             perform(command)
@@ -395,7 +410,7 @@ class AppRuntime {
         ) {
         case .reconcileNow:
             cancelCoalescedReconcile()
-            reconcile()
+            followUps.report(reconcile())
         case .scheduleCoalesced:
             scheduleCoalescedReconcile()
         case .coalesceIntoPending:
@@ -413,6 +428,22 @@ class AppRuntime {
         }
         // The chrome's tab-todo badge (and the dock/toolbar bell badges + window title)
         // now reconcile via reconcileWindowChrome from the model after every send().
+    }
+
+    /// Runs a whole-model sweep outside `send()` -- the coalesced timer and the
+    /// post-restore commit -- and dispatches what its passes reported.
+    private func sweepAndDispatchFollowUps() {
+        followUps.report(reconcile())
+        drainFollowUps()
+    }
+
+    /// Dispatch the facts reconcile passes reported. Yields nothing while a send
+    /// frame is still running, so only the outermost frame drains; it loops until
+    /// empty so a follow-up's own sweep can report one.
+    private func drainFollowUps() {
+        while let followUp = followUps.nextToDispatch() {
+            dispatch(followUp)
+        }
     }
 
     /// Close pane-level shortcut help without dismissing the parent todo popover.
@@ -1337,7 +1368,7 @@ class AppRuntime {
             self.schedulingLifecycle.run(token) {
                 self.coalescedReconcileTimer = nil
                 self.coalescedReconcileTimerToken = nil
-                self.reconcile()
+                self.sweepAndDispatchFollowUps()
             }
         }
         timer.resume()
@@ -1823,8 +1854,7 @@ class AppRuntime {
         // tab's container eagerly from the nil containerShape cache -- selected visible,
         // the rest mounted+hidden -- and the chrome/sidebar/window passes build from
         // scratch. reconcileSessionExistence is a no-op (staged sessions match allPaneIds).
-        reconcile()
-
+        sweepAndDispatchFollowUps()
     }
 
     /// Dispose of a staged restore after a failed build so no temp state leaks into the live

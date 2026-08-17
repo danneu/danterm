@@ -110,6 +110,36 @@ guard, but they pass only the narrow value that helper needs. Reconcile passes
 may write AppKit views, session state, runtime-owned view handles, and
 `ReconcilerCaches`. They must not write `AppModel`.
 
+A pass writes `AppModel` indirectly if it calls `send()`, because the send
+re-enters `update()`. So the rule covers that too: **a reconcile pass originates
+no `Msg`.** A fact a pass discovers about the view travels back in the pass's
+return value, and the runtime dispatches it after the sweep has returned and
+every pass cache has advanced. Sending from mid-pass instead re-enters the whole
+sweep: the nested pass diffs the new model against a cache the outer pass has not
+advanced yet, and issues view ops against a host that is mid-mutation.
+
+This is the direction for the sweep, with one named exception rather than a claim
+already true of every pass. `reconcilePaneFocus` moves the responder, and AppKit
+synchronously calls `becomeFirstResponder`, which reaches a
+`.paneBecameFirstResponder` send. Converting it first requires settling whether
+that echo is redundant for a pass-issued move, which is a separate behavioral
+question. Two things keep the rule safe meanwhile:
+
+- `scripts/reconcile-pass-lint.sh` rejects a direct call edge from a pass to
+  `send(`, over the sweep's entry files and a marked region of `SidebarView`. It
+  cannot see an edge laundered through AppKit dispatch, so it does not on its own
+  establish the rule.
+- Only the outermost send dispatches follow-ups. A send arriving while a sweep is
+  in flight -- from any path, including an AppKit-laundered one -- accumulates
+  into the frame already running (`ReconcileFollowUps`). This is what makes the
+  channel correct without depending on having enumerated every in-pass send site.
+
+Two deferrals are deliberate and are not violations of the rule. AppKit's
+`control(_:textShouldEndEditing:)` must return before the field editor finishes
+tearing down, so the sidebar's click-away rename commit stays on a queue hop. And
+a fact discovered by a genuine pointer interaction is dispatched synchronously, in
+the same turn as the interaction -- there is no sweep running to report it to.
+
 For ordinary `Msg` handling, `AppModel` transitions happen in `update()` and are
 covered by behavior tests at the pure layer. If view-sync needs derived model
 state, compute it in `update()` before reconcile runs. If state is genuinely

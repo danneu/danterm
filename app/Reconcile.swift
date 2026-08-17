@@ -65,7 +65,10 @@ extension AppRuntime {
     /// Ordered containers -> existence -> pane config -> content/chrome -> occlusion:
     /// containers detach removed wrappers before session teardown releases their hosts;
     /// chrome then renders into the stable surviving wrappers, and occlusion stays last.
-    func reconcile() {
+    /// Returns the follow-up messages its passes discovered. The caller dispatches
+    /// them only after this sweep has returned and every pass cache has advanced --
+    /// a pass that sent for itself would re-enter the sweep against a stale cache.
+    func reconcile() -> [Msg] {
         reconcileContainers()               // eager: selected visible, rest mounted+hidden
         reconcileSessionExistence()         // release hosts only after containers detach dead wrappers
         reconcilePaneConfig()
@@ -73,7 +76,7 @@ extension AppRuntime {
         reconcileFocusBorders(tally: alertTally)
         reconcilePaneChrome(tally: alertTally)
         reconcilePaneFocus()                 // after chrome creates any desired search field
-        reconcileSidebar(tally: alertTally)
+        let followUps = reconcileSidebar(tally: alertTally)
         reconcileWindowChrome(tally: alertTally)
         reconcileSwitcher(tally: alertTally)      // single-optional MRU projection; nil (no mruCycle) -> orderOut
         reconcileConfirmation()
@@ -82,6 +85,7 @@ extension AppRuntime {
         reconcileTodoPopover()
         reconcileThemeBrowser()
         syncPaneVisibility()  // existing occlusion pass; stays last
+        return followUps
     }
 
     /// Tear down panes that left the model after containers detach wrappers.
@@ -207,10 +211,12 @@ extension AppRuntime {
         })
     }
 
-    /// Drives the sidebar through its single cache-owning reconcile pipeline.
-    func reconcileSidebar(tally: UnreadAlertTally) {
-        guard let sidebarView = sidebarView else { return }
-        sidebarReconcileDriver.reconcile(model, tally: tally, in: sidebarView)
+    /// Drives the sidebar through its single cache-owning reconcile pipeline and
+    /// returns what the pass discovered, for the sweep's caller to dispatch.
+    func reconcileSidebar(tally: UnreadAlertTally) -> [Msg] {
+        guard let sidebarView = sidebarView else { return [] }
+        return sidebarReconcileDriver.reconcile(
+            model, tally: tally, in: sidebarView).followUps
     }
 
     /// Push the window chrome -- window/content title, dock + toolbar-bell unread badge,
