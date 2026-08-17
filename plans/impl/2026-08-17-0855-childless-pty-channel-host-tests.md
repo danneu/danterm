@@ -208,8 +208,23 @@ suite once into a file under `.build/` and grep the file.
 ## Commit progress
 
 - [x] 1. docs(design): record the test-seam rule for owning components (D1, I6)
-- [ ] 2. feat(pty): let a host adopt a PTY channel with no child (D2, D3, I2, I3, PO1, PO2, PO6)
+- [x] 2. feat(pty): let a host adopt a PTY channel with no child (D2, D3, I2, I3, PO1, PO2, PO6)
 - [ ] 3. refactor(pty): prove input-write failure with a real descriptor (D4, I1, I5, PO3)
 - [ ] 4. test(pty): drive the host suite through childless PTY channels (D4, D7, I2, PO4)
 - [ ] 5. test(pty): serialize only the tests that share machine state (D6, I4)
 - [ ] 6. refactor(pty): keep fixture output staging out of shipping builds (D5, I1, PO5)
+
+## Implementation notes
+
+- `ChildlessPTYChannel` opens the PTY pair in its initializer, not in `spawn`. The
+  channel is therefore drivable before the host adopts it, so a test can write child
+  output first and let the host's read source pick it up on activation, instead of
+  polling for adoption before every write.
+- The child end is opened with `cfmakeraw` termios. Without it the line discipline
+  echoes what the host writes back to the master and rewrites bytes in both
+  directions, so no byte assertion would be about the byte that actually crossed.
+- Both ends are nonblocking. The child end has to be, because the byte-back assertion
+  reads it by polling and a blocking read with nothing pending would park the test.
+- The two-way byte test asserts the whole transmission, not a suffix of it. The
+  launch command line is itself written to the PTY before any test input, so a
+  childless channel receives exactly what a shell would.

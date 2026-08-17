@@ -1601,8 +1601,12 @@ public actor TerminalPTYHost {
         readSource = read
         readSourceActivated = false
 
+        // A channel with no child behind it has no process to watch. The rest of the
+        // process plane already treats an absent leader and session as nothing to do,
+        // so this host simply ends on the channel's own end-of-output edge.
+        guard let leader = spawned.leader else { return }
         let process = DispatchSource.makeProcessSource(
-            identifier: spawned.leader,
+            identifier: leader,
             eventMask: .exit,
             queue: queue
         )

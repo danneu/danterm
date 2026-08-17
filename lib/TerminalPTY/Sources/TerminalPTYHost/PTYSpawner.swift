@@ -3,11 +3,22 @@
 import Darwin
 import PaneProcessLifecycle
 
-/// File descriptors and identity returned atomically after a successful spawn.
+/// The byte plane a host adopts, and the child identity behind it when there is one.
+///
+/// Identity is optional because owning a PTY and owning a child are separate facts: a
+/// host can adopt a channel whose other end is held by something that is not a process
+/// of ours. A host reading `nil` here installs no process source, signals no session,
+/// and reaps no leader.
 package struct SpawnedPTY: Sendable {
-    let master: Int32
-    let leader: pid_t
-    let session: pid_t
+    package let master: Int32
+    package let leader: pid_t?
+    package let session: pid_t?
+
+    package init(master: Int32, leader: pid_t?, session: pid_t?) {
+        self.master = master
+        self.leader = leader
+        self.session = session
+    }
 }
 
 /// Distinguishes a complete spawn from the reducer-facing classified failure.
@@ -162,8 +173,9 @@ enum PTYSpawner {
 
     static func discard(_ spawned: SpawnedPTY) {
         Darwin.close(spawned.master)
-        kill(spawned.leader, SIGKILL)
-        _ = waitpid(spawned.leader, nil, 0)
+        guard let leader = spawned.leader else { return }
+        kill(leader, SIGKILL)
+        _ = waitpid(leader, nil, 0)
     }
 
     /// Closes the PTY master before reaping a spawned session leader. On macOS,

@@ -61,7 +61,7 @@ final class InFlightLaunch: Sendable {
             case .abandoned:
                 // Killed here as well as in `abandon`, which cannot have seen a
                 // child that did not exist yet when it ran.
-                _ = kill(spawned.leader, SIGKILL)
+                if let leader = spawned.leader { _ = kill(leader, SIGKILL) }
                 return false
             case .available, .consumed:
                 return false
@@ -128,8 +128,8 @@ final class InFlightLaunch: Sendable {
             switch state.phase {
             case .launching:
                 state.phase = .abandoned
-                if let launched = state.launched {
-                    _ = kill(launched.leader, SIGKILL)
+                if let leader = state.launched?.leader {
+                    _ = kill(leader, SIGKILL)
                 }
                 return Action.waitForWorker
             case .abandoned:

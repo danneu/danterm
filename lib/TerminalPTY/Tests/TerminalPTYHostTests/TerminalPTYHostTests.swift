@@ -2575,6 +2575,87 @@ struct TerminalPTYHostTests {
         #expect(await expectation.satisfied())
         await host.close()
     }
+
+    @Test("a host on a childless channel lives and quiesces with nothing to reap", .timeLimit(.minutes(1)))
+    func childlessChannelHostReachesQuiescence() async throws {
+        // Intent: a host whose PTY has no child behind it starts, takes output,
+        //   transmits input, resizes, and reaches quiescence owning no process.
+        // Why it exists: source installation was the one process-plane step that
+        //   assumed a child existed, so a channel without one could not converge.
+        // Scenario: the test owns the child end of a real PTY and plays the child.
+        let channel = try ChildlessPTYChannel()
+        let host = try makeHost(spawner: channel)
+        await host.start(makeLaunchInput(command: "no command runs on a childless channel"))
+        channel.writeFromChild(Array("__READY__".utf8))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        let running = await host.resourceSnapshot()
+        #expect(running.hasOpenMaster)
+        #expect(running.hasLeader == false)
+        #expect(running.hasSession == false)
+
+        host.send(Array("typed".utf8))
+        host.resize(.init(columns: 100, rows: 31))
+        #expect(await host.drainedPendingInputByteCount() == 0)
+        await host.close()
+
+        let released = await host.resourceSnapshot()
+        #expect(released.isReleased)
+        #expect(released.census.forcedQuiescenceCount == 0)
+    }
+
+    @Test("bytes cross a childless channel in both directions", .timeLimit(.minutes(1)))
+    func childlessChannelCarriesBytesBothWays() async throws {
+        // Intent: output written at the child end reaches a fenced snapshot through
+        //   the host's own read path, and input reaches the child end byte for byte.
+        // Why it exists: input capture records what the reducer submitted, not what
+        //   crossed the master, so transmission itself had no coverage.
+        // Scenario: the test writes as the child, then reads back what the host sent.
+        let launchCommand = "no command runs on a childless channel"
+        let channel = try ChildlessPTYChannel()
+        let host = try makeHost(spawner: channel)
+        await host.start(makeLaunchInput(command: launchCommand))
+
+        channel.writeFromChild(Array("alpha".utf8))
+        #expect(await host.waitForSnapshot {
+            $0.fencedSnapshot().screenText.contains("alpha")
+        })
+
+        host.send(Array("typed\r".utf8))
+        // The whole transmission, not a suffix of it: the launch command line the
+        // policy hands the host is itself written to the PTY, and a childless channel
+        // receives it exactly as a shell would.
+        let transmitted = Array("\(launchCommand)\n".utf8) + Array("typed\r".utf8)
+        #expect(await pollUntil({
+            channel.bytesReceivedFromHost() == transmitted
+        }, within: .seconds(20)))
+        await host.close()
+    }
+
+    @Test("a resize on a childless channel reaches the descriptor", .timeLimit(.minutes(1)))
+    func childlessChannelResizeReachesDescriptor() async throws {
+        // Intent: the host's TIOCSWINSZ lands on the adopted descriptor, and the
+        //   terminal geometry moves with it.
+        // Why it exists: a fixture that only carried bytes could be a socket pair.
+        //   A window size read back at the child end is what proves a real PTY.
+        // Scenario: the test reads TIOCGWINSZ at the child end after a resize.
+        let channel = try ChildlessPTYChannel()
+        let host = try makeHost(spawner: channel)
+        await host.start(makeLaunchInput(command: "no command runs on a childless channel"))
+        channel.writeFromChild(Array("__READY__".utf8))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        #expect(channel.childWindowSize()?.ws_col == 80)
+
+        host.resize(.init(columns: 100, rows: 31))
+        let snapshot = await host.snapshot()
+
+        #expect(snapshot.geometry.columns == 100)
+        #expect(snapshot.geometry.rows.count == 31)
+        let resized = try #require(channel.childWindowSize())
+        #expect(resized.ws_col == 100)
+        #expect(resized.ws_row == 31)
+        await host.close()
+    }
 }
 
 /// Awaits the task's value but gives up after the bound, returning nil on
