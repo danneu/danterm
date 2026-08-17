@@ -18,10 +18,8 @@ struct TerminalPTYHostTests {
         // Intent: owner-side key encoding covers every new byte-exact D8 key class.
         // Why it exists: encoding these keys in a client would race live terminal modes.
         // Scenario: Ctrl-Space, Ctrl-backslash, and Insert reach one waiting child.
-        let host = try makeHost()
-        let command = "stty -echo; exec \(try probeExecutable()) hold \"$0\""
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost()
+        let host = pane.host
         let baseline = await host.inputWrites().count
 
         host.sendKey(.character(" "), modifiers: [.control])
@@ -40,10 +38,9 @@ struct TerminalPTYHostTests {
 
     @Test("captured wheel completion follows PTY delivery", .timeLimit(.minutes(1)))
     func capturedWheelCompletionFollowsPTYDelivery() async throws {
-        let host = try makeHost()
-        let command = "printf '\\033[?1000;1006h'; exec \(try probeExecutable()) hold \"$0\""
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[?1000;1006h"))
         let completion = InputCompletionRecorder(expecting: 1)
 
         host.sendWheel(.init(rowDelta: -1, column: 2, row: 3)) {
@@ -57,8 +54,7 @@ struct TerminalPTYHostTests {
 
     @Test("encoded key and paste submissions complete after PTY delivery", .timeLimit(.minutes(1)))
     func encodedInputSubmissionsCompleteAfterDelivery() async throws {
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: "stty -echo; exec cat > /dev/null"))
+        let host = try await startChildlessHost().host
         let completions = InputCompletionRecorder(expecting: 2)
 
         host.sendKey(.returnKey, modifiers: []) { completions.signal($0) }
@@ -79,8 +75,11 @@ struct TerminalPTYHostTests {
         lifecycle.holdSpawnActivation {
             spawnInstalled.signal()
         }
-        let host = try makeHost(resourceLifecycle: lifecycle)
-        await host.start(makeLaunchInput(command: "stty -echo; exec cat > /dev/null"))
+        let host = try makeHost(
+            resourceLifecycle: lifecycle,
+            spawner: try ChildlessPTYChannel()
+        )
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
         let completion = InputCompletionRecorder(expecting: 1)
 
         host.send(Array("buffered\n".utf8)) {
@@ -105,8 +104,11 @@ struct TerminalPTYHostTests {
         lifecycle.holdSpawnActivation {
             spawnInstalled.signal()
         }
-        let host = try makeHost(resourceLifecycle: lifecycle)
-        await host.start(makeLaunchInput(command: "exec sleep 30"))
+        let host = try makeHost(
+            resourceLifecycle: lifecycle,
+            spawner: try ChildlessPTYChannel()
+        )
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
         let completion = InputCompletionRecorder(expecting: 1)
         host.send(Array("buffered".utf8)) {
             completion.signal($0)
@@ -130,12 +132,15 @@ struct TerminalPTYHostTests {
         lifecycle.holdSpawnActivation {
             spawnInstalled.signal()
         }
-        let host = try makeHost(resourceLifecycle: lifecycle)
-        await host.start(makeLaunchInput(command: "exec sleep 30"))
+        let host = try makeHost(
+            resourceLifecycle: lifecycle,
+            spawner: try ChildlessPTYChannel()
+        )
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
         let accepted = InputCompletionRecorder(expecting: 1)
         let rejected = InputCompletionRecorder(expecting: 1)
 
-        let initialInputByteCount = Array("exec sleep 30\n".utf8).count
+        let initialInputByteCount = Array("\(childlessLaunchCommand)\n".utf8).count
         host.send([UInt8](
             repeating: 0x61,
             count: PaneProcessLifecycleReducer.pendingInputByteLimit - initialInputByteCount
@@ -163,7 +168,7 @@ struct TerminalPTYHostTests {
         // Scenario: the test closes the child end, then submits one whole payload.
         let channel = try ChildlessPTYChannel()
         let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: "no command runs on a childless channel"))
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
         channel.writeFromChild(Array("__READY__".utf8))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
@@ -194,7 +199,7 @@ struct TerminalPTYHostTests {
         //   backpressure with its prefix already across the master; then the end closes.
         let channel = try ChildlessPTYChannel()
         let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: "no command runs on a childless channel"))
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
         channel.writeFromChild(Array("__READY__".utf8))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let completion = InputCompletionRecorder(expecting: 1)
@@ -215,11 +220,10 @@ struct TerminalPTYHostTests {
     func linkInteractionEffectsStayLocal() async throws {
         // Intent: prove the serialized owner applies hover/open effects without child bytes.
         // Why it exists: link ownership must preempt mouse reporting at the PTY boundary.
-        // Scenario: a real child prints OSC 8 text, then receives a Cmd-hover and Cmd-click.
-        let host = try makeHost()
-        let command = "printf '\\033]8;;https://a.co\\007https://a.co\\033]8;;\\007'; exec \(try probeExecutable()) hold \"$0\""
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        // Scenario: the child prints OSC 8 text, then receives a Cmd-hover and Cmd-click.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}]8;;https://a.co\u{7}https://a.co\u{1B}]8;;\u{7}"))
         let screen = host.fencedSnapshot().screenText
             .split(separator: "\n", omittingEmptySubsequences: false)
         let row = try #require(screen.lastIndex(where: { $0.contains("https://a.co") }))
@@ -270,8 +274,9 @@ struct TerminalPTYHostTests {
         // Why it exists: signaling every mutation lets pointer backlogs wake the same future drain
         //   repeatedly even though that drain reads the terminal's final state.
         // Scenario: full damage is signaled, then Select All lands before the consumer drains it.
-        let host = try makeHost(captureTransitions: false)
-        host.deliverOutputForTesting(Array("alpha".utf8))
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("alpha"))
         let afterOutput = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
         host.selectAll()
@@ -290,8 +295,9 @@ struct TerminalPTYHostTests {
         // Why it exists: signal coalescing is safe only if the eventual drain carries all damage,
         //   rather than only the rows present when the wake was emitted.
         // Scenario: two line selections land on different rows before one frame drain.
-        let host = try makeHost(captureTransitions: false)
-        host.deliverOutputForTesting(Array("alpha\r\nbeta\r\ngamma".utf8))
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("alpha\r\nbeta\r\ngamma"))
         _ = host.fencedFrameState()
         let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
@@ -317,8 +323,9 @@ struct TerminalPTYHostTests {
         // Intent: click reservation stays owner-internal and creates no consumer wakeup.
         // Why it exists: whole-Terminal inequality treated invisible armed-link state as a frame.
         // Scenario: Cmd-hover drains, then Cmd-down arms the same URL without changing hover.
-        let host = try makeHost(captureTransitions: false)
-        host.deliverOutputForTesting(Array("https://a.co".utf8))
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("https://a.co"))
         _ = host.fencedFrameState()
 
         host.sendPointer(.move(column: 3, row: 0, modifiers: [.command]))
@@ -339,9 +346,9 @@ struct TerminalPTYHostTests {
         // Why it exists: the 2026-08-15 pointer freeze came from whole-Terminal equality on the
         //   owner queue, and removing only that one call would leave the same failure elsewhere.
         // Scenario: each interaction class mutates a live host after it has built deep history.
-        let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(command: try scrollbackCommand()))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
         _ = host.fencedFrameState()
 
         let comparisons = WholeStoreEqualityCounter.measure {
@@ -363,8 +370,9 @@ struct TerminalPTYHostTests {
         // Intent: publication follows recorded damage even when the visible value is unchanged.
         // Why it exists: an inequality-based shortcut would strand deliberate repaint records.
         // Scenario: the same URL is hovered twice and the same successful search is begun twice.
-        let host = try makeHost(captureTransitions: false)
-        host.deliverOutputForTesting(Array("https://a.co hit".utf8))
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("https://a.co hit"))
         _ = host.fencedFrameState()
 
         host.sendPointer(.move(column: 3, row: 0, modifiers: [.command]))
@@ -395,13 +403,13 @@ struct TerminalPTYHostTests {
         // Intent: transition capture classifies viewport movement from viewport state itself.
         // Why it exists: pending full damage cannot say whether a later navigation actually moved.
         // Scenario: output schedules full damage, then a scroll lands before that frame drains.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: try scrollbackCommand()))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
         _ = host.fencedFrameState()
         let baseline = await host.transitions().count
 
-        host.deliverOutputForTesting(Array("\u{1B}[2J".utf8))
+        #expect(await pane.writeFromChild("\u{1B}[2J"))
         host.scroll(byRows: -1)
         _ = host.fencedSnapshot()
 
@@ -441,13 +449,11 @@ struct TerminalPTYHostTests {
     func clipboardWriteFrameStateAndReadDenial() async throws {
         // Intent: owner framing drains completed clipboard writes independently from replies.
         // Why it exists: grid-silent effects need a wakeup, while reads must never expose clipboard data.
-        // Scenario: a child writes OSC 52, asks to read it, and remains alive for inspection.
-        let host = try makeHost()
+        // Scenario: the child writes OSC 52, asks to read it, and the pane stays live.
+        let pane = try await startChildlessHost()
+        let host = pane.host
         _ = host.fencedFrameState()
-        let command = "\(printMarker("READY", newline: false)); sleep 0.1; printf '\\033]52;c;aGVsbG8=\\007\\033]52;c;?\\007'; exec sleep 30"
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        _ = host.fencedFrameState()
+        #expect(await pane.writeFromChild("\u{1B}]52;c;aGVsbG8=\u{7}\u{1B}]52;c;?\u{7}"))
 
         var clipboardWrite: String?
         for await _ in host.updates {
@@ -468,22 +474,19 @@ struct TerminalPTYHostTests {
     func incompleteClipboardWriteStaysIdle() async throws {
         // Intent: retained OSC bytes alone produce neither a host wakeup nor a drained effect.
         // Why it exists: whole-Terminal inequality includes parser state and is too broad for work.
-        // Scenario: a child splits one clipboard write across two temporally separate chunks.
-        let host = try makeHost(captureTransitions: false)
-        _ = host.fencedFrameState()
-        let command = "printf '\\137\\137READY\\137\\137'; sleep 0.2; printf '\\033]52;c;aGVs'; sleep 0.2; printf 'bG8=\\007'; exec sleep 30"
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        // Scenario: the child splits one clipboard write across two separate writes.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
         _ = host.fencedFrameState()
         let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
-        #expect(await host.waitForOutput(containing: Array("\u{1B}]52;c;aGVs".utf8)))
+        #expect(await pane.writeFromChild("\u{1B}]52;c;aGVs"))
         #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == baseline)
         let incomplete = host.fencedFrameState()
         #expect(incomplete.damage == .none)
         #expect(incomplete.clipboardWrite == nil)
 
-        #expect(await host.waitForOutput(containing: Array("bG8=\u{7}".utf8)))
+        #expect(await pane.writeFromChild("bG8=\u{7}"))
         #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == baseline + 1)
         let complete = host.fencedFrameState()
         #expect(complete.damage == .none)
@@ -656,9 +659,9 @@ struct TerminalPTYHostTests {
         //   promises geometry that a run-wide skip would break.
         // Scenario: a drag interrupted by a click, with the click's viewport
         //   row 0 resolving against the taller grid submitted just before it.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: try scrollbackCommand()))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
 
         host.resize(.init(columns: 80, rows: 30))
         let tallTopLine = topViewportLine(host.fencedSnapshot())
@@ -702,9 +705,7 @@ struct TerminalPTYHostTests {
         // Why it exists: the rejected debounce alternative would have made every
         //   settled resize wait out a timer, and nothing else in this suite fails
         //   if a delay is added rather than a submission dropped.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let host = try await startChildlessHost().host
 
         host.resize(.init(columns: 100, rows: 31))
         let snapshot = host.fencedSnapshot()
@@ -757,11 +758,7 @@ struct TerminalPTYHostTests {
 
     @Test("an unchanged terminal emits no update work", .timeLimit(.minutes(1)))
     func unchangedTerminalEmitsNoUpdate() async throws {
-        let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let host = try await startChildlessHost(captureTransitions: false).host
         let signalsBefore = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
         host.resize(.init(columns: 80, rows: 24))
@@ -1051,10 +1048,10 @@ struct TerminalPTYHostTests {
     func stateSynchronizationSharesRecorderFence() async throws {
         // Intent: pair serialized terminal state with the first event not reflected in that state.
         // Why it exists: separate terminal and recorder reads can drop or double-apply output between them.
-        // Scenario: a live child prints history, the host fences a sync, and later output resumes at its cursor.
-        let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(command: "printf 'one\\n'; read ignored; printf 'two\\n'; sleep 30"))
-        #expect(await host.waitForOutput(containing: Array("one".utf8)))
+        // Scenario: the child prints history, the host fences a sync, and later output resumes at its cursor.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("one\r\n"))
 
         let fenced = host.fencedStateSynchronization()
         var resumed = try #require(Terminal(
@@ -1063,7 +1060,7 @@ struct TerminalPTYHostTests {
         ))
         resumed.feed(fenced.state.bytes)
         host.send(Array("\n".utf8))
-        #expect(await host.waitForOutput(containing: Array("two".utf8)))
+        #expect(await pane.writeFromChild("two\r\n"))
         let suffix = host.fencedFlightRecording(from: fenced.cursor)
         for recorded in suffix.events {
             switch recorded.event {
@@ -1091,9 +1088,9 @@ struct TerminalPTYHostTests {
         // Intent: one owner turn returns remote cursor placement, retained events, and state.
         // Why it exists: separate fences can splice a cursor onto state from another moment.
         // Scenario: a live pane rejects a foreign cursor while its exact state stays replayable.
-        let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(command: "printf 'pane-state'; sleep 30"))
-        #expect(await host.waitForOutput(containing: Array("pane-state".utf8)))
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("pane-state"))
         let foreign = TerminalFlightRecordingCursor(
             recorderLifetimeId: UUID(),
             nextSequence: 0,
@@ -1122,12 +1119,10 @@ struct TerminalPTYHostTests {
     func followFenceCarriesSuffixAndState() async throws {
         // Intent: a followed suffix and its replacement state end at the same recorder cursor.
         // Why it exists: eviction during delivery must repair state without losing later output.
-        // Scenario: a child waits between two writes while a follower arms at the first one.
-        let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(
-            command: "printf 'one'; read ignored; printf 'two'; sleep 30"
-        ))
-        #expect(await host.waitForOutput(containing: Array("one".utf8)))
+        // Scenario: the child waits between two writes while a follower arms at the first one.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("one"))
         let origin = host.fencedFlightRecordingOriginFromNow()
         let subscriptionId = UUID()
         host.addFlightRecordingFollowNotice(
@@ -1136,7 +1131,7 @@ struct TerminalPTYHostTests {
             notify: {}
         )
         host.send(Array("\n".utf8))
-        #expect(await host.waitForOutput(containing: Array("two".utf8)))
+        #expect(await pane.writeFromChild("two"))
 
         let fenced = try #require(host.fencedFlightRecordingFollowStream(
             subscriptionId: subscriptionId,
@@ -1161,12 +1156,8 @@ struct TerminalPTYHostTests {
         //   waiting in the owner's own buffer leaves no event behind.
         // Why it exists: an event written when bytes are queued charges the app's own
         //   backpressure to the child, which is the attribution this facility exists to make.
-        // Scenario: megabytes are submitted to a child that never reads its terminal.
-        let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(
-            command: "stty raw -echo; exec \(try probeExecutable()) stalled \"$0\""
-        ))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        // Scenario: megabytes are submitted to a channel whose child end nobody reads.
+        let host = try await startChildlessHost(captureTransitions: false).host
 
         let submission = host.fencedFlightRecordingOriginFromNow().cursor
         let payload = [UInt8](repeating: UInt8(ascii: "A"), count: 4 * 1024 * 1024)
@@ -1249,13 +1240,12 @@ struct TerminalPTYHostTests {
         //   carries one stamp, while input submitted with an origin beside it carries two.
         // Why it exists: I3. An origin defaulted to the transfer time, or to zero, would read
         //   as a measurement rather than as the absence of one.
-        // Scenario: a child asks for the cursor position and the user types straight after.
-        let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(command: drainingCommand))
-        #expect(await host.waitForOutput(containing: drainingMarker))
+        // Scenario: the child asks for the cursor position and the user types straight after.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
 
         let submission = host.fencedFlightRecordingOriginFromNow().cursor
-        host.deliverOutputForTesting(Array("\u{1B}[6n".utf8))
+        #expect(await pane.writeFromChild("\u{1B}[6n"))
         let typedOrigin = DispatchTime.now().uptimeNanoseconds
         host.send(Array("hi".utf8), origin: typedOrigin)
         #expect(await host.settledPendingInputByteCount() == 0)
@@ -1263,14 +1253,13 @@ struct TerminalPTYHostTests {
         let events = host.fencedFlightRecording(from: submission)
             .events
             .filter { writtenBytes($0) != nil }
-        // Row 4 column 13: `stty raw` clears ONLCR, so the newline that ends
-        // the marker line moves the cursor down without returning it to
-        // column 1. The coordinates stay exact because they are what notices
-        // the child printing something this test did not ask for -- and the
-        // screen rides along with a failure, so the next such surprise
-        // explains itself instead of arriving as a byte array.
+        // Row 1 column 1: nothing has been printed to this pane, because the only
+        // thing that could print to it is this test. The coordinates stay exact
+        // because they are what notices output nobody asked for -- and the screen
+        // rides along with a failure, so the next such surprise explains itself
+        // instead of arriving as a byte array.
         #expect(events.compactMap(writtenBytes) == [
-            Array("\u{1B}[4;13R".utf8),
+            Array("\u{1B}[1;1R".utf8),
             Array("hi".utf8),
         ], "screen when the cursor was reported:\n\(occupiedScreenText(host))")
         #expect(events.first?.originElapsedNanoseconds == nil)
@@ -2044,10 +2033,10 @@ struct TerminalPTYHostTests {
     func primaryWheelRoutesLocally() async throws {
         // Intent: route a wheel step using the authoritative screen selected on the host queue.
         // Why it exists: deciding from a lagging session snapshot can emit arrows on primary.
-        // Scenario: the user wheels upward through retained shell output while the child waits.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: try scrollbackCommand()))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        // Scenario: the user wheels upward through retained output while the child waits.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
         let writeBaseline = await host.inputWrites().count
 
         host.sendWheel(.init(rowDelta: -3, column: 0, row: 0))
@@ -2068,10 +2057,9 @@ struct TerminalPTYHostTests {
         // Intent: select the alternate-screen arrow arm exactly once on the owner queue.
         // Why it exists: wheel routing outside the owner can swallow input during a 1049 race.
         // Scenario: the user wheels upward three rows while a full-screen application is active.
-        let host = try makeHost()
-        let command = "printf '\\033[?1h\\033[?1049h'; exec \(try probeExecutable()) hold \"$0\""
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[?1h\u{1B}[?1049h"))
         let writeBaseline = await host.inputWrites().count
         let up = [UInt8]([0x1B, 0x4F, 0x41])
 
@@ -2091,10 +2079,9 @@ struct TerminalPTYHostTests {
         // Intent: read child-controlled modes, encode semantic input, and write it in one owner turn.
         // Why it exists: a controller-side mode mirror can lag immediately after a child mode change.
         // Scenario: a TUI enables DECCKM, bracketed paste, and focus reporting before accepting input.
-        let host = try makeHost()
-        let command = "stty -echo; printf '\\033[?1h\\033[?2004h\\033[?1004h'; exec \(try probeExecutable()) hold \"$0\""
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[?1h\u{1B}[?2004h\u{1B}[?1004h"))
         let baseline = await host.inputWrites().count
         let snapshotBeforeFocus = await host.snapshot()
 
@@ -2114,9 +2101,9 @@ struct TerminalPTYHostTests {
 
     @Test("empty safe paste and focus preserve a browsing viewport", .timeLimit(.minutes(1)))
     func nonScrollingSemanticInputPreservesViewport() async throws {
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: try scrollbackCommand(disableEcho: true)))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
         host.scroll(byRows: -3)
         let browsing = host.fencedSnapshot()
         let baseline = await host.inputWrites().count
@@ -2135,9 +2122,7 @@ struct TerminalPTYHostTests {
 
     @Test("semantic input capture records normalized events in owner order", .timeLimit(.minutes(1)))
     func semanticInputCaptureOrder() async throws {
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let host = try await startChildlessHost().host
 
         host.sendKey(.f5, modifiers: [.shift])
         host.sendPaste("paste")
@@ -2155,25 +2140,24 @@ struct TerminalPTYHostTests {
     func wheelTransitionRaceUsesOwnerScreen() async throws {
         // Intent: prove both race directions resolve on the shared FIFO instead of a caller snapshot.
         // Why it exists: a primary-to-alt race can leak arrows, while alt-to-primary can swallow them.
-        // Scenario: wheel intent is queued immediately after commands that enter and leave alt screen.
-        let host = try makeHost()
-        let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done"
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForSnapshot {
-            $0.fencedSnapshot().fullHistoryText.contains("line-39")
-        })
+        // Scenario: wheel intent is queued immediately after the commands that make the
+        //   child enter and leave alt screen, and before the child's answer arrives.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
         let down = [UInt8]([0x1B, 0x5B, 0x42])
 
-        let enter = Array("printf '\\033[?1049h'\n".utf8)
+        let enter = Array("enter-alt-screen\n".utf8)
         let enterWriteBaseline = await host.inputWrites().count
         host.send(enter)
         host.sendWheel(.init(rowDelta: -1, column: 0, row: 0))
         _ = host.fencedSnapshot()
         #expect(Array((await host.inputWrites()).dropFirst(enterWriteBaseline)) == [enter])
         #expect((await host.transitions()).contains(.scrollByRows(-1)))
-        #expect(await host.waitForSnapshot { $0.fencedSnapshot().isAlternateScreenActive })
+        #expect(await pane.writeFromChild("\u{1B}[?1049h"))
+        #expect(host.fencedSnapshot().isAlternateScreenActive)
 
-        let exit = Array("printf '\\033[?1049l'\n".utf8)
+        let exit = Array("leave-alt-screen\n".utf8)
         let exitWriteBaseline = await host.inputWrites().count
         host.send(exit)
         host.sendWheel(.init(rowDelta: 2, column: 0, row: 0))
@@ -2182,7 +2166,8 @@ struct TerminalPTYHostTests {
             exit,
             down + down,
         ])
-        #expect(await host.waitForSnapshot { $0.fencedSnapshot().isAlternateScreenActive == false })
+        #expect(await pane.writeFromChild("\u{1B}[?1049l"))
+        #expect(host.fencedSnapshot().isAlternateScreenActive == false)
 
         await host.close()
     }
@@ -2191,11 +2176,10 @@ struct TerminalPTYHostTests {
     func capturedPointerUsesAuthoritativeModes() async throws {
         // Intent: decide and encode pointer input from the terminal modes on the owner FIFO.
         // Why it exists: mode lookup outside the owner can race child DECSET output.
-        // Scenario: a child enables click tracking and SGR encoding before the user clicks.
-        let host = try makeHost()
-        let command = "printf '\\033[?1000;1006h'; exec \(try probeExecutable()) hold \"$0\""
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        // Scenario: the child enables click tracking and SGR encoding before the user clicks.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[?1000;1006h"))
         let baseline = await host.inputWrites().count
 
         host.sendPointer(.down(.left, column: 4, row: 2))
@@ -2211,11 +2195,9 @@ struct TerminalPTYHostTests {
 
     @Test("Shift extension stays local while captured and replays exactly", .timeLimit(.minutes(1)))
     func capturedShiftSelectionReplays() async throws {
-        let host = try makeHost()
-        let command = "exec \(try probeExecutable()) hold \"$0\""
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        host.deliverOutputForTesting(Array("\u{1B}[2J\u{1B}[H\u{1B}[?1000halpha beta".utf8))
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[2J\u{1B}[H\u{1B}[?1000halpha beta"))
         let baseline = await host.inputWrites().count
         let lines = host.fencedSnapshot().viewportText
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -2258,10 +2240,9 @@ struct TerminalPTYHostTests {
 
     @Test("captured and Shift wheel routes preserve a browsing viewport", .timeLimit(.minutes(1)))
     func wheelRoutesPreserveBrowsing() async throws {
-        let host = try makeHost()
-        let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; printf '\\033[?1000;1006h'; exec \(try probeExecutable()) hold \"$0\""
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines + "\u{1B}[?1000;1006h"))
         host.scroll(byRows: -3)
         let browsing = host.fencedSnapshot().scrollProjection
         let baseline = await host.inputWrites().count
@@ -2284,9 +2265,7 @@ struct TerminalPTYHostTests {
 
     @Test("uncaptured pane menu is returned only after right-button release", .timeLimit(.minutes(1)))
     func paneMenuWaitsForRelease() async throws {
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let host = try await startChildlessHost().host
         let menus = AsyncStream<TerminalViewportCell>.makeStream()
         var iterator = menus.stream.makeAsyncIterator()
 
@@ -2307,9 +2286,9 @@ struct TerminalPTYHostTests {
         // Intent: record the local snap before the user write without classifying replies as input.
         // Why it exists: a non-echoing child cannot reconstruct this viewport mutation from output.
         // Scenario: the user scrolls up, types into a waiting process, and captures the pane.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: try scrollbackCommand(disableEcho: true)))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
         host.scroll(byRows: -4)
         #expect(host.fencedSnapshot().scrollProjection.isFollowing == false)
 
@@ -2331,9 +2310,9 @@ struct TerminalPTYHostTests {
 
     @Test("scrollbar commands clamp on the owner queue and emit updates only for changes", .timeLimit(.minutes(1)))
     func ownerScrollbarCommandsClampAndDedupe() async throws {
-        let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(command: try scrollbackCommand()))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild(scrollbackLines))
         _ = host.fencedFrameState()
         let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         let writeBaseline = await host.inputWrites().count
@@ -2363,11 +2342,9 @@ struct TerminalPTYHostTests {
         //   mutation that never publishes leaves the previous match painted on screen.
         // Scenario: a pane holding two occurrences of a needle is searched, walked to the
         //   older match, then cleared.
-        let host = try makeHost(captureTransitions: false)
-        // Octal-escaped so the needle never appears in the echoed command line itself.
-        let command = "printf '\\150it\\nmiss\\n\\150it\\n'; exec \(try probeExecutable()) hold \"$0\""
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("hit\r\nmiss\r\nhit\r\n"))
         _ = host.fencedFrameState()
         let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
         var iterator = statuses.stream.makeAsyncIterator()
@@ -2407,11 +2384,9 @@ struct TerminalPTYHostTests {
         //   to be told that the search found nothing or cannot move.
         // Scenario: typing a needle with no matches, then re-typing it; and pressing
         //   Cmd-G on the only match.
-        let host = try makeHost(captureTransitions: false)
-        // Octal-escaped so the needle never appears in the echoed command line itself.
-        let command = "printf '\\150it\\n'; exec \(try probeExecutable()) hold \"$0\""
-        await host.start(makeLaunchInput(command: command))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("hit\r\n"))
         let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
         var iterator = statuses.stream.makeAsyncIterator()
         let report: @Sendable (TerminalSearchStatus?) -> Void = { statuses.continuation.yield($0) }
@@ -2443,11 +2418,7 @@ struct TerminalPTYHostTests {
         //   whole suite sat idle forever holding the PTY.
         // Scenario: the 2026-07-22 stress run where launchRecipeAndDuplexIO hit
         //   its 60s time limit yet the run had to be killed by hand.
-        let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let host = try await startChildlessHost(captureTransitions: false).host
 
         let resultTask = Task { await host.waitForResult() }
         let outputTask = Task { await host.waitForOutput(containing: Array("__NEVER__".utf8)) }
@@ -2505,14 +2476,15 @@ struct TerminalPTYHostTests {
         //   bytes arrived before the wait started, even though the host has already
         //   torn down and can never deliver another output callback.
         // Why it exists: the helper registered its quiescence fallback before consulting
-        //   the evidence it was handed, so the two raced on the host queue. A child that
-        //   prints and immediately exits -- the common shape -- made every such wait a
-        //   coin flip, surfacing as an unexplained `#expect` failure at the wait line.
+        //   the evidence it was handed, so the two raced on the host queue. A pane that
+        //   prints and is immediately torn down -- the common shape -- made every such
+        //   wait a coin flip, surfacing as an unexplained `#expect` failure at the wait
+        //   line.
         // Scenario: `just test` runs its steps as a parallel pool; under that load the
         //   host queue won the race often enough to fail the gate roughly one run in five.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: "\(printMarker("SETTLED")); exit 0"))
-        #expect(await host.waitForResult() == .exited(.exited(0)))
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("__SETTLED__"))
         await host.close()
 
         // Re-asking a torn-down host is the whole point: each call reinstalls the
@@ -2539,16 +2511,20 @@ struct TerminalPTYHostTests {
         //   `applicationTerminationClosesMultipleLivePanes`, where the chatty probe
         //   printed `__READY__` once and then wrote 4 KiB forever, so sixteen writes
         //   discarded the marker before the wait for it was armed (fix fdb9ec6).
-        let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("__READY__"))
 
-        // The flood, deterministically: enough output through the host's own path that
-        // the marker cannot still be retained, on an idle machine as much as a loaded one.
+        // The flood, deterministically: twice the host's retention window, so the marker
+        // cannot still be retained on an idle machine or a loaded one. The trailing
+        // marker is what proves the flood was consumed -- the host applies its output in
+        // order, so the flood is behind that answer -- and it is armed before the flood
+        // because that is the only way to ask about output a flood has already buried.
+        let flooded = host.expectOutput(containing: Array("__FLOODED__".utf8))
         let flood = [UInt8](repeating: UInt8(ascii: "f"), count: 64 * 1024)
-        for _ in 0..<16 { host.deliverOutputForTesting(flood) }
+        for _ in 0..<2 { #expect(pane.channel.writeFromChild(flood)) }
+        #expect(pane.channel.writeFromChild(Array("__FLOODED__".utf8)))
+        #expect(await flooded.satisfied())
 
         let clock = ContinuousClock()
         let start = clock.now
@@ -2574,15 +2550,20 @@ struct TerminalPTYHostTests {
         //   at, so it has to actually work; and it is the property that makes retaining
         //   output unnecessary in the first place.
         // Scenario: the shape a chatty pane forces -- the interesting marker arrives after
-        //   megabytes of noise that no bounded window could have held.
-        let host = try makeHost(captureTransitions: false)
+        //   noise that no bounded window could have held.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
         let expectation = host.expectOutput(containing: Array("__LATE__".utf8))
+        // Armed here for the same reason as the match under test: after the flood,
+        // nothing may ask about output any more. It is what splits the marker across two
+        // applied chunks, which is what a PTY read boundary landing inside it looks like.
+        let firstHalfApplied = host.expectOutput(containing: Array("__LA".utf8))
 
         let flood = [UInt8](repeating: UInt8(ascii: "f"), count: 64 * 1024)
-        for _ in 0..<16 { host.deliverOutputForTesting(flood) }
-        // Split across chunks, because a PTY read boundary lands wherever it lands.
-        host.deliverOutputForTesting(Array("__LA".utf8))
-        host.deliverOutputForTesting(Array("TE__".utf8))
+        for _ in 0..<2 { #expect(pane.channel.writeFromChild(flood)) }
+        #expect(pane.channel.writeFromChild(Array("__LA".utf8)))
+        #expect(await firstHalfApplied.satisfied())
+        #expect(pane.channel.writeFromChild(Array("TE__".utf8)))
 
         #expect(await expectation.satisfied())
         await host.close()
@@ -2597,7 +2578,7 @@ struct TerminalPTYHostTests {
         // Scenario: the test owns the child end of a real PTY and plays the child.
         let channel = try ChildlessPTYChannel()
         let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: "no command runs on a childless channel"))
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
         channel.writeFromChild(Array("__READY__".utf8))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
@@ -2623,10 +2604,9 @@ struct TerminalPTYHostTests {
         // Why it exists: input capture records what the reducer submitted, not what
         //   crossed the master, so transmission itself had no coverage.
         // Scenario: the test writes as the child, then reads back what the host sent.
-        let launchCommand = "no command runs on a childless channel"
         let channel = try ChildlessPTYChannel()
         let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: launchCommand))
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
 
         channel.writeFromChild(Array("alpha".utf8))
         #expect(await host.waitForSnapshot {
@@ -2637,7 +2617,7 @@ struct TerminalPTYHostTests {
         // The whole transmission, not a suffix of it: the launch command line the
         // policy hands the host is itself written to the PTY, and a childless channel
         // receives it exactly as a shell would.
-        let transmitted = Array("\(launchCommand)\n".utf8) + Array("typed\r".utf8)
+        let transmitted = Array("\(childlessLaunchCommand)\n".utf8) + Array("typed\r".utf8)
         #expect(await pollUntil({
             channel.bytesReceivedFromHost() == transmitted
         }, within: .seconds(20)))
@@ -2653,7 +2633,7 @@ struct TerminalPTYHostTests {
         // Scenario: the test reads TIOCGWINSZ at the child end after a resize.
         let channel = try ChildlessPTYChannel()
         let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: "no command runs on a childless channel"))
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
         channel.writeFromChild(Array("__READY__".utf8))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         #expect(channel.childWindowSize()?.ws_col == 80)
@@ -2782,11 +2762,6 @@ private func topViewportLine(_ terminal: Terminal) -> String {
         .split(separator: "\n", omittingEmptySubsequences: false)
         .first
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
-}
-
-private func scrollbackCommand(disableEcho: Bool = false) throws -> String {
-    let echoPolicy = disableEcho ? "stty -echo; " : ""
-    return "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; \(echoPolicy)exec \(try probeExecutable()) hold \"$0\""
 }
 
 /// Compares two byte payloads and reports a mismatch without diffing them.
@@ -2919,6 +2894,77 @@ private extension TerminalPTYHost {
         }
         return resourceSnapshot().pendingInputByteCount
     }
+}
+
+/// The launch command a childless host is started with.
+///
+/// No process ever runs it, because the channel launches nothing. The host still writes the
+/// line to the PTY exactly as it would to a shell, so a test that reads back transmitted
+/// bytes -- or counts input writes -- accounts for it first.
+private let childlessLaunchCommand = "no command runs on a childless channel"
+
+/// Forty numbered lines, the history the scroll, wheel, and viewport tests browse through.
+///
+/// Carriage returns are explicit: the child end is raw, so nothing turns a newline into a
+/// carriage return and line feed on its way to the terminal.
+private let scrollbackLines = (0..<40).map { "line-\($0)\r\n" }.joined()
+
+/// A host driven across a real PTY master with nothing at the other end but the test.
+///
+/// The host's read, write, and ioctl calls are the production ones; only the child process
+/// is missing, and the test plays it. Tests whose subject is a real process -- launch
+/// ownership, the teardown ladder, exit status, the descriptor census -- launch `PTYProbe`
+/// instead and are not built from here.
+private struct ChildlessHost {
+    let host: TerminalPTYHost
+    let channel: ChildlessPTYChannel
+
+    /// Writes bytes as a child would print them, returning once the host has applied them.
+    ///
+    /// The match is armed before the write, so no output that follows can bury the answer,
+    /// and the host records output for tests only after feeding it to the terminal -- so a
+    /// fenced read taken after this call sees these bytes.
+    ///
+    /// It carries `expectOutput`'s discard rule with it: a host that has already dropped
+    /// output past its bounded window cannot answer, so a test that floods this pane must
+    /// arm its own expectation before the flood and write through `channel` after it.
+    @discardableResult
+    func writeFromChild(_ bytes: [UInt8]) async -> Bool {
+        let applied = host.expectOutput(containing: bytes)
+        guard channel.writeFromChild(bytes) else { return false }
+        return await applied.satisfied()
+    }
+
+    @discardableResult
+    func writeFromChild(_ text: String) async -> Bool {
+        await writeFromChild(Array(text.utf8))
+    }
+}
+
+/// Starts a host on a PTY with no child and returns once its launch line has crossed.
+///
+/// That transmission is this fixture's readiness edge. A child's `__READY__` proved the same
+/// thing indirectly -- a shell can only print it after reading the line -- and a test that
+/// counts input writes needs the same anchor before it takes a baseline.
+private func startChildlessHost(
+    captureTransitions: Bool = true,
+    sourceLocation: SourceLocation = #_sourceLocation
+) async throws -> ChildlessHost {
+    let channel = try ChildlessPTYChannel()
+    let host = try makeHost(captureTransitions: captureTransitions, spawner: channel)
+    await host.start(makeLaunchInput(command: childlessLaunchCommand))
+    let launchLine = Array("\(childlessLaunchCommand)\n".utf8)
+    let transmitted = await pollUntil(
+        { channel.bytesReceivedFromHost().starts(with: launchLine) },
+        within: .seconds(20)
+    )
+    if transmitted == false {
+        Issue.record(
+            "the host never transmitted its launch command line",
+            sourceLocation: sourceLocation
+        )
+    }
+    return ChildlessHost(host: host, channel: channel)
 }
 
 private func makeHost(

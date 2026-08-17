@@ -210,7 +210,7 @@ suite once into a file under `.build/` and grep the file.
 - [x] 1. docs(design): record the test-seam rule for owning components (D1, I6)
 - [x] 2. feat(pty): let a host adopt a PTY channel with no child (D2, D3, I2, I3, PO1, PO2, PO6)
 - [x] 3. refactor(pty): prove input-write failure with a real descriptor (D4, I1, I5, PO3)
-- [ ] 4. test(pty): drive the host suite through childless PTY channels (D4, D7, I2, PO4)
+- [x] 4. test(pty): drive the host suite through childless PTY channels (D4, D7, I2, PO4)
 - [ ] 5. test(pty): serialize only the tests that share machine state (D6, I4)
 - [ ] 6. refactor(pty): keep fixture output staging out of shipping builds (D5, I1, PO5)
 
@@ -242,3 +242,41 @@ suite once into a file under `.build/` and grep the file.
 - The removed seam's names join the lint's banned list in the same commit that
   deletes them, with a self-test case, so the seam cannot return unnoticed between
   here and the PO5 slice.
+- The line between converted and kept is what the child is for. A test whose child only
+  holds the PTY open, prints bytes, or refuses to read is converted. A test whose subject
+  is a real process keeps `PTYProbe`: the teardown ladder, exit convergence, the
+  descriptor census, launch ownership and cwd fallback, `SIGWINCH` at a real child, the
+  CPR and OSC reply round trips, a child that drains megabytes, and the seam that proves
+  a login shell executed the command it was handed.
+- A childless host's readiness edge is its own launch command line crossing the master,
+  which `startChildlessHost` waits for. A child's `__READY__` proved the same thing
+  indirectly, and a test that takes an input-write baseline needs that anchor.
+- `ChildlessHost.writeFromChild` returns only once the host has applied the bytes. That
+  makes each write its own applied chunk, which is what replaced the sleeps in the split
+  OSC 52 test: the two halves are now separate by construction rather than by timing.
+- The cursor-position reply is now `1;1`, because nothing prints to a childless pane but
+  the test. The old coordinates were an artifact of a marker line the fixture printed.
+- The 1049 wheel-race test writes the screen switch itself instead of typing a command
+  that asks a shell to write it. The claim is unchanged -- wheel intent submitted before
+  the child's answer arrives resolves on the screen the owner had -- and the ordering it
+  depends on is now stated rather than raced for.
+- The two flood tests flood 128 KiB, twice the host's 64 KiB retention window, rather than
+  the 1 MiB the bypass used. The window is what the claim is about, and a megabyte through
+  the real read path crashes the process today -- see Follow Up.
+- `TerminalFlightRecorderTests.shippingHostRetainsFlightRecording` still applies output
+  directly. It is a claim about the shipping initializer, which takes no spawner, so it
+  cannot adopt a channel. The PO5 lint has to name the host's own suite rather than the
+  whole target, or that test needs another route to output.
+
+## Follow Up
+
+- A test-output observer registered while roughly half a megabyte of child output crosses
+  a real PTY overflows the host queue thread's stack and kills the test process. The stack
+  is a repeating recursive Swift release chain, and its depth tracks the number of applied
+  output chunks (about 2600 chunks at 512 KiB, since a PTY read turn here lands around 200
+  bytes). Reproduced with a bare `observeTestOutput { _ in true }` -- no matcher and no
+  waiter involved -- and 4 MiB is fine with no observer registered, so the chain is built
+  by the observer path in
+  `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift#recordTestOutput` or by
+  what a registered observer keeps alive. Until it is fixed, no test may push more than a
+  few hundred KiB past an armed match.
