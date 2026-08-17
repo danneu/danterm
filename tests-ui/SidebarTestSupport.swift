@@ -18,6 +18,28 @@ func applySidebarTestModel(
     return result
 }
 
+/// Begins an inline rename the way production does: the model records the
+/// target and the reconcile pass hands the field editor over. The view has no
+/// entry point of its own, so every suite opens an editor through here.
+@discardableResult
+func beginRenameThroughModel(
+    _ target: RenameTarget,
+    in model: inout AppModel,
+    driver: SidebarReconcileDriver,
+    sidebar: SidebarView,
+    outline: NSOutlineView
+) -> SidebarReconcileResult {
+    // A pass opens an editor only when the projected target CHANGES. In
+    // production the rename end retracts the previous target before the next
+    // begin sets one; a test holds its own model, so retract it here.
+    if model.sidebarRenameTarget != nil {
+        model.sidebarRenameTarget = nil
+        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
+    }
+    model.sidebarRenameTarget = target
+    return applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
+}
+
 /// Materializes every visible outline row after a reconcile pass.
 func materializeSidebarRows(_ sidebar: SidebarView, outline: NSOutlineView) {
     sidebar.layoutSubtreeIfNeeded()

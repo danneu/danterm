@@ -529,7 +529,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func renameTab(_ sender: Any?) {
         guard let tabId = runtime.model.selectedTabId else { return }
-        sidebarView.beginRenamingTab(tabId)
+        runtime.send(.beginSidebarRename(target: .tab(tabId)))
     }
 
     @objc func clearCustomTitle(_ sender: Any?) {

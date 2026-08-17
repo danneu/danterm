@@ -81,7 +81,9 @@ func sidebarProjectionRowTests() {
 
         model.jumpMode = JumpModeState(keyMap: [tab: "a"])
         _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
-        sidebar.beginRenamingTab(tab)
+        beginRenameThroughModel(
+            .tab(tab), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         window.contentView?.layoutSubtreeIfNeeded()
         let editingWidth = projectionRowTitleLaneWidth(cell)
 
@@ -185,7 +187,9 @@ func sidebarProjectionRowTests() {
         try uiExpect(cell.paneStrip.chips.map(\.state) == [.quiet, .quiet],
             "precondition: neither pane should start marked")
 
-        sidebar.beginRenamingTab(edited)
+        beginRenameThroughModel(
+            .tab(edited), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         try uiExpect(cell.textField?.currentEditor() != nil,
             "precondition: rename should attach a live field editor")
 

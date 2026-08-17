@@ -585,6 +585,49 @@ import Testing
             "an end naming the pending session retracts it")
     }
 
+    @Test("beginSidebarRename records the session and supersedes a live one")
+    func beginSidebarRenameRecordsSession() {
+        // Intent: the begin message is what puts an open inline edit session in
+        //   the model, and a second begin moves the session to its target.
+        // Why it exists: every writer -- menu and double-click alike -- begins a
+        //   rename through this message, so the model can be read as a truthful
+        //   record of whether an editor is open and on which row.
+        // Scenario: spec-first -- the user renames a tab, then starts renaming
+        //   the group while the tab's editor is still open.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let groupId = model.groups[0].id
+
+        let commands = update(&model, .beginSidebarRename(target: .tab(tabId)))
+        #expect(commands.isEmpty)
+        #expect(model.sidebarRenameTarget == .tab(tabId),
+            "a begin records the session it opens")
+
+        _ = update(&model, .beginSidebarRename(target: .group(groupId)))
+        #expect(model.sidebarRenameTarget == .group(groupId),
+            "a second begin moves the one session to its target")
+
+        _ = update(&model, .sidebarRenameEnded(target: .tab(tabId)))
+        #expect(model.sidebarRenameTarget == .group(groupId),
+            "the superseded session's end must not retract the successor")
+    }
+
+    @Test("beginSidebarRename against an absent entity records no session")
+    func beginSidebarRenameAgainstAbsentEntity() {
+        // Intent: a begin naming an entity the model does not hold leaves no
+        //   pending rename behind.
+        // Why it exists: the model must never claim a session that cannot exist,
+        //   because a state query reads the pending target as the open editor.
+        // Scenario: spec-first -- a begin arrives for a tab that closed.
+        var model = makeModel()
+        createTab(&model)
+
+        _ = update(&model, .beginSidebarRename(target: .tab(TabId())))
+
+        #expect(model.sidebarRenameTarget == nil)
+    }
+
     @Test("renameTab emits no commands")
     func renameTabEmitsNoCommands() {
         // Intent: renameTab changes only model state.

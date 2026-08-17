@@ -102,7 +102,9 @@ func sidebarRenameRecycleTests() {
             cell.alertBadge, inset: 2,
             scroll: scroll, label: "short display title")
 
-        sidebar.beginRenamingTab(tab)
+        beginRenameThroughModel(
+            .tab(tab), in: &model, driver: projection,
+            sidebar: sidebar, outline: outline)
         // No trailing space: a display title is normalized on its way out of the
         // projection, so one would not survive the commit and the assertion below
         // would be about trimming rather than about row recycling.
@@ -131,7 +133,9 @@ func sidebarRenameRecycleTests() {
             cell.alertBadge, inset: 2,
             scroll: scroll, label: "after rename commit")
 
-        sidebar.beginRenamingTab(tab)
+        beginRenameThroughModel(
+            .tab(tab), in: &model, driver: projection,
+            sidebar: sidebar, outline: outline)
         titleField.stringValue = "cancelled draft"
         guard let cancelEditor = titleField.currentEditor() as? NSTextView else {
             throw UITestFailure(message: "second rename should install a field editor")
@@ -174,9 +178,11 @@ func sidebarRenameRecycleTests() {
             (groupB, "Anchor", false, [(anchor, "anchor")]),
         ], selected: tab)
         model.jumpMode = JumpModeState(keyMap: [tab: "a"])
-        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        let driver = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
 
-        sidebar.beginRenamingTab(tab)
+        beginRenameThroughModel(
+            .tab(tab), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         let tabCell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         tabCell.titleField.frame.size.width = 0
         tabCell.titleField.invalidateIntrinsicContentSize()
@@ -185,7 +191,9 @@ func sidebarRenameRecycleTests() {
             "editable tab title should retain useful width beside its jump badge")
 
         window.makeFirstResponder(nil)
-        sidebar.beginRenamingGroup(groupA)
+        beginRenameThroughModel(
+            .group(groupA), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         let groupCell: SidebarGroupCellView = try sidebarCell(
             for: .group(groupA), in: outline)
         groupCell.titleField.frame.size.width = 0
@@ -205,11 +213,13 @@ func sidebarRenameRecycleTests() {
         defer { window.close() }
 
         let group = GroupId(); let tab = TabId(); let other = TabId()
-        let model = renameRecycleModel(
+        var model = renameRecycleModel(
             [(group, "G", false, [(tab, "alpha"), (other, "beta")])],
             selected: tab)
-        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
-        sidebar.beginRenamingTab(tab)
+        let driver = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        beginRenameThroughModel(
+            .tab(tab), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         cell.titleField.stringValue = "renamed"
 
@@ -240,16 +250,18 @@ func sidebarRenameRecycleTests() {
 
         let groupA = GroupId(); let groupB = GroupId()
         let tabA = TabId(); let tabB = TabId()
-        let model = renameRecycleModel([
+        var model = renameRecycleModel([
             (groupA, "A", false, [(tabA, "alpha")]),
             (groupB, "B", false, [(tabB, "beta")]),
         ])
-        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        let driver = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
         let groupCell: SidebarGroupCellView = try sidebarCell(
             for: .group(groupA), in: outline)
         let field = groupCell.titleField
 
-        sidebar.beginRenamingGroup(groupA)
+        beginRenameThroughModel(
+            .group(groupA), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         field.stringValue = "committed"
         let commitStart = runtime.sentMessages.count
         let commitEditor = try requireRenameRecycleEditor(field)
@@ -268,7 +280,9 @@ func sidebarRenameRecycleTests() {
         try uiExpect(sidebar.activeRenameTarget == nil,
             "group Enter should clear ownership")
 
-        sidebar.beginRenamingGroup(groupA)
+        beginRenameThroughModel(
+            .group(groupA), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         field.stringValue = "cancelled"
         let cancelStart = runtime.sentMessages.count
         let cancelEditor = try requireRenameRecycleEditor(field)
@@ -284,7 +298,9 @@ func sidebarRenameRecycleTests() {
         try uiExpect(sidebar.activeRenameTarget == nil,
             "group Escape should clear ownership")
 
-        sidebar.beginRenamingGroup(groupA)
+        beginRenameThroughModel(
+            .group(groupA), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         field.stringValue = "click away"
         let clickStart = runtime.sentMessages.count
         sidebar.finishActiveRenameForPointerInteraction()
@@ -314,11 +330,13 @@ func sidebarRenameRecycleTests() {
         defer { window.close() }
 
         let group = GroupId(); let tab = TabId(); let other = TabId()
-        let model = renameRecycleModel(
+        var model = renameRecycleModel(
             [(group, "G", false, [(tab, "alpha"), (other, "beta")])],
             selected: tab)
         let projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
-        sidebar.beginRenamingTab(tab)
+        beginRenameThroughModel(
+            .tab(tab), in: &model, driver: projection,
+            sidebar: sidebar, outline: outline)
         let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         cell.titleField.stringValue = "stale draft"
         cell.titleField.abortEditing()
@@ -349,11 +367,13 @@ func sidebarRenameRecycleTests() {
         defer { window.close() }
 
         let group = GroupId(); let tab = TabId(); let other = TabId()
-        let model = renameRecycleModel(
+        var model = renameRecycleModel(
             [(group, "G", false, [(tab, "alpha"), (other, "beta")])],
             selected: tab)
-        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
-        sidebar.beginRenamingTab(tab)
+        let driver = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        beginRenameThroughModel(
+            .tab(tab), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         cell.titleField.abortEditing()
         try uiExpect(cell.titleField.currentEditor() == nil,
@@ -384,13 +404,15 @@ func sidebarRenameRecycleTests() {
 
         let groupA = GroupId(); let groupB = GroupId()
         let edited = TabId(); let anchor = TabId()
-        let initial = renameRecycleModel([
+        var initial = renameRecycleModel([
             (groupA, "A", false, [(edited, "alpha")]),
             (groupB, "B", false, [(anchor, "anchor")]),
         ])
         let initialProjection = applyRenameRecycleModel(initial, to: sidebar, outline: outline, old: nil)
 
-        sidebar.beginRenamingTab(edited)
+        beginRenameThroughModel(
+            .tab(edited), in: &initial, driver: initialProjection,
+            sidebar: sidebar, outline: outline)
         let editedRow = try sidebarTabRow(for: edited, in: outline)
         let editedCell = outline.view(
             atColumn: 0, row: editedRow,
@@ -450,12 +472,14 @@ func sidebarRenameRecycleTests() {
 
         let group = GroupId()
         let edited = TabId(); let other = TabId(); let spawned = TabId()
-        let initial = renameRecycleModel(
+        var initial = renameRecycleModel(
             [(group, "G", false, [(edited, "alpha"), (other, "beta")])],
             selected: edited)
         let initialProjection = applyRenameRecycleModel(initial, to: sidebar, outline: outline, old: nil)
 
-        sidebar.beginRenamingTab(edited)
+        beginRenameThroughModel(
+            .tab(edited), in: &initial, driver: initialProjection,
+            sidebar: sidebar, outline: outline)
         let editedRow = try sidebarTabRow(for: edited, in: outline)
         let editedCell = outline.view(
             atColumn: 0, row: editedRow,
@@ -490,12 +514,14 @@ func sidebarRenameRecycleTests() {
         let group = GroupId()
         let edited = TabId()
         let other = TabId()
-        let model = renameRecycleModel(
+        var model = renameRecycleModel(
             [(group, "G", false, [(edited, "alpha"), (other, "beta")])],
             selected: edited)
         let projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
 
-        sidebar.beginRenamingTab(edited)
+        beginRenameThroughModel(
+            .tab(edited), in: &model, driver: projection,
+            sidebar: sidebar, outline: outline)
         let editedRow = try sidebarTabRow(for: edited, in: outline)
         let editedCell = outline.view(
             atColumn: 0, row: editedRow,
@@ -527,12 +553,14 @@ func sidebarRenameRecycleTests() {
 
         let group = GroupId()
         let edited = TabId(); let other = TabId(); let spawned = TabId()
-        let initial = renameRecycleModel(
+        var initial = renameRecycleModel(
             [(group, "G", false, [(edited, "alpha"), (other, "beta")])],
             selected: edited)
         let initialProjection = applyRenameRecycleModel(initial, to: sidebar, outline: outline, old: nil)
 
-        sidebar.beginRenamingTab(edited)
+        beginRenameThroughModel(
+            .tab(edited), in: &initial, driver: initialProjection,
+            sidebar: sidebar, outline: outline)
         let editedRow = try sidebarTabRow(for: edited, in: outline)
         let editedCell = outline.view(
             atColumn: 0, row: editedRow,
@@ -589,14 +617,16 @@ func sidebarRenameRecycleTests() {
             let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
             let groupA = GroupId(); let groupB = GroupId(); let groupC = GroupId()
             let tabA = TabId(); let tabB = TabId(); let tabC = TabId()
-            let initial = renameRecycleModel([
+            var initial = renameRecycleModel([
                 (groupA, "A", false, [(tabA, "alpha")]),
                 (groupB, "B", false, [(tabB, "beta")]),
                 (groupC, "C", false, [(tabC, "gamma")]),
             ], selected: tabA)
             let projection = applyRenameRecycleModel(
                 initial, to: sidebar, outline: outline, old: nil)
-            sidebar.beginRenamingGroup(groupA)
+            beginRenameThroughModel(
+                .group(groupA), in: &initial, driver: projection,
+                sidebar: sidebar, outline: outline)
             let cell: SidebarGroupCellView = try sidebarCell(
                 for: .group(groupA), in: outline)
             let field = cell.titleField
@@ -641,6 +671,100 @@ func sidebarRenameRecycleTests() {
         }
     }
 
+    uiTest("a double-click asks the model to begin the clicked row's rename") {
+        // Intent: double-clicking a tab row or a group header asks the model to
+        //   begin that rename, rather than opening an editor the model has no
+        //   record of.
+        // Why it exists: this path used to call straight into the view, so the
+        //   session it opened was invisible to every reader of the model.
+        // Scenario: the user double-clicks a tab row, then a group header.
+        let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let group = GroupId(); let sibling = GroupId()
+        let tab = TabId(); let other = TabId()
+        let model = renameRecycleModel([
+            (group, "G", false, [(tab, "alpha")]),
+            (sibling, "H", false, [(other, "beta")]),
+        ], selected: tab)
+        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+
+        sidebar.doubleClickRow(try sidebarTabRow(for: tab, in: outline))
+        let groupCell: SidebarGroupCellView = try sidebarCell(for: .group(group), in: outline)
+        sidebar.doubleClickRow(outline.row(for: groupCell))
+
+        let begun: [RenameTarget] = runtime.sentMessages.compactMap {
+            if case .beginSidebarRename(let target) = $0 { return target }
+            return nil
+        }
+        try uiExpect(begun == [.tab(tab), .group(group)],
+            "each double-click should ask the model to begin its own row's rename")
+        try uiExpect(sidebar.activeRenameTarget == nil,
+            "a double-click must not open an editor on its own")
+    }
+
+    uiTest("a begin the pass cannot honor records no open session") {
+        // Intent: when the requested row has no cell to hand a field editor to,
+        //   the pass reports the end of that rename, and no later pass opens it.
+        // Why it exists: the model records the request before the pass runs, so
+        //   an unhonored request would leave the model claiming a session that
+        //   is not on screen.
+        // Scenario: a rename is requested for a tab inside a collapsed group,
+        //   and for a tab whose row sits far below the visible sidebar.
+        enum Unopenable {
+            case collapsedGroup
+            case unmountedRow
+        }
+
+        for unopenable in [Unopenable.collapsedGroup, .unmountedRow] {
+            let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
+            let group = GroupId(); let sibling = GroupId()
+            let hidden = TabId(); let other = TabId()
+            // The unmounted case needs a row AppKit has no reason to make a cell
+            // for: one short window, and the target far down a long list.
+            let filler = unopenable == .unmountedRow
+                ? (0..<80).map { (TabId(), "filler \($0)") }
+                : []
+            var model = renameRecycleModel([
+                (group, "G", unopenable == .collapsedGroup,
+                 filler + [(hidden, "alpha")]),
+                (sibling, "H", false, [(other, "beta")]),
+            ], selected: other)
+            let driver = SidebarReconcileDriver()
+            let materialize = unopenable == .collapsedGroup
+            if !materialize { window.setContentSize(NSSize(width: 260, height: 60)) }
+            _ = applySidebarTestModel(
+                model, using: driver, to: sidebar, outline: outline,
+                materializeRows: materialize)
+
+            model.sidebarRenameTarget = .tab(hidden)
+            let requested = applySidebarTestModel(
+                model, using: driver, to: sidebar, outline: outline,
+                materializeRows: materialize)
+
+            try uiExpect(sidebar.activeRenameTarget == nil,
+                "\(unopenable) should leave no editor open")
+            // The end names the request, which is what retracts it in the model
+            // (update() drops the pending target only for the session it names).
+            let endedTargets: [RenameTarget] = requested.followUps.compactMap {
+                if case .sidebarRenameEnded(let target) = $0 { return target }
+                return nil
+            }
+            try uiExpect(endedTargets == [.tab(hidden)],
+                "\(unopenable) should report the end of the rename it could not open")
+            try uiExpect(runtime.sentMessages.isEmpty,
+                "\(unopenable) should report the end rather than send it from the pass")
+
+            model.sidebarRenameTarget = nil
+            let later = applySidebarTestModel(
+                model, using: driver, to: sidebar, outline: outline,
+                materializeRows: materialize)
+            try uiExpect(later.followUps.isEmpty && sidebar.activeRenameTarget == nil,
+                "\(unopenable) must not resurrect the session in a later pass")
+            window.close()
+        }
+    }
+
     uiTest("collapsing the group that holds an edited tab reports the rename end") {
         // Intent: a group collapse that hides the edited tab row ends the rename
         //   and reports it back through the pass, like the other structural exits.
@@ -654,13 +778,15 @@ func sidebarRenameRecycleTests() {
         // Two groups: single-group mode has no caret, so it emits no collapse op.
         let group = GroupId(); let sibling = GroupId()
         let edited = TabId(); let other = TabId()
-        let expanded = renameRecycleModel([
+        var expanded = renameRecycleModel([
             (group, "G", false, [(edited, "alpha")]),
             (sibling, "H", false, [(other, "beta")]),
         ], selected: edited)
         let driver = applyRenameRecycleModel(
             expanded, to: sidebar, outline: outline, old: nil)
-        sidebar.beginRenamingTab(edited)
+        beginRenameThroughModel(
+            .tab(edited), in: &expanded, driver: driver,
+            sidebar: sidebar, outline: outline)
         let cell: SidebarTabCellView = try sidebarCell(for: .tab(edited), in: outline)
         let field = cell.titleField
         field.stringValue = "stale draft"
@@ -699,13 +825,15 @@ func sidebarRenameRecycleTests() {
 
         let groupA = GroupId(); let groupB = GroupId()
         let tabA = TabId(); let tabB = TabId()
-        let initial = renameRecycleModel([
+        var initial = renameRecycleModel([
             (groupA, "A", false, [(tabA, "alpha")]),
             (groupB, "B", false, [(tabB, "beta")]),
         ], selected: tabA)
         let driver = applyRenameRecycleModel(
             initial, to: sidebar, outline: outline, old: nil)
-        sidebar.beginRenamingGroup(groupA)
+        beginRenameThroughModel(
+            .group(groupA), in: &initial, driver: driver,
+            sidebar: sidebar, outline: outline)
         let cell: SidebarGroupCellView = try sidebarCell(for: .group(groupA), in: outline)
         cell.titleField.stringValue = "stale draft"
 
@@ -746,12 +874,11 @@ func sidebarRenameRecycleTests() {
         var initial = renameRecycleModel(
             [(group, "G", false, [(first, "alpha"), (second, "beta")])],
             selected: first)
-        initial.sidebarRenameTarget = .tab(first)
         let driver = applyRenameRecycleModel(
             initial, to: sidebar, outline: outline, old: nil)
-        // The first pass sets the projection's rename target, but its rows are not
-        // materialized yet, so install the editor once they are.
-        sidebar.beginRenamingTab(first)
+        beginRenameThroughModel(
+            .tab(first), in: &initial, driver: driver,
+            sidebar: sidebar, outline: outline)
         let firstCell: SidebarTabCellView = try sidebarCell(for: .tab(first), in: outline)
         firstCell.titleField.stringValue = "first draft"
 
@@ -774,37 +901,35 @@ func sidebarRenameRecycleTests() {
             "the successor row should own the live editor")
     }
 
-    uiTest("starting another rename commits the prior field before owning the successor") {
-        // Intent: replacement commits the prior draft once, then transfers ownership
-        //   to the successor field; a stale callback from the prior field is inert.
-        // Why it exists: the old field and runtime sidecar were separate owners, so a
-        //   late callback could clear or complete a newer edit session.
-        // Scenario: the user edits one tab, starts renaming another, and AppKit then
-        //   delivers a delayed end-editing callback for the first field.
+    uiTest("a replaced rename commits the prior draft once and ignores its stale field") {
+        // Intent: taking the editor to a successor row commits the prior draft
+        //   exactly once, and a late callback from the prior field neither ends
+        //   the successor session nor commits a second time.
+        // Why it exists: the old field and the session record were separate
+        //   owners, so a late callback could clear or complete a newer session.
+        // Scenario: the user edits one tab, starts renaming another, and AppKit
+        //   then delivers a delayed end-editing callback for the first field.
         let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
         defer { window.close() }
 
         let group = GroupId(); let first = TabId(); let second = TabId()
-        let model = renameRecycleModel(
+        var model = renameRecycleModel(
             [(group, "G", false, [(first, "alpha"), (second, "beta")])],
             selected: first)
-        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
-        sidebar.beginRenamingTab(first)
+        let driver = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        beginRenameThroughModel(
+            .tab(first), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         let firstCell: SidebarTabCellView = try sidebarCell(
             for: .tab(first), in: outline)
         let firstField = firstCell.titleField
         firstField.stringValue = "first draft"
-        var targetDuringPriorDispatch: RenameTarget?
-        runtime.onSend = { msg in
-            if case .renameTab(let id, _) = msg, id == first {
-                targetDuringPriorDispatch = sidebar.activeRenameTarget
-            }
-        }
 
-        sidebar.beginRenamingTab(second)
-        runtime.onSend = nil
+        let replacement = beginRenameThroughModel(
+            .tab(second), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
 
-        let firstRenames = runtime.sentMessages.filter {
+        let firstRenames = replacement.followUps.filter {
             if case .renameTab(let id, let name) = $0 {
                 return id == first && name == "first draft"
             }
@@ -812,21 +937,17 @@ func sidebarRenameRecycleTests() {
         }
         try uiExpect(firstRenames.count == 1,
             "replacement should commit the prior draft exactly once")
-        try uiExpect(targetDuringPriorDispatch == nil,
-            "successor ownership must not exist while the prior rename dispatches")
+        try uiExpect(runtime.sentMessages.isEmpty,
+            "the pass should report the prior commit rather than send it")
         try uiExpect(sidebar.activeRenameTarget == .tab(second),
-            "successor should become active only after the prior commit")
+            "the successor row should own the live editor")
 
         _ = sidebar.control(firstField, textShouldEndEditing: NSTextView())
         _ = sidebar.control(NSTextField(), textShouldEndEditing: NSTextView())
 
         try uiExpect(sidebar.activeRenameTarget == .tab(second),
             "stale prior-field callback must not clear the successor session")
-        let afterStaleCallback = runtime.sentMessages.filter {
-            if case .renameTab(let id, _) = $0 { return id == first }
-            return false
-        }
-        try uiExpect(afterStaleCallback.count == 1,
+        try uiExpect(runtime.sentMessages.isEmpty,
             "stale prior-field callback must not dispatch a second rename")
     }
 
@@ -840,9 +961,11 @@ func sidebarRenameRecycleTests() {
         defer { window.close() }
 
         let group = GroupId(); let tab = TabId()
-        let model = renameRecycleModel([(group, "G", false, [(tab, "alpha")])])
-        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
-        sidebar.beginRenamingTab(tab)
+        var model = renameRecycleModel([(group, "G", false, [(tab, "alpha")])])
+        let driver = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        beginRenameThroughModel(
+            .tab(tab), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         cell.titleField.abortEditing()
 
@@ -909,13 +1032,15 @@ func sidebarRenameRecycleTests() {
 
         let groupA = GroupId(); let groupB = GroupId()
         let edited = TabId(); let anchor = TabId(); let spawned = TabId()
-        let initial = renameRecycleModel([
+        var initial = renameRecycleModel([
             (groupA, "A", false, [(edited, "alpha")]),
             (groupB, "B", false, [(anchor, "anchor")]),
         ])
         let initialProjection = applyRenameRecycleModel(initial, to: sidebar, outline: outline, old: nil)
 
-        sidebar.beginRenamingTab(edited)
+        beginRenameThroughModel(
+            .tab(edited), in: &initial, driver: initialProjection,
+            sidebar: sidebar, outline: outline)
         let editedRow = try sidebarTabRow(for: edited, in: outline)
         let editedCell = outline.view(
             atColumn: 0, row: editedRow,

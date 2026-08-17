@@ -433,6 +433,14 @@ func update(
         // and the selected tab's window chrome via reconcileWindowChrome.
         return []
 
+    case .beginSidebarRename(let target):
+        // A live session is superseded rather than closed here: the reconcile
+        // pass commits the predecessor's draft when it hands the editor over,
+        // and reports that end afterwards. reconcileSidebarRenameTarget drops a
+        // target whose entity is not in the model.
+        model.sidebarRenameTarget = target
+        return []
+
     case .sidebarRenameEnded(let target):
         // Only the named session retracts the request. An end can arrive after a
         // successor rename has already claimed the target, and a blanket clear
@@ -938,7 +946,7 @@ func update(
     case .createGroupInteractively(let name):
         let commands = update(&model, .createGroup(name: name), env: env)
         if let groupId = model.groups.last?.id {
-            model.sidebarRenameTarget = .group(groupId)
+            _ = update(&model, .beginSidebarRename(target: .group(groupId)), env: env)
         }
         return commands
 
@@ -1033,7 +1041,7 @@ func update(
             .extractTabsToNewGroup(tabIds: tabIds, groupName: groupName),
             env: env)
         if let groupId = model.groups.last?.id, groupId != priorLastGroupId {
-            model.sidebarRenameTarget = .group(groupId)
+            _ = update(&model, .beginSidebarRename(target: .group(groupId)), env: env)
         }
         return commands
 

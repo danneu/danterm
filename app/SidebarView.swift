@@ -270,14 +270,20 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     // MARK: - Actions
 
     @objc private func outlineViewDoubleClicked() {
-        let row = outlineView.clickedRow
+        doubleClickRow(outlineView.clickedRow)
+    }
+
+    /// Asks the model to begin the rename the double-clicked row names. Split
+    /// from the `@objc` action so a caller can name the row: `clickedRow` is
+    /// only meaningful inside AppKit's own event dispatch.
+    func doubleClickRow(_ row: Int) {
         guard row >= 0 else { return }
         guard let sidebarItem = outlineView.item(atRow: row) as? SidebarItem else { return }
         switch sidebarItem.kind {
         case .tab(let tab):
-            beginRenamingTab(tab.id)
+            runtime?.send(.beginSidebarRename(target: .tab(tab.id)))
         case .group(let group):
-            beginRenamingGroup(group.id)
+            runtime?.send(.beginSidebarRename(target: .group(group.id)))
         }
     }
 
@@ -601,9 +607,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     /// Hands the field editor to `target`, returning whatever the predecessor
-    /// session owed the model. The model can move a live rename to a successor
-    /// row, so this runs inside the pass as well as from a menu command -- which
-    /// is why it reports rather than sends.
+    /// session owed the model plus, when no editor could open, the end of the
+    /// requested one. The model records the request before the pass runs, so a
+    /// request this view cannot honor -- an unmounted row, or a row inside a
+    /// collapsed group -- has to report its own end, or the model would keep
+    /// claiming a session that is not on screen.
     private func beginRenaming(target: RenameTarget) -> [Msg] {
         var followUps: [Msg] = []
         if activeRenameSession != nil {
@@ -615,13 +623,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             case .group(let id): return groupItemCache[id]
             }
         }()
-        guard let item else { return followUps }
+        let unopened = followUps + [.sidebarRenameEnded(target: target)]
+        guard let item else { return unopened }
         let row = outlineView.row(forItem: item)
-        guard row >= 0 else { return followUps }
+        guard row >= 0 else { return unopened }
         guard let cellView = outlineView.view(
             atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView
-        else { return followUps }
-        guard let textField = cellView.textField else { return followUps }
+        else { return unopened }
+        guard let textField = cellView.textField else { return unopened }
         activeRenameSession = (target, textField)
         textField.isEditable = true
         textField.selectText(nil)
@@ -700,24 +709,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let isEditing = cell.titleField.currentEditor() != nil
         cell.apply(group, isEditingTitle: isEditing)
         return false
-    }
-
-    // MARK: - Inline Rename
-
-    // A menu- or pointer-driven rename commits the predecessor and dispatches that
-    // commit BEFORE the successor takes ownership, so a late callback from the old
-    // field cannot arrive while the new session is already installed. The pass path
-    // cannot do this -- it has no turn to dispatch in -- which is why `beginRenaming`
-    // reports instead, and why these two callers finish first rather than relying on
-    // the finish inside it.
-    func beginRenamingGroup(_ groupId: GroupId) {
-        sendNow(finishActiveRename())
-        _ = beginRenaming(target: .group(groupId))
-    }
-
-    func beginRenamingTab(_ tabId: TabId) {
-        sendNow(finishActiveRename())
-        _ = beginRenaming(target: .tab(tabId))
     }
 
     // MARK: - NSOutlineViewDataSource
@@ -1171,11 +1162,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         runtime?.send(.createTab(inGroupId: GroupId(rawValue: rawId)))
     }
 
+    // The hop off menu tracking stays: the model's begin drives a reconcile pass
+    // that installs a field editor, and AppKit is still tearing the menu down.
     @objc private func contextRenameGroup(_ sender: NSMenuItem) {
         guard let rawId = sender.representedObject as? UUID else { return }
         let groupId = GroupId(rawValue: rawId)
         DispatchQueue.main.async { [weak self] in
-            self?.beginRenamingGroup(groupId)
+            self?.runtime?.send(.beginSidebarRename(target: .group(groupId)))
         }
     }
 
@@ -1196,7 +1189,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         guard let rawId = sender.representedObject as? UUID else { return }
         let tabId = TabId(rawValue: rawId)
         DispatchQueue.main.async { [weak self] in
-            self?.beginRenamingTab(tabId)
+            self?.runtime?.send(.beginSidebarRename(target: .tab(tabId)))
         }
     }
 

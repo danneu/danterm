@@ -12,7 +12,7 @@ func singleLineLabelTests() {
     print("SingleLineLabel")
 
     uiTest("every sidebar row label lays out one line and truncates") {
-        let (sidebar, outline, window) = makeSingleLineSidebar()
+        let (sidebar, outline, window, _, _) = makeSingleLineSidebar()
         defer { window.close() }
 
         let groupCell: SidebarGroupCellView = try sidebarCell(
@@ -62,13 +62,16 @@ func singleLineLabelTests() {
         // Why it exists: the tab title field goes editable for inline rename, and
         // an editable field that accepts Return would put a newline straight into
         // the model, past every admission point.
-        let (sidebar, outline, window) = makeSingleLineSidebar()
+        let (sidebar, outline, window, initialModel, driver) = makeSingleLineSidebar()
+        var model = initialModel
         defer { window.close() }
 
         let cell: SidebarTabCellView = try sidebarCell(
             for: .tab(sidebarFixtureTabId), in: outline)
         let titleField = cell.titleField
-        sidebar.beginRenamingTab(sidebarFixtureTabId)
+        beginRenameThroughModel(
+            .tab(sidebarFixtureTabId), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
         guard let editor = titleField.currentEditor() as? NSTextView else {
             throw UITestFailure(message: "rename should install a field editor")
         }
@@ -119,7 +122,8 @@ private let sidebarFixtureTabId = TabId()
 /// A sidebar with one group and one single-pane tab, so both cell kinds and the
 /// tab's cwd subtitle are all mounted.
 @MainActor
-private func makeSingleLineSidebar() -> (SidebarView, NSOutlineView, NSWindow) {
+private func makeSingleLineSidebar()
+    -> (SidebarView, NSOutlineView, NSWindow, AppModel, SidebarReconcileDriver) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
     sidebar.runtime = AppRuntime()
     let window = NSWindow(
@@ -142,7 +146,7 @@ private func makeSingleLineSidebar() -> (SidebarView, NSOutlineView, NSWindow) {
     let driver = SidebarReconcileDriver()
     _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
     window.layoutIfNeeded()
-    return (sidebar, outline, window)
+    return (sidebar, outline, window, model, driver)
 }
 
 @MainActor

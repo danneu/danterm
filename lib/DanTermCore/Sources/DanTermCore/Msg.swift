@@ -71,6 +71,11 @@ enum Msg {
     case adjustPaneFontSize(paneId: PaneId?, steps: Int)
     case resetPaneFontSize(paneId: PaneId?)
     case renameTab(id: TabId, name: String?)
+    // The one way an inline sidebar rename begins. Every writer -- the menu
+    // commands, a double-click on a row, and the group-creating messages --
+    // sends it, so the model is a truthful record of the open edit session and
+    // the reconcile pass stays the only thing that opens an editor.
+    case beginSidebarRename(target: RenameTarget)
     // Names the session that ended, so an end arriving after a successor rename
     // already opened cannot retract the successor's pending target.
     case sidebarRenameEnded(target: RenameTarget)

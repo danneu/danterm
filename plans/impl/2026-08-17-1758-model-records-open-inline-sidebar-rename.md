@@ -109,7 +109,28 @@ open.
   target while the successor's editor is open. Sliced out as commit 1 because it
   is a self-contained no-op refactor that touches every rename-end site.
 
+- The begin message carries one target value, and the menu, the double-click,
+  and the two group-creating messages all send it. That retired the view's
+  `beginRenamingTab` / `beginRenamingGroup` entry points, which had no
+  production caller left; the UI suites now open an editor the way production
+  does, through a shared `beginRenameThroughModel` test helper.
+- The pass still opens an editor only when the projected target CHANGES. The
+  weaker rule -- open whenever the view's session differs from the projected
+  target -- would reopen the editor a selection change had just ended, because
+  the model has not yet seen the end the same pass reported.
+- I4 reports the end from the view's begin, so an unhonored request retracts
+  itself. The UI proof runs the collapsed-group row and an unmounted row far
+  below a short window; ablating the report fails it.
+
 ## Commit progress
 - [x] 1. The sidebar rename end names the session it ends
-- [ ] 2. Every inline sidebar rename begins through the model
+- [x] 2. Every inline sidebar rename begins through the model
 - [ ] 3. The state listing reports the open inline rename
+
+## Follow Up
+
+- `SidebarView.resetRecycledRenameState` (app/SidebarView.swift) clears a live
+  session without reporting its end, so the model can keep a pending target
+  after a cell reuse killed the editor. A later begin for that same target then
+  changes nothing and no editor opens. The reset runs mid-traversal, so the fix
+  is to feed its end into the pass's follow-ups.
