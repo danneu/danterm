@@ -314,9 +314,6 @@ public final class TerminalPaneSessionController {
     /// Signals primary-history changes without materializing text until recovery reads it.
     public var onPrimaryHistoryMutation: (() -> Void)?
 
-    /// Receives an uncaptured pane-menu request only after its pointer gesture completes.
-    public var onPaneMenu: ((TerminalViewportCell) -> Void)?
-
     /// Receives a click-time-revalidated HTTP(S) target on the main actor.
     public var onOpenLink: ((TerminalHyperlink) -> Void)?
 
@@ -705,12 +702,6 @@ public final class TerminalPaneSessionController {
         host.sendPointer(
             event,
             origin: origin,
-            onPaneMenu: { [weak self] cell in
-                deliveryBoundary.enqueue { [weak self] in
-                    guard let self, self.isTornDown == false else { return }
-                    self.onPaneMenu?(cell)
-                }
-            },
             onOpenLink: { [weak self] link in
                 deliveryBoundary.enqueue { [weak self] in
                     guard let self, self.isTornDown == false else { return }
@@ -870,6 +861,15 @@ public final class TerminalPaneSessionController {
     /// Reflects whether the latest consumed terminal snapshot has a selection.
     public var hasSelection: Bool {
         cachedTerminal.selectionRange != nil
+    }
+
+    /// Reflects whether the terminal application claims mouse buttons, so the main thread can
+    /// decide the pane context menu inside the press that opens it. Read from the cached value
+    /// for the same reason `hasSelection` is: fencing the render owner during menu tracking
+    /// would reintroduce the latency this answer exists to remove. The cost is that the answer
+    /// can lag the engine by one consumed update.
+    public var claimsMouseButtons: Bool {
+        cachedTerminal.inputModes.mouseTracking != .off
     }
 
     /// Returns selection from the latest asynchronously consumed terminal snapshot.
@@ -1085,7 +1085,6 @@ public final class TerminalPaneSessionController {
         onProcessStarted = nil
         onViewportStateChange = nil
         onPrimaryHistoryMutation = nil
-        onPaneMenu = nil
         onOpenLink = nil
         onSelectionCopy = nil
         onSearchStatus = nil

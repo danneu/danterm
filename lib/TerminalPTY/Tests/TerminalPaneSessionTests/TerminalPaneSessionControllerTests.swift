@@ -86,6 +86,47 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("the mouse-button claim follows consumed updates and fences no host")
+    func mouseButtonClaimFollowsConsumedUpdates() async throws {
+        // Intent: `claimsMouseButtons` answers from the last consumed snapshot, changes
+        //   with it, and costs no host entry.
+        // Why it exists: the pane view reads this inside the press that opens the context
+        //   menu. An answer that fenced would restore the latency the menu-on-press change
+        //   removed, and an answer read from state that never refreshes would route every
+        //   click against the mode the pane started in. A view test cannot see either
+        //   failure: its harness answers from immediate state.
+        // Scenario: spec-first -- a full-screen program turns mouse reporting on, then off,
+        //   while the user right-clicks the pane.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        #expect(controller.claimsMouseButtons == false)
+
+        host.stageFixtureOutput(Array("\u{1B}[?1000h".utf8))
+        #expect(
+            controller.claimsMouseButtons == false,
+            "the claim moved before the update carrying it was consumed"
+        )
+        controller.consumePendingHostUpdateForTesting()
+        #expect(controller.claimsMouseButtons)
+
+        host.stageFixtureOutput(Array("\u{1B}[?1000l".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        #expect(controller.claimsMouseButtons == false)
+
+        let entriesBefore = controller.fenceMetrics.hostEntryCount
+        for _ in 0 ..< 5 { _ = controller.claimsMouseButtons }
+        #expect(
+            controller.fenceMetrics.hostEntryCount == entriesBefore,
+            "reading the claim entered the host"
+        )
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("package-test fences do not advance the host production count")
     func packageTestFencesDoNotPolluteProductionCount() throws {
         let host = try makeHost()
@@ -458,8 +499,8 @@ struct TerminalPaneSessionControllerTests {
 
     @Test("application-exit fence suppresses every queued main delivery")
     func applicationExitFenceSuppressesQueuedDeliveries() async throws {
-        // Intent: one synchronous fence makes queued frame, pane-menu, link, and search
-        //   callbacks inert before host shutdown begins.
+        // Intent: one synchronous fence makes queued frame, link, and search callbacks
+        //   inert before host shutdown begins.
         // Why it exists: separately owned Task relays can resume after the recovery
         //   snapshot and touch AppKit state while application termination blocks main.
         // Scenario: output, two pointer gestures, and a search all reach the host while
@@ -470,12 +511,10 @@ struct TerminalPaneSessionControllerTests {
             launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
         )
         var frameCount = 0
-        var paneMenuCount = 0
         var linkCount = 0
         var searchCount = 0
         var selectionCopyCount = 0
         controller.onFrame = { _ in frameCount += 1 }
-        controller.onPaneMenu = { _ in paneMenuCount += 1 }
         controller.onOpenLink = { _ in linkCount += 1 }
         controller.onSearchStatus = { _ in searchCount += 1 }
         controller.onSelectionCopy = { _ in selectionCopyCount += 1 }
@@ -495,8 +534,6 @@ struct TerminalPaneSessionControllerTests {
             from: lines[viewportRow].startIndex,
             to: linkRange.lowerBound
         )
-        controller.sendPointer(.down(.right, column: 0, row: 0))
-        controller.sendPointer(.up(.right, column: 0, row: 0))
         controller.sendPointer(.down(
             .left, column: column, row: viewportRow, modifiers: [.command]
         ))
@@ -516,7 +553,6 @@ struct TerminalPaneSessionControllerTests {
         }
 
         #expect(frameCount == 0)
-        #expect(paneMenuCount == 0)
         #expect(linkCount == 0)
         #expect(searchCount == 0)
         #expect(selectionCopyCount == 0)

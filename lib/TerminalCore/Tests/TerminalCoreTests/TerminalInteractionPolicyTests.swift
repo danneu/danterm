@@ -31,25 +31,31 @@ struct TerminalInteractionPolicyTests {
         #expect(capturedResult.inputBytes == Array("\u{1B}[<0;2;1M".utf8))
         #expect(capturedResult.selectionMutation == nil)
 
-        var shiftedMenu = TerminalInteractionState()
-        #expect(decideTerminalPointer(
+        // A local right press has no arm: AppKit owns the pane menu and consumes the
+        // gesture before the engine sees it, so shift-right under capture emits nothing.
+        var shiftedRight = TerminalInteractionState()
+        let shiftedRightDown = decideTerminalPointer(
             .down(.right, column: 2, row: 0, modifiers: [.shift]),
             terminal: capturedTerminal,
-            state: &shiftedMenu
-        ).consumption == .paneMenu)
-        #expect(decideTerminalPointer(
+            state: &shiftedRight
+        )
+        #expect(shiftedRightDown.consumption == .ignored)
+        #expect(shiftedRightDown.inputBytes.isEmpty)
+        let shiftedRightUp = decideTerminalPointer(
             .up(.right, column: 2, row: 0, modifiers: [.shift]),
             terminal: capturedTerminal,
-            state: &shiftedMenu
-        ).paneMenuCell == .init(column: 2, row: 0))
+            state: &shiftedRight
+        )
+        #expect(shiftedRightUp.consumption == .ignored)
+        #expect(shiftedRightUp.inputBytes.isEmpty)
 
-        var menu = TerminalInteractionState()
+        var uncapturedRight = TerminalInteractionState()
         #expect(decideTerminalPointer(
-            .down(.right, column: 3, row: 1), terminal: terminal, state: &menu
-        ).paneMenuCell == nil)
+            .down(.right, column: 3, row: 1), terminal: terminal, state: &uncapturedRight
+        ).consumption == .ignored)
         #expect(decideTerminalPointer(
-            .up(.right, column: 4, row: 1), terminal: terminal, state: &menu
-        ).paneMenuCell == .init(column: 4, row: 1))
+            .up(.right, column: 4, row: 1), terminal: terminal, state: &uncapturedRight
+        ).inputBytes.isEmpty)
 
         var middle = TerminalInteractionState()
         #expect(decideTerminalPointer(
@@ -298,7 +304,6 @@ struct TerminalInteractionPolicyTests {
             .up(.right, column: 1, row: 0), terminal: terminal, state: &captured
         )
         #expect(up.consumption == .report)
-        #expect(up.paneMenuCell == nil)
     }
 
     @Test("wheel priority and gesture ownership remain stable through momentum")

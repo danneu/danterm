@@ -194,7 +194,7 @@ that claims the mouse.
 
 ## Commit progress
 - [x] 1. Outline the pane under its context menu (D1)
-- [ ] 2. Open the pane context menu on press, decided on the main thread (D2)
+- [x] 2. Open the pane context menu on press, decided on the main thread (D2)
 
 ## Implementation notes
 
@@ -215,3 +215,42 @@ that claims the mouse.
   right-click into another application needs posted CG events and the
   accessibility grant that goes with them; the check is better run once against
   the finished gesture after D2.
+- The view reads the claim through a new `claimsMouseButtons` on the session
+  controller and hands AppKit its menu through a `paneMenuProvider` closure the
+  owner installs. `PaneWrapperView` installs the shared builder in its
+  initializer, so all three entry points still build the same menu, and the view
+  no longer knows how a menu is made. That closure replaced the old
+  `paneMenuHandler` test seam, so the harness installs its own provider instead
+  of observing an owner callback.
+- `rightMouseDown` forwards only a claimed press and records that it did.
+  `rightMouseUp` forwards nothing without that record. This is what discharges
+  I7 now that AppKit swallows the release that ends menu tracking.
+- The host suite's `OwnerHold` helper blocked the owner queue from inside the
+  pane-menu callback, which this slice deletes. Its trailing closure silently
+  rebound to `onOpenLink`, which the gesture never fires, so the two
+  resize-coalescing tests parked on a semaphore forever and wedged the whole
+  `TerminalPTY` lane instead of failing. The hold now rides the completion of a
+  zero-row standalone wheel sample: it is the remaining production entry point
+  that runs caller code on the owner queue, and it records no transition, writes
+  no bytes, and moves no viewport, so both call sites keep their assertions
+  unchanged. The wait also grew a 30s expiry that throws `POSIXError(.ETIMEDOUT)`,
+  so the next time the chosen entry point stops calling back, one test fails by
+  name rather than the lane stalling -- a blocking semaphore wait is exactly what
+  a `.timeLimit` cannot unwind.
+
+## Follow Up
+
+- `TerminalSession.paneWrapper` has no production reader left: deleting
+  `SwiftTerminalSessionView.showPaneMenu(at:)` removed its last one, and the
+  property is now only assigned in `app/PaneWrapperView.swift:128` and asserted
+  by `app-tests/PaneHostHeadlessTests.swift:26`,
+  `tests-ui/PaneWrapperViewTests.swift:276`, and
+  `tests-ui/SplitContainerViewTests.swift:248`. Removing it is a change to the
+  `TerminalSession` protocol contract and to three tests that exist only to pin
+  the back-pointer, so it was left out of this slice.
+- The plan's live end-to-end check is still unrun: launch a slot, split a tab
+  into three panes, and confirm the outline names the pane under the pointer,
+  that the menu opens on press, that a control-click on an unfocused pane both
+  focuses it and opens the menu, and that a right-click inside an application
+  claiming the mouse reports bytes and opens no menu. It needs posted CG events
+  and the accessibility grant that goes with them, which no agent path here has.

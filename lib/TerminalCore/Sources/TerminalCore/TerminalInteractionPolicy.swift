@@ -6,7 +6,6 @@
 public enum TerminalPointerConsumption: Equatable, Sendable {
     case report
     case selection
-    case paneMenu
     case link
     case ignored
 }
@@ -47,8 +46,6 @@ public struct TerminalPointerDecision: Equatable, Sendable {
     public let selectionMutation: TerminalSelectionMutation?
     /// Carries the unit that a set mutation must settle with the range.
     public let selectionGranularity: TerminalSelectionGranularity?
-    /// Requests the pane menu only after an uncaptured right-button release.
-    public let paneMenuCell: TerminalViewportCell?
     /// Applies hover presentation independently from the event's byte-owning arm.
     public let hoverMutation: TerminalHoverMutation?
     /// Delivers a click-time-revalidated HTTP(S) target only on a matching link release.
@@ -211,7 +208,6 @@ public func decideTerminalPointer(
                 inputBytes: [],
                 selectionMutation: nil,
                 selectionGranularity: nil,
-                paneMenuCell: nil,
                 hoverMutation: .clear,
                 openLink: link.hyperlink,
                 armMutation: .clear,
@@ -236,18 +232,6 @@ public func decideTerminalPointer(
             return pointerDecision(
                 .selection,
                 completedSelectionGesture: completesSelection
-            )
-        case .paneMenu:
-            return TerminalPointerDecision(
-                consumption: .paneMenu,
-                inputBytes: [],
-                selectionMutation: nil,
-                selectionGranularity: nil,
-                paneMenuCell: .init(column: column, row: row),
-                hoverMutation: nil,
-                openLink: nil,
-                armMutation: nil,
-                completedSelectionGesture: false
             )
         case .link:
             return pointerDecision(.link)
@@ -342,9 +326,6 @@ public func decideTerminalPointer(
         if state.pointerOwners.contains(where: { $0 == .report }) {
             return pointerDecision(.report, bytes: reportBytes, hoverMutation: hover)
         }
-        if state.pointerOwners.contains(where: { $0 == .paneMenu }) {
-            return pointerDecision(.paneMenu, hoverMutation: hover)
-        }
         if state.pointerOwners[TerminalMouseButton.left.rawValue] == .selection {
             return pointerDecision(.selection, hoverMutation: hover)
         }
@@ -429,9 +410,11 @@ private func pointerOwner(
     let usesLocalArm = modifiers.contains(.shift) || tracking == .off
     guard usesLocalArm else { return .report }
     switch button {
+    // A local right press is ignored like the middle one: AppKit owns the pane context
+    // menu and consumes the gesture before it reaches here, so an unclaimed right press
+    // that still arrives has no arm left to run.
     case .left: return .selection
-    case .right: return .paneMenu
-    case .middle: return .ignored
+    case .right, .middle: return .ignored
     }
 }
 
@@ -450,8 +433,6 @@ private func pointerDownDecision(
     switch owner {
     case .report:
         return pointerDecision(.report, bytes: reportBytes)
-    case .paneMenu:
-        return pointerDecision(.paneMenu)
     // Unreachable via `pointerOwner`, which never mints `.link`; kept for exhaustiveness.
     case .link:
         return pointerDecision(.link)
@@ -580,7 +561,6 @@ private func pointerDecision(
         inputBytes: bytes,
         selectionMutation: selectionMutation,
         selectionGranularity: selectionGranularity,
-        paneMenuCell: nil,
         hoverMutation: hoverMutation,
         openLink: nil,
         armMutation: armMutation,

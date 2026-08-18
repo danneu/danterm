@@ -125,6 +125,9 @@ struct TerminalSessionRequest {
 protocol TerminalSession: AnyObject {
     var hostView: NSView { get }
     var paneWrapper: PaneWrapperView? { get set }
+    /// Supplies the pane context menu the terminal view hands AppKit from a right-button or
+    /// control-click press. The owner installs it; the view never builds a menu itself.
+    var paneMenuProvider: (() -> NSMenu?)? { get set }
     var state: TerminalSessionState { get }
     var stateObserver: (any TerminalSessionStateObserver)? { get set }
     var onEvent: ((TerminalSessionEvent) -> Void)? { get set }

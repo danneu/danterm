@@ -90,6 +90,7 @@ final class AppDelegate {
 
 class TerminalView: NSView, TerminalSession {
     weak var paneWrapper: PaneWrapperView?
+    var paneMenuProvider: (() -> NSMenu?)?
     var hasSelection = false
     var performedActions: [String] = []
     var hostView: NSView { self }

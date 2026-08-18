@@ -311,7 +311,6 @@ final class TerminalPaneSessionController {
     var onProcessStarted: (() -> Void)?
     var onSessionEnded: ((PaneProcessLifecycleResult) -> Void)?
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
-    var onPaneMenu: ((TerminalViewportCell) -> Void)?
     var onOpenLink: ((TerminalHyperlink) -> Void)?
     var onSearchStatus: ((TerminalSearchStatus?) -> Void)?
     var onPrimaryHistoryMutation: (() -> Void)?
@@ -351,7 +350,9 @@ final class TerminalPaneSessionController {
     private(set) var clearSearchRequests = 0
     private(set) var synchronizedSelectionReads = 0
     private(set) var linkInteractionCancellations = 0
-    var allowsPaneMenu = true
+    /// Stands in for the real controller's cached mouse-tracking answer, which the pane view
+    /// reads on every right-button press to decide whether the terminal application claims it.
+    var claimsMouseButtons = false
     /// Stands in for lifecycle policy refusing a submission -- a full pending-input buffer, a
     /// failed launch, a closed descriptor. When set, no submission is recorded as delivered and
     /// every completion names this reason, which is what lets a test observe why input was lost.
@@ -484,9 +485,6 @@ final class TerminalPaneSessionController {
     }
     func sendPointer(_ event: TerminalPointerEvent, origin: UInt64?) {
         pointerEvents.append(event)
-        if allowsPaneMenu, case let .up(.right, column, row, _) = event {
-            onPaneMenu?(.init(column: column, row: row))
-        }
         switch event {
         case let .move(_, _, _, modifiers):
             cachedHoveredLink = modifiers.contains(.command) ? hoveredLinkForCommandMove : nil

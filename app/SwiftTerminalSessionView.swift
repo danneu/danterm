@@ -200,6 +200,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// still reads as a change and still reaches the applied boundary.
     private var currentGridPinned: Bool?
     private var controlClickIsActive = false
+    /// True between a forwarded right-button press and its release. AppKit consumes the
+    /// release that ends menu tracking, so a press the menu path never forwarded must not
+    /// be answered by a release either -- an unpaired press would latch the engine's button
+    /// owner and swallow the next right-click the terminal application does claim.
+    private var rightButtonForwarded = false
     private var mouseTrackingArea: NSTrackingArea?
     private var lastPointerLocationInWindow: NSPoint?
     private var isPointerInside = false
@@ -244,8 +249,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// in. Defaults to the system pasteboard while keeping UI tests isolated, so a test that
     /// assigns a scratch board neither reads nor destroys the developer's real clipboard.
     var selectionPasteboard = NSPasteboard.general
-    /// Lets the UI harness observe owner-approved menu timing without entering AppKit menu tracking.
-    var paneMenuHandler: ((TerminalViewportCell) -> Void)?
+    /// Supplies the pane context menu without coupling this view to how its owner builds one.
+    /// `PaneWrapperView` installs the shared builder; a harness installs its own.
+    var paneMenuProvider: (() -> NSMenu?)?
     /// Defaults approved web links to the workspace while keeping UI tests free of external effects.
     var linkOpener: ((URL) -> Bool)? = { NSWorkspace.shared.open($0) }
 
@@ -388,9 +394,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         }
         controller.onViewportStateChange = { [weak self] _ in
             self?.emitStateIfNeeded()
-        }
-        controller.onPaneMenu = { [weak self] cell in
-            self?.showPaneMenu(at: cell)
         }
         controller.onOpenLink = { [weak self] link in
             self?.openLink(link)
@@ -754,6 +757,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     override func mouseDown(with event: NSEvent) {
+        // A control-click only arrives here when the terminal claimed it: an unclaimed one
+        // is answered by `menu(for:)`, and AppKit then delivers no mouse lifecycle at all.
         controlClickIsActive = event.modifierFlags.contains(.control)
         forwardPointerDown(event, button: controlClickIsActive ? .right : .left)
         // The focus report rides this entry point because AppKit's window moves the
@@ -773,10 +778,20 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        // Only a claimed right-click reaches the engine. An unclaimed one goes to super,
+        // whose default implementation is what asks `menu(for:)` and pops the menu inside
+        // this press; overriding it away would suppress the menu entirely.
+        guard terminalClaimsRightButton(modifiers: event.modifierFlags) else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        rightButtonForwarded = true
         forwardPointerDown(event, button: .right)
     }
 
     override func rightMouseUp(with event: NSEvent) {
+        guard rightButtonForwarded else { return }
+        rightButtonForwarded = false
         forwardPointerUp(event, button: .right)
     }
 
@@ -833,8 +848,38 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         )
     }
 
+    // NSView: AppKit calls this from the press -- inside the default `rightMouseDown` for a
+    // right-click, and before any mouse lifecycle for a control-click -- and pops up whatever
+    // is returned. Returning the menu here is what makes the pane menu open on press, at the
+    // pointer, without the gesture ever leaving the main thread.
     override func menu(for event: NSEvent) -> NSMenu? {
-        nil
+        guard isTornDown == false else { return nil }
+        switch event.type {
+        case .rightMouseDown:
+            guard terminalClaimsRightButton(modifiers: event.modifierFlags) == false else {
+                return nil
+            }
+        case .leftMouseDown:
+            guard event.modifierFlags.contains(.control),
+                  terminalClaimsRightButton(modifiers: event.modifierFlags) == false
+            else {
+                return nil
+            }
+            // A control-click takes key focus but never reaches `mouseDown`, because AppKit
+            // stops delivering the gesture once a menu is returned. Reporting focus here is
+            // the only remaining chance to name the pane the user pointed at.
+            callbackGate.emit(.clickedToFocus)
+        default:
+            return nil
+        }
+        return paneMenuProvider?()
+    }
+
+    /// Answers whether the terminal application, not the pane, owns this right-button press.
+    /// Shift always overrides the claim, matching the local arm the engine's own pointer
+    /// policy uses for every other button.
+    private func terminalClaimsRightButton(modifiers: NSEvent.ModifierFlags) -> Bool {
+        modifiers.contains(.shift) == false && controller.claimsMouseButtons
     }
 
     override func keyDown(with event: NSEvent) {
@@ -1315,7 +1360,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     func tearDown() {
         guard isTornDown == false else { return }
         isTornDown = true
-        paneMenuHandler = nil
+        paneMenuProvider = nil
         linkOpener = nil
         isPointerInside = false
         updateHoveredLinkChrome(nil)
@@ -1685,21 +1730,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         if cell.isInsideGrid == false {
             controller.cancelLinkInteraction()
         }
-    }
-
-    private func showPaneMenu(at cell: TerminalViewportCell) {
-        guard isTornDown == false else { return }
-        if let paneMenuHandler {
-            paneMenuHandler(cell)
-            return
-        }
-        guard let paneWrapper, let cellSize = displayedCellSize else { return }
-        let menu = paneWrapper.makePaneMenu(includeClipboard: true)
-        let point = NSPoint(
-            x: (CGFloat(cell.column) + 0.5) * cellSize.width,
-            y: (CGFloat(cell.row) + 1) * cellSize.height
-        )
-        menu.popUp(positioning: nil, at: point, in: self)
     }
 
     private func openLink(_ link: TerminalHyperlink) {

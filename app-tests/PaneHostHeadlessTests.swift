@@ -31,6 +31,7 @@ import Testing
 @MainActor
 private final class HeadlessPaneHostSession: NSView, TerminalSession {
     weak var paneWrapper: PaneWrapperView?
+    var paneMenuProvider: (() -> NSMenu?)?
     var hostView: NSView { self }
     var state = TerminalSessionState(
         scrollbarEnabled: true,

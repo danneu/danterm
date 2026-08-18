@@ -66,6 +66,7 @@ final class RecordingAppRuntimePorts {
 @MainActor
 final class RecordingTerminalSession: NSView, TerminalSession {
     weak var paneWrapper: PaneWrapperView?
+    var paneMenuProvider: (() -> NSMenu?)?
     var hostView: NSView { self }
     var state = TerminalSessionState(
         scrollbarEnabled: true,

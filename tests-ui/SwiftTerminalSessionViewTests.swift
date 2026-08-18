@@ -350,8 +350,8 @@ func swiftTerminalSessionViewTests() {
         // Why it exists: the grid the user sees and the grid the engine is told
         //   about have to be the same one. Hit-testing against the rendered cell
         //   box would offset every selection and every mouse-mode report.
-        // Scenario: spec-first -- the user right-clicks inside a pane the phone
-        //   claimed at 60x30.
+        // Scenario: spec-first -- the user clicks inside a pane the phone claimed
+        //   at 60x30.
         let controller = TerminalPaneSessionController()
         let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
         pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
@@ -363,14 +363,10 @@ func swiftTerminalSessionViewTests() {
         guard let claimed = pane.presentationGeometryForTesting else {
             throw UITestFailure(message: "a claimed pane reported no presentation geometry")
         }
-        var menuCells: [TerminalViewportCell] = []
-        pane.paneMenuHandler = { menuCells.append($0) }
-
         // Window coordinates are bottom-up; the pane is flipped, so this lands at
         // (30, 50) inside it.
         let location = NSPoint(x: 30, y: 150)
-        pane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: location))
-        pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: location))
+        pane.mouseDown(with: try makeMouseEvent(type: .leftMouseDown, location: location))
 
         let shown = TerminalViewportCell(
             column: Int(30 / claimed.cellSize.width),
@@ -382,8 +378,12 @@ func swiftTerminalSessionViewTests() {
         )
         try uiExpect(shown != atNativeCellSize,
                      "the two cell boxes agree, so this test proves nothing")
-        try uiExpect(menuCells == [shown],
-                     "the click did not name the cell drawn under it: \(menuCells)")
+        let named = controller.pointerEvents.compactMap { event -> TerminalViewportCell? in
+            guard case let .down(_, column, row, _, _, _) = event else { return nil }
+            return .init(column: column, row: row)
+        }
+        try uiExpect(named == [shown],
+                     "the click did not name the cell drawn under it: \(named)")
     }
 
     uiTest("geometry that is not finite or is out of Int range yields no grid and no cell") {
@@ -1157,57 +1157,111 @@ func swiftTerminalSessionViewTests() {
                      "precise wheel motion was quantized in the view")
     }
 
-    uiTest("automatic menus stay suppressed and owner menu requests arrive after right up") {
-        // Intent: only the serialized owner can authorize a terminal-view context menu.
-        // Why it exists: AppKit's automatic down-time lookup races child mouse-capture modes.
-        // Scenario: an uncaptured right-click opens after up, then a captured click does not reopen.
+    uiTest("the pane menu is offered on the press unless the terminal claims the button") {
+        // Intent: a right-button press answers with the pane menu and forwards nothing,
+        //   while a claimed press forwards the gesture and offers no menu. Shift always
+        //   takes the press back from the terminal.
+        // Why it exists: this is the whole gesture split. AppKit pops whatever `menu(for:)`
+        //   returns from inside the press, so returning a menu for a click the terminal
+        //   claimed would eat the report the running program is waiting for.
+        // Scenario: spec-first -- the user right-clicks a plain shell, then the same pane
+        //   under a full-screen program that turned mouse reporting on, then shift-clicks it.
         let controller = TerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
-        var menuCells: [TerminalViewportCell] = []
-        pane.paneMenuHandler = { menuCells.append($0) }
-        let down = try makeMouseEvent(type: .rightMouseDown, location: .init(x: 17, y: 125))
-        let up = try makeMouseEvent(type: .rightMouseUp, location: .init(x: 17, y: 125))
+        let provided = NSMenu()
+        pane.paneMenuProvider = { provided }
+        let point = NSPoint(x: 17, y: 125)
+        let down = try makeMouseEvent(type: .rightMouseDown, location: point)
 
-        try uiExpect(pane.menu(for: down) == nil, "AppKit menu lookup was not suppressed")
+        try uiExpect(pane.menu(for: down) === provided,
+                     "an unclaimed right press did not offer the pane menu")
         pane.rightMouseDown(with: down)
-        try uiExpect(menuCells.isEmpty, "pane menu opened before button-up")
-        pane.rightMouseUp(with: up)
-        try uiExpect(menuCells == [.init(column: 2, row: 2)], "pane menu did not follow owner up")
+        try uiExpect(controller.pointerEvents.isEmpty,
+                     "an unclaimed right press reached the engine: \(controller.pointerEvents)")
 
-        controller.allowsPaneMenu = false
+        controller.claimsMouseButtons = true
+        try uiExpect(pane.menu(for: down) == nil, "a claimed right press offered a menu")
         pane.rightMouseDown(with: down)
-        pane.rightMouseUp(with: up)
-        try uiExpect(menuCells.count == 1, "captured right-click reopened the dismissed menu")
+        pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
+        try uiExpect(controller.pointerEvents == [
+            .down(.right, column: 2, row: 2, offsetX: 0.125, modifiers: [], clickCount: 1),
+            .up(.right, column: 2, row: 2, modifiers: []),
+        ], "a claimed right press did not reach the engine: \(controller.pointerEvents)")
+
+        let shiftDown = try makeMouseEvent(
+            type: .rightMouseDown, location: point, modifiers: [.shift]
+        )
+        try uiExpect(pane.menu(for: shiftDown) === provided,
+                     "shift did not take the press back from the terminal")
+        pane.rightMouseDown(with: shiftDown)
+        try uiExpect(controller.pointerEvents.count == 2,
+                     "a shifted right press reached the engine: \(controller.pointerEvents)")
     }
 
-    uiTest("control click uses the owner right-button lifecycle") {
-        // Intent: macOS Control-click is normalized as a right-button gesture before owner policy.
-        // Why it exists: AppKit otherwise asks for a menu before delivering the mouse lifecycle.
-        // Scenario: a shell Control-click opens the pane menu only after its synthesized right up.
+    uiTest("a right release without a forwarded press is never sent on") {
+        // Intent: the engine only ever sees a right release that pairs with a press it saw.
+        // Why it exists: AppKit consumes the release that ends menu tracking, but a stray
+        //   one can still arrive. An unpaired release -- or an unpaired press -- latches the
+        //   engine's button owner, which then swallows the next right-click a program claims.
+        // Scenario: spec-first -- the user right-clicks a plain shell to open the menu, then
+        //   a program turns mouse reporting on and the user right-clicks again.
         let controller = TerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
-        var menuCells: [TerminalViewportCell] = []
-        pane.paneMenuHandler = { menuCells.append($0) }
-        let down = try makeMouseEvent(
-            type: .leftMouseDown,
-            location: .init(x: 9, y: 143),
-            modifiers: [.control]
-        )
-        let up = try makeMouseEvent(
-            type: .leftMouseUp,
-            location: .init(x: 9, y: 143),
-            modifiers: [.control]
-        )
+        pane.paneMenuProvider = { NSMenu() }
+        let point = NSPoint(x: 17, y: 125)
 
-        try uiExpect(pane.menu(for: down) == nil, "control-click menu lookup was not suppressed")
+        pane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: point))
+        pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
+        try uiExpect(controller.pointerEvents.isEmpty,
+                     "a menu-owned gesture reached the engine: \(controller.pointerEvents)")
+
+        controller.claimsMouseButtons = true
+        pane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: point))
+        pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
+        try uiExpect(controller.pointerEvents == [
+            .down(.right, column: 2, row: 2, offsetX: 0.125, modifiers: [], clickCount: 1),
+            .up(.right, column: 2, row: 2, modifiers: []),
+        ], "the claimed gesture was not delivered whole: \(controller.pointerEvents)")
+    }
+
+    uiTest("an unclaimed control-click both focuses the pane and offers the menu") {
+        // Intent: a control-click reports pane focus and returns the menu from the same
+        //   call, and forwards nothing; a claimed one runs the right-button lifecycle.
+        // Why it exists: AppKit asks for the menu before any mouse lifecycle on a
+        //   control-click and delivers no lifecycle at all once a menu comes back, so
+        //   `mouseDown` never runs. The focus half is the half that silently breaks: the
+        //   menu still opens, on a pane that never became key.
+        // Scenario: spec-first -- the user control-clicks an unfocused pane running a
+        //   plain shell, then control-clicks one under a program that claims the mouse.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        let provided = NSMenu()
+        pane.paneMenuProvider = { provided }
+        var events: [TerminalSessionEvent] = []
+        pane.onEvent = { events.append($0) }
+        let point = NSPoint(x: 9, y: 143)
+        let down = try makeMouseEvent(
+            type: .leftMouseDown, location: point, modifiers: [.control]
+        )
+        let up = try makeMouseEvent(type: .leftMouseUp, location: point, modifiers: [.control])
+
+        try uiExpect(pane.menu(for: down) === provided,
+                     "an unclaimed control-click did not offer the pane menu")
+        try uiExpect(events == [.clickedToFocus],
+                     "an unclaimed control-click reported \(events)")
+        try uiExpect(controller.pointerEvents.isEmpty,
+                     "an unclaimed control-click reached the engine: \(controller.pointerEvents)")
+
+        controller.claimsMouseButtons = true
+        events = []
+        try uiExpect(pane.menu(for: down) == nil, "a claimed control-click offered a menu")
         pane.mouseDown(with: down)
         pane.mouseUp(with: up)
-
         try uiExpect(controller.pointerEvents == [
             .down(.right, column: 1, row: 1, offsetX: 0.125, modifiers: [.control], clickCount: 1),
             .up(.right, column: 1, row: 1, modifiers: [.control]),
-        ], "control-click escaped the right-button owner lifecycle")
-        try uiExpect(menuCells == [.init(column: 1, row: 1)], "control-click menu was not deferred")
+        ], "a claimed control-click escaped the right-button lifecycle")
+        try uiExpect(events == [.clickedToFocus], "a claimed control-click reported \(events)")
     }
 
     uiTest("only a click that takes key focus reports pane focus") {

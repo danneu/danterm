@@ -688,7 +688,6 @@ public actor TerminalPTYHost {
     nonisolated public func sendPointer(
         _ event: TerminalPointerEvent,
         origin: UInt64? = nil,
-        onPaneMenu: @escaping @Sendable (TerminalViewportCell) -> Void = { _ in },
         onOpenLink: @escaping @Sendable (TerminalHyperlink) -> Void = { _ in },
         onSelectionCompleted: (@Sendable (String) -> Void)? = nil
     ) {
@@ -697,7 +696,6 @@ public actor TerminalPTYHost {
                 owner.applyPointer(
                     event,
                     origin: origin,
-                    onPaneMenu: onPaneMenu,
                     onOpenLink: onOpenLink,
                     onSelectionCompleted: onSelectionCompleted
                 )
@@ -1226,7 +1224,6 @@ public actor TerminalPTYHost {
                 owner.applyPointer(
                     event,
                     origin: nil,
-                    onPaneMenu: { _ in },
                     onOpenLink: { _ in },
                     onSelectionCompleted: nil
                 )
@@ -1337,7 +1334,6 @@ public actor TerminalPTYHost {
     private func applyPointer(
         _ event: TerminalPointerEvent,
         origin: UInt64?,
-        onPaneMenu: @Sendable (TerminalViewportCell) -> Void,
         onOpenLink: @Sendable (TerminalHyperlink) -> Void,
         onSelectionCompleted: (@Sendable (String) -> Void)?
     ) {
@@ -1373,9 +1369,6 @@ public actor TerminalPTYHost {
         applyArmMutation(decision.armMutation)
         markFrameUpdatePendingIfNeeded()
         publishPendingUpdate()
-        if let cell = decision.paneMenuCell {
-            onPaneMenu(cell)
-        }
         if let link = decision.openLink {
             onOpenLink(link)
         }

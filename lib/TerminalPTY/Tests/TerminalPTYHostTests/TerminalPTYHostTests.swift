@@ -514,7 +514,7 @@ struct TerminalPTYHostTests {
         let baseline = await host.transitions().count
 
         let owner = OwnerHold()
-        owner.hold(host)
+        try owner.hold(host)
         host.resize(unpinned(columns: 80, rows: 30))
         host.sendPointer(.down(.left, column: 2, row: 0, clickCount: 3))
         host.resize(unpinned(columns: 80, rows: 10))
@@ -1086,21 +1086,23 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
-    @Test("uncaptured pane menu is returned only after right-button release", .timeLimit(.minutes(1)))
-    func paneMenuWaitsForRelease() async throws {
+    @Test("an uncaptured right-button gesture writes nothing to the child", .timeLimit(.minutes(1)))
+    func uncapturedRightButtonIsInert() async throws {
+        // Intent: with mouse reporting off, neither half of a right-button gesture reaches
+        //   the child.
+        // Why it exists: AppKit now owns the pane context menu, so the engine's only
+        //   remaining duty for an unclaimed right-click is to stay out of the way. A stray
+        //   report here would land as input in whatever program is running.
+        // Scenario: spec-first -- the user right-clicks a pane running a plain shell.
         let host = try await startChildlessHost().host
-        let menus = AsyncStream<TerminalViewportCell>.makeStream()
-        var iterator = menus.stream.makeAsyncIterator()
+        let before = await host.inputWrites().count
 
-        host.sendPointer(.down(.right, column: 9, row: 4)) { cell in
-            _ = menus.continuation.yield(cell)
-        }
+        host.sendPointer(.down(.right, column: 9, row: 4))
         _ = host.fencedSnapshot()
-        host.sendPointer(.up(.right, column: 9, row: 4)) { cell in
-            _ = menus.continuation.yield(cell)
-        }
+        host.sendPointer(.up(.right, column: 9, row: 4))
+        _ = host.fencedSnapshot()
 
-        #expect(await iterator.next() == .init(column: 9, row: 4))
+        #expect(await host.inputWrites().count == before)
         await host.close()
     }
 
@@ -1866,7 +1868,7 @@ struct TerminalPTYHostChildProcessTests {
         //   the pane trails the window by seconds and the child is told forty
         //   sizes. The verdict has to be deterministic rather than "fewer than
         //   submitted", which a fix that drops one of forty would also satisfy.
-        // Scenario: the owner is held inside a pane-menu callback while a drag's
+        // Scenario: the owner is held inside a wheel completion while a drag's
         //   worth of grids arrives, then released -- the shape of a real drag on
         //   a pane whose reflow is slower than mouse-move arrival.
         let host = try makeHost()
@@ -1877,7 +1879,7 @@ struct TerminalPTYHostChildProcessTests {
         let baseline = await host.transitions().count
 
         let owner = OwnerHold()
-        owner.hold(host)
+        try owner.hold(host)
         for grid in [(84, 25), (88, 26), (92, 27), (96, 28)] {
             host.resize(unpinned(columns: grid.0, rows: grid.1))
         }
@@ -3125,27 +3127,34 @@ private extension TerminalPointerEvent {
     }
 }
 
-/// Holds the owner queue inside a pane-menu callback so everything submitted after
+/// Holds the owner queue inside a wheel-completion callback so everything submitted after
 /// `hold(_:)` returns provably queues behind one job.
 ///
 /// Coalescing is only a deterministic verdict when the test controls *when the owner is
 /// free*; measuring how much a burst collapses while the queue drains at its own pace
-/// would assert the machine's speed instead. The pane-menu callback is used because it is
-/// the one production entry point that runs caller code on the owner queue.
+/// would assert the machine's speed instead. A zero-row standalone wheel sample carries the
+/// hold because its completion runs caller code on the owner queue while changing nothing a
+/// surrounding test observes: it records no applied transition, writes no bytes to the child,
+/// and moves no viewport.
 private struct OwnerHold {
     private let reached = DispatchSemaphore(value: 0)
     private let released = DispatchSemaphore(value: 0)
 
     /// Returns once the owner queue is blocked, so the caller's next submission waits.
-    func hold(_ host: TerminalPTYHost) {
+    ///
+    /// The guard names this waiter when the chosen entry point stops running caller code on
+    /// the owner queue. Without it such a change reads as a whole wedged suite rather than
+    /// one failed hold, because a blocking semaphore wait is what no `.timeLimit` can unwind.
+    func hold(_ host: TerminalPTYHost) throws {
         let reached = reached
         let released = released
-        host.sendPointer(.down(.right, column: 0, row: 0))
-        host.sendPointer(.up(.right, column: 0, row: 0)) { _ in
+        host.sendWheel(.init(rowDelta: 0, column: 0, row: 0)) { _ in
             reached.signal()
             released.wait()
         }
-        reached.wait()
+        guard reached.wait(timeout: .now() + 30) == .success else {
+            throw POSIXError(.ETIMEDOUT)
+        }
     }
 
     func release() {

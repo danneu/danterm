@@ -126,6 +126,7 @@ class PaneWrapperView: NSView {
 
         super.init(frame: .zero)
         terminalView.paneWrapper = self
+        terminalView.paneMenuProvider = { [weak self] in self?.makePaneMenu(includeClipboard: true) }
 
         menuButton.target = self
         menuButton.action = #selector(showPaneMenu)
