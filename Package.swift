@@ -9,24 +9,17 @@ let package = Package(
         .executable(name: "DanTermCLI", targets: ["DanTermCLI"]),
         .executable(name: "DanTermBundleLayoutTool", targets: ["DanTermBundleLayoutTool"]),
         .executable(name: "DanTermInstanceIdentityTool", targets: ["DanTermInstanceIdentityTool"]),
-        .library(name: "DanTermProtocol", targets: ["DanTermProtocol"]),
         .library(name: "DanTermClient", targets: ["DanTermClient"]),
     ],
     dependencies: [
+        .package(path: "lib/DanTermProtocol"),
         .package(path: "lib/TerminalCore"),
         .package(path: "lib/TerminalPTY"),
     ],
     targets: [
         .target(
-            name: "DanTermProtocol",
-            path: "lib/DanTermProtocol/Sources/DanTermProtocol",
-            swiftSettings: [
-                .swiftLanguageMode(.v6),
-            ]
-        ),
-        .target(
             name: "DanTermClient",
-            dependencies: ["DanTermProtocol"],
+            dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
             path: "lib/DanTermClient/Sources/DanTermClient",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
@@ -34,7 +27,7 @@ let package = Package(
         ),
         .target(
             name: "DanTermSupport",
-            dependencies: ["DanTermProtocol"],
+            dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
             path: "lib/DanTermSupport/Sources/DanTermSupport",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
@@ -46,7 +39,7 @@ let package = Package(
         .executableTarget(
             name: "DanTerm",
             dependencies: [
-                "DanTermProtocol",
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
                 .product(name: "PaneProcessLifecycle", package: "TerminalPTY"),
                 .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
@@ -72,7 +65,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "DanTermCLI",
-            dependencies: ["DanTermClient", "DanTermProtocol", "DanTermSupport"],
+            dependencies: [
+                "DanTermClient",
+                "DanTermSupport",
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+            ],
             path: "cli",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
@@ -80,7 +77,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "DanTermBundleLayoutTool",
-            dependencies: ["DanTermProtocol"],
+            dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
             path: "tools/DanTermBundleLayoutTool",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
@@ -88,23 +85,18 @@ let package = Package(
         ),
         .executableTarget(
             name: "DanTermInstanceIdentityTool",
-            dependencies: ["DanTermProtocol"],
+            dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
             path: "tools/DanTermInstanceIdentityTool",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]
         ),
         .testTarget(
-            name: "DanTermProtocolTests",
-            dependencies: ["DanTermProtocol"],
-            path: "lib/DanTermProtocol/Tests/DanTermProtocolTests",
-            swiftSettings: [
-                .swiftLanguageMode(.v6),
-            ]
-        ),
-        .testTarget(
             name: "DanTermClientTests",
-            dependencies: ["DanTermClient", "DanTermProtocol"],
+            dependencies: [
+                "DanTermClient",
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+            ],
             path: "lib/DanTermClient/Tests/DanTermClientTests",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
@@ -115,7 +107,11 @@ let package = Package(
         // DanTermSupport, and DanTermClient must not depend on the host layer.
         .testTarget(
             name: "DanTermPaneTapeRoundTripTests",
-            dependencies: ["DanTermClient", "DanTermProtocol", "DanTermSupport"],
+            dependencies: [
+                "DanTermClient",
+                "DanTermSupport",
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+            ],
             path: "client-tests",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
@@ -125,7 +121,7 @@ let package = Package(
             name: "DanTermAppTests",
             dependencies: [
                 "DanTerm",
-                "DanTermProtocol",
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
                 .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
             ],
@@ -136,7 +132,10 @@ let package = Package(
         ),
         .testTarget(
             name: "DanTermCLITests",
-            dependencies: ["DanTermCLI", "DanTermProtocol"],
+            dependencies: [
+                "DanTermCLI",
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+            ],
             path: "cli-tests",
             swiftSettings: [
                 .swiftLanguageMode(.v6),

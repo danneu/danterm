@@ -33,7 +33,7 @@ STEPS=(
     'python3 ./scripts/tests/fetch_references_test.py'
     'swift test --package-path lib/DanTermCore'
     './scripts/tests/danterm-cli-connect-errors_test.sh'
-    'swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests'
+    'swift test --package-path lib/DanTermProtocol'
     'swift test --package-path lib/DanTermClient'
     'python3 ./scripts/tests/terminal_benchmark_snapshot_test.py'
     'python3 ./scripts/tests/dev-slot-launcher_test.py'

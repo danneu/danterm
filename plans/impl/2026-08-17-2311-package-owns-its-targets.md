@@ -181,7 +181,7 @@ ownership lint fails on the tree the middle slices clean up, so it lands last.
 - [x] **1. Close the gate hole.** Add the coverage check, its self-test, and the
       `lib/DanTermClient` gate step. Red first: the check names
       `lib/DanTermClient` before the step exists.
-- [ ] **2. `DanTermProtocol` becomes a package dependency.** One atomic manifest
+- [x] **2. `DanTermProtocol` becomes a package dependency.** One atomic manifest
       edit -- adding the dependency while the same-named target still exists puts
       two targets of one name in the graph, so the swap cannot be split across
       commits. Drop the dead `--filter` from the protocol gate step.
@@ -245,3 +245,12 @@ Per slice, and in full after slice 5:
   failed naming exactly `lib/DanTermClient` and nothing else. With the step added it
   reports 9 test estates each run once, and `just test` passed all 96 steps in 71s
   with the client lane in the ok list.
+- **Slice 2.** Every root consumer of `DanTermProtocol` moved from the bare
+  `"DanTermProtocol"` target name to `.product(name:package:)`, because a package
+  dependency is only reachable through its product. The root also drops its
+  `.library(name: "DanTermProtocol")` product, which had no consumer once the
+  target it exported was gone.
+- **Slice 2 verification.** The full gate passed all 96 steps in 75s, the iOS gate
+  still builds both pinned packages with tests, and a dev slot launched, answered
+  `ls` over its control socket, and quit cleanly. The root test step now runs 164
+  tests; the protocol suite runs only under `lib/DanTermProtocol`.
