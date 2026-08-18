@@ -19,7 +19,7 @@ public struct MobileSessionProjection: Equatable, Sendable {
     public let draft: MobileTargetDraft
     /// The problem with the target fields, shown beside them and nowhere else.
     public let draftProblem: MobileTargetDraftProblem?
-    public let panes: [MobilePaneListItem]
+    public let panes: [PaneRosterItem]
     public let selectedPaneId: PaneId?
     public let claim: MobileClaimControl
     /// Whether the accessory row's Ctrl key is latched.
@@ -40,7 +40,7 @@ public struct MobileSessionModel: Equatable, Sendable {
     private var draft = MobileTargetDraft(host: nil, port: MobileLaunchPlan.defaultPort)
     private var draftProblem: MobileTargetDraftProblem?
     private var status = MobileStatus()
-    private var panes: [MobilePaneListItem] = []
+    private var panes: [PaneRosterItem] = []
     private var selectedPaneId: PaneId?
     private var surface = MobileSurfaceFacts()
     /// The target and pane the current episode is about, so an automatic retry cannot
@@ -135,8 +135,8 @@ public struct MobileSessionModel: Equatable, Sendable {
             checkpointDeadlineIsArmed = false
             return [.flushCheckpoint(savingReplica: takeCheckpointDirt(), synchronously: false)]
 
-        case .attemptSucceeded(let panes, let serverVersion):
-            self.panes = panes
+        case .attemptSucceeded(let roster, let serverVersion):
+            panes = roster.panes
             guard let pane = preferredPaneId
                 .flatMap({ wanted in panes.first { $0.paneId == wanted } })
                 ?? panes.first(where: { $0.isSelectedTab && $0.isFocused })
@@ -395,6 +395,13 @@ public struct MobileSessionModel: Equatable, Sendable {
             }
             return [.applyRecord(record)]
         case .notification(let method, let params):
+            // A roster replaces the list and nothing else. The streamed pane leaving the
+            // roster is not this notification's news to act on: the tape stream reports
+            // its own pane's closure with an end record, which is what drives recovery.
+            if let carried = PaneRosterNotification(method: method, params: params) {
+                panes = carried.roster.panes
+                return [.redraw]
+            }
             guard let notification = PaneTapeStreamNotification(method: method, params: params),
                   let record = decodePaneTapeRecord(notification.record)
             else { return [] }

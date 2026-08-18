@@ -69,8 +69,8 @@ public enum MobileSessionEvent: Equatable, Sendable {
     case retryTimerFired
     /// The checkpoint deadline the model armed has arrived.
     case checkpointTimerFired
-    /// An attempt reached a handshaken session and its first pane list.
-    case attemptSucceeded(panes: [MobilePaneListItem], serverVersion: String)
+    /// An attempt reached a handshaken session and the roster its subscribe replied with.
+    case attemptSucceeded(roster: PaneRoster, serverVersion: String)
     /// The surface holds the chosen pane and resumes from this cursor, or from nothing.
     case paneAttached(pane: PaneId, cursor: PaneTapeCursor?)
     /// The attempt, or the connection it established, ended with this typed cause.

@@ -220,7 +220,7 @@ final class MobileSessionController {
                 case .connected(let bootstrap):
                     self.pendingSession = bootstrap.session
                     self.dispatch(.attemptSucceeded(
-                        panes: bootstrap.panes,
+                        roster: bootstrap.roster,
                         serverVersion: bootstrap.serverVersion
                     ))
                 }

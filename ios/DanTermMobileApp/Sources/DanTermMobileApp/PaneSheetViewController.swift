@@ -6,7 +6,6 @@
 //
 // It decides nothing. It reports the row the user picked and paints the list it is given;
 // the session model owns which panes exist and which one is selected.
-import DanTermMobileKit
 import DanTermProtocol
 import UIKit
 
@@ -20,12 +19,12 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
     private let table = UITableView(frame: .zero, style: .plain)
     /// The rows the table is showing. It is the data source's copy of the projection,
     /// reloaded when the projection moves -- not a second owner of the list.
-    private var panes: [MobilePaneListItem]
+    private var panes: [PaneRosterItem]
     private var selectedPaneId: PaneId?
 
     /// Seeds the list from the projection, so the sheet has its rows before its first
     /// layout rather than after the next redraw.
-    init(panes: [MobilePaneListItem], selected: PaneId?) {
+    init(panes: [PaneRosterItem], selected: PaneId?) {
         self.panes = panes
         selectedPaneId = selected
         super.init(nibName: nil, bundle: nil)
@@ -38,7 +37,7 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
 
     /// Paints the pane list as it stands. Called on every redraw while the sheet is up, so
     /// a pane the Mac opens or closes shows here without the user closing the sheet.
-    func show(panes: [MobilePaneListItem], selected: PaneId?) {
+    func show(panes: [PaneRosterItem], selected: PaneId?) {
         guard self.panes != panes || selectedPaneId != selected else { return }
         self.panes = panes
         selectedPaneId = selected

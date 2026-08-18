@@ -202,7 +202,7 @@ whole, on change, to subscribed connections.
 
 - [x] 1. feat(protocol): define the shared roster value and its pure core projection
 - [x] 2. feat(ipc): serve roster subscriptions and push the roster on change
-- [ ] 3. feat(ios): subscribe the phone to server-pushed rosters and delete the ls scrape
+- [x] 3. feat(ios): subscribe the phone to server-pushed rosters and delete the ls scrape
 
 ## Implementation notes
 
@@ -234,3 +234,21 @@ whole, on change, to subscribed connections.
 - The `DanTermClient` roster-notification decoder stays with the phone work in
   commit 3, so the runtime delivery tests read notifications straight off the
   socketpair.
+- `MobilePaneListItem` does not survive as an alias: the phone renders
+  `PaneRosterItem` itself, so there is one name for the roster item on both
+  sides and no place a second projection could reappear.
+- `MobileSessionEvent.attemptSucceeded` now carries a whole `PaneRoster` rather
+  than a pane array, so the bootstrap reply and every later push hand the model
+  the same value.
+- A bootstrap reply the phone cannot decode as a roster fails the attempt as
+  `.deviceSetup`, which is the vocabulary the reply-shaped failures beside it
+  already use.
+
+## Follow Up
+
+- Run the live-rig half of `## Verification`: this session had no access to the
+  physical iPhone or the tailnet listener, so the pushed roster is proved by the
+  MobileKit, client, core, and runtime-socket tests but not yet on the device.
+  With the phone attached, split a pane, close it, and rename a tab from the
+  branch-built CLI, then change the selected pane's terminal title and watch the
+  status pill follow it.

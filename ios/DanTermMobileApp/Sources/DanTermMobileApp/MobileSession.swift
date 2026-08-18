@@ -5,10 +5,10 @@ import DanTermProtocol
 import Dispatch
 import Foundation
 
-/// Transfers a fully handshaken session and its first pane list to the shell.
+/// Transfers a fully handshaken session and its opening roster to the shell.
 struct MobileSessionBootstrap: Sendable {
     let session: DanTermClientSession
-    let panes: [MobilePaneListItem]
+    let roster: PaneRoster
     let serverVersion: String
 }
 
@@ -64,7 +64,7 @@ final class MobileSessionAttempt: @unchecked Sendable {
                 let requestId = JSONValue.string(UUID().uuidString)
                 try opened.send(JsonRpcRequest(
                     id: requestId,
-                    method: IpcRequestMethod.ls.rawValue,
+                    method: IpcRequestMethod.roster.rawValue,
                     params: .object([:])
                 ))
                 // No reply and no error: the frames ran out, which is the peer closing
@@ -81,18 +81,21 @@ final class MobileSessionAttempt: @unchecked Sendable {
                     deliver(.failed(.deviceSetup))
                     return
                 }
-                let panes = try projectPaneList(from: result)
+                guard let roster = PaneRoster(jsonValue: result) else {
+                    deliver(.failed(.deviceSetup))
+                    return
+                }
                 handedOff = true
                 deliver(.connected(MobileSessionBootstrap(
                     session: opened,
-                    panes: panes,
+                    roster: roster,
                     serverVersion: hello.appVersion
                 )))
             } catch let error as TCPSocketTransportError {
                 deliver(.failed(.transport(error, phase: .establishing)))
             } catch let error as DanTermClientError {
                 // Everything this closure does is establishment, up to and including the
-                // first pane list, so silence here means the Mac never answered.
+                // opening roster, so silence here means the Mac never answered.
                 deliver(.failed(.conversation(error, phase: .establishing)))
             } catch {
                 deliver(.failed(.deviceSetup))

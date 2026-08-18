@@ -161,7 +161,7 @@ func smokeInputEntersThroughTheResponder() throws {
         smokeInput: "echo hi"
     )))
     #expect(launched.contains(.connect(session.target)))
-    _ = session.handle(.attemptSucceeded(panes: try panes(), serverVersion: "1.2.3"))
+    _ = session.handle(.attemptSucceeded(roster: roster(), serverVersion: "1.2.3"))
 
     let attached = session.handle(.paneAttached(pane: session.pane, cursor: nil))
     #expect(attached.contains(.driveSmokeInput(MobileSmokeInputScript.steps(for: "echo hi"))))
@@ -203,6 +203,48 @@ func onlyTheSubscriptionRefusalEndsTheConnection() throws {
     #expect(ended.contains(.disconnect))
 }
 
+@Test("A pushed roster replaces the pane list and redraws")
+func pushedRosterReplacesThePaneList() throws {
+    // Intent: a `roster.event` notification makes the model's pane list exactly the list
+    //   the server sent, and asks for a redraw so the sheet and the pill follow it.
+    // Why it exists: the phone used to read its pane list once, at connect, so every pane
+    //   opened, closed, or retitled afterwards stayed invisible until it reconnected.
+    // Scenario: the user splits a pane on the Mac while the phone is attached.
+    var session = Session()
+    try session.reachServingStream()
+
+    let effects = session.handle(.frameReceived(.notification(
+        method: Methods.rosterEvent,
+        params: roster(panes: [(201, "zsh"), (202, "vim")]).jsonValue
+    )))
+
+    #expect(effects == [.redraw])
+    let projection = session.model.projection(at: session.now)
+    #expect(projection.panes.map(\.paneId) == [paneId(201), paneId(202)])
+    #expect(projection.panes.map(\.paneTitle) == ["zsh", "vim"])
+}
+
+@Test("A roster without the selected pane changes the list only")
+func rosterWithoutTheSelectedPaneLeavesTheStreamAlone() throws {
+    // Intent: the pane the phone is reading disappearing from the roster changes the list
+    //   and nothing else -- the selection stays and the tape stream is not torn down.
+    // Why it exists: the tape stream reports its own pane's closure with an end record,
+    //   and that is what drives recovery. A roster that also ended the connection would
+    //   race that path and could end a stream still serving.
+    var session = Session()
+    try session.reachServingStream()
+
+    let effects = session.handle(.frameReceived(.notification(
+        method: Methods.rosterEvent,
+        params: roster(panes: [(202, "vim")]).jsonValue
+    )))
+
+    #expect(effects == [.redraw])
+    let projection = session.model.projection(at: session.now)
+    #expect(projection.panes.map(\.paneId) == [paneId(202)])
+    #expect(projection.selectedPaneId == session.pane)
+}
+
 // MARK: - Driving
 
 /// Drives one model with an explicit clock and explicit request ids.
@@ -230,7 +272,7 @@ private struct Session {
     mutating func reachServingStream() throws {
         let launched = handle(.launched(MobileLaunchInputs(environmentHost: target.host)))
         #expect(launched.contains(.connect(target)))
-        let succeeded = handle(.attemptSucceeded(panes: try panes(), serverVersion: "1.2.3"))
+        let succeeded = handle(.attemptSucceeded(roster: roster(), serverVersion: "1.2.3"))
         #expect(succeeded.contains(.attachPane(pane: pane, resumesFromStoredCheckpoint: true)))
         let attached = handle(.paneAttached(pane: pane, cursor: nil))
         let subscription = try #require(attached.compactMap { effect -> JSONValue? in
@@ -293,22 +335,20 @@ private func grid(columns: Int, rows: Int) -> MobileSurfaceGrid {
     )!
 }
 
-private func panes() throws -> [MobilePaneListItem] {
-    try projectPaneList(from: .object([
-        "selectedTabId": .string(wireId(101)),
-        "groups": .array([.object([
-            "id": .string(wireId(1)),
-            "name": .string("Work"),
-            "tabs": .array([.object([
-                "id": .string(wireId(101)),
-                "focusedPaneId": .string(wireId(201)),
-                "rootNode": .object([
-                    "type": .string("leaf"),
-                    "pane": .object(["id": .string(wireId(201)), "title": .string("zsh")]),
-                ]),
-            ])]),
-        ])]),
-    ]))
+/// One group holding one selected tab, whose focused pane is the first of the named ones.
+private func roster(panes: [(id: Int, title: String)] = [(201, "zsh")]) -> PaneRoster {
+    PaneRoster(panes: panes.enumerated().map { index, pane in
+        PaneRosterItem(
+            groupId: GroupId(rawValue: UUID(uuidString: wireId(1))!),
+            groupName: "Work",
+            tabId: TabId(rawValue: UUID(uuidString: wireId(101))!),
+            tabTitle: "Tab",
+            paneId: paneId(pane.id),
+            paneTitle: pane.title,
+            isSelectedTab: true,
+            isFocused: index == 0
+        )
+    })
 }
 
 private func wireId(_ value: Int) -> String {
