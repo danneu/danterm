@@ -26,21 +26,19 @@ public struct MobileObserveSurface: Equatable, Sendable {
     /// Returns nil when the view cannot draw this grid at all -- no room for a whole
     /// pixel per cell, or a font size the metrics layer refuses -- which leaves the
     /// caller with the surfaces it already has.
-    public init?(
-        columns: Int,
-        rows: Int,
-        widthPixels: Int,
-        heightPixels: Int,
-        displayScale: CGFloat,
-        fontSize: CGFloat
-    ) {
+    ///
+    /// The extent comes from the content box rather than from the caller's own reading
+    /// of the view, so the pixels drawn and the grid claimed cannot describe different
+    /// regions of it.
+    public init?(columns: Int, rows: Int, contentBox: MobileContentBox, fontSize: CGFloat) {
+        let displayScale = contentBox.displayScale
         guard columns > 0, rows > 0,
               let native = TerminalRenderMetrics(displayScale: displayScale, fontSize: fontSize),
               let scale = fittedRenderScale(
                   columns: columns,
                   rows: rows,
-                  widthPixels: widthPixels,
-                  heightPixels: heightPixels,
+                  widthPixels: contentBox.widthPixels,
+                  heightPixels: contentBox.heightPixels,
                   nativeCellSize: native.cellSize,
                   nativeDisplayScale: displayScale
               )

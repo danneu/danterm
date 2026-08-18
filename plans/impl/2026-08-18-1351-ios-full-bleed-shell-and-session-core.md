@@ -249,7 +249,7 @@ until everything else works.
 ## Commit progress
 
 - [x] 1. refactor(ios): give the phone session one pure decision core
-- [ ] 2. refactor(ios): derive the phone's grid from one content box
+- [x] 2. refactor(ios): derive the phone's grid from one content box
 - [ ] 3. feat(ios): run the terminal full-bleed under a floating status pill
 - [ ] 4. feat(ios): move pane choice and claim into the bottom bar
 - [ ] 5. feat(ios): make the terminal itself the text-input target
@@ -281,3 +281,22 @@ until everything else works.
   alone afterwards. The draft is a model fact, but the field is its editor, and a
   redraw arriving mid-edit must not rewrite what the user is typing. Commit 3 moves
   the fields into the connect sheet, which is where that gets its own answer.
+- Commit 2: `MobileObserveSurface`'s pixel-extent initializer was replaced by the
+  content-box form rather than joined by it. Keeping both would leave the view a second
+  way to describe its own extent, which is the exact split I3 exists to close.
+- Commit 2: the box takes four named inset values rather than a `UIEdgeInsets`, because
+  MobileKit is portable and links no UIKit. It applies all four, though I2 only names the
+  top and the sides; the shell passes zero for the bottom, so the extra axis costs
+  nothing and the type does not have to know which edges the layout happens to use.
+- Commit 2: `TerminalSurfaceView` passes all-zero insets for now, per the plan's
+  sequencing constraint. Commit 3 is where the real safe-area insets arrive.
+
+## Follow Up
+
+- `scripts/ios-portability-gate.sh` reported a false failure twice in a row for
+  `ios/DanTermMobileApp`: its cached build plan under
+  `ios/DanTermMobileApp/.build-ios-gate/debug.yaml` kept a stale source list for the
+  `DanTermMobileKit` path dependency, so a newly added file in that package was never
+  compiled and every reference to it failed. Deleting `debug.yaml` fixed it. The gate
+  reuses a per-package scratch path on purpose (step isolation), so it needs a way to
+  force a re-plan when a path dependency's source list changes.

@@ -1,4 +1,5 @@
 // Behavioral tests for the pixels the phone draws a pane's grid into.
+import CoreGraphics
 import DanTermMobileKit
 import Testing
 
@@ -12,9 +13,7 @@ func observeSurfaceStaysInsideTheView() throws {
     let surface = try #require(MobileObserveSurface(
         columns: 179,
         rows: 50,
-        widthPixels: 1170,
-        heightPixels: 1600,
-        displayScale: 3,
+        contentBox: try box(widthPixels: 1170, heightPixels: 1600, displayScale: 3),
         fontSize: 11
     ))
     #expect(surface.pixelWidth <= 1170)
@@ -27,9 +26,7 @@ func observeSurfaceKeepsNativeScaleWhenItFits() throws {
     let surface = try #require(MobileObserveSurface(
         columns: 20,
         rows: 10,
-        widthPixels: 1170,
-        heightPixels: 1600,
-        displayScale: 3,
+        contentBox: try box(widthPixels: 1170, heightPixels: 1600, displayScale: 3),
         fontSize: 11
     ))
     #expect(surface.metrics.displayScale == 3)
@@ -38,13 +35,29 @@ func observeSurfaceKeepsNativeScaleWhenItFits() throws {
 }
 
 @Test("A grid with no room for a whole pixel per cell has no surface")
-func observeSurfaceRefusesUndrawableGrids() {
+func observeSurfaceRefusesUndrawableGrids() throws {
     #expect(MobileObserveSurface(
         columns: 1024,
         rows: 1024,
-        widthPixels: 400,
-        heightPixels: 400,
-        displayScale: 3,
+        contentBox: try box(widthPixels: 400, heightPixels: 400, displayScale: 3),
         fontSize: 11
     ) == nil)
+}
+
+/// Builds a content box with the exact pixel extent a case names, so these tests stay
+/// about the fit rather than about how points and insets become pixels.
+private func box(
+    widthPixels: Int,
+    heightPixels: Int,
+    displayScale: CGFloat
+) throws -> MobileContentBox {
+    try #require(MobileContentBox(
+        width: CGFloat(widthPixels) / displayScale,
+        height: CGFloat(heightPixels) / displayScale,
+        insetTop: 0,
+        insetLeading: 0,
+        insetTrailing: 0,
+        insetBottom: 0,
+        displayScale: displayScale
+    ))
 }

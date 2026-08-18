@@ -111,15 +111,7 @@ final class TerminalSurfaceView: UIView {
     /// gesture asks the pane to run at. It is derived from the current extent rather
     /// than from the replica, so it answers for the phone even before a stream arrives.
     var nativeGrid: MobileSurfaceGrid? {
-        let scale = displayScale
-        guard let metrics = TerminalRenderMetrics(displayScale: scale, fontSize: Self.fontSize)
-        else { return nil }
-        return MobileSurfaceGrid(
-            widthPixels: Int(bounds.width * scale),
-            heightPixels: Int(bounds.height * scale),
-            cellWidthPixels: metrics.cellWidthPixels,
-            cellHeightPixels: metrics.cellHeightPixels
-        )
+        contentBox?.nativeGrid(fontSize: Self.fontSize)
     }
 
     /// Copies one exact value snapshot so checkpoint synthesis can run off the main actor.
@@ -133,17 +125,17 @@ final class TerminalSurfaceView: UIView {
         // The extent decides the metrics, so a rotation or a keyboard has to be able to
         // change them. Re-running the fit here is what makes the surfaces follow the view.
         if let geometry { ensureSurfaces(columns: geometry.columns, rows: geometry.rows) }
-        guard let surface else { return }
-        let scale = displayScale
+        guard let surface, let box = contentBox else { return }
+        let scale = box.displayScale
         // The pixels are already drawn small enough for this view, so they are shown one
         // for one rather than scaled by a transform.
         let width = CGFloat(surface.pixelWidth) / scale
         let height = CGFloat(surface.pixelHeight) / scale
         surfaceView.bounds = CGRect(x: 0, y: 0, width: width, height: height)
         surfaceView.layer.contentsScale = scale
-        // The replica draws from the bottom of the view, so newly typed output stays put
-        // while the keyboard changes how much of the view is left.
-        surfaceView.layer.position = CGPoint(x: 0, y: bounds.height - height)
+        // The replica draws from the bottom of the content box, so newly typed output
+        // stays put while the keyboard changes how much of the view is left.
+        surfaceView.layer.position = CGPoint(x: box.originX, y: box.maxY - height)
     }
 
     fileprivate func displayTick() {
@@ -189,16 +181,14 @@ final class TerminalSurfaceView: UIView {
     /// can actually draw it with. Idempotent: it returns without touching anything when
     /// neither the grid nor the resolved metrics moved, so the layout pass may call it.
     private func ensureSurfaces(columns: Int, rows: Int) {
-        guard bounds.width > 0, bounds.height > 0 else { return }
-        let scale = displayScale
-        guard let fitted = MobileObserveSurface(
-            columns: columns,
-            rows: rows,
-            widthPixels: Int(bounds.width * scale),
-            heightPixels: Int(bounds.height * scale),
-            displayScale: scale,
-            fontSize: Self.fontSize
-        ) else { return }
+        guard let box = contentBox,
+              let fitted = MobileObserveSurface(
+                  columns: columns,
+                  rows: rows,
+                  contentBox: box,
+                  fontSize: Self.fontSize
+              )
+        else { return }
         if geometry?.columns == columns, geometry?.rows == rows, surface == fitted { return }
         let newStores = (0..<3).compactMap { _ in
             TerminalFrameBackingStore(columns: columns, rows: rows, metrics: fitted.metrics)
@@ -215,11 +205,21 @@ final class TerminalSurfaceView: UIView {
         setNeedsLayout()
     }
 
-    /// The one reading of this view's point-to-pixel scale, used for the metrics it
-    /// renders with and for the size it shows those pixels at. The two must agree or the
-    /// grid would be drawn at one size and presented at another.
-    private var displayScale: CGFloat {
-        window?.screen.scale ?? traitCollection.displayScale
+    /// The one reading of the region this view may put cells in. Every extent question
+    /// -- what grid a claim names, what pixels a frame store holds, where the layer
+    /// showing them sits -- is answered from this single value, so none of them can
+    /// describe a different region than the others. The insets are zero until the
+    /// terminal runs full-bleed and has a safe area to stay clear of.
+    private var contentBox: MobileContentBox? {
+        MobileContentBox(
+            width: bounds.width,
+            height: bounds.height,
+            insetTop: 0,
+            insetLeading: 0,
+            insetTrailing: 0,
+            insetBottom: 0,
+            displayScale: window?.screen.scale ?? traitCollection.displayScale
+        )
     }
 }
 
