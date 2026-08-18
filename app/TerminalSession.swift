@@ -198,12 +198,15 @@ protocol TerminalSession: AnyObject {
         cursor: PaneTapeCursor,
         notify: @escaping @Sendable () -> Void
     ) -> PaneTapeFollowNoticeRegistration?
-    /// Fences one retained suffix and defers event adaptation off the main actor.
+    /// Fences one retained suffix and defers event adaptation off the main actor. The
+    /// replica's history standing travels in because it decides whether a suffix that resizes
+    /// may be forwarded or must be replaced by a fresh sync.
     func paneTapeFollowBatch(
         subscriptionId: UUID,
         from cursor: PaneTapeCursor,
-        policy: PaneTapeSyncPolicy
-    ) -> (@Sendable () throws -> PaneTapeBatch)?
+        policy: PaneTapeSyncPolicy,
+        replicaHistoryIsComplete: Bool
+    ) -> (@Sendable () throws -> PaneTapeContinuation)?
     func scroll(toRow row: Int)
     func copySelection()
     func pasteClipboard()
@@ -272,6 +275,7 @@ extension TerminalSession {
     func paneTapeFollowBatch(
         subscriptionId: UUID,
         from cursor: PaneTapeCursor,
-        policy: PaneTapeSyncPolicy
-    ) -> (@Sendable () throws -> PaneTapeBatch)? { nil }
+        policy: PaneTapeSyncPolicy,
+        replicaHistoryIsComplete: Bool
+    ) -> (@Sendable () throws -> PaneTapeContinuation)? { nil }
 }

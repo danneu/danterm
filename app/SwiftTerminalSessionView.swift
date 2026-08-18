@@ -56,6 +56,17 @@ func recorderCursor(_ cursor: PaneTapeCursor) -> TerminalFlightRecordingCursor {
     )
 }
 
+/// Names the recorded events a replica cannot replay without the source's whole history.
+///
+/// A primary-screen resize reflows retained history and the live rows as one stream, so a
+/// replica missing the oldest rows would compute a different grid from the same event. Which
+/// events read history is engine knowledge, so it is stated here, beside the engine vocabulary,
+/// rather than rediscovered from the event's JSON downstream.
+func paneTapeEventNeedsCompleteHistory(_ event: NeutralTerminalRecordingEvent) -> Bool {
+    if case .resize = event { return true }
+    return false
+}
+
 /// Lowers one fenced recorder suffix into the support layer's stream snapshot. Finite dumps
 /// and follow batches both come through here, so neither can adapt an event differently.
 func paneTapeSnapshot(
@@ -70,7 +81,8 @@ func paneTapeSnapshot(
                 payload: recorded.payload.map {
                     .init(byteOffset: $0.byteOffset, byteLength: $0.byteLength)
                 },
-                event: try paneTapeFollowEventJSON(recorded.event)
+                event: try paneTapeFollowEventJSON(recorded.event),
+                needsCompleteHistory: paneTapeEventNeedsCompleteHistory(recorded.event)
             )
         },
         droppedEventCount: snapshot.droppedEventCount,
@@ -1192,8 +1204,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     func paneTapeFollowBatch(
         subscriptionId: UUID,
         from cursor: PaneTapeCursor,
-        policy: PaneTapeSyncPolicy
-    ) -> (@Sendable () throws -> PaneTapeBatch)? {
+        policy: PaneTapeSyncPolicy,
+        replicaHistoryIsComplete: Bool
+    ) -> (@Sendable () throws -> PaneTapeContinuation)? {
         guard let fence = controller.flightRecordingFollowStreamFence(
             subscriptionId: subscriptionId,
             from: recorderCursor(cursor),
@@ -1202,7 +1215,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             return nil
         }
         return {
-            makePaneTapeContinuation(policy: policy, fence: try paneTapeFollowStreamFence(fence))
+            makePaneTapeContinuation(
+                policy: policy,
+                replicaHistoryIsComplete: replicaHistoryIsComplete,
+                fence: try paneTapeFollowStreamFence(fence)
+            )
         }
     }
 

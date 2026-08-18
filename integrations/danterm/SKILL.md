@@ -610,9 +610,20 @@ ran at still produces one geometry event, with `pinned` false and the same
 columns and rows -- the child sees no size change and no cell content changes.
 
 A reconstructible stream injects a sync only when the requested position plus
-the delivered events cannot reconstruct exact pane state. A raw stream never
-injects state. It reports retained events and loss as recorder evidence. Use
-`--raw` for captures that will become fixtures.
+the delivered events cannot reconstruct exact pane state. A bounded stream has
+one more such moment: a resize reflows retained history and the visible rows
+together, so a stream whose replica is missing history cannot forward one. When
+a suffix contains a resize, that whole suffix arrives as a fresh sync at the
+suffix's ending cursor instead -- none of the replaced events are also
+delivered, and later events continue from the sync's cursor. A stream whose last
+sync reported `droppedHistoryRows` of `0`, or that replayed the recorder from
+its beginning with no `gap`, holds the whole history and keeps receiving plain
+resize events. A stream resumed with `--from-cursor` does not: a cursor is a
+recorder coordinate and states nothing about the replica behind it, so the first
+resize after a resume costs one sync.
+
+A raw stream never injects state. It reports retained events and loss as
+recorder evidence. Use `--raw` for captures that will become fixtures.
 
 ### Snapshot exact pane state
 

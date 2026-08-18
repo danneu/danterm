@@ -53,6 +53,11 @@ struct PaneTapeEvent: Equatable, Sendable {
     /// Where these bytes sit in their direction's stream; nil for an event carrying no bytes.
     let payload: PaneTapePayloadSpan?
     let event: JSONValue
+    /// True when replaying this event reads history the replica may not hold. A primary-screen
+    /// resize is the one such event: it reflows retained history and the live rows as one
+    /// stream, so a replica missing the oldest rows computes a different grid from the same
+    /// event. A bounded stream replaces a suffix carrying one rather than forwarding it.
+    let needsCompleteHistory: Bool
 }
 
 /// Represents one owner-fenced suffix in protocol-only values for off-main processing.

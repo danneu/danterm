@@ -30,14 +30,16 @@ struct PaneTapeFollowTests {
                         elapsedNanoseconds: 11,
                         originElapsedNanoseconds: nil,
                         payload: .init(byteOffset: 6, byteLength: 2),
-                        event: .object(["type": .string("feed")])
+                        event: .object(["type": .string("feed")]),
+                        needsCompleteHistory: false
                     ),
                     PaneTapeEvent(
                         sequence: 5,
                         elapsedNanoseconds: 12,
                         originElapsedNanoseconds: nil,
                         payload: nil,
-                        event: .object(["type": .string("resize")])
+                        event: .object(["type": .string("resize")]),
+                        needsCompleteHistory: true
                     ),
                 ],
                 droppedEventCount: 4,
@@ -165,7 +167,8 @@ struct PaneTapeFollowTests {
                     elapsedNanoseconds: 10,
                     originElapsedNanoseconds: nil,
                     payload: .init(byteOffset: 96, byteLength: 12),
-                    event: .object(["type": .string("feed"), "base64": .string("SGk=")])
+                    event: .object(["type": .string("feed"), "base64": .string("SGk=")]),
+                    needsCompleteHistory: false
                 ),
                 .init(
                     sequence: 5,
@@ -176,7 +179,8 @@ struct PaneTapeFollowTests {
                         "type": .string("resize"),
                         "columns": .number(100),
                         "rows": .number(30),
-                    ])
+                    ]),
+                    needsCompleteHistory: true
                 ),
             ],
             droppedEventCount: 0,
@@ -257,14 +261,16 @@ struct PaneTapeFollowTests {
                     elapsedNanoseconds: 10,
                     originElapsedNanoseconds: nil,
                     payload: .init(byteOffset: 30, byteLength: 2),
-                    event: feed
+                    event: feed,
+                    needsCompleteHistory: false
                 ),
                 .init(
                     sequence: 8,
                     elapsedNanoseconds: 20,
                     originElapsedNanoseconds: nil,
                     payload: nil,
-                    event: resize
+                    event: resize,
+                    needsCompleteHistory: true
                 ),
             ],
             droppedEventCount: 7,
@@ -301,14 +307,16 @@ struct PaneTapeFollowTests {
                     elapsedNanoseconds: 30,
                     originElapsedNanoseconds: 10,
                     payload: nil,
-                    event: write
+                    event: write,
+                    needsCompleteHistory: false
                 ),
                 .init(
                     sequence: 1,
                     elapsedNanoseconds: 40,
                     originElapsedNanoseconds: nil,
                     payload: nil,
-                    event: feed
+                    event: feed,
+                    needsCompleteHistory: false
                 ),
             ],
             droppedEventCount: 0,
@@ -368,7 +376,7 @@ struct PaneTapeFollowTests {
         )
         let finishedBatch = subscriptions.finishFetch(
             subscriptionId: subscriptionId,
-            batch: preparedBatch
+            continuation: .init(batch: preparedBatch, replicaHistoryIsComplete: false)
         )
         let batch = try #require(finishedBatch)
         #expect(batch.records.compactMap(sequence) == [0])
@@ -377,6 +385,44 @@ struct PaneTapeFollowTests {
         let followUp = try #require(pendingFetch)
         #expect(followUp.cursor.nextSequence == 1)
         #expect(subscriptions.eventsAvailable(subscriptionId) == nil)
+    }
+
+    // Intent: a stream's fetch carries the replica's history standing beside its cursor, and
+    //   each delivered continuation restates it for the next fetch.
+    // Why it exists: the standing decides whether the next suffix may carry a resize. Held
+    //   anywhere but with the cursor it could drift from the position it describes, and a
+    //   stream would forward a resize a replica cannot reflow.
+    // Scenario: a stream opens on a truncated sync, takes one continuation that resyncs it
+    //   whole, and the fetch after that reports it exact.
+    @Test("a stream's replica history standing travels with its cursor across fetches")
+    func replicaHistoryStandingTravelsWithTheCursor() throws {
+        let subscriptionId = UUID()
+        var subscriptions = PaneTapeFollowSubscriptions()
+        subscriptions.add(
+            id: subscriptionId,
+            connectionId: UUID(),
+            paneId: UUID(),
+            cursor: .beginning,
+            replicaHistoryIsComplete: false
+        )
+
+        let opened = subscriptions.eventsAvailable(subscriptionId)
+        let firstFetch = try #require(opened)
+        #expect(firstFetch.replicaHistoryIsComplete == false)
+
+        _ = subscriptions.finishFetch(
+            subscriptionId: subscriptionId,
+            continuation: .init(
+                batch: makePaneTapeBatch(from: snapshot(sequences: [0], nextSequence: 1)),
+                replicaHistoryIsComplete: true
+            )
+        )
+        _ = subscriptions.completeDelivery(subscriptionId: subscriptionId)
+
+        let resumed = subscriptions.eventsAvailable(subscriptionId)
+        let secondFetch = try #require(resumed)
+        #expect(secondFetch.replicaHistoryIsComplete)
+        #expect(secondFetch.cursor.nextSequence == 1)
     }
 
     @Test("live output waits until every opening synchronization record is delivered")
@@ -568,7 +614,8 @@ struct PaneTapeFollowTests {
                     elapsedNanoseconds: $0 * 10,
                     originElapsedNanoseconds: nil,
                     payload: .init(byteOffset: Int($0), byteLength: 0),
-                    event: .object(["type": .string("feed"), "base64": .string("")])
+                    event: .object(["type": .string("feed"), "base64": .string("")]),
+                    needsCompleteHistory: false
                 )
             },
             droppedEventCount: 0,

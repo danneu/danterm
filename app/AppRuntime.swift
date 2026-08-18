@@ -714,6 +714,7 @@ class AppRuntime {
             connectionId: connection.id,
             paneId: paneId.rawValue,
             cursor: opening.nextCursor,
+            replicaHistoryIsComplete: opening.replicaHistoryIsComplete,
             isDeliveringOpening: opening.records.isEmpty == false
         )
         paneTapeFollowTransports[subscriptionId] = PaneTapeFollowTransport(
@@ -790,7 +791,8 @@ class AppRuntime {
         guard let prepareBatch = session.paneTapeFollowBatch(
             subscriptionId: fetch.subscriptionId,
             from: fetch.cursor,
-            policy: transport.policy
+            policy: transport.policy,
+            replicaHistoryIsComplete: fetch.replicaHistoryIsComplete
         ) else {
             failPaneTapeFollow(fetch.subscriptionId)
             return
@@ -801,14 +803,14 @@ class AppRuntime {
         ) else { return }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             do {
-                let batch = try prepareBatch()
+                let continuation = try prepareBatch()
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.schedulingLifecycle.run(callbackToken) {
                         self.deliverPaneTapeFollowBatch(
                             subscriptionId: fetch.subscriptionId,
                             connection: connection,
-                            batch: batch
+                            continuation: continuation
                         )
                     }
                 }
@@ -826,12 +828,12 @@ class AppRuntime {
     private func deliverPaneTapeFollowBatch(
         subscriptionId: UUID,
         connection: IpcConnection,
-        batch: PaneTapeBatch
+        continuation: PaneTapeContinuation
     ) {
         guard schedulingLifecycle.isActive else { return }
         guard let accepted = paneTapeFollowSubscriptions.finishFetch(
             subscriptionId: subscriptionId,
-            batch: batch
+            continuation: continuation
         ) else { return }
         guard accepted.records.isEmpty == false else {
             if let fetch = paneTapeFollowSubscriptions.completeDelivery(

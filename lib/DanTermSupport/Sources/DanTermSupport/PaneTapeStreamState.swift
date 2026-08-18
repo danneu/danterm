@@ -46,6 +46,18 @@ struct PaneTapeOpening: Equatable, Sendable {
     let start: PaneTapeStart
     let records: [JSONValue]
     let nextCursor: PaneTapeCursor
+    /// Whether this prefix leaves the replica holding the source's whole retained history.
+    /// Only this stream can establish it: it replayed the recorder from its beginning with
+    /// nothing evicted, or a sync on it reported no dropped history rows. A cursor is a
+    /// recorder coordinate and says nothing about a replica, so a resumed stream starts unknown.
+    let replicaHistoryIsComplete: Bool
+}
+
+/// Keeps one followed suffix inseparable from what it leaves the replica knowing about its
+/// own history, so the next fetch cannot decide the resize question from a stale standing.
+struct PaneTapeContinuation: Equatable, Sendable {
+    let batch: PaneTapeBatch
+    let replicaHistoryIsComplete: Bool
 }
 
 /// Keeps a followed suffix inseparable from exact replacement state at its ending cursor.
@@ -55,18 +67,46 @@ struct PaneTapeFollowStreamFence: Equatable, Sendable {
 }
 
 /// Builds one followed suffix, replacing lost events with exact state in reconstructible mode.
+///
+/// The same replacement covers a second case: a suffix that resizes cannot be replayed by a
+/// replica whose history the stream truncated, so that suffix is replaced whole by a fresh
+/// bounded sync at its ending cursor. No replaced event is also delivered, which is what keeps
+/// the replica's grid exact instead of an argument about how far a reflow can reach.
 func makePaneTapeContinuation(
     policy: PaneTapeSyncPolicy,
+    replicaHistoryIsComplete: Bool,
     fence: PaneTapeFollowStreamFence
-) -> PaneTapeBatch {
+) -> PaneTapeContinuation {
     if policy.mode == .reconstructible, fence.snapshot.droppedEventCount > 0 {
-        return PaneTapeBatch(
-            records: [makePaneTapeExactGapRecord(fence.snapshot)]
-                + makePaneTapeSynchronizationRecords(fence.synchronization),
-            nextCursor: fence.synchronization.cursor
+        return synchronizedContinuation(
+            loss: makePaneTapeExactGapRecord(fence.snapshot),
+            synchronization: fence.synchronization
         )
     }
-    return makePaneTapeBatch(from: fence.snapshot)
+    if policy.mode == .reconstructible,
+       replicaHistoryIsComplete == false,
+       fence.snapshot.events.contains(where: \.needsCompleteHistory)
+    {
+        return synchronizedContinuation(loss: nil, synchronization: fence.synchronization)
+    }
+    return PaneTapeContinuation(
+        batch: makePaneTapeBatch(from: fence.snapshot),
+        replicaHistoryIsComplete: replicaHistoryIsComplete
+    )
+}
+
+private func synchronizedContinuation(
+    loss: JSONValue?,
+    synchronization: PaneTapeStateSynchronization
+) -> PaneTapeContinuation {
+    PaneTapeContinuation(
+        batch: PaneTapeBatch(
+            records: (loss.map { [$0] } ?? [])
+                + makePaneTapeSynchronizationRecords(synchronization),
+            nextCursor: synchronization.cursor
+        ),
+        replicaHistoryIsComplete: synchronization.droppedHistoryRows == 0
+    )
 }
 
 /// Applies the reconstructibility rule without IO or mutable subscription state.
@@ -87,7 +127,8 @@ func makePaneTapeOpening(
     return PaneTapeOpening(
         start: start,
         records: selection.records,
-        nextCursor: selection.nextCursor
+        nextCursor: selection.nextCursor,
+        replicaHistoryIsComplete: selection.replicaHistoryIsComplete
     )
 }
 
@@ -96,6 +137,7 @@ private struct PaneTapeOpeningSelection {
     let publishedCursor: PaneTapeCursor?
     let records: [JSONValue]
     let nextCursor: PaneTapeCursor
+    let replicaHistoryIsComplete: Bool
 }
 
 private func selectPaneTapeOpening(
@@ -111,7 +153,8 @@ private func selectPaneTapeOpening(
             initial: fence.synchronization.dimensions,
             publishedCursor: fence.synchronization.cursor,
             records: [],
-            nextCursor: fence.synchronization.cursor
+            nextCursor: fence.synchronization.cursor,
+            replicaHistoryIsComplete: false
         )
 
     case .beginning:
@@ -124,7 +167,10 @@ private func selectPaneTapeOpening(
         return eventSelection(
             initial: fence.origin.initial,
             cursor: fence.origin.cursor,
-            snapshot: fence.retained
+            snapshot: fence.retained,
+            // Replayed from the recorder's own beginning: the replica built every history row
+            // the source has, unless the recorder already evicted some of them.
+            replicaHistoryIsComplete: fence.retained.droppedEventCount == 0
         )
 
     case .cursor(let cursor):
@@ -139,7 +185,10 @@ private func selectPaneTapeOpening(
             return eventSelection(
                 initial: fence.origin.initial,
                 cursor: cursor,
-                snapshot: snapshot
+                snapshot: snapshot,
+                // The client held this cursor, and a cursor is a recorder coordinate: it
+                // reports nothing about the history the replica behind it actually holds.
+                replicaHistoryIsComplete: false
             )
         case .unplaceable:
             let totalLoss = makePaneTapeTotalGapRecord()
@@ -151,7 +200,8 @@ private func selectPaneTapeOpening(
                 initial: fence.origin.initial,
                 publishedCursor: head,
                 records: [totalLoss] + fence.retained.events.map(makePaneTapeEventRecord),
-                nextCursor: fence.retained.nextCursor
+                nextCursor: fence.retained.nextCursor,
+                replicaHistoryIsComplete: false
             )
         }
     }
@@ -160,13 +210,15 @@ private func selectPaneTapeOpening(
 private func eventSelection(
     initial: PaneTapeDimensions,
     cursor: PaneTapeCursor,
-    snapshot: PaneTapeSnapshot
+    snapshot: PaneTapeSnapshot,
+    replicaHistoryIsComplete: Bool
 ) -> PaneTapeOpeningSelection {
     PaneTapeOpeningSelection(
         initial: initial,
         publishedCursor: cursor,
         records: makePaneTapeBatch(from: snapshot).records,
-        nextCursor: snapshot.nextCursor
+        nextCursor: snapshot.nextCursor,
+        replicaHistoryIsComplete: replicaHistoryIsComplete
     )
 }
 
@@ -179,7 +231,8 @@ private func synchronizedSelection(
         publishedCursor: nil,
         records: (loss.map { [$0] } ?? [])
             + makePaneTapeSynchronizationRecords(fence.synchronization),
-        nextCursor: fence.synchronization.cursor
+        nextCursor: fence.synchronization.cursor,
+        replicaHistoryIsComplete: fence.synchronization.droppedHistoryRows == 0
     )
 }
 

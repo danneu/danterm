@@ -25,7 +25,8 @@ struct PaneTapeFollowEncodingTests {
                     elapsedNanoseconds: 2,
                     originElapsedNanoseconds: nil,
                     payload: .init(byteOffset: 0, byteLength: 2),
-                    event: adapted
+                    event: adapted,
+                    needsCompleteHistory: paneTapeEventNeedsCompleteHistory(event)
                 )],
                 droppedEventCount: 0,
                 droppedFeedBytes: 0,
@@ -39,6 +40,27 @@ struct PaneTapeFollowEncodingTests {
             ))
 
             #expect(batch.records.first?["event"] == direct)
+        }
+    }
+
+    // Intent: the resize is the only recorded event a replica cannot replay without the
+    //   source's whole history.
+    // Why it exists: a bounded stream replaces a suffix carrying such an event with a fresh
+    //   sync. Classifying an ordinary event that way would resync on plain output and throw
+    //   away the incremental path; missing the resize would hand a truncated replica a reflow
+    //   it computes differently from the source.
+    // Scenario: spec-first contract for the one engine fact the resize-resync rule rests on.
+    @Test("a resize is the only recorded event that needs the replica's whole history")
+    func onlyAResizeNeedsCompleteHistory() {
+        #expect(paneTapeEventNeedsCompleteHistory(.resize(columns: 100, rows: 30, pinned: false)))
+        for event: NeutralTerminalRecordingEvent in [
+            .feed(Array("Hi".utf8)),
+            .write(Array("ls".utf8)),
+            .paste("text"),
+            .focus(true),
+            .checkpoint,
+        ] {
+            #expect(paneTapeEventNeedsCompleteHistory(event) == false)
         }
     }
 }

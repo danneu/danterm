@@ -11,6 +11,10 @@ struct PaneTapeFollowFetch: Equatable, Sendable {
     let subscriptionId: UUID
     let paneId: UUID
     let cursor: PaneTapeCursor
+    /// Whether the replica reading this stream holds the source's whole retained history. It
+    /// travels with the cursor because it describes the same position: a suffix that resizes
+    /// may be forwarded only to a replica that can reflow it.
+    let replicaHistoryIsComplete: Bool
 }
 
 /// Names the one stream a terminal record belongs to. It carries no transport coordinate:
@@ -28,6 +32,7 @@ struct PaneTapeFollowSubscriptions {
         let connectionId: UUID
         let paneId: UUID
         var cursor: PaneTapeCursor
+        var replicaHistoryIsComplete: Bool
         var isInFlight = false
         var hasPendingEvents = false
     }
@@ -42,12 +47,14 @@ struct PaneTapeFollowSubscriptions {
         connectionId: UUID,
         paneId: UUID,
         cursor: PaneTapeCursor,
+        replicaHistoryIsComplete: Bool = false,
         isDeliveringOpening: Bool = false
     ) {
         subscriptions[id] = Subscription(
             connectionId: connectionId,
             paneId: paneId,
             cursor: cursor,
+            replicaHistoryIsComplete: replicaHistoryIsComplete,
             isInFlight: isDeliveringOpening
         )
     }
@@ -60,17 +67,19 @@ struct PaneTapeFollowSubscriptions {
         return claimPendingFetch(subscriptionId)
     }
 
-    /// Advances a claimed stream through the exact suffix that will be handed to its socket.
+    /// Advances a claimed stream through the exact suffix that will be handed to its socket,
+    /// and restates what that suffix leaves the replica holding.
     mutating func finishFetch(
         subscriptionId: UUID,
-        batch: PaneTapeBatch
+        continuation: PaneTapeContinuation
     ) -> PaneTapeBatch? {
         guard var subscription = subscriptions[subscriptionId], subscription.isInFlight else {
             return nil
         }
-        subscription.cursor = batch.nextCursor
+        subscription.cursor = continuation.batch.nextCursor
+        subscription.replicaHistoryIsComplete = continuation.replicaHistoryIsComplete
         subscriptions[subscriptionId] = subscription
-        return batch
+        return continuation.batch
     }
 
     /// Releases one delivered batch and claims the single append edge merged behind it.
@@ -143,7 +152,8 @@ struct PaneTapeFollowSubscriptions {
         return PaneTapeFollowFetch(
             subscriptionId: subscriptionId,
             paneId: subscription.paneId,
-            cursor: subscription.cursor
+            cursor: subscription.cursor,
+            replicaHistoryIsComplete: subscription.replicaHistoryIsComplete
         )
     }
 }

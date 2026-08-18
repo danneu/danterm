@@ -114,4 +114,43 @@ struct TerminalBoundedHistorySynchronizationTests {
         #expect(bounded.droppedHistoryRows == 0)
         #expect(bounded.bytes == unbounded.bytes)
     }
+
+    @Test("a replayed resize diverges a truncated replica, and a fresh sync restores its grid")
+    func aReplayedResizeDivergesATruncatedReplica() throws {
+        // Intent: replaying a resize against a replica whose history was truncated produces
+        // the wrong grid, and syncing again produces the right one.
+        // Why it exists: this is the reason a bounded stream refuses to forward a resize to a
+        // history-incomplete replica. Without the divergence stated as a fact, the resync rule
+        // reads as caution rather than as a repair for a defect that really happens.
+        // Scenario: a pane deeper than its budget syncs grid-only, then grows in height, which
+        // pulls retained history rows onto the source's screen that the replica never received.
+        var source = try #require(Terminal(columns: 20, rows: 4))
+        for index in 0..<200 {
+            source.feed(Array("row \(index)\r\n".utf8))
+        }
+
+        let truncated = source.stateSynchronization(historyBudgetBytes: 0)
+        #expect(truncated.droppedHistoryRows > 0)
+        var replica = try #require(Terminal(columns: truncated.columns, rows: truncated.rows))
+        replica.feed(truncated.bytes)
+        #expect(grid(of: replica) == grid(of: source))
+
+        source.resize(columns: 20, rows: 12)
+        replica.resize(columns: 20, rows: 12)
+        #expect(grid(of: replica) != grid(of: source))
+
+        let repair = source.stateSynchronization(historyBudgetBytes: 0)
+        var repaired = try #require(Terminal(columns: repair.columns, rows: repair.rows))
+        repaired.feed(repair.bytes)
+        #expect(grid(of: repaired) == grid(of: source))
+    }
+
+    /// Reads the whole visible grid, which is the surface a replica presents and the one a
+    /// diverged reflow shows up on.
+    private func grid(of terminal: Terminal) -> [[TerminalCell?]] {
+        let geometry = terminal.geometry
+        return (0..<geometry.rows.count).map { row in
+            (0..<geometry.columns).map { terminal.cell(row: row, column: $0) }
+        }
+    }
 }

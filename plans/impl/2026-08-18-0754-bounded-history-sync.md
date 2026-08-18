@@ -177,7 +177,7 @@ Interface changes:
 ## Commit progress
 - [x] 1. feat(engine): bound the history a state synchronization carries
 - [x] 2. feat(ipc): let a pane.tape stream bound its sync history
-- [ ] 3. feat(tape): resync a truncated replica instead of replaying a resize
+- [x] 3. feat(tape): resync a truncated replica instead of replaying a resize
 - [ ] 4. docs(research): record the bounded-sync half of T22
 
 ## Implementation notes
@@ -199,6 +199,19 @@ Interface changes:
   so instead.
 - The phone's follow request names the default budget explicitly rather than
   omitting the field, so the value it runs under is visible at the call site.
+- The replica's history standing lives beside the cursor in
+  `PaneTapeFollowSubscriptions`, not in the runtime's per-stream transport. It
+  describes the same position the cursor names, so holding the two apart would
+  let a fetch decide the resize question from a standing that belongs to a
+  different point in the stream.
+- Which events need the whole history is a typed flag on the lowered event,
+  decided at the engine adapter, rather than a `"type":"resize"` peek at the
+  event JSON in the support layer. Reflow is engine knowledge, and the support
+  layer treats an event's body as opaque everywhere else.
+- The rule fires on every recorded resize, including a pinnedness-only one that
+  changes no grid and reflows nothing. Narrowing it would mean tracking the
+  replica's current grid to compare against, which is more state than the
+  occasional extra sync is worth.
 
 ## Follow Up
 

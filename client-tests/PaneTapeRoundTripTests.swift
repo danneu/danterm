@@ -84,7 +84,8 @@ struct PaneTapeRoundTripTests {
                     elapsedNanoseconds: 9_000,
                     originElapsedNanoseconds: origin,
                     payload: span,
-                    event: .object(["feed": .string("aGk=")])
+                    event: .object(["feed": .string("aGk=")]),
+                    needsCompleteHistory: false
                 )
 
                 #expect(decodePaneTapeRecord(makePaneTapeEventRecord(event)) == .event(
@@ -129,7 +130,8 @@ struct PaneTapeRoundTripTests {
                         elapsedNanoseconds: 10,
                         originElapsedNanoseconds: nil,
                         payload: nil,
-                        event: .object(["resize": .object(["columns": .number(80)])])
+                        event: .object(["resize": .object(["columns": .number(80)])]),
+                        needsCompleteHistory: true
                     ),
                 ],
                 droppedEventCount: 2,
@@ -170,6 +172,7 @@ struct PaneTapeRoundTripTests {
         for pinned in [true, false] {
             let batch = makePaneTapeContinuation(
                 policy: .reconstructible(historyBudgetBytes: 4096),
+                replicaHistoryIsComplete: true,
                 fence: .init(
                     snapshot: evicted,
                     synchronization: .init(
@@ -179,7 +182,7 @@ struct PaneTapeRoundTripTests {
                         cursor: evicted.nextCursor
                     )
                 )
-            )
+            ).batch
 
             var assembler = PaneTapeSyncAssembler()
             var assembled: DanTermClient.PaneTapeStateSynchronization?
@@ -237,6 +240,7 @@ struct PaneTapeRoundTripTests {
         let bytes = [UInt8](repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
         let batch = makePaneTapeContinuation(
             policy: .reconstructible(historyBudgetBytes: 4096),
+            replicaHistoryIsComplete: true,
             fence: .init(
                 snapshot: evicted,
                 synchronization: .init(
@@ -246,7 +250,7 @@ struct PaneTapeRoundTripTests {
                     cursor: evicted.nextCursor
                 )
             )
-        )
+        ).batch
 
         var assembler = PaneTapeSyncAssembler()
         var assembled: DanTermClient.PaneTapeStateSynchronization?

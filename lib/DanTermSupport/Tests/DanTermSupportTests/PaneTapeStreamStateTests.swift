@@ -253,12 +253,14 @@ struct PaneTapeStreamStateTests {
 
         let reconstructible = makePaneTapeContinuation(
             policy: reconstructiblePolicy,
+            replicaHistoryIsComplete: true,
             fence: .init(snapshot: evicted, synchronization: synchronization)
-        )
+        ).batch
         let raw = makePaneTapeContinuation(
             policy: .raw,
+            replicaHistoryIsComplete: true,
             fence: .init(snapshot: evicted, synchronization: synchronization)
-        )
+        ).batch
 
         #expect(reconstructible.records.first?["kind"] == .string("gap"))
         #expect(reconstructible.records.dropFirst().compactMap(sequence).isEmpty)
@@ -266,6 +268,143 @@ struct PaneTapeStreamStateTests {
         #expect(reconstructible.nextCursor == synchronization.cursor)
         #expect(raw.records.first?["kind"] == .string("gap"))
         #expect(raw.records.dropFirst().compactMap(sequence) == [4, 5])
+    }
+
+    // Intent: an opening reports whether it left the replica holding the source's whole
+    //   history, and only the three grounds that establish it count.
+    // Why it exists: this flag is what later decides whether a resize may be replayed. A
+    //   stream that overstated it would forward a resize the replica cannot reflow, and one
+    //   that understated it would resync a replica that was already exact.
+    // Scenario: spec-first contract for the completeness a bounded stream tracks.
+    @Test("an opening states whether it left the replica holding the whole history")
+    func openingStatesReplicaHistoryCompleteness() {
+        func opening(
+            position: PaneTapeStartPosition,
+            fence streamFence: PaneTapeStreamFence
+        ) -> Bool {
+            makePaneTapeOpening(
+                request: .init(capture: .follow, policy: reconstructiblePolicy, position: position),
+                fence: streamFence
+            ).replicaHistoryIsComplete
+        }
+
+        // Replayed from the recorder's own beginning with nothing evicted: the replica built
+        // the whole history itself.
+        #expect(opening(position: .beginning, fence: fence(retainedSequences: [0, 1])))
+        // A sync that omitted nothing states completeness; one that omitted rows denies it.
+        #expect(opening(position: .now, fence: fence(retainedSequences: [0, 1])))
+        #expect(opening(
+            position: .now,
+            fence: fence(retainedSequences: [0, 1], droppedHistoryRows: 12)
+        ) == false)
+        #expect(opening(
+            position: .beginning,
+            fence: fence(retainedSequences: [4, 5], droppedEventCount: 4, droppedHistoryRows: 12)
+        ) == false)
+        // A cursor is a recorder coordinate and carries no evidence about the replica's
+        // history, so a resumed stream stays unknown until a sync says otherwise.
+        #expect(opening(
+            position: .cursor(cursor(sequence: 1, feed: 1)),
+            fence: fence(
+                retainedSequences: [0, 1, 2],
+                requested: .placed(snapshot(sequences: [1, 2], nextSequence: 3))
+            )
+        ) == false)
+    }
+
+    // Intent: a suffix that resizes reaches a history-incomplete replica as a fresh bounded
+    //   sync instead, and reaches an exact replica as the resize event it is.
+    // Why it exists: a primary-screen resize reflows retained history and the live rows as one
+    //   stream, so a replica missing the oldest history computes a different grid from the
+    //   same event. Replacing the suffix with state keeps grid exactness structural rather
+    //   than an argument about how far reflow can reach.
+    // Scenario: a bounded stream whose opening sync dropped history sees output, a resize,
+    //   then more output.
+    @Test("a resize in a suffix resyncs a truncated replica and passes through to an exact one")
+    func resizeResyncsOnlyATruncatedReplica() {
+        let resizing = snapshot(sequences: [4, 5, 6], nextSequence: 7, resizeSequences: [5])
+        let synchronization = PaneTapeStateSynchronization(
+            bytes: Array("state".utf8),
+            dimensions: .init(columns: 100, rows: 30, pinned: false),
+            droppedHistoryRows: 9,
+            cursor: cursor(sequence: 7, feed: 7)
+        )
+        let followFence = PaneTapeFollowStreamFence(
+            snapshot: resizing,
+            synchronization: synchronization
+        )
+
+        let truncated = makePaneTapeContinuation(
+            policy: reconstructiblePolicy,
+            replicaHistoryIsComplete: false,
+            fence: followFence
+        )
+        let exact = makePaneTapeContinuation(
+            policy: reconstructiblePolicy,
+            replicaHistoryIsComplete: true,
+            fence: followFence
+        )
+
+        #expect(truncated.batch.records.allSatisfy { $0["kind"] == .string("sync") })
+        #expect(truncated.batch.records.compactMap(sequence).isEmpty)
+        #expect(truncated.batch.nextCursor == synchronization.cursor)
+        #expect(truncated.replicaHistoryIsComplete == false)
+        #expect(exact.batch.records.compactMap(sequence) == [4, 5, 6])
+        #expect(exact.batch.nextCursor == resizing.nextCursor)
+        #expect(exact.replicaHistoryIsComplete)
+    }
+
+    // Intent: the resize rule fires on a resize and on nothing else, and a replacement sync
+    //   that omits nothing hands the replica back its exact standing.
+    // Why it exists: resyncing a truncated replica on every batch would throw away the cheap
+    //   incremental path the stream exists for, and never restoring completeness would keep a
+    //   replica resyncing on resizes long after it held the whole history again.
+    // Scenario: a truncated replica takes a plain output suffix, then one whose replacement
+    //   sync fits the whole history, then a resize.
+    @Test("only a resize resyncs, and a sync that omits nothing restores exact standing")
+    func plainSuffixesPassThroughAndAWholeSyncRestoresCompleteness() {
+        let plain = snapshot(sequences: [4, 5], nextSequence: 6)
+        let truncatedSync = PaneTapeStateSynchronization(
+            bytes: Array("state".utf8),
+            dimensions: .init(columns: 100, rows: 30, pinned: false),
+            droppedHistoryRows: 9,
+            cursor: cursor(sequence: 6, feed: 6)
+        )
+
+        let passedThrough = makePaneTapeContinuation(
+            policy: reconstructiblePolicy,
+            replicaHistoryIsComplete: false,
+            fence: .init(snapshot: plain, synchronization: truncatedSync)
+        )
+        #expect(passedThrough.batch.records.compactMap(sequence) == [4, 5])
+        #expect(passedThrough.replicaHistoryIsComplete == false)
+
+        let wholeSync = PaneTapeStateSynchronization(
+            bytes: Array("state".utf8),
+            dimensions: .init(columns: 100, rows: 30, pinned: false),
+            droppedHistoryRows: 0,
+            cursor: cursor(sequence: 7, feed: 7)
+        )
+        let restored = makePaneTapeContinuation(
+            policy: reconstructiblePolicy,
+            replicaHistoryIsComplete: false,
+            fence: .init(
+                snapshot: snapshot(sequences: [6], nextSequence: 7, resizeSequences: [6]),
+                synchronization: wholeSync
+            )
+        )
+        #expect(restored.batch.records.allSatisfy { $0["kind"] == .string("sync") })
+        #expect(restored.replicaHistoryIsComplete)
+
+        let afterRestore = makePaneTapeContinuation(
+            policy: reconstructiblePolicy,
+            replicaHistoryIsComplete: restored.replicaHistoryIsComplete,
+            fence: .init(
+                snapshot: snapshot(sequences: [7], nextSequence: 8, resizeSequences: [7]),
+                synchronization: wholeSync
+            )
+        )
+        #expect(afterRestore.batch.records.compactMap(sequence) == [7])
     }
 
     // Intent: a sync transfer states its dropped-history count once, on the same first part
@@ -327,9 +466,56 @@ struct PaneTapeStreamStateTests {
         }
     }
 
+    // Intent: the standing an opening reports is the one the next continuation acts on, for a
+    //   stream that opened on a truncated sync and for one that resumed from a client cursor.
+    // Why it exists: the two halves are decided in different functions, so each can be right
+    //   on its own while the stream still forwards a resize to a replica that cannot reflow it.
+    // Scenario: a phone joins a deep pane under a budget, and later reconnects from the cursor
+    //   its last sync published; a resize arrives on each stream.
+    @Test("an opening's standing carries into the next suffix, on a fresh join and on a resume")
+    func openingStandingDecidesTheNextSuffix() {
+        let resizing = PaneTapeFollowStreamFence(
+            snapshot: snapshot(sequences: [8], nextSequence: 9, resizeSequences: [8]),
+            synchronization: .init(
+                bytes: Array("state".utf8),
+                dimensions: .init(columns: 100, rows: 30, pinned: false),
+                droppedHistoryRows: 9,
+                cursor: cursor(sequence: 9, feed: 9)
+            )
+        )
+
+        for opening in [
+            makePaneTapeOpening(
+                request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
+                fence: fence(retainedSequences: [0, 1], droppedHistoryRows: 12)
+            ),
+            makePaneTapeOpening(
+                request: .init(
+                    capture: .follow,
+                    policy: reconstructiblePolicy,
+                    position: .cursor(cursor(sequence: 1, feed: 1))
+                ),
+                fence: fence(
+                    retainedSequences: [0, 1, 2],
+                    requested: .placed(snapshot(sequences: [1, 2], nextSequence: 3))
+                )
+            ),
+        ] {
+            let continuation = makePaneTapeContinuation(
+                policy: reconstructiblePolicy,
+                replicaHistoryIsComplete: opening.replicaHistoryIsComplete,
+                fence: resizing
+            )
+
+            #expect(continuation.batch.records.allSatisfy { $0["kind"] == .string("sync") })
+            #expect(continuation.batch.nextCursor == resizing.synchronization.cursor)
+        }
+    }
+
     private func fence(
         retainedSequences: [UInt64],
         droppedEventCount: UInt64 = 0,
+        droppedHistoryRows: Int = 0,
         requested: PaneTapeCursorPlacement? = nil
     ) -> PaneTapeStreamFence {
         let nextSequence = retainedSequences.last.map { $0 + 1 } ?? 0
@@ -348,7 +534,7 @@ struct PaneTapeStreamStateTests {
             synchronization: .init(
                 bytes: Array("state".utf8),
                 dimensions: .init(columns: 100, rows: 30, pinned: false),
-                droppedHistoryRows: 0,
+                droppedHistoryRows: droppedHistoryRows,
                 cursor: retained.nextCursor
             )
         )
@@ -357,16 +543,26 @@ struct PaneTapeStreamStateTests {
     private func snapshot(
         sequences: [UInt64],
         nextSequence: UInt64,
-        droppedEventCount: UInt64 = 0
+        droppedEventCount: UInt64 = 0,
+        resizeSequences: Set<UInt64> = []
     ) -> PaneTapeSnapshot {
         PaneTapeSnapshot(
             events: sequences.map { sequence in
-                .init(
+                let isResize = resizeSequences.contains(sequence)
+                return .init(
                     sequence: sequence,
                     elapsedNanoseconds: sequence,
                     originElapsedNanoseconds: nil,
-                    payload: .init(byteOffset: Int(sequence), byteLength: 1),
-                    event: .object(["type": .string("feed"), "base64": .string("QQ==")])
+                    payload: isResize ? nil : .init(byteOffset: Int(sequence), byteLength: 1),
+                    event: isResize
+                        ? .object([
+                            "type": .string("resize"),
+                            "columns": .number(100),
+                            "rows": .number(30),
+                            "pinned": .bool(false),
+                        ])
+                        : .object(["type": .string("feed"), "base64": .string("QQ==")]),
+                    needsCompleteHistory: isResize
                 )
             },
             droppedEventCount: droppedEventCount,

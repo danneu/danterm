@@ -265,7 +265,8 @@ func makeEmptyPaneTapeOpening() -> PaneTapeOpening {
     return PaneTapeOpening(
         start: PaneTapeStart(record: .object(["type": .string("start")]), cursor: cursor),
         records: [],
-        nextCursor: cursor
+        nextCursor: cursor,
+        replicaHistoryIsComplete: false
     )
 }
 
