@@ -120,7 +120,7 @@ private enum TerminalWorkflowRunner {
                 case .key(let key, let modifiers):
                     controller.sendKey(key, modifiers: modifiers, origin: nil)
                 case .resize(let columns, let rows):
-                    controller.setGridDimensions(.init(columns: columns, rows: rows))
+                    controller.setGridDimensions(.init(columns: columns, rows: rows), pinned: false)
                 case .expect(let marker):
                     try await waitFor(marker, controller: controller)
                     controller.synchronizeState()

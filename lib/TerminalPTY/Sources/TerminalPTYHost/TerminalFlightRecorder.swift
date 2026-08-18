@@ -151,7 +151,7 @@ public struct TerminalFlightRecordingCursorSnapshot: Equatable, Sendable {
 /// Atomically pairs the geometry for a tail-only stream with its first event cursor.
 public struct TerminalFlightRecordingOrigin: Equatable, Sendable {
     /// Pane geometry immediately before the cursor's first possible event.
-    public let initial: NeutralTerminalDimensions
+    public let initial: NeutralTerminalGeometry
     /// Cursor that excludes every event recorded before this owner fence.
     public let cursor: TerminalFlightRecordingCursor
 }
@@ -209,9 +209,11 @@ package final class TerminalFlightRecorder {
         let writeBytesBeforeEvent: Int
     }
 
-    private let initial: NeutralTerminalDimensions
+    private let initial: NeutralTerminalGeometry
     private let lifetimeId: UUID
-    private var currentDimensions: NeutralTerminalDimensions
+    /// The last geometry an applied event stated, so a tail-only stream and a state sync
+    /// both report the grid and its pinnedness as one fact rather than a grid alone.
+    private var currentGeometry: NeutralTerminalGeometry
     private let configuration: TerminalFlightRecorderConfiguration
     private let now: @Sendable () -> UInt64
     private let startedNanoseconds: UInt64
@@ -230,16 +232,13 @@ package final class TerminalFlightRecorder {
 
     package init(
         lifetimeId: UUID = UUID(),
-        initialDimensions: TerminalDimensions,
+        initialGeometry: NeutralTerminalGeometry,
         configuration: TerminalFlightRecorderConfiguration = .production,
         now: @escaping @Sendable () -> UInt64
     ) {
-        initial = .init(
-            columns: initialDimensions.columns,
-            rows: initialDimensions.rows
-        )
+        initial = initialGeometry
         self.lifetimeId = lifetimeId
-        currentDimensions = initial
+        currentGeometry = initial
         self.configuration = configuration
         self.now = now
         startedNanoseconds = now()
@@ -283,8 +282,8 @@ package final class TerminalFlightRecorder {
                 totalWriteBytes += direction.byteCount
             }
         }
-        if case .resize(let columns, let rows) = event {
-            currentDimensions = .init(columns: columns, rows: rows)
+        if case .resize(let columns, let rows, let pinned) = event {
+            currentGeometry = .init(columns: columns, rows: rows, pinned: pinned)
         }
         slots.append(slot)
         accountedBytes += payloadBytes + configuration.eventOverheadBytes
@@ -394,8 +393,12 @@ package final class TerminalFlightRecorder {
         )
     }
 
+    /// Whether the last applied geometry stated a pinned grid. Read at the same owner fence
+    /// as a state pairing, so exact state and its pinnedness cannot come from different turns.
+    package var pinned: Bool { currentGeometry.pinned }
+
     package func fromNowOrigin() -> TerminalFlightRecordingOrigin {
-        TerminalFlightRecordingOrigin(initial: currentDimensions, cursor: liveCursor())
+        TerminalFlightRecordingOrigin(initial: currentGeometry, cursor: liveCursor())
     }
 
     /// Pairs recorder birth geometry with the cursor that requests all retained history.

@@ -215,7 +215,11 @@ struct PaneTapeStreamTests {
             "capture": .string("follow"),
             "format": .string("inspect"),
             "reconstructible": .bool(true),
-            "initial": .object(["columns": .number(80), "rows": .number(24)]),
+            "initial": .object([
+                "columns": .number(80),
+                "rows": .number(24),
+                "pinned": .bool(false),
+            ]),
             "cursor": .object([
                 "recorderLifetimeId": .string("11111111-1111-4111-8111-111111111111"),
                 "sequence": .number(0),
@@ -271,7 +275,11 @@ struct PaneTapeStreamTests {
             "capture": .string(capture),
             "format": .string(PaneTapeFormat.replay.rawValue),
             "reconstructible": .bool(capture != "dump"),
-            "initial": .object(["columns": .number(80), "rows": .number(24)]),
+            "initial": .object([
+                "columns": .number(80),
+                "rows": .number(24),
+                "pinned": .bool(false),
+            ]),
             "cursor": .object([
                 "recorderLifetimeId": .string("11111111-1111-4111-8111-111111111111"),
                 "sequence": .number(0),

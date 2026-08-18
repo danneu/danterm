@@ -30,9 +30,10 @@ func paneTapeProvenanceJSON() throws -> JSONValue {
     return try JSONDecoder().decode(JSONValue.self, from: data)
 }
 
-/// Lowers engine geometry into the support layer's stream dimensions.
-func paneTapeDimensions(_ dimensions: NeutralTerminalDimensions) -> PaneTapeDimensions {
-    .init(columns: dimensions.columns, rows: dimensions.rows)
+/// Lowers engine geometry into the support layer's stream dimensions, pinnedness included,
+/// so the stream states the pane's geometry as the one fact the recorder holds.
+func paneTapeDimensions(_ geometry: NeutralTerminalGeometry) -> PaneTapeDimensions {
+    .init(columns: geometry.columns, rows: geometry.rows, pinned: geometry.pinned)
 }
 
 /// Lowers a recorder cursor into the support layer's stream cursor.
@@ -85,10 +86,7 @@ func paneTapeStateSynchronization(
 ) -> PaneTapeStateSynchronization {
     .init(
         bytes: synchronization.state.bytes,
-        dimensions: .init(
-            columns: synchronization.state.columns,
-            rows: synchronization.state.rows
-        ),
+        dimensions: paneTapeDimensions(synchronization.geometry),
         cursor: paneTapeCursor(synchronization.cursor)
     )
 }
@@ -181,6 +179,10 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// never `currentMetrics.cellSize`, which describes the pixels rendered.
     private var displayedCellSize: CGSize?
     private var currentDimensions: TerminalDimensions?
+    /// The pinnedness last submitted with `currentDimensions`. Kept beside the grid rather
+    /// than re-derived, so clearing an override back to the grid the pane already ran at
+    /// still reads as a change and still reaches the applied boundary.
+    private var currentGridPinned: Bool?
     private var controlClickIsActive = false
     private var mouseTrackingArea: NSTrackingArea?
     private var lastPointerLocationInWindow: NSPoint?
@@ -1369,10 +1371,12 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             return
         }
 
+        let pinned = gridOverride != nil
         let metricsChanged = metrics != currentMetrics
-        let dimensionsChanged = dimensions != currentDimensions
+        let geometryChanged = dimensions != currentDimensions || pinned != currentGridPinned
         currentMetrics = metrics
         currentDimensions = dimensions
+        currentGridPinned = pinned
         // What one cell occupies on screen, which is the rendered cell box carried
         // back to the pane's own scale. Every pointer mapping and every piece of
         // chrome the view positions reads this rather than the render metrics, so
@@ -1381,8 +1385,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             width: metrics.cellSize.width * metrics.displayScale / scale,
             height: metrics.cellSize.height * metrics.displayScale / scale
         )
-        if dimensionsChanged {
-            controller.setGridDimensions(dimensions)
+        if geometryChanged {
+            controller.setGridDimensions(dimensions, pinned: pinned)
         }
         // Cell height is the only state-channel field this method moves -- the
         // viewport projection arrives on the controller's own state callback. An

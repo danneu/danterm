@@ -159,6 +159,28 @@ public struct NeutralTerminalDimensions: Codable, Equatable, Sendable {
     }
 }
 
+/// A pane's replicated geometry as one fact: the grid, plus whether that grid is pinned.
+///
+/// Pinned means the grid is an explicit override; unpinned means it is derived from the
+/// pane's rectangle. Recording carries the pair together so no observer can hold half of a
+/// transition -- a grid without its pinnedness, or the reverse. It is deliberately separate
+/// from `NeutralTerminalDimensions`, which is replay geometry and has no use for the bit.
+public struct NeutralTerminalGeometry: Equatable, Sendable {
+    /// Character columns in the applied grid.
+    public let columns: Int
+    /// Character rows in the applied grid.
+    public let rows: Int
+    /// Whether the grid is an override rather than a projection of the pane's rectangle.
+    public let pinned: Bool
+
+    /// Keeps stream geometry independent from either host's dimension type.
+    public init(columns: Int, rows: Int, pinned: Bool) {
+        self.columns = columns
+        self.rows = rows
+        self.pinned = pinned
+    }
+}
+
 /// Describes local viewport mutations that must replay even when the child emits no bytes.
 public enum NeutralTerminalViewportNavigation: Equatable, Sendable {
     case byRows(Int)
@@ -222,14 +244,19 @@ public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
     case paste(String)
     case focus(Bool)
     case mouse(NeutralTerminalMouseEvent)
-    case resize(columns: Int, rows: Int)
+    /// One applied geometry fact stated whole: the grid, and whether that grid is pinned.
+    /// Pinned means the grid is an explicit override rather than a projection of the pane's
+    /// rectangle. The bit reaches no terminal -- replay ignores it -- so a pinnedness-only
+    /// transition is invisible to the child and to cell content. It exists so a replica can
+    /// tell which writer produced the current grid without comparing grids.
+    case resize(columns: Int, rows: Int, pinned: Bool)
     case viewport(NeutralTerminalViewportNavigation)
     case checkpoint
 }
 
 extension NeutralTerminalRecordingEvent: Codable {
     private enum CodingKeys: String, CodingKey {
-        case type, text, base64, columns, rows, action, key, scalar, modifiers, focused
+        case type, text, base64, columns, rows, pinned, action, key, scalar, modifiers, focused
         case button, column, row, offsetX, clickCount, expect, elapsedNanoseconds
         case originElapsedNanoseconds
     }
@@ -263,15 +290,20 @@ extension NeutralTerminalRecordingEvent: Codable {
                 type: type
             ))
         case "resize":
+            // `pinned` is optional on the way in so the stored fixture corpus, recorded
+            // before pinnedness existed, still decodes; it is always written on the way
+            // out. A peer on the other side of the shape change never reaches this decode
+            // -- the handshake's protocol number refuses it first.
             try Self.validateKeys(
                 keys,
                 required: ["type", "columns", "rows"],
-                optional: ["elapsedNanoseconds"],
+                optional: ["pinned", "elapsedNanoseconds"],
                 type: type
             )
             self = .resize(
                 columns: try values.decode(Int.self, forKey: .columns),
-                rows: try values.decode(Int.self, forKey: .rows)
+                rows: try values.decode(Int.self, forKey: .rows),
+                pinned: try values.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
             )
         case "input":
             let key = try values.decode(String.self, forKey: .key)
@@ -406,10 +438,11 @@ extension NeutralTerminalRecordingEvent: Codable {
             try values.encode(mouse.offsetX, forKey: .offsetX)
             try values.encode(Self.encodeModifiers(mouse.modifiers), forKey: .modifiers)
             try values.encode(mouse.clickCount, forKey: .clickCount)
-        case .resize(let columns, let rows):
+        case .resize(let columns, let rows, let pinned):
             try values.encode("resize", forKey: .type)
             try values.encode(columns, forKey: .columns)
             try values.encode(rows, forKey: .rows)
+            try values.encode(pinned, forKey: .pinned)
         case .viewport(let navigation):
             try values.encode("viewport", forKey: .type)
             switch navigation {
@@ -689,7 +722,7 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
                     terminal: &terminal,
                     interactionState: &interactionState
                 )
-            case .resize(let columns, let rows):
+            case .resize(let columns, let rows, _):
                 guard columns >= 2, rows >= 1 else {
                     throw NeutralTerminalRecordingError.invalidDimensions
                 }

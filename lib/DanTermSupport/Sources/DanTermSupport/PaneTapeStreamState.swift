@@ -217,10 +217,7 @@ private func makePaneTapeSynchronizationRecords(
             "base64": .string(Data(bytes).base64EncodedString()),
         ]
         if index == chunks.startIndex {
-            record["initial"] = .object([
-                "columns": .number(Double(synchronization.dimensions.columns)),
-                "rows": .number(Double(synchronization.dimensions.rows)),
-            ])
+            record["initial"] = paneTapeGeometryJSON(synchronization.dimensions)
         }
         if index == chunks.index(before: chunks.endIndex) {
             record["cursor"] = paneTapeCursorJSON(synchronization.cursor)

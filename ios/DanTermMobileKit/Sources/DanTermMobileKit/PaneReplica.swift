@@ -166,7 +166,8 @@ public struct PaneReplica: Sendable {
                 interactionState: &interactionState
             )
             discardAuthority(from: &terminal)
-        case .resize(let columns, let rows):
+        // Pinnedness is carried by the event but not yet held by the replica.
+        case .resize(let columns, let rows, _):
             guard columns >= 2, rows >= 1 else {
                 state = .gap(.detected)
                 syncAssembler = PaneTapeSyncAssembler()

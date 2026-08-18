@@ -359,7 +359,7 @@ struct ClientLivenessTests {
         //   would leave the client either unbounded or applying a rule it invented.
         // Scenario: a server that greets a remote client without the field.
         let peer = LivenessPeer(answersPings: false)
-        peer.deliver(#"{"jsonrpc":"2.0","method":"hello","params":{"protocol":1,"app":"test"}}"#)
+        peer.deliver(#"{"jsonrpc":"2.0","method":"hello","params":{"protocol":\#(danTermIpcProtocolVersion),"app":"test"}}"#)
         let session = DanTermClientSession(transport: peer)
         defer { session.cancel() }
 

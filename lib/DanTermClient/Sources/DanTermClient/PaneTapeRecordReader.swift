@@ -39,6 +39,10 @@ public struct PaneTapeStartRecord: Equatable, Sendable {
     public let columns: Int
     /// Gives the initial terminal height.
     public let rows: Int
+    /// States whether that grid is pinned -- an explicit override rather than a projection
+    /// of the pane's rectangle. Required: the producer states geometry whole, and a reader
+    /// that guessed would report a claim the pane does not hold.
+    public let pinned: Bool
     /// Continues the stream when no opening synchronization is pending.
     public let cursor: PaneTapeCursor?
     /// States whether the producer may synthesize exact terminal state after loss.
@@ -58,6 +62,7 @@ public struct PaneTapeStartRecord: Equatable, Sendable {
         format: PaneTapeFormat,
         columns: Int,
         rows: Int,
+        pinned: Bool,
         cursor: PaneTapeCursor?,
         reconstructible: Bool
     ) {
@@ -66,6 +71,7 @@ public struct PaneTapeStartRecord: Equatable, Sendable {
         self.format = format
         self.columns = columns
         self.rows = rows
+        self.pinned = pinned
         self.cursor = cursor
         self.reconstructible = reconstructible
     }
@@ -129,6 +135,8 @@ public struct PaneTapeSyncRecord: Equatable, Sendable {
     public let columns: Int?
     /// Gives the terminal height on the first part only.
     public let rows: Int?
+    /// Gives that grid's pinnedness on the first part only, beside its columns and rows.
+    public let pinned: Bool?
     /// Publishes the continuation position on the final part only.
     public let cursor: PaneTapeCursor?
 
@@ -139,6 +147,7 @@ public struct PaneTapeSyncRecord: Equatable, Sendable {
         bytes: [UInt8],
         columns: Int?,
         rows: Int?,
+        pinned: Bool?,
         cursor: PaneTapeCursor?
     ) {
         self.part = part
@@ -146,6 +155,7 @@ public struct PaneTapeSyncRecord: Equatable, Sendable {
         self.bytes = bytes
         self.columns = columns
         self.rows = rows
+        self.pinned = pinned
         self.cursor = cursor
     }
 }
@@ -158,14 +168,24 @@ public struct PaneTapeStateSynchronization: Equatable, Sendable {
     public let columns: Int
     /// Gives the height at which the state must be applied.
     public let rows: Int
+    /// States whether the replaced pane's grid is pinned. A sync replaces a replica outright,
+    /// so it restates the whole geometry fact rather than leaving pinnedness to nearby events.
+    public let pinned: Bool
     /// Names the first recorder event after this state.
     public let cursor: PaneTapeCursor
 
     /// Creates one complete state replacement.
-    public init(bytes: [UInt8], columns: Int, rows: Int, cursor: PaneTapeCursor) {
+    public init(
+        bytes: [UInt8],
+        columns: Int,
+        rows: Int,
+        pinned: Bool,
+        cursor: PaneTapeCursor
+    ) {
         self.bytes = bytes
         self.columns = columns
         self.rows = rows
+        self.pinned = pinned
         self.cursor = cursor
     }
 }
@@ -177,6 +197,7 @@ public struct PaneTapeSyncAssembler: Sendable {
     private var bytes: [UInt8] = []
     private var columns: Int?
     private var rows: Int?
+    private var pinned: Bool?
 
     /// Starts an assembler with no partial transfer.
     public init() {}
@@ -190,14 +211,18 @@ public struct PaneTapeSyncAssembler: Sendable {
             return nil
         }
         if record.part == 1 {
-            guard let columns = record.columns, let rows = record.rows else {
+            guard let columns = record.columns,
+                  let rows = record.rows,
+                  let pinned = record.pinned
+            else {
                 reset()
                 return nil
             }
             expectedCount = record.parts
             self.columns = columns
             self.rows = rows
-        } else if record.columns != nil || record.rows != nil {
+            self.pinned = pinned
+        } else if record.columns != nil || record.rows != nil || record.pinned != nil {
             reset()
             return nil
         }
@@ -209,7 +234,8 @@ public struct PaneTapeSyncAssembler: Sendable {
         }
         guard let cursor = record.cursor,
               let columns,
-              let rows
+              let rows,
+              let pinned
         else {
             reset()
             return nil
@@ -218,6 +244,7 @@ public struct PaneTapeSyncAssembler: Sendable {
             bytes: bytes,
             columns: columns,
             rows: rows,
+            pinned: pinned,
             cursor: cursor
         )
         reset()
@@ -230,6 +257,7 @@ public struct PaneTapeSyncAssembler: Sendable {
         bytes.removeAll(keepingCapacity: true)
         columns = nil
         rows = nil
+        pinned = nil
     }
 }
 
@@ -283,6 +311,7 @@ public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord? {
               let rowsValue = initial["rows"]?.asNumber,
               let columns = positiveInt(columnsValue),
               let rows = positiveInt(rowsValue),
+              case .bool(let pinned)? = initial["pinned"],
               case .bool(let reconstructible)? = value["reconstructible"]
         else { return nil }
         let cursor: PaneTapeCursor?
@@ -298,6 +327,7 @@ public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord? {
             format: format,
             columns: columns,
             rows: rows,
+            pinned: pinned,
             cursor: cursor,
             reconstructible: reconstructible
         ))
@@ -349,7 +379,13 @@ public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord? {
         let initial = value["initial"]
         let columns = initial?["columns"]?.asNumber.flatMap(positiveInt)
         let rows = initial?["rows"]?.asNumber.flatMap(positiveInt)
-        guard (columns == nil) == (rows == nil) else { return nil }
+        let pinned: Bool?
+        if case .bool(let value)? = initial?["pinned"] { pinned = value } else { pinned = nil }
+        // Geometry arrives whole or not at all, so a first part missing any one of the three
+        // is malformed rather than a part carrying partial geometry.
+        guard (columns == nil) == (rows == nil), (columns == nil) == (pinned == nil) else {
+            return nil
+        }
         let cursor: PaneTapeCursor?
         if let cursorValue = value["cursor"] {
             guard let decoded = decodePaneTapeCursor(cursorValue) else { return nil }
@@ -363,6 +399,7 @@ public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord? {
             bytes: Array(data),
             columns: columns,
             rows: rows,
+            pinned: pinned,
             cursor: cursor
         ))
     case "end":

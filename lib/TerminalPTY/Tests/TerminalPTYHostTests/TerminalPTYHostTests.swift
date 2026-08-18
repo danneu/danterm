@@ -15,6 +15,17 @@ import PaneProcessLifecycle
 @testable import TerminalCore
 import TerminalCoreRecording
 
+/// The ordinary slot-derived grid submission, so a test that says nothing about pinnedness
+/// is not silently asserting a claim.
+func unpinned(columns: Int, rows: Int) -> PaneGridSubmission {
+    PaneGridSubmission(dimensions: .init(columns: columns, rows: rows), pinned: false)
+}
+
+/// The same grid submitted as an explicit override, for the geometry-event assertions.
+func pinned(columns: Int, rows: Int) -> PaneGridSubmission {
+    PaneGridSubmission(dimensions: .init(columns: columns, rows: rows), pinned: true)
+}
+
 /// Exercises the owner across a real PTY master with no process at the other end.
 ///
 /// Nothing here forks, signals, or reaps, so nothing here contends for machine state another
@@ -367,7 +378,7 @@ struct TerminalPTYHostTests {
             host.applyInteractionForTesting(.beginSearch("line"))
             host.applyInteractionForTesting(.selectAll)
             host.applyInteractionForTesting(.scrollByRows(-1))
-            host.applyInteractionForTesting(.resize(.init(columns: 79, rows: 23)))
+            host.applyInteractionForTesting(.resize(unpinned(columns: 79, rows: 23)))
         }
 
         #expect(comparisons == 0)
@@ -494,9 +505,9 @@ struct TerminalPTYHostTests {
         let host = pane.host
         #expect(await pane.writeFromChild(scrollbackLines))
 
-        host.resize(.init(columns: 80, rows: 30))
+        host.resize(unpinned(columns: 80, rows: 30))
         let tallTopLine = topViewportLine(host.fencedSnapshot())
-        host.resize(.init(columns: 80, rows: 10))
+        host.resize(unpinned(columns: 80, rows: 10))
         let shortTopLine = topViewportLine(host.fencedSnapshot())
         try #require(tallTopLine.isEmpty == false)
         try #require(tallTopLine != shortTopLine)
@@ -504,9 +515,9 @@ struct TerminalPTYHostTests {
 
         let owner = OwnerHold()
         owner.hold(host)
-        host.resize(.init(columns: 80, rows: 30))
+        host.resize(unpinned(columns: 80, rows: 30))
         host.sendPointer(.down(.left, column: 2, row: 0, clickCount: 3))
-        host.resize(.init(columns: 80, rows: 10))
+        host.resize(unpinned(columns: 80, rows: 10))
         owner.release()
 
         let snapshot = host.fencedSnapshot()
@@ -518,9 +529,9 @@ struct TerminalPTYHostTests {
             }
         }
         #expect(ordered == [
-            .resize(.init(columns: 80, rows: 30)),
+            .resize(unpinned(columns: 80, rows: 30)),
             .mouse(.down(.left, column: 2, row: 0, clickCount: 3)),
-            .resize(.init(columns: 80, rows: 10)),
+            .resize(unpinned(columns: 80, rows: 10)),
         ])
         #expect(
             snapshot.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines) == tallTopLine
@@ -538,7 +549,7 @@ struct TerminalPTYHostTests {
         //   if a delay is added rather than a submission dropped.
         let host = try await startChildlessHost().host
 
-        host.resize(.init(columns: 100, rows: 31))
+        host.resize(unpinned(columns: 100, rows: 31))
         let snapshot = host.fencedSnapshot()
 
         #expect(snapshot.geometry.columns == 100)
@@ -551,7 +562,7 @@ struct TerminalPTYHostTests {
         let host = try await startChildlessHost(captureTransitions: false).host
         let signalsBefore = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
-        host.resize(.init(columns: 80, rows: 24))
+        host.resize(unpinned(columns: 80, rows: 24))
         _ = await host.snapshot()
 
         #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == signalsBefore)
@@ -581,7 +592,7 @@ struct TerminalPTYHostTests {
             switch recorded.event {
             case .feed(let bytes):
                 resumed.feed(bytes)
-            case .resize(let columns, let rows):
+            case .resize(let columns, let rows, _):
                 resumed.resize(columns: columns, rows: rows)
             default:
                 break
@@ -1461,7 +1472,7 @@ struct TerminalPTYHostTests {
         #expect(running.hasSession == false)
 
         host.send(Array("typed".utf8))
-        host.resize(.init(columns: 100, rows: 31))
+        host.resize(unpinned(columns: 100, rows: 31))
         #expect(await host.drainedPendingInputByteCount() == 0)
         await host.close()
 
@@ -1511,7 +1522,7 @@ struct TerminalPTYHostTests {
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         #expect(channel.childWindowSize()?.ws_col == 80)
 
-        host.resize(.init(columns: 100, rows: 31))
+        host.resize(unpinned(columns: 100, rows: 31))
         let snapshot = await host.snapshot()
 
         #expect(snapshot.geometry.columns == 100)
@@ -1623,7 +1634,7 @@ struct TerminalPTYHostChildProcessTests {
 
         await host.start(makeLaunchInput(command: command))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        host.resize(.init(columns: 100, rows: 31))
+        host.resize(unpinned(columns: 100, rows: 31))
         let snapshot = await host.snapshot()
         host.send(Array("done\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(0)))
@@ -1651,19 +1662,103 @@ struct TerminalPTYHostChildProcessTests {
         let submissionBaseline = await host.submittedTransitions().count
 
         host.send(Array("prefix-".utf8))
-        host.resize(.init(columns: 96, rows: 28))
+        host.resize(unpinned(columns: 96, rows: 28))
         host.send(Array("continue\n".utf8))
 
         #expect(await host.waitForResult() == .exited(.exited(0)))
         #expect(Array((await host.submittedTransitions()).dropFirst(submissionBaseline)) == [
             .input(Array("prefix-".utf8)),
-            .resize(.init(columns: 96, rows: 28)),
+            .resize(unpinned(columns: 96, rows: 28)),
             .input(Array("continue\n".utf8)),
         ])
 
         host.send(Array("after-teardown".utf8))
-        host.resize(.init(columns: 120, rows: 40))
+        host.resize(unpinned(columns: 120, rows: 40))
         #expect(await host.submittedTransitions().count == submissionBaseline + 3)
+    }
+
+    @Test(
+        "every applied geometry fact records one event stating its pinnedness",
+        .timeLimit(.minutes(1))
+    )
+    func appliedGeometryRecordsPinnednessOnce() async throws {
+        // Intent: each of the four geometry transitions -- pin at a new grid, pin at the
+        //   grid already running, release to that same grid, release to a different one --
+        //   records exactly one tape event, and each one states the pinnedness that applied.
+        // Why it exists: pinnedness is the only thing a phone can key a Release control off.
+        //   A transition that records nothing because the grid did not move would leave every
+        //   replica reporting the pane as claimed for as long as that grid held.
+        // Scenario: a claim, a re-claim at the same size, a take-back, and a later resize.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let baseline = await host.fencedFlightRecordingCapture().snapshot.events.count
+
+        // A zero-row scroll between submissions closes the coalescing run, so nothing here
+        // is superseded and every fact below reaches the applied boundary in order.
+        host.resize(pinned(columns: 60, rows: 20))
+        host.scroll(byRows: 0)
+        host.resize(pinned(columns: 60, rows: 20))
+        host.scroll(byRows: 0)
+        host.resize(unpinned(columns: 60, rows: 20))
+        host.scroll(byRows: 0)
+        host.resize(unpinned(columns: 100, rows: 31))
+        host.scroll(byRows: 0)
+
+        // The fence runs on the same owner queue as every submission above, so it cannot
+        // return before all of them have applied.
+        let recorded = host.fencedFlightRecordingCapture().snapshot.events
+            .dropFirst(baseline)
+            .compactMap { event -> (Int, Int, Bool)? in
+                guard case .resize(let columns, let rows, let pinned) = event.event else {
+                    return nil
+                }
+                return (columns, rows, pinned)
+            }
+
+        #expect(recorded.map(\.0) == [60, 60, 60, 100])
+        #expect(recorded.map(\.1) == [20, 20, 20, 31])
+        #expect(recorded.map(\.2) == [true, true, false, false])
+
+        await host.close()
+    }
+
+    @Test(
+        "a pinnedness-only transition reaches neither the child nor the cells",
+        .timeLimit(.minutes(1))
+    )
+    func pinnednessOnlyTransitionIsInvisibleToTheChild() async throws {
+        // Intent: pinning and releasing a pane at the grid it already runs at raises no
+        //   SIGWINCH and changes no cell content, even though each one records an event.
+        // Why it exists: pinnedness is a presentation fact about who chose the grid. A
+        //   claim at the current size that made a full-screen application redraw, or that
+        //   reflowed the screen, would be a visible cost for no visible change.
+        // Scenario: a phone claims a pane already showing its size, then hands it back,
+        //   and only afterwards asks for a different grid.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) resize \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let before = await host.snapshot().viewportText
+
+        // A zero-row scroll closes the coalescing run without touching a cell or the child,
+        // so both transitions actually apply rather than the first being superseded.
+        host.resize(pinned(columns: 80, rows: 24))
+        host.scroll(byRows: 0)
+        host.resize(unpinned(columns: 80, rows: 24))
+        host.scroll(byRows: 0)
+        #expect(await host.snapshot().viewportText == before)
+
+        // The probe reports the first SIGWINCH it receives and no other. If either
+        // transition above had signalled, this would name the unchanged 80x24 grid.
+        host.resize(unpinned(columns: 100, rows: 31))
+        #expect(await host.waitForOutput(containing: Array("__WINCH__=31 100".utf8)))
+
+        host.send(Array("done\n".utf8))
+        #expect(await host.waitForResult() == .exited(.exited(0)))
     }
 
     @Test(
@@ -1691,15 +1786,15 @@ struct TerminalPTYHostChildProcessTests {
         let owner = OwnerHold()
         owner.hold(host)
         for grid in [(84, 25), (88, 26), (92, 27), (96, 28)] {
-            host.resize(.init(columns: grid.0, rows: grid.1))
+            host.resize(unpinned(columns: grid.0, rows: grid.1))
         }
-        host.resize(.init(columns: 100, rows: 31))
+        host.resize(unpinned(columns: 100, rows: 31))
         owner.release()
 
         let applied = (await host.transitions()).dropFirst(baseline).filter {
             if case .resize = $0 { true } else { false }
         }
-        #expect(applied == [.resize(.init(columns: 100, rows: 31))])
+        #expect(applied == [.resize(unpinned(columns: 100, rows: 31))])
         #expect(await host.waitForOutput(containing: Array("__WINCH__=31 100".utf8)))
         let snapshot = await host.snapshot()
         #expect(snapshot.geometry.columns == 100)
@@ -1726,7 +1821,7 @@ struct TerminalPTYHostChildProcessTests {
         #expect(await updates.next() != nil)
         _ = host.fencedFrameState()
 
-        host.resize(.init(columns: 100, rows: 31))
+        host.resize(unpinned(columns: 100, rows: 31))
         var observedResize = false
         while let _ = await updates.next() {
             let frame = host.fencedFrameState()
@@ -1950,7 +2045,7 @@ struct TerminalPTYHostChildProcessTests {
             command: "exec \(try probeExecutable()) recording \"$0\""
         ))
         #expect(await host.waitForOutput(containing: Array("__BEFORE_RESIZE__".utf8)))
-        host.resize(.init(columns: 96, rows: 28))
+        host.resize(unpinned(columns: 96, rows: 28))
         host.send(Array("continue\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(0)))
 
@@ -1988,7 +2083,7 @@ struct TerminalPTYHostChildProcessTests {
             command: "exec \(try probeExecutable()) recording \"$0\""
         ))
         #expect(await host.waitForOutput(containing: Array("__BEFORE_RESIZE__".utf8)))
-        host.resize(.init(columns: 96, rows: 28))
+        host.resize(unpinned(columns: 96, rows: 28))
         host.send(Array("continue\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(0)))
 
@@ -2000,14 +2095,17 @@ struct TerminalPTYHostChildProcessTests {
         // the ordered events from the snapshot fenced with it.
         let recording = NeutralTerminalRecording(
             provenance: .liveCapture(),
-            initial: capture.origin.initial,
+            initial: .init(
+                columns: capture.origin.initial.columns,
+                rows: capture.origin.initial.rows
+            ),
             events: snapshot.events.map(\.event)
         )
         let resizeIndex = try #require(snapshot.events.firstIndex {
             if case .resize = $0.event { true } else { false }
         })
 
-        #expect(capture.origin.initial == .init(columns: 80, rows: 24))
+        #expect(capture.origin.initial == .init(columns: 80, rows: 24, pinned: false))
         #expect(try recording.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
         // The tape carries the bytes this test typed as well as the child's output, and the
         // replay above is what proves replay ignores them rather than echoing them back in.
@@ -2021,7 +2119,7 @@ struct TerminalPTYHostChildProcessTests {
         #expect(zip(snapshot.events, snapshot.events.dropFirst()).allSatisfy {
             $0.elapsedNanoseconds <= $1.elapsedNanoseconds
         })
-        #expect(fromNow.initial == .init(columns: 96, rows: 28))
+        #expect(fromNow.initial == .init(columns: 96, rows: 28, pinned: false))
         #expect(fromNow.cursor.nextSequence == snapshot.events.last.map { $0.sequence + 1 })
         #expect(liveSuffix.events.isEmpty)
     }
@@ -2142,7 +2240,7 @@ struct TerminalPTYHostChildProcessTests {
                 } else {
                     await withTaskGroup(of: Void.self) { group in
                         group.addTask {
-                            host.resize(.init(columns: 81 + iteration, rows: 25))
+                            host.resize(unpinned(columns: 81 + iteration, rows: 25))
                         }
                         group.addTask { await host.close() }
                     }
@@ -2888,8 +2986,12 @@ private extension TerminalPTYAppliedTransition {
         case .paste(let text): .paste(text)
         case .focus(let focused): .focus(focused)
         case .mouse(let event): .mouse(event.neutralEvent)
-        case .resize(let dimensions):
-            .resize(columns: dimensions.columns, rows: dimensions.rows)
+        case .resize(let grid):
+            .resize(
+                columns: grid.dimensions.columns,
+                rows: grid.dimensions.rows,
+                pinned: grid.pinned
+            )
         case .scrollByRows(let rows): .viewport(.byRows(rows))
         case .scrollToTopRow(let row): .viewport(.toTopRow(row))
         case .scrollToBottom: .viewport(.toBottom)

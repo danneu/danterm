@@ -145,7 +145,7 @@ final class IpcConnection: @unchecked Sendable {
         let hello = JsonRpcRequest(
             method: Methods.hello,
             params: IpcHello.params(
-                protocolVersion: 1,
+                protocolVersion: danTermIpcProtocolVersion,
                 appVersion: appVersion,
                 livenessBound: livenessBound
             )

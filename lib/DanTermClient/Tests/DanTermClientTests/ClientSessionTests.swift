@@ -192,7 +192,7 @@ struct ClientSessionTests {
     @Test("the handshake accepts the protocol version and surfaces the server app version")
     func handshakeAcceptsKnownVersionAndSurfacesAppVersion() throws {
         let session = DanTermClientSession(
-            transport: ScriptedTransport(lines: [hello(protocol: 1, app: "9.4.1")])
+            transport: ScriptedTransport(lines: [hello(protocol: danTermIpcProtocolVersion, app: "9.4.1")])
         )
 
         let server = try session.handshake()
@@ -207,7 +207,7 @@ struct ClientSessionTests {
         // Why it exists: only one end may define the number. A client constant would
         //   be a second, independently tuned rule about the same connection.
         let session = DanTermClientSession(
-            transport: ScriptedTransport(lines: [hello(protocol: 1, app: "test", silenceBound: 4)])
+            transport: ScriptedTransport(lines: [hello(protocol: danTermIpcProtocolVersion, app: "test", silenceBound: 4)])
         )
 
         let server = try session.handshake()
@@ -218,7 +218,7 @@ struct ClientSessionTests {
 
     @Test("a hello with no readable bound advertises none")
     func handshakeReportsAnAbsentBound() throws {
-        let line = #"{"jsonrpc":"2.0","method":"hello","params":{"protocol":1,"app":"test"}}"#
+        let line = #"{"jsonrpc":"2.0","method":"hello","params":{"protocol":\#(danTermIpcProtocolVersion),"app":"test"}}"#
         let session = DanTermClientSession(transport: ScriptedTransport(lines: [line]))
 
         #expect(try session.handshake().livenessBound == nil)
@@ -241,6 +241,25 @@ struct ClientSessionTests {
             try DanTermClientSession(
                 transport: ScriptedTransport(lines: [hello(protocol: 9, app: "future")])
             ).handshake()
+        }
+    }
+
+    @Test("a peer speaking the previous protocol number is refused before any stream starts")
+    func previousProtocolNumberIsRefusedAtHello() {
+        // Intent: the number that was current before the pane-tape shape changed is now
+        //   refused, and refused during the handshake rather than when a record fails to
+        //   parse.
+        // Why it exists: a peer on the other side of the shape change reads a geometry
+        //   fact that no longer means what it thinks. Catching that at the first record
+        //   would mean the stream had already started and a replica had already presented.
+        // Scenario: an un-upgraded phone connects to an upgraded Mac.
+        let previous = danTermIpcProtocolVersion - 1
+        let session = DanTermClientSession(
+            transport: ScriptedTransport(lines: [hello(protocol: previous, app: "old")])
+        )
+
+        #expect(throws: DanTermClientError.unsupportedProtocol(previous)) {
+            try session.handshake()
         }
     }
 
@@ -301,7 +320,7 @@ struct ClientSessionTests {
 
     @Test("a line split across chunk boundaries is still one frame")
     func framingSpansChunks() throws {
-        let line = hello(protocol: 1, app: "test") + "\n"
+        let line = hello(protocol: danTermIpcProtocolVersion, app: "test") + "\n"
         let split = line.index(line.startIndex, offsetBy: 12)
         let transport = ScriptedTransport(chunks: [
             Data(line[line.startIndex..<split].utf8),

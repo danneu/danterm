@@ -261,7 +261,7 @@ private func helloLine() -> String {
     encoded(JsonRpcRequest(
         method: Methods.hello,
         params: IpcHello.params(
-            protocolVersion: 1,
+            protocolVersion: danTermIpcProtocolVersion,
             appVersion: "test",
             livenessBound: .standard
         )

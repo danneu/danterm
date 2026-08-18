@@ -137,7 +137,7 @@ struct CLICharacterizationTests {
     @Test("a hello naming an unknown protocol version is rejected by number")
     func unsupportedProtocolVersionIsRejected() throws {
         let run = try withScriptedEndpoint { connection in
-            writeLine(helloLine(protocolVersion: 2), to: connection)
+            writeLine(helloLine(protocolVersion: danTermIpcProtocolVersion + 1), to: connection)
             Darwin.close(connection)
         } run: { path in
             try runCLI(["ls"], socketPath: path)
@@ -145,7 +145,10 @@ struct CLICharacterizationTests {
 
         #expect(run.status == 1)
         #expect(run.stdout == "")
-        #expect(run.stderr == "danterm: unsupported DanTerm IPC protocol 2\n")
+        #expect(
+            run.stderr
+                == "danterm: unsupported DanTerm IPC protocol \(danTermIpcProtocolVersion + 1)\n"
+        )
     }
 
     @Test("connection refusals have distinct CLI messages")
@@ -219,7 +222,7 @@ struct CLICharacterizationTests {
             "revision": .number(7),
         ])
         let run = try withScriptedEndpoint { connection in
-            writeLine(helloLine(protocolVersion: 1), to: connection)
+            writeLine(helloLine(protocolVersion: danTermIpcProtocolVersion), to: connection)
             guard let request = readLine(from: connection),
                   let id = requestId(of: request)
             else { Darwin.close(connection); return }
@@ -237,7 +240,7 @@ struct CLICharacterizationTests {
     @Test("an error reply is printed on stderr with a failing exit status")
     func errorReplyIsReported() throws {
         let run = try withScriptedEndpoint { connection in
-            writeLine(helloLine(protocolVersion: 1), to: connection)
+            writeLine(helloLine(protocolVersion: danTermIpcProtocolVersion), to: connection)
             guard let request = readLine(from: connection),
                   let id = requestId(of: request)
             else { Darwin.close(connection); return }
@@ -261,7 +264,11 @@ struct CLICharacterizationTests {
             "format": .string("replay"),
             "reconstructible": .bool(false),
             "provenance": .object(["pane": .string(samplePaneId)]),
-            "initial": .object(["columns": .number(80), "rows": .number(24)]),
+            "initial": .object([
+                "columns": .number(80),
+                "rows": .number(24),
+                "pinned": .bool(false),
+            ]),
             "cursor": .object([
                 "recorderLifetimeId": .string("11111111-1111-4111-8111-111111111111"),
                 "sequence": .number(0),
@@ -283,7 +290,7 @@ struct CLICharacterizationTests {
         ])
 
         let run = try withScriptedEndpoint { connection in
-            writeLine(helloLine(protocolVersion: 1), to: connection)
+            writeLine(helloLine(protocolVersion: danTermIpcProtocolVersion), to: connection)
             guard let request = readLine(from: connection),
                   let id = requestId(of: request)
             else { Darwin.close(connection); return }

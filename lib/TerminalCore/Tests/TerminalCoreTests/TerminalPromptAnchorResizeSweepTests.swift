@@ -310,7 +310,7 @@ private func promptAnchorFeedSpans(
                   if case .resize = $0 { return true }
                   return false
               }),
-              case .resize(let columns, let rows) = nextResize
+              case .resize(let columns, let rows, _) = nextResize
         else { continue }
         spans.append(PromptAnchorFeedSpan(
             eventIndex: eventIndex,
@@ -448,7 +448,7 @@ private func replayPromptAnchorSweepCase(
         case .feed(let bytes):
             terminal.feed(bytes)
             drainPromptAnchorSweepEffects(from: &terminal)
-        case .resize(let columns, let rows):
+        case .resize(let columns, let rows, _):
             terminal.resize(columns: columns, rows: rows)
         case .checkpoint:
             break

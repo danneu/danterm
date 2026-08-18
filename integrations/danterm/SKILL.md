@@ -549,9 +549,10 @@ with `end`. Every line is independently valid JSON; one state transfer can use
 several lines.
 
 - `start` opens every stream:
-  `{"kind":"start","version":3,"capture":"dump"|"follow"|"snapshot",`
+  `{"kind":"start","version":4,"capture":"dump"|"follow"|"snapshot",`
   `"format":"replay"|"inspect","reconstructible":true|false,`
-  `"provenance":{...},"initial":{"columns":N,"rows":N},"cursor":{...}}`.
+  `"provenance":{...},"initial":{"columns":N,"rows":N,"pinned":true|false},`
+  `"cursor":{...}}`.
   `cursor` is absent while a state sync is pending. It appears only after all
   state bytes have arrived.
 - `gap` reports exact loss for a cursor from this recorder:
@@ -563,9 +564,12 @@ several lines.
   Timing sits above the event object. `byteOffset` and `byteLength` appear only
   on `feed` and `write` events; the offsets are zero-based and numbered
   independently per direction, so a feed offset counts feed bytes only.
+  A geometry event is
+  `{"type":"resize","columns":N,"rows":N,"pinned":true|false}`.
 - `sync` carries synthesized terminal bytes in ordered parts. The first part
   carries current geometry. The final part carries the continuation cursor:
-  `{"kind":"sync","part":1,"parts":N,"base64":"...","initial":{"columns":N,"rows":N}}`.
+  `{"kind":"sync","part":1,"parts":N,"base64":"...",`
+  `"initial":{"columns":N,"rows":N,"pinned":true|false}}`.
   Buffer every part and apply the bytes only after the final part arrives.
 - `end` states why the producer stopped:
   `{"kind":"end","reason":"dump-complete"|"snapshot-complete"|"pane-closed"|"stream-failed"}`.
@@ -583,6 +587,14 @@ ends that stream only -- other follows and requests on the same connection keep
 working, and the connection stays open until you close it. A follow that ends at
 EOF without an `end` record is still a valid capture of everything up to the
 moment the app stopped, which is what surviving a crash looks like.
+
+Geometry is one fact on this stream: the grid, plus whether that grid is pinned.
+Pinned means the grid is an override a `pane resize` set; unpinned means it follows
+the pane's rectangle. The start record, the first sync part, and every geometry
+event all state both, so a reader always knows the pane's current pinnedness
+without comparing grids. Clearing an override back to the grid the pane already
+ran at still produces one geometry event, with `pinned` false and the same
+columns and rows -- the child sees no size change and no cell content changes.
 
 A reconstructible stream injects a sync only when the requested position plus
 the delivered events cannot reconstruct exact pane state. A raw stream never

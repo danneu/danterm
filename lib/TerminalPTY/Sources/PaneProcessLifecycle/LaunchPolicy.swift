@@ -17,6 +17,28 @@ public struct TerminalDimensions: Equatable, Sendable {
     var isValid: Bool { columns > 0 && rows > 0 }
 }
 
+/// One submitted grid together with whether that grid is pinned.
+///
+/// Pinned means the grid is an explicit override rather than a projection of the pane's
+/// rectangle. The pair travels as one value from submission to the applied boundary, so a
+/// submission superseded on the way is superseded on the whole fact, and a pinnedness change
+/// at an unchanged grid is still a distinct submission. Nothing here reaches the child: the
+/// PTY is told `dimensions` and nothing else.
+public struct PaneGridSubmission: Equatable, Sendable {
+    /// The grid reported to the child and the terminal core.
+    public let dimensions: TerminalDimensions
+    /// Whether that grid is an override rather than a projection of the pane's rectangle.
+    public let pinned: Bool
+
+    /// Creates one complete geometry submission.
+    public init(dimensions: TerminalDimensions, pinned: Bool) {
+        self.dimensions = dimensions
+        self.pinned = pinned
+    }
+
+    var isValid: Bool { dimensions.isValid }
+}
+
 /// One ordered environment entry, used instead of a dictionary so spawn input is reproducible.
 public struct EnvironmentEntry: Equatable, Sendable {
     /// Variable name passed to the child.

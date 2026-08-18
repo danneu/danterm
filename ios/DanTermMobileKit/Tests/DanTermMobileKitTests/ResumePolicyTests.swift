@@ -103,6 +103,7 @@ private func storedCheckpoint() throws -> PaneReplicaCheckpoint {
         bytes: Array("resume".utf8),
         columns: 8,
         rows: 2,
+        pinned: false,
         cursor: PaneTapeCursor(
             recorderLifetimeId: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
             nextSequence: 12,

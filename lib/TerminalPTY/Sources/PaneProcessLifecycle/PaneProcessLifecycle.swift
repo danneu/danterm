@@ -86,7 +86,7 @@ public enum PaneProcessLifecycleEvent: Equatable, Sendable {
     /// clock, and travels with them so the eventual write can be attributed to it. Nil for
     /// bytes the pane owner produced itself, such as a terminal reply.
     case sendInput([UInt8], origin: UInt64?, submissionId: PaneInputSubmissionId)
-    case resize(TerminalDimensions)
+    case resize(PaneGridSubmission)
     case output([UInt8])
     case outputEOF
     case childExited(ChildExitStatus)
@@ -104,7 +104,7 @@ public enum PaneProcessLifecycleCommand: Equatable, Sendable {
     case writeInput([UInt8], origin: UInt64?, submissionId: PaneInputSubmissionId?)
     /// Resolves a submission rejected by lifecycle policy before it reaches descriptor IO.
     case completeInput(PaneInputSubmissionId, PaneInputSubmissionResult)
-    case resize(TerminalDimensions)
+    case resize(PaneGridSubmission)
     case deliverOutput([UInt8])
     case drainOutput
     case closeMaster
@@ -191,7 +191,7 @@ public struct PaneProcessLifecycleReducer: Sendable {
                 let spawnContext = SpawnContext(
                     plan: plan,
                     attemptIndex: 0,
-                    pendingDimensions: nil,
+                    pendingGrid: nil,
                     pendingInput: pendingInput,
                     pendingInputByteCount: pendingInputByteCount
                 )
@@ -235,8 +235,8 @@ public struct PaneProcessLifecycleReducer: Sendable {
         case .spawnSucceeded:
             storage = .running(outputEOF: false)
             var commands: [PaneProcessLifecycleCommand] = [.activateIO]
-            if let dimensions = context.pendingDimensions {
-                commands.append(.resize(dimensions))
+            if let grid = context.pendingGrid {
+                commands.append(.resize(grid))
             }
             commands += context.pendingInput.map {
                 .writeInput($0.bytes, origin: $0.origin, submissionId: $0.id)
@@ -260,9 +260,9 @@ public struct PaneProcessLifecycleReducer: Sendable {
             let failure = LaunchFailureReason.systemError(code)
             return rejectPendingInput(context, because: .launchFailed(failure))
                 + [.report(.launchFailed(failure)), .finishTeardown]
-        case .resize(let dimensions) where dimensions.isValid:
+        case .resize(let grid) where grid.isValid:
             var next = context
-            next.pendingDimensions = dimensions
+            next.pendingGrid = grid
             storage = .spawning(next)
             return []
         case .sendInput(let bytes, let origin, let submissionId):
@@ -311,8 +311,8 @@ public struct PaneProcessLifecycleReducer: Sendable {
                 return [.completeInput(submissionId, .delivered)]
             }
             return [.writeInput(bytes, origin: origin, submissionId: submissionId)]
-        case .resize(let dimensions) where dimensions.isValid:
-            return [.resize(dimensions)]
+        case .resize(let grid) where grid.isValid:
+            return [.resize(grid)]
         case .output(let bytes) where !outputEOF:
             return [.deliverOutput(bytes)]
         case .outputEOF:
@@ -434,7 +434,7 @@ public struct PaneProcessLifecycleReducer: Sendable {
 private struct SpawnContext: Sendable {
     let plan: ResolvedLaunchPlan
     var attemptIndex: Int
-    var pendingDimensions: TerminalDimensions?
+    var pendingGrid: PaneGridSubmission?
     var pendingInput: [PendingInputSubmission]
     var pendingInputByteCount: Int
 }

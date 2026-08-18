@@ -83,6 +83,10 @@ public struct TerminalPaneLaunchConfiguration: Equatable, Sendable {
     public let launchInput: LaunchPolicyInput
     /// Program version shared by the child environment and terminal query replies.
     public let terminalProgramVersion: String
+    /// Whether the pane's launch geometry is an override rather than a slot-derived grid.
+    /// A pane is born pinned only when its request named a grid, so the recorder's birth
+    /// geometry states the same fact its first recorded resize would.
+    public let initialGridPinned: Bool
 
     /// Geometry used to construct the terminal and PTY owner. Derived rather than stored:
     /// `TerminalPTYHost.start` rejects a launch whose input geometry differs from the host's,
@@ -92,10 +96,12 @@ public struct TerminalPaneLaunchConfiguration: Equatable, Sendable {
     /// Creates the coupled boundary consumed by the session controller.
     public init(
         launchInput: LaunchPolicyInput,
-        terminalProgramVersion: String
+        terminalProgramVersion: String,
+        initialGridPinned: Bool = false
     ) {
         self.launchInput = launchInput
         self.terminalProgramVersion = terminalProgramVersion
+        self.initialGridPinned = initialGridPinned
     }
 }
 
@@ -139,6 +145,7 @@ public func assembleTerminalPaneLaunch(
             launchCommand: request.launchCommand,
             initialDimensions: dimensions
         ),
-        terminalProgramVersion: facts.terminalProgramVersion
+        terminalProgramVersion: facts.terminalProgramVersion,
+        initialGridPinned: request.initialDimensions != nil
     )
 }

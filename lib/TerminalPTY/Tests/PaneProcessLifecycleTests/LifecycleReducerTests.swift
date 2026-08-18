@@ -27,8 +27,8 @@ import Testing
                 submissionId: PaneInputSubmissionId(rawValue: 1)
             )]
         )
-        #expect(reducer.handle(.resize(TerminalDimensions(columns: 120, rows: 50))) == [
-            .resize(TerminalDimensions(columns: 120, rows: 50)),
+        #expect(reducer.handle(.resize(PaneGridSubmission(dimensions: .init(columns: 120, rows: 50), pinned: false))) == [
+            .resize(PaneGridSubmission(dimensions: .init(columns: 120, rows: 50), pinned: false)),
         ])
         #expect(reducer.handle(.output([0x63, 0x64])) == [.deliverOutput([0x63, 0x64])])
         #expect(reducer.phase == .running)
@@ -343,7 +343,7 @@ import Testing
         let events: [PaneProcessLifecycleEvent] = [
             .start(lifecycleInput()), .spawnSucceeded,
             .spawnFailed(.systemError(1)),
-            .resize(TerminalDimensions(columns: 1, rows: 1)), .output([2]),
+            .resize(PaneGridSubmission(dimensions: .init(columns: 1, rows: 1), pinned: false)), .output([2]),
             .outputEOF, .childExited(.exited(0)), .requestClose,
             .masterClosed, .graceElapsed(.hangup), .sessionDrained,
         ]

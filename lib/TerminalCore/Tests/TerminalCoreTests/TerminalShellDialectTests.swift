@@ -65,7 +65,7 @@ struct TerminalShellDialectTests {
         context: String
     ) throws {
         switch event {
-        case .resize(let columns, let rows):
+        case .resize(let columns, let rows, _):
             terminal.resize(columns: columns, rows: rows)
         case .feed(let bytes):
             terminal.feed(overriding(redrawOverride, in: bytes))

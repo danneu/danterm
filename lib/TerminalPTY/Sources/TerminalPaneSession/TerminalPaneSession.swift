@@ -250,7 +250,9 @@ public final class TerminalPaneSessionController {
     /// controller is what keeps the retained rows and `pendingDamage` in lineage.
     private var framePlanner = PaneFramePlanner()
     private var pendingDamage = TerminalDamage.none
-    private var lastSubmittedDimensions: TerminalDimensions
+    /// The whole geometry fact last submitted, so a pinnedness change at an unchanged grid
+    /// is still a distinct submission rather than one this guard swallows.
+    private var lastSubmittedGrid: PaneGridSubmission
     private var isVisible: Bool
     private var isRenderingAvailable = true
     private var isTornDown = false
@@ -372,6 +374,7 @@ public final class TerminalPaneSessionController {
     ) throws -> TerminalPTYHost {
         try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
+            initialGridPinned: configuration.initialGridPinned,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
             programVersion: configuration.terminalProgramVersion,
@@ -397,6 +400,7 @@ public final class TerminalPaneSessionController {
                 captureTransitions: false
             ),
             launchInput: configuration.launchInput,
+            initialGridPinned: configuration.initialGridPinned,
             isVisible: isVisible,
             theme: theme
         )
@@ -421,6 +425,7 @@ public final class TerminalPaneSessionController {
                 captureTransitions: captureTransitions
             ),
             launchInput: configuration.launchInput,
+            initialGridPinned: configuration.initialGridPinned,
             isVisible: isVisible,
             theme: theme
         )
@@ -443,6 +448,7 @@ public final class TerminalPaneSessionController {
                 captureTransitions: captureTransitions
             ),
             launchInput: configuration.launchInput,
+            initialGridPinned: configuration.initialGridPinned,
             isVisible: isVisible,
             theme: theme
         )
@@ -452,6 +458,7 @@ public final class TerminalPaneSessionController {
     init(
         host: TerminalPTYHost,
         launchInput: LaunchPolicyInput,
+        initialGridPinned: Bool = false,
         isVisible: Bool = true,
         theme: RenderTheme = .dark,
         fenceClock: @escaping () -> UInt64 = {
@@ -490,7 +497,10 @@ public final class TerminalPaneSessionController {
         lastPrimaryHistoryGeneration = initialFrameState.terminal.primaryHistoryGeneration
         initialDimensions = launchInput.initialDimensions
         pendingDamage = initialFrameState.damage
-        lastSubmittedDimensions = launchInput.initialDimensions
+        lastSubmittedGrid = .init(
+            dimensions: launchInput.initialDimensions,
+            pinned: initialGridPinned
+        )
         self.isVisible = isVisible
         lastEmittedViewportState = viewportState
         lastEmittedSearchStatus = cachedTerminal.searchStatus
@@ -750,12 +760,17 @@ public final class TerminalPaneSessionController {
         }
     }
 
-    /// Submits each distinct valid grid once, preserving its order relative to input.
-    public func setGridDimensions(_ dimensions: TerminalDimensions) {
-        guard isTornDown == false, dimensions != lastSubmittedDimensions else { return }
+    /// Submits each distinct valid geometry fact once, preserving its order relative to input.
+    ///
+    /// `pinned` is part of the fact, not a hint beside it: clearing an override back to the
+    /// grid it already ran at changes nothing a rectangle can see, and swallowing it here
+    /// would leave every replica reporting the pane as claimed for as long as the grid held.
+    public func setGridDimensions(_ dimensions: TerminalDimensions, pinned: Bool) {
+        let submission = PaneGridSubmission(dimensions: dimensions, pinned: pinned)
+        guard isTornDown == false, submission != lastSubmittedGrid else { return }
         guard dimensions.columns >= 2, dimensions.rows >= 1 else { return }
-        lastSubmittedDimensions = dimensions
-        host.resize(dimensions)
+        lastSubmittedGrid = submission
+        host.resize(submission)
     }
 
     /// Gates planning only; revealing accumulated changes emits one complete current frame.
@@ -1048,7 +1063,8 @@ public final class TerminalPaneSessionController {
             case .paste(let text): .paste(text)
             case .focus(let focused): .focus(focused)
             case .mouse(let event): .mouse(neutralMouseEvent(for: event))
-            case .resize(let dimensions): .resize(columns: dimensions.columns, rows: dimensions.rows)
+            case .resize(let grid):
+                .resize(columns: grid.dimensions.columns, rows: grid.dimensions.rows, pinned: grid.pinned)
             case .scrollByRows(let rows): .viewport(.byRows(rows))
             case .scrollToTopRow(let row): .viewport(.toTopRow(row))
             case .scrollToBottom: .viewport(.toBottom)

@@ -17,9 +17,24 @@ extension PaneTapeCursor {
 }
 
 /// Keeps stream geometry independent from the terminal engine's dimension type.
+///
+/// Geometry is one two-part fact on this stream: the grid, plus whether that grid is pinned
+/// -- an explicit override rather than a projection of the pane's rectangle. Every
+/// geometry-bearing shape states both, so a reader can never hold half of a transition.
 struct PaneTapeDimensions: Equatable, Sendable {
     let columns: Int
     let rows: Int
+    let pinned: Bool
+}
+
+/// States one pane's geometry whole, so the start record and the sync payload cannot
+/// disagree about the shape they publish it in.
+func paneTapeGeometryJSON(_ geometry: PaneTapeDimensions) -> JSONValue {
+    .object([
+        "columns": .number(Double(geometry.columns)),
+        "rows": .number(Double(geometry.rows)),
+        "pinned": .bool(geometry.pinned),
+    ])
 }
 
 /// Locates one event's bytes inside its own direction's lifetime byte stream.
@@ -83,10 +98,7 @@ func makePaneTapeStart(
         "capture": .string(capture.rawValue),
         "format": .string(PaneTapeFormat.replay.rawValue),
         "provenance": provenance,
-        "initial": .object([
-            "columns": .number(Double(initial.columns)),
-            "rows": .number(Double(initial.rows)),
-        ]),
+        "initial": paneTapeGeometryJSON(initial),
     ]
     if publishesCursor {
         // The baseline every later offset is read against. Without it a stream that starts

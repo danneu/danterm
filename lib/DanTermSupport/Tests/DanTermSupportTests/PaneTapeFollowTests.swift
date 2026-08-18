@@ -20,7 +20,7 @@ struct PaneTapeFollowTests {
             start: makePaneTapeStart(
                 capture: .dump,
                 provenance: .object(["source": .string("danterm-live-capture")]),
-                initial: .init(columns: 80, rows: 24),
+                initial: .init(columns: 80, rows: 24, pinned: false),
                 cursor: .beginning
             ),
             snapshot: PaneTapeSnapshot(
@@ -73,13 +73,13 @@ struct PaneTapeFollowTests {
         let backlog = makePaneTapeStart(
             capture: .dump,
             provenance: .object(["source": .string("danterm-live-capture")]),
-            initial: .init(columns: 120, rows: 40),
+            initial: .init(columns: 120, rows: 40, pinned: false),
             cursor: .beginning
         )
 
         #expect(backlog.record == .object([
             "kind": .string("start"),
-            "version": .number(3),
+            "version": .number(4),
             "capture": .string("dump"),
             "format": .string("replay"),
             "reconstructible": .bool(false),
@@ -87,6 +87,7 @@ struct PaneTapeFollowTests {
             "initial": .object([
                 "columns": .number(120),
                 "rows": .number(40),
+                "pinned": .bool(false),
             ]),
             "cursor": .object([
                 "recorderLifetimeId": .string(PaneTapeCursor.beginning.recorderLifetimeId.uuidString),
@@ -106,12 +107,13 @@ struct PaneTapeFollowTests {
         let fromNow = makePaneTapeStart(
             capture: .follow,
             provenance: .object(["source": .string("danterm-live-capture")]),
-            initial: .init(columns: 100, rows: 30),
+            initial: .init(columns: 100, rows: 30, pinned: false),
             cursor: tailCursor
         )
         #expect(fromNow.record["initial"] == .object([
             "columns": .number(100),
             "rows": .number(30),
+            "pinned": .bool(false),
         ]))
         #expect(fromNow.cursor == tailCursor)
     }
@@ -134,11 +136,11 @@ struct PaneTapeFollowTests {
         let start = makePaneTapeStart(
             capture: .follow,
             provenance: .object(["source": .string("danterm-live-capture")]),
-            initial: .init(columns: 100, rows: 30),
+            initial: .init(columns: 100, rows: 30, pinned: false),
             cursor: cursor
         )
 
-        #expect(start.record["version"] == .number(3))
+        #expect(start.record["version"] == .number(4))
         #expect(start.record["capture"] == .string("follow"))
         #expect(start.record["format"] == .string("replay"))
         #expect(start.record["cursor"] == .object([

@@ -10,7 +10,7 @@ struct TerminalFlightRecorderTests {
     @Test("follow notices stay coalesced until their cursor snapshot rearms them")
     func followNoticesCoalesceUntilSnapshot() {
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -31,7 +31,7 @@ struct TerminalFlightRecorderTests {
             from: .beginning
         )
         #expect(first?.events.map(\.sequence) == [0, 1])
-        recorder.record(.resize(columns: 100, rows: 30))
+        recorder.record(.resize(columns: 100, rows: 30, pinned: false))
         recorder.record(.feed([3]))
         #expect(noticeCount.withLock { $0 } == 2)
 
@@ -45,7 +45,7 @@ struct TerminalFlightRecorderTests {
     @Test("follow registration signals backlog and removal stops later notices")
     func followNoticeBacklogAndRemoval() {
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -73,19 +73,19 @@ struct TerminalFlightRecorderTests {
     func retainsOrderedTimedEvents() {
         let clock = TestFlightClock([100, 112, 111, 140])
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
             now: clock.now
         )
 
         recorder.record(.feed([0x41, 0x42]))
-        recorder.record(.resize(columns: 100, rows: 30))
+        recorder.record(.resize(columns: 100, rows: 30, pinned: false))
         recorder.record(.feed([0x43]))
 
         let snapshot = recorder.capture().snapshot
         #expect(snapshot.events.map(\.event) == [
             .feed([0x41, 0x42]),
-            .resize(columns: 100, rows: 30),
+            .resize(columns: 100, rows: 30, pinned: false),
             .feed([0x43]),
         ])
         #expect(snapshot.events.map(\.elapsedNanoseconds) == [12, 12, 40])
@@ -101,7 +101,7 @@ struct TerminalFlightRecorderTests {
         //   zero, would both read as a measurement the tape never made.
         let clock = TestFlightClock([100, 140, 150])
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
             now: clock.now
         )
@@ -122,7 +122,7 @@ struct TerminalFlightRecorderTests {
         //   created before the pane's recorder was constructed.
         let clock = TestFlightClock([100, 140])
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
             now: clock.now
         )
@@ -135,7 +135,7 @@ struct TerminalFlightRecorderTests {
     @Test("payload budget evicts the minimal oldest whole-event prefix")
     func payloadBudgetEvictsMinimalPrefix() {
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 134, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -156,7 +156,7 @@ struct TerminalFlightRecorderTests {
         // Why it exists: retention charges payload bytes per event, so an event type that
         //   carried bytes for free would let a paste-heavy pane hold far more than its budget.
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 134, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -173,7 +173,7 @@ struct TerminalFlightRecorderTests {
     @Test("per-event overhead bounds many tiny chunks")
     func eventOverheadBoundsTinyChunks() {
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 130, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -191,18 +191,18 @@ struct TerminalFlightRecorderTests {
     @Test("event-count cap evicts before the byte budget")
     func eventCountCapEvictsOldest() {
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 2, eventOverheadBytes: 64),
             now: { 0 }
         )
 
         recorder.record(.feed([1]))
-        recorder.record(.resize(columns: 90, rows: 25))
+        recorder.record(.resize(columns: 90, rows: 25, pinned: false))
         recorder.record(.feed([2]))
 
         let snapshot = recorder.capture().snapshot
         #expect(snapshot.events.map(\.event) == [
-            .resize(columns: 90, rows: 25),
+            .resize(columns: 90, rows: 25, pinned: false),
             .feed([2]),
         ])
         #expect(snapshot.droppedEventCount == 1)
@@ -219,14 +219,14 @@ struct TerminalFlightRecorderTests {
         // Scenario: a pane interleaves child output, an input write, a resize, an empty feed,
         //   another write, and more output.
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 16, eventOverheadBytes: 8),
             now: { 0 }
         )
 
         recorder.record(.feed([1, 2, 3]))
         recorder.record(.write([4, 5]))
-        recorder.record(.resize(columns: 90, rows: 25))
+        recorder.record(.resize(columns: 90, rows: 25, pinned: false))
         recorder.record(.feed([]))
         recorder.record(.write([6]))
         recorder.record(.feed([7, 8]))
@@ -253,7 +253,7 @@ struct TerminalFlightRecorderTests {
         // Scenario: a slow follower that consumed the first output chunk and the first input
         //   write asks again after eviction dropped the two events that came next.
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 2, eventOverheadBytes: 8),
             now: { 0 }
         )
@@ -290,7 +290,7 @@ struct TerminalFlightRecorderTests {
     @Test("cursor snapshots retain stable lifetime sequences across eviction")
     func cursorSnapshotsRetainStableSequences() {
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 2, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -305,7 +305,7 @@ struct TerminalFlightRecorderTests {
             writeBytesBeforeNextSequence: 0
         ))
         recorder.record(.feed([4, 5, 6, 7]))
-        recorder.record(.resize(columns: 100, rows: 30))
+        recorder.record(.resize(columns: 100, rows: 30, pinned: false))
 
         let retained = recorder.cursorSnapshot(from: delivered.nextCursor)
         let truncatedBacklog = recorder.cursorSnapshot(from: .beginning)
@@ -335,7 +335,7 @@ struct TerminalFlightRecorderTests {
     @Test("cursor gap counts only undelivered events evicted after an earlier batch")
     func cursorGapExcludesPreviouslyDeliveredEvictions() {
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 2, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -365,7 +365,7 @@ struct TerminalFlightRecorderTests {
         //   index-backed storage must translate into a buffer-relative position.
         // Scenario: a polling reader resumes from sequence 3 after sequences 0 and 1 were evicted.
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 3, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -392,7 +392,7 @@ struct TerminalFlightRecorderTests {
         // Why it exists: pins down the offset-at-end boundary for index-backed recorder storage.
         // Scenario: a polling reader asks again after consuming all five lifetime events.
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 3, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -421,7 +421,7 @@ struct TerminalFlightRecorderTests {
         let secondLifetime = UUID()
         let oldRecorder = TerminalFlightRecorder(
             lifetimeId: firstLifetime,
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -433,7 +433,7 @@ struct TerminalFlightRecorderTests {
         let aboveNewHead = oldRecorder.capture().snapshot.nextCursor
         let newRecorder = TerminalFlightRecorder(
             lifetimeId: secondLifetime,
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 1, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -453,7 +453,7 @@ struct TerminalFlightRecorderTests {
         let lifetimeId = UUID()
         let recorder = TerminalFlightRecorder(
             lifetimeId: lifetimeId,
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -489,7 +489,7 @@ struct TerminalFlightRecorderTests {
         // Why it exists: pins down the empty-buffer fallback used by snapshots and invariants.
         // Scenario: a pane configured with no recording budget receives two feed events.
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 0, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
@@ -512,7 +512,7 @@ struct TerminalFlightRecorderTests {
         // Why it exists: pins down ordering across circular-buffer wraparound after repeated eviction.
         // Scenario: a busy pane records three times the production event limit before a reader polls.
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .production,
             now: { 0 }
         )
@@ -541,19 +541,19 @@ struct TerminalFlightRecorderTests {
     @Test("from-now origin pairs current geometry with the next event cursor")
     func fromNowOriginIsAtomicRecorderState() {
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
         recorder.record(.feed([1, 2]))
         recorder.record(.write([9, 10, 11]))
-        recorder.record(.resize(columns: 100, rows: 30))
+        recorder.record(.resize(columns: 100, rows: 30, pinned: false))
 
         let origin = recorder.fromNowOrigin()
         recorder.record(.feed([3]))
         let snapshot = recorder.cursorSnapshot(from: origin.cursor)
 
-        #expect(origin.initial == .init(columns: 100, rows: 30))
+        #expect(origin.initial == .init(columns: 100, rows: 30, pinned: false))
         // Both watermarks ride the origin. A tail-only stream that lost the write watermark
         // would report every write byte recorded before it began as loss on its first gap.
         #expect(origin.cursor == .init(
@@ -571,14 +571,14 @@ struct TerminalFlightRecorderTests {
     @Test("backlog origin pairs birth geometry with the beginning cursor")
     func backlogOriginUsesBirthGeometry() {
         let recorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
-        recorder.record(.resize(columns: 100, rows: 30))
+        recorder.record(.resize(columns: 100, rows: 30, pinned: false))
 
         let origin = recorder.backlogOrigin()
-        #expect(origin.initial == .init(columns: 80, rows: 24))
+        #expect(origin.initial == .init(columns: 80, rows: 24, pinned: false))
         #expect(origin.cursor.nextSequence == 0)
         #expect(origin.cursor.feedBytesBeforeNextSequence == 0)
         #expect(origin.cursor.writeBytesBeforeNextSequence == 0)
@@ -622,7 +622,7 @@ struct TerminalFlightRecorderTests {
     @Test("no single record from a production-bounded recorder exceeds one JSON-RPC line")
     func productionBoundsFitIPCLine() throws {
         let bulkRecorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .production,
             now: { 0 }
         )
@@ -632,7 +632,7 @@ struct TerminalFlightRecorderTests {
         // can produce. That is the costliest per-event encoding the schema admits, so a ring
         // of output events of the same size fits wherever this one does.
         let tinyRecorder = TerminalFlightRecorder(
-            initialDimensions: .init(columns: 80, rows: 24),
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .production,
             now: { 0 }
         )

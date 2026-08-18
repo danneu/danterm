@@ -285,7 +285,7 @@ struct NeutralTerminalRecordingTests {
             initial: NeutralTerminalDimensions(columns: 8, rows: 2),
             events: [
                 .feed(Array("before".utf8)),
-                .resize(columns: 12, rows: 3),
+                .resize(columns: 12, rows: 3, pinned: false),
                 .feed(Array("\nafter".utf8)),
             ]
         )
@@ -516,7 +516,7 @@ struct NeutralTerminalRecordingTests {
 
         #expect(recording.events == [
             .feed(Array("café".utf8)),
-            .resize(columns: 10, rows: 3),
+            .resize(columns: 10, rows: 3, pinned: false),
         ])
         #expect(try recording.replay().geometry.columns == 10)
     }

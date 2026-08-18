@@ -25,7 +25,7 @@ struct PaneTapeRoundTripTests {
             let start = makePaneTapeStart(
                 capture: capture,
                 provenance: .object(["pane": .string("p")]),
-                initial: PaneTapeDimensions(columns: 120, rows: 40),
+                initial: PaneTapeDimensions(columns: 120, rows: 40, pinned: true),
                 cursor: cursor
             )
 
@@ -38,6 +38,7 @@ struct PaneTapeRoundTripTests {
             #expect(decoded.format == .replay)
             #expect(decoded.columns == 120)
             #expect(decoded.rows == 40)
+            #expect(decoded.pinned)
             #expect(decoded.cursor == cursor)
             #expect(decoded.reconstructible == false)
             #expect(decoded.nextSequence == cursor.nextSequence)
@@ -118,7 +119,7 @@ struct PaneTapeRoundTripTests {
             start: makePaneTapeStart(
                 capture: .dump,
                 provenance: .null,
-                initial: PaneTapeDimensions(columns: 80, rows: 24),
+                initial: PaneTapeDimensions(columns: 80, rows: 24, pinned: false),
                 cursor: .beginning
             ),
             snapshot: PaneTapeSnapshot(
@@ -144,5 +145,80 @@ struct PaneTapeRoundTripTests {
         if case .gap? = decoded.first ?? nil {} else { Issue.record("a dump leads with its gap") }
         if case .event? = decoded[1] {} else { Issue.record("the event follows the gap") }
         #expect(decoded.last == .end(reason: .dumpComplete))
+    }
+
+    @Test("a state sync round-trips the pane's pinnedness with its grid")
+    func syncRoundTripsPinnedness() {
+        // Intent: the pinnedness the producer puts on a sync's first part is the pinnedness
+        //   the reader's assembler publishes when the transfer completes.
+        // Why it exists: a sync replaces a replica's state outright, so it is the only
+        //   record that can restate geometry after a gap. Dropping the bit here would leave
+        //   a repaired replica reporting the pane's claim wrongly until its next resize.
+        // Scenario: a followed stream loses events on a claimed pane and is repaired.
+        let evicted = PaneTapeSnapshot(
+            events: [],
+            droppedEventCount: 2,
+            droppedFeedBytes: 3,
+            droppedWriteBytes: 0,
+            nextCursor: PaneTapeCursor(
+                recorderLifetimeId: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!,
+                nextSequence: 9,
+                feedBytesBeforeNextSequence: 3,
+                writeBytesBeforeNextSequence: 0
+            )
+        )
+        for pinned in [true, false] {
+            let batch = makePaneTapeContinuation(
+                mode: .reconstructible,
+                fence: .init(
+                    snapshot: evicted,
+                    synchronization: .init(
+                        bytes: Array("state".utf8),
+                        dimensions: .init(columns: 62, rows: 19, pinned: pinned),
+                        cursor: evicted.nextCursor
+                    )
+                )
+            )
+
+            var assembler = PaneTapeSyncAssembler()
+            var assembled: DanTermClient.PaneTapeStateSynchronization?
+            for record in batch.records {
+                guard case .sync(let part)? = decodePaneTapeRecord(record) else { continue }
+                assembled = assembler.ingest(part) ?? assembled
+            }
+
+            #expect(assembled?.columns == 62)
+            #expect(assembled?.rows == 19)
+            #expect(assembled?.pinned == pinned)
+        }
+    }
+
+    @Test("the served protocol number is the one the shipped client speaks")
+    func servedProtocolNumberMatchesTheClient() {
+        // Intent: the number the Mac announces at hello is exactly the number this
+        //   client refuses every other value in favour of.
+        // Why it exists: the two ends used to name the number independently -- a literal
+        //   at the server's write site, a constant in the client -- so bumping one and
+        //   forgetting the other would lock every peer out with no test failing.
+        // Scenario: the pane-tape record shape changed, so the number had to move.
+        #expect(
+            IpcHello.params(
+                protocolVersion: danTermIpcProtocolVersion,
+                appVersion: "test",
+                livenessBound: .standard
+            )["protocol"] == .number(Double(DanTermClientSession.supportedProtocolVersion))
+        )
+    }
+
+    @Test("the tape stream version moved with the geometry shape")
+    func streamVersionStatesTheGeometryShape() {
+        // Intent: the version a start record publishes is the one that first carried
+        //   pinnedness in its geometry.
+        // Why it exists: readers key their expectations off this number. Leaving it at the
+        //   value that named grid-only geometry would let a reader accept a stream whose
+        //   shape it does not know, and the protocol number's refusal is the only other
+        //   guard.
+        // Scenario: a reader deciding whether it understands the stream it just opened.
+        #expect(paneTapeStreamVersion == 4)
     }
 }

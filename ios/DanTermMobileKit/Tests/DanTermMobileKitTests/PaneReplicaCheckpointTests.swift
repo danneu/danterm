@@ -219,6 +219,7 @@ struct PaneReplicaCheckpointTests {
             bytes: Array("new".utf8),
             columns: 8,
             rows: 2,
+            pinned: false,
             cursor: nil
         )))
         #expect(replica.checkpoint(for: paneId) == exact)
@@ -334,6 +335,7 @@ struct PaneReplicaCheckpointTests {
             format: .replay,
             columns: 8,
             rows: 2,
+            pinned: false,
             cursor: foreign,
             reconstructible: true
         )))
@@ -345,6 +347,7 @@ struct PaneReplicaCheckpointTests {
             bytes: Array("fresh".utf8),
             columns: 8,
             rows: 2,
+            pinned: false,
             cursor: foreign
         )))
         #expect(restored.terminal?.viewportText == "fresh")
@@ -366,6 +369,7 @@ private func checkpointReplica(
         bytes: bytes,
         columns: columns,
         rows: rows,
+        pinned: false,
         cursor: cursor
     )))
     return replica

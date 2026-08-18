@@ -92,7 +92,7 @@ struct TerminalFixtureTests {
                 switch event {
                 case .feed(let bytes):
                     terminal.feed(bytes)
-                case .resize(let columns, let rows):
+                case .resize(let columns, let rows, _):
                     terminal.resize(columns: columns, rows: rows)
                 case .viewport(let navigation):
                     switch navigation {
@@ -613,7 +613,7 @@ struct TerminalFixtureTests {
                     terminal: &terminal,
                     interactionState: &interactionState
                 ))
-            case .resize(let columns, let rows):
+            case .resize(let columns, let rows, _):
                 terminal.resize(columns: columns, rows: rows)
             case .viewport(let navigation):
                 switch navigation {

@@ -154,7 +154,7 @@ struct PaneTapeStreamStateTests {
             requested: streamFence.requested,
             synchronization: .init(
                 bytes: bytes,
-                dimensions: .init(columns: 179, rows: 66),
+                dimensions: .init(columns: 179, rows: 66, pinned: false),
                 cursor: streamFence.synchronization.cursor
             )
         )
@@ -171,6 +171,7 @@ struct PaneTapeStreamStateTests {
         #expect(records.first?["initial"] == .object([
             "columns": .number(179),
             "rows": .number(66),
+            "pinned": .bool(false),
         ]))
         #expect(try synchronizationBytes(records) == bytes)
         for record in records {
@@ -187,12 +188,63 @@ struct PaneTapeStreamStateTests {
         }
     }
 
+    @Test("both geometry-bearing opening shapes state the pane's pinnedness")
+    func openingShapesStatePinnedness() {
+        // Intent: whichever opening a request selects -- retained events behind a start
+        //   record, or an injected state sync -- the geometry it publishes carries the
+        //   pinned bit beside its columns and rows.
+        // Why it exists: a replica learns pinnedness from the stream and nowhere else. An
+        //   opening that stated a grid without it would leave the replica guessing until
+        //   the pane's next resize, which may never come.
+        // Scenario: one pane running at a claimed grid, opened from the beginning and
+        //   from now.
+        var pinnedFence = fence(retainedSequences: [0, 1])
+        pinnedFence = PaneTapeStreamFence(
+            origin: .init(
+                initial: .init(columns: 80, rows: 24, pinned: true),
+                cursor: pinnedFence.origin.cursor
+            ),
+            retained: pinnedFence.retained,
+            requested: pinnedFence.requested,
+            synchronization: .init(
+                bytes: Array("state".utf8),
+                dimensions: .init(columns: 100, rows: 30, pinned: true),
+                cursor: pinnedFence.synchronization.cursor
+            )
+        )
+
+        let fromBeginning = makePaneTapeOpening(
+            request: .init(capture: .dump, mode: .raw, position: .beginning),
+            fence: pinnedFence
+        )
+        #expect(fromBeginning.start.record["initial"] == .object([
+            "columns": .number(80),
+            "rows": .number(24),
+            "pinned": .bool(true),
+        ]))
+
+        let fromNow = makePaneTapeOpening(
+            request: .init(capture: .follow, mode: .reconstructible, position: .now),
+            fence: pinnedFence
+        )
+        #expect(fromNow.start.record["initial"] == .object([
+            "columns": .number(100),
+            "rows": .number(30),
+            "pinned": .bool(true),
+        ]))
+        #expect(fromNow.records.first?["initial"] == .object([
+            "columns": .number(100),
+            "rows": .number(30),
+            "pinned": .bool(true),
+        ]))
+    }
+
     @Test("a reconstructible continuation repairs eviction while a raw continuation reports it")
     func continuationDependsOnMode() {
         let evicted = snapshot(sequences: [4, 5], nextSequence: 6, droppedEventCount: 4)
         let synchronization = PaneTapeStateSynchronization(
             bytes: Array("state".utf8),
-            dimensions: .init(columns: 100, rows: 30),
+            dimensions: .init(columns: 100, rows: 30, pinned: false),
             cursor: evicted.nextCursor
         )
 
@@ -226,14 +278,14 @@ struct PaneTapeStreamStateTests {
         )
         return PaneTapeStreamFence(
             origin: .init(
-                initial: .init(columns: 80, rows: 24),
+                initial: .init(columns: 80, rows: 24, pinned: false),
                 cursor: cursor(sequence: 0, feed: 0)
             ),
             retained: retained,
             requested: requested ?? .placed(retained),
             synchronization: .init(
                 bytes: Array("state".utf8),
-                dimensions: .init(columns: 100, rows: 30),
+                dimensions: .init(columns: 100, rows: 30, pinned: false),
                 cursor: retained.nextCursor
             )
         )

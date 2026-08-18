@@ -94,7 +94,7 @@ package enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case paste(String)
     case focus(Bool)
     case mouse(TerminalPointerEvent)
-    case resize(TerminalDimensions)
+    case resize(PaneGridSubmission)
     case scrollByRows(Int)
     case scrollToTopRow(Int)
     case scrollToBottom
@@ -165,7 +165,7 @@ package struct TerminalPTYProductionFenceResult<Payload: Sendable>: Sendable {
 /// Test-support view of input and resize effects applied on the shared owner queue.
 enum TerminalPTYSubmittedTransition: Equatable, Sendable {
     case input([UInt8])
-    case resize(TerminalDimensions)
+    case resize(PaneGridSubmission)
 }
 
 /// Groups passive lifecycle observations so the resource snapshot separates
@@ -214,14 +214,21 @@ public struct TerminalFlightRecordingStateSynchronization: Equatable, Sendable {
     /// Terminal-protocol bytes and the geometry needed to replay them.
     public let state: TerminalStateSynchronization
 
+    /// The same grid `state` carries, stated with the pinnedness the recorder held at the
+    /// pairing's fence. A sync payload replaces a replica outright, so it must restate the
+    /// whole geometry fact rather than leave pinnedness to the events around it.
+    public let geometry: NeutralTerminalGeometry
+
     /// Recorder position taken in the same owner turn as `state`.
     public let cursor: TerminalFlightRecordingCursor
 
     fileprivate init(
         state: TerminalStateSynchronization,
+        pinned: Bool,
         cursor: TerminalFlightRecordingCursor
     ) {
         self.state = state
+        geometry = .init(columns: state.columns, rows: state.rows, pinned: pinned)
         self.cursor = cursor
     }
 }
@@ -235,10 +242,12 @@ public struct TerminalFlightRecordingStateSynchronization: Equatable, Sendable {
 /// walks the whole retained history, which must not run on the owner queue.
 package struct TerminalFlightRecordingStatePairing: Sendable {
     private let terminal: Terminal
+    private let pinned: Bool
     private let cursor: TerminalFlightRecordingCursor
 
-    fileprivate init(terminal: Terminal, cursor: TerminalFlightRecordingCursor) {
+    fileprivate init(terminal: Terminal, pinned: Bool, cursor: TerminalFlightRecordingCursor) {
         self.terminal = terminal
+        self.pinned = pinned
         self.cursor = cursor
     }
 
@@ -251,6 +260,7 @@ package struct TerminalFlightRecordingStatePairing: Sendable {
     package func resolve() -> TerminalFlightRecordingStateSynchronization {
         TerminalFlightRecordingStateSynchronization(
             state: terminal.stateSynchronization,
+            pinned: pinned,
             cursor: cursor
         )
     }
@@ -383,6 +393,7 @@ public actor TerminalPTYHost {
     /// Creates an owner before launch so every later mutation shares one executor.
     public init(
         initialDimensions: TerminalDimensions,
+        initialGridPinned: Bool = false,
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
         programVersion: String = "dev",
@@ -390,6 +401,7 @@ public actor TerminalPTYHost {
     ) throws {
         try self.init(
             initialDimensions: initialDimensions,
+            initialGridPinned: initialGridPinned,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
             programVersion: programVersion,
@@ -402,6 +414,7 @@ public actor TerminalPTYHost {
     /// quiescence path deterministically instead of waiting out the real bound.
     package init(
         initialDimensions: TerminalDimensions,
+        initialGridPinned: Bool = false,
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
         programVersion: String = "dev",
@@ -435,7 +448,11 @@ public actor TerminalPTYHost {
         self.resourceLifecycle = resourceLifecycle
         self.spawner = spawner
         flightTape = TerminalFlightRecorder(
-            initialDimensions: initialDimensions,
+            initialGeometry: .init(
+                columns: initialDimensions.columns,
+                rows: initialDimensions.rows,
+                pinned: initialGridPinned
+            ),
             configuration: flightTapeConfiguration,
             now: flightTapeClock
         )
@@ -541,12 +558,12 @@ public actor TerminalPTYHost {
     /// and drops the whole winsize/reflow pair for a grid a later submission already
     /// superseded -- a drag then applies as many reflows as the owner can afford rather
     /// than one per column crossed, and the child is told proportionally fewer sizes.
-    nonisolated public func resize(_ dimensions: TerminalDimensions) {
+    nonisolated public func resize(_ grid: PaneGridSubmission) {
         let submission = resizeCoalescer.submitResize()
         queue.async { [weak self] in
             self?.assumeIsolated { owner in
                 guard owner.resizeCoalescer.isSuperseded(submission) == false else { return }
-                owner.process(.resize(dimensions))
+                owner.process(.resize(grid))
             }
         }
     }
@@ -921,6 +938,7 @@ public actor TerminalPTYHost {
     fileprivate func liveStatePairing() -> TerminalFlightRecordingStatePairing {
         TerminalFlightRecordingStatePairing(
             terminal: terminal,
+            pinned: flightTape.pinned,
             cursor: flightTape.liveCursor()
         )
     }
@@ -943,6 +961,7 @@ public actor TerminalPTYHost {
             snapshot,
             TerminalFlightRecordingStatePairing(
                 terminal: terminal,
+                pinned: flightTape.pinned,
                 cursor: snapshot.nextCursor
             )
         )
@@ -1188,7 +1207,7 @@ public actor TerminalPTYHost {
         case beginSearch(String)
         case selectAll
         case scrollByRows(Int)
-        case resize(TerminalDimensions)
+        case resize(PaneGridSubmission)
     }
 
     package nonisolated func applyInteractionForTesting(_ interaction: InteractionForTesting) {
@@ -1212,8 +1231,8 @@ public actor TerminalPTYHost {
                 owner.applySelectAll()
             case .scrollByRows(let rows):
                 owner.applyViewportNavigation(.scrollByRows(rows), publishUpdate: true)
-            case .resize(let dimensions):
-                owner.process(.resize(dimensions))
+            case .resize(let grid):
+                owner.process(.resize(grid))
             }
         }
     }
@@ -1513,8 +1532,8 @@ public actor TerminalPTYHost {
             enqueueInput(bytes, origin: origin, submissionId: submissionId)
         case .completeInput(let submissionId, let result):
             completeInput(submissionId, with: result)
-        case .resize(let dimensions):
-            applyResize(dimensions)
+        case .resize(let grid):
+            applyResize(grid)
         case .deliverOutput(let bytes):
             applyOutput(bytes)
         case .drainOutput:
@@ -1997,8 +2016,17 @@ public actor TerminalPTYHost {
         }
     }
 
-    private func applyResize(_ dimensions: TerminalDimensions) {
+    /// The applied-geometry boundary: every geometry fact the authoritative terminal
+    /// applies is recorded here as exactly one event, grid and pinnedness together.
+    ///
+    /// A pinnedness-only change arrives with an unchanged grid. The `TIOCSWINSZ` below then
+    /// installs the size the tty already holds, so the kernel raises no `SIGWINCH` and the
+    /// child observes nothing, and `terminal.resize` to the current grid leaves cell content
+    /// alone -- but the event still has to be recorded, because a replica that never saw it
+    /// would stay wrong about the pane's pinnedness for as long as the grid held.
+    private func applyResize(_ grid: PaneGridSubmission) {
         guard descriptorOwnershipSealed == false, masterFD >= 0 else { return }
+        let dimensions = grid.dimensions
         var size = winsize(
             ws_row: UInt16(clamping: dimensions.rows),
             ws_col: UInt16(clamping: dimensions.columns),
@@ -2006,12 +2034,14 @@ public actor TerminalPTYHost {
             ws_ypixel: 0
         )
         guard ioctl(masterFD, TIOCSWINSZ, &size) == 0 else { return }
-        flightTape.record(.resize(columns: dimensions.columns, rows: dimensions.rows))
+        flightTape.record(
+            .resize(columns: dimensions.columns, rows: dimensions.rows, pinned: grid.pinned)
+        )
         terminal.resize(columns: dimensions.columns, rows: dimensions.rows)
         markFrameUpdatePendingIfNeeded()
         if captureTransitions {
-            appliedTransitions.append(.resize(dimensions))
-            capturedSubmittedTransitions.append(.resize(dimensions))
+            appliedTransitions.append(.resize(grid))
+            capturedSubmittedTransitions.append(.resize(grid))
         }
     }
 

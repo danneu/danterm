@@ -74,7 +74,7 @@ public struct DanTermServerHello: Equatable, Sendable {
 public final class DanTermClientSession: @unchecked Sendable {
     /// The protocol version this client speaks. A hello naming any other version is
     /// refused before a request is sent.
-    public static let supportedProtocolVersion = 1
+    public static let supportedProtocolVersion = danTermIpcProtocolVersion
 
     /// How long a client under the contract waits for the server's opening hello.
     ///

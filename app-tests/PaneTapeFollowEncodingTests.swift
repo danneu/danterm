@@ -14,7 +14,7 @@ struct PaneTapeFollowEncodingTests {
         for event in [
             NeutralTerminalRecordingEvent.feed(Array("Hi".utf8)),
             .write(Array("ls".utf8)),
-            .resize(columns: 100, rows: 30),
+            .resize(columns: 100, rows: 30, pinned: true),
         ] {
             let directData = try JSONEncoder().encode(event)
             let direct = try JSONDecoder().decode(JSONValue.self, from: directData)

@@ -48,6 +48,7 @@ struct PaneTapeRecordReaderTests {
             bytes: Array("sta".utf8),
             columns: 80,
             rows: 24,
+            pinned: true,
             cursor: nil
         )) == nil)
         #expect(assembler.ingest(PaneTapeSyncRecord(
@@ -56,11 +57,13 @@ struct PaneTapeRecordReaderTests {
             bytes: Array("te".utf8),
             columns: nil,
             rows: nil,
+            pinned: nil,
             cursor: cursor
         )) == PaneTapeStateSynchronization(
             bytes: Array("state".utf8),
             columns: 80,
             rows: 24,
+            pinned: true,
             cursor: cursor
         ))
     }
@@ -121,7 +124,11 @@ struct PaneTapeRecordReaderTests {
             "capture": .string("snapshot"),
             "format": .string("replay"),
             "reconstructible": .bool(true),
-            "initial": .object(["columns": .number(80.5), "rows": .number(24)]),
+            "initial": .object([
+                "columns": .number(80.5),
+                "rows": .number(24),
+                "pinned": .bool(false),
+            ]),
         ])) == nil)
         #expect(decodePaneTapeRecord(.object([
             "kind": .string("gap"),
@@ -145,7 +152,11 @@ struct PaneTapeRecordReaderTests {
             "capture": .string("snapshot"),
             "format": .string("replay"),
             "reconstructible": .bool(true),
-            "initial": .object(["columns": .number(80), "rows": .number(24)]),
+            "initial": .object([
+                "columns": .number(80),
+                "rows": .number(24),
+                "pinned": .bool(false),
+            ]),
         ])
 
         guard case .start(let start)? = decodePaneTapeRecord(record) else {
@@ -176,7 +187,11 @@ struct PaneTapeRecordReaderTests {
             "version": .number(2),
             "capture": .string("mirror"),
             "format": .string("replay"),
-            "initial": .object(["columns": .number(80), "rows": .number(24)]),
+            "initial": .object([
+                "columns": .number(80),
+                "rows": .number(24),
+                "pinned": .bool(false),
+            ]),
             "cursor": .object([
                 "sequence": .number(0),
                 "feedByteOffset": .number(0),

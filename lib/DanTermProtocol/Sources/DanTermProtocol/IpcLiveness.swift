@@ -55,6 +55,14 @@ public struct IpcLivenessBound: Equatable, Sendable {
     }
 }
 
+/// The one protocol number both ends of the handshake name, so a shape change cannot move
+/// on one side alone.
+///
+/// It moves whenever a peer that speaks the previous number would behave incorrectly rather
+/// than merely miss a feature -- a changed pane-tape record shape is exactly that. Skew in
+/// either direction is refused at hello, before any stream starts.
+public let danTermIpcProtocolVersion = 2
+
 /// Builds and reads the server's opening hello, so its shape is stated once for the end
 /// that writes it and the end that parses it.
 public enum IpcHello {

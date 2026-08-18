@@ -18,7 +18,7 @@ import Testing
             PaneProcessLifecycleEvent.output([0x78]),
             .outputEOF,
             .childExited(.exited(4)),
-            .resize(TerminalDimensions(columns: 90, rows: 30)),
+            .resize(PaneGridSubmission(dimensions: .init(columns: 90, rows: 30), pinned: false)),
         ] {
             checkRunningRace(with: event)
         }

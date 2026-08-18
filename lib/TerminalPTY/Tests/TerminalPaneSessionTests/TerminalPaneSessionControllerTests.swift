@@ -1312,6 +1312,48 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test(
+        "a pinnedness change at an unchanged grid is submitted, not deduped away",
+        .timeLimit(.minutes(1))
+    )
+    func pinnednessChangeSurvivesTheGridDedupe() async throws {
+        // Intent: the submission guard keys off the whole geometry fact, so pinning and
+        //   then releasing a pane at one grid submits two resizes while repeating either
+        //   one submits nothing further.
+        // Why it exists: the guard used to compare columns and rows alone. Claiming a pane
+        //   already showing the phone's size, or handing one back to a slot that happens to
+        //   derive the same size, would then reach neither the tape nor any replica.
+        // Scenario: a phone claims a pane at the size it already runs at, then releases it.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+        )
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        // Input between the geometry facts closes the coalescing run, so nothing here is
+        // superseded and what reaches the host is exactly what the guard let through.
+        controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: true)
+        controller.sendText("a")
+        controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: true)
+        controller.sendText("b")
+        controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: false)
+        controller.sendText("c")
+        controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: false)
+        controller.sendText("d")
+
+        let submitted = await host.submittedTransitions().compactMap { transition in
+            if case .resize(let grid) = transition { grid } else { nil }
+        }
+        #expect(submitted == [
+            .init(dimensions: .init(columns: 90, rows: 30), pinned: true),
+            .init(dimensions: .init(columns: 90, rows: 30), pinned: false),
+        ])
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("grid submissions dedupe and remain disabled after teardown", .timeLimit(.minutes(1)))
     func gridDedupeAndPostTeardownNoOps() async throws {
         // Intent: repeated layout reports submit one resize, and teardown closes
@@ -1326,8 +1368,8 @@ struct TerminalPaneSessionControllerTests {
             launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
         )
 
-        controller.setGridDimensions(.init(columns: 90, rows: 30))
-        controller.setGridDimensions(.init(columns: 90, rows: 30))
+        controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: false)
+        controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: false)
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let resizeCount = await host.submittedTransitions().filter {
             if case .resize = $0 { true } else { false }
@@ -1339,9 +1381,9 @@ struct TerminalPaneSessionControllerTests {
 
         controller.tearDown()
         controller.sendText("ignored")
-        controller.setGridDimensions(.init(columns: 100, rows: 40))
+        controller.setGridDimensions(.init(columns: 100, rows: 40), pinned: false)
         host.send(Array("direct-after-teardown".utf8))
-        host.resize(.init(columns: 110, rows: 45))
+        host.resize(.init(dimensions: .init(columns: 110, rows: 45), pinned: false))
         controller.tearDown()
         await host.close()
 
@@ -1374,7 +1416,7 @@ struct TerminalPaneSessionControllerTests {
         var iterator = frames.stream.makeAsyncIterator()
         controller.onFrame = { frames.continuation.yield($0) }
 
-        controller.setGridDimensions(.init(columns: 40, rows: 12))
+        controller.setGridDimensions(.init(columns: 40, rows: 12), pinned: false)
 
         var resized: TerminalPaneFrame?
         while resized == nil, let frame = await iterator.next() {
@@ -1447,7 +1489,7 @@ struct TerminalPaneSessionControllerTests {
         }
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
-        controller.setGridDimensions(.init(columns: 42, rows: 7))
+        controller.setGridDimensions(.init(columns: 42, rows: 7), pinned: false)
         controller.sendText("printf '__CONTROLLER_LIVE__\\n'\nexit\n")
         #expect(await host.waitForResult() == .exited(.exited(0)))
         #expect(await resultIterator.next() == .exited(.exited(0)))
@@ -1497,7 +1539,7 @@ struct TerminalPaneSessionControllerTests {
             $0.currentPlan?.projectedText.contains("__CAPTURE_READY__") == true
         })
 
-        controller.setGridDimensions(.init(columns: 96, rows: 28))
+        controller.setGridDimensions(.init(columns: 96, rows: 28), pinned: false)
         controller.sendText("continue\nprintf '__CAPTURE_FINAL__\\n'\nexit\n")
         #expect(await resultIterator.next() == .exited(.exited(0)))
         controller.synchronizeState()

@@ -16,6 +16,7 @@ func completeSyncIsAtomic() throws {
         format: .replay,
         columns: 8,
         rows: 2,
+        pinned: false,
         cursor: nil,
         reconstructible: true
     )))
@@ -26,6 +27,7 @@ func completeSyncIsAtomic() throws {
         bytes: Array("first".utf8),
         columns: 8,
         rows: 2,
+        pinned: false,
         cursor: nil
     )))
     #expect(replica.terminal == nil)
@@ -37,6 +39,7 @@ func completeSyncIsAtomic() throws {
         bytes: Array(" second".utf8),
         columns: nil,
         rows: nil,
+        pinned: nil,
         cursor: cursor
     )))
     #expect(replica.terminal?.viewportText == "first second")
@@ -61,6 +64,7 @@ func gapFreezesReplicaUntilRepair() throws {
         bytes: Array("new".utf8),
         columns: 8,
         rows: 2,
+        pinned: false,
         cursor: nil
     )))
     #expect(replica.terminal == frozen)
@@ -77,6 +81,7 @@ func gapFreezesReplicaUntilRepair() throws {
         bytes: [],
         columns: nil,
         rows: nil,
+        pinned: nil,
         cursor: repairCursor
     )))
     #expect(replica.terminal?.viewportText == "new")
@@ -197,7 +202,7 @@ func geometryAndViewportEventsApply() throws {
     )
     try replica.apply(eventRecord(sequence: 1, event: .viewport(.byRows(-1))))
     #expect(replica.terminal?.scrollProjection.isFollowing == false)
-    try replica.apply(eventRecord(sequence: 2, event: .resize(columns: 10, rows: 3)))
+    try replica.apply(eventRecord(sequence: 2, event: .resize(columns: 10, rows: 3, pinned: false)))
     #expect(replica.terminal?.geometry.columns == 10)
     #expect(replica.terminal?.geometry.rows.count == 3)
 }
@@ -224,7 +229,7 @@ func invalidResizeBecomesGap() throws {
         columns: 6,
         rows: 2
     )
-    try replica.apply(eventRecord(sequence: 1, event: .resize(columns: 1, rows: 0)))
+    try replica.apply(eventRecord(sequence: 1, event: .resize(columns: 1, rows: 0, pinned: false)))
     #expect(replica.state == .gap(.detected))
     #expect(replica.cursor == testCursor(sequence: 1))
     #expect(replica.terminal?.viewportText == "stable")
@@ -243,6 +248,7 @@ func reconnectResumeAndTotalLoss() throws {
         format: .replay,
         columns: 8,
         rows: 2,
+        pinned: false,
         cursor: stored,
         reconstructible: true
     )))
@@ -264,6 +270,7 @@ func reconnectResumeAndTotalLoss() throws {
         bytes: Array("fresh".utf8),
         columns: 8,
         rows: 2,
+        pinned: false,
         cursor: replacement
     )))
     #expect(replica.terminal?.viewportText == "fresh")
@@ -286,6 +293,7 @@ func reconnectRejectsForeignStartCursor() throws {
         format: .replay,
         columns: 8,
         rows: 2,
+        pinned: false,
         cursor: foreign,
         reconstructible: true
     )))
@@ -325,7 +333,7 @@ func replicaMarksItsOwnFindingsAsDetected() throws {
     #expect(skippedSequence.state == .gap(.detected))
 
     var degenerateResize = try synchronizedReplica(bytes: [], cursor: base)
-    try degenerateResize.apply(eventRecord(sequence: 4, event: .resize(columns: 1, rows: 0)))
+    try degenerateResize.apply(eventRecord(sequence: 4, event: .resize(columns: 1, rows: 0, pinned: false)))
     #expect(degenerateResize.state == .gap(.detected))
 
     var unplaceableBytes = try synchronizedReplica(bytes: [], cursor: base)
@@ -344,6 +352,7 @@ private func startRecord(cursor: PaneTapeCursor) -> PaneTapeRecord {
         format: .replay,
         columns: 8,
         rows: 2,
+        pinned: false,
         cursor: cursor,
         reconstructible: true
     ))
@@ -362,6 +371,7 @@ private func synchronizedReplica(
         bytes: bytes,
         columns: columns,
         rows: rows,
+        pinned: false,
         cursor: cursor
     )))
     return replica
