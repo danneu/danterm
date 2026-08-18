@@ -175,7 +175,7 @@ session test doubles (`app-tests/PaneHostHeadlessTests.swift`,
       census is for. Green gate.
 - [x] 2. `refactor(app)`: give the terminal-session boundary one absence. Green
       gate plus `just test-ui`, and the live scroll check above.
-- [ ] 3. `refactor(core)`: propagate nested reducer commands and gate the rule.
+- [x] 3. `refactor(core)`: propagate nested reducer commands and gate the rule.
       Propagation, lint, and lint self-test travel together. Green gate; no
       behavior change.
 
@@ -197,6 +197,21 @@ session test doubles (`app-tests/PaneHostHeadlessTests.swift`,
   document sizing and row restore are pinned by the two new UI-harness tests
   instead; both were confirmed to fail when the production scroll restore is
   removed.
+- Commit 3: the lint is positional rather than name-based. A Swift statement
+  starts a line, so a consumed call always has text in front of it (`let x = `,
+  `return `, `commands += `), and a line whose first token is `update(` -- with
+  or without a leading `_ = ` or `try ` -- is the discard. That catches the bare
+  call as well as the explicit `_ =`, which matters because `@discardableResult`
+  stays and the bare call is the shape the compiler says nothing about.
+- Commit 3: the scanned roots are `lib/DanTermCore/Sources` and `app`, which is
+  the whole set of production files that can name the reducer -- `update()` is
+  internal to `DanTermCore`, and `app` compiles those sources same-module. `find`
+  runs without `-L`, so the `app/DanTermCore` symlink does not make the lint scan
+  the same file twice.
+- Commit 3: `paneResize` and `paneZoom` return `commands + [.ipcReply(...)]`, so
+  the reply stays last. Between the nested call and that return sits a `guard`
+  that throws "pane not found"; neither nested message can remove a pane, so the
+  throw is unreachable there and no propagated command can be lost to it.
 
 ## Follow Up
 
@@ -207,4 +222,5 @@ session test doubles (`app-tests/PaneHostHeadlessTests.swift`,
   Adding a `pane scroll` command and scroll state on `pane info` would close it.
 - `lib/DanTermCore/Sources/DanTermCore/Update.swift:717` binds `tabId` and never
   uses it, which the build reports as a warning on every compile. Commit 3 of
-  this plan edits the same file and can clear it.
+  this plan edits the same file but left the binding alone, because clearing it
+  is outside this plan's scope.

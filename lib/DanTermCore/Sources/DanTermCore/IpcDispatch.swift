@@ -352,6 +352,7 @@ private func dispatchIpc(
 
     case .paneResize(let paneId, let requested):
         try requirePane(paneId, in: model)
+        let commands: [Command]
         switch requested {
         case .grid(let columns, let rows):
             // The failable init is the whole range check: a grid the model
@@ -364,9 +365,9 @@ private func dispatchIpc(
                         + "\(paneGridOverrideRowRange.lowerBound)-\(paneGridOverrideRowRange.upperBound)"
                 )
             }
-            _ = update(&model, .setPaneGridOverride(paneId: paneId, grid: grid), env: env)
+            commands = update(&model, .setPaneGridOverride(paneId: paneId, grid: grid), env: env)
         case .fit:
-            _ = update(&model, .clearPaneGridOverride(paneId: paneId), env: env)
+            commands = update(&model, .clearPaneGridOverride(paneId: paneId), env: env)
         }
         guard let pane = model.pane(paneId),
               let tab = tabForPane(paneId, in: model),
@@ -375,7 +376,7 @@ private func dispatchIpc(
             throw IpcParamsError("pane not found")
         }
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
-        return [.ipcReply(
+        return commands + [.ipcReply(
             reqId: reqId,
             result: encoder.paneInfo(pane: pane, tab: tab, group: group, in: model)
         )]
@@ -395,8 +396,9 @@ private func dispatchIpc(
         // scripted path and the menubar/context-menu paths cannot drift: the guard that
         // only a split tab may zoom lives there and is the reason a request can be
         // honoured and still report `isZoomed: false`.
+        var commands: [Command] = []
         if tab.paneTree.isZoomed != target {
-            _ = update(&model, .toggleZoomPane(paneId: paneId), env: env)
+            commands = update(&model, .toggleZoomPane(paneId: paneId), env: env)
         }
         guard let pane = model.pane(paneId),
               let currentTab = tabForPane(paneId, in: model),
@@ -405,7 +407,7 @@ private func dispatchIpc(
             throw IpcParamsError("pane not found")
         }
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
-        return [.ipcReply(
+        return commands + [.ipcReply(
             reqId: reqId,
             result: encoder.paneInfo(pane: pane, tab: currentTab, group: group, in: model)
         )]

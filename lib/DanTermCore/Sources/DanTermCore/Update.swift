@@ -918,9 +918,9 @@ func update(
         )
 
     case .createGroupInteractively(let name):
-        let commands = update(&model, .createGroup(name: name), env: env)
+        var commands = update(&model, .createGroup(name: name), env: env)
         if let groupId = model.groups.last?.id {
-            _ = update(&model, .beginSidebarRename(target: .group(groupId)), env: env)
+            commands += update(&model, .beginSidebarRename(target: .group(groupId)), env: env)
         }
         return commands
 
@@ -1003,19 +1003,17 @@ func update(
         // Reuse .moveTabs for tabLocation lookup, clamping, and
         // removeGroupIfEmpty pruning of vacated source groups. The new
         // group is empty, so atIndex: 0 is unambiguous; ids are inserted
-        // in the order given. Discard nested commands; the sidebar updates via
-        // reconcileSidebar.
-        _ = update(&model, .moveTabs(tabIds: validIds, toGroupId: newGroupId, atIndex: 0), env: env)
-        return []
+        // in the order given.
+        return update(&model, .moveTabs(tabIds: validIds, toGroupId: newGroupId, atIndex: 0), env: env)
 
     case .extractTabsToNewGroupInteractively(let tabIds, let groupName):
         let priorLastGroupId = model.groups.last?.id
-        let commands = update(
+        var commands = update(
             &model,
             .extractTabsToNewGroup(tabIds: tabIds, groupName: groupName),
             env: env)
         if let groupId = model.groups.last?.id, groupId != priorLastGroupId {
-            _ = update(&model, .beginSidebarRename(target: .group(groupId)), env: env)
+            commands += update(&model, .beginSidebarRename(target: .group(groupId)), env: env)
         }
         return commands
 
