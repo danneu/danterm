@@ -241,6 +241,54 @@ import Testing
         }, "should not terminate when fallback tab remains")
     }
 
+    @Test("sessionCreationFailed on the selected tab selects the MRU-previous tab")
+    func sessionCreationFailedSelectsMruPreviousTab() throws {
+        // Intent: when a creation failure destroys the selected tab, selection
+        //   lands on the most recently used surviving tab, and mruOrder[0]
+        //   agrees with it.
+        // Why it exists: this path used to jump to the first tab in flattened
+        //   order, so the tab a user landed on depended on how their tab died.
+        // Scenario: spec-first; tabs A, B, C created in order with C selected,
+        //   so the MRU answer (B) and the flattened-first answer (A) differ.
+        var model = makeModel()
+        createTab(&model)
+        let tabA = try #require(model.selectedTabId)
+        createTab(&model)
+        let tabB = try #require(model.selectedTabId)
+        createTab(&model)
+        let tabC = try #require(model.selectedTabId)
+        let failedPane = try #require(tabById(tabC, in: model)).paneTree.focusedPaneId
+
+        update(&model, .sessionCreationFailed(sessionId: sessionId(for: failedPane, in: model)))
+
+        #expect(model.selectedTabId == tabB, "MRU-previous tab, not the first tab \(tabA)")
+        #expect(model.mruOrder.first == tabB, "the repaired selection heads mruOrder")
+    }
+
+    @Test("sessionProcessExited on the selected tab's only session selects the predecessor tab")
+    func sessionProcessExitedSelectsPredecessorTab() throws {
+        // Intent: a shell exit that empties the selected tab lands selection on
+        //   the predecessor tab in flattened order, matching explicit tab close.
+        // Why it exists: this route shares closeTabRemoval with Cmd-W and batch
+        //   close, so the landing spot must not depend on whether the user
+        //   pressed a key or typed `exit`. Nothing pinned it before.
+        // Scenario: spec-first; tabs A, B, C with B selected last, so the
+        //   predecessor answer (A) and the MRU answer (C) differ.
+        var model = makeModel()
+        createTab(&model)
+        let tabA = try #require(model.selectedTabId)
+        createTab(&model)
+        let tabB = try #require(model.selectedTabId)
+        createTab(&model)
+        let tabC = try #require(model.selectedTabId)
+        update(&model, .selectTab(id: tabB))
+        let exitingPane = try #require(tabById(tabB, in: model)).paneTree.focusedPaneId
+
+        update(&model, .sessionProcessExited(sessionId: sessionId(for: exitingPane, in: model)))
+
+        #expect(model.selectedTabId == tabA, "predecessor tab, not the MRU answer \(tabC)")
+    }
+
     @Test("testBellThrottling")
     func testBellThrottling() {
         // Intent: the first bell records the injected now as the bell's

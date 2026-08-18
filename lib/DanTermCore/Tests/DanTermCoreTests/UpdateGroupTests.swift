@@ -292,6 +292,33 @@ import Testing
         #expect(model.groups[0].tabs[0].id == tabId2)
     }
 
+    @Test("deleting the selected tab's group selects the MRU-previous tab")
+    func deleteGroupSelectsMruPreviousTab() throws {
+        // Intent: when deleteGroup(moveTabs: false) destroys the selected tab,
+        //   selection lands on the most recently used surviving tab, and
+        //   mruOrder[0] agrees with it.
+        // Why it exists: this branch used to jump to the first tab in
+        //   flattened order, disagreeing with every other removal path.
+        // Scenario: spec-first; General holds A and B, "Other" holds C, and C
+        //   is selected last, so the MRU answer (B) and the flattened-first
+        //   answer (A) differ.
+        var model = makeModel()
+        let generalId = model.groups[0].id
+        createTab(&model, inGroupId: generalId)
+        let tabA = try #require(model.selectedTabId)
+        createTab(&model, inGroupId: generalId)
+        let tabB = try #require(model.selectedTabId)
+        update(&model, .createGroup(name: "Other"))
+        let otherId = model.groups[1].id
+        let tabC = try #require(model.selectedTabId)
+
+        update(&model, .deleteGroup(id: otherId, moveTabs: false))
+
+        #expect(tabById(tabC, in: model) == nil, "the deleted group's tab is gone")
+        #expect(model.selectedTabId == tabB, "MRU-previous tab, not the first tab \(tabA)")
+        #expect(model.mruOrder.first == tabB, "the repaired selection heads mruOrder")
+    }
+
     @Test("testDeleteGroupShowsConfirmationIfLast")
     func testDeleteGroupShowsConfirmationIfLast() {
         // Intent: with auto-pruning of empty groups, deleting the sole

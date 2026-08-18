@@ -129,6 +129,25 @@ import Testing
         #expect(model.mruOrder.contains(newTabId), "new tab id appears in mruOrder")
     }
 
+    @Test("a background tab created into a tab-less model becomes selected")
+    func backgroundTabIntoEmptyModelBecomesSelected() throws {
+        // Intent: with no tabs and no selection, a background-created tab is
+        //   selected anyway.
+        // Why it exists: "background" means "do not steal a live selection".
+        //   With nothing selected there is nothing to steal, and leaving the
+        //   selection nil beside a live tab breaks the selection invariant.
+        // Scenario: spec-first; IPC creates a background tab in the launch
+        //   window before the first tab exists.
+        var model = makeModel()
+        #expect(model.selectedTabId == nil)
+
+        createTab(&model, background: true)
+
+        let created = try #require(model.groups[0].tabs.first?.id)
+        #expect(model.selectedTabId == created)
+        #expect(model.mruOrder.first == created)
+    }
+
     @Test("sessionCreationFailed prunes the failed tab from mruOrder")
     func sessionCreationFailedPrunesFailedTabFromMruOrder() {
         // Intent: sessionCreationFailed removes the failed tab from

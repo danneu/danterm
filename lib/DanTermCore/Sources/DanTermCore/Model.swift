@@ -438,7 +438,7 @@ struct PreferencesDraft: Equatable {
 }
 
 // MRU tab switcher state. Ephemeral — never serialized into AppModelSnapshot.
-// mruOrder[0] is the most-recently-used tab; reconcileMru maintains this
+// mruOrder[0] is the most-recently-used tab; reconcileTabState maintains this
 // invariant whenever mruCycle is nil. While mruCycle is non-nil, mruOrder is
 // frozen so repeated cmd-shift-i taps walk back through history instead of
 // toggling between two tabs.

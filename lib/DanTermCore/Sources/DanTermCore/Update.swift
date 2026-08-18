@@ -12,11 +12,13 @@ func update(
     // Single chokepoint: every code path that mutates tab membership or
     // selectedTabId reaches this point. `defer` fires after the matched case
     // returns, and `inout model` makes the reconciled state visible to
-    // callers. Without this, MRU updates would have to be sprinkled into
-    // every handler that touches tabs (movePaneToTab, sessionCreationFailed,
-    // deleteGroup, restore/import paths, etc.).
+    // callers. Without this, selection repair and MRU updates would have to be
+    // sprinkled into every handler that touches tabs (movePaneToTab,
+    // sessionCreationFailed, deleteGroup, restore/import paths, etc.) -- and
+    // each copy would be free to pick a different tab, which is exactly what
+    // reconcileTabState now decides once for all of them.
     defer {
-        reconcileMru(&model)
+        reconcileTabState(&model)
         reconcileTodoPopover(&model)
         reconcilePendingConfirmation(&model, env: env)
         reconcileSidebarRenameTarget(&model)
@@ -729,9 +731,6 @@ func update(
                 model.groups[gi].tabs.remove(at: ti)
                 removeGroupIfEmpty(groupId, from: &model)
 
-                if model.selectedTabId == tabId {
-                    model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
-                }
                 if !model.hasAnyTab {
                     return commands + [.terminate]
                 }
@@ -1502,10 +1501,6 @@ private func deleteGroupBody(
         model.groups.remove(at: idx)
         if model.hasAnyTab == false {
             return commands + [.terminate]
-        }
-        if let selectedTabId = model.selectedTabId,
-           model.groups.flatMap(\.tabs).contains(where: { $0.id == selectedTabId }) == false {
-            model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
         }
         return commands
     }
