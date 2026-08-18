@@ -1006,6 +1006,59 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(menuCells == [.init(column: 1, row: 1)], "control-click menu was not deferred")
     }
 
+    uiTest("only a click that takes key focus reports pane focus") {
+        // Intent: the gesture that hands this pane key focus reports it, and no
+        //   other button reports anything.
+        // Why it exists: focus reports come from interaction sites now. AppKit's
+        //   window moves the responder for a left-button press -- control-click
+        //   included, which arrives here and is routed onward as a right click --
+        //   and moves nothing for a genuine right or middle press. A report on
+        //   those would invent a focus change the user never asked for.
+        // Scenario: one mounted pane takes a plain click, a control-click, a right
+        //   click, and an other-button press. The other-button press is dropped by
+        //   that entry point's own middle-button guard, so its arm pins the weaker
+        //   claim that nothing escapes `otherMouseDown` by any path.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        var events: [TerminalSessionEvent] = []
+        pane.onEvent = { events.append($0) }
+        let point = NSPoint(x: 9, y: 143)
+
+        pane.mouseDown(with: try makeMouseEvent(type: .leftMouseDown, location: point))
+        try uiExpect(events == [.clickedToFocus], "a plain click reported \(events)")
+
+        events = []
+        pane.mouseDown(with: try makeMouseEvent(
+            type: .leftMouseDown, location: point, modifiers: [.control]
+        ))
+        try uiExpect(events == [.clickedToFocus], "a control-click reported \(events)")
+
+        events = []
+        pane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: point))
+        pane.otherMouseDown(with: try makeMouseEvent(type: .otherMouseDown, location: point))
+        try uiExpect(events.isEmpty, "a right or other-button press reported \(events)")
+    }
+
+    uiTest("gaining first responder reports nothing and only tells the engine") {
+        // Intent: a responder gain is presentation state, never a model fact.
+        // Why it exists: the pane-focus pass repairs the responder to this view, and
+        //   AppKit calls becomeFirstResponder from inside that call. A report here
+        //   is a Msg originated by a reconcile sweep, laundered through AppKit's own
+        //   responder dispatch where the lint script cannot see it.
+        // Scenario: the pane is made first responder programmatically, the way the
+        //   pass does it.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        var events: [TerminalSessionEvent] = []
+        pane.onEvent = { events.append($0) }
+
+        try uiExpect(pane.window?.makeFirstResponder(pane) == true, "window refused the pane")
+
+        try uiExpect(events.isEmpty, "a responder gain reported \(events)")
+        try uiExpect(controller.focusChanges == [true],
+                     "focus reached the engine as \(controller.focusChanges)")
+    }
+
     uiTest("explicit copy fences selection and hasSelection stays cache-only") {
         // Intent: Copy fences pending selection work while menu enablement reads only cached state.
         // Why it exists: asynchronous drag consumption must not put stale text on the pasteboard.

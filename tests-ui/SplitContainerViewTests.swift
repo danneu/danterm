@@ -491,6 +491,55 @@ func splitContainerViewTests() {
             "the repair changed search focus ownership")
     }
 
+    uiTest("a responder move with no gesture reports nothing and the next sweep repairs it") {
+        // Intent: a responder move nobody asked for never becomes a model fact, and
+        //   the pass that moves the responder back reports nothing either.
+        // Why it exists: the pane view used to adopt every responder gain, so a
+        //   programmatic move, a key-view-loop traversal, or AppKit's own restoration
+        //   rewrote the focused pane as if the user had clicked -- and the pass's own
+        //   repair went the same way, putting a Msg inside a reconcile sweep.
+        // Scenario: the model focuses pane A, the responder is moved to pane B's
+        //   terminal with no gesture behind it, and the pass runs.
+        let paneA = PaneId(), paneB = PaneId(), tabId = TabId()
+        let root = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.5
+        )
+        let tab = TabModel(id: tabId, paneTree: PaneTree(root: root, focusedPaneId: paneA))
+        let model = AppModel(
+            groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
+            selectedTabId: tabId
+        )
+        let runtime = AppRuntime(model: model)
+        // The production pane view, not the harness stand-in: the report this test
+        // rules out is one only the real view can make.
+        let terminalA = SwiftTerminalSessionView(controller: TerminalPaneSessionController())
+        let terminalB = SwiftTerminalSessionView(controller: TerminalPaneSessionController())
+        var events: [TerminalSessionEvent] = []
+        terminalA.onEvent = { events.append($0) }
+        terminalB.onEvent = { events.append($0) }
+        runtime.installTerminalSession(terminalA, paneId: paneA)
+        runtime.installTerminalSession(terminalB, paneId: paneB)
+        let container = persistentContainer(root: root, runtime: runtime)
+        let window = focusTestWindow(content: container)
+        defer { window.close() }
+        runtime.window = window
+        container.rebuild()
+        container.ensureLaidOut()
+
+        try uiExpect(window.makeFirstResponder(terminalB), "window refused pane B's terminal")
+        try uiExpect(events.isEmpty, "a bare responder move reported \(events)")
+
+        runtime.reconcilePaneFocus()
+
+        try uiExpect(runtime.paneFocusClaimant() == .pane(.terminal(paneA)),
+            "the sweep did not repair the responder to the model's pane")
+        try uiExpect(events.isEmpty, "the terminal repair originated \(events)")
+        try uiExpect(runtime.sentMessages.isEmpty,
+            "the sweep dispatched \(runtime.sentMessages)")
+    }
+
     uiTest("pane focus claimant distinguishes pane, field editor, window, and non-pane focus") {
         // Intent: claimant detection resolves pane terminal and search controls,
         //   treats the window as unclaimed, and preserves deliberate non-pane focus.

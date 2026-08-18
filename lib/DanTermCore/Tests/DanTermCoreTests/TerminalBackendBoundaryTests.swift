@@ -95,7 +95,7 @@ struct TerminalBackendBoundaryTests {
             if case .searchSelectionReported(let id, let selected) = $0 { return id == paneId && selected == nil }
             return false
         }
-        assertSessionMessage(.becameFirstResponder, paneId: paneId) {
+        assertSessionMessage(.clickedToFocus, paneId: paneId) {
             if case .paneBecameFirstResponder(let id) = $0 { return id == paneId }
             return false
         }

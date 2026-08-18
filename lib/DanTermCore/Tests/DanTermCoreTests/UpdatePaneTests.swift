@@ -348,6 +348,35 @@ import Testing
         #expect(commands.isEmpty)
     }
 
+    @Test("a focus report for the pane the model already targets changes nothing")
+    func testPaneBecameFirstResponderForDesiredTarget() {
+        // Intent: dispatching the focus report for the target `desiredPaneFocus`
+        //   already names leaves the whole model unchanged.
+        // Why it exists: this is the premise that let the responder echo be deleted
+        //   rather than routed. The pane-focus pass only ever moves the responder to
+        //   the target this projection names, so an echo from that move could carry
+        //   no new fact -- there was nothing to route, only a sweep to re-enter.
+        // Scenario: spec-first. One pane holds focus, an unread alert, and search
+        //   state the terminal owns; the report names that same pane.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        model.searchState[paneId] = SearchModel(needle: "hit", focusOwner: .terminal)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+        #expect(desiredPaneFocus(in: model) == .terminal(paneId))
+
+        let commands = update(&model, .paneBecameFirstResponder(paneId: paneId))
+
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == paneId)
+        #expect(model.alerts[0].isUnread == true, "the report cleared alerts nobody read")
+        #expect(model.searchState[paneId]?.focusOwner == .terminal)
+        #expect(desiredPaneFocus(in: model) == .terminal(paneId))
+        #expect(commands.isEmpty)
+    }
+
     @Test("testPaneBecameFirstResponderSamePane")
     func testPaneBecameFirstResponderSamePane() {
         // Intent: callback for the already-focused pane emits no commands.

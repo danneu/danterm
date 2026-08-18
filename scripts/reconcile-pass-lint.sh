@@ -20,9 +20,11 @@
 #
 # What this check CANNOT see is a send laundered through AppKit's own dispatch --
 # an outline mutation reaching delegate feedback, a field-editor teardown reaching
-# the end-editing callback, a responder move reaching becomeFirstResponder. Those
-# carry their own dispositions, and the runtime's outermost-only drain rule is the
-# backstop for any edge this gate misses.
+# the end-editing callback. The responder-move edge, where a pass's
+# makeFirstResponder reached becomeFirstResponder, is gone: the pane view reports
+# focus from the click that asks for it, not from responder state. The remaining
+# edges carry their own dispositions, and the runtime's outermost-only drain rule
+# is the backstop for any edge this gate misses.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

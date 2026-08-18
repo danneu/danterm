@@ -280,7 +280,7 @@ search overlay, and the pane-focus pass, so both halves are drivable.
 
 ## Commit progress
 - [x] 1. search-field focus reports from the click gesture
-- [ ] 2. delete the responder echo; the terminal click reports focus
+- [x] 2. delete the responder echo; the terminal click reports focus
 
 ## Implementation notes
 
@@ -298,3 +298,32 @@ search overlay, and the pane-focus pass, so both halves are drivable.
   own mouse tracking inside `NSSearchField` blocks on real events that the
   harness cannot post, so a windowed click hangs the suite; windowless, the
   same production entry point runs and returns.
+- The boundary event keeps the callback-gate transport and is renamed
+  `.clickedToFocus`. The discretion allowed a direct hook instead; the gate
+  already carries every other pane fact through one teardown-safe channel, and a
+  second channel would have to repeat that gating. The new name states the
+  interaction, so a future reader cannot reintroduce a responder-state emitter
+  under it.
+- The terminal click reports on every left press, including one on the pane that
+  already holds focus. AR3 allowed gating the send on "not already first
+  responder"; the ungated form is what makes the view's rule statable in one
+  line -- the click reports, responder state never does -- and the extra sweep
+  diffs an unchanged model.
+- The key-view-loop question is settled empirically, and the answer is that
+  there is nothing to preserve: a Tab keyed into a pane's search field leaves
+  the responder on that field's own editor. It never reached a terminal view, so
+  the old echo never fired for it and the model never adopted it. No
+  interaction-site send is owed, and the observable outcome is the same before
+  and after. Measured with a throwaway harness probe driving a real window,
+  removed after it answered.
+- PO1's terminal arm is discharged at the emission site rather than through
+  `runtime.sentMessages`: the harness runtime never wires a session's `onEvent`
+  to `send`, so a session-laundered message could not appear in that list at
+  all. The two repair tests instead record the production view's own events, and
+  the boundary suite covers the translation from event to `Msg`.
+- Not run: the click half of the live CLI check. The CLI has no command that
+  delivers a pointer event or opens the search overlay, so driving it would mean
+  posting real OS-level clicks at screen coordinates and stealing the user's
+  input focus. The drivable half was run against a dev slot -- split, focus each
+  pane, and confirm through `danterm focus` that the responder follows model
+  intent and holds through a burst of output in the other pane.

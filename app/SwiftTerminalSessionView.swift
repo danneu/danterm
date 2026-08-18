@@ -657,10 +657,10 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
-        if result {
-            forwardFocusIfChanged(true)
-            callbackGate.emit(.becameFirstResponder)
-        }
+        // Presentation only. A responder gain is not a model fact: the pane-focus
+        // pass moves the responder here itself, so a report would be a Msg out of a
+        // reconcile sweep. The click that asks for focus reports it in `mouseDown`.
+        if result { forwardFocusIfChanged(true) }
         return result
     }
 
@@ -692,6 +692,15 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     override func mouseDown(with event: NSEvent) {
         controlClickIsActive = event.modifierFlags.contains(.control)
         forwardPointerDown(event, button: controlClickIsActive ? .right : .left)
+        // The focus report rides this entry point because AppKit's window moves the
+        // responder here and nowhere else: a control-click still arrives as a left
+        // press and still takes focus, while a genuine right or middle press moves
+        // no responder and reports nothing. It goes last because the report re-enters
+        // the model and its reconcile sweep synchronously; the press has already
+        // reached the engine by then, so the sweep cannot land between this down and
+        // the up that pairs with it. It is not gated on the forward, which drops a
+        // press whose cell it cannot resolve -- a click still names its pane.
+        callbackGate.emit(.clickedToFocus)
     }
 
     override func mouseUp(with event: NSEvent) {

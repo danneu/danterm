@@ -118,12 +118,13 @@ every pass cache has advanced. Sending from mid-pass instead re-enters the whole
 sweep: the nested pass diffs the new model against a cache the outer pass has not
 advanced yet, and issues view ops against a host that is mid-mutation.
 
-This is the direction for the sweep, with one named exception rather than a claim
-already true of every pass. `reconcilePaneFocus` moves the responder, and AppKit
-synchronously calls `becomeFirstResponder`, which reaches a
-`.paneBecameFirstResponder` send. Converting it first requires settling whether
-that echo is redundant for a pass-issued move, which is a separate behavioral
-question. Two things keep the rule safe meanwhile:
+The rule holds for every pass, with no exception. `reconcilePaneFocus` moves the
+responder and AppKit synchronously calls `becomeFirstResponder`, which used to
+reach a `.paneBecameFirstResponder` send; the pane view no longer reports a
+responder gain at all. Key focus into a pane target is reported by the gesture
+that asks for it -- the terminal click and the search-field click -- so a
+responder move with nobody behind it changes no model state, and the next pass
+repairs it. Two things keep the rule robust rather than merely true today:
 
 - `scripts/reconcile-pass-lint.sh` rejects a direct call edge from a pass to
   `send(`, over the sweep's entry files and a marked region of `SidebarView`. It

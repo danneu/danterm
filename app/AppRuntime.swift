@@ -43,8 +43,8 @@ func recordTerminalCharacterizationEvent(_ event: TerminalSessionEvent) {
         description = "session.searchTotal:\(String(describing: total))"
     case .searchSelected(let selected):
         description = "session.searchSelected:\(String(describing: selected))"
-    case .becameFirstResponder:
-        description = "session.becameFirstResponder"
+    case .clickedToFocus:
+        description = "session.clickedToFocus"
     case .processStarted:
         description = "session.processStarted"
     case .processExited:
