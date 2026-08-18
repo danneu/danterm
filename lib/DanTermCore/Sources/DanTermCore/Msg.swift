@@ -31,6 +31,19 @@ enum TabInsertPosition {
     case afterTab(TabId)
 }
 
+/// One preferences control's new value. Naming every control in one payload
+/// lets a single `.prefSet` reducer arm hold the sole "only while the panel is
+/// open" guard, instead of repeating it once per field.
+enum PreferenceEdit {
+    case alertClearMode(AlertClearMode)
+    case remoteTheme(String)
+    case theme(String?)
+    // Raw text rather than a number: a half-typed size must survive until save.
+    case fontSize(String?)
+    case fontFamily(String?)
+    case copyOnSelect(Bool)
+}
+
 enum Msg {
     // User actions
     case createTab(inGroupId: GroupId, position: TabInsertPosition = .afterSelected, launch: LaunchSpec? = nil, background: Bool = false)
@@ -140,12 +153,7 @@ enum Msg {
         availableThemeNames: [String] = []
     )
     case preferencesClosed
-    case prefSetAlertClearMode(AlertClearMode)
-    case prefSetRemoteTheme(String)
-    case prefSetTheme(String?)
-    case prefSetFontSize(String?)
-    case prefSetFontFamily(String?)
-    case prefSetCopyOnSelect(Bool)
+    case prefSet(PreferenceEdit)
     case prefSave
 
     // Lifecycle

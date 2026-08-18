@@ -226,14 +226,14 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .preferencesOpened())
 
-        update(&model, .prefSetFontSize("200"))
+        update(&model, .prefSet(.fontSize("200")))
         update(&model, .prefSave)
         #expect(model.config.fontSize == DanTermConfig.fontSizeRange.upperBound)
         #expect(size(model, paneId) == DanTermConfig.fontSizeRange.upperBound)
         var panel = try #require(desiredPreferencesPanel(in: model))
         #expect(panel.fontSizeText == "72")
 
-        update(&model, .prefSetFontSize("4"))
+        update(&model, .prefSet(.fontSize("4")))
         update(&model, .prefSave)
         #expect(model.config.fontSize == DanTermConfig.fontSizeRange.lowerBound)
         #expect(size(model, paneId) == DanTermConfig.fontSizeRange.lowerBound)

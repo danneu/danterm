@@ -53,12 +53,12 @@ import DanTermProtocol
         #expect(model.preferencesDraft?.config.copyOnSelect == false)
     }
 
-    @Test("prefSetCopyOnSelect changes only the draft")
-    func prefSetCopyOnSelectChangesOnlyTheDraft() {
+    @Test(".prefSet(.copyOnSelect) changes only the draft")
+    func copyOnSelectEditChangesOnlyTheDraft() {
         var model = makeModel()
         _ = update(&model, .preferencesOpened())
 
-        _ = update(&model, .prefSetCopyOnSelect(false))
+        _ = update(&model, .prefSet(.copyOnSelect(false)))
 
         #expect(model.preferencesDraft?.config.copyOnSelect == false)
         #expect(model.config.copyOnSelect, "committed config only moves on save")
@@ -70,7 +70,7 @@ import DanTermProtocol
         _ = update(&model, .preferencesOpened())
         #expect(try #require(desiredPreferencesPanel(in: model)).copyOnSelect)
 
-        _ = update(&model, .prefSetCopyOnSelect(false))
+        _ = update(&model, .prefSet(.copyOnSelect(false)))
 
         #expect(try #require(desiredPreferencesPanel(in: model)).copyOnSelect == false)
     }
@@ -79,7 +79,7 @@ import DanTermProtocol
     func configLoadedResetsCopyOnSelectDraft() {
         var model = makeModel()
         _ = update(&model, .preferencesOpened())
-        _ = update(&model, .prefSetCopyOnSelect(false))
+        _ = update(&model, .prefSet(.copyOnSelect(false)))
 
         _ = update(&model, .configLoaded(.default, resolvedFontFamily: nil))
 
@@ -92,7 +92,7 @@ import DanTermProtocol
     func prefSaveWritesCopyOnSelect() {
         var model = makeModel()
         _ = update(&model, .preferencesOpened())
-        _ = update(&model, .prefSetCopyOnSelect(false))
+        _ = update(&model, .prefSet(.copyOnSelect(false)))
 
         let commands = update(&model, .prefSave)
 

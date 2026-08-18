@@ -126,12 +126,12 @@ import Testing
         #expect(model.preferencesDraft?.config.fontFamily == "Menlo")
     }
 
-    @Test("prefSetFontFamily changes only the draft")
-    func prefSetFontFamilyChangesOnlyTheDraft() {
+    @Test(".prefSet(.fontFamily) changes only the draft")
+    func fontFamilyEditChangesOnlyTheDraft() {
         var model = makeModel()
         _ = update(&model, .preferencesOpened())
 
-        _ = update(&model, .prefSetFontFamily("Menlo"))
+        _ = update(&model, .prefSet(.fontFamily("Menlo")))
 
         #expect(model.preferencesDraft?.config.fontFamily == "Menlo")
         #expect(model.config.fontFamily == nil, "committed config only moves on save")
@@ -141,7 +141,7 @@ import Testing
     func configLoadedResetsFontFamilyDraft() {
         var model = makeModel()
         _ = update(&model, .preferencesOpened())
-        _ = update(&model, .prefSetFontFamily("Menlo"))
+        _ = update(&model, .prefSet(.fontFamily("Menlo")))
 
         var config = DanTermConfig.default
         config.fontFamily = "Courier"
@@ -156,7 +156,7 @@ import Testing
     func prefSaveWritesFontFamily() {
         var model = makeModel()
         _ = update(&model, .preferencesOpened())
-        _ = update(&model, .prefSetFontFamily("Menlo"))
+        _ = update(&model, .prefSet(.fontFamily("Menlo")))
 
         let commands = update(&model, .prefSave)
 
@@ -177,7 +177,7 @@ import Testing
         // Scenario: spec-first; the user types a font they have not installed yet.
         var model = makeModel()
         _ = update(&model, .preferencesOpened())
-        _ = update(&model, .prefSetFontFamily("Fira Codee"))
+        _ = update(&model, .prefSet(.fontFamily("Fira Codee")))
 
         let commands = update(&model, .prefSave)
 
@@ -192,7 +192,7 @@ import Testing
         var model = makeModel()
         model.config.fontFamily = "Menlo"
         _ = update(&model, .preferencesOpened())
-        _ = update(&model, .prefSetFontFamily("   "))
+        _ = update(&model, .prefSet(.fontFamily("   ")))
 
         let commands = update(&model, .prefSave)
 
@@ -216,7 +216,7 @@ import Testing
         _ = createTab(&model)
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         _ = update(&model, .preferencesOpened())
-        _ = update(&model, .prefSetFontFamily("menlo"))
+        _ = update(&model, .prefSet(.fontFamily("menlo")))
 
         let commands = update(&model, .prefSave)
         #expect(hasEffect(commands) {
@@ -242,8 +242,8 @@ import Testing
         //   field still holds unparseable text.
         var model = makeModel()
         _ = update(&model, .preferencesOpened())
-        _ = update(&model, .prefSetFontFamily("Menlo"))
-        _ = update(&model, .prefSetFontSize("abc"))
+        _ = update(&model, .prefSet(.fontFamily("Menlo")))
+        _ = update(&model, .prefSet(.fontSize("abc")))
         _ = update(&model, .prefSave)
         let configAfterSave = model.config
 

@@ -300,11 +300,11 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
 
     @objc private func alertClearModeChanged(_ sender: NSPopUpButton) {
         let mode: AlertClearMode = sender.indexOfSelectedItem == 0 ? .focus : .manual
-        applyPreferenceChange(.prefSetAlertClearMode(mode))
+        applyPreferenceChange(.alertClearMode(mode))
     }
 
     @objc private func copyOnSelectChanged(_ sender: NSButton) {
-        applyPreferenceChange(.prefSetCopyOnSelect(sender.state == .on))
+        applyPreferenceChange(.copyOnSelect(sender.state == .on))
     }
 
     // NSTextFieldDelegate: retain partial text in the model until editing ends.
@@ -312,10 +312,10 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         guard let field = obj.object as? NSTextField else { return }
         if field === fontSizeField {
             let text = field.stringValue
-            runtime?.send(.prefSetFontSize(text.isEmpty ? nil : text))
+            runtime?.send(.prefSet(.fontSize(text.isEmpty ? nil : text)))
         } else if field === fontFamilyCombo {
             let text = field.stringValue
-            runtime?.send(.prefSetFontFamily(text.isEmpty ? nil : text))
+            runtime?.send(.prefSet(.fontFamily(text.isEmpty ? nil : text)))
         }
     }
 
@@ -332,13 +332,13 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         guard let combo = notification.object as? NSComboBox, combo === fontFamilyCombo,
               let title = combo.objectValueOfSelectedItem as? String
         else { return }
-        applyPreferenceChange(.prefSetFontFamily(title))
+        applyPreferenceChange(.fontFamily(title))
     }
 
     @objc private func fontSizeStepped(_ sender: NSStepper) {
         let text = configFontSizeText(sender.doubleValue)
         fontSizeField.stringValue = text
-        applyPreferenceChange(.prefSetFontSize(text))
+        applyPreferenceChange(.fontSize(text))
     }
 
     /// Present the theme picker sheet so the user can browse DanTerm's catalog.
@@ -348,7 +348,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
             ? runtime?.model.config.defaultTheme
             : themeField.stringValue
         picker.onSelect = { [weak self] themeName in
-            self?.applyPreferenceChange(.prefSetTheme(themeName))
+            self?.applyPreferenceChange(.theme(themeName))
         }
         let sheetWindow = NSWindow(contentViewController: picker)
         sheetWindow.styleMask = [.titled]
@@ -363,7 +363,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
             ? runtime?.model.config.remoteTheme
             : remoteThemeField.stringValue
         picker.onSelect = { [weak self] themeName in
-            self?.applyPreferenceChange(.prefSetRemoteTheme(themeName))
+            self?.applyPreferenceChange(.remoteTheme(themeName))
         }
         let sheetWindow = NSWindow(contentViewController: picker)
         sheetWindow.styleMask = [.titled]
@@ -381,8 +381,8 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         runtime?.reloadDanTermConfig()
     }
 
-    private func applyPreferenceChange(_ msg: Msg) {
-        runtime?.send(msg)
+    private func applyPreferenceChange(_ edit: PreferenceEdit) {
+        runtime?.send(.prefSet(edit))
         runtime?.send(.prefSave)
     }
 }

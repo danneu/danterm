@@ -517,7 +517,10 @@ final class TerminalPaneSessionController {
     func primaryHistoryTailReader() -> @Sendable (Int, Int) -> String? { { _, _ in nil } }
     private(set) var gridDimensions: [TerminalDimensions] = []
 
-    func setGridDimensions(_ dimensions: TerminalDimensions) {
+    // Mirrors TerminalPaneSession.setGridDimensions(_:pinned:). `pinned` is
+    // dropped because no UI test asserts on it yet; record it here the day one
+    // does.
+    func setGridDimensions(_ dimensions: TerminalDimensions, pinned: Bool) {
         gridDimensions.append(dimensions)
     }
     func tearDown() {

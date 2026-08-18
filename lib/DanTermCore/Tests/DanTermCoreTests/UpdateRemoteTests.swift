@@ -44,7 +44,7 @@ struct UpdateRemoteTests {
         #expect(model.pane(paneId) == paneBefore)
 
         _ = update(&model, .preferencesOpened())
-        _ = update(&model, .prefSetRemoteTheme("Ocean"))
+        _ = update(&model, .prefSet(.remoteTheme("Ocean")))
         _ = update(&model, .prefSave)
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Ocean")
         #expect(model.pane(paneId) == paneBefore)

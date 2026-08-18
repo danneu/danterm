@@ -2,7 +2,7 @@
 // initializes the draft from the saved config without wiping an existing
 // draft, preferencesClosed clears it), the desiredPreferencesPanel projection
 // (the values and warnings the panel renders, plus invalid font-size
-// persistence), edit operations (prefSet* preserve raw text for remoteTheme, do
+// persistence), edit operations (prefSet preserves raw text for remoteTheme, does
 // NOT mutate committed config), prefSave (one whole-document transaction,
 // remote-theme propagation to live panes, theme + font-size ownership, and
 // invalid font-size handling), configLoaded while open (re-seeds the draft from
@@ -54,7 +54,7 @@ private func openPrefs(
         // Scenario: spec-first preserve draft.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetAlertClearMode(.manual))
+        _ = update(&model, .prefSet(.alertClearMode(.manual)))
         #expect(model.preferencesDraft?.config.alertClearMode == .manual)
         _ = openPrefs(&model)
         #expect(model.preferencesDraft?.config.alertClearMode == .manual, "draft should not be wiped")
@@ -139,7 +139,7 @@ private func openPrefs(
         //   one.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetRemoteTheme("  Purplepeter  "))
+        _ = update(&model, .prefSet(.remoteTheme("  Purplepeter  ")))
 
         let projection = try #require(desiredPreferencesPanel(in: model), "expected preferences projection")
         #expect(projection.remoteThemeText == "  Purplepeter  ", "field keeps raw draft text")
@@ -172,7 +172,7 @@ private func openPrefs(
         // Scenario: spec-first -- edit the theme, then the config file changes.
         var model = makeModel()
         _ = openPrefs(&model, theme: "Dracula", fontSize: 13)
-        _ = update(&model, .prefSetTheme("Solarized"))
+        _ = update(&model, .prefSet(.theme("Solarized")))
 
         var reloaded = DanTermConfig.default
         reloaded.defaultTheme = "Nord"
@@ -193,7 +193,7 @@ private func openPrefs(
         // Scenario: spec-first invalid font save.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetFontSize("abc"))
+        _ = update(&model, .prefSet(.fontSize("abc")))
         let commands = update(&model, .prefSave)
 
         let projection = try #require(desiredPreferencesPanel(in: model), "expected preferences projection")
@@ -204,77 +204,77 @@ private func openPrefs(
 
     // MARK: - Editing draft
 
-    @Test("prefSetAlertClearMode updates draft only, not model.config")
-    func prefSetAlertClearModeUpdatesDraftOnly() {
-        // Intent: prefSetAlertClearMode writes the draft only; committed
+    @Test(".prefSet(.alertClearMode) updates draft only, not model.config")
+    func alertClearModeEditUpdatesDraftOnly() {
+        // Intent: .prefSet(.alertClearMode) writes the draft only; committed
         //   config is unchanged.
         // Why it exists: pins the draft-isolation rule.
         // Scenario: spec-first draft-only.
         var model = makeModel()
         _ = openPrefs(&model)
-        let commands = update(&model, .prefSetAlertClearMode(.manual))
+        let commands = update(&model, .prefSet(.alertClearMode(.manual)))
         #expect(model.preferencesDraft?.config.alertClearMode == .manual)
         #expect(model.config.alertClearMode == .focus, "committed config should not change")
         #expect(commands.count == 0)
     }
 
-    @Test("prefSetRemoteTheme stores raw text without normalizing")
-    func prefSetRemoteThemeStoresRawText() {
-        // Intent: prefSetRemoteTheme stores the raw string (no trim).
+    @Test(".prefSet(.remoteTheme) stores raw text without normalizing")
+    func remoteThemeEditStoresRawText() {
+        // Intent: .prefSet(.remoteTheme) stores the raw string (no trim).
         // Why it exists: pins the raw-text storage so the editor preserves
         //   user input including whitespace.
         // Scenario: spec-first raw text.
         var model = makeModel()
         _ = openPrefs(&model)
-        let commands = update(&model, .prefSetRemoteTheme("  Grape  "))
+        let commands = update(&model, .prefSet(.remoteTheme("  Grape  ")))
         #expect(model.preferencesDraft?.config.remoteTheme == "  Grape  ", "should store raw text")
         #expect(model.config.remoteTheme == "Purplepeter", "committed config should not change")
         #expect(commands.count == 0)
     }
 
-    @Test("prefSetRemoteTheme stores empty string without defaulting")
-    func prefSetRemoteThemeStoresEmptyString() {
+    @Test(".prefSet(.remoteTheme) stores empty string without defaulting")
+    func remoteThemeEditStoresEmptyString() {
         // Intent: an empty string is stored as-is in the draft (defaulting
         //   happens later on save).
         // Why it exists: pins the no-default-on-set rule.
         // Scenario: spec-first empty store.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetRemoteTheme(""))
+        _ = update(&model, .prefSet(.remoteTheme("")))
         #expect(model.preferencesDraft?.config.remoteTheme == "", "should store empty string")
     }
 
-    @Test("prefSetTheme updates draft")
-    func prefSetThemeUpdatesDraft() {
-        // Intent: prefSetTheme writes the draft theme.
+    @Test(".prefSet(.theme) updates draft")
+    func themeEditUpdatesDraft() {
+        // Intent: .prefSet(.theme) writes the draft theme.
         // Why it exists: pins the bare write.
         // Scenario: spec-first set theme.
         var model = makeModel()
         _ = openPrefs(&model)
-        let commands = update(&model, .prefSetTheme("Solarized"))
+        let commands = update(&model, .prefSet(.theme("Solarized")))
         #expect(model.preferencesDraft?.config.defaultTheme == "Solarized")
         #expect(commands.count == 0)
     }
 
-    @Test("prefSetTheme nil clears draft theme")
-    func prefSetThemeNilClearsDraftTheme() {
-        // Intent: prefSetTheme(nil) clears the draft theme.
+    @Test(".prefSet(.theme) nil clears draft theme")
+    func themeEditNilClearsDraftTheme() {
+        // Intent: .prefSet(.theme(nil)) clears the draft theme.
         // Why it exists: pins the explicit-clear branch.
         // Scenario: spec-first clear theme.
         var model = makeModel()
         _ = openPrefs(&model, theme: "Dracula")
-        _ = update(&model, .prefSetTheme(nil))
+        _ = update(&model, .prefSet(.theme(nil)))
         #expect(model.preferencesDraft?.config.defaultTheme == nil, "should be nil")
     }
 
-    @Test("prefSetFontSize updates draft")
-    func prefSetFontSizeUpdatesDraft() {
-        // Intent: prefSetFontSize writes the draft fontSize.
+    @Test(".prefSet(.fontSize) updates draft")
+    func fontSizeEditUpdatesDraft() {
+        // Intent: .prefSet(.fontSize) writes the draft fontSize.
         // Why it exists: pins the bare write.
         // Scenario: spec-first set font size.
         var model = makeModel()
         _ = openPrefs(&model)
-        let commands = update(&model, .prefSetFontSize("16"))
+        let commands = update(&model, .prefSet(.fontSize("16")))
         #expect(model.preferencesDraft?.fontSizeText == "16")
         #expect(commands.count == 0)
     }
@@ -285,10 +285,10 @@ private func openPrefs(
     func prefSaveAppliesEveryFieldInOneTransaction() {
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetTheme("Dracula"))
-        _ = update(&model, .prefSetFontSize("17.5"))
-        _ = update(&model, .prefSetAlertClearMode(.manual))
-        _ = update(&model, .prefSetRemoteTheme("Grape"))
+        _ = update(&model, .prefSet(.theme("Dracula")))
+        _ = update(&model, .prefSet(.fontSize("17.5")))
+        _ = update(&model, .prefSet(.alertClearMode(.manual)))
+        _ = update(&model, .prefSet(.remoteTheme("Grape")))
 
         let commands = update(&model, .prefSave)
 
@@ -316,8 +316,8 @@ private func openPrefs(
         // config that names one.
         var model = makeModel()
         _ = openPrefs(&model, fontSize: 14)
-        _ = update(&model, .prefSetFontSize("nan"))
-        _ = update(&model, .prefSetAlertClearMode(.manual))
+        _ = update(&model, .prefSet(.fontSize("nan")))
+        _ = update(&model, .prefSet(.alertClearMode(.manual)))
 
         let commands = update(&model, .prefSave)
 
@@ -346,7 +346,7 @@ private func openPrefs(
         // Scenario: spec-first save alert mode.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetAlertClearMode(.manual))
+        _ = update(&model, .prefSet(.alertClearMode(.manual)))
         let commands = update(&model, .prefSave)
         #expect(model.config.alertClearMode == .manual, "committed config should update")
         #expect(hasEffect(commands) {
@@ -363,7 +363,7 @@ private func openPrefs(
         // Scenario: spec-first save remote theme.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetRemoteTheme("Grape"))
+        _ = update(&model, .prefSet(.remoteTheme("Grape")))
         let commands = update(&model, .prefSave)
         #expect(model.config.remoteTheme == "Grape", "committed config should update")
         #expect(hasEffect(commands) {
@@ -380,7 +380,7 @@ private func openPrefs(
         // Scenario: spec-first save trim.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetRemoteTheme("  Grape  "))
+        _ = update(&model, .prefSet(.remoteTheme("  Grape  ")))
         _ = update(&model, .prefSave)
         #expect(model.preferencesDraft?.config.remoteTheme == "Grape", "draft should be normalized post-save")
         #expect(model.config.remoteTheme == "Grape")
@@ -394,7 +394,7 @@ private func openPrefs(
         // Scenario: spec-first save default.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetRemoteTheme("   "))
+        _ = update(&model, .prefSet(.remoteTheme("   ")))
         _ = update(&model, .prefSave)
         #expect(model.config.remoteTheme == "Purplepeter", "should resolve to default")
         #expect(model.preferencesDraft?.config.remoteTheme == "Purplepeter")
@@ -409,7 +409,7 @@ private func openPrefs(
         // Scenario: spec-first -- edit the alert mode, save, then save again.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetAlertClearMode(.manual))
+        _ = update(&model, .prefSet(.alertClearMode(.manual)))
         #expect(update(&model, .prefSave).count == 1, "the edit is committed")
         #expect(update(&model, .prefSave).count == 0, "nothing left to write")
     }
@@ -427,7 +427,7 @@ private func openPrefs(
         let paneBefore = model.pane(paneId)
 
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetRemoteTheme("Grape"))
+        _ = update(&model, .prefSet(.remoteTheme("Grape")))
         let commands = update(&model, .prefSave)
         #expect(model.pane(paneId) == paneBefore)
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Grape")
@@ -444,7 +444,7 @@ private func openPrefs(
         // Scenario: spec-first save local theme.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetTheme("Solarized"))
+        _ = update(&model, .prefSet(.theme("Solarized")))
         let commands = update(&model, .prefSave)
         #expect(hasEffect(commands) {
             if case .saveDanTermConfig(let config) = $0 { return config.defaultTheme == "Solarized" }
@@ -460,7 +460,7 @@ private func openPrefs(
         var model = makeModel()
         model.config.defaultTheme = "Dracula"
         _ = openPrefs(&model, theme: "Dracula")
-        _ = update(&model, .prefSetTheme(nil))
+        _ = update(&model, .prefSet(.theme(nil)))
         let commands = update(&model, .prefSave)
         #expect(hasEffect(commands) {
             if case .saveDanTermConfig(let config) = $0 { return config.defaultTheme == nil }
@@ -475,7 +475,7 @@ private func openPrefs(
         // Scenario: spec-first save font size.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetFontSize("16"))
+        _ = update(&model, .prefSet(.fontSize("16")))
         let commands = update(&model, .prefSave)
         #expect(hasEffect(commands) {
             if case .saveDanTermConfig(let config) = $0 { return config.fontSize == 16 }
@@ -490,7 +490,7 @@ private func openPrefs(
         // Scenario: spec-first invalid font save skip.
         var model = makeModel()
         _ = openPrefs(&model)
-        _ = update(&model, .prefSetFontSize("abc"))
+        _ = update(&model, .prefSet(.fontSize("abc")))
         let commands = update(&model, .prefSave)
         #expect(commands.count == 0)
         #expect(!hasEffect(commands) {
@@ -508,8 +508,8 @@ private func openPrefs(
         // Scenario: spec-first configLoaded scope.
         var model = makeModel()
         _ = openPrefs(&model, theme: "Dracula", fontSize: 14)
-        _ = update(&model, .prefSetAlertClearMode(.manual))
-        _ = update(&model, .prefSetTheme("Solarized"))
+        _ = update(&model, .prefSet(.alertClearMode(.manual)))
+        _ = update(&model, .prefSet(.theme("Solarized")))
 
         var newConfig = DanTermConfig()
         newConfig.remoteTheme = "Ocean"
@@ -540,7 +540,7 @@ private func openPrefs(
         reloaded.tailnet = DanTermTailnetConfig(listen: "100.64.0.1:7000", admittedNodeIds: ["node-a"])
         _ = update(&model, .configLoaded(reloaded, resolvedFontFamily: nil))
 
-        _ = update(&model, .prefSetTheme("Nord"))
+        _ = update(&model, .prefSet(.theme("Nord")))
         let commands = update(&model, .prefSave)
 
         let saved = try #require(
@@ -571,26 +571,34 @@ private func openPrefs(
 
     @Test("pref messages are no-ops when draft is nil")
     func prefMessagesAreNoOpsWhenDraftIsNil() {
-        // Intent: every pref* message is a no-op when no draft exists.
-        // Why it exists: pins the closed-state safety net for the entire
-        //   draft Msg surface.
+        // Intent: every preference edit, and prefSave, leaves the whole model
+        //   untouched and emits nothing when no draft exists.
+        // Why it exists: one reducer arm now holds the draft-open guard for
+        //   every control, so a regression there would let a closed panel write
+        //   the model. Covering all six edits is what makes that guard pinned
+        //   rather than sampled.
         // Scenario: spec-first all-no-ops.
+        let edits: [PreferenceEdit] = [
+            .alertClearMode(.manual),
+            .remoteTheme("Grape"),
+            .theme("Dracula"),
+            .fontSize("14"),
+            .fontFamily("Menlo"),
+            .copyOnSelect(true),
+        ]
+        for edit in edits {
+            var model = makeModel()
+            let before = model
+            let commands = update(&model, .prefSet(edit))
+            #expect(commands.count == 0, "\(edit) should emit no commands")
+            #expect(model == before, "\(edit) should leave the model unchanged")
+        }
+
         var model = makeModel()
-        let e1 = update(&model, .prefSetAlertClearMode(.manual))
-        #expect(e1.count == 0)
-        #expect(model.config.alertClearMode == .focus, "should not change")
-
-        let e2 = update(&model, .prefSetRemoteTheme("Grape"))
-        #expect(e2.count == 0)
-
-        let e3 = update(&model, .prefSave)
-        #expect(e3.count == 0)
-
-        let e4 = update(&model, .prefSetTheme("Dracula"))
-        #expect(e4.count == 0)
-
-        let e5 = update(&model, .prefSetFontSize("14"))
-        #expect(e5.count == 0)
+        let before = model
+        let commands = update(&model, .prefSave)
+        #expect(commands.count == 0)
+        #expect(model == before, "prefSave should leave the model unchanged")
     }
 
     // MARK: - Helper functions

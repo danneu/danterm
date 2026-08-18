@@ -746,7 +746,7 @@ import DanTermProtocol
         createTab(&model)
         model.config.defaultTheme = "Dracula"
         update(&model, .preferencesOpened())
-        update(&model, .prefSetTheme("Solarized"))
+        update(&model, .prefSet(.theme("Solarized")))
         #expect(model.preferencesDraft != nil, "draft should exist before snapshot")
 
         let snapshot = toSnapshot(model)

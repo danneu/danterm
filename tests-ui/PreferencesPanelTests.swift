@@ -185,8 +185,8 @@ func preferencesPanelTests() {
         fx.panel.fontFamilyCombo.selectItem(at: 1)
 
         try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
-        guard case .prefSetFontFamily(let family) = fx.runtime.sentMessages[0] else {
-            throw UITestFailure(message: "expected prefSetFontFamily, got \(fx.runtime.sentMessages[0])")
+        guard case .prefSet(.fontFamily(let family)) = fx.runtime.sentMessages[0] else {
+            throw UITestFailure(message: "expected .prefSet(.fontFamily), got \(fx.runtime.sentMessages[0])")
         }
         try uiExpect(family == "Menlo", "expected the picked family, got \(family ?? "nil")")
         guard case .prefSave = fx.runtime.sentMessages[1] else {
@@ -208,8 +208,8 @@ func preferencesPanelTests() {
 
         fx.panel.fontFamilyCombo.selectItem(at: 0)
 
-        guard case .prefSetFontFamily(let family) = fx.runtime.sentMessages.first else {
-            throw UITestFailure(message: "expected prefSetFontFamily, got \(String(describing: fx.runtime.sentMessages.first))")
+        guard case .prefSet(.fontFamily(let family)) = fx.runtime.sentMessages.first else {
+            throw UITestFailure(message: "expected .prefSet(.fontFamily), got \(String(describing: fx.runtime.sentMessages.first))")
         }
         try uiExpect(family == systemMonospaceFontChoiceTitle,
                      "expected the sentinel title, got \(family ?? "nil")")
@@ -225,8 +225,8 @@ func preferencesPanelTests() {
             Notification(name: NSControl.textDidChangeNotification, object: fx.panel.fontFamilyCombo)
         )
 
-        guard case .prefSetFontFamily(let family) = fx.runtime.sentMessages.last else {
-            throw UITestFailure(message: "expected prefSetFontFamily, got \(String(describing: fx.runtime.sentMessages.last))")
+        guard case .prefSet(.fontFamily(let family)) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "expected .prefSet(.fontFamily), got \(String(describing: fx.runtime.sentMessages.last))")
         }
         try uiExpect(family == "Fira Code", "expected the typed text, got \(family ?? "nil")")
     }
@@ -241,8 +241,8 @@ func preferencesPanelTests() {
             Notification(name: NSControl.textDidChangeNotification, object: fx.panel.fontFamilyCombo)
         )
 
-        guard case .prefSetFontFamily(let family) = fx.runtime.sentMessages.last else {
-            throw UITestFailure(message: "expected prefSetFontFamily, got \(String(describing: fx.runtime.sentMessages.last))")
+        guard case .prefSet(.fontFamily(let family)) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "expected .prefSet(.fontFamily), got \(String(describing: fx.runtime.sentMessages.last))")
         }
         try uiExpect(family == nil, "an empty field means no family, got \(family ?? "nil")")
     }
@@ -273,8 +273,8 @@ func preferencesPanelTests() {
 
         try uiExpect(fx.panel.fontSizeField.stringValue == "14", "the field should mirror the stepped size")
         try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
-        guard case .prefSetFontSize(let text) = fx.runtime.sentMessages[0] else {
-            throw UITestFailure(message: "expected prefSetFontSize, got \(fx.runtime.sentMessages[0])")
+        guard case .prefSet(.fontSize(let text)) = fx.runtime.sentMessages[0] else {
+            throw UITestFailure(message: "expected .prefSet(.fontSize), got \(fx.runtime.sentMessages[0])")
         }
         try uiExpect(text == "14", "expected stepped size 14, got \(text ?? "nil")")
         guard case .prefSave = fx.runtime.sentMessages[1] else {
@@ -320,8 +320,8 @@ func preferencesPanelTests() {
         fx.panel.copyOnSelectCheckbox.performClick(nil)
 
         try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
-        guard case .prefSetCopyOnSelect(let enabled) = fx.runtime.sentMessages[0] else {
-            throw UITestFailure(message: "expected prefSetCopyOnSelect, got \(fx.runtime.sentMessages[0])")
+        guard case .prefSet(.copyOnSelect(let enabled)) = fx.runtime.sentMessages[0] else {
+            throw UITestFailure(message: "expected .prefSet(.copyOnSelect), got \(fx.runtime.sentMessages[0])")
         }
         try uiExpect(enabled == false, "unticking should draft the option off")
         guard case .prefSave = fx.runtime.sentMessages[1] else {

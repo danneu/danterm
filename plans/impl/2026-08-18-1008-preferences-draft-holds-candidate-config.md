@@ -155,7 +155,7 @@ UpdatePaneFontSizeTests, UpdateRemoteTests, SnapshotTests), and
 ## Commit progress
 - [x] 1. refactor(prefs): delete the dead reset and dirty surface
 - [x] 2. refactor(prefs): let the draft hold a candidate config
-- [ ] 3. refactor(prefs): collapse the six set messages into one edit
+- [x] 3. refactor(prefs): collapse the six set messages into one edit
 
 ## Implementation notes
 
@@ -186,14 +186,25 @@ UpdatePaneFontSizeTests, UpdateRemoteTests, SnapshotTests), and
   `draft.config.<field>` / `draft.fontSizeText`. They were left as draft reads
   rather than moved onto the projection, so this commit's diff stays a
   representation change and does not also re-target what those tests assert.
+- `PreferenceEdit` is declared top-level in Msg.swift beside the other intent
+  payload enums, with cases named for the panel's controls. The panel's
+  `applyPreferenceChange` now takes a `PreferenceEdit` and builds the `.prefSet`
+  message itself, so no call site names `Msg` twice.
+- Commit 3 rewrote the reducer's six guarded arms into one `.prefSet` arm that
+  states the draft-open guard once and then switches on the edit. The guard was
+  checked by deleting it and confirming the widened no-op test failed on all six
+  cases before it was restored.
+- Commit 3 fixed `tests-ui/SwiftTerminalSessionViewTestShim.swift`'s
+  `setGridDimensions` signature, which the previous Follow Up named. That break
+  predates this plan and is unrelated to preferences, but PO4 requires a passing
+  `just test-ui` from this commit, and the suite did not compile without it. The
+  shim drops the new `pinned` argument because no UI test asserts on it.
 
 ## Follow Up
 
-- `tests-ui/SwiftTerminalSessionViewTestShim.swift:520` declares
-  `setGridDimensions(_:)` without the `pinned:` argument that
+- `tests-ui/SwiftTerminalSessionViewTestShim.swift:520` records only the
+  dimensions its `setGridDimensions(_:pinned:)` receives and drops `pinned`.
+  Nothing asserts on `pinned` today, so no coverage is missing right now, but a
+  UI test that wants to pin the claimed-vs-unclaimed distinction described at
   `lib/TerminalPTY/Sources/TerminalPaneSession/TerminalPaneSession.swift:768`
-  gained in commit 4c4fdabe, so `just test-ui` fails to compile at
-  `app/SwiftTerminalSessionView.swift:1389`. This break predates this plan and
-  is unrelated to preferences, but it blocks PO4, which requires a passing
-  `just test-ui` once the last commit lands. Fix the shim signature before
-  commit 3 reports PO4.
+  must first widen the shim's recorded value.

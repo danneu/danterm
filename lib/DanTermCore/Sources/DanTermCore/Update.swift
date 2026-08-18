@@ -584,34 +584,25 @@ func update(
         model.availableThemeNames = []
         return []
 
-    case .prefSetAlertClearMode(let mode):
+    // The one place an edit reaches the draft, so the "only while the panel is
+    // open" guard is stated once for every control.
+    case .prefSet(let edit):
         guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.config.alertClearMode = mode
-        return []
-
-    case .prefSetRemoteTheme(let rawText):
-        guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.config.remoteTheme = rawText
-        return []
-
-    case .prefSetTheme(let text):
-        guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.config.defaultTheme = text
-        return []
-
-    case .prefSetFontSize(let text):
-        guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.fontSizeText = text
-        return []
-
-    case .prefSetFontFamily(let text):
-        guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.config.fontFamily = text
-        return []
-
-    case .prefSetCopyOnSelect(let enabled):
-        guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.config.copyOnSelect = enabled
+        switch edit {
+        case .alertClearMode(let mode):
+            model.preferencesDraft!.config.alertClearMode = mode
+        case .remoteTheme(let rawText):
+            model.preferencesDraft!.config.remoteTheme = rawText
+        case .theme(let text):
+            model.preferencesDraft!.config.defaultTheme = text
+        case .fontSize(let text):
+            // The candidate's number is left alone: save is what parses the text.
+            model.preferencesDraft!.fontSizeText = text
+        case .fontFamily(let text):
+            model.preferencesDraft!.config.fontFamily = text
+        case .copyOnSelect(let enabled):
+            model.preferencesDraft!.config.copyOnSelect = enabled
+        }
         return []
 
     case .prefSave:

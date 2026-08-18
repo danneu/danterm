@@ -89,7 +89,7 @@ import DanTermProtocol
         model.config.fontFamily = "Menlo"
         openPanel(&model)
 
-        _ = update(&model, .prefSetFontFamily(systemMonospaceFontChoiceTitle))
+        _ = update(&model, .prefSet(.fontFamily(systemMonospaceFontChoiceTitle)))
         let commands = update(&model, .prefSave)
 
         #expect(model.config.fontFamily == nil)
@@ -150,7 +150,7 @@ import DanTermProtocol
         _ = update(&model, .configLoaded(config, resolvedFontFamily: nil))
         openPanel(&model)
 
-        _ = update(&model, .prefSetFontFamily("Fira Code"))
+        _ = update(&model, .prefSet(.fontFamily("Fira Code")))
 
         #expect(try #require(desiredPreferencesPanel(in: model)).fontFamilyWarning == nil)
     }
@@ -162,9 +162,9 @@ import DanTermProtocol
         config.fontFamily = "Fira Codee"
         _ = update(&model, .configLoaded(config, resolvedFontFamily: nil))
         openPanel(&model)
-        _ = update(&model, .prefSetFontFamily("Fira Code"))
+        _ = update(&model, .prefSet(.fontFamily("Fira Code")))
 
-        _ = update(&model, .prefSetFontFamily("Fira Codee"))
+        _ = update(&model, .prefSet(.fontFamily("Fira Codee")))
 
         #expect(try #require(desiredPreferencesPanel(in: model)).fontFamilyWarning != nil)
     }
