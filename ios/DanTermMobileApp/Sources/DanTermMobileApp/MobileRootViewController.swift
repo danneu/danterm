@@ -9,19 +9,12 @@ import UIKit
 
 /// Keeps every UIKit state transition on the main actor while sessions block elsewhere.
 @MainActor
-final class MobileRootViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
+final class MobileRootViewController: UIViewController {
     private let session = MobileSessionController()
     private let statusPill = ConnectionStatusPillView()
-    private let paneTable = UITableView(frame: .zero, style: .plain)
+    private let bottomBar = TerminalBottomBarView()
     private let composer = TerminalComposerView()
-    private let claimBar = UIStackView()
-    private let claimButton = UIButton(type: .system)
-    private let releaseButton = UIButton(type: .system)
 
-    /// The rows the table is currently showing. It is the data source's own copy of the
-    /// projection, reloaded when the projection moves -- not a second owner of the list.
-    private var panes: [MobilePaneListItem] = []
-    private var selectedPaneId: PaneId?
     /// Whether the launch has already been given its answer about the connect sheet. It
     /// is presentation choreography, not a session fact: whether a sheet is *wanted* is
     /// read from the model each time.
@@ -76,84 +69,55 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         if handled == false { super.pressesBegan(presses, with: event) }
     }
 
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        panes.count
-    }
-
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "pane", for: indexPath)
-        let pane = panes[indexPath.row]
-        var content = cell.defaultContentConfiguration()
-        content.text = pane.paneTitle
-        content.secondaryText = "\(pane.groupName) / \(pane.tabTitle)"
-        cell.contentConfiguration = content
-        cell.accessoryType = pane.paneId == selectedPaneId ? .checkmark : .none
-        return cell
-    }
-
-    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        session.dispatch(.paneSelected(panes[indexPath.row].paneId))
-    }
-
     private func configureViews() {
         statusPill.addTarget(self, action: #selector(statusPillTapped), for: .touchUpInside)
-        paneTable.dataSource = self
-        paneTable.delegate = self
-        paneTable.rowHeight = UITableView.automaticDimension
-        paneTable.estimatedRowHeight = 52
-        paneTable.register(UITableViewCell.self, forCellReuseIdentifier: "pane")
         composer.onText = { [weak self] text in self?.session.dispatch(.textEntered(text)) }
         composer.onPaste = { [weak self] text in self?.session.dispatch(.pasted(text)) }
-        composer.onAccessoryKey = { [weak self] key in
+        bottomBar.onPaneList = { [weak self] in self?.presentPaneSheet() }
+        bottomBar.onAccessoryKey = { [weak self] key in
             guard let self else { return false }
             session.dispatch(.accessoryKeyPressed(key))
+            // The key was aimed at the terminal, so the keyboard target keeps the focus a
+            // tap on the bar would otherwise have taken.
+            composer.focusInput()
             return session.projection.isControlLatched
         }
-        composer.onDismissKeyboard = { [weak self] in self?.view.endEditing(true) }
-        configureGeometryButton(claimButton, title: "Claim", action: #selector(claimTapped))
-        configureGeometryButton(releaseButton, title: "Release", action: #selector(releaseTapped))
-        claimBar.axis = .horizontal
-        claimBar.alignment = .center
-        claimBar.distribution = .fillEqually
-        claimBar.spacing = 8
-        claimBar.isLayoutMarginsRelativeArrangement = true
-        claimBar.directionalLayoutMargins = NSDirectionalEdgeInsets(
-            top: 4,
-            leading: 8,
-            bottom: 4,
-            trailing: 8
-        )
-        claimBar.addArrangedSubview(claimButton)
-        claimBar.addArrangedSubview(releaseButton)
+        bottomBar.onDismissKeyboard = { [weak self] in self?.view.endEditing(true) }
+        bottomBar.menuItems = { [weak self] in self?.geometryMenuItems() ?? [] }
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
         terminalView.addGestureRecognizer(scroll)
         // The pill is added after the terminal because it floats over it. Everything else
         // sits beside the terminal and takes its own space.
-        for subview in [terminalView, paneTable, claimBar, composer, statusPill] {
+        for subview in [terminalView, bottomBar, composer, statusPill] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
         configureConstraints()
     }
 
-    /// Gives both geometry buttons the one appearance, so the pair reads as two forms of
-    /// the same control rather than two unrelated actions.
-    private func configureGeometryButton(_ button: UIButton, title: String, action: Selector) {
-        var configuration = UIButton.Configuration.gray()
-        configuration.title = title
-        configuration.cornerStyle = .capsule
-        button.configuration = configuration
-        button.titleLabel?.adjustsFontForContentSizeCategory = true
-        button.addTarget(self, action: action, for: .touchUpInside)
+    /// Names the geometry actions the model offers right now. It is asked when the menu
+    /// opens, and each item carries an event rather than the request the facts imply at
+    /// that instant -- the model builds the request when it handles the event.
+    private func geometryMenuItems() -> [TerminalBarMenuItem] {
+        let claim = session.projection.claim
+        var items: [TerminalBarMenuItem] = []
+        if claim.claim != nil {
+            items.append(TerminalBarMenuItem(
+                title: "Claim",
+                systemImage: "arrow.down.right.and.arrow.up.left"
+            ) { [weak self] in self?.session.dispatch(.claimRequested) })
+        }
+        if claim.release != nil {
+            items.append(TerminalBarMenuItem(
+                title: "Release",
+                systemImage: "arrow.up.left.and.arrow.down.right"
+            ) { [weak self] in self?.session.dispatch(.releaseRequested) })
+        }
+        return items
     }
 
     private func configureConstraints() {
         view.keyboardLayoutGuide.followsUndockedKeyboard = true
-        let preferredTableHeight = paneTable.heightAnchor.constraint(
-            equalTo: view.heightAnchor,
-            multiplier: 0.2
-        )
-        preferredTableHeight.priority = .defaultHigh
         NSLayoutConstraint.activate([
             // Full bleed: the terminal owns the whole width and everything from the
             // physical top of the window down to the controls at the bottom. Nothing is
@@ -161,7 +125,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             terminalView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             terminalView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             terminalView.topAnchor.constraint(equalTo: view.topAnchor),
-            terminalView.bottomAnchor.constraint(equalTo: paneTable.topAnchor),
+            terminalView.bottomAnchor.constraint(equalTo: composer.topAnchor),
 
             statusPill.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             statusPill.topAnchor.constraint(
@@ -177,25 +141,18 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
                 constant: -12
             ),
 
-            // The table sits below the terminal until the pane sheet replaces it, so the
-            // terminal keeps the top of the window either way.
-            paneTable.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            paneTable.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            paneTable.bottomAnchor.constraint(equalTo: claimBar.topAnchor),
-            paneTable.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
-            paneTable.heightAnchor.constraint(lessThanOrEqualToConstant: 150),
-            preferredTableHeight,
-
-            // The bar sits beside the terminal rather than over it, so no cell is ever
-            // drawn underneath it, claimed or not.
-            claimBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            claimBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            claimBar.bottomAnchor.constraint(equalTo: composer.topAnchor),
-            claimBar.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
-
             composer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            composer.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            composer.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
+
+            // The bar sits beside the terminal rather than over it, so no cell is ever
+            // drawn underneath it, claimed or not. Its height is a constant, so the
+            // terminal's extent does not move when the overflow menu gains or loses an
+            // action.
+            bottomBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomBar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            bottomBar.heightAnchor.constraint(equalToConstant: TerminalBottomBarView.height),
         ])
     }
 
@@ -216,25 +173,16 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             sheet.showStatus(projection.status.text, color: color)
             sheet.showDraftProblem(projection.draftProblem?.label)
         }
-        if panes != projection.panes || selectedPaneId != projection.selectedPaneId {
-            panes = projection.panes
-            selectedPaneId = projection.selectedPaneId
-            paneTable.reloadData()
+        // The list is a model fact, so a pane the Mac opens or closes reaches the sheet
+        // while it is up rather than waiting for the user to close and reopen it.
+        if let sheet = presentedViewController as? PaneSheetViewController {
+            sheet.show(panes: projection.panes, selected: projection.selectedPaneId)
         }
-        // Only the buttons hide. The bar keeps its layout space either way, so the
-        // terminal's extent -- and with it the grid a claim would name -- does not move
-        // when an action appears or goes away.
-        //
-        // Written only on a change: a layout pass feeds this, and the stack view lays out
-        // again whenever an arranged subview's hidden flag is set, so an unconditional
-        // write would drive a layout loop.
-        setOffered(claimButton, projection.claim.claim != nil)
-        setOffered(releaseButton, projection.claim.release != nil)
-    }
-
-    private func setOffered(_ button: UIButton, _ offered: Bool) {
-        guard button.isHidden == offered else { return }
-        button.isHidden = offered == false
+        // Only whether the menu opens follows the projection. The bar's height is fixed,
+        // so the terminal's extent -- and with it the grid a claim would name -- does not
+        // move when an action appears or goes away. What the menu contains is asked for
+        // again when it opens.
+        bottomBar.setMenuOffered(projection.claim.claim != nil || projection.claim.release != nil)
     }
 
     /// Opens the form that names a server. The sheet is built for this one presentation
@@ -261,16 +209,28 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         render(session.projection)
     }
 
+    /// Opens the pane list. It dismisses itself on a pick, which is what keeps the terminal
+    /// the screen the user lives on.
+    ///
+    /// Medium detent only, as the connect sheet is: a large sheet would rise over the pill,
+    /// and the connection status has to stay readable while a sheet is up. A list too long
+    /// for the detent scrolls inside it.
+    private func presentPaneSheet() {
+        guard presentedViewController == nil else { return }
+        let projection = session.projection
+        let sheet = PaneSheetViewController(
+            panes: projection.panes,
+            selected: projection.selectedPaneId
+        )
+        sheet.onSelect = { [weak self] pane in self?.session.dispatch(.paneSelected(pane)) }
+        sheet.sheetPresentationController?.detents = [.medium()]
+        sheet.sheetPresentationController?.prefersGrabberVisible = true
+        present(sheet, animated: true)
+        render(session.projection)
+    }
+
     @objc private func statusPillTapped() {
         presentConnectSheet()
-    }
-
-    @objc private func claimTapped() {
-        session.dispatch(.claimRequested)
-    }
-
-    @objc private func releaseTapped() {
-        session.dispatch(.releaseRequested)
     }
 
     @objc private func scrolled(_ recognizer: UIPanGestureRecognizer) {

@@ -251,7 +251,7 @@ until everything else works.
 - [x] 1. refactor(ios): give the phone session one pure decision core
 - [x] 2. refactor(ios): derive the phone's grid from one content box
 - [x] 3. feat(ios): run the terminal full-bleed under a floating status pill
-- [ ] 4. feat(ios): move pane choice and claim into the bottom bar
+- [x] 4. feat(ios): move pane choice and claim into the bottom bar
 - [ ] 5. feat(ios): make the terminal itself the text-input target
 
 ## Implementation notes
@@ -312,6 +312,24 @@ until everything else works.
   an explicit near-black rather than `.systemBackground`. A presented controller does not
   inherit the presenter's override, and a system background color under a sheet resolved
   light over the terminal's black.
+- Commit 4: the accessory key row moved out of the composer into a new
+  `TerminalBottomBarView` rather than gaining the two new controls where it stood. The
+  plan makes that row the bottom bar, and the bar has to outlive the composer, so moving
+  it now leaves commit 5 a plain deletion instead of a second restructure. What is left of
+  `TerminalComposerView` is the keyboard-raising field alone.
+- Commit 4: the overflow menu is a `UIDeferredMenuElement.uncached`, so its items are built
+  when the menu opens rather than when the bar last drew. Only whether the menu button is
+  enabled follows the projection. That is what makes a menu left open across a change in
+  the facts unable to show an action the model no longer offers.
+- Commit 4: the bar's height is a constant on the view rather than the sum of its contents,
+  and the three chrome controls are 36pt wide so the ten terminal keys keep the rest of the
+  row. Every control is sized to the row, so nothing in the bar can change its height.
+- Commit 4: an accessory key now returns focus to the composer from the view controller,
+  because the bar is no longer the composer's own subview and must not know what the
+  keyboard target is. Commit 5 replaces that call with the terminal's responder.
+- Commit 4: the pane sheet is seeded at init and repainted on every redraw while it is up,
+  unlike the connect sheet, whose fields are an editor a redraw must not overwrite. The
+  pane list has no editor, so a pane the Mac opens or closes belongs on screen at once.
 
 ## Follow Up
 
