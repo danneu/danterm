@@ -96,11 +96,18 @@ public struct TerminalStateSynchronization: Equatable, Sendable {
     /// Ordinary terminal-protocol bytes that rebuild the fenced state on a fresh terminal.
     public let bytes: [UInt8]
 
+    /// How many of the source's retained history rows these bytes leave out, oldest first;
+    /// `0` when the whole retained history is carried. A replica cannot derive this from the
+    /// bytes -- they look the same whether the source had more history or not -- so the
+    /// encoder is the only place that can state it.
+    public let droppedHistoryRows: Int
+
     /// Keeps geometry inseparable from bytes whose cursor and wrapping operations depend on it.
-    public init(columns: Int, rows: Int, bytes: [UInt8]) {
+    public init(columns: Int, rows: Int, bytes: [UInt8], droppedHistoryRows: Int) {
         self.columns = columns
         self.rows = rows
         self.bytes = bytes
+        self.droppedHistoryRows = droppedHistoryRows
     }
 }
 
@@ -896,19 +903,65 @@ public struct Terminal: Equatable, Sendable {
 
     /// Serializes observable engine state into bytes accepted by an ordinary reset terminal.
     public var stateSynchronization: TerminalStateSynchronization {
+        stateSynchronization(historyBudgetBytes: nil)
+    }
+
+    /// Serializes observable engine state while spending at most `historyBudgetBytes` on
+    /// retained history; `nil` carries all of it.
+    ///
+    /// The budget belongs to the caller, not to this encoder: an exact consumer -- a pane
+    /// snapshot, a replica checkpoint -- passes `nil` and keeps the whole retained state,
+    /// while a bounded replication stream passes its own budget. The grid, the alternate
+    /// screen, and control state are always carried whole, so the returned payload exceeds
+    /// the budget by that screen-proportional cost.
+    public func stateSynchronization(
+        historyBudgetBytes: Int?
+    ) -> TerminalStateSynchronization {
+        var historyStart = 0
+        if let historyBudgetBytes {
+            historyStart = boundedHistoryStart(budget: historyBudgetBytes)
+        }
+        while true {
+            let encoded = encodeStateSynchronization(historyStart: historyStart)
+            guard let historyBudgetBytes,
+                  encoded.historyBytes > historyBudgetBytes,
+                  historyStart < historyRowCount
+            else { return encoded.synchronization }
+            // The start estimate sums each row encoded on its own, which the joint encode can
+            // beat but, at the seam into the grid, can also exceed by a wide grapheme it
+            // borrows from the row after it. Dropping one more logical line and re-encoding
+            // makes the bound a fact rather than an argument about the encoder's internals.
+            historyStart = alignedHistoryStart(historyStart + 1)
+        }
+    }
+
+    /// Pairs one serialization with the byte cost of the history rows inside it, which is what
+    /// the budget is denominated in.
+    private struct EncodedStateSynchronization {
+        let synchronization: TerminalStateSynchronization
+        let historyBytes: Int
+    }
+
+    private func encodeStateSynchronization(
+        historyStart: Int
+    ) -> EncodedStateSynchronization {
         var writer = StateSynchronizationWriter()
         writer.append("\u{1B}c\u{1B}[3J\u{1B}]133;S;redraw=0\u{7}")
 
         var primaryRows: [GridRow] = []
-        primaryRows.reserveCapacity(historyRowCount + rowCount)
-        for index in 0..<historyRowCount {
+        primaryRows.reserveCapacity(historyRowCount - historyStart + rowCount)
+        for index in historyStart..<historyRowCount {
             guard let row = history.paintedDisplayRow(at: index) else {
                 preconditionFailure("retained history count must address every retained row")
             }
             primaryRows.append(row.materialized(to: columnCount))
         }
         primaryRows.append(contentsOf: primaryScreenRows.map { $0.materialized(to: columnCount) })
-        writer.appendRows(primaryRows, terminal: self)
+        let historyBytes = writer.appendRows(
+            primaryRows,
+            terminal: self,
+            measuringFirst: historyRowCount - historyStart
+        )
 
         let primaryState = activeScreen == .primary ? screen : inactiveScreen!
         appendControlState(for: primaryState, to: &writer)
@@ -923,7 +976,58 @@ public struct Terminal: Equatable, Sendable {
         writer.append(promptRedrawSequence)
         appendGraphemeSynchronization(to: &writer)
         writer.append(inputStream.synchronizationPrefix)
-        return TerminalStateSynchronization(columns: columnCount, rows: rowCount, bytes: writer.bytes)
+        return EncodedStateSynchronization(
+            synchronization: TerminalStateSynchronization(
+                columns: columnCount,
+                rows: rowCount,
+                bytes: writer.bytes,
+                droppedHistoryRows: historyStart
+            ),
+            historyBytes: historyBytes
+        )
+    }
+
+    /// Estimates the oldest history row a budget can afford, walking back from the newest.
+    ///
+    /// Each candidate is encoded on its own, which costs more than the joint encode of the
+    /// same rows -- style state carries across rows there -- so the running total is an
+    /// estimate the real encode is expected to come in under. The walk stops the moment the
+    /// budget is exceeded, so its cost tracks the budget rather than the retained depth.
+    private func boundedHistoryStart(budget: Int) -> Int {
+        // The joint encode ends a hard-broken row with a style reset and CRLF; a row measured
+        // alone has no following row and emits neither.
+        let separatorAllowance = styleSequence(TerminalStyle()).utf8.count + 2
+        var spent = 0
+        var start = historyRowCount
+        while start > 0 {
+            let candidate = start - 1
+            guard let row = history.paintedDisplayRow(at: candidate) else {
+                preconditionFailure("retained history count must address every retained row")
+            }
+            var writer = StateSynchronizationWriter()
+            writer.appendRows([row.materialized(to: columnCount)], terminal: self)
+            spent += writer.bytes.count + separatorAllowance
+            guard spent <= budget else { break }
+            start = candidate
+        }
+        return alignedHistoryStart(start)
+    }
+
+    /// Moves a candidate start forward until it is the first row of a logical line.
+    ///
+    /// A row whose predecessor continues into it is a wrap fragment with no head. Keeping one
+    /// would give the replica an oldest line that never began, and a later reflow would rewrap
+    /// that fragment as a line of its own.
+    private func alignedHistoryStart(_ start: Int) -> Int {
+        var aligned = start
+        while aligned > 0, aligned < historyRowCount {
+            guard let previous = history.paintedDisplayRow(at: aligned - 1) else {
+                preconditionFailure("retained history count must address every retained row")
+            }
+            guard previous.logicallyContinues else { break }
+            aligned += 1
+        }
+        return aligned
     }
 
     private func appendControlState(
@@ -1192,8 +1296,21 @@ public struct Terminal: Equatable, Sendable {
             bytes.append(contentsOf: appended)
         }
 
-        mutating func appendRows(_ rows: [GridRow], terminal: Terminal) {
+        /// Appends every row and reports what the first `measuringFirst` of them cost.
+        ///
+        /// The count is taken inside the loop because rows are not encoded independently:
+        /// style state carries across a soft wrap, and a row ending in a spacer emits the
+        /// wide grapheme that opens the row after it. Only the writer can say where one run
+        /// of rows stopped paying and the next started.
+        @discardableResult
+        mutating func appendRows(
+            _ rows: [GridRow],
+            terminal: Terminal,
+            measuringFirst: Int = 0
+        ) -> Int {
             style = nil
+            let startByteCount = bytes.count
+            var measuredBytes = 0
             var firstColumn = 0
             for rowIndex in rows.indices {
                 let sourceRow = rows[rowIndex]
@@ -1244,14 +1361,15 @@ public struct Terminal: Equatable, Sendable {
                 }
                 appendRowState(sourceRow)
                 setHyperlink(nil)
-                guard rowIndex + 1 < rows.count else { continue }
-                if row.isSoftWrapped {
-                    continue
-                } else {
+                if rowIndex + 1 < rows.count, row.isSoftWrapped == false {
                     setStyle(TerminalStyle(), terminal: terminal)
                     append("\r\n")
                 }
+                if rowIndex + 1 == measuringFirst {
+                    measuredBytes = bytes.count - startByteCount
+                }
             }
+            return measuredBytes
         }
 
         private mutating func setStyle(_ next: TerminalStyle, terminal: Terminal) {
