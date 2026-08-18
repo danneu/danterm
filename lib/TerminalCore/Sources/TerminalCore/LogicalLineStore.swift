@@ -226,6 +226,46 @@ extension Terminal {
         /// Width-free projected content units retained by all records.
         private(set) var grandContentUnitTotal = 0
 
+        /// Debug-only proof that the two stored totals still equal what the block index says.
+        ///
+        /// The block ring already holds both numbers: a block's `rowStart` and `contentStart` are
+        /// absolute against the same origins `evictedRowCount` and `evictedContentUnitCount` count
+        /// from, so the last block's end *is* the total. Reading them off it and deleting the
+        /// stored pair -- which is the structure in which the ordering hazard the two comments
+        /// below describe cannot happen, because there would be one update rather than two -- was
+        /// built and measured. A `confirm` comparison of that form against this one read
+        /// `retained-browse` slower by 1.17%, past the 1.05% that workload decides on, so the
+        /// stored fields stay and this assertion stands in for the structure. Every operation that
+        /// can move a total ends here, so a mutation that moves one representation and not the
+        /// other fails a test instead of reaching a reader.
+        ///
+        /// Every term sits inside an `assert` autoclosure, so a release build reads no block and
+        /// pays no branch here: the check may not put back the read cost that rejected deriving.
+        private func assertGrandTotalsAgreeWithBlockIndex() {
+            assert(
+                grandDisplayRowTotal == blockDerivedDisplayRowTotal,
+                "the stored display-row total drifted from the block index"
+            )
+            assert(
+                grandContentUnitTotal == blockDerivedContentUnitTotal,
+                "the stored content-unit total drifted from the block index"
+            )
+        }
+
+        /// What `grandDisplayRowTotal` would be if it were read off the index instead of stored.
+        private var blockDerivedDisplayRowTotal: Int {
+            guard blocks.count > 0 else { return 0 }
+            let last = blocks[blocks.count - 1]
+            return last.rowStart + last.rowCount - evictedRowCount
+        }
+
+        /// What `grandContentUnitTotal` would be if it were read off the index instead of stored.
+        private var blockDerivedContentUnitTotal: Int {
+            guard blocks.count > 0 else { return 0 }
+            let last = blocks[blocks.count - 1]
+            return last.contentStart + last.contentCount - evictedContentUnitCount
+        }
+
         /// Display rows dropped at the head, at the width in force when they were dropped, and
         /// only ever increasing (`research/31/D2` Decision 2's invariant, which replaces
         /// `isHistoryHeadTruncated`).
@@ -616,6 +656,7 @@ extension Terminal {
         /// row whose tail past the content is painted by a background erase contributes that
         /// paint as the record's **trailing fill style**, not as cells.
         mutating func admit(_ row: Terminal.GridRow) {
+            defer { assertGrandTotalsAgreeWithBlockIndex() }
             let admission = admissionExtent(row)
 
             // A budget too small to hold one display row of this width retains nothing rather
@@ -784,6 +825,7 @@ extension Terminal {
         /// This is `severScrollbackWrapClaim` under the new store, and the whole of it is one
         /// header bit plus the tables the open record had been accumulating.
         mutating func closeOpenRecord() {
+            defer { assertGrandTotalsAgreeWithBlockIndex() }
             guard var record = openTailRecord() else { return }
             let offset = offsets[offsets.count - 1]
             flushOpenTables(into: &record, at: offset)
@@ -801,6 +843,7 @@ extension Terminal {
         /// line, and a reopened line has no end yet -- its last display row is about to be
         /// extended, and admission re-derives the tail of whatever row finally closes it.
         mutating func reopenTailRecord() {
+            defer { assertGrandTotalsAgreeWithBlockIndex() }
             guard offsets.count > 0 else { return }
             let offset = offsets[offsets.count - 1]
             let record = self.record(at: offset)
@@ -860,6 +903,7 @@ extension Terminal {
         /// display row whose painted content changed and no other.
         @discardableResult
         mutating func repairClearedSpacer(styleId: Terminal.StyleId) -> Bool {
+            defer { assertGrandTotalsAgreeWithBlockIndex() }
             guard styleId != Terminal.defaultStyleId else { return false }
             guard let record = openTailRecord() else { return false }
             let offset = offsets[offsets.count - 1]
@@ -872,6 +916,7 @@ extension Terminal {
         /// Cuts the open logical line here and lets the next admission continue it in a new
         /// record, which readers rejoin by adjacency (`research/31/DD6`).
         mutating func forceSplitOpenRecord() {
+            defer { assertGrandTotalsAgreeWithBlockIndex() }
             guard var record = openTailRecord(), record.cellCount > 0 else { return }
             let offset = offsets[offsets.count - 1]
             flushOpenTables(into: &record, at: offset)
@@ -895,6 +940,7 @@ extension Terminal {
         /// rewritten header, so a step can free nothing and still make progress.
         @discardableResult
         mutating func evictOneDisplayRow() -> Bool {
+            defer { assertGrandTotalsAgreeWithBlockIndex() }
             guard offsets.count > 0 else { return false }
             let offset = offsets[0]
             let record = self.record(at: offset)
@@ -1041,6 +1087,7 @@ extension Terminal {
         /// are not lost: they keep their absolute stream positions and merely change which side
         /// of the history/live seam they sit on, which is why `evictedRowCount` does not move.
         mutating func truncateTail(displayRows: Int) -> [Terminal.GridRow] {
+            defer { assertGrandTotalsAgreeWithBlockIndex() }
             let count = min(displayRows, grandDisplayRowTotal)
             guard count > 0 else { return [] }
 
@@ -1169,6 +1216,7 @@ extension Terminal {
         // MARK: - Operation 5: clear all history
 
         mutating func removeAll() {
+            defer { assertGrandTotalsAgreeWithBlockIndex() }
             evictedRowCount += grandDisplayRowTotal
             grandDisplayRowTotal = 0
             evictedContentUnitCount += grandContentUnitTotal
@@ -1192,6 +1240,7 @@ extension Terminal {
         /// a width change evicts nothing, at any width down to the engine minimum.
         @discardableResult
         mutating func setWidth(_ newWidth: Int) -> [Terminal.GridCell] {
+            defer { assertGrandTotalsAgreeWithBlockIndex() }
             precondition(newWidth >= 1)
             width = newWidth
             let pulled = pullBackOpenTailRemainder()

@@ -516,6 +516,20 @@ presentation shape described below no longer exist.
 
 `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.grandDisplayRowTotal`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.evictOneDisplayRow`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.removeLastDisplayRow`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.wrapWriteCursorAtSeam`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.recomputeIndex`
 
+**Status note.** Closed on the cheaper fallback, after the ideal fix was built
+and measured. The derived form -- computed `grandDisplayRowTotal` and
+`grandContentUnitTotal` over the block ring, computed `firstBlockNumber`, and
+`retireEmptyHeadBlocks` replaced by one head-block drop where the head-sequence
+quotient advances -- passed the whole suite, and a `confirm` comparison against
+the pre-change tree read `terminal-feed: equivalent (+0.10%)` but
+`retained-browse: slower (+1.17%)`, past the 1.05% that workload decides on.
+That is the read-path cost the Risk paragraph below predicted, so the stored
+fields stay and this finding lands its named fallback instead: a debug
+`assertGrandTotalsAgreeWithBlockIndex()` that compares both stored totals with
+the block-derived values, run at the end of every store operation that can move
+one. It is the check the Risk paragraph asks for; the structure that would have
+made the drift inexpressible is refused on measurement, not on effort.
+
 **Problem.** `grandDisplayRowTotal` and `grandContentUnitTotal` hold numbers the block index already holds. Because block `rowStart`/`contentStart` are absolute against `evictedRowCount`/`evictedContentUnitCount`, the totals are exactly `blocks.last.rowStart + rowCount - evictedRowCount` and the content analogue -- O(1) reads off the ring. Storing them separately means every mutation must move two representations of one quantity in the right order, and the file already carries scar tissue from getting that wrong: two sites have multi-line comments explaining that the totals must move _before_ a block can retire or the row is subtracted twice. `firstBlockNumber` is the same shape of redundancy: while `offsets` is non-empty it is always `firstRecordSequence / blockSize`, and `retireEmptyHeadBlocks` exists only to re-establish that.
 
 **Evidence.** Read the maintenance pair at every mutation site: `addDisplayRowsToTail` and `addContentUnitsToTail` update grand-then-block together; `removeContentUnitsFromHead` and `addContentUnits(_:toBlockContaining:)` likewise; `evictOneDisplayRow` (line ~1031) and `removeLastDisplayRow` (line ~1213) update `grandDisplayRowTotal` and `blocks[...]` inline with comments naming the double-subtract hazard; `wrapWriteCursorAtSeam` (line ~3004) does it a fourth time inline; `recomputeIndex` re-accumulates both. `appendRecordOffset` sets `firstBlockNumber = sequence / Self.blockSize` on the first record, and `retireEmptyHeadBlocks` loops `while firstBlockNumber < firstRecordSequence / Self.blockSize`, so the two can only differ when `blocks` is empty, which is exactly when the store is empty.

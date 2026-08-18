@@ -205,7 +205,8 @@ before the implementation is accepted.
 ## Commit progress
 - [x] 1. Instrument unification
 - [x] 2. Side-table ownership
-- [ ] 3. Derived totals
+- [x] 3. Derived totals (landed as the pre-authorized fallback; I7 rejected the
+      derivation)
 
 ## Implementation notes
 
@@ -240,11 +241,57 @@ before the implementation is accepted.
   cannot carry for itself, so S32 got the file's other convention -- a
   `**Status note.**` paragraph in its section. The hash cell still needs a
   stamp.
+- **Commit 3 landed the fallback: I7 rejected the derivation.** The derived form
+  was built in full -- computed `grandDisplayRowTotal` and
+  `grandContentUnitTotal` over the block ring, computed `firstBlockNumber`, the
+  eight maintenance sites deleted, and `retireEmptyHeadBlocks` replaced by one
+  head-block drop where the head-sequence quotient advances across
+  `dropHeadRecord`'s `firstRecordSequence += 1`. It passed `just test` and the
+  whole `TerminalCore` suite, and then the benchmark refused it. Evidence (PO6),
+  `just benchmark-confirm baseline=5dfdc6b4`, baseline tree
+  `dad1ea862c75c98fe0fedc57b3aa387b9fe10fac`, candidate tree
+  `46c8a59a142538e7da7a985db99b725a1fa29d39`:
+  - `retained-browse`: **slower**, +1.17% symmetric median of 4 pairs (deciding;
+    threshold 1.05%). This is the reject.
+  - `terminal-feed`: equivalent, +0.10% symmetric median of 2 pairs (deciding;
+    accepts on its own).
+  - `scrollback-stream`: faster, -4.54% symmetric median of 4 pairs
+    (descriptive only per I7, and inside its own 3.5-point distrust band).
+  - Non-deciding cells, recorded for completeness: `content-churn` slower
+    +6.27%, `style-churn` equivalent +0.19%, `incremental-mixed` -3.03%
+    (uncalibratable). The two churn cells cannot be attributed to this change --
+    it touches no drawing path -- and no rerun was taken, because the schedule is
+    frozen and a valid invocation is not re-rolled.
+  - Artifact: `.build/terminal-benchmark-comparisons/confirm/46c8a59a1425-0000`.
+- What landed instead is exactly what the Decision pre-authorized: the stored
+  fields, plus `assertGrandTotalsAgreeWithBlockIndex()` comparing both totals
+  with the block-derived values. It runs from a `defer` at the top of every store
+  operation that can move a total -- `admit`, `closeOpenRecord`,
+  `reopenTailRecord`, `repairClearedSpacer`, `forceSplitOpenRecord`,
+  `evictOneDisplayRow` (so `evictToBudget` too), `truncateTail`, `removeAll`,
+  `setWidth` -- rather than inside the helpers that move the totals, because a
+  helper runs mid-operation where the two representations are transiently and
+  legitimately out of step: `addContentUnits(_:toBlockContaining:)` decrements an
+  earlier block whose successor's `contentStart` only becomes right again once
+  the emptied tail block retires. The operation boundary is the first point where
+  equality is required.
+- The assertion was proved non-vacuous before it was kept: dropping
+  `grandDisplayRowTotal -= 1` from `evictOneDisplayRow` made
+  `TerminalLogicalLineStoreTests` fail on it, and restoring the line made the
+  suite green again.
 
 ## Follow Up
 
-- Stamp the S32 and S31 rows' Status cells in
+- Stamp the S32, S31 and S18 rows' Status cells in
   `docs/scratch/2026-08-11-simplification-audit.md` with their landing commit
-  hashes, and do the same for S18 as commit 3 lands. Each section already
-  carries its `**Status note.**` paragraph; only the ranked-table cell is
-  pending, because a commit cannot carry its own hash.
+  hashes. All three sections now carry a `**Status note.**` paragraph; only the
+  ranked-table cell is pending, because a commit cannot carry its own hash.
+- Decide whether `retained-browse`'s +1.17% is worth attributing before S18 is
+  considered settled. The rejected candidate changed two things on that read
+  path at once -- two ring subscripts per `grandDisplayRowTotal` read and a
+  division per `firstBlockNumber` read -- and the run cannot say which cost the
+  1.17%. A `quick baseline=<this commit> workload=retained-browse` over a
+  candidate that derives *only* `firstBlockNumber` would separate them, and if
+  the division is the cheap half, the totals could still be derived. Worth one
+  run only if the stored pair is in the way of later work; the assertion covers
+  the drift risk in the meantime.
