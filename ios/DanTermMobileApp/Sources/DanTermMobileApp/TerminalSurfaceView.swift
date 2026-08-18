@@ -102,6 +102,11 @@ final class TerminalSurfaceView: UIView {
         replica.terminal?.isAlternateScreenActive == true
     }
 
+    /// Whether the replicated pane's grid is an override, or nothing while the replica
+    /// is not exact. It is the replica's own bit rather than a comparison of grids: a
+    /// coincidental match between the pane's grid and this phone's is not a claim.
+    var pinned: Bool? { replica.pinned }
+
     /// The grid this surface shows at native cell metrics, which is the grid the claim
     /// gesture asks the pane to run at. It is derived from the current extent rather
     /// than from the replica, so it answers for the phone even before a stream arrives.

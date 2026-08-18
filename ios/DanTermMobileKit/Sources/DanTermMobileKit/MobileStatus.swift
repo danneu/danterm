@@ -48,7 +48,9 @@ public struct MobileStatusLine: Equatable, Sendable {
 /// were written in, so the shell can report each observation as it arrives and never has
 /// to undo one fact to state another.
 public struct MobileStatus: Equatable, Sendable {
-    private var connection = MobileConnectionState.disconnected
+    /// Readable so the shell projects other controls from the same stored fact instead
+    /// of keeping a second copy of the connection state that could disagree with this one.
+    public private(set) var connection = MobileConnectionState.disconnected
     private var connectionDetail: String?
     private var recovery = MobileRecoveryPhase.none
     /// The replica's own condition, or nothing when no stream is attached.

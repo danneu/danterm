@@ -18,7 +18,9 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private let paneTable = UITableView(frame: .zero, style: .plain)
     private let terminalView = TerminalSurfaceView()
     private let composer = TerminalComposerView()
+    private let claimBar = UIStackView()
     private let claimButton = UIButton(type: .system)
+    private let releaseButton = UIButton(type: .system)
 
     private var panes: [MobilePaneListItem] = []
     private var selectedPaneId: PaneId?
@@ -62,6 +64,13 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         if connectionHeader.hostText?.isEmpty == false {
             requestConnectToTypedTarget(preferredPane: nil)
         }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // The terminal's extent decides whether a whole cell fits, which is one of the
+        // facts the claim control projects from.
+        refreshClaimControl()
     }
 
     isolated deinit {
@@ -131,12 +140,21 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             return inputMapper.isControlLatched
         }
         composer.onDismissKeyboard = { [weak self] in self?.view.endEditing(true) }
-        var claimConfiguration = UIButton.Configuration.gray()
-        claimConfiguration.title = "Claim"
-        claimConfiguration.cornerStyle = .capsule
-        claimButton.configuration = claimConfiguration
-        claimButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        claimButton.addTarget(self, action: #selector(claimTapped), for: .touchUpInside)
+        configureGeometryButton(claimButton, title: "Claim", action: #selector(claimTapped))
+        configureGeometryButton(releaseButton, title: "Release", action: #selector(releaseTapped))
+        claimBar.axis = .horizontal
+        claimBar.alignment = .center
+        claimBar.distribution = .fillEqually
+        claimBar.spacing = 8
+        claimBar.isLayoutMarginsRelativeArrangement = true
+        claimBar.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: 4,
+            leading: 8,
+            bottom: 4,
+            trailing: 8
+        )
+        claimBar.addArrangedSubview(claimButton)
+        claimBar.addArrangedSubview(releaseButton)
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
         terminalView.addGestureRecognizer(scroll)
         terminalView.didAdvanceReplica = { [weak self] in self?.scheduleCheckpoint() }
@@ -151,19 +169,29 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
                 fail(.streamDesynchronized)
             case .exact:
                 resumePolicy.replicaBecameExact()
-                refreshStatus()
+                refreshProjections()
             case .gap(.declared), .awaitingSynchronization:
-                refreshStatus()
+                refreshProjections()
             }
         }
-        // The claim button is added after the terminal so it sits above the pixels it
-        // asks the Mac to resize.
-        for subview in [connectionHeader, paneTable, terminalView, composer, claimButton]
+        for subview in [connectionHeader, paneTable, terminalView, claimBar, composer]
         {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
         configureConstraints()
+        refreshClaimControl()
+    }
+
+    /// Gives both geometry buttons the one appearance, so the pair reads as two forms of
+    /// the same control rather than two unrelated actions.
+    private func configureGeometryButton(_ button: UIButton, title: String, action: Selector) {
+        var configuration = UIButton.Configuration.gray()
+        configuration.title = title
+        configuration.cornerStyle = .capsule
+        button.configuration = configuration
+        button.titleLabel?.adjustsFontForContentSizeCategory = true
+        button.addTarget(self, action: action, for: .touchUpInside)
     }
 
     private func configureConstraints() {
@@ -188,13 +216,14 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             terminalView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             terminalView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             terminalView.topAnchor.constraint(equalTo: paneTable.bottomAnchor),
-            terminalView.bottomAnchor.constraint(equalTo: composer.topAnchor),
+            terminalView.bottomAnchor.constraint(equalTo: claimBar.topAnchor),
 
-            // The replica draws from the bottom of its view, so the top trailing corner
-            // is the part of the terminal the button covers least.
-            claimButton.trailingAnchor.constraint(equalTo: terminalView.trailingAnchor, constant: -8),
-            claimButton.topAnchor.constraint(equalTo: terminalView.topAnchor, constant: 8),
-            claimButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            // The bar sits beside the terminal rather than over it, so no cell is ever
+            // drawn underneath it, claimed or not.
+            claimBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            claimBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            claimBar.bottomAnchor.constraint(equalTo: composer.topAnchor),
+            claimBar.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
 
             composer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -294,7 +323,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         case .rest:
             retryTimer.cancel()
         }
-        refreshStatus()
+        refreshProjections()
     }
 
     private func startAttempt() {
@@ -413,13 +442,13 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
                     fail(.requestRefused(reason: error.message))
                 } else {
                     status.noteRequestOutcome(.refused(reason: error.message))
-                    refreshStatus()
+                    refreshProjections()
                 }
                 return
             }
             guard response.id == tapeRequestId else {
                 status.noteRequestOutcome(.succeeded)
-                refreshStatus()
+                refreshProjections()
                 return
             }
             guard let value = response.result,
@@ -498,8 +527,15 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     /// this surface runs at. No other gesture here sends one, which is what keeps
     /// typing and scrolling from claiming.
     @objc private func claimTapped() {
-        guard let pane = selectedPaneId, let grid = terminalView.nativeGrid else { return }
-        send(grid.claimRequest(for: pane))
+        guard let request = claimControl.claim else { return }
+        send(request)
+    }
+
+    /// Gives the pane back to the grid its Mac slot implies. It acts on the override's
+    /// presence, not on who set it, so it is the phone's exit from any pinned pane.
+    @objc private func releaseTapped() {
+        guard let request = claimControl.release else { return }
+        send(request)
     }
 
     @objc private func scrolled(_ recognizer: UIPanGestureRecognizer) {
@@ -515,16 +551,52 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
 
     private func show(state: MobileConnectionState, detail: String? = nil) {
         status.noteConnection(state, detail: detail)
-        refreshStatus()
+        refreshProjections()
     }
 
+    /// Re-renders everything the shell projects from its stored facts -- the status line
+    /// and the claim control -- so both stay projections instead of remembered UI state.
+    /// Every path that moves one of those facts ends here.
+    ///
     /// Reads the recovery phase, which only the policy knows, and renders whatever the four
     /// facts compose to. No wording or severity is decided here.
-    private func refreshStatus() {
+    private func refreshProjections() {
         let moment = MobileMonotonicClock.now
         status.noteRecovery(reconnectPolicy.recoveryPhase(at: moment))
         let line = status.line(at: moment)
         connectionHeader.showStatus(line.text, color: line.severity.color)
+        refreshClaimControl()
+    }
+
+    /// Shows exactly the geometry actions the phone can send right now, and stores none of
+    /// them: the projection is recomputed from the facts every time one of them moves.
+    private func refreshClaimControl() {
+        let control = claimControl
+        // Only the buttons hide. The bar keeps its layout space either way, so the
+        // terminal's extent -- and with it the grid a claim would name -- does not move
+        // when an action appears or goes away.
+        //
+        // Written only on a change: a layout pass calls this, and the stack view lays out
+        // again whenever an arranged subview's hidden flag is set, so an unconditional
+        // write would drive a layout loop.
+        setOffered(claimButton, control.claim != nil)
+        setOffered(releaseButton, control.release != nil)
+    }
+
+    private func setOffered(_ button: UIButton, _ offered: Bool) {
+        guard button.isHidden == offered else { return }
+        button.isHidden = offered == false
+    }
+
+    /// The current projection, recomputed at every read so a tap acts on the facts as they
+    /// stand rather than on whatever they were when the button was last drawn.
+    private var claimControl: MobileClaimControl {
+        MobileClaimControl(
+            connection: status.connection,
+            pane: selectedPaneId,
+            pinned: terminalView.pinned,
+            nativeGrid: terminalView.nativeGrid
+        )
     }
 
     private func scheduleCheckpoint() {

@@ -736,6 +736,20 @@ in [README.md](README.md) and remains open.
     ever reintroduced. Nothing else in this entry moves: no ownership is stored,
     "claimed" stays a derived predicate, and two claimers still settle by last
     writer wins.
+  - **2026-08-18 amendment: the geometry event states its writer after all, in a
+    weaker form and for a different job.** Stage 3's origin metadata dissolved
+    because layout no longer clobbers a claim. A replica still needs the same
+    fact for a different reason: the phone's claim control has to say what it
+    can do right now, and the two things it can do -- claim and release -- are
+    decided by whether the pane's grid is an override. So every geometry-bearing
+    stream shape (the start record, the sync payload, and the resize event) now
+    states the grid and whether it is pinned as one fact, and the phone projects
+    Claim and Release from it. This is weaker than stage 3 proposed: it names
+    which of the two remaining writers produced the grid -- the slot projection
+    or `pane.resize` -- and never who or which client. Nothing about suppression
+    returns, because there is still nothing to suppress. The phone's Release is
+    the symmetric partner of the Mac take-back, and like it, it acts on the
+    override's presence rather than on any tenure.
 - What this declines, knowingly:
   - **Tenure.** There is no moment where the phone *has* the pane: a Mac
     take-back mid-vim silently drops the phone to remote-sized. With one

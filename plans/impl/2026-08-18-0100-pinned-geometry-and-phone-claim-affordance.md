@@ -219,7 +219,7 @@ suppression.
 
 - [x] 1. The pane tape states whether a pane's grid is pinned
 - [x] 2. The phone's replica holds pinnedness through events, sync, and checkpoints
-- [ ] 3. The phone's claim control projects pinnedness and takes its own layout space
+- [x] 3. The phone's claim control projects pinnedness and takes its own layout space
 
 ## Implementation notes
 
@@ -255,3 +255,33 @@ suppression.
 - `PaneReplica.pinned` is computed from the state rather than cleared on a gap: the last
   exact fence must survive for `checkpoint(for:)`, which is defined to capture that fence
   even while the replica is frozen behind a gap.
+- `MobileClaimControl` holds the two requests themselves rather than two booleans, so
+  "offered" and "sendable" cannot come apart: a button with no request is a button the
+  shell must not show. The shell recomputes the projection at each read, including inside
+  the tap handlers, so a tap acts on the facts as they stand rather than on the ones the
+  button was last drawn from.
+- Claim is offered while the replica is not yet exact, because a resize can be sent then;
+  only Release waits on pinnedness. And a surface with no room for a whole cell keeps
+  Release while losing Claim, because the fit form names no grid. Both follow from
+  "nothing offered that cannot be sent" read in each direction.
+- `MobileStatus.connection` became readable rather than the shell storing its own copy of
+  the connection state. The status already holds that fact with one writer; a second copy
+  could disagree with the line the user is reading.
+- The shell's `refreshStatus` became `refreshProjections` and re-renders the claim control
+  beside the status line. Every path that moves one of the four facts already ended there,
+  which is what lets the control stay a projection with no refresh call sites of its own;
+  layout is the one addition, since the terminal's extent decides whether a whole cell fits.
+- The button visibility write is guarded on a change. A layout pass calls the refresh, and
+  a stack view lays out again whenever an arranged subview's hidden flag is set, so an
+  unconditional write would drive a layout loop.
+- PO5 was taken as far as this machine allows: the simulator shows the bar holding its own
+  layout space below the terminal, with the terminal's pixels ending above it, so no cell
+  can render beneath it. The claimed and unclaimed halves of that check need a served
+  tailnet connection -- see Follow Up.
+
+## Follow Up
+
+- Run PO5's full acceptance on a device or simulator connected to a live Mac: with one
+  claimed pane and one unclaimed pane, confirm no terminal cell sits under the control and
+  that Release appears only on the pinned pane. It needs a reachable tailnet address and an
+  admitted device, which `TailnetBindAddress` requires and this machine could not supply.
