@@ -16,9 +16,15 @@ final class AppRuntime {
     var onSend: ((Msg) -> Void)?
     var focusedPaneSessions: [PaneId] = []
     var themeBrowserToggles = 0
+    /// The production outbox, wired to the shim's send, so the UI suites observe
+    /// the real buffering and wake-up rules rather than a harness imitation.
+    let outbox = MainActor.assumeIsolated { ReconcileOutbox() }
 
     init(model: AppModel = AppModel(groups: [])) {
         self.model = model
+        MainActor.assumeIsolated {
+            outbox.setDispatcher { [weak self] msg in self?.send(msg) }
+        }
     }
 
     func send(_ msg: Msg) {

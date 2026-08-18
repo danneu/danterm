@@ -70,6 +70,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Persistence.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/CheckpointCapture.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Msg.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ReconcileFollowUps.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Command.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecycleReducer.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecycleConsumers.swift" \
@@ -134,6 +135,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/SidebarCellViews.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \
         "$SCRIPT_DIR/app/SidebarReconcileDriver.swift" \
+        "$SCRIPT_DIR/app/ReconcileOutbox.swift" \
         "$SCRIPT_DIR/app/SwitcherPanel.swift" \
         "$SCRIPT_DIR/app/BellToolbarButton.swift" \
         "$SCRIPT_DIR/app/TitlebarDragView.swift" \

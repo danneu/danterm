@@ -73,6 +73,32 @@ import Testing
             "the loop drained the fact the first follow-up's sweep reported")
     }
 
+    @Test("only a report with no frame open asks its owner for a wake-up")
+    func reportOutsideAFrameNeedsAScheduledDrain() {
+        // Intent: the queue says when a report has nobody to dispatch it, so the
+        //   owner schedules a drain exactly then.
+        // Why it exists: a view can report from AppKit's own stack, where no send
+        //   frame is running -- without a wake-up that end waits for whatever
+        //   send happens next, which is the stranding this channel removes. A
+        //   wake-up for a report made inside a frame would be the opposite fault:
+        //   a drain scheduled for work the frame exit already did.
+        // Scenario: one report inside a frame, one with no frame open.
+        var followUps = ReconcileFollowUps()
+        #expect(followUps.needsScheduledDrain == false, "nothing pending needs no drain")
+
+        followUps.enterFrame()
+        followUps.report([.sidebarRenameEnded(session: RenameSessionId(rawValue: UUID()))])
+        #expect(followUps.needsScheduledDrain == false,
+            "the open frame is what will drain this report")
+        followUps.leaveFrame()
+        _ = followUps.nextToDispatch()
+        #expect(followUps.needsScheduledDrain == false, "the frame exit drained it")
+
+        followUps.report([.sidebarRenameEnded(session: RenameSessionId(rawValue: UUID()))])
+        #expect(followUps.needsScheduledDrain,
+            "a report with no frame open has to be woken up")
+    }
+
     @Test("update's rename-target chokepoint covers only a target that left the model")
     func chokepointClearsOnlyAbsentTargets() throws {
         // Intent: update() clears sidebarRenameTarget when the edited entity is

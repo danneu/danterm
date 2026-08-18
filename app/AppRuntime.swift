@@ -179,9 +179,10 @@ class AppRuntime {
     )
     private var coalescedReconcileTimer: DispatchSourceTimer?   // rate-limited whole-model sweep
     private var coalescedReconcileTimerToken: AppRuntimeSchedulingToken?
-    // What reconcile passes reported plus the send-frame depth that decides when it
-    // may be dispatched. Owned here because only send() opens and closes a frame.
-    private var followUps = ReconcileFollowUps()
+    // The one channel a view reports a discovered fact through. Owned here because
+    // the runtime is what opens a send frame and what dispatches a released fact,
+    // and because it has to outlive every view that reports into it.
+    let outbox = ReconcileOutbox()
     // Serializes checkpoint encode+write work and gives sync flushes one fence for pending I/O.
     private let checkpointWriter = CheckpointWriter()
     // Export gets its own queue rather than sharing the checkpoint one. Nothing orders an export
@@ -229,6 +230,10 @@ class AppRuntime {
         self.model.config = launchConfig
         self.model.resolvedFontFamily = resolveConfiguredFontFamily(launchConfig)
         self.lightCheckpointBaseline = LightCheckpointProjection(snapshot: toSnapshot(model))
+
+        // Weak on purpose: the runtime owns the outbox, and a drain scheduled on
+        // the main queue must be inert once the runtime is gone.
+        outbox.setDispatcher { [weak self] msg in self?.dispatch(msg) }
 
         // Build the MRU switcher panel eagerly — pay first-frame cost at
         // launch instead of on every cmd-shift-i. Keep it offscreen until
@@ -388,18 +393,21 @@ class AppRuntime {
 
     func send(_ msg: Msg) {
         dispatch(msg)
-        drainFollowUps()
     }
 
-    /// One send frame: translate, perform, sweep. Follow-ups the sweep's passes
-    /// reported accumulate for the outermost frame and are never dispatched here,
-    /// which is what stops a send arriving mid-sweep -- including one laundered
-    /// through AppKit's own dispatch -- from re-entering a pass against a stale
+    /// One send frame: translate, perform, sweep, then deliver what the frame
+    /// collected. Anything reported while the frame is open -- by a pass, or by a
+    /// view whose teardown AppKit ran mid-sweep -- waits for the outermost frame to
+    /// close, which is what stops it from re-entering a pass against a stale
     /// projection cache.
     private func dispatch(_ msg: Msg) {
         guard schedulingLifecycle.isActive else { return }
-        followUps.enterFrame()
-        defer { followUps.leaveFrame() }
+        outbox.withFrame { dispatchInFrame(msg) }
+    }
+
+    /// The body of one send frame. Split out so the frame bracket reads as one
+    /// line; it has no other caller.
+    private func dispatchInFrame(_ msg: Msg) {
         let commands = update(&model, msg)
         for command in commands {
             perform(command)
@@ -410,7 +418,7 @@ class AppRuntime {
         ) {
         case .reconcileNow:
             cancelCoalescedReconcile()
-            followUps.report(reconcile())
+            reconcile()
         case .scheduleCoalesced:
             scheduleCoalescedReconcile()
         case .coalesceIntoPending:
@@ -431,19 +439,12 @@ class AppRuntime {
     }
 
     /// Runs a whole-model sweep outside `send()` -- the coalesced timer and the
-    /// post-restore commit -- and dispatches what its passes reported.
+    /// post-restore commit -- and delivers what the sweep reported. The sweep runs
+    /// outside any send frame on purpose: nothing may drain while it is in flight,
+    /// which is why a report never drains on its own stack.
     private func sweepAndDispatchFollowUps() {
-        followUps.report(reconcile())
-        drainFollowUps()
-    }
-
-    /// Dispatch the facts reconcile passes reported. Yields nothing while a send
-    /// frame is still running, so only the outermost frame drains; it loops until
-    /// empty so a follow-up's own sweep can report one.
-    private func drainFollowUps() {
-        while let followUp = followUps.nextToDispatch() {
-            dispatch(followUp)
-        }
+        reconcile()
+        outbox.drain()
     }
 
     /// Close pane-level shortcut help without dismissing the parent todo popover.

@@ -8,9 +8,6 @@ struct SidebarReconcileResult {
     let appliedProjection: SidebarProjection
     let unappliedTabIds: Set<TabId>
     let unappliedGroupIds: Set<GroupId>
-    /// Facts the pass discovered about the view, for the runtime to dispatch once
-    /// the sweep has returned. The pass never sends them itself.
-    let followUps: [Msg]
 }
 
 /// Owns the only sidebar reconcile pipeline and its last-applied projection.
@@ -46,8 +43,7 @@ final class SidebarReconcileDriver {
         return SidebarReconcileResult(
             appliedProjection: advancedProjection,
             unappliedTabIds: unapplied.tabs,
-            unappliedGroupIds: unapplied.groups,
-            followUps: unapplied.followUps)
+            unappliedGroupIds: unapplied.groups)
     }
 
     /// Reconciles callers that do not already hold an unread-alert tally.

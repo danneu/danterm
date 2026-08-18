@@ -45,6 +45,33 @@ func recordRenameBegin(_ target: RenameTarget, in model: inout AppModel) -> Rena
     return session
 }
 
+/// Runs the main queue until `condition` holds, so a report waiting on its
+/// scheduled drain is delivered before an assertion reads it. The deadline is a
+/// hang guard, not a measurement: a passing run satisfies the condition on the
+/// first turn.
+func pumpMainQueue(
+    untilTrue condition: () -> Bool,
+    timeout: TimeInterval = 5,
+    file: String = #file,
+    line: Int = #line
+) throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    while !condition() {
+        guard Date() < deadline else {
+            throw UITestFailure(
+                message: "timed out waiting for the main queue to deliver (\(file):\(line))")
+        }
+        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005))
+    }
+}
+
+/// Runs the main queue for one turn, so a report that had a turn to arrive has
+/// taken it. The 10ms is a probe that is meant to expire, not a guard: the point
+/// is to give delivery its chance before asserting that nothing arrived.
+func pumpMainQueueOnce() {
+    RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+}
+
 /// Materializes every visible outline row after a reconcile pass.
 func materializeSidebarRows(_ sidebar: SidebarView, outline: NSOutlineView) {
     sidebar.layoutSubtreeIfNeeded()

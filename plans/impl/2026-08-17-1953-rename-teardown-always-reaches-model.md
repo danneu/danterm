@@ -221,7 +221,7 @@ timing; the proofs use them rather than provoking a real scroll.
 
 ## Commit progress
 - [x] 1. Give an inline sidebar rename session its own identity (D1)
-- [ ] 2. Deliver every view-side rename teardown through the reconcile outbox (D2)
+- [x] 2. Deliver every view-side rename teardown through the reconcile outbox (D2)
 
 ## Implementation notes
 
@@ -234,3 +234,29 @@ timing; the proofs use them rather than provoking a real scroll.
   `update(.beginSidebarRename)`. It mints the session through one named helper,
   `recordRenameBegin`, which stands in for the reducer's mint. The
   clear-then-throwaway-pass workaround the plan called out is gone.
+- Making the outbox the sole channel left the pass's return channel with no
+  producer, so it is gone: `reconcile()`, `reconcileSidebar`, `applySidebarOps`
+  and `SidebarReconcileResult` no longer carry `[Msg]`. Keeping an always-empty
+  return would have been a second way to deliver an end, which is the coupling
+  this plan removes.
+- The queue and the wake-up live in a new `app/ReconcileOutbox.swift` rather than
+  inline in `AppRuntime`, so the UI harness -- whose `AppRuntime` is a shim --
+  exercises the real buffering, frame, and wake-up rules instead of a copy. The
+  pure ordering rule stays in `ReconcileFollowUps`, which gains one predicate,
+  `needsScheduledDrain`, for the owner to act on.
+- Enter and Esc now land one main-queue turn later, like the click-away path:
+  they report with no send frame open. The plan grants a frame of its own only to
+  the pointer interaction, whose commit must beat the selection changes the rest
+  of the event drives.
+- The live GUI check in Verification was not run. Neither the double-click that
+  opens an editor nor the scroll that recycles its row can be driven through the
+  CLI, so the slot check was limited to launching the app and reading `ls`. The
+  two ablations were run and behave as the plan predicted: removing the wake-up
+  fails PO1, and draining in the ingress fails PO7.
+
+## Follow Up
+
+- `danterm` cannot begin an inline sidebar rename, so the plan's live check
+  (double-click a row, scroll it out of view and back, read `ls`) has no
+  programmatic path. An IPC method that begins the rename the way a double-click
+  does would make this class of behavior testable from the CLI.

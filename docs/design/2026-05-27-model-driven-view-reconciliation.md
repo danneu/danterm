@@ -112,11 +112,17 @@ may write AppKit views, session state, runtime-owned view handles, and
 
 A pass writes `AppModel` indirectly if it calls `send()`, because the send
 re-enters `update()`. So the rule covers that too: **a reconcile pass originates
-no `Msg`.** A fact a pass discovers about the view travels back in the pass's
-return value, and the runtime dispatches it after the sweep has returned and
+no `Msg`.** A fact a pass discovers about the view goes into the runtime's
+outbox (`ReconcileOutbox`), which dispatches it after the sweep has returned and
 every pass cache has advanced. Sending from mid-pass instead re-enters the whole
 sweep: the nested pass diffs the new model against a cache the outer pass has not
 advanced yet, and issues view ops against a host that is mid-mutation.
+
+The outbox is the sole channel out of a view, and reporting into it never
+dispatches on the reporting stack. That is what lets a teardown report from a
+place no pass can reach -- AppKit's own row traversal, where a recycled cell
+takes a live field editor with it -- instead of clearing view state silently and
+leaving the model claiming a session that is gone.
 
 The rule holds for every pass, with no exception. `reconcilePaneFocus` moves the
 responder and AppKit synchronously calls `becomeFirstResponder`, which used to
@@ -135,11 +141,14 @@ repairs it. Two things keep the rule robust rather than merely true today:
   into the frame already running (`ReconcileFollowUps`). This is what makes the
   channel correct without depending on having enumerated every in-pass send site.
 
-Two deferrals are deliberate and are not violations of the rule. AppKit's
-`control(_:textShouldEndEditing:)` must return before the field editor finishes
-tearing down, so the sidebar's click-away rename commit stays on a queue hop. And
-a fact discovered by a genuine pointer interaction is dispatched synchronously, in
-the same turn as the interaction -- there is no sweep running to report it to.
+Delivery is therefore never immediate, and the two paths it takes are deliberate.
+A report made inside a send frame is delivered when the outermost frame closes. A
+report made with no frame open -- AppKit's `control(_:textShouldEndEditing:)`,
+which must return before the field editor finishes tearing down, or a cell recycle
+inside `viewFor:` -- wakes a drain on the next main-queue turn. A fact discovered
+by a genuine pointer interaction still reaches the model in the same turn as the
+interaction: that path opens a send frame of its own around the teardown, so its
+report is delivered before the event goes on to change the selection.
 
 For ordinary `Msg` handling, `AppModel` transitions happen in `update()` and are
 covered by behavior tests at the pure layer. If view-sync needs derived model

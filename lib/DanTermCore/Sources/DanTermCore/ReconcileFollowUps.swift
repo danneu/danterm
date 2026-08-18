@@ -1,8 +1,8 @@
-// The dispatch discipline for facts a reconcile pass discovers about the view.
-// A pass never sends: it returns what it found, and this queue decides when the
-// runtime may dispatch it. The rule is pure ordering logic, so it lives here and
-// is unit-tested without AppKit; the runtime glue that owns a queue and calls
-// update() stays in app/AppRuntime.swift.
+// The dispatch discipline for facts a view discovers about itself -- a reconcile
+// pass among them. A view never sends: it reports what it found, and this queue
+// decides when the runtime may dispatch it. The rule is pure ordering logic, so it
+// lives here and is unit-tested without AppKit; the runtime glue that owns a
+// queue, wakes it up, and calls update() stays in app/ReconcileOutbox.swift.
 
 /// Holds what reconcile passes reported and releases it only to the outermost
 /// send frame.
@@ -35,6 +35,11 @@ struct ReconcileFollowUps {
     mutating func report(_ messages: [Msg]) {
         pending.append(contentsOf: messages)
     }
+
+    /// True when what is pending has nobody to dispatch it: no frame is open, so
+    /// no frame exit will drain, and the owner has to schedule a drain of its own.
+    /// A report made inside a frame needs no wake-up -- that frame's exit drains it.
+    var needsScheduledDrain: Bool { depth == 0 && !pending.isEmpty }
 
     /// The next message the caller may dispatch, or nil while a frame is running
     /// or nothing is pending. Callers loop until nil, so a follow-up's own sweep
