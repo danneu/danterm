@@ -181,7 +181,7 @@ in itself.
 |        | [S25](#s25) | 15    | 3   | 5   | core-model     | small  | Compute a tab's chrome once instead of four times per sidebar row                                                       |
 |        | [S26](#s26) | 15    | 3   | 5   | core-reducer   | medium | Derive preferences-draft sync instead of enumerating the six fields in five places                                      |
 |        | [S27](#s27) | 15    | 3   | 5   | ipc-cli        | small  | Make --socket work for `doctor` instead of intercepting local commands before the flag parser                           |
-|        | [S28](#s28) | 15    | 3   | 5   | ipc-cli        | small  | Replace the CLI's two hand-rolled per-byte line readers with the shared framer                                          |
+| 26dd4afa 5ec5c034 | [S28](#s28) | 15    | 3   | 5   | ipc-cli        | small  | Replace the CLI's two hand-rolled per-byte line readers with the shared framer                                          |
 | part 2fc9f971 | [S29](#s29) | 15    | 3   | 5   | pty            | medium | Record transitions once: fold TerminalPTYAppliedTransition into the flight recorder            |
 | 271fddbd | [S30](#s30) | 15    | 3   | 5   | pty            | small  | Replace the fence operation/output enum pair with typed fence methods                                                   |
 |        | [S31](#s31) | 15    | 3   | 5   | scrollback     | medium | Give the record side tables one owner that maintains its own byte charge                                                |
