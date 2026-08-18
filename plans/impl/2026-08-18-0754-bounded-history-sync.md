@@ -178,7 +178,7 @@ Interface changes:
 - [x] 1. feat(engine): bound the history a state synchronization carries
 - [x] 2. feat(ipc): let a pane.tape stream bound its sync history
 - [x] 3. feat(tape): resync a truncated replica instead of replaying a resize
-- [ ] 4. docs(research): record the bounded-sync half of T22
+- [x] 4. docs(research): record the bounded-sync half of T22
 
 ## Implementation notes
 

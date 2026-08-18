@@ -556,6 +556,26 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   19.4 MB, so both halves of this task now have the numbers they were
   waiting on.
 
+  **Sync history is now bounded, and that half is answered.** A `pane.tape`
+  stream carries a per-stream history byte budget, `syncHistoryBytes`,
+  defaulting to 256 KiB; every sync the stream emits -- the opening one and any
+  gap repair -- obeys it, and the sync record reports the `droppedHistoryRows`
+  it left out. So the 19.4 MB pane-switch splice and the 19.4 MB flood repair
+  both become the budget plus screen-sized state, which is the shrink from
+  megabytes to kilobytes F13 named as what the repair unit needed.
+  `pane.snapshot` and the iOS replica checkpoint keep the
+  unbounded exact form. One consequence the plan had to settle: a replica whose
+  history is incomplete cannot replay a resize, because primary-screen reflow
+  reads retained history, so such a stream gets a fresh bounded sync in place of
+  a suffix containing a resize. Plan:
+  [plans/impl/2026-08-18-0754-bounded-history-sync.md](../../../plans/impl/2026-08-18-0754-bounded-history-sync.md),
+  shipped 2026-08-18 across `ce7576b9`, `3cf81733`, and `ef8d6c58`.
+
+  **Still open:** subscription scope itself -- which panes a client follows, and
+  the 34/D2 activity-transition wire for the rest -- and lazy paging of the
+  history a bounded sync omits. Bounding makes a scoping policy cheap; it does
+  not choose one.
+
 ### Phase 3 -- durable subscriptions and resume
 
 - **T8 DONE** (D5, shipped) -- Design `pane.snapshot` plus sequence-numbered tape resume:
