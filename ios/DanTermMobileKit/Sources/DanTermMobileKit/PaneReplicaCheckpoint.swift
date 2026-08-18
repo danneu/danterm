@@ -23,7 +23,10 @@ public enum PaneReplicaCheckpointError: Error, Equatable, Sendable {
 /// Couples bounded terminal-state bytes to the one pane and recorder cursor they describe.
 public struct PaneReplicaCheckpoint: Equatable, Sendable {
     /// Rejects private checkpoint formats from any other app version without a migration.
-    public static let currentFormatVersion = 1
+    ///
+    /// Version 2 added pinnedness. A version-1 record cannot say whether its grid was an
+    /// override, so it is discarded rather than restored with a guessed claim.
+    public static let currentFormatVersion = 2
 
     /// Identifies the private on-disk format.
     public let formatVersion: Int
@@ -33,6 +36,9 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
     public let columns: Int
     /// Gives the terminal height used to synthesize the state.
     public let rows: Int
+    /// States whether that grid was pinned, so a resumed replica restores the whole
+    /// geometry fact instead of inferring a claim from the grid it happens to hold.
+    public let pinned: Bool
     /// Prevents one last-subscribed pane's state from restoring into another pane.
     public let paneId: PaneId
     /// Names the first recorder event needed after this state.
@@ -44,6 +50,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
         stateBytes: [UInt8],
         columns: Int,
         rows: Int,
+        pinned: Bool,
         paneId: PaneId,
         cursor: PaneTapeCursor,
         formatVersion: Int = currentFormatVersion
@@ -52,6 +59,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
         self.stateBytes = stateBytes
         self.columns = columns
         self.rows = rows
+        self.pinned = pinned
         self.paneId = paneId
         self.cursor = cursor
         integrity = Self.digest(
@@ -59,6 +67,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
             stateBytes: stateBytes,
             columns: columns,
             rows: rows,
+            pinned: pinned,
             paneId: paneId,
             cursor: cursor
         )
@@ -69,6 +78,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
         stateBytes = Array(envelope.stateBytes)
         columns = envelope.columns
         rows = envelope.rows
+        pinned = envelope.pinned
         paneId = PaneId(rawValue: envelope.paneId)
         cursor = PaneTapeCursor(
             recorderLifetimeId: envelope.recorderLifetimeId,
@@ -125,6 +135,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
             stateBytes: stateBytes,
             columns: columns,
             rows: rows,
+            pinned: pinned,
             paneId: paneId,
             cursor: cursor
         )
@@ -138,6 +149,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
         stateBytes: [UInt8],
         columns: Int,
         rows: Int,
+        pinned: Bool,
         paneId: PaneId,
         cursor: PaneTapeCursor
     ) -> [UInt8] {
@@ -147,6 +159,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
         input.append(contentsOf: stateBytes)
         appendInteger(Int64(columns), to: &input)
         appendInteger(Int64(rows), to: &input)
+        appendInteger(Int64(pinned ? 1 : 0), to: &input)
         appendUUID(paneId.rawValue, to: &input)
         appendUUID(cursor.recorderLifetimeId, to: &input)
         appendInteger(cursor.nextSequence, to: &input)
@@ -210,6 +223,7 @@ private struct Envelope: Codable {
     let stateBytes: Data
     let columns: Int
     let rows: Int
+    let pinned: Bool
     let paneId: UUID
     let recorderLifetimeId: UUID
     let nextSequence: UInt64
@@ -222,6 +236,7 @@ private struct Envelope: Codable {
         stateBytes = Data(checkpoint.stateBytes)
         columns = checkpoint.columns
         rows = checkpoint.rows
+        pinned = checkpoint.pinned
         paneId = checkpoint.paneId.rawValue
         recorderLifetimeId = checkpoint.cursor.recorderLifetimeId
         nextSequence = checkpoint.cursor.nextSequence

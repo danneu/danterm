@@ -36,6 +36,15 @@ public struct PaneReplica: Sendable {
     public private(set) var cursor: PaneTapeCursor?
     public private(set) var state = PaneReplicaState.awaitingSynchronization
 
+    /// States whether the replicated grid is pinned -- an override a client claimed rather
+    /// than a projection of the pane's rectangle -- at the replica's own cursor.
+    ///
+    /// Nothing whenever the replica is not exact: behind a gap the held bit describes a
+    /// position the producer has already left, and a caller offering a release from it
+    /// would act on a claim that may no longer exist.
+    public var pinned: Bool? { state == .exact ? heldPinned : nil }
+
+    private var heldPinned: Bool?
     private var syncAssembler = PaneTapeSyncAssembler()
     private var interactionState = TerminalInteractionState()
 
@@ -55,17 +64,19 @@ public struct PaneReplica: Sendable {
         discardAuthority(from: &terminal)
         self.terminal = terminal
         cursor = checkpoint.cursor
+        heldPinned = checkpoint.pinned
         state = .exact
     }
 
     /// Synthesizes one bounded state-and-cursor fence without retaining event history.
     public func checkpoint(for paneId: PaneId) -> PaneReplicaCheckpoint? {
-        guard let terminal, let cursor else { return nil }
+        guard let terminal, let cursor, let heldPinned else { return nil }
         let synchronization = terminal.stateSynchronization
         return PaneReplicaCheckpoint(
             stateBytes: synchronization.bytes,
             columns: synchronization.columns,
             rows: synchronization.rows,
+            pinned: heldPinned,
             paneId: paneId,
             cursor: cursor
         )
@@ -138,6 +149,7 @@ public struct PaneReplica: Sendable {
         discardAuthority(from: &replacement)
         terminal = replacement
         cursor = synchronization.cursor
+        heldPinned = synchronization.pinned
         state = .exact
         interactionState = TerminalInteractionState()
     }
@@ -155,6 +167,7 @@ public struct PaneReplica: Sendable {
             from: data
         ) else { throw PaneReplicaError.invalidEvent }
 
+        var appliedPinned = heldPinned
         switch event {
         case .feed(let bytes):
             terminal.feed(bytes)
@@ -166,14 +179,17 @@ public struct PaneReplica: Sendable {
                 interactionState: &interactionState
             )
             discardAuthority(from: &terminal)
-        // Pinnedness is carried by the event but not yet held by the replica.
-        case .resize(let columns, let rows, _):
+        // The producer states geometry whole, so the grid and its pinnedness apply together.
+        // A pinnedness-only event repeats the grid the replica already holds; the engine
+        // resize is then a no-op and the bit is what moves.
+        case .resize(let columns, let rows, let pinned):
             guard columns >= 2, rows >= 1 else {
                 state = .gap(.detected)
                 syncAssembler = PaneTapeSyncAssembler()
                 return
             }
             terminal.resize(columns: columns, rows: rows)
+            appliedPinned = pinned
         case .viewport(let navigation):
             switch navigation {
             case .byRows(let rows): terminal.scroll(byRows: rows)
@@ -191,6 +207,7 @@ public struct PaneReplica: Sendable {
         }
         self.terminal = terminal
         self.cursor = nextCursor
+        heldPinned = appliedPinned
     }
 
     private func advancedCursor(

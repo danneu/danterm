@@ -218,7 +218,7 @@ suppression.
 ## Commit progress
 
 - [x] 1. The pane tape states whether a pane's grid is pinned
-- [ ] 2. The phone's replica holds pinnedness through events, sync, and checkpoints
+- [x] 2. The phone's replica holds pinnedness through events, sync, and checkpoints
 - [ ] 3. The phone's claim control projects pinnedness and takes its own layout space
 
 ## Implementation notes
@@ -244,3 +244,14 @@ suppression.
   grid (`TerminalPaneLaunchRequest.initialDimensions != nil`) rather than stored
   separately, because only a restored override supplies one. A second stored field
   could disagree with the geometry it describes.
+- The replica takes pinnedness from a sync payload, a resize event, and a checkpoint, but
+  not from a start record. A start states the producer's current geometry, while a resumed
+  replica sits at its own cursor and the events between the two are still to be replayed;
+  adopting the start's bit would report a transition the replica has not reached yet. The
+  events that follow carry it instead.
+- An event's pinnedness lands only where the event's own cursor advance lands, so a record
+  the replica rejects leaves the held bit alone. Otherwise a malformed event could unpin a
+  pane in the replica while the terminal and cursor stayed at the previous position.
+- `PaneReplica.pinned` is computed from the state rather than cleared on a gap: the last
+  exact fence must survive for `checkpoint(for:)`, which is defined to capture that fence
+  even while the replica is frozen behind a gap.

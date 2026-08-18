@@ -61,6 +61,7 @@ struct PaneReplicaCheckpointStoreTests {
             stateBytes: Array("old".utf8),
             columns: 8,
             rows: 2,
+            pinned: false,
             paneId: pane,
             cursor: PaneTapeCursor(
                 recorderLifetimeId: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
@@ -102,6 +103,7 @@ private func checkpointStoreValue(
         stateBytes: Array(text.utf8),
         columns: 8,
         rows: 2,
+        pinned: false,
         paneId: pane,
         cursor: PaneTapeCursor(
             recorderLifetimeId: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,

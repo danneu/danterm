@@ -207,6 +207,61 @@ func geometryAndViewportEventsApply() throws {
     #expect(replica.terminal?.geometry.rows.count == 3)
 }
 
+@Test("Pinnedness follows the stream's geometry and is withheld off exact state")
+func pinnednessTracksStreamGeometry() throws {
+    // Intent: hold the authoritative pinnedness at the cursor, and hold none when not exact.
+    // Why it exists: a Release control offered from stale or guessed pinnedness lies.
+    // Scenario: a pinned pane is synchronized, unpinned at the same grid, then loses records.
+    var replica = PaneReplica()
+    #expect(replica.pinned == nil)
+
+    replica = try synchronizedReplica(
+        bytes: Array("live".utf8),
+        cursor: testCursor(sequence: 1),
+        columns: 6,
+        rows: 2,
+        pinned: true
+    )
+    #expect(replica.pinned == true)
+
+    try replica.apply(eventRecord(sequence: 1, event: .resize(columns: 6, rows: 2, pinned: false)))
+    #expect(replica.pinned == false)
+    #expect(replica.terminal?.geometry.columns == 6)
+
+    try replica.apply(eventRecord(sequence: 2, event: .resize(columns: 10, rows: 3, pinned: true)))
+    #expect(replica.pinned == true)
+
+    try replica.apply(.gap(.total))
+    #expect(replica.pinned == nil)
+
+    try replica.apply(.sync(PaneTapeSyncRecord(
+        part: 1,
+        parts: 1,
+        bytes: Array("repaired".utf8),
+        columns: 10,
+        rows: 3,
+        pinned: false,
+        cursor: testCursor(sequence: 9)
+    )))
+    #expect(replica.pinned == false)
+}
+
+@Test("A detected gap withholds pinnedness until a replacement sync")
+func detectedGapWithholdsPinnedness() throws {
+    // Intent: treat a replica-detected discontinuity like a declared one for pinnedness.
+    // Why it exists: the pinned bit the replica holds is only as trustworthy as its cursor.
+    // Scenario: an out-of-order event arrives on a pinned pane.
+    var replica = try synchronizedReplica(
+        bytes: Array("live".utf8),
+        cursor: testCursor(sequence: 1),
+        pinned: true
+    )
+    try replica.apply(eventRecord(sequence: 4, event: .viewport(.toBottom)))
+
+    #expect(replica.state == .gap(.detected))
+    #expect(replica.pinned == nil)
+}
+
 @Test("Local primary-screen scrolling moves an exact replica viewport")
 func localViewportScrollMovesReplica() throws {
     var replica = try synchronizedReplica(
@@ -362,7 +417,8 @@ private func synchronizedReplica(
     bytes: [UInt8],
     cursor: PaneTapeCursor,
     columns: Int = 8,
-    rows: Int = 2
+    rows: Int = 2,
+    pinned: Bool = false
 ) throws -> PaneReplica {
     var replica = PaneReplica()
     try replica.apply(.sync(PaneTapeSyncRecord(
@@ -371,7 +427,7 @@ private func synchronizedReplica(
         bytes: bytes,
         columns: columns,
         rows: rows,
-        pinned: false,
+        pinned: pinned,
         cursor: cursor
     )))
     return replica

@@ -228,8 +228,64 @@ struct PaneReplicaCheckpointTests {
         #expect(replica.checkpoint(for: paneId) == exact)
     }
 
+    @Test("a checkpoint carries pinnedness across restore and replayed transitions")
+    func checkpointRestoresPinnednessAndHeals() throws {
+        // Intent: keep the replica's pinnedness exact across a save, a restore, and later events.
+        // Why it exists: a resumed phone must not guess a claim from geometry it happens to hold.
+        // Scenario: a pinned pane is checkpointed, restored, then unpinned by a replayed event.
+        var replica = try checkpointReplica(
+            bytes: Array("claimed".utf8),
+            cursor: checkpointCursor(sequence: 1),
+            pinned: true
+        )
+        let captured = try #require(replica.checkpoint(for: paneId))
+        let persisted = try PaneReplicaCheckpoint.decode(captured.encoded())
+        var restored = try PaneReplica(checkpoint: persisted, for: paneId)
+        #expect(restored.pinned == true)
+
+        let release = try checkpointEvent(
+            sequence: 1,
+            event: .resize(columns: 8, rows: 2, pinned: false)
+        )
+        try replica.apply(release)
+        try restored.apply(release)
+        #expect(restored.pinned == false)
+        #expect(restored.pinned == replica.pinned)
+    }
+
+    @Test("a checkpoint written before pinnedness is rejected before any restore")
+    func prePinnednessCheckpointIsDiscarded() throws {
+        // Intent: refuse a stored envelope that cannot state whether its grid was pinned.
+        // Why it exists: restoring one would present a guessed claim as exact replica state.
+        // Scenario: the format version predating pinnedness is loaded from the store.
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("danterm-mobile-legacy-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PaneReplicaCheckpointStore(directory: directory)
+        let current = try #require(
+            try checkpointReplica(bytes: Array("safe".utf8), cursor: checkpointCursor(sequence: 1))
+                .checkpoint(for: paneId)
+        )
+        try store.save(current)
+        var envelope = try #require(PropertyListSerialization.propertyList(
+            from: try Data(contentsOf: store.fileURL),
+            options: [],
+            format: nil
+        ) as? [String: Any])
+        envelope.removeValue(forKey: "pinned")
+        envelope["formatVersion"] = NSNumber(value: 1)
+        try PropertyListSerialization.data(
+            fromPropertyList: envelope,
+            format: .binary,
+            options: 0
+        ).write(to: store.fileURL, options: .atomic)
+
+        #expect(store.load(for: paneId) == nil)
+        #expect(FileManager.default.fileExists(atPath: store.fileURL.path) == false)
+    }
+
     @Test("every still-decodable envelope-field mutation fails integrity", arguments: [
-        "stateBytes", "columns", "rows", "paneId", "recorderLifetimeId",
+        "stateBytes", "columns", "rows", "pinned", "paneId", "recorderLifetimeId",
         "nextSequence", "feedBytesBeforeNextSequence", "writeBytesBeforeNextSequence",
         "formatVersion", "integrity",
     ])
@@ -254,6 +310,7 @@ struct PaneReplicaCheckpointTests {
             stateBytes: state,
             columns: 8,
             rows: 2,
+            pinned: false,
             paneId: paneId,
             cursor: cursor,
             formatVersion: PaneReplicaCheckpoint.currentFormatVersion + 1
@@ -269,6 +326,7 @@ struct PaneReplicaCheckpointTests {
             stateBytes: state,
             columns: 8,
             rows: 2,
+            pinned: false,
             paneId: paneId,
             cursor: cursor
         )
@@ -280,6 +338,7 @@ struct PaneReplicaCheckpointTests {
             stateBytes: state,
             columns: 1,
             rows: 0,
+            pinned: false,
             paneId: paneId,
             cursor: cursor
         )
@@ -291,6 +350,7 @@ struct PaneReplicaCheckpointTests {
             stateBytes: state,
             columns: 8,
             rows: 2,
+            pinned: false,
             paneId: paneId,
             cursor: checkpointCursor(sequence: 1, feed: -1)
         )
@@ -306,6 +366,7 @@ struct PaneReplicaCheckpointTests {
             stateBytes: state,
             columns: 80,
             rows: 24,
+            pinned: false,
             paneId: paneId,
             cursor: checkpointCursor(sequence: 1, feed: state.count)
         )
@@ -360,7 +421,8 @@ private func checkpointReplica(
     bytes: [UInt8],
     cursor: PaneTapeCursor,
     columns: Int = 8,
-    rows: Int = 2
+    rows: Int = 2,
+    pinned: Bool = false
 ) throws -> PaneReplica {
     var replica = PaneReplica()
     try replica.apply(.sync(.init(
@@ -369,7 +431,7 @@ private func checkpointReplica(
         bytes: bytes,
         columns: columns,
         rows: rows,
-        pinned: false,
+        pinned: pinned,
         cursor: cursor
     )))
     return replica
@@ -415,6 +477,8 @@ private func mutateCheckpointField(in data: Data, key: String) throws -> Data {
     switch key {
     case "stateBytes", "integrity": envelope[key] = Data("unsafe".utf8)
     case "paneId", "recorderLifetimeId": envelope[key] = UUID().uuidString
+    // Flip in place: an integer here would fail decoding instead of integrity.
+    case "pinned": envelope[key] = try #require(envelope[key] as? Bool) == false
     default:
         let value = try #require(envelope[key] as? NSNumber)
         envelope[key] = NSNumber(value: value.int64Value + 1)
