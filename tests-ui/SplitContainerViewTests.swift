@@ -245,9 +245,9 @@ func splitContainerViewTests() {
         )
 
         container.rebuild()
-        let firstWrapper = terminal.paneWrapper
+        let firstWrapper = runtime.paneHost(for: paneId)?.wrapper
         container.rebuild()
-        let secondWrapper = terminal.paneWrapper
+        let secondWrapper = runtime.paneHost(for: paneId)?.wrapper
 
         try uiExpect(terminal.hostView === terminal, "session host identity changed")
         try uiExpect(firstWrapper != nil && secondWrapper != nil, "rebuild should mount both wrappers")

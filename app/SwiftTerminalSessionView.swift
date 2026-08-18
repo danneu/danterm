@@ -244,7 +244,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         gridOverride.map { TerminalDimensions(columns: $0.columns, rows: $0.rows) }
     }
 
-    weak var paneWrapper: PaneWrapperView?
     /// The pane's clipboard in both directions -- explicit selection copies out and Edit > Paste
     /// in. Defaults to the system pasteboard while keeping UI tests isolated, so a test that
     /// assigns a scratch board neither reads nor destroys the developer's real clipboard.

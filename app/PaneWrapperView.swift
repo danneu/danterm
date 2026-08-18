@@ -125,7 +125,6 @@ class PaneWrapperView: NSView {
         self.todoButton = TodoToolbarButton()
 
         super.init(frame: .zero)
-        terminalView.paneWrapper = self
         terminalView.paneMenuProvider = { [weak self] in self?.makePaneMenu(includeClipboard: true) }
 
         menuButton.target = self

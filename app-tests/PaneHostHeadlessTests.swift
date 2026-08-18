@@ -23,14 +23,12 @@ import Testing
 
         #expect(host.session === session)
         #expect(host.wrapper.terminalSession === session)
-        #expect(session.paneWrapper === host.wrapper)
     }
 }
 
 /// Supplies the stable session boundary while the test exercises only PaneHost's AppKit chrome.
 @MainActor
 private final class HeadlessPaneHostSession: NSView, TerminalSession {
-    weak var paneWrapper: PaneWrapperView?
     var paneMenuProvider: (() -> NSMenu?)?
     var hostView: NSView { self }
     var state = TerminalSessionState(

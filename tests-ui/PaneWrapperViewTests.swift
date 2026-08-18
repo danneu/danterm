@@ -266,16 +266,6 @@ func paneWrapperViewTests() {
             "a released pane should collapse the button again, got \(releaseButton.frame.width)")
     }
 
-    uiTest("init points the terminal back at its wrapper") {
-        // Intent: after PaneWrapperView.init, terminalView.paneWrapper === the
-        //   wrapper.
-        // Why it exists: TerminalView.menu(for:) reaches its menu through this
-        //   back-pointer; this pins the seam the terminal right-click relies on.
-        //   Spec-first.
-        let fx = makePaneMenuFixture()
-        try uiExpect(fx.terminal.paneWrapper === fx.wrapper, "terminalView.paneWrapper should point at the wrapper")
-    }
-
     uiTest("menu keeps the wrapper alive and actions still fire after teardown") {
         // Intent: a built menu strongly retains the ephemeral wrapper, so its
         //   actions still dispatch after a reconcile releases the wrapper while
