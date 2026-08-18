@@ -32,6 +32,11 @@ Research started: 2026-08-12.
   reports the resume cursor, scrollback depth, input modes, and a viewport digest
   comparable with the source pane's `pane read`. It reads a file and talks to no
   device, so it survives the network outages the scenarios create.
+- [t19-run.sh](t19-run.sh) and [t19-wire-capture.py](t19-wire-capture.py) --
+  F11's reproduction: the run that drives the three tape-stream workloads
+  against a throwaway slot, and the instrument that records the socket's bytes
+  verbatim and accounts payload against envelope, raw and deflated. Captures
+  under [t19-artifacts/](t19-artifacts/).
 - [briefing.md](briefing.md) -- the initiating brainstorm dump: repo census, IPC
   surface, portability inference, candidate directions. Census-grade evidence;
   every claim that carries weight is re-verified by a Phase 1 task before a
@@ -288,10 +293,13 @@ as settled:
   input-direction rule. Neither is adopted here; T11 decides and says which of
   the two it overrules. Note that predictive local echo needs local modes either
   way, so the sync payload's mode floor stays load bearing under both.
-- **No traffic number in this hypothesis has been measured.** The ordering is
-  structural and stands; the magnitudes do not exist yet. T19, T20, and T21 are
-  the probes, and no wire-format or policy change may cite this section as
-  evidence until they report.
+- **The magnitudes are now partly measured.** F11 supplies the first ones: the
+  steady stream runs 3-4.3x its PTY payload raw and about 2.5x after
+  compression, at 4.2-4.4 KB/s in every active workload measured and exactly
+  zero when idle. That settles the encoding half at those workloads -- nothing
+  there motivates a wire change. T21's flood and T20's sync sizes are still
+  unmeasured, and no flood-policy change may cite this section as evidence
+  until they report.
 
 ## Direction
 
@@ -498,13 +506,18 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   never as content, because the alternative is a keylogger at rest. D4's
   implementation amendment makes that accounting text UTF-8 bytes or event
   count, not owner-encoded PTY bytes.
-- **T19 TODO** -- Measure what the tape stream actually costs on the wire, since
-  H5 asserts an ordering and no magnitude. Capture a follow stream's bytes over a
-  real interactive session against a live slot, raw and deflated, and separate
-  payload from envelope: an 8-byte echo rides inside a base64 payload and a JSON
-  envelope, and the ratio between them decides whether a binary tape framing has
-  anything left to win after compression. Report an interactive session, a build
-  log, and an idle pane. Diagnostic, not benchmark, and labeled so.
+- **T19 DONE** (F11) -- Measured what the tape stream costs on the wire, at the
+  socket, for an interactive session, a warm and a cold build, and an idle
+  pane. A 1-byte keystroke echo rides in a ~296-byte record; the steady stream
+  runs 3-4.3x its PTY payload raw. Compression answers the framing question in
+  two halves: deflate takes the JSON wire below its own *uncompressed* payload,
+  but against a binary framing compressed under the same per-record flush the
+  JSON wire stays 2.3-2.7x larger -- base64's bit-spreading is the residue
+  compression cannot remove. The magnitudes make that residue moot at these
+  workloads: every active scenario ran 4.2-4.4 KB/s and idle ran exactly zero,
+  so the framing question now rests entirely on T21's flood. Unplanned: the
+  from-now join's sync outweighed the steady stream in three of four captures,
+  which is T20's trade made visible. Diagnostic, not benchmark.
 - **T21 TODO** -- Size the flood counterexample H5 names: the byte rate for a
   pane emitting far faster than a screen can show it, against the bound a
   frame-coalesced cell diff would have at the same grid and frame rate. This is

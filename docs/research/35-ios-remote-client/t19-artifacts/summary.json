@@ -1,0 +1,211 @@
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t19-artifacts/interactive",
+  "captureSeconds": 37.968,
+  "totalWireBytes": 169528,
+  "join": {
+    "records": 3,
+    "wireBytes": 2547,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1,
+      "sync": 1
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 1366,
+      "other": 0
+    },
+    "payloadBytesTotal": 1366,
+    "base64Chars": 1824,
+    "envelopeBytes": 723,
+    "wirePerPayloadByte": 1.86,
+    "deflateWholeBytes": 907,
+    "deflatePerRecordBytes": 940,
+    "deflatePayloadOnlyBytes": 320
+  },
+  "steady": {
+    "records": 430,
+    "wireBytes": 166981,
+    "recordKinds": {
+      "event": 430
+    },
+    "eventTypes": {
+      "write": 131,
+      "feed": 299
+    },
+    "payloadBytes": {
+      "feed": 38740,
+      "write": 428,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 39168,
+    "base64Chars": 53044,
+    "envelopeBytes": 113937,
+    "wirePerPayloadByte": 4.26,
+    "deflateWholeBytes": 22249,
+    "deflatePerRecordBytes": 27939,
+    "deflatePayloadOnlyBytes": 6460
+  },
+  "steadySpanSeconds": 37.732,
+  "steadyWireBytesPerSecond": 4425.4
+}
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t19-artifacts/build",
+  "captureSeconds": 17.394,
+  "totalWireBytes": 84557,
+  "join": {
+    "records": 3,
+    "wireBytes": 12646,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1,
+      "sync": 1
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 8938,
+      "other": 0
+    },
+    "payloadBytesTotal": 8938,
+    "base64Chars": 11920,
+    "envelopeBytes": 726,
+    "wirePerPayloadByte": 1.41,
+    "deflateWholeBytes": 4258,
+    "deflatePerRecordBytes": 4271,
+    "deflatePayloadOnlyBytes": 2415
+  },
+  "steady": {
+    "records": 152,
+    "wireBytes": 71911,
+    "recordKinds": {
+      "event": 152
+    },
+    "eventTypes": {
+      "write": 3,
+      "feed": 149
+    },
+    "payloadBytes": {
+      "feed": 24507,
+      "write": 88,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 24595,
+    "base64Chars": 33008,
+    "envelopeBytes": 38903,
+    "wirePerPayloadByte": 2.92,
+    "deflateWholeBytes": 7772,
+    "deflatePerRecordBytes": 10093,
+    "deflatePayloadOnlyBytes": 2438
+  },
+  "steadySpanSeconds": 17.164,
+  "steadyWireBytesPerSecond": 4189.6
+}
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t19-artifacts/build-cold",
+  "captureSeconds": 30.426,
+  "totalWireBytes": 102797,
+  "join": {
+    "records": 3,
+    "wireBytes": 2547,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1,
+      "sync": 1
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 1366,
+      "other": 0
+    },
+    "payloadBytesTotal": 1366,
+    "base64Chars": 1824,
+    "envelopeBytes": 723,
+    "wirePerPayloadByte": 1.86,
+    "deflateWholeBytes": 903,
+    "deflatePerRecordBytes": 935,
+    "deflatePayloadOnlyBytes": 320
+  },
+  "steady": {
+    "records": 222,
+    "wireBytes": 100250,
+    "recordKinds": {
+      "event": 222
+    },
+    "eventTypes": {
+      "write": 3,
+      "feed": 219
+    },
+    "payloadBytes": {
+      "feed": 32283,
+      "write": 209,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 32492,
+    "base64Chars": 43596,
+    "envelopeBytes": 56654,
+    "wirePerPayloadByte": 3.09,
+    "deflateWholeBytes": 12747,
+    "deflatePerRecordBytes": 16165,
+    "deflatePayloadOnlyBytes": 4427
+  },
+  "steadySpanSeconds": 23.841,
+  "steadyWireBytesPerSecond": 4204.9
+}
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t19-artifacts/idle",
+  "captureSeconds": 120.058,
+  "totalWireBytes": 13538,
+  "join": {
+    "records": 3,
+    "wireBytes": 13538,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1,
+      "sync": 1
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 9608,
+      "other": 0
+    },
+    "payloadBytesTotal": 9608,
+    "base64Chars": 12812,
+    "envelopeBytes": 726,
+    "wirePerPayloadByte": 1.41,
+    "deflateWholeBytes": 4411,
+    "deflatePerRecordBytes": 4424,
+    "deflatePayloadOnlyBytes": 2525
+  },
+  "steady": {
+    "records": 0,
+    "wireBytes": 0,
+    "recordKinds": {},
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 0,
+    "base64Chars": 0,
+    "envelopeBytes": 0,
+    "wirePerPayloadByte": null,
+    "deflateWholeBytes": 0,
+    "deflatePerRecordBytes": 0,
+    "deflatePayloadOnlyBytes": 0
+  },
+  "steadySpanSeconds": 0,
+  "steadyWireBytesPerSecond": null
+}

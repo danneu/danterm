@@ -1187,3 +1187,90 @@ instrument F9 built, unchanged.
   half minutes rather than the minute the delay schedule alone suggests -- in
   that failure mode the per-attempt timeout dominates the backoff, and the
   plan's stated episode length describes only the case where attempts fail fast.
+
+### F11 -- the envelope is 3-4x the payload raw, and compression narrows the gap to ~2.5x without closing it
+
+Discharges T19's measurement half: what the `pane.tape --follow` stream
+actually costs on the wire, captured at the socket. Reproduction:
+[t19-run.sh](t19-run.sh) drives all three workloads against a throwaway slot,
+and [t19-wire-capture.py](t19-wire-capture.py) is the instrument -- its
+`capture` mode records the socket's bytes verbatim, and its `analyze` mode
+splits the join prefix from the steady stream and accounts both.
+
+- Status: settled for the three workloads the task named, one run each.
+  **Diagnostic, not benchmark**, per this doc's rules and
+  [agent-docs/terminal-performance.md](../../../agent-docs/terminal-performance.md):
+  debug-configuration app, one capture per scenario, CLI-driven input pacing.
+- Date and investigator: 2026-08-18, agent.
+- Commit and worktree state: `a635c6d7`, clean but for this doc's own files.
+- Environment: one `just launch-slot` instance on its local Unix socket (the
+  transport does not change the bytes; the tailnet listener frames the same
+  lines). One pane pinned at 80x24. The subscription is the phone's join:
+  `follow`, `reconstructible`, `start: now`. Interactive typing was driven one
+  character per `pane input` call at ~0.15s effective spacing; the builds are
+  real `swift build` runs of `lib/TerminalCore` (warm incremental, 9.85s; cold
+  `--scratch-path` with cached dependency fetch, ~25s).
+- Result, steady stream (join prefix excluded), raw deflate level 6, one
+  shared context:
+
+  | scenario | span | records | wire B | payload B | wire/payload | deflate whole | deflate per-record | binary+deflate per-record |
+  |---|---|---|---|---|---|---|---|---|
+  | interactive (typing, vim, git) | 37.7s | 430 (299 feed, 131 write) | 166,981 | 39,168 | 4.26x | 22,249 | 27,939 | 10,544 |
+  | build, warm | 17.2s | 152 | 71,911 | 24,595 | 2.92x | 7,772 | 10,093 | 4,086 |
+  | build, cold | 23.8s | 222 | 100,250 | 32,492 | 3.09x | 12,747 | 16,165 | 6,993 |
+  | idle prompt | 120.0s | 0 | 0 | 0 | -- | -- | -- | -- |
+
+  "Payload" is the decoded PTY bytes the records carry; "deflate per-record"
+  sync-flushes after every record, which is what a latency-preserving
+  compressed wire must do; "binary+deflate per-record" is the same flushing
+  applied to the payloads plus a nominal 16-byte binary header each, as the
+  floor a binary tape framing would reach.
+- **The per-keystroke echo the task asked about costs ~296 wire bytes per
+  payload byte.** The 131 write records in the interactive capture have a
+  median payload of 1 byte and a median line of 296 bytes. One verbatim:
+
+  ```
+  {"params":{"subscription":"663156E3-0B97-4B9F-8830-DB8431F284A3","record":{"byteLength":1,"elapsedNanoseconds":3334168208,"kind":"event","originElapsedNanoseconds":3333966916,"sequence":17,"byteOffset":108,"event":{"type":"write","base64":"Zw=="}}},"jsonrpc":"2.0","method":"pane.tape.event"}
+  ```
+
+  The fixed part -- the JSON-RPC frame, the 36-character subscription UUID,
+  the record keys, and three coordinate numbers -- averages 265 bytes per
+  record across the interactive capture. Note the write direction is echoed
+  back to the subscriber, so on a phone each keystroke pays an uplink request
+  plus this ~296-byte downlink record plus the prompt's feed echo (median feed
+  record: 58 payload bytes in a 335-byte line).
+- **Compression removes most of the envelope but not all of it.** Whole-blob
+  deflate takes the interactive wire from 167 KB to 22 KB -- smaller than the
+  39 KB of raw payload it carries, so a compressed JSON wire already beats an
+  uncompressed binary one. Against a binary framing compressed under the same
+  per-record flush, though, the JSON wire stays 2.3-2.7x larger across all
+  three active workloads: the repeating keys and UUID deflate away almost
+  entirely, but base64's bit-spreading resists compression, and that residue
+  is what a binary framing has left to win.
+- **The absolute magnitudes are small in every measured workload.** Every
+  active scenario -- interactive and both builds alike -- ran 4.2-4.4 KB/s of
+  raw wire in its steady segment, against F5's measured tailnet link that
+  moved 252 KB in 215 seconds without strain. The 2.5x a binary framing would
+  keep after compression is therefore about 0.5 KB/s in these workloads.
+  Nothing here motivates a wire-format change; the workload that could is
+  T21's flood, which this finding deliberately does not cover.
+- **An idle pane costs exactly zero.** 120 seconds, zero records, zero bytes
+  after the join. The stream itself has no keepalive; the liveness ping that
+  remote connections carry is a separate, per-connection cost outside this
+  capture.
+- Unplanned observation, T20's subject: the from-now join resends the pane's
+  prompt state as sync. A fresh pane's join is 2,547 wire bytes (1,366 payload);
+  the same pane after one session's history is 12.6-13.5 KB of join for
+  8.9-9.6 KB of sync payload. The join, not the steady stream, is where this
+  pane's wire bytes actually went in three of the four captures.
+- Uncertainty: single runs, and the interactive pacing is an agent's scripted
+  typing, not a human's. The builds are short; a longer build extends the span
+  at the same shape, since the steady rate was flat across warm and cold. The
+  per-record flush is the strictest latency assumption -- a wire that flushed
+  per coalesced batch would land between the whole-blob and per-record
+  columns. Artifacts: [t19-artifacts/](t19-artifacts/) holds the four raw
+  captures, their chunk timelines, and `summary.json`.
+- Next action: T21 sizes the flood, where the byte stream is the expensive
+  encoding and where a magnitude could actually move the framing question.
+  T20 sizes the sync-vs-backlog trade the join numbers above already gesture
+  at.
