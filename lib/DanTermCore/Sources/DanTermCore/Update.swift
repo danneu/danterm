@@ -437,16 +437,20 @@ func update(
         // A live session is superseded rather than closed here: the reconcile
         // pass commits the predecessor's draft when it hands the editor over,
         // and reports that end afterwards. reconcileSidebarRenameTarget drops a
-        // target whose entity is not in the model.
-        model.sidebarRenameTarget = target
+        // target whose entity is not in the model. Every begin mints its own
+        // identity, including a second begin on the row the previous session
+        // edited -- that is what tells the pass an editor has to open again.
+        model.sidebarRename = SidebarRenameSession(
+            id: RenameSessionId(rawValue: env.newId()),
+            target: target)
         return []
 
-    case .sidebarRenameEnded(let target):
+    case .sidebarRenameEnded(let session):
         // Only the named session retracts the request. An end can arrive after a
-        // successor rename has already claimed the target, and a blanket clear
+        // successor rename has already claimed the row, and a blanket clear
         // would leave the model denying a session that is on screen.
-        if model.sidebarRenameTarget == target {
-            model.sidebarRenameTarget = nil
+        if model.sidebarRename?.id == session {
+            model.sidebarRename = nil
         }
         return []
 
@@ -1351,7 +1355,7 @@ private func reconcileSidebarRenameTarget(_ model: inout AppModel) {
         isLive = model.groups.contains { $0.id == id }
     }
     if !isLive {
-        model.sidebarRenameTarget = nil
+        model.sidebarRename = nil
     }
 }
 

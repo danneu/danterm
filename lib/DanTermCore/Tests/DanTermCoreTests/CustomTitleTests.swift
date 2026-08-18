@@ -420,8 +420,9 @@ import Testing
         // Why it exists: pins the dispatch sequence on commit.
         // Scenario: spec-first enter commit.
         let tabId = TabId()
+        let session = RenameSessionId(rawValue: UUID())
         let msgs = renameCompletionMessages(
-            isConfirm: true, target: .tab(tabId), newName: "New Name")
+            isConfirm: true, session: session, target: .tab(tabId), newName: "New Name")
         #expect(msgs.count == 2)
         guard case .renameTab(let id, let name) = msgs[0] else {
             Issue.record("expected renameTab")
@@ -433,7 +434,7 @@ import Testing
             Issue.record("expected sidebarRenameEnded")
             return
         }
-        #expect(ended == .tab(tabId), "the end must name the session it ended")
+        #expect(ended == session, "the end must name the session it ended")
     }
 
     @Test("renameCompletion: Enter with unchanged text still dispatches rename")
@@ -444,7 +445,8 @@ import Testing
         // Scenario: spec-first unchanged-still-fires.
         let tabId = TabId()
         let msgs = renameCompletionMessages(
-            isConfirm: true, target: .tab(tabId), newName: "zsh")
+            isConfirm: true, session: RenameSessionId(rawValue: UUID()),
+            target: .tab(tabId), newName: "zsh")
         #expect(msgs.count == 2)
         guard case .renameTab = msgs[0] else {
             Issue.record("expected renameTab")
@@ -464,7 +466,8 @@ import Testing
         // Scenario: spec-first empty-clear.
         let tabId = TabId()
         let msgs = renameCompletionMessages(
-            isConfirm: true, target: .tab(tabId), newName: "")
+            isConfirm: true, session: RenameSessionId(rawValue: UUID()),
+            target: .tab(tabId), newName: "")
         #expect(msgs.count == 2)
         guard case .renameTab(_, let name) = msgs[0] else {
             Issue.record("expected renameTab")
@@ -481,8 +484,10 @@ import Testing
         //   takes, and every neighbouring branch was covered while it was not.
         // Scenario: spec-first group commit.
         let groupId = GroupId()
+        let session = RenameSessionId(rawValue: UUID())
         let msgs = renameCompletionMessages(
-            isConfirm: true, target: .group(groupId), newName: "Release work")
+            isConfirm: true, session: session,
+            target: .group(groupId), newName: "Release work")
         #expect(msgs.count == 2)
         guard case .renameGroup(let id, let name) = msgs[0] else {
             Issue.record("expected renameGroup")
@@ -494,7 +499,7 @@ import Testing
             Issue.record("expected sidebarRenameEnded")
             return
         }
-        #expect(ended == .group(groupId), "the end must name the session it ended")
+        #expect(ended == session, "the end must name the session it ended")
     }
 
     @Test("renameCompletion: Enter with empty group name skips rename")
@@ -505,7 +510,8 @@ import Testing
         // Scenario: spec-first empty group.
         let groupId = GroupId()
         let msgs = renameCompletionMessages(
-            isConfirm: true, target: .group(groupId), newName: "")
+            isConfirm: true, session: RenameSessionId(rawValue: UUID()),
+            target: .group(groupId), newName: "")
         #expect(msgs.count == 1)
         guard case .sidebarRenameEnded = msgs[0] else {
             Issue.record("expected sidebarRenameEnded")
@@ -520,7 +526,8 @@ import Testing
         // Scenario: spec-first esc tab.
         let tabId = TabId()
         let msgs = renameCompletionMessages(
-            isConfirm: false, target: .tab(tabId), newName: "Changed Text")
+            isConfirm: false, session: RenameSessionId(rawValue: UUID()),
+            target: .tab(tabId), newName: "Changed Text")
         #expect(msgs.count == 1)
         guard case .sidebarRenameEnded = msgs[0] else {
             Issue.record("expected sidebarRenameEnded")
@@ -535,7 +542,8 @@ import Testing
         // Scenario: spec-first esc group.
         let groupId = GroupId()
         let msgs = renameCompletionMessages(
-            isConfirm: false, target: .group(groupId), newName: "New Name")
+            isConfirm: false, session: RenameSessionId(rawValue: UUID()),
+            target: .group(groupId), newName: "New Name")
         #expect(msgs.count == 1)
         guard case .sidebarRenameEnded = msgs[0] else {
             Issue.record("expected sidebarRenameEnded")
@@ -555,33 +563,42 @@ import Testing
         let tabId = model.groups[0].tabs[0].id
         let focusedPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
-        let commands = update(&model, .sidebarRenameEnded(target: .tab(tabId)))
+        _ = update(&model, .beginSidebarRename(target: .tab(tabId)))
+        let session = model.sidebarRename!.id
+
+        let commands = update(&model, .sidebarRenameEnded(session: session))
         #expect(commands.isEmpty)
         #expect(desiredPaneFocus(in: model) == .terminal(focusedPaneId))
     }
 
     @Test("sidebarRenameEnded retracts only the session it names")
     func sidebarRenameEndedRetractsOnlyNamedSession() {
-        // Intent: an end naming one target leaves a pending request for a
-        //   different target standing, and clears the request it does name.
-        // Why it exists: a rename that supersedes a live one commits the
-        //   predecessor, so the predecessor's end arrives after the successor
-        //   already claimed the pending target. A blanket clear would leave the
-        //   model denying a session that is open on screen.
-        // Scenario: spec-first -- the shape a second rename takes while the
-        //   first editor is still open.
+        // Intent: an end naming a superseded session leaves the live one
+        //   standing, even when both sessions edit the same row, and an end
+        //   naming the live session retracts it.
+        // Why it exists: the view can tear a session down long before its end
+        //   reaches the model -- a recycled cell buffers it, a click-away
+        //   delivers it a turn later. Identifying a session by the row it edits
+        //   cannot tell two successive edits of one row apart, so a late end
+        //   would retract a session that is open on screen.
+        // Scenario: spec-first -- the same row is renamed twice in a row, which
+        //   is what a recycled editor forces the user to do.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let groupId = model.groups[0].id
-        model.sidebarRenameTarget = .tab(tabId)
 
-        _ = update(&model, .sidebarRenameEnded(target: .group(groupId)))
-        #expect(model.sidebarRenameTarget == .tab(tabId),
-            "an end for another session must not retract this one")
+        _ = update(&model, .beginSidebarRename(target: .tab(tabId)))
+        let first = model.sidebarRename!.id
+        _ = update(&model, .beginSidebarRename(target: .tab(tabId)))
+        let second = model.sidebarRename!.id
+        #expect(first != second, "each begin mints its own session")
 
-        _ = update(&model, .sidebarRenameEnded(target: .tab(tabId)))
-        #expect(model.sidebarRenameTarget == nil,
+        _ = update(&model, .sidebarRenameEnded(session: first))
+        #expect(model.sidebarRename?.id == second,
+            "a superseded session's end must not retract the live one on the same row")
+
+        _ = update(&model, .sidebarRenameEnded(session: second))
+        #expect(model.sidebarRename == nil,
             "an end naming the pending session retracts it")
     }
 
@@ -603,12 +620,13 @@ import Testing
         #expect(commands.isEmpty)
         #expect(model.sidebarRenameTarget == .tab(tabId),
             "a begin records the session it opens")
+        let tabSession = model.sidebarRename!.id
 
         _ = update(&model, .beginSidebarRename(target: .group(groupId)))
         #expect(model.sidebarRenameTarget == .group(groupId),
             "a second begin moves the one session to its target")
 
-        _ = update(&model, .sidebarRenameEnded(target: .tab(tabId)))
+        _ = update(&model, .sidebarRenameEnded(session: tabSession))
         #expect(model.sidebarRenameTarget == .group(groupId),
             "the superseded session's end must not retract the successor")
     }

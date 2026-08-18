@@ -77,8 +77,9 @@ enum Msg {
     // the reconcile pass stays the only thing that opens an editor.
     case beginSidebarRename(target: RenameTarget)
     // Names the session that ended, so an end arriving after a successor rename
-    // already opened cannot retract the successor's pending target.
-    case sidebarRenameEnded(target: RenameTarget)
+    // already opened cannot retract it -- including a successor editing the
+    // same row.
+    case sidebarRenameEnded(session: RenameSessionId)
 
     // IPC
     case ipcRequest(reqId: UUID, caller: IpcCallerIdentity, request: IpcRequest)
@@ -243,6 +244,7 @@ extension Msg {
 /// for Enter (confirm) vs Esc (cancel).
 func renameCompletionMessages(
     isConfirm: Bool,
+    session: RenameSessionId,
     target: RenameTarget,
     newName: String
 ) -> [Msg] {
@@ -258,6 +260,6 @@ func renameCompletionMessages(
             }
         }
     }
-    msgs.append(.sidebarRenameEnded(target: target))
+    msgs.append(.sidebarRenameEnded(session: session))
     return msgs
 }

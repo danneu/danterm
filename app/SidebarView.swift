@@ -192,10 +192,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private var rootItems: [SidebarItem] { store.rootItems }
     private var childItems: [GroupId: [SidebarItem]] { store.childItems }
     private var appliedProjection: SidebarProjection?
-    private var activeRenameSession: (target: RenameTarget, textField: NSTextField)?
+    private var activeRenameSession: (session: SidebarRenameSession, textField: NSTextField)?
 
     /// Identifies the row whose exact field owns the live inline rename session.
-    var activeRenameTarget: RenameTarget? { activeRenameSession?.target }
+    var activeRenameTarget: RenameTarget? { activeRenameSession?.session.target }
 
 #if DANTERM_UI_TEST
     /// UI-harness seam that forces the next in-place update for selected rows down
@@ -336,7 +336,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         isReloading = true
         defer { isReloading = false }
         let priorFocusedTabId = appliedProjection?.selectedTabId
-        let priorRenameTarget = appliedProjection?.renameTarget
+        let priorRename = appliedProjection?.rename
         appliedProjection = projection
         var unappliedTabIds = Set<TabId>()
         var unappliedGroupIds = Set<GroupId>()
@@ -388,10 +388,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             let row = outlineView.row(forItem: item)
             if row >= 0 { outlineView.scrollRowToVisible(row) }
         }
-        if let target = projection.renameTarget,
-           target != priorRenameTarget,
-           activeRenameTarget != target {
-            followUps += beginRenaming(target: target)
+        // The comparison is on the session, not the row: a second rename of a row
+        // whose editor AppKit destroyed silently is a new session, and the view has
+        // to open an editor for it.
+        if let request = projection.rename,
+           request.id != priorRename?.id,
+           activeRenameSession?.session.id != request.id {
+            followUps += beginRenaming(request)
         }
         return (unappliedTabIds, unappliedGroupIds, followUps)
     }
@@ -478,9 +481,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// ownership. A pointer interaction dispatches them in the same turn; a
     /// reconcile pass reports them back through `applySidebarOps`.
     private func finishActiveRename() -> [Msg] {
-        guard let session = activeRenameSession else { return [] }
-        let target = session.target
-        let textField = session.textField
+        guard let active = activeRenameSession else { return [] }
+        let target = active.session.target
+        let textField = active.textField
         guard textField.currentEditor() != nil else {
             return cancelAbandonedInlineRenameIfNeeded()
         }
@@ -499,7 +502,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 messages.append(.renameGroup(id: id, name: newName))
             }
         }
-        messages.append(.sidebarRenameEnded(target: target))
+        messages.append(.sidebarRenameEnded(session: active.session.id))
         return messages
     }
 
@@ -507,22 +510,22 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// Returns the end for its caller to report; the projection guard has already
     /// decided this rename is over, so the view only tears the session down.
     func endActiveRename(_ target: RenameTarget) -> [Msg] {
-        guard let session = activeRenameSession, session.target == target else { return [] }
+        guard let active = activeRenameSession, active.session.target == target else { return [] }
         activeRenameSession = nil
-        if session.textField.currentEditor() != nil { session.textField.abortEditing() }
-        finishInlineRename(textField: session.textField, target: target)
-        return [.sidebarRenameEnded(target: target)]
+        if active.textField.currentEditor() != nil { active.textField.abortEditing() }
+        finishInlineRename(textField: active.textField, target: target)
+        return [.sidebarRenameEnded(session: active.session.id)]
     }
 
     /// Repairs AppKit silently discarding the owned field editor before delegate cleanup.
     /// Returns the end for whichever caller invoked it, so the same repair serves a
     /// pointer interaction and a pass without either one guessing how to dispatch.
     private func cancelAbandonedInlineRenameIfNeeded() -> [Msg] {
-        guard let session = activeRenameSession,
-              session.textField.currentEditor() == nil else { return [] }
+        guard let active = activeRenameSession,
+              active.textField.currentEditor() == nil else { return [] }
         activeRenameSession = nil
-        finishInlineRename(textField: session.textField, target: session.target)
-        return [.sidebarRenameEnded(target: session.target)]
+        finishInlineRename(textField: active.textField, target: active.session.target)
+        return [.sidebarRenameEnded(session: active.session.id)]
     }
 
     /// Restore AppKit selection so multi-selection stays live while the focused
@@ -612,18 +615,18 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// request this view cannot honor -- an unmounted row, or a row inside a
     /// collapsed group -- has to report its own end, or the model would keep
     /// claiming a session that is not on screen.
-    private func beginRenaming(target: RenameTarget) -> [Msg] {
+    private func beginRenaming(_ request: SidebarRenameSession) -> [Msg] {
         var followUps: [Msg] = []
         if activeRenameSession != nil {
             followUps = finishActiveRename()
         }
         let item: SidebarItem? = {
-            switch target {
+            switch request.target {
             case .tab(let id): return tabItemCache[id]
             case .group(let id): return groupItemCache[id]
             }
         }()
-        let unopened = followUps + [.sidebarRenameEnded(target: target)]
+        let unopened = followUps + [.sidebarRenameEnded(session: request.id)]
         guard let item else { return unopened }
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return unopened }
@@ -631,7 +634,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView
         else { return unopened }
         guard let textField = cellView.textField else { return unopened }
-        activeRenameSession = (target, textField)
+        activeRenameSession = (request, textField)
         textField.isEditable = true
         textField.selectText(nil)
         window?.makeFirstResponder(textField)
@@ -1312,17 +1315,18 @@ extension SidebarView: NSTextFieldDelegate {
         let isCancel  = commandSelector == #selector(NSResponder.cancelOperation(_:))
         guard isConfirm || isCancel,
               let textField = control as? NSTextField,
-              let session = activeRenameSession,
-              session.textField === textField else { return false }
+              let active = activeRenameSession,
+              active.textField === textField else { return false }
 
-        let target = session.target
+        let target = active.session.target
         let newName = textField.stringValue.trimmingCharacters(in: .whitespaces)
         activeRenameSession = nil
         window?.makeFirstResponder(nil)
         finishInlineRename(textField: textField, target: target)
 
         for msg in renameCompletionMessages(
-            isConfirm: isConfirm, target: target, newName: newName
+            isConfirm: isConfirm, session: active.session.id,
+            target: target, newName: newName
         ) {
             runtime?.send(msg)
         }
@@ -1340,9 +1344,10 @@ extension SidebarView: NSTextFieldDelegate {
     /// mid-teardown. The hazard is AppKit's ordering, not DanTerm's structure.
     func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool {
         guard let textField = control as? NSTextField,
-              let session = activeRenameSession,
-              session.textField === textField else { return true }
-        let target = session.target
+              let active = activeRenameSession,
+              active.textField === textField else { return true }
+        let target = active.session.target
+        let session = active.session.id
         let newName = textField.stringValue.trimmingCharacters(in: .whitespaces)
         activeRenameSession = nil
 
@@ -1351,14 +1356,14 @@ extension SidebarView: NSTextFieldDelegate {
             let name: String? = newName.isEmpty ? nil : newName
             DispatchQueue.main.async { [weak self] in
                 self?.runtime?.send(.renameTab(id: tabId, name: name))
-                self?.runtime?.send(.sidebarRenameEnded(target: target))
+                self?.runtime?.send(.sidebarRenameEnded(session: session))
             }
         case .group(let groupId):
             DispatchQueue.main.async { [weak self] in
                 if !newName.isEmpty {
                     self?.runtime?.send(.renameGroup(id: groupId, name: newName))
                 }
-                self?.runtime?.send(.sidebarRenameEnded(target: target))
+                self?.runtime?.send(.sidebarRenameEnded(session: session))
             }
         }
 

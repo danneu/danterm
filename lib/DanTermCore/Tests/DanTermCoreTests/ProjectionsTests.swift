@@ -950,14 +950,14 @@ import Testing
         projectedModel.groups[0].tabs[0].customTitle = "Pinned"
         projectedModel.groups[0].tabs[0].color = .green
         projectedModel.selectedTabId = ids[2]
-        projectedModel.sidebarRenameTarget = .group(projectedModel.groups[0].id)
+        _ = update(&projectedModel, .beginSidebarRename(target: .group(projectedModel.groups[0].id)))
 
         let projection = desiredSidebar(in: projectedModel)
 
         #expect(projection.selectedTabId == ids[2])
         #expect(projection.singleGroupDropTargetId == projectedModel.groups[0].id)
         #expect(!projection.canDeleteGroups)
-        #expect(projection.renameTarget == .group(projectedModel.groups[0].id))
+        #expect(projection.rename == projectedModel.sidebarRename)
         #expect(projection.groups[0].tabs[0].hasCustomTitle)
         #expect(projection.groups[0].tabs[0].color == .green)
     }

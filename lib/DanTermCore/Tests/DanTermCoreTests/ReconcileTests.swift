@@ -832,7 +832,7 @@ private func applySidebarRowOps(_ ops: [SidebarRowOp], to old: SidebarProjection
     work.selectedTabId = new.selectedTabId
     work.singleGroupDropTargetId = new.singleGroupDropTargetId
     work.canDeleteGroups = new.canDeleteGroups
-    work.renameTarget = new.renameTarget
+    work.rename = new.rename
     func newGroup(_ id: GroupId) -> SidebarGroupProjection { new.groups.first { $0.id == id }! }
     func newTab(_ id: TabId) -> SidebarTabProjection { new.groups.flatMap(\.tabs).first { $0.id == id }! }
     func groupIndex(_ id: GroupId) -> Int { work.groups.firstIndex { $0.id == id }! }

@@ -703,6 +703,49 @@ func sidebarRenameRecycleTests() {
             "a double-click must not open an editor on its own")
     }
 
+    uiTest("renaming a row whose editor a recycle destroyed opens an editor again") {
+        // Intent: a second rename of a row opens an editor even when the view
+        //   gave the first session up without the model hearing about it.
+        // Why it exists: the reuse-pool branch tears the session down inside
+        //   AppKit's row traversal, where it cannot report. If a session were
+        //   identified by the row it edits, the model's pending request would
+        //   still name that row, the pass would see no change, and renaming the
+        //   row would do nothing for the rest of the session.
+        // Scenario: the user renames a tab, scrolls the row out of view and back
+        //   (which recycles its cell), then renames the same tab again.
+        let (sidebar, outline, window, _) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let group = GroupId(); let edited = TabId(); let other = TabId()
+        var model = renameRecycleModel(
+            [(group, "G", false, [(edited, "alpha"), (other, "beta")])],
+            selected: edited)
+        let driver = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+
+        beginRenameThroughModel(
+            .tab(edited), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
+        let cell: SidebarTabCellView = try sidebarCell(for: .tab(edited), in: outline)
+        try uiExpect(cell.titleField.currentEditor() != nil,
+            "precondition: the first rename should attach a field editor")
+
+        // The reuse-pool branch of viewFor:, which a scroll reaches with no
+        // reconcile pass anywhere on the stack.
+        sidebar.testResetRecycledRenameState(cell)
+        try uiExpect(sidebar.activeRenameTarget == nil,
+            "precondition: the recycle should leave the view owning no session")
+
+        beginRenameThroughModel(
+            .tab(edited), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
+
+        try uiExpect(sidebar.activeRenameTarget == .tab(edited),
+            "a second rename of the same row should hand the editor back")
+        let reopened: SidebarTabCellView = try sidebarCell(for: .tab(edited), in: outline)
+        try uiExpect(reopened.titleField.currentEditor() != nil,
+            "the reopened rename should attach a live field editor")
+    }
+
     uiTest("a begin the pass cannot honor records no open session") {
         // Intent: when the requested row has no cell to hand a field editor to,
         //   the pass reports the end of that rename, and no later pass opens it.
@@ -737,7 +780,7 @@ func sidebarRenameRecycleTests() {
                 model, using: driver, to: sidebar, outline: outline,
                 materializeRows: materialize)
 
-            model.sidebarRenameTarget = .tab(hidden)
+            let requestedSession = recordRenameBegin(.tab(hidden), in: &model)
             let requested = applySidebarTestModel(
                 model, using: driver, to: sidebar, outline: outline,
                 materializeRows: materialize)
@@ -745,17 +788,17 @@ func sidebarRenameRecycleTests() {
             try uiExpect(sidebar.activeRenameTarget == nil,
                 "\(unopenable) should leave no editor open")
             // The end names the request, which is what retracts it in the model
-            // (update() drops the pending target only for the session it names).
-            let endedTargets: [RenameTarget] = requested.followUps.compactMap {
-                if case .sidebarRenameEnded(let target) = $0 { return target }
+            // (update() drops the pending request only for the session it names).
+            let ended: [RenameSessionId] = requested.followUps.compactMap {
+                if case .sidebarRenameEnded(let session) = $0 { return session }
                 return nil
             }
-            try uiExpect(endedTargets == [.tab(hidden)],
+            try uiExpect(ended == [requestedSession],
                 "\(unopenable) should report the end of the rename it could not open")
             try uiExpect(runtime.sentMessages.isEmpty,
                 "\(unopenable) should report the end rather than send it from the pass")
 
-            model.sidebarRenameTarget = nil
+            model.sidebarRename = nil
             let later = applySidebarTestModel(
                 model, using: driver, to: sidebar, outline: outline,
                 materializeRows: materialize)
@@ -883,7 +926,7 @@ func sidebarRenameRecycleTests() {
         firstCell.titleField.stringValue = "first draft"
 
         var handoff = initial
-        handoff.sidebarRenameTarget = .tab(second)
+        recordRenameBegin(.tab(second), in: &handoff)
         let transition = applyRenameRecycleTransitionResult(
             old: driver, newModel: handoff, to: sidebar, outline: outline)
 

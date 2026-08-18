@@ -23,7 +23,7 @@ import Testing
 
         let created = try #require(model.groups.last)
         #expect(model.sidebarRenameTarget == .group(created.id))
-        _ = update(&model, .sidebarRenameEnded(target: .group(created.id)))
+        _ = update(&model, .sidebarRenameEnded(session: try #require(model.sidebarRename).id))
         #expect(model.sidebarRenameTarget == nil)
     }
 
@@ -50,7 +50,7 @@ import Testing
         let created = try #require(model.groups.last)
         #expect(model.sidebarRenameTarget == .group(created.id))
 
-        model.sidebarRenameTarget = nil
+        model.sidebarRename = nil
         let remainingIds = model.groups[0].tabs.map(\.id)
         _ = update(&model, .extractTabsToNewGroup(
             tabIds: [remainingIds[0]], groupName: "Domain group"))

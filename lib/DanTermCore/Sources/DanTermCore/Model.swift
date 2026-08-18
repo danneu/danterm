@@ -17,6 +17,8 @@ enum SplitTag {}
 enum AlertTag {}
 /// Separates panel answers from every replaced confirmation transaction.
 enum ConfirmationTag {}
+/// Separates one inline rename session from its successor on the same row.
+enum RenameSessionTag {}
 
 /// Identifies one terminal lifetime so late reports cannot target its replacement.
 typealias SessionId = TypedId<SessionTag>
@@ -24,6 +26,8 @@ typealias SplitId = TypedId<SplitTag>
 typealias AlertId = TypedId<AlertTag>
 /// Names the exact confirmation transaction a panel answer belongs to.
 typealias ConfirmationId = TypedId<ConfirmationTag>
+/// Names the exact inline rename session an end belongs to.
+typealias RenameSessionId = TypedId<RenameSessionTag>
 
 enum AlertKind: Hashable {
     case bell
@@ -510,7 +514,11 @@ struct AppModel: Equatable {
     // panel-scoped for the same reason as `installedFontFamilies`.
     var availableThemeNames: [String] = []
     var todoPopover: TodoOwner? = nil  // ephemeral -- which TODO popover (pane or tab) is open
-    var sidebarRenameTarget: RenameTarget? = nil  // ephemeral -- one projected request to begin inline editing
+    var sidebarRename: SidebarRenameSession? = nil  // ephemeral -- one projected request to begin inline editing
+
+    /// Which row the pending inline rename edits, for readers that do not care
+    /// which session it is (the row-op guard, the `ls` encoder).
+    var sidebarRenameTarget: RenameTarget? { sidebarRename?.target }
     var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
@@ -646,6 +654,19 @@ extension AppModel {
 enum RenameTarget: Equatable {
     case tab(TabId)
     case group(GroupId)
+}
+
+/// One inline sidebar rename session: the row it edits, and which edit of that
+/// row it is.
+///
+/// The identity exists because the view tears a session down long before its
+/// end reaches the model -- a recycled cell buffers the end, a click-away
+/// delivers it a turn later -- and two successive edits of one row are
+/// otherwise indistinguishable. An end names the session, so a late end can
+/// neither retract a successor nor block a second rename of the same row.
+struct SidebarRenameSession: Equatable {
+    var id: RenameSessionId
+    var target: RenameTarget
 }
 
 // MARK: - Init Snapshot Types

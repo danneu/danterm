@@ -29,15 +29,20 @@ func beginRenameThroughModel(
     sidebar: SidebarView,
     outline: NSOutlineView
 ) -> SidebarReconcileResult {
-    // A pass opens an editor only when the projected target CHANGES. In
-    // production the rename end retracts the previous target before the next
-    // begin sets one; a test holds its own model, so retract it here.
-    if model.sidebarRenameTarget != nil {
-        model.sidebarRenameTarget = nil
-        _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
-    }
-    model.sidebarRenameTarget = target
+    _ = recordRenameBegin(target, in: &model)
     return applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
+}
+
+/// Records one rename begin in the model and returns the session it minted, the
+/// way `update(.beginSidebarRename)` does. The UI harness compiles the model but
+/// not the reducer, so the mint is spelled out here; a begin on a row an earlier
+/// session already edited still mints its own identity, which is what makes the
+/// pass open an editor again.
+@discardableResult
+func recordRenameBegin(_ target: RenameTarget, in model: inout AppModel) -> RenameSessionId {
+    let session = RenameSessionId(rawValue: UUID())
+    model.sidebarRename = SidebarRenameSession(id: session, target: target)
+    return session
 }
 
 /// Materializes every visible outline row after a reconcile pass.

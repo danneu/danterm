@@ -19,7 +19,7 @@ import Testing
         var followUps = ReconcileFollowUps()
 
         followUps.enterFrame()
-        followUps.report([.sidebarRenameEnded(target: .tab(TabId()))])
+        followUps.report([.sidebarRenameEnded(session: RenameSessionId(rawValue: UUID()))])
         #expect(followUps.nextToDispatch() == nil,
             "the frame that reported must not dispatch its own follow-up")
 
@@ -54,7 +54,7 @@ import Testing
         //   second one.
         var followUps = ReconcileFollowUps()
         followUps.enterFrame()
-        followUps.report([.sidebarRenameEnded(target: .tab(TabId()))])
+        followUps.report([.sidebarRenameEnded(session: RenameSessionId(rawValue: UUID()))])
         followUps.leaveFrame()
 
         var dispatched: [Msg] = []
@@ -64,7 +64,7 @@ import Testing
             followUps.enterFrame()
             if !reportedOnce {
                 reportedOnce = true
-                followUps.report([.sidebarRenameEnded(target: .tab(TabId()))])
+                followUps.report([.sidebarRenameEnded(session: RenameSessionId(rawValue: UUID()))])
             }
             followUps.leaveFrame()
         }

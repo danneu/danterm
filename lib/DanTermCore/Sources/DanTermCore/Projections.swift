@@ -595,7 +595,10 @@ struct SidebarProjection: Equatable {
   var selectedTabId: TabId?
   var singleGroupDropTargetId: GroupId?
   var canDeleteGroups: Bool = false
-  var renameTarget: RenameTarget?
+  /// The pending inline rename, identity included: the pass opens an editor
+  /// when the projected SESSION changes, so a second rename of the row an
+  /// abandoned session named still reads as a change.
+  var rename: SidebarRenameSession?
   var groups: [SidebarGroupProjection]
 
   /// The row payload `SidebarItemStore` mounts for an inserted or reloaded group.
@@ -652,7 +655,7 @@ func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProje
     selectedTabId: model.selectedTabId,
     singleGroupDropTargetId: model.groups.count == 1 ? model.groups[0].id : nil,
     canDeleteGroups: model.groups.count > 1,
-    renameTarget: model.sidebarRenameTarget,
+    rename: model.sidebarRename,
     groups: groups)
 }
 

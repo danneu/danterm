@@ -401,8 +401,8 @@ import DanTermProtocol
         // The editor closes and reports the session it ended.
         var ended = makeModel()
         createTab(&ended)
-        let endedTabId = try openTabRename(&ended)
-        _ = update(&ended, .sidebarRenameEnded(target: .tab(endedTabId)))
+        _ = try openTabRename(&ended)
+        _ = update(&ended, .sidebarRenameEnded(session: try #require(ended.sidebarRename).id))
         #expect(try reportedRename(&ended) == nil)
 
         // The edited tab is closed while its editor is open.
