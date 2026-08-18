@@ -39,6 +39,10 @@ public enum MobileSessionEffect: Equatable, Sendable {
     case cancelRetryTimer
     /// Deliver `checkpointTimerFired` at this moment.
     case armCheckpointTimer(deadline: TimeInterval)
+    /// Drive the smoke run's probe into the terminal's input responder. It enters the
+    /// session again as ordinary input events, which is what makes the probe a test of
+    /// the responder rather than of the model.
+    case driveSmokeInput([MobileSmokeInputStep])
     /// Re-render every projection from the model.
     case redraw
 }

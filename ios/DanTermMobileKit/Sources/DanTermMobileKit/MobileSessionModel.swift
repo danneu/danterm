@@ -166,8 +166,9 @@ public struct MobileSessionModel: Equatable, Sendable {
             )]
             if let smokeInput = pendingSmokeInput {
                 pendingSmokeInput = nil
-                let action = inputMapper.text(smokeInput)
-                effects += send(action, env: env)
+                // The probe is handed to the responder rather than sent from here, so the
+                // run exercises the way the user's own typing reaches the pane.
+                effects.append(.driveSmokeInput(MobileSmokeInputScript.steps(for: smokeInput)))
             }
             status.noteConnection(
                 .ready,
@@ -217,6 +218,10 @@ public struct MobileSessionModel: Equatable, Sendable {
 
         case .textEntered(let text):
             let action = inputMapper.text(text)
+            return send(action, env: env)
+
+        case .deleteBackwardPressed:
+            let action = inputMapper.deleteBackward()
             return send(action, env: env)
 
         case .pasted(let text):

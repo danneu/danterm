@@ -87,6 +87,9 @@ public enum MobileSessionEvent: Equatable, Sendable {
     case replicaAdvanced
     case surfaceChanged(MobileSurfaceFacts)
     case textEntered(String)
+    /// The keyboard's backspace, which the terminal's input responder is the first thing
+    /// on this phone able to report.
+    case deleteBackwardPressed
     case pasted(String)
     case accessoryKeyPressed(MobileAccessoryKey)
     case hardwareKeyPressed(NamedKey, KeyMods)

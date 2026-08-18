@@ -135,6 +135,39 @@ func inputRoutesByScreen() throws {
     ])
 }
 
+@Test("Backspace reaches the selected pane as the named key")
+func backspaceReachesThePane() throws {
+    // Intent: a backspace from the keyboard is ordinary pane input, routed to the pane
+    //   the model holds like any other keystroke.
+    // Why it exists: the terminal's input responder is the only place a software
+    //   backspace can be observed, and the composer it replaced dropped the key outright.
+    var session = Session()
+    try session.reachServingStream()
+    #expect(requests(session.handle(.deleteBackwardPressed)) == [
+        .paneInput(pane: session.pane, input: .events([.key(.named(.bspace), [])])),
+    ])
+}
+
+@Test("Smoke input is driven into the responder rather than sent from the model")
+func smokeInputEntersThroughTheResponder() throws {
+    // Intent: a launch carrying smoke input answers the attached pane with the probe for
+    //   the shell to drive, and sends nothing itself.
+    // Why it exists: a probe the model sent straight to the pane would prove the model's
+    //   own path and leave the responder -- the only thing this migration replaced --
+    //   untested by the simulator run that exists to test it.
+    var session = Session()
+    let launched = session.handle(.launched(MobileLaunchInputs(
+        environmentHost: session.target.host,
+        smokeInput: "echo hi"
+    )))
+    #expect(launched.contains(.connect(session.target)))
+    _ = session.handle(.attemptSucceeded(panes: try panes(), serverVersion: "1.2.3"))
+
+    let attached = session.handle(.paneAttached(pane: session.pane, cursor: nil))
+    #expect(attached.contains(.driveSmokeInput(MobileSmokeInputScript.steps(for: "echo hi"))))
+    #expect(requests(attached).contains { $0.method == .paneInput } == false)
+}
+
 @Test("A launch with no host connects to nothing and reports no problem")
 func launchWithoutAHostStaysPut() {
     // Intent: a launch that names no host waits, and says nothing about the empty field
@@ -229,7 +262,7 @@ private extension MobileSessionEffect {
         case .connect, .disconnect, .storeTarget, .beginStream, .send, .flushCheckpoint:
             true
         case .attachPane, .applyRecord, .scrollViewport, .armRetryTimer, .cancelRetryTimer,
-             .armCheckpointTimer, .redraw:
+             .armCheckpointTimer, .driveSmokeInput, .redraw:
             false
         }
     }

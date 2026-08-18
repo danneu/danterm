@@ -22,6 +22,10 @@ final class MobileSessionController {
     /// effects act on it; the view controller only places it.
     let surfaceView = TerminalSurfaceView()
 
+    /// The terminal's own text-input target, owned here for the same reason the surface
+    /// is: the smoke probe is an effect performed on it.
+    let inputView = TerminalInputView()
+
     /// Called whenever a redraw effect is performed, with everything the surfaces render.
     var didUpdate: ((MobileSessionProjection) -> Void)?
 
@@ -68,6 +72,9 @@ final class MobileSessionController {
             surfaceDidLayout()
         }
         surfaceView.didLayout = { [weak self] in self?.surfaceDidLayout() }
+        inputView.onText = { [weak self] text in self?.dispatch(.textEntered(text)) }
+        inputView.onDeleteBackward = { [weak self] in self?.dispatch(.deleteBackwardPressed) }
+        inputView.onPaste = { [weak self] text in self?.dispatch(.pasted(text)) }
         observeLifecycle()
         let environment = ProcessInfo.processInfo.environment
         let defaults = UserDefaults.standard
@@ -189,6 +196,8 @@ final class MobileSessionController {
             checkpointTimer.schedule(until: deadline) { [weak self] in
                 self?.dispatch(.checkpointTimerFired)
             }
+        case .driveSmokeInput(let steps):
+            inputView.drive(steps)
         case .redraw:
             didUpdate?(projection)
         }

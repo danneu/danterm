@@ -13,7 +13,6 @@ final class MobileRootViewController: UIViewController {
     private let session = MobileSessionController()
     private let statusPill = ConnectionStatusPillView()
     private let bottomBar = TerminalBottomBarView()
-    private let composer = TerminalComposerView()
 
     /// Whether the launch has already been given its answer about the connect sheet. It
     /// is presentation choreography, not a session fact: whether a sheet is *wanted* is
@@ -21,6 +20,7 @@ final class MobileRootViewController: UIViewController {
     private var hasAnsweredLaunch = false
 
     private var terminalView: TerminalSurfaceView { session.surfaceView }
+    private var terminalInput: TerminalInputView { session.inputView }
 
     /// The terminal runs edge to edge in black, so the status bar's own content is drawn
     /// light over it whatever the device's appearance setting is.
@@ -71,24 +71,26 @@ final class MobileRootViewController: UIViewController {
 
     private func configureViews() {
         statusPill.addTarget(self, action: #selector(statusPillTapped), for: .touchUpInside)
-        composer.onText = { [weak self] text in self?.session.dispatch(.textEntered(text)) }
-        composer.onPaste = { [weak self] text in self?.session.dispatch(.pasted(text)) }
         bottomBar.onPaneList = { [weak self] in self?.presentPaneSheet() }
         bottomBar.onAccessoryKey = { [weak self] key in
             guard let self else { return false }
             session.dispatch(.accessoryKeyPressed(key))
-            // The key was aimed at the terminal, so the keyboard target keeps the focus a
-            // tap on the bar would otherwise have taken.
-            composer.focusInput()
+            // The key was aimed at the terminal, so the terminal keeps the focus a tap on
+            // the bar would otherwise have taken.
+            terminalInput.becomeFirstResponder()
             return session.projection.isControlLatched
         }
-        bottomBar.onDismissKeyboard = { [weak self] in self?.view.endEditing(true) }
+        bottomBar.onDismissKeyboard = { [weak self] in self?.terminalInput.resignFirstResponder() }
         bottomBar.menuItems = { [weak self] in self?.geometryMenuItems() ?? [] }
+        // Both gestures belong to the input view, which covers the terminal: a view over
+        // it takes the touches first, so a recognizer on the surface below would never
+        // see one.
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
-        terminalView.addGestureRecognizer(scroll)
-        // The pill is added after the terminal because it floats over it. Everything else
-        // sits beside the terminal and takes its own space.
-        for subview in [terminalView, bottomBar, composer, statusPill] {
+        terminalInput.addGestureRecognizer(scroll)
+        // The input view covers the terminal so a tap anywhere on the grid raises the
+        // keyboard, and the pill is added after both because it floats over them.
+        // Everything else sits beside the terminal and takes its own space.
+        for subview in [terminalView, terminalInput, bottomBar, statusPill] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
@@ -125,7 +127,14 @@ final class MobileRootViewController: UIViewController {
             terminalView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             terminalView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             terminalView.topAnchor.constraint(equalTo: view.topAnchor),
-            terminalView.bottomAnchor.constraint(equalTo: composer.topAnchor),
+            terminalView.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
+
+            // The input view is the terminal's own surface as far as touches go, so it
+            // covers exactly what the terminal covers.
+            terminalInput.leadingAnchor.constraint(equalTo: terminalView.leadingAnchor),
+            terminalInput.trailingAnchor.constraint(equalTo: terminalView.trailingAnchor),
+            terminalInput.topAnchor.constraint(equalTo: terminalView.topAnchor),
+            terminalInput.bottomAnchor.constraint(equalTo: terminalView.bottomAnchor),
 
             statusPill.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             statusPill.topAnchor.constraint(
@@ -140,10 +149,6 @@ final class MobileRootViewController: UIViewController {
                 lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor,
                 constant: -12
             ),
-
-            composer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            composer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            composer.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
 
             // The bar sits beside the terminal rather than over it, so no cell is ever
             // drawn underneath it, claimed or not. Its height is a constant, so the

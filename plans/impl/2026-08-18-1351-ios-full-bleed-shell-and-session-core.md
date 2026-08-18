@@ -252,7 +252,7 @@ until everything else works.
 - [x] 2. refactor(ios): derive the phone's grid from one content box
 - [x] 3. feat(ios): run the terminal full-bleed under a floating status pill
 - [x] 4. feat(ios): move pane choice and claim into the bottom bar
-- [ ] 5. feat(ios): make the terminal itself the text-input target
+- [x] 5. feat(ios): make the terminal itself the text-input target
 
 ## Implementation notes
 
@@ -331,8 +331,38 @@ until everything else works.
   unlike the connect sheet, whose fields are an editor a redraw must not overwrite. The
   pane list has no editor, so a pane the Mac opens or closes belongs on screen at once.
 
+- Commit 5: the responder is its own transparent view over the terminal rather than the
+  surface view adopting `UIKeyInput`. The surface owns detached IOSurfaces and a display
+  link, and focus, an edit menu, and two gestures are a second job; a view over it takes
+  the touches first anyway, so the scroll recognizer moved onto it with the tap.
+- Commit 5: hardware keys stay on the view controller's `pressesBegan`. The responder chain
+  delivers to the first responder first, so the input view consumes exactly the presses the
+  text input system turns into text -- typed characters, return, backspace -- and everything
+  else (Escape, arrows, Ctrl chords) reaches the controller unchanged. Moving the handler
+  onto the input view would have made it know about the session to no behavioral end.
+- Commit 5: the smoke probe stopped being sent from the model and became an effect the
+  shell drives into the responder, which is what PO8 asks for -- a probe the model sent
+  itself would prove the model's path and leave the one thing this commit replaced
+  unexercised. The step list is a tested MobileKit value rather than a shell loop, because
+  the app package has no test target and a probe that quietly lost a step would still pass.
+- Commit 5: the probe pastes ` # paste` and then backspaces one character off it. Opening a
+  shell comment is what keeps everything the probe adds after the caller's own input from
+  changing what the command runs, and a backspace that never reached the pane shows up as
+  the one extra character left on the command line.
+
 ## Follow Up
 
+- The plan's manual verification never ran against a live stream: `simctl` cannot tap, and
+  a connected run needs a `tailnet` listener in `~/.config/danterm/config.json`. Everything
+  behind a touch or a serving pane is unproven -- keyboard raise on terminal tap, the
+  long-press paste menu, the smoke probe's four entry points (PO8), pane switching, the
+  claim menu, and rotation. Run
+  `DANTERM_IOS_HOST=<host> DANTERM_IOS_SMOKE_INPUT='echo hi' scripts/ios-app.sh simulator`
+  against a listener and walk the Verification list.
+- `TerminalInputView` adopts `UIKeyInput`, so marked text is still defeated (RI4). The full
+  `UITextInput` conformance with a client-side composition buffer is what would give the
+  phone real IME and dictation support, and it is now the only thing standing between the
+  phone and an ordinary iOS text-input experience.
 - `scripts/ios-portability-gate.sh` reported a false failure twice in a row for
   `ios/DanTermMobileApp`: its cached build plan under
   `ios/DanTermMobileApp/.build-ios-gate/debug.yaml` kept a stale source list for the

@@ -38,6 +38,14 @@ public struct MobileInputMapper: Equatable, Sendable {
         .send(.text(text))
     }
 
+    /// Sends the keyboard's backspace as the named key the owner already encodes.
+    ///
+    /// The Ctrl latch is deliberately not read: it belongs to the accessory row alone, as
+    /// it does for typed text.
+    public mutating func deleteBackward() -> MobileInputAction {
+        named(.bspace, modifiers: [])
+    }
+
     /// Applies one accessory-row key, toggling Ctrl without producing traffic itself.
     public mutating func accessory(_ key: MobileAccessoryKey) -> MobileInputAction? {
         if key == .control {

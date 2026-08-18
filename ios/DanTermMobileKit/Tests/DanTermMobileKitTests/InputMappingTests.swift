@@ -10,6 +10,17 @@ func textPathsStayDistinct() {
     #expect(mapper.paste("hello") == .send(.text("hello")))
 }
 
+@Test("Backspace from the software keyboard sends the named bspace key")
+func softwareBackspaceSendsNamedKey() {
+    // Intent: a backspace from the keyboard reaches the pane as the same named key a
+    //   hardware backspace does, with no modifiers.
+    // Why it exists: the old composer swallowed it -- the text view rejected every change
+    //   and an empty replacement string carried nothing to forward -- so the phone could
+    //   type but never correct a typo.
+    var mapper = MobileInputMapper()
+    #expect(mapper.deleteBackward() == .send(.events([.key(.named(.bspace), [])])))
+}
+
 @Test("The accessory row maps named keys and a latching Ctrl modifier")
 func accessoryRowMapping() {
     let cases: [(MobileAccessoryKey, MobileInputAction, MobileInputAction)] = [
