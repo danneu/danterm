@@ -1,10 +1,22 @@
 // Maps phone controls to pane input intent without encoding terminal bytes on the client.
 import DanTermProtocol
 
+/// The two meanings a scroll has, which are the two the engine's viewport answers to.
+///
+/// They stay apart all the way to the replica because each one has a safe answer under
+/// either replicated screen mode: an absolute row is meaningless where there is no
+/// scrollback, and whole rows must never be replayed as a jump.
+public enum MobileViewportScroll: Equatable, Sendable {
+    /// Move the window by whole rows; negative moves toward history.
+    case byRows(Int)
+    /// Put this row at the top of the window. The engine clamps it.
+    case toTopRow(Int)
+}
+
 /// Describes either owner-side input or a local replica viewport movement.
 public enum MobileInputAction: Equatable, Sendable {
     case send(IpcPaneInput)
-    case scrollViewport(Int)
+    case scrollViewport(MobileViewportScroll)
 }
 
 /// Names every key in the step-0 phone accessory row.
@@ -83,17 +95,31 @@ public struct MobileInputMapper: Equatable, Sendable {
         named(key, modifiers: modifiers)
     }
 
-    /// Routes scroll from replicated screen state: primary is local, alternate is remote intent.
-    public mutating func scroll(
-        _ direction: InputWheelDirection,
+    /// Routes an absolute top row, which only the primary screen can hold: the alternate
+    /// screen reports a degenerate projection, so a row named against it means nothing.
+    public func scroll(toTopRow row: Int, alternateScreen: Bool) -> MobileInputAction? {
+        guard alternateScreen == false else { return nil }
+        return .scrollViewport(.toTopRow(row))
+    }
+
+    /// Routes whole rows from replicated screen state: primary is local, alternate is one
+    /// wheel event per row at the gesture's own cell, which the owner routes through its
+    /// wheel policy.
+    public func scroll(
+        byRows rows: Int,
         column: Int,
         row: Int,
         alternateScreen: Bool
-    ) -> MobileInputAction {
+    ) -> MobileInputAction? {
         guard alternateScreen else {
-            return .scrollViewport(direction == .up ? -1 : 1)
+            return rows == 0 ? nil : .scrollViewport(.byRows(rows))
         }
-        return .send(.events([.wheel(direction, column: column, row: row)]))
+        // `Int(exactly:)` rather than `abs`, which traps on the one row count that has no
+        // positive counterpart.
+        guard let count = Int(exactly: rows.magnitude), count > 0 else { return nil }
+        let direction: InputWheelDirection = rows < 0 ? .up : .down
+        let wheel = InputEvent.wheel(direction, column: column, row: row)
+        return .send(.events(Array(repeating: wheel, count: count)))
     }
 
     private func named(_ key: NamedKey, modifiers: KeyMods) -> MobileInputAction {

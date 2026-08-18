@@ -218,7 +218,7 @@ indicator.
 
 ## Commit progress
 - [x] 1. Pure scroll geometry, mode selection, and the interaction latch in `DanTermMobileKit`
-- [ ] 2. Scroll routing through the session model and the replica's absolute-scroll seam
+- [x] 2. Scroll routing through the session model and the replica's absolute-scroll seam
 - [ ] 3. UIScrollView chrome driving the phone's terminal scroll
 
 ## Implementation notes
@@ -239,3 +239,22 @@ indicator.
   there are now two.
 - Commit 1: delta mode's constants are 100,000 points of content, parked at the middle,
   recentered once the offset is more than a fifth of that from it.
+- Commit 2: the two scroll events are spelled `scrolledToTopRow` and `scrolledByRows`
+  rather than the plan's overloaded `scrolled(toTopRow:)` / `scrolled(byRows:)`. Swift
+  resolves an overloaded enum-case pattern by base name, so the model's switch sent both
+  gestures down whichever branch it matched first and reported the other as unreachable.
+- Commit 2: the two meanings share one `MobileViewportScroll` value (`byRows` /
+  `toTopRow`) carried by `MobileInputAction.scrollViewport` and by the
+  `.scrollViewport` effect, rather than a second effect case. One case keeps every
+  existing exhaustive switch over the effect intact, and the replica already reads the
+  same two shapes out of a replayed viewport record.
+- Commit 2: `TerminalSurfaceView` takes that value (`scrollViewport(_:)`) instead of
+  gaining a second `scrollViewport(toTopRow:)` method beside the relative one, so the
+  shell forwards what the model decided rather than re-deciding which entry point to call.
+- Commit 2: the alternate-screen wheel events still carry cell 0,0, because the interim
+  one-shot pan recognizer has no scroll-facts seam to read a real cell from. Commit 3
+  replaces that recognizer and supplies the gesture's own cell.
+- Commit 2: the gate's `swift test --scratch-path .build-app-tests` step failed on
+  `CLICharacterizationTests` and `AppRuntimeRosterPushTests`, both with connect timeouts
+  under the oversubscribed pool. Both suites pass on their own, and this slice touches no
+  macOS app code.

@@ -61,9 +61,15 @@ func hardwareKeyboardMapping() {
 
 @Test("Scroll stays local on primary screen and becomes wheel intent on alternate screen")
 func scrollPolicyUsesReplicatedScreenState() {
-    var mapper = MobileInputMapper()
-    #expect(mapper.scroll(.up, column: 3, row: 4, alternateScreen: false) == .scrollViewport(-1))
-    #expect(mapper.scroll(.down, column: 3, row: 4, alternateScreen: true) == .send(.events([
-        .wheel(.down, column: 3, row: 4),
+    let mapper = MobileInputMapper()
+    #expect(mapper.scroll(toTopRow: 9, alternateScreen: false) == .scrollViewport(.toTopRow(9)))
+    #expect(mapper.scroll(toTopRow: 9, alternateScreen: true) == nil)
+
+    #expect(mapper.scroll(byRows: -1, column: 3, row: 4, alternateScreen: false)
+        == .scrollViewport(.byRows(-1)))
+    #expect(mapper.scroll(byRows: 0, column: 3, row: 4, alternateScreen: true) == nil)
+    #expect(mapper.scroll(byRows: -2, column: 3, row: 4, alternateScreen: true) == .send(.events([
+        .wheel(.up, column: 3, row: 4),
+        .wheel(.up, column: 3, row: 4),
     ])))
 }

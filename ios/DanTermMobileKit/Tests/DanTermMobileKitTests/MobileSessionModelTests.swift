@@ -114,10 +114,10 @@ func noClaimWithoutAWholeCell() throws {
     #expect(resizes(session.handle(.claimRequested)).isEmpty)
 }
 
-@Test("Typing reaches the selected pane and scrolling stays on the phone")
-func inputRoutesByScreen() throws {
-    // Intent: input goes to the pane the model holds, and a primary-screen scroll moves
-    //   the local viewport instead of sending anything.
+@Test("Typing reaches the pane the model holds, and nothing before it holds one")
+func typingRoutesToTheSelectedPane() throws {
+    // Intent: text goes to the selected pane, and text handled before a pane is selected
+    //   produces nothing.
     // Why it exists: the model is the only owner of the selected pane, so an input event
     //   handled before a pane exists must produce nothing rather than guess one.
     var session = Session()
@@ -127,11 +127,32 @@ func inputRoutesByScreen() throws {
     #expect(requests(session.handle(.textEntered("ls"))) == [
         .paneInput(pane: session.pane, input: .events([.text("ls")])),
     ])
-    #expect(session.handle(.scrolled(.up)) == [.scrollViewport(rows: -1)])
+}
+
+@Test("Each scroll meaning has a safe answer under either replicated screen mode")
+func scrollRoutesByScreenAndMeaning() throws {
+    // Intent: an absolute row moves the local viewport on the primary screen and does
+    //   nothing on the alternate one; whole rows become wheel events on the alternate
+    //   screen and a local relative scroll on the primary one.
+    // Why it exists: the chrome routes a gesture under the mode it last saw, so a screen
+    //   flip mid-gesture must not turn either event category into a wrong action -- an
+    //   absolute row has no meaning on a screen with no scrollback, and residual rows
+    //   must never be replayed as an absolute jump.
+    var session = Session()
+    #expect(session.handle(.scrolledToTopRow(3)).isEmpty)
+    #expect(session.handle(.scrolledByRows(-2, column: 1, row: 1)).isEmpty)
+
+    try session.reachServingStream()
+    #expect(session.handle(.scrolledByRows(3, column: 4, row: 5))
+        == [.scrollViewport(.byRows(3))])
 
     _ = session.handle(.surfaceChanged(MobileSurfaceFacts(isAlternateScreenActive: true)))
-    #expect(requests(session.handle(.scrolled(.up))) == [
-        .paneInput(pane: session.pane, input: .events([.wheel(.up, column: 0, row: 0)])),
+    #expect(session.handle(.scrolledToTopRow(3)).isEmpty)
+    #expect(requests(session.handle(.scrolledByRows(2, column: 4, row: 5))) == [
+        .paneInput(pane: session.pane, input: .events([
+            .wheel(.down, column: 4, row: 5),
+            .wheel(.down, column: 4, row: 5),
+        ])),
     ])
 }
 

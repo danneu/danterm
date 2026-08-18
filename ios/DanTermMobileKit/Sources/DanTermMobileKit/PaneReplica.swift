@@ -106,6 +106,16 @@ public struct PaneReplica: Sendable {
         terminal?.scroll(byRows: rows)
     }
 
+    /// Puts an absolute row at the top of the replicated primary-screen window, which is
+    /// what the phone's scroll chrome names once it can project the whole stream.
+    ///
+    /// Clamping and the return to following are the engine's: a request that lands on the
+    /// last complete window is how pinned-to-bottom comes back, with no flag kept here.
+    public mutating func scrollViewport(toTopRow row: Int) {
+        guard state == .exact, terminal?.isAlternateScreenActive == false else { return }
+        terminal?.scroll(toTopRow: row)
+    }
+
     /// Drains engine damage while returning the exact terminal snapshot to present.
     public mutating func drainPresentation() -> (terminal: Terminal, damage: TerminalDamage)? {
         guard state == .exact, var terminal else { return nil }

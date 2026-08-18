@@ -240,9 +240,8 @@ final class MobileRootViewController: UIViewController {
 
     @objc private func scrolled(_ recognizer: UIPanGestureRecognizer) {
         guard recognizer.state == .ended else { return }
-        let direction: InputWheelDirection =
-            recognizer.translation(in: terminalView).y > 0 ? .up : .down
-        session.dispatch(.scrolled(direction))
+        let rows = recognizer.translation(in: terminalView).y > 0 ? -1 : 1
+        session.dispatch(.scrolledByRows(rows, column: 0, row: 0))
     }
 }
 

@@ -182,8 +182,8 @@ final class MobileSessionController {
             } catch {
                 dispatch(.replicaRejectedRecord)
             }
-        case .scrollViewport(let rows):
-            surfaceView.scrollViewport(byRows: rows)
+        case .scrollViewport(let scroll):
+            surfaceView.scrollViewport(scroll)
         case .flushCheckpoint(let savingReplica, let synchronously):
             flushCheckpoint(savingReplica: savingReplica, synchronously: synchronously)
         case .armRetryTimer(let deadline):

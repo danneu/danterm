@@ -281,6 +281,65 @@ func localViewportScrollMovesReplica() throws {
     #expect(replica.terminal?.scrollProjection.isFollowing == false)
 }
 
+@Test("An absolute local scroll names a row, and the maximum row restores following")
+func localViewportScrollToTopRow() throws {
+    // Intent: the phone's chrome names an absolute top row, the engine puts the window
+    //   there, and naming the last complete window puts the replica back in following.
+    // Why it exists: the engine is the phone's only scroll authority, so pinned-to-bottom
+    //   has to fall out of an ordinary absolute request rather than a separate flag the
+    //   view keeps.
+    var replica = try synchronizedReplica(
+        bytes: Array("one\r\ntwo\r\nthree\r\nfour".utf8),
+        cursor: testCursor(sequence: 1),
+        columns: 8,
+        rows: 2
+    )
+    let maximumTopRow = try #require(replica.terminal.map { terminal in
+        terminal.scrollProjection.totalRows - terminal.scrollProjection.windowRows
+    })
+
+    replica.scrollViewport(toTopRow: 0)
+    #expect(replica.terminal?.scrollProjection.topRow == 0)
+    #expect(replica.terminal?.scrollProjection.isFollowing == false)
+
+    replica.scrollViewport(toTopRow: maximumTopRow)
+    #expect(replica.terminal?.scrollProjection.topRow == maximumTopRow)
+    #expect(replica.terminal?.scrollProjection.isFollowing == true)
+}
+
+@Test("An absolute local scroll is refused off the primary screen and off exact replica state")
+func localViewportScrollGuardsScreenAndState() throws {
+    // Intent: an absolute row is only meaningful against a primary screen the replica can
+    //   vouch for, so the alternate screen and a declared gap both leave the viewport put.
+    // Why it exists: the chrome routes a gesture under the mode it last saw, so an
+    //   absolute row can arrive just after the pane opened a full-screen application.
+    var alternate = try synchronizedReplica(
+        bytes: Array("one\r\ntwo\r\nthree\r\nfour\u{1b}[?1049h".utf8),
+        cursor: testCursor(sequence: 1),
+        columns: 8,
+        rows: 2
+    )
+    #expect(alternate.terminal?.isAlternateScreenActive == true)
+    let beforeAlternate = alternate.terminal
+    alternate.scrollViewport(toTopRow: 0)
+    #expect(alternate.terminal == beforeAlternate)
+
+    var gapped = try synchronizedReplica(
+        bytes: Array("one\r\ntwo\r\nthree\r\nfour".utf8),
+        cursor: testCursor(sequence: 1),
+        columns: 8,
+        rows: 2
+    )
+    try gapped.apply(.gap(PaneTapeGapRecord(
+        droppedEventCount: 1,
+        droppedFeedBytes: 1,
+        droppedWriteBytes: 0
+    )))
+    let beforeGap = gapped.terminal
+    gapped.scrollViewport(toTopRow: 0)
+    #expect(gapped.terminal == beforeGap)
+}
+
 @Test("Invalid authoritative geometry cannot advance exact replica state")
 func invalidResizeBecomesGap() throws {
     var replica = try synchronizedReplica(

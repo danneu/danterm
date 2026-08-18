@@ -242,11 +242,18 @@ public struct MobileSessionModel: Equatable, Sendable {
             let action = inputMapper.hardwareCharacter(character, modifiers: modifiers)
             return send(action, env: env)
 
-        case .scrolled(let direction):
+        case .scrolledToTopRow(let topRow):
             let action = inputMapper.scroll(
-                direction,
-                column: 0,
-                row: 0,
+                toTopRow: topRow,
+                alternateScreen: surface.isAlternateScreenActive
+            )
+            return send(action, env: env)
+
+        case .scrolledByRows(let rows, let column, let row):
+            let action = inputMapper.scroll(
+                byRows: rows,
+                column: column,
+                row: row,
                 alternateScreen: surface.isAlternateScreenActive
             )
             return send(action, env: env)
@@ -417,8 +424,8 @@ public struct MobileSessionModel: Equatable, Sendable {
     ) -> [MobileSessionEffect] {
         guard let action, let pane = selectedPaneId else { return [] }
         switch action {
-        case .scrollViewport(let rows):
-            return [.scrollViewport(rows: rows)]
+        case .scrollViewport(let scroll):
+            return [.scrollViewport(scroll)]
         case .send(let input):
             return [.send(
                 requestId: env.newRequestId(),

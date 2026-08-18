@@ -94,7 +94,16 @@ public enum MobileSessionEvent: Equatable, Sendable {
     case accessoryKeyPressed(MobileAccessoryKey)
     case hardwareKeyPressed(NamedKey, KeyMods)
     case hardwareCharacterPressed(Character, KeyMods)
-    case scrolled(InputWheelDirection)
+    /// The scroll chrome put this absolute row at the top of the window, which it can
+    /// only mean while it is projecting the whole stream.
+    ///
+    /// The two scroll events are spelled as two names rather than as one overloaded
+    /// `scrolled`, because Swift resolves an overloaded case pattern by base name and
+    /// would send both gestures down whichever branch it matched first.
+    case scrolledToTopRow(Int)
+    /// The scroll chrome travelled this many whole rows -- negative toward history -- with
+    /// the gesture sitting on this grid cell, so a mouse report has a real position.
+    case scrolledByRows(Int, column: Int, row: Int)
 }
 
 /// The two gestures that may change the grid the pane runs at.

@@ -93,8 +93,11 @@ final class TerminalSurfaceView: UIView {
     }
 
     /// Applies local primary-screen scroll without sending authoritative terminal bytes.
-    func scrollViewport(byRows rows: Int) {
-        replica.scrollViewport(byRows: rows)
+    func scrollViewport(_ scroll: MobileViewportScroll) {
+        switch scroll {
+        case .byRows(let rows): replica.scrollViewport(byRows: rows)
+        case .toTopRow(let row): replica.scrollViewport(toTopRow: row)
+        }
         guard replica.state == .exact else { return }
         policy?.noteDamage()
         displayLink?.isPaused = false

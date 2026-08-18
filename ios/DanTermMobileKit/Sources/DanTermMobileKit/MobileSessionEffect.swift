@@ -29,7 +29,7 @@ public enum MobileSessionEffect: Equatable, Sendable {
     /// or with `replicaRejectedRecord` when it cannot take it.
     case applyRecord(PaneTapeRecord)
     /// Move the replica's local viewport, which sends nothing to the owner.
-    case scrollViewport(rows: Int)
+    case scrollViewport(MobileViewportScroll)
     /// Write the replica's position out. `savingReplica` is false when nothing has moved
     /// since the last write, which leaves a synchronous flush as a plain barrier on work
     /// already in flight. Performing this also drops any armed checkpoint deadline.
