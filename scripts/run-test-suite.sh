@@ -82,6 +82,7 @@ STEPS=(
     './scripts/tests/agent-notifications-live_test.py'
     './scripts/terminal-backend-boundary-lint.sh'
     './scripts/tests/test-terminal-pty_test.sh'
+    './scripts/tests/test-terminal-pty-cleanup_test.sh'
     'python3 ./scripts/tests/pack_theme_catalog_test.py'
     'python3 ./scripts/tests/terminal_tape_to_fixture_test.py'
     'python3 ./scripts/tests/terminal_recording_research_producers_test.py'

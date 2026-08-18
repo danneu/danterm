@@ -6,6 +6,11 @@ import signal
 import subprocess
 import sys
 import time
+from typing import Callable
+
+# Re-entry marker for the watchdog mode, which is this same file so the reaping
+# rules cannot drift between the supervisor and its last-resort backstop.
+WATCHDOG_FLAG = "--reap-on-supervisor-exit"
 
 
 class ForwardedSignal(Exception):
@@ -62,31 +67,33 @@ def still_alive(pids: list[int]) -> list[int]:
     return alive
 
 
-def terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
+def terminate_tree(pid: int, settle: Callable[[], None], confirm: Callable[[], bool]) -> None:
     """Stops the command and every descendant, inside its process group or not.
 
     A group-only kill is not enough. SwiftPM's test binary runs in a session of
     its own, so it survives the signal aimed at the group, is reparented to pid
     1, and keeps burning a core until someone notices -- one was found 44 minutes
     after the deadline that was supposed to have ended it.
+
+    `settle` reaps the command once the group has been signalled and `confirm`
+    reports whether it is gone, because the supervisor owns the command as a
+    child while the watchdog only observes it as a stranger.
     """
-    escapees = descendant_pids(process.pid)
+    escapees = descendant_pids(pid)
 
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        os.killpg(pid, signal.SIGTERM)
     except ProcessLookupError:
         # The group is already gone, but its escapees below may not be. Reap the
         # command itself so this wrapper does not exit over a zombie of its own.
-        process.wait()
+        settle()
     else:
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
+        if not confirm():
             try:
-                os.killpg(process.pid, signal.SIGKILL)
+                os.killpg(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            process.wait()
+            settle()
 
     # SIGKILL, not SIGTERM: a process wedged badly enough to reach the deadline
     # has already shown that it will not act on a request to stop.
@@ -105,12 +112,61 @@ def terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
         time.sleep(0.1)
     print(
         f"warning: {len(survivors)} descendant(s) survived cleanup: "
-        f"{' '.join(str(pid) for pid in survivors)}",
+        f"{' '.join(str(survivor) for survivor in survivors)}",
         file=sys.stderr)
+
+
+def terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
+    """Stops the command tree from the supervisor, which owns it as a child."""
+
+    def settle() -> None:
+        process.wait()
+
+    def confirm() -> bool:
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            return False
+        return True
+
+    terminate_tree(process.pid, settle, confirm)
+
+
+def watch_until_supervisor_exits(pid: int) -> int:
+    """Reaps the command tree once the supervisor's pipe closes.
+
+    The command runs in a session of its own so the deadline can signal it
+    without signalling the supervisor. That leaves the supervisor as the only
+    route to it, and SIGKILL cannot be handled -- so a hard abort of the suite
+    used to strand the whole tree with pid 1 for a parent, where it sat for days.
+    A pipe closes on every death a handler cannot see, which is what makes this
+    watchdog the reaper of last resort rather than one more thing to signal.
+    """
+    while os.read(0, 4096):
+        pass
+
+    def settle() -> None:
+        for _ in range(50):
+            if not still_alive([pid]):
+                return
+            time.sleep(0.1)
+
+    def confirm() -> bool:
+        for _ in range(50):
+            if not still_alive([pid]):
+                return True
+            time.sleep(0.1)
+        return False
+
+    terminate_tree(pid, settle, confirm)
+    return 0
 
 
 def main() -> int:
     """Returns the command status, or 124 after enforcing the requested deadline."""
+    if len(sys.argv) == 3 and sys.argv[1] == WATCHDOG_FLAG:
+        return watch_until_supervisor_exits(int(sys.argv[2]))
+
     if len(sys.argv) < 4:
         print(
             "usage: run-with-deadline.py SECONDS DESCRIPTION COMMAND [ARG ...]",
@@ -129,6 +185,19 @@ def main() -> int:
 
     description = sys.argv[2]
     process = subprocess.Popen(sys.argv[3:], start_new_session=True)
+    # Created after the command starts, so the command cannot inherit the write
+    # end and hold its own watchdog open.
+    watchdog_read, watchdog_write = os.pipe()
+    subprocess.Popen(
+        [sys.executable, os.path.abspath(__file__), WATCHDOG_FLAG, str(process.pid)],
+        stdin=watchdog_read,
+        start_new_session=True,
+    )
+    os.close(watchdog_read)
+    # `watchdog_write` is never written to and never closed here on purpose: the
+    # kernel closing it when this process dies is the whole signal, and a raw fd
+    # survives this function returning.
+    del watchdog_write
     signal.signal(signal.SIGTERM, forward_signal)
     try:
         return process.wait(timeout=seconds)
