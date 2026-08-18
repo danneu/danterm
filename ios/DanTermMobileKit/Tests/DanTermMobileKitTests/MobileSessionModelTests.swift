@@ -1,0 +1,287 @@
+// Behavioral tests for the phone session's decision core: what leaves the phone, in what
+// order, and which facts each decision is made from.
+//
+// Every test drives the model with an explicit clock and explicit request ids, so nothing
+// here waits on real time or on a socket. What is deliberately absent: how an effect is
+// performed -- the model decides only what the shell must do.
+import DanTermClient
+import DanTermMobileKit
+import DanTermProtocol
+import Foundation
+import Testing
+
+@Test("Backgrounding saves the position, drops the connection, and owes a reconnect")
+func backgroundingFlushesThenDisconnects() throws {
+    // Intent: the background event returns exactly the checkpoint flush and then the
+    //   disconnect, and leaves the reconnect owed so returning to the foreground dials
+    //   again on its own.
+    // Why it exists: the two effects are ordered against each other -- a flush after the
+    //   teardown would save a position the replica no longer holds -- and the reconnect
+    //   debt is policy state, so an implementation that announced it as an effect could
+    //   perform it twice or lose it.
+    // Scenario: the user switches away from the phone client mid-session and comes back.
+    var session = Session()
+    try session.reachServingStream()
+
+    let backgrounded = session.handle(.appBackgrounded)
+    #expect(backgrounded.filter(\.leavesThePhone) == [
+        .flushCheckpoint(savingReplica: false, synchronously: true),
+        .disconnect,
+    ])
+
+    session.now += 5
+    #expect(session.handle(.appForegrounded).contains(.connect(session.target)))
+}
+
+@Test("An advanced replica is what a background flush has to save")
+func backgroundingSavesAnAdvancedReplica() {
+    // Intent: the flush the background event returns saves the replica exactly when the
+    //   replica moved since the last write.
+    // Why it exists: a flush that always saved would write a stale snapshot on every
+    //   switch away, and one that never saved would lose the session's newest position.
+    var session = Session()
+    _ = session.handle(.replicaAdvanced)
+    #expect(session.handle(.appBackgrounded).contains(
+        .flushCheckpoint(savingReplica: true, synchronously: true)
+    ))
+}
+
+@Test("A claim sends the grid the surface draws now, and a release sends the fit form")
+func geometryGesturesSendTheCurrentGrid() throws {
+    // Intent: the claim gesture's whole wire effect is one resize carrying the surface's
+    //   current grid, and the release gesture's is the fit form.
+    // Why it exists: the resize is the phone's only authoritative geometry statement, so
+    //   a claim that named a grid the surface does not draw would pin the pane to a size
+    //   nothing can show.
+    var session = Session()
+    try session.reachServingStream()
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: false
+    )))
+
+    #expect(resizes(session.handle(.claimRequested)) == [
+        .paneResize(pane: session.pane, resize: .grid(columns: 80, rows: 24)),
+    ])
+    #expect(resizes(session.handle(.releaseRequested)).isEmpty)
+
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 12),
+        pinned: true
+    )))
+    #expect(resizes(session.handle(.claimRequested)) == [
+        .paneResize(pane: session.pane, resize: .grid(columns: 40, rows: 12)),
+    ])
+    #expect(resizes(session.handle(.releaseRequested)) == [
+        .paneResize(pane: session.pane, resize: .fit),
+    ])
+}
+
+@Test("A geometry gesture the facts no longer offer sends nothing")
+func geometryGesturesFollowTheFactsAtTheTap() throws {
+    // Intent: the gesture is answered from the facts as they stand when it is handled,
+    //   so a tap that arrives after the pane was unpinned or the connection dropped
+    //   sends nothing rather than the request the earlier facts would have produced.
+    // Why it exists: a menu item stays on screen while the Mac takes the pane back, and
+    //   a request built when the menu opened would resize a pane the phone no longer has
+    //   any claim on.
+    // Scenario: the menu is left open while the Mac releases the pane, and again while
+    //   the connection drops under it.
+    var session = Session()
+    try session.reachServingStream()
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: true
+    )))
+    #expect(resizes(session.handle(.releaseRequested)).isEmpty == false)
+
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: false
+    )))
+    #expect(resizes(session.handle(.releaseRequested)).isEmpty)
+
+    _ = session.handle(.connectionEnded(.transport(.peerClosed, phase: .established)))
+    #expect(resizes(session.handle(.claimRequested)).isEmpty)
+    #expect(resizes(session.handle(.releaseRequested)).isEmpty)
+}
+
+@Test("A surface with no room for a whole cell offers no claim")
+func noClaimWithoutAWholeCell() throws {
+    var session = Session()
+    try session.reachServingStream()
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(nativeGrid: nil, pinned: false)))
+    #expect(resizes(session.handle(.claimRequested)).isEmpty)
+}
+
+@Test("Typing reaches the selected pane and scrolling stays on the phone")
+func inputRoutesByScreen() throws {
+    // Intent: input goes to the pane the model holds, and a primary-screen scroll moves
+    //   the local viewport instead of sending anything.
+    // Why it exists: the model is the only owner of the selected pane, so an input event
+    //   handled before a pane exists must produce nothing rather than guess one.
+    var session = Session()
+    #expect(session.handle(.textEntered("ls")).isEmpty)
+
+    try session.reachServingStream()
+    #expect(requests(session.handle(.textEntered("ls"))) == [
+        .paneInput(pane: session.pane, input: .events([.text("ls")])),
+    ])
+    #expect(session.handle(.scrolled(.up)) == [.scrollViewport(rows: -1)])
+
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(isAlternateScreenActive: true)))
+    #expect(requests(session.handle(.scrolled(.up))) == [
+        .paneInput(pane: session.pane, input: .events([.wheel(.up, column: 0, row: 0)])),
+    ])
+}
+
+@Test("A launch with no host connects to nothing and reports no problem")
+func launchWithoutAHostStaysPut() {
+    // Intent: a launch that names no host waits, and says nothing about the empty field
+    //   the user has not filled in yet.
+    // Why it exists: reporting a draft problem at launch would greet a first run with an
+    //   error about a field nobody touched.
+    var session = Session()
+    let effects = session.model.handle(.launched(MobileLaunchInputs()), env: session.env)
+    #expect(effects == [.redraw])
+    #expect(session.model.projection(at: session.now).draftProblem == nil)
+}
+
+@Test("A refused tape subscription ends the connection and a refused input does not")
+func onlyTheSubscriptionRefusalEndsTheConnection() throws {
+    // Intent: the subscription is what the connection is for, so its refusal ends the
+    //   connection; any other refusal is the newest outcome on a stream still serving.
+    // Why it exists: ending a serving connection over one refused keystroke would throw
+    //   away exact replicated state the stream still holds.
+    var session = Session()
+    try session.reachServingStream()
+
+    let strayId = JSONValue.string("stray")
+    let stray = session.handle(.frameReceived(.response(JsonRpcResponse(
+        id: strayId,
+        error: JsonRpcError(code: -1, message: "no")
+    ))))
+    #expect(stray == [.redraw])
+
+    let ended = session.handle(.frameReceived(.response(JsonRpcResponse(
+        id: session.tapeRequestId,
+        error: JsonRpcError(code: -1, message: "no")
+    ))))
+    #expect(ended.contains(.disconnect))
+}
+
+// MARK: - Driving
+
+/// Drives one model with an explicit clock and explicit request ids.
+private struct Session {
+    var model = MobileSessionModel()
+    var now: TimeInterval = 100
+    let ids = RequestIds()
+    let target = MobileServerTarget(host: "mac.tailnet", port: 7420)
+    let pane = paneId(201)
+    var tapeRequestId = JSONValue.null
+
+    var env: MobileSessionEnv {
+        MobileSessionEnv(now: now, newRequestId: ids.makeId)
+    }
+
+    mutating func handle(_ event: MobileSessionEvent) -> [MobileSessionEffect] {
+        model.handle(event, env: env)
+    }
+
+    mutating func handle(_ event: MobileSessionGeometryEvent) -> [MobileSessionGeometryEffect] {
+        model.handle(event, env: env)
+    }
+
+    /// Takes the model through the whole opening: launch, attempt, pane, subscription.
+    mutating func reachServingStream() throws {
+        let launched = handle(.launched(MobileLaunchInputs(environmentHost: target.host)))
+        #expect(launched.contains(.connect(target)))
+        let succeeded = handle(.attemptSucceeded(panes: try panes(), serverVersion: "1.2.3"))
+        #expect(succeeded.contains(.attachPane(pane: pane, resumesFromStoredCheckpoint: true)))
+        let attached = handle(.paneAttached(pane: pane, cursor: nil))
+        let subscription = try #require(attached.compactMap { effect -> JSONValue? in
+            guard case .beginStream(let requestId, _) = effect else { return nil }
+            return requestId
+        }.first)
+        tapeRequestId = subscription
+    }
+}
+
+/// Hands out request ids a test can predict without the model reading any ambient source.
+private final class RequestIds: @unchecked Sendable {
+    private let lock = NSLock()
+    private var issued = 0
+
+    func makeId() -> JSONValue {
+        lock.withLock {
+            issued += 1
+            return .string("request-\(issued)")
+        }
+    }
+}
+
+private extension MobileSessionEffect {
+    /// Whether performing this effect is observable outside this phone: a socket write, a
+    /// teardown, or a file. The rest only move pixels or arm a deadline.
+    var leavesThePhone: Bool {
+        switch self {
+        case .connect, .disconnect, .storeTarget, .beginStream, .send, .flushCheckpoint:
+            true
+        case .attachPane, .applyRecord, .scrollViewport, .armRetryTimer, .cancelRetryTimer,
+             .armCheckpointTimer, .redraw:
+            false
+        }
+    }
+}
+
+private func resizes(_ effects: [MobileSessionGeometryEffect]) -> [IpcRequest] {
+    effects.compactMap { effect in
+        guard case .resizePane(_, let request) = effect else { return nil }
+        return request
+    }
+}
+
+private func requests(_ effects: [MobileSessionEffect]) -> [IpcRequest] {
+    effects.compactMap { effect in
+        switch effect {
+        case .send(_, let request), .beginStream(_, let request): request.request
+        default: nil
+        }
+    }
+}
+
+private func grid(columns: Int, rows: Int) -> MobileSurfaceGrid {
+    MobileSurfaceGrid(
+        widthPixels: columns * 10,
+        heightPixels: rows * 20,
+        cellWidthPixels: 10,
+        cellHeightPixels: 20
+    )!
+}
+
+private func panes() throws -> [MobilePaneListItem] {
+    try projectPaneList(from: .object([
+        "selectedTabId": .string(wireId(101)),
+        "groups": .array([.object([
+            "id": .string(wireId(1)),
+            "name": .string("Work"),
+            "tabs": .array([.object([
+                "id": .string(wireId(101)),
+                "focusedPaneId": .string(wireId(201)),
+                "rootNode": .object([
+                    "type": .string("leaf"),
+                    "pane": .object(["id": .string(wireId(201)), "title": .string("zsh")]),
+                ]),
+            ])]),
+        ])]),
+    ]))
+}
+
+private func wireId(_ value: Int) -> String {
+    "00000000-0000-0000-0000-" + String(format: "%012d", value)
+}
+
+private func paneId(_ value: Int) -> PaneId {
+    PaneId(rawValue: UUID(uuidString: wireId(value))!)
+}
