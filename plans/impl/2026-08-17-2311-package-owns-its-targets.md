@@ -250,7 +250,7 @@ because it records the hashes of everything above.
       a checkout or scratch export of d633f92e -- record the failure there, then
       confirm the lane green on the current tree -- and put both records in the
       implementation notes.
-- [ ] **8. Close S48 in the audit.** In
+- [x] **8. Close S48 in the audit.** In
       `docs/scratch/2026-08-11-simplification-audit.md`, put the hashes of the
       slices above in the S48 row's Status column, the way every other closed
       finding records the commits that closed it, and rewrite the
@@ -415,3 +415,11 @@ Per slice, and in full after slice 8:
 - **Slice 7, green.** The same command on the current tree exits 0 in 26s solo. Inside
   the gate's capped pool the lane takes 56s and becomes the longest pole; `just test`
   passed all 99 steps in 83s, up from 74s.
+- **Slice 8.** The S48 Status column records the seven implementation commits
+  only, not this closing commit. That matches every other closed row -- S47's
+  row names `c38ace17`, the commit that did the work, and a later audit-progress
+  commit wrote the hash in -- and a commit cannot carry its own hash anyway.
+- **Slice 8, full verification.** `just test` passed all 99 steps in 85s. The
+  root test step (`swift test --scratch-path .build-app-tests`) is 6s warm; it
+  lost the protocol and client suites, 4,800 lines of test compilation, to the
+  packages that own them. This is a report, not a threshold.

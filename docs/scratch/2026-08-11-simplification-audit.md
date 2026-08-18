@@ -134,7 +134,17 @@ in itself.
 
 - Probe files: the scrollback auditor recommends deleting LogicalLineArena, BudgetEnforcedRowStore and four probe files outright; the test-suite auditor recommends moving all nine probes to a separate non-gate target specifically so a probe that must be re-run still can be. Both also note research/31/D4 freezes these files against edits, which deletion violates. One decision is needed: delete the prototype-driven probes (they can no longer re-derive anything about the shipped store) and relocate only those that drive production code.
 
-- DanTermProtocolTests ownership: the build-tooling auditor recommends keeping the root test target and deleting the nested package's, but its own cheaper fix recommends the reverse, and the test-suite auditor's 'derive STEPS from the manifests' assumes the duplicate is already resolved. Deriving STEPS from manifests while both declarations exist would re-create the double run, so the ownership call must land first.
+- DanTermProtocolTests ownership: settled and closed by `a234ced4`,
+  `4eff6906`, `3ace4267`, `d633f92e`, `0387412d`, `26ca0977`, and
+  `4e64e2b2`. A target belongs to the nearest first-party `Package.swift`
+  above its declared path, and no other manifest may declare it, so the
+  nested packages own their own targets and their own tests. The root
+  manifest depends on `lib/DanTermProtocol`, `lib/DanTermClient`, and
+  `lib/DanTermSupport` as packages instead of re-declaring their targets,
+  and two gate checks enforce the rule: an ownership lint, and a coverage
+  check that every test estate runs, once. 'Derive STEPS from the
+  manifests' can now read a settled call -- each test estate has exactly
+  one owning manifest.
 
 - Test seams in production: 'Move test-only state and fault injection out of the production PTY actor' argues test-driven branches in shipping paths are the defect, while 'Stop forking a PTY child...' wants deliverOutputForTesting to become the normal way to drive a host, and 'The Command interpreter... has no automated coverage' wants a Ports seam threaded through AppRuntime. These reconcile only under an explicit rule -- constructor-injected collaborators yes, conditional test-only branches no -- which should be stated before any of the three is implemented, or the PTY cleanup and the AppRuntime refactor will be argued against each other.
 
@@ -201,7 +211,7 @@ in itself.
 | 8c34a41f | [S45](#s45) | 12    | 3   | 4   | sidebar        | small  | Drop SidebarView.currentModel; read the runtime's model                                                                 |
 |        | [S46](#s46) | 12    | 3   | 4   | terminal-views | medium | Let the swapchain own its construction inputs instead of mirroring them in the view                                     |
 | c38ace17 | [S47](#s47) | 10    | 2   | 5   | build          | small  | `just clean` misses two of the five build trees it is supposed to remove                                                |
-|        | [S48](#s48) | 10    | 2   | 5   | build          | small  | Stop running DanTermProtocolTests twice in the gate                                                                     |
+| a234ced4 4eff6906 3ace4267 d633f92e 0387412d 26ca0977 4e64e2b2 | [S48](#s48) | 10    | 2   | 5   | build          | small  | Stop running DanTermProtocolTests twice in the gate                                                                     |
 | e7e30252 | [S49](#s49) | 10    | 2   | 5   | core-model     | small  | Delete the three unread-alert reference implementations no render path calls                                            |
 | 5a296702 | [S50](#s50) | 10    | 2   | 5   | core-reducer   | small  | Move the IPC dispatcher out of Update.swift; the file is two subsystems                                               |
 | 3b95df8f | [S51](#s51) | 10    | 2   | 5   | ipc-cli        | small  | Give todo ids the same phantom-typed treatment as every other entity id                                         |
