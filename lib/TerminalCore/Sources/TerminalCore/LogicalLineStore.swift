@@ -243,17 +243,6 @@ extension Terminal {
 
         private let forcedSplitCellCap: Int
 
-        /// Index plus side tables, maintained at the mutating operations that move them rather
-        /// than recomputed per call.
-        ///
-        /// The same discipline `grandDisplayRowTotal` keeps, and for the same reason: the write
-        /// path tests the charge against the capacity once per admission and once per eviction
-        /// step, and `research/31/F8` Observation 3 counted a full `census` recompute -- two dictionary
-        /// capacities and four array capacities -- on each of those. `census` recomputes it from
-        /// scratch and asserts the two agree, so a missed refresh fails a test rather than
-        /// silently drifting the bound (`31/AR4`'s failure mode, applied to the charge).
-        private var metadataBytes = 0
-
         /// The open tail record's side tables, held outside the arena until it closes.
         ///
         /// A record's tables sit after its cells, so they cannot be written while admission is
@@ -264,19 +253,170 @@ extension Terminal {
         private var openIdentityRuns: [IdentityRun] = []
         private var openPreviousIdentity: Terminal.ContentIdentity?
 
-        /// Multi-scalar payloads, keyed by absolute record sequence. Outside the arena for the
-        /// same reason `PackedRetainedRow` holds them outside its blob: inlining them would make
-        /// a cell variable-width, and 99.88% of rows have none (`research/28/F11`).
-        private var spillsBySequence: [Int: [[Unicode.Scalar]]] = [:]
-        private var spillBytes = 0
-
-        /// The trailing background-erase fill style, keyed by absolute record sequence.
+        /// The two sequence-keyed side tables and the bytes they cost, held by one owner.
         ///
-        /// A side table rather than a header field for the reason `research/31/D3` Decision 3 rejected a
-        /// header style slot: it is reachable on a minority of records, and a 32-bit slot in
-        /// every header would cost the blank-history depth `research/31/D2` Decision 1 rests on. Keyed
-        /// like the spill table, so the two are evicted and charged by the same rules.
-        private var fillStylesBySequence: [Int: Terminal.StyleId] = [:]
+        /// The tables and their charge used to be four independent fields moved by hand at
+        /// roughly fifteen sites, and the sites had drifted into three different spellings of
+        /// "is the spill table empty". Both failures are the same one: a fact kept in two places
+        /// that every mutation had to move together. Nothing outside this type can reach a table,
+        /// so a charge cannot go stale and an emptiness question has one answer.
+        private var sideTables = SequenceKeyedSideTables()
+
+        /// Owns the sequence-keyed side tables and prices them, so a mutation and its byte charge
+        /// are one operation.
+        ///
+        /// Charged rather than recomputed per read for the reason `research/31/F8` Observation 3
+        /// recorded: the write path tests the charge against the capacity once per admission and
+        /// once per eviction step, and a from-scratch recount walks every retained payload. The
+        /// maintained total is refreshed inside each mutating method, and `census` recounts it and
+        /// asserts the two agree -- so a term that moves without its charge fails a test rather
+        /// than silently loosening `31/I2`'s bound (`31/AR4`'s failure mode, applied to the charge).
+        private struct SequenceKeyedSideTables {
+            /// Multi-scalar payloads, keyed by absolute record sequence. Outside the arena for the
+            /// same reason `PackedRetainedRow` holds them outside its blob: inlining them would
+            /// make a cell variable-width, and 99.88% of rows have none (`research/28/F11`).
+            private var spillsBySequence: [Int: [[Unicode.Scalar]]] = [:]
+
+            /// The trailing background-erase fill style, keyed by absolute record sequence.
+            ///
+            /// A side table rather than a header field for the reason `research/31/D3` Decision 3
+            /// rejected a header style slot: it is reachable on a minority of records, and a
+            /// 32-bit slot in every header would cost the blank-history depth `research/31/D2`
+            /// Decision 1 rests on. Keyed like the spill table, so the two are evicted and charged
+            /// by the same rules.
+            private var fillStylesBySequence: [Int: Terminal.StyleId] = [:]
+
+            /// The retained payloads' own bytes, the one term a recount would have to walk for.
+            private var payloadBytes = 0
+
+            /// The maintained total, refreshed by every mutation here and by nothing else.
+            private(set) var chargedBytes = 0
+
+            /// Whether any record holds a spill payload.
+            ///
+            /// The one answer to a question the old call sites spelled three ways. Probing an
+            /// empty table costs a hash of a key that cannot be there, and a store whose content
+            /// carries neither spills nor fills evicts on every admitted row -- so eviction asks
+            /// this before it asks the dictionary. Only a non-empty payload is ever charged, which
+            /// is what makes the byte accumulator answer it.
+            var holdsSpills: Bool { payloadBytes > 0 }
+
+            func spills(at sequence: Int) -> [[Unicode.Scalar]]? {
+                guard holdsSpills else { return nil }
+                return spillsBySequence[sequence]
+            }
+
+            func fillStyle(at sequence: Int) -> Terminal.StyleId? {
+                fillStylesBySequence[sequence]
+            }
+
+            /// Replaces a record's payloads; an empty array drops the entry rather than storing one,
+            /// which is what keeps `holdsSpills` exact.
+            mutating func setSpills(_ spills: [[Unicode.Scalar]], at sequence: Int) {
+                payloadBytes -= Self.spillCost(of: spillsBySequence[sequence])
+                if spills.isEmpty {
+                    spillsBySequence.removeValue(forKey: sequence)
+                } else {
+                    spillsBySequence[sequence] = spills
+                    payloadBytes += Self.spillCost(of: spills)
+                }
+                refreshCharge()
+            }
+
+            mutating func setFillStyle(_ styleId: Terminal.StyleId?, at sequence: Int) {
+                if let styleId {
+                    fillStylesBySequence[sequence] = styleId
+                } else {
+                    guard fillStylesBySequence.isEmpty == false else { return }
+                    fillStylesBySequence.removeValue(forKey: sequence)
+                }
+                refreshCharge()
+            }
+
+            /// Drops everything one record owns, which is what an eviction or a tail drop needs.
+            mutating func removeEntries(at sequence: Int) {
+                var moved = false
+                if holdsSpills {
+                    payloadBytes -= Self.spillCost(
+                        of: spillsBySequence.removeValue(forKey: sequence)
+                    )
+                    moved = true
+                }
+                if fillStylesBySequence.isEmpty == false {
+                    fillStylesBySequence.removeValue(forKey: sequence)
+                    moved = true
+                }
+                if moved { refreshCharge() }
+            }
+
+            mutating func removeAll() {
+                spillsBySequence.removeAll()
+                fillStylesBySequence.removeAll()
+                payloadBytes = 0
+                refreshCharge()
+            }
+
+            /// The charge rebuilt from the tables themselves, ignoring the maintained total.
+            ///
+            /// The independent oracle the `census` assert is stated against: it re-walks every
+            /// payload rather than trusting the accumulator, so it catches a mutation that moved a
+            /// table without moving its bytes.
+            var recountedChargedBytes: Int {
+                var payloads = 0
+                for spills in spillsBySequence.values { payloads += Self.spillCost(of: spills) }
+                return payloads + tableAllocationBytes
+            }
+
+            private mutating func refreshCharge() {
+                chargedBytes = payloadBytes + tableAllocationBytes
+            }
+
+            /// What the two hash tables themselves allocated, on top of the payloads they point at.
+            ///
+            /// The spill table's second term is what `research/31/F8` Observation 4 found missing --
+            /// the census charged 1.931 MiB of side tables on `scrollback-mixed` while the arena's
+            /// resident excess was 4.375 MiB, and the gap was this dictionary's own storage. A
+            /// charge that describes the payloads and not the allocation is `research/15/F2`'s error
+            /// class, recurring inside `31/I2`.
+            private var tableAllocationBytes: Int {
+                Self.hashTableBytes(
+                    capacity: spillsBySequence.capacity,
+                    entryStride: MemoryLayout<Int>.stride
+                        + MemoryLayout<[[Unicode.Scalar]]>.stride
+                )
+                    + Self.hashTableBytes(
+                        capacity: fillStylesBySequence.capacity,
+                        entryStride: MemoryLayout<Int>.stride
+                            + MemoryLayout<Terminal.StyleId>.stride
+                    )
+            }
+
+            private static func spillCost(of spills: [[Unicode.Scalar]]?) -> Int {
+                guard let spills, spills.isEmpty == false else { return 0 }
+                var total = Terminal.arrayStorageHeaderBytes
+                    + spills.capacity * MemoryLayout<[Unicode.Scalar]>.stride
+                for spill in spills {
+                    total += Terminal.arrayStorageHeaderBytes
+                        + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
+                }
+                return total
+            }
+
+            /// What a `Dictionary` at this capacity actually allocated, rather than what its live
+            /// entries weigh.
+            ///
+            /// `Dictionary.capacity` is the count it holds *before* it resizes -- three quarters of
+            /// the power-of-two bucket count it allocated -- so `capacity * stride` under-charges
+            /// the allocation by a third plus the occupancy bitmap. Charging the buckets is
+            /// `research/15/D4`'s rule, the same one the index's 8-B-per-record charge follows:
+            /// charge what the allocator gave, not what the model says is in use.
+            private static func hashTableBytes(capacity: Int, entryStride: Int) -> Int {
+                guard capacity > 0 else { return 0 }
+                var buckets = 1
+                while buckets - buckets / 4 < capacity { buckets <<= 1 }
+                return Terminal.arrayStorageHeaderBytes + buckets * entryStride + buckets / 8
+            }
+        }
 
         /// Records per index block.
         ///
@@ -307,7 +447,6 @@ extension Terminal {
             forcedSplitCellCap = LogicalLineRecord.forcedSplitCellCount(forCapacity: budgetBytes)
             offsets = RingBuffer(filler: 0)
             blocks = RingBuffer(filler: Block(rowStart: 0, rowCount: 0))
-            metadataBytes = indexChargeBytes + sideTableChargeBytes
         }
 
         /// The spelling `research/31/F8`'s eviction probe compiles against.
@@ -410,23 +549,27 @@ extension Terminal {
         /// The single quantity `31/I2` bounds, in O(1).
         ///
         /// Read on the write path -- once per admission and once per eviction step -- which is why
-        /// it reads a maintained total instead of building a `Census`.
-        var chargedBytes: Int { bytesInUse + metadataBytes }
+        /// every term is either capacity arithmetic or a total its owner maintains, rather than
+        /// the walk over payloads a `Census` does.
+        var chargedBytes: Int {
+            bytesInUse + indexChargeBytes + openScratchBytes + sideTables.chargedBytes
+        }
 
         var census: Census {
-            // The maintained total against a full recompute: a mutating operation that moves a
-            // metadata term without refreshing the total fails here rather than loosening the
-            // bound in production.
+            // The maintained side-table charge against a full recount: a mutation that moves a
+            // table without moving its bytes fails here rather than loosening the bound in
+            // production. The other terms are read off live capacities, so they cannot drift.
+            let recountedSideTables = sideTables.recountedChargedBytes
             assert(
-                metadataBytes == indexChargeBytes + sideTableChargeBytes,
-                "the maintained metadata charge drifted from a recount"
+                sideTables.chargedBytes == recountedSideTables,
+                "the maintained side-table charge drifted from a recount"
             )
             return Census(
                 budgetBytes: budget,
                 capacityBytes: arenaCapacity,
                 arenaBytesInUse: bytesInUse,
                 indexBytes: indexChargeBytes,
-                sideTableBytes: sideTableChargeBytes
+                sideTableBytes: recountedSideTables + openScratchBytes
             )
         }
 
@@ -447,55 +590,9 @@ extension Terminal {
                 + fullChunkCount * MemoryLayout<ContiguousArray<UInt64>>.stride
         }
 
-        private var sideTableChargeBytes: Int {
-            spillTableBytes + openScratchBytes + fillStyleBytes
-        }
-
-        private mutating func refreshMetadataCharge() {
-            metadataBytes = indexChargeBytes + sideTableChargeBytes
-        }
-
         private var openScratchBytes: Int {
             openHyperlinks.capacity * MemoryLayout<HyperlinkEntry>.stride
                 + openIdentityRuns.capacity * MemoryLayout<IdentityRun>.stride
-        }
-
-        /// The spill table's charge: its payloads **and** the hash table holding them.
-        ///
-        /// The second term is what `research/31/F8` Observation 4 found missing -- the census charged
-        /// 1.931 MiB of side tables on `scrollback-mixed` while the arena's resident excess was
-        /// 4.375 MiB, and the gap was this dictionary's own storage. A charge that describes the
-        /// payloads and not the allocation is `research/15/F2`'s error class, recurring inside `31/I2`.
-        private var spillTableBytes: Int {
-            spillBytes
-                + Self.hashTableBytes(
-                    capacity: spillsBySequence.capacity,
-                    entryStride: MemoryLayout<Int>.stride
-                        + MemoryLayout<[[Unicode.Scalar]]>.stride
-                )
-        }
-
-        /// The fill table's charge, on the same rule. Only records that carry a fill move it.
-        private var fillStyleBytes: Int {
-            Self.hashTableBytes(
-                capacity: fillStylesBySequence.capacity,
-                entryStride: MemoryLayout<Int>.stride + MemoryLayout<Terminal.StyleId>.stride
-            )
-        }
-
-        /// What a `Dictionary` at this capacity actually allocated, rather than what its live
-        /// entries weigh.
-        ///
-        /// `Dictionary.capacity` is the count it holds *before* it resizes -- three quarters of
-        /// the power-of-two bucket count it allocated -- so `capacity * stride` under-charges the
-        /// allocation by a third plus the occupancy bitmap. Charging the buckets is `research/15/D4`'s
-        /// rule, the same one the index's 8-B-per-record charge follows: charge what the
-        /// allocator gave, not what the model says is in use.
-        private static func hashTableBytes(capacity: Int, entryStride: Int) -> Int {
-            guard capacity > 0 else { return 0 }
-            var buckets = 1
-            while buckets - buckets / 4 < capacity { buckets <<= 1 }
-            return Terminal.arrayStorageHeaderBytes + buckets * entryStride + buckets / 8
         }
 
         /// The record cap `31/I10` derives from the budget, exposed so a caller can drive a
@@ -662,14 +759,12 @@ extension Terminal {
                 guard record.hasTrailingFill else { return }
                 record.hasTrailingFill = false
                 writeHeader(record, at: offset)
-                fillStylesBySequence.removeValue(forKey: firstRecordSequence + index)
-                refreshMetadataCharge()
+                sideTables.setFillStyle(nil, at: firstRecordSequence + index)
                 return
             }
             record.hasTrailingFill = true
             writeHeader(record, at: offset)
-            fillStylesBySequence[firstRecordSequence + index] = styleId
-            refreshMetadataCharge()
+            sideTables.setFillStyle(styleId, at: firstRecordSequence + index)
         }
 
         /// The style painted after this record's content ends, on its last display row.
@@ -679,7 +774,7 @@ extension Terminal {
         func trailingFillStyle(at recordIndex: Int) -> Terminal.StyleId? {
             guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
             guard record(at: offsets[recordIndex]).hasTrailingFill else { return nil }
-            return fillStylesBySequence[firstRecordSequence + recordIndex]
+            return sideTables.fillStyle(at: firstRecordSequence + recordIndex)
         }
 
         // MARK: - Operation 2: close / reopen the tail record
@@ -739,7 +834,7 @@ extension Terminal {
             loadOpenScratch(from: record, at: offset)
             if record.hasTrailingFill {
                 record.hasTrailingFill = false
-                fillStylesBySequence.removeValue(forKey: firstRecordSequence + offsets.count - 1)
+                sideTables.setFillStyle(nil, at: firstRecordSequence + offsets.count - 1)
             }
             let closedLength = record.byteLength
             record.isOpen = true
@@ -753,7 +848,6 @@ extension Terminal {
             writeHeader(record, at: offset)
             bytesInUse -= closedLength - record.byteLength
             writeCursor = recordOffset(in: offset) + record.byteLength
-            refreshMetadataCharge()
         }
 
         /// Materializes the styled blank a background-erase sever or spacer clear leaves behind
@@ -889,20 +983,7 @@ extension Terminal {
                 pendingStartsMidLine = true
             }
 
-            // Probing an empty table costs a hash of a key that cannot be there, and a store whose
-            // content carries neither spills nor fills evicts on every admitted row. `spillBytes`
-            // answers "is the spill table empty" without touching the dictionary at all, because
-            // only a non-empty payload is ever charged.
-            if spillBytes > 0 {
-                spillBytes -= spillCost(
-                    of: spillsBySequence.removeValue(forKey: firstRecordSequence)
-                )
-                refreshMetadataCharge()
-            }
-            if record.hasTrailingFill {
-                fillStylesBySequence.removeValue(forKey: firstRecordSequence)
-                refreshMetadataCharge()
-            }
+            sideTables.removeEntries(at: firstRecordSequence)
             offsets.removeFirst()
             firstRecordSequence += 1
             headTrimmedCells = 0
@@ -947,11 +1028,8 @@ extension Terminal {
             bytesInUse = 0
             headTrimmedCells = 0
             blocks.removeAll()
-            spillsBySequence.removeAll()
-            spillBytes = 0
-            fillStylesBySequence.removeAll()
+            sideTables.removeAll()
             clearOpenScratch()
-            refreshMetadataCharge()
         }
 
         // MARK: - Operation 4: truncate the tail
@@ -1036,11 +1114,7 @@ extension Terminal {
             addContentUnitsToTail(-contentContribution(recordIndex: offsets.count - 1))
             removeBoundaryBeforeTailIfNeeded()
             let sequence = firstRecordSequence + offsets.count - 1
-            if spillsBySequence.isEmpty == false {
-                spillBytes -= spillCost(of: spillsBySequence.removeValue(forKey: sequence))
-            }
-            if record.hasTrailingFill { fillStylesBySequence.removeValue(forKey: sequence) }
-            refreshMetadataCharge()
+            sideTables.removeEntries(at: sequence)
             clearOpenScratch()
             offsets.removeLast()
             bytesInUse -= record.byteLength
@@ -1069,11 +1143,9 @@ extension Terminal {
             }
             if removedSpills > 0 {
                 let sequence = firstRecordSequence + offsets.count - 1
-                if var spills = spillsBySequence[sequence] {
-                    spillBytes -= spillCost(of: spills)
+                if var spills = sideTables.spills(at: sequence) {
                     spills.removeLast(removedSpills)
-                    spillBytes += spillCost(of: spills)
-                    spillsBySequence[sequence] = spills
+                    sideTables.setSpills(spills, at: sequence)
                 }
             }
 
@@ -1092,7 +1164,6 @@ extension Terminal {
             writeHeader(record, at: offset)
             bytesInUse -= (oldCellCount - newCellCount) * LogicalLineRecord.cellBytes
             writeCursor = recordOffset(in: offset) + record.byteLength
-            refreshMetadataCharge()
         }
 
         // MARK: - Operation 5: clear all history
@@ -1172,7 +1243,6 @@ extension Terminal {
                 rowStart += rows
                 grandDisplayRowTotal += rows
             }
-            refreshMetadataCharge()
         }
 
         /// Counts the retained display rows straight off the arena, ignoring every cached total.
@@ -1532,7 +1602,7 @@ extension Terminal {
             let address = offsets[recordIndex]
             let chunk = chunks[chunkIndex(of: address)]
             let cellsBase = chunkWordIndex(of: address) + 1
-            let spills = spillsBySequence[firstRecordSequence + recordIndex]
+            let spills = sideTables.spills(at: firstRecordSequence + recordIndex)
             chunk.withUnsafeBufferPointer { words in
                 for cellOffset in 0..<scan.cellCount {
                     let word = words[cellsBase + cellOffset]
@@ -1692,18 +1762,18 @@ extension Terminal {
             }
 
             if left.hasTrailingFill,
-               lhs.fillStylesBySequence[lhs.firstRecordSequence + index]
-                   != rhs.fillStylesBySequence[rhs.firstRecordSequence + index]
+               lhs.sideTables.fillStyle(at: lhs.firstRecordSequence + index)
+                   != rhs.sideTables.fillStyle(at: rhs.firstRecordSequence + index)
             {
                 return false
             }
 
             // Variable-width spill payloads live outside the arena in a table keyed by
             // absolute record sequence, so compare them through that table -- and only when
-            // one exists, which `spillBytes` answers for the whole store at once.
-            guard lhs.spillBytes > 0 || rhs.spillBytes > 0 else { return true }
-            return lhs.spillsBySequence[lhs.firstRecordSequence + index]
-                == rhs.spillsBySequence[rhs.firstRecordSequence + index]
+            // one exists, which `holdsSpills` answers for the whole store at once.
+            guard lhs.sideTables.holdsSpills || rhs.sideTables.holdsSpills else { return true }
+            return lhs.sideTables.spills(at: lhs.firstRecordSequence + index)
+                == rhs.sideTables.spills(at: rhs.firstRecordSequence + index)
         }
 
         /// Every retained display row, oldest first, as the renderer must paint it.
@@ -1856,7 +1926,7 @@ extension Terminal {
                             return (
                                 kind,
                                 TerminalScalars(
-                                    spillsBySequence[sequence]?[Int(field)] ?? []
+                                    sideTables.spills(at: sequence)?[Int(field)] ?? []
                                 )
                             )
                         }
@@ -2303,7 +2373,7 @@ extension Terminal {
             )
             let field = UInt32(word & PackedRetainedRow.Header.cellScalarMask)
             if word & PackedRetainedRow.Header.cellSpillBit != 0 {
-                cell.scalars = TerminalScalars(spillsBySequence[sequence]?[Int(field)] ?? [])
+                cell.scalars = TerminalScalars(sideTables.spills(at: sequence)?[Int(field)] ?? [])
             } else if field != 0, let scalar = Unicode.Scalar(field) {
                 cell.scalars = TerminalScalars(scalar)
             }
@@ -2478,11 +2548,9 @@ extension Terminal {
             let offset = offsets[offsets.count - 1]
             var record = self.record(at: offset)
             let sequence = firstRecordSequence + offsets.count - 1
-            var spills = spillsBySequence[sequence] ?? []
+            var spills = sideTables.spills(at: sequence) ?? []
             let spillsBefore = spills.count
-            var sideTablesGrew = false
             var contentUnits = 0
-            spillBytes -= spillCost(of: spillsBySequence[sequence])
 
             // The record's cells are one run inside one backing chunk (`research/31/D5`), and moving that
             // chunk into a local for the loop keeps the store's per-cell write the single
@@ -2518,7 +2586,6 @@ extension Terminal {
 
                 if let id = cells[index].hyperlinkId {
                     openHyperlinks.append(HyperlinkEntry(offset: cellOffset, id: id))
-                    sideTablesGrew = true
                 }
                 if let identity = cells[index].contentIdentity {
                     // A run is a strict step of one, matching `PackedRetainedRow.pack` -- the
@@ -2531,7 +2598,6 @@ extension Terminal {
                         openIdentityRuns.append(
                             IdentityRun(start: cellOffset, extent: 1, base: identity)
                         )
-                        sideTablesGrew = true
                     }
                     openPreviousIdentity = identity
                 } else {
@@ -2542,17 +2608,15 @@ extension Terminal {
 
             swap(&chunk, &chunks[chunkAt])
 
-            if spills.isEmpty == false { spillsBySequence[sequence] = spills }
-            spillBytes += spillCost(of: spills)
+            // The overwhelmingly common row carries no spill at all, and only a row that added
+            // one moves the table or its charge.
+            if spills.count != spillsBefore { sideTables.setSpills(spills, at: sequence) }
 
             record.cellCount += cells.count
             writeHeader(record, at: offset)
             writeCursor += cells.count * LogicalLineRecord.cellBytes
             bytesInUse += cells.count * LogicalLineRecord.cellBytes
             addContentUnitsToTail(contentUnits)
-            // The overwhelmingly common row moves no side table at all, and the charge only has
-            // to be refreshed when one of its terms moved.
-            if sideTablesGrew || spills.count != spillsBefore { refreshMetadataCharge() }
         }
 
         /// Writes the open record's side tables after its cells and stamps their counts into the
@@ -2848,7 +2912,6 @@ extension Terminal {
                     contentStart: evictedContentUnitCount,
                     contentCount: 0
                 ))
-                refreshMetadataCharge()
                 return
             }
             let number = sequence / Self.blockSize
@@ -2861,7 +2924,6 @@ extension Terminal {
                     contentCount: 0
                 ))
             }
-            refreshMetadataCharge()
         }
 
         /// Test support: stable identity shares the existing index word with the arena offset.
@@ -3078,17 +3140,6 @@ extension Terminal {
             let index = (offset & chunkByteMask) >> 3
             chunks[chunk][index] = chunks[chunk][index] & ~(0xFFFF_FFFF << shift)
                 | (UInt64(value) << shift)
-        }
-
-        private func spillCost(of spills: [[Unicode.Scalar]]?) -> Int {
-            guard let spills, spills.isEmpty == false else { return 0 }
-            var total = Terminal.arrayStorageHeaderBytes
-                + spills.capacity * MemoryLayout<[Unicode.Scalar]>.stride
-            for spill in spills {
-                total += Terminal.arrayStorageHeaderBytes
-                    + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
-            }
-            return total
         }
     }
 

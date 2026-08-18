@@ -748,6 +748,17 @@ of the host and belong to S12's account rather than this one: `fca0ea42`,
 
 `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.refreshMetadataCharge`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.dropHeadRecord`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.dropTailRecord`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.cutTail`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.setTrailingFillOnTail`
 
+**Status note.** Closed by the ideal fix. One `SequenceKeyedSideTables` value
+type inside the store now owns both dictionaries, the payload byte accumulator,
+and the charge; every mutation moves the charge in the same operation, so
+`metadataBytes` and all eleven `refreshMetadataCharge()` calls are gone and
+`chargedBytes` sums the live index charge, the live open-scratch charge, and the
+owner's charge. The three divergent emptiness guards collapsed into one
+`holdsSpills`. The recount comparison the Risk paragraph asks to keep now lives
+in the owner as `recountedChargedBytes`, still asserted by `census`, and a new
+fixture pins retention depth so an overcharge that a recount agrees with cannot
+pass unseen.
+
 **Problem.** Three pieces of state -- `spillsBySequence`, `fillStylesBySequence`, and the `spillBytes` accumulator -- plus the `metadataBytes` cache are maintained by hand at roughly fifteen scattered sites, and every record-removing path must remember to prune both dictionaries and then call `refreshMetadataCharge()`. The sites have already drifted into three different emptiness guards for the same question (`spillBytes > 0` in `dropHeadRecord`, `spillsBySequence.isEmpty == false` in `dropTailRecord`, `record.hasTrailingFill` for the fill table, `sideTablesGrew || spills.count != spillsBefore` in the arena writer). A missed prune leaks a dictionary entry keyed to a sequence that will never be read again; a missed refresh loosens the one bound `31/I2` rests on, and today only an `assert` inside `census` -- which the write path never reads -- catches it.
 
 **Evidence.** Grepped every occurrence of `spillsBySequence`, `fillStylesBySequence`, `spillBytes`, and `refreshMetadataCharge()` in the file: mutation sites at lines 881-888, 958-972, 1112-1120, 1166-1170, 1255-1259, 1288-1292/1311, 1391, 2696-2770, 3066/3079, with `refreshMetadataCharge` called eleven times and conditionally in two of them. `census` (line ~635) carries the drift assert, and `chargedBytes` -- the value the write path actually tests -- reads the cached `metadataBytes` without it.

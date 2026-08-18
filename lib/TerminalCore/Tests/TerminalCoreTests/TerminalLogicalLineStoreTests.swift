@@ -556,6 +556,40 @@ struct TerminalLogicalLineStoreTests {
         )
     }
 
+    @Test("A spill-and-fill history retains an exact depth at a budget the side tables decide")
+    func sideTableChargeDecidesRetentionDepth() {
+        // Intent: a history whose side tables carry a real share of the charge retains an exact
+        //   number of display rows, and the oldest retained row holds exact content.
+        // Why it exists: the charge tests around it prove the maintained total agrees with a
+        //   recount and stays under capacity, which an implementation that consistently
+        //   *over*charges a side table also satisfies -- while evicting history the store should
+        //   have kept. Only a pinned depth catches that, so this fixture is what makes moving the
+        //   side tables and their charge behind one owner a behavior-preserving change.
+        // Scenario: spec-first. Every admitted row carries a multi-scalar spill and a trailing
+        //   background-erase fill, so both sequence-keyed tables are populated on every record,
+        //   at a budget small enough that their charge sets the eviction boundary.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 16)
+        for line in 0..<400 {
+            var row = Self.backgroundErasedRow(width: 16, count: 10, seed: line, fillStyle: 9)
+            row.cells[0] = Terminal.GridCell(
+                scalars: TerminalScalars([Unicode.Scalar(97 + UInt32(line % 26))!,
+                                          Unicode.Scalar(0x0301)!]),
+                kind: .narrow,
+                styleId: 9
+            )
+            store.admit(row)
+        }
+
+        #expect(store.census.sideTableBytes > 0)
+        #expect(store.chargedBytes <= store.capacityBytes)
+        #expect(store.grandDisplayRowTotal == 242)
+        #expect(store.evictedRowCount == 158)
+
+        let oldest = store.displayRow(at: 0)
+        #expect(oldest?.cells.first?.scalars.count == 2)
+        #expect(oldest?.cells.first?.scalars.first == Unicode.Scalar(97 + UInt32(158 % 26))!)
+    }
+
     // MARK: - I4 / PO5 (store half): head-granular eviction
 
     @Test("Eviction under a head record spanning many display rows drops one row per step")

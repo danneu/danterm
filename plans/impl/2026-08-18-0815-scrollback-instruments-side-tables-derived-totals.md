@@ -204,7 +204,7 @@ before the implementation is accepted.
 
 ## Commit progress
 - [x] 1. Instrument unification
-- [ ] 2. Side-table ownership
+- [x] 2. Side-table ownership
 - [ ] 3. Derived totals
 
 ## Implementation notes
@@ -219,6 +219,23 @@ before the implementation is accepted.
   each scope counts the operation exactly once.
 - `record`'s amount label is `count:` for every instrument, replacing the old
   `rows:` / `cells:` / `units:` spellings.
+- The side-table owner keeps a maintained `chargedBytes` refreshed inside each
+  of its mutating methods, rather than computing the charge on every read. The
+  hash-table term needs a bucket-count loop per dictionary, and `chargedBytes`
+  is read once per admission and once per eviction step, which is the cost
+  `research/31/F8` Observation 3 recorded. The store's other terms -- the index
+  charge and the open-scratch charge -- are plain capacity arithmetic, so those
+  are read live and their eight `refreshMetadataCharge()` calls simply went
+  away.
+- `census` reports the side-table line from a full recount rather than the
+  maintained total, so the existing oracle test compares two independently
+  derived numbers (PO3). `openScratchBytes` stays inside that census line, which
+  keeps the `Census` shape unchanged as the Non-goals require.
+- `dropHeadRecord` used to skip the fill table when the record carried no fill
+  bit. The owner asks `fillStylesBySequence.isEmpty` instead, which costs one
+  hash probe per eviction in a history that holds any fill at all. Taken so the
+  three drifted emptiness guards collapse to guards the owner alone states; the
+  eviction fast path for a store with no side tables is unchanged.
 - The audit's ranked-findings Status cell holds commit hashes, which a commit
   cannot carry for itself, so S32 got the file's other convention -- a
   `**Status note.**` paragraph in its section. The hash cell still needs a
@@ -226,6 +243,8 @@ before the implementation is accepted.
 
 ## Follow Up
 
-- Stamp the S32 row's Status cell in
-  `docs/scratch/2026-08-11-simplification-audit.md` with this commit's hash,
-  and do the same for S31 and S18 as commits 2 and 3 land.
+- Stamp the S32 and S31 rows' Status cells in
+  `docs/scratch/2026-08-11-simplification-audit.md` with their landing commit
+  hashes, and do the same for S18 as commit 3 lands. Each section already
+  carries its `**Status note.**` paragraph; only the ranked-table cell is
+  pending, because a commit cannot carry its own hash.
