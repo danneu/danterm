@@ -170,23 +170,31 @@ public struct TerminalFlightRecordingCapture: Equatable, Sendable {
 }
 
 /// Captures every input the stream policy needs in one owner-queue turn.
-public struct TerminalFlightRecordingStreamFence: Equatable, Sendable {
+///
+/// Everything here except `state` is cheap to read, and `state` is unserialized: a stream
+/// that decides to ship events never pays for terminal bytes it would discard.
+public struct TerminalFlightRecordingStreamFence: Sendable {
     /// Recorder birth geometry and its real lifetime cursor at sequence zero.
     public let origin: TerminalFlightRecordingOrigin
+    /// Live geometry with the cursor past every event recorded before this fence, for an
+    /// opening that begins at the fenced moment rather than replaying up to it.
+    public let live: TerminalFlightRecordingOrigin
     /// The whole retained suffix for raw fallback and beginning requests.
     public let retained: TerminalFlightRecordingCursorSnapshot
     /// Placement of the requester's supplied cursor in this recorder lifetime.
     public let requested: TerminalFlightRecordingCursorPlacement
-    /// Exact pane state and the first event outside it.
-    public let synchronization: TerminalFlightRecordingStateSynchronization
+    /// The fenced terminal beside the first event outside it, serialized only if the stream
+    /// selects a synchronization.
+    public let state: TerminalFlightRecordingStatePairing
 }
 
-/// Pairs a followed suffix with exact state at the same notice-rearming owner fence.
-public struct TerminalFlightRecordingFollowFence: Equatable, Sendable {
+/// Pairs a followed suffix with the fenced state at the same notice-rearming owner fence.
+public struct TerminalFlightRecordingFollowFence: Sendable {
     /// Retained events and exact loss from the subscriber's previous cursor.
     public let snapshot: TerminalFlightRecordingCursorSnapshot
-    /// Exact pane state at `snapshot.nextCursor` for reconstructible loss repair.
-    public let synchronization: TerminalFlightRecordingStateSynchronization
+    /// The fenced terminal at `snapshot.nextCursor`, serialized only if the stream selects a
+    /// synchronization to repair loss with.
+    public let state: TerminalFlightRecordingStatePairing
 }
 
 /// Owner-queue-only FIFO that releases evicted payload storage without shifting an array.

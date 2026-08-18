@@ -64,12 +64,6 @@ public enum PaneTapeSyncPolicy: Equatable, Sendable {
         case .reconstructible: return .reconstructible
         }
     }
-
-    /// The bound every sync on this stream obeys, or `nil` when syncs carry all history.
-    public var historyBudgetBytes: Int? {
-        guard case .reconstructible(let budget) = self else { return nil }
-        return budget
-    }
 }
 
 /// Why a requested mode and history budget do not name a policy.

@@ -170,17 +170,13 @@ struct PaneTapeRoundTripTests {
             )
         )
         for pinned in [true, false] {
-            let batch = makePaneTapeContinuation(
-                policy: .reconstructible(historyBudgetBytes: 4096),
-                replicaHistoryIsComplete: true,
-                fence: .init(
-                    snapshot: evicted,
-                    synchronization: .init(
-                        bytes: Array("state".utf8),
-                        dimensions: .init(columns: 62, rows: 19, pinned: pinned),
-                        droppedHistoryRows: 0,
-                        cursor: evicted.nextCursor
-                    )
+            let batch = repairedContinuation(
+                snapshot: evicted,
+                synchronization: .init(
+                    bytes: Array("state".utf8),
+                    dimensions: .init(columns: 62, rows: 19, pinned: pinned),
+                    droppedHistoryRows: 0,
+                    cursor: evicted.nextCursor
                 )
             ).batch
 
@@ -238,17 +234,13 @@ struct PaneTapeRoundTripTests {
         )
         // Long enough to chunk, so the count has to survive multi-part assembly.
         let bytes = [UInt8](repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
-        let batch = makePaneTapeContinuation(
-            policy: .reconstructible(historyBudgetBytes: 4096),
-            replicaHistoryIsComplete: true,
-            fence: .init(
-                snapshot: evicted,
-                synchronization: .init(
-                    bytes: bytes,
-                    dimensions: .init(columns: 62, rows: 19, pinned: false),
-                    droppedHistoryRows: 3141,
-                    cursor: evicted.nextCursor
-                )
+        let batch = repairedContinuation(
+            snapshot: evicted,
+            synchronization: .init(
+                bytes: bytes,
+                dimensions: .init(columns: 62, rows: 19, pinned: false),
+                droppedHistoryRows: 3141,
+                cursor: evicted.nextCursor
             )
         ).batch
 
@@ -276,5 +268,30 @@ struct PaneTapeRoundTripTests {
         //   guard.
         // Scenario: a reader deciding whether it understands the stream it just opened.
         #expect(paneTapeStreamVersion == 5)
+    }
+
+    /// Builds the suffix a reconstructible stream ships when eviction forced it to replace
+    /// events with state, taking the decide and materialize halves in one step so these
+    /// reader-side tests stay about what reaches the wire.
+    private func repairedContinuation(
+        snapshot: PaneTapeSnapshot,
+        synchronization: DanTermSupport.PaneTapeStateSynchronization
+    ) -> PaneTapeContinuation {
+        let decision = decidePaneTapeContinuation(
+            policy: .reconstructible(historyBudgetBytes: 4096),
+            replicaHistoryIsComplete: true,
+            snapshot: snapshot
+        )
+        guard case .synchronize(let requirement) = decision else {
+            Issue.record("an evicted reconstructible suffix must select a sync")
+            return PaneTapeContinuation(
+                batch: PaneTapeBatch(records: [], nextCursor: snapshot.nextCursor),
+                replicaHistoryIsComplete: false
+            )
+        }
+        return makePaneTapeContinuation(
+            requirement: requirement,
+            synchronization: synchronization
+        )
     }
 }

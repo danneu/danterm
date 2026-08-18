@@ -1,4 +1,5 @@
-// Behavioral coverage for choosing raw events or an atomic terminal-state synchronization.
+// Behavioral coverage for choosing raw events or an atomic terminal-state synchronization,
+// and for the record building that follows whichever was chosen.
 import Foundation
 import Testing
 import DanTermProtocol
@@ -9,9 +10,9 @@ struct PaneTapeStreamStateTests {
 
     @Test("reconstructible beginning replays a complete retained tape without a sync")
     func completeBeginningNeedsNoSync() {
-        let opening = makePaneTapeOpening(
+        let opening = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .beginning),
-            fence: fence(retainedSequences: [0, 1])
+            pane: pane(retainedSequences: [0, 1])
         )
 
         #expect(opening.start.record["reconstructible"] == .bool(true))
@@ -23,9 +24,9 @@ struct PaneTapeStreamStateTests {
 
     @Test("reconstructible eviction states exact loss and replaces the suffix with a sync")
     func evictedBeginningUsesSync() throws {
-        let opening = makePaneTapeOpening(
+        let opening = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .beginning),
-            fence: fence(retainedSequences: [4, 5], droppedEventCount: 4)
+            pane: pane(retainedSequences: [4, 5], droppedEventCount: 4)
         )
 
         #expect(opening.start.record["cursor"] == nil)
@@ -37,53 +38,79 @@ struct PaneTapeStreamStateTests {
         ]))
         #expect(opening.records.compactMap(sequence).isEmpty)
         let sync = opening.records.filter { $0["kind"] == .string("sync") }
-        #expect(sync.isEmpty == false)
+        // Whole-record value, not a shape: this assembly now crosses the decide/materialize
+        // boundary, so every field the wire carries is stated here rather than sampled.
+        #expect(sync == [.object([
+            "kind": .string("sync"),
+            "part": .number(1),
+            "parts": .number(1),
+            "base64": .string("c3RhdGU="),
+            "initial": .object([
+                "columns": .number(100),
+                "rows": .number(30),
+                "pinned": .bool(false),
+            ]),
+            "droppedHistoryRows": .number(0),
+            "cursor": cursorJSON(sequence: 6, feed: 6),
+        ])])
         #expect(try synchronizationBytes(sync) == Array("state".utf8))
-        #expect(sync.dropLast().allSatisfy { $0["cursor"] == nil })
-        #expect(sync.last?["cursor"] == cursorJSON(sequence: 6, feed: 6))
         #expect(opening.nextCursor.nextSequence == 6)
     }
 
     @Test("from-now reconstructible starts with state while raw starts at the live cursor")
     func fromNowDependsOnMode() {
-        let streamFence = fence(retainedSequences: [0, 1])
-        let reconstructible = makePaneTapeOpening(
+        let fenced = pane(retainedSequences: [0, 1])
+        let reconstructible = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
-            fence: streamFence
+            pane: fenced
         )
-        let raw = makePaneTapeOpening(
+        let raw = openStream(
             request: .init(capture: .follow, policy: .raw, position: .now),
-            fence: streamFence
+            pane: fenced
         )
 
         #expect(reconstructible.start.record["cursor"] == nil)
         #expect(reconstructible.records.map { $0["kind"] } == [.string("sync")])
-        #expect(raw.start.record["reconstructible"] == .bool(false))
-        #expect(raw.start.record["cursor"] == cursorJSON(sequence: 2, feed: 2))
+        // Whole start record: a raw from-now opening is the one path that reports live
+        // geometry and the live cursor without any state being serialized to read them off.
+        #expect(raw.start.record == .object([
+            "kind": .string("start"),
+            "version": .number(Double(paneTapeStreamVersion)),
+            "capture": .string("follow"),
+            "format": .string(PaneTapeFormat.replay.rawValue),
+            "provenance": defaultPaneTapeProvenance,
+            "initial": .object([
+                "columns": .number(100),
+                "rows": .number(30),
+                "pinned": .bool(false),
+            ]),
+            "cursor": cursorJSON(sequence: 2, feed: 2),
+            "reconstructible": .bool(false),
+        ]))
         #expect(raw.records.isEmpty)
     }
 
     @Test("a placeable resume continues directly or synchronizes after exact loss")
     func placeableResumeDependsOnLoss() {
         let requested = cursor(sequence: 1, feed: 1)
-        let contiguous = makePaneTapeOpening(
+        let contiguous = openStream(
             request: .init(
                 capture: .follow,
                 policy: reconstructiblePolicy,
                 position: .cursor(requested)
             ),
-            fence: fence(
+            pane: pane(
                 retainedSequences: [0, 1, 2],
                 requested: .placed(snapshot(sequences: [1, 2], nextSequence: 3))
             )
         )
-        let evicted = makePaneTapeOpening(
+        let evicted = openStream(
             request: .init(
                 capture: .follow,
                 policy: reconstructiblePolicy,
                 position: .cursor(requested)
             ),
-            fence: fence(
+            pane: pane(
                 retainedSequences: [2, 3],
                 requested: .placed(snapshot(
                     sequences: [2, 3],
@@ -92,9 +119,9 @@ struct PaneTapeStreamStateTests {
                 ))
             )
         )
-        let rawEvicted = makePaneTapeOpening(
+        let rawEvicted = openStream(
             request: .init(capture: .follow, policy: .raw, position: .cursor(requested)),
-            fence: fence(
+            pane: pane(
                 retainedSequences: [2, 3],
                 requested: .placed(snapshot(
                     sequences: [2, 3],
@@ -121,18 +148,18 @@ struct PaneTapeStreamStateTests {
             feedBytesBeforeNextSequence: 100,
             writeBytesBeforeNextSequence: 20
         )
-        let streamFence = fence(retainedSequences: [4, 5], droppedEventCount: 4, requested: .unplaceable)
-        let reconstructible = makePaneTapeOpening(
+        let fenced = pane(retainedSequences: [4, 5], droppedEventCount: 4, requested: .unplaceable)
+        let reconstructible = openStream(
             request: .init(
                 capture: .follow,
                 policy: reconstructiblePolicy,
                 position: .cursor(foreign)
             ),
-            fence: streamFence
+            pane: fenced
         )
-        let raw = makePaneTapeOpening(
+        let raw = openStream(
             request: .init(capture: .follow, policy: .raw, position: .cursor(foreign)),
-            fence: streamFence
+            pane: fenced
         )
 
         let totalGap: JSONValue = .object(["kind": .string("gap"), "loss": .string("total")])
@@ -147,22 +174,13 @@ struct PaneTapeStreamStateTests {
     @Test("sync chunks fit the IPC line bound and publish the cursor only on completion")
     func syncChunksAreAtomicAndBounded() throws {
         let bytes = [UInt8](repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
-        var streamFence = fence(retainedSequences: [])
-        streamFence = PaneTapeStreamFence(
-            origin: streamFence.origin,
-            retained: streamFence.retained,
-            requested: streamFence.requested,
-            synchronization: .init(
-                bytes: bytes,
-                dimensions: .init(columns: 179, rows: 66, pinned: false),
-                droppedHistoryRows: 0,
-                cursor: streamFence.synchronization.cursor
-            )
-        )
-
-        let opening = makePaneTapeOpening(
+        let opening = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
-            fence: streamFence
+            pane: pane(
+                retainedSequences: [],
+                syncBytes: bytes,
+                syncDimensions: .init(columns: 179, rows: 66, pinned: false)
+            )
         )
         let records = opening.records
 
@@ -199,25 +217,15 @@ struct PaneTapeStreamStateTests {
         //   the pane's next resize, which may never come.
         // Scenario: one pane running at a claimed grid, opened from the beginning and
         //   from now.
-        var pinnedFence = fence(retainedSequences: [0, 1])
-        pinnedFence = PaneTapeStreamFence(
-            origin: .init(
-                initial: .init(columns: 80, rows: 24, pinned: true),
-                cursor: pinnedFence.origin.cursor
-            ),
-            retained: pinnedFence.retained,
-            requested: pinnedFence.requested,
-            synchronization: .init(
-                bytes: Array("state".utf8),
-                dimensions: .init(columns: 100, rows: 30, pinned: true),
-                droppedHistoryRows: 0,
-                cursor: pinnedFence.synchronization.cursor
-            )
+        let pinned = pane(
+            retainedSequences: [0, 1],
+            initial: .init(columns: 80, rows: 24, pinned: true),
+            syncDimensions: .init(columns: 100, rows: 30, pinned: true)
         )
 
-        let fromBeginning = makePaneTapeOpening(
+        let fromBeginning = openStream(
             request: .init(capture: .dump, policy: .raw, position: .beginning),
-            fence: pinnedFence
+            pane: pinned
         )
         #expect(fromBeginning.start.record["initial"] == .object([
             "columns": .number(80),
@@ -225,9 +233,9 @@ struct PaneTapeStreamStateTests {
             "pinned": .bool(true),
         ]))
 
-        let fromNow = makePaneTapeOpening(
+        let fromNow = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
-            fence: pinnedFence
+            pane: pinned
         )
         #expect(fromNow.start.record["initial"] == .object([
             "columns": .number(100),
@@ -251,23 +259,84 @@ struct PaneTapeStreamStateTests {
             cursor: evicted.nextCursor
         )
 
-        let reconstructible = makePaneTapeContinuation(
+        let reconstructible = continueStream(
             policy: reconstructiblePolicy,
             replicaHistoryIsComplete: true,
-            fence: .init(snapshot: evicted, synchronization: synchronization)
+            snapshot: evicted,
+            synchronization: synchronization
         ).batch
-        let raw = makePaneTapeContinuation(
+        let raw = continueStream(
             policy: .raw,
             replicaHistoryIsComplete: true,
-            fence: .init(snapshot: evicted, synchronization: synchronization)
+            snapshot: evicted,
+            synchronization: synchronization
         ).batch
 
         #expect(reconstructible.records.first?["kind"] == .string("gap"))
         #expect(reconstructible.records.dropFirst().compactMap(sequence).isEmpty)
-        #expect(reconstructible.records.last?["kind"] == .string("sync"))
+        // Whole-record value: this assembly crosses the decide/materialize boundary too.
+        #expect(Array(reconstructible.records.dropFirst()) == [.object([
+            "kind": .string("sync"),
+            "part": .number(1),
+            "parts": .number(1),
+            "base64": .string("c3RhdGU="),
+            "initial": .object([
+                "columns": .number(100),
+                "rows": .number(30),
+                "pinned": .bool(false),
+            ]),
+            "droppedHistoryRows": .number(0),
+            "cursor": cursorJSON(sequence: 6, feed: 6),
+        ])])
         #expect(reconstructible.nextCursor == synchronization.cursor)
         #expect(raw.records.first?["kind"] == .string("gap"))
         #expect(raw.records.dropFirst().compactMap(sequence) == [4, 5])
+    }
+
+    // Intent: no stream that ships recorder events asks for the fenced terminal to be
+    //   serialized -- not a raw opening at any start position, not a raw follow suffix, and
+    //   not a reconstructible suffix the retained events already serve.
+    // Why it exists: serializing state costs the whole retained scrollback, and every one of
+    //   these paths used to pay it and throw the bytes away. Nothing in the delivered records
+    //   would show the waste, so the decision itself is what gets asserted.
+    // Scenario: spec-first contract for the stream's one serialization seam.
+    @Test("only a stream that ships a sync asks for state to be serialized")
+    func eventServedStreamsNeverSerializeState() {
+        let placed = pane(
+            retainedSequences: [0, 1, 2],
+            requested: .placed(snapshot(sequences: [1, 2], nextSequence: 3))
+        )
+        let rawOpenings: [(String, PaneTapeStreamRequest, FencedPane)] = [
+            ("dump from the beginning", .init(capture: .dump, policy: .raw, position: .beginning), placed),
+            ("follow from now", .init(capture: .follow, policy: .raw, position: .now), placed),
+            (
+                "resume from a placed cursor",
+                .init(capture: .follow, policy: .raw, position: .cursor(cursor(sequence: 1, feed: 1))),
+                placed
+            ),
+            (
+                "resume from an unplaceable cursor",
+                .init(capture: .follow, policy: .raw, position: .cursor(cursor(sequence: 1, feed: 1))),
+                pane(retainedSequences: [4, 5], droppedEventCount: 4, requested: .unplaceable)
+            ),
+        ]
+        for (name, request, fenced) in rawOpenings {
+            let decision = decidePaneTapeOpening(request: request, fence: fenced.facts)
+            #expect(isEventDecision(decision.payload), "raw opening: \(name)")
+        }
+
+        // The raw follow stream's second entry point: rearming through the follow decision.
+        #expect(isEventDecision(decidePaneTapeContinuation(
+            policy: .raw,
+            replicaHistoryIsComplete: false,
+            snapshot: snapshot(sequences: [4, 5], nextSequence: 6, droppedEventCount: 4)
+        )))
+        // A reconstructible suffix the retained events serve -- the steady state.
+        #expect(isEventDecision(decidePaneTapeContinuation(
+            policy: reconstructiblePolicy,
+            replicaHistoryIsComplete: false,
+            snapshot: snapshot(sequences: [4, 5], nextSequence: 6)
+        )))
     }
 
     // Intent: an opening reports whether it left the replica holding the source's whole
@@ -278,34 +347,31 @@ struct PaneTapeStreamStateTests {
     // Scenario: spec-first contract for the completeness a bounded stream tracks.
     @Test("an opening states whether it left the replica holding the whole history")
     func openingStatesReplicaHistoryCompleteness() {
-        func opening(
-            position: PaneTapeStartPosition,
-            fence streamFence: PaneTapeStreamFence
-        ) -> Bool {
-            makePaneTapeOpening(
+        func standing(position: PaneTapeStartPosition, pane fenced: FencedPane) -> Bool {
+            openStream(
                 request: .init(capture: .follow, policy: reconstructiblePolicy, position: position),
-                fence: streamFence
+                pane: fenced
             ).replicaHistoryIsComplete
         }
 
         // Replayed from the recorder's own beginning with nothing evicted: the replica built
         // the whole history itself.
-        #expect(opening(position: .beginning, fence: fence(retainedSequences: [0, 1])))
+        #expect(standing(position: .beginning, pane: pane(retainedSequences: [0, 1])))
         // A sync that omitted nothing states completeness; one that omitted rows denies it.
-        #expect(opening(position: .now, fence: fence(retainedSequences: [0, 1])))
-        #expect(opening(
+        #expect(standing(position: .now, pane: pane(retainedSequences: [0, 1])))
+        #expect(standing(
             position: .now,
-            fence: fence(retainedSequences: [0, 1], droppedHistoryRows: 12)
+            pane: pane(retainedSequences: [0, 1], droppedHistoryRows: 12)
         ) == false)
-        #expect(opening(
+        #expect(standing(
             position: .beginning,
-            fence: fence(retainedSequences: [4, 5], droppedEventCount: 4, droppedHistoryRows: 12)
+            pane: pane(retainedSequences: [4, 5], droppedEventCount: 4, droppedHistoryRows: 12)
         ) == false)
         // A cursor is a recorder coordinate and carries no evidence about the replica's
         // history, so a resumed stream stays unknown until a sync says otherwise.
-        #expect(opening(
+        #expect(standing(
             position: .cursor(cursor(sequence: 1, feed: 1)),
-            fence: fence(
+            pane: pane(
                 retainedSequences: [0, 1, 2],
                 requested: .placed(snapshot(sequences: [1, 2], nextSequence: 3))
             )
@@ -329,20 +395,18 @@ struct PaneTapeStreamStateTests {
             droppedHistoryRows: 9,
             cursor: cursor(sequence: 7, feed: 7)
         )
-        let followFence = PaneTapeFollowStreamFence(
+
+        let truncated = continueStream(
+            policy: reconstructiblePolicy,
+            replicaHistoryIsComplete: false,
             snapshot: resizing,
             synchronization: synchronization
         )
-
-        let truncated = makePaneTapeContinuation(
-            policy: reconstructiblePolicy,
-            replicaHistoryIsComplete: false,
-            fence: followFence
-        )
-        let exact = makePaneTapeContinuation(
+        let exact = continueStream(
             policy: reconstructiblePolicy,
             replicaHistoryIsComplete: true,
-            fence: followFence
+            snapshot: resizing,
+            synchronization: synchronization
         )
 
         #expect(truncated.batch.records.allSatisfy { $0["kind"] == .string("sync") })
@@ -363,7 +427,6 @@ struct PaneTapeStreamStateTests {
     //   sync fits the whole history, then a resize.
     @Test("only a resize resyncs, and a sync that omits nothing restores exact standing")
     func plainSuffixesPassThroughAndAWholeSyncRestoresCompleteness() {
-        let plain = snapshot(sequences: [4, 5], nextSequence: 6)
         let truncatedSync = PaneTapeStateSynchronization(
             bytes: Array("state".utf8),
             dimensions: .init(columns: 100, rows: 30, pinned: false),
@@ -371,10 +434,11 @@ struct PaneTapeStreamStateTests {
             cursor: cursor(sequence: 6, feed: 6)
         )
 
-        let passedThrough = makePaneTapeContinuation(
+        let passedThrough = continueStream(
             policy: reconstructiblePolicy,
             replicaHistoryIsComplete: false,
-            fence: .init(snapshot: plain, synchronization: truncatedSync)
+            snapshot: snapshot(sequences: [4, 5], nextSequence: 6),
+            synchronization: truncatedSync
         )
         #expect(passedThrough.batch.records.compactMap(sequence) == [4, 5])
         #expect(passedThrough.replicaHistoryIsComplete == false)
@@ -385,24 +449,20 @@ struct PaneTapeStreamStateTests {
             droppedHistoryRows: 0,
             cursor: cursor(sequence: 7, feed: 7)
         )
-        let restored = makePaneTapeContinuation(
+        let restored = continueStream(
             policy: reconstructiblePolicy,
             replicaHistoryIsComplete: false,
-            fence: .init(
-                snapshot: snapshot(sequences: [6], nextSequence: 7, resizeSequences: [6]),
-                synchronization: wholeSync
-            )
+            snapshot: snapshot(sequences: [6], nextSequence: 7, resizeSequences: [6]),
+            synchronization: wholeSync
         )
         #expect(restored.batch.records.allSatisfy { $0["kind"] == .string("sync") })
         #expect(restored.replicaHistoryIsComplete)
 
-        let afterRestore = makePaneTapeContinuation(
+        let afterRestore = continueStream(
             policy: reconstructiblePolicy,
             replicaHistoryIsComplete: restored.replicaHistoryIsComplete,
-            fence: .init(
-                snapshot: snapshot(sequences: [7], nextSequence: 8, resizeSequences: [7]),
-                synchronization: wholeSync
-            )
+            snapshot: snapshot(sequences: [7], nextSequence: 8, resizeSequences: [7]),
+            synchronization: wholeSync
         )
         #expect(afterRestore.batch.records.compactMap(sequence) == [7])
     }
@@ -415,31 +475,22 @@ struct PaneTapeStreamStateTests {
     // Scenario: spec-first contract for a bounded sync on the wire.
     @Test("a sync transfer states its dropped history rows once, beside its geometry")
     func syncStatesDroppedHistoryRowsOnItsFirstPart() {
-        var streamFence = fence(retainedSequences: [])
-        streamFence = PaneTapeStreamFence(
-            origin: streamFence.origin,
-            retained: streamFence.retained,
-            requested: streamFence.requested,
-            synchronization: .init(
-                bytes: [UInt8](repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1),
-                dimensions: .init(columns: 100, rows: 30, pinned: false),
-                droppedHistoryRows: 512,
-                cursor: streamFence.synchronization.cursor
-            )
-        )
-
-        let records = makePaneTapeOpening(
+        let records = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
-            fence: streamFence
+            pane: pane(
+                retainedSequences: [],
+                droppedHistoryRows: 512,
+                syncBytes: [UInt8](repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
+            )
         ).records
 
         #expect(records.count > 1)
         #expect(records.first?["droppedHistoryRows"] == .number(512))
         #expect(records.dropFirst().allSatisfy { $0["droppedHistoryRows"] == nil })
 
-        let whole = makePaneTapeOpening(
+        let whole = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
-            fence: fence(retainedSequences: [])
+            pane: pane(retainedSequences: [])
         ).records
         #expect(whole.first?["droppedHistoryRows"] == .number(0))
     }
@@ -452,17 +503,54 @@ struct PaneTapeStreamStateTests {
     @Test("a budget does not make a servable request take a sync instead of events")
     func budgetDoesNotChangeWhenASyncIsSent() {
         for budget in [0, 4096, PaneTapeSyncPolicy.defaultHistoryBudgetBytes] {
-            let opening = makePaneTapeOpening(
+            let opening = openStream(
                 request: .init(
                     capture: .follow,
                     policy: .reconstructible(historyBudgetBytes: budget),
                     position: .beginning
                 ),
-                fence: fence(retainedSequences: [0, 1])
+                pane: pane(retainedSequences: [0, 1])
             )
 
             #expect(opening.records.compactMap(sequence) == [0, 1])
             #expect(opening.records.contains { $0["kind"] == .string("sync") } == false)
+        }
+    }
+
+    // Intent: the budget a reconstructible stream runs under is the budget the selected sync
+    //   asks the fenced state for, and no other path carries one.
+    // Why it exists: the budget is the only thing standing between a join and a payload
+    //   proportional to the whole scrollback, and it now travels inside the requirement rather
+    //   than beside the request. A decision that dropped it would still deliver a correct
+    //   sync, just an unbounded one.
+    // Scenario: spec-first contract for what the one serialization seam is handed.
+    @Test("a selected sync asks for exactly the budget the stream's policy states")
+    func selectedSyncCarriesThePolicyBudget() {
+        for budget in [nil, 0, 4096, PaneTapeSyncPolicy.defaultHistoryBudgetBytes] {
+            let decision = decidePaneTapeOpening(
+                request: .init(
+                    capture: .follow,
+                    policy: .reconstructible(historyBudgetBytes: budget),
+                    position: .now
+                ),
+                fence: pane(retainedSequences: [0, 1]).facts
+            )
+            guard case .synchronize(let requirement) = decision.payload else {
+                Issue.record("a reconstructible from-now opening must select a sync")
+                continue
+            }
+            #expect(requirement.historyBudgetBytes == budget)
+
+            let continuation = decidePaneTapeContinuation(
+                policy: .reconstructible(historyBudgetBytes: budget),
+                replicaHistoryIsComplete: true,
+                snapshot: snapshot(sequences: [4, 5], nextSequence: 6, droppedEventCount: 4)
+            )
+            guard case .synchronize(let followRequirement) = continuation else {
+                Issue.record("an evicted reconstructible suffix must select a sync")
+                continue
+            }
+            #expect(followRequirement.historyBudgetBytes == budget)
         }
     }
 
@@ -474,66 +562,123 @@ struct PaneTapeStreamStateTests {
     //   its last sync published; a resize arrives on each stream.
     @Test("an opening's standing carries into the next suffix, on a fresh join and on a resume")
     func openingStandingDecidesTheNextSuffix() {
-        let resizing = PaneTapeFollowStreamFence(
-            snapshot: snapshot(sequences: [8], nextSequence: 9, resizeSequences: [8]),
-            synchronization: .init(
-                bytes: Array("state".utf8),
-                dimensions: .init(columns: 100, rows: 30, pinned: false),
-                droppedHistoryRows: 9,
-                cursor: cursor(sequence: 9, feed: 9)
-            )
+        let resizing = snapshot(sequences: [8], nextSequence: 9, resizeSequences: [8])
+        let resizeSync = PaneTapeStateSynchronization(
+            bytes: Array("state".utf8),
+            dimensions: .init(columns: 100, rows: 30, pinned: false),
+            droppedHistoryRows: 9,
+            cursor: cursor(sequence: 9, feed: 9)
         )
 
         for opening in [
-            makePaneTapeOpening(
+            openStream(
                 request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
-                fence: fence(retainedSequences: [0, 1], droppedHistoryRows: 12)
+                pane: pane(retainedSequences: [0, 1], droppedHistoryRows: 12)
             ),
-            makePaneTapeOpening(
+            openStream(
                 request: .init(
                     capture: .follow,
                     policy: reconstructiblePolicy,
                     position: .cursor(cursor(sequence: 1, feed: 1))
                 ),
-                fence: fence(
+                pane: pane(
                     retainedSequences: [0, 1, 2],
                     requested: .placed(snapshot(sequences: [1, 2], nextSequence: 3))
                 )
             ),
         ] {
-            let continuation = makePaneTapeContinuation(
+            let continuation = continueStream(
                 policy: reconstructiblePolicy,
                 replicaHistoryIsComplete: opening.replicaHistoryIsComplete,
-                fence: resizing
+                snapshot: resizing,
+                synchronization: resizeSync
             )
 
             #expect(continuation.batch.records.allSatisfy { $0["kind"] == .string("sync") })
-            #expect(continuation.batch.nextCursor == resizing.synchronization.cursor)
+            #expect(continuation.batch.nextCursor == resizeSync.cursor)
         }
     }
 
-    private func fence(
+    /// One fenced moment: the cheap facts stream policy decides from, beside the state the
+    /// fenced terminal would serialize into if -- and only if -- the decision asks for one.
+    private struct FencedPane {
+        let facts: PaneTapeStreamFence
+        let synchronization: PaneTapeStateSynchronization
+    }
+
+    /// Runs one opening through both phases, serializing state only when the decision asked
+    /// for it, exactly as the app does.
+    private func openStream(
+        request: PaneTapeStreamRequest,
+        pane fenced: FencedPane
+    ) -> PaneTapeOpening {
+        let decision = decidePaneTapeOpening(request: request, fence: fenced.facts)
+        switch decision.payload {
+        case .events(let events):
+            return makePaneTapeOpening(decision, events: events)
+        case .synchronize(let requirement):
+            return makePaneTapeOpening(
+                decision,
+                requirement: requirement,
+                synchronization: fenced.synchronization
+            )
+        }
+    }
+
+    /// Runs one followed suffix through both phases, the same way.
+    private func continueStream(
+        policy: PaneTapeSyncPolicy,
+        replicaHistoryIsComplete: Bool,
+        snapshot: PaneTapeSnapshot,
+        synchronization: PaneTapeStateSynchronization
+    ) -> PaneTapeContinuation {
+        let decision = decidePaneTapeContinuation(
+            policy: policy,
+            replicaHistoryIsComplete: replicaHistoryIsComplete,
+            snapshot: snapshot
+        )
+        switch decision {
+        case .events(let events):
+            return makePaneTapeContinuation(events: events)
+        case .synchronize(let requirement):
+            return makePaneTapeContinuation(
+                requirement: requirement,
+                synchronization: synchronization
+            )
+        }
+    }
+
+    private func isEventDecision<Events>(_ decision: PaneTapePayloadDecision<Events>) -> Bool {
+        if case .events = decision { true } else { false }
+    }
+
+    private func pane(
         retainedSequences: [UInt64],
         droppedEventCount: UInt64 = 0,
         droppedHistoryRows: Int = 0,
-        requested: PaneTapeCursorPlacement? = nil
-    ) -> PaneTapeStreamFence {
+        requested: PaneTapeCursorPlacement? = nil,
+        initial: PaneTapeDimensions = .init(columns: 80, rows: 24, pinned: false),
+        syncBytes: [UInt8] = Array("state".utf8),
+        syncDimensions: PaneTapeDimensions = .init(columns: 100, rows: 30, pinned: false)
+    ) -> FencedPane {
         let nextSequence = retainedSequences.last.map { $0 + 1 } ?? 0
         let retained = snapshot(
             sequences: retainedSequences,
             nextSequence: nextSequence,
             droppedEventCount: droppedEventCount
         )
-        return PaneTapeStreamFence(
-            origin: .init(
-                initial: .init(columns: 80, rows: 24, pinned: false),
-                cursor: cursor(sequence: 0, feed: 0)
+        return FencedPane(
+            facts: PaneTapeStreamFence(
+                origin: .init(initial: initial, cursor: cursor(sequence: 0, feed: 0)),
+                // The live pane runs at the geometry a sync would report, and the recorder's
+                // live cursor is the one past every event the fence retained.
+                live: .init(initial: syncDimensions, cursor: retained.nextCursor),
+                retained: retained,
+                requested: requested ?? .placed(retained)
             ),
-            retained: retained,
-            requested: requested ?? .placed(retained),
             synchronization: .init(
-                bytes: Array("state".utf8),
-                dimensions: .init(columns: 100, rows: 30, pinned: false),
+                bytes: syncBytes,
+                dimensions: syncDimensions,
                 droppedHistoryRows: droppedHistoryRows,
                 cursor: retained.nextCursor
             )

@@ -1,5 +1,7 @@
-// Pure pane-tape opening policy: it chooses retained events or an atomic state sync from one
-// owner fence. IPC request parsing and socket delivery stay outside this file.
+// Pure pane-tape stream policy in two halves: it decides retained events or an atomic state
+// sync from one owner fence, then builds the records for whichever it decided. Deciding never
+// touches terminal state, so a stream that ships events never asks for state to be serialized.
+// IPC request parsing and socket delivery stay outside this file.
 import Foundation
 import DanTermProtocol
 
@@ -23,6 +25,9 @@ enum PaneTapeCursorPlacement: Equatable, Sendable {
 }
 
 /// Carries terminal-protocol state bytes with their geometry and continuation position.
+///
+/// Only the materialize phase holds one: it is what serializing the fenced terminal produces,
+/// and the decide phase below runs entirely without it.
 struct PaneTapeStateSynchronization: Equatable, Sendable {
     let bytes: [UInt8]
     let dimensions: PaneTapeDimensions
@@ -33,13 +38,65 @@ struct PaneTapeStateSynchronization: Equatable, Sendable {
     let cursor: PaneTapeCursor
 }
 
-/// Gives stream policy every value observed at one pane-owner fence.
+/// Gives stream policy every cheap value observed at one pane-owner fence.
+///
+/// The fenced terminal itself is deliberately absent: it stays an opaque handle in the app,
+/// which resolves it only for a decision that asked for a synchronization.
 struct PaneTapeStreamFence: Equatable, Sendable {
     let origin: PaneTapeOrigin
+    /// Live geometry with the cursor past every event recorded before the fence, which is
+    /// what an opening at the fenced moment publishes instead of replaying up to it.
+    let live: PaneTapeOrigin
     let retained: PaneTapeSnapshot
     let requested: PaneTapeCursorPlacement
-    let synchronization: PaneTapeStateSynchronization
 }
+
+/// What a selected synchronization needs before it can become records: the exact-loss record
+/// that precedes it, and the bound its retained history obeys.
+///
+/// The budget lives here and nowhere else below the request boundary, so a stream that ships
+/// events has no place to carry one. `nil` means every retained row, which is what an exact
+/// consumer such as `pane.snapshot` asks for.
+struct PaneTapeSynchronizationRequirement: Equatable, Sendable {
+    let loss: JSONValue?
+    let historyBudgetBytes: Int?
+}
+
+/// The one answer to "ship these events" or "replace them with a synchronization".
+///
+/// Openings and continuations decide the same question against the same fence facts, so they
+/// decide it in one type; only the metadata around an events answer differs between them.
+enum PaneTapePayloadDecision<Events: Equatable & Sendable>: Equatable, Sendable {
+    case events(Events)
+    case synchronize(PaneTapeSynchronizationRequirement)
+}
+
+/// Everything an opening that ships recorder events publishes, decided without terminal state.
+struct PaneTapeEventOpening: Equatable, Sendable {
+    let initial: PaneTapeDimensions
+    let publishedCursor: PaneTapeCursor
+    let records: [JSONValue]
+    let nextCursor: PaneTapeCursor
+    let replicaHistoryIsComplete: Bool
+}
+
+/// One opening's answer, plus the start-record facts that hold either way.
+struct PaneTapeOpeningDecision: Equatable, Sendable {
+    let capture: PaneTapeCaptureMode
+    let reconstructible: Bool
+    let payload: PaneTapePayloadDecision<PaneTapeEventOpening>
+}
+
+/// One followed suffix that ships as the recorder events it is, with the history standing it
+/// leaves the replica holding.
+struct PaneTapeEventContinuation: Equatable, Sendable {
+    let snapshot: PaneTapeSnapshot
+    let replicaHistoryIsComplete: Bool
+}
+
+/// One continuation's answer. It needs no surrounding metadata: a followed suffix publishes no
+/// start record.
+typealias PaneTapeContinuationDecision = PaneTapePayloadDecision<PaneTapeEventContinuation>
 
 /// Describes the complete prefix that must be delivered before live follow batches can begin.
 struct PaneTapeOpening: Equatable, Sendable {
@@ -60,111 +117,164 @@ struct PaneTapeContinuation: Equatable, Sendable {
     let replicaHistoryIsComplete: Bool
 }
 
-/// Keeps a followed suffix inseparable from exact replacement state at its ending cursor.
-struct PaneTapeFollowStreamFence: Equatable, Sendable {
-    let snapshot: PaneTapeSnapshot
-    let synchronization: PaneTapeStateSynchronization
-}
-
-/// Builds one followed suffix, replacing lost events with exact state in reconstructible mode.
+/// Chooses what one followed suffix ships, replacing lost events with state in reconstructible
+/// mode.
 ///
 /// The same replacement covers a second case: a suffix that resizes cannot be replayed by a
 /// replica whose history the stream truncated, so that suffix is replaced whole by a fresh
 /// bounded sync at its ending cursor. No replaced event is also delivered, which is what keeps
 /// the replica's grid exact instead of an argument about how far a reflow can reach.
-func makePaneTapeContinuation(
+func decidePaneTapeContinuation(
     policy: PaneTapeSyncPolicy,
     replicaHistoryIsComplete: Bool,
-    fence: PaneTapeFollowStreamFence
-) -> PaneTapeContinuation {
-    if policy.mode == .reconstructible, fence.snapshot.droppedEventCount > 0 {
-        return synchronizedContinuation(
-            loss: makePaneTapeExactGapRecord(fence.snapshot),
-            synchronization: fence.synchronization
-        )
+    snapshot: PaneTapeSnapshot
+) -> PaneTapeContinuationDecision {
+    if case .reconstructible(let historyBudgetBytes) = policy {
+        if snapshot.droppedEventCount > 0 {
+            return .synchronize(PaneTapeSynchronizationRequirement(
+                loss: makePaneTapeExactGapRecord(snapshot),
+                historyBudgetBytes: historyBudgetBytes
+            ))
+        }
+        if replicaHistoryIsComplete == false,
+           snapshot.events.contains(where: \.needsCompleteHistory)
+        {
+            return .synchronize(PaneTapeSynchronizationRequirement(
+                loss: nil,
+                historyBudgetBytes: historyBudgetBytes
+            ))
+        }
     }
-    if policy.mode == .reconstructible,
-       replicaHistoryIsComplete == false,
-       fence.snapshot.events.contains(where: \.needsCompleteHistory)
-    {
-        return synchronizedContinuation(loss: nil, synchronization: fence.synchronization)
-    }
-    return PaneTapeContinuation(
-        batch: makePaneTapeBatch(from: fence.snapshot),
+    return .events(PaneTapeEventContinuation(
+        snapshot: snapshot,
         replicaHistoryIsComplete: replicaHistoryIsComplete
+    ))
+}
+
+/// Builds the suffix a continuation decided to ship as recorder events.
+func makePaneTapeContinuation(events: PaneTapeEventContinuation) -> PaneTapeContinuation {
+    PaneTapeContinuation(
+        batch: makePaneTapeBatch(from: events.snapshot),
+        replicaHistoryIsComplete: events.replicaHistoryIsComplete
     )
 }
 
-private func synchronizedContinuation(
-    loss: JSONValue?,
+/// Builds the suffix a continuation decided to replace with state, from the synchronization
+/// serialized for that requirement.
+func makePaneTapeContinuation(
+    requirement: PaneTapeSynchronizationRequirement,
     synchronization: PaneTapeStateSynchronization
 ) -> PaneTapeContinuation {
     PaneTapeContinuation(
         batch: PaneTapeBatch(
-            records: (loss.map { [$0] } ?? [])
+            records: (requirement.loss.map { [$0] } ?? [])
                 + makePaneTapeSynchronizationRecords(synchronization),
             nextCursor: synchronization.cursor
         ),
+        // Only the encode knows how much history fit, and the next fetch decides the resize
+        // question from it, so the materialized suffix is what carries the standing forward.
         replicaHistoryIsComplete: synchronization.droppedHistoryRows == 0
     )
 }
 
-/// Applies the reconstructibility rule without IO or mutable subscription state.
-func makePaneTapeOpening(
-    request: PaneTapeStreamRequest,
-    fence: PaneTapeStreamFence,
-    provenance: JSONValue = .object(["source": .string("danterm-live-capture")])
-) -> PaneTapeOpening {
-    let selection = selectPaneTapeOpening(request: request, fence: fence)
-    let start = makePaneTapeStart(
-        capture: request.capture,
-        provenance: provenance,
-        initial: selection.initial,
-        cursor: selection.publishedCursor ?? selection.nextCursor,
-        publishesCursor: selection.publishedCursor != nil,
-        reconstructible: request.policy.mode == .reconstructible
-    )
-    return PaneTapeOpening(
-        start: start,
-        records: selection.records,
-        nextCursor: selection.nextCursor,
-        replicaHistoryIsComplete: selection.replicaHistoryIsComplete
-    )
-}
-
-private struct PaneTapeOpeningSelection {
-    let initial: PaneTapeDimensions
-    let publishedCursor: PaneTapeCursor?
-    let records: [JSONValue]
-    let nextCursor: PaneTapeCursor
-    let replicaHistoryIsComplete: Bool
-}
-
-private func selectPaneTapeOpening(
+/// Applies the reconstructibility rule to one opening without IO or terminal state.
+func decidePaneTapeOpening(
     request: PaneTapeStreamRequest,
     fence: PaneTapeStreamFence
-) -> PaneTapeOpeningSelection {
-    switch request.position {
+) -> PaneTapeOpeningDecision {
+    PaneTapeOpeningDecision(
+        capture: request.capture,
+        reconstructible: request.policy.mode == .reconstructible,
+        payload: selectPaneTapeOpeningPayload(request: request, fence: fence)
+    )
+}
+
+/// Builds the opening an events decision selected.
+func makePaneTapeOpening(
+    _ decision: PaneTapeOpeningDecision,
+    events: PaneTapeEventOpening,
+    provenance: JSONValue = defaultPaneTapeProvenance
+) -> PaneTapeOpening {
+    PaneTapeOpening(
+        start: makePaneTapeStart(
+            capture: decision.capture,
+            provenance: provenance,
+            initial: events.initial,
+            cursor: events.publishedCursor,
+            publishesCursor: true,
+            reconstructible: decision.reconstructible
+        ),
+        records: events.records,
+        nextCursor: events.nextCursor,
+        replicaHistoryIsComplete: events.replicaHistoryIsComplete
+    )
+}
+
+/// Builds the opening a synchronization decision selected, from the state serialized for that
+/// requirement.
+func makePaneTapeOpening(
+    _ decision: PaneTapeOpeningDecision,
+    requirement: PaneTapeSynchronizationRequirement,
+    synchronization: PaneTapeStateSynchronization,
+    provenance: JSONValue = defaultPaneTapeProvenance
+) -> PaneTapeOpening {
+    PaneTapeOpening(
+        start: makePaneTapeStart(
+            capture: decision.capture,
+            provenance: provenance,
+            initial: synchronization.dimensions,
+            // The sync record carries the continuation cursor itself, so the start record
+            // stating one too would publish the same position twice.
+            cursor: synchronization.cursor,
+            publishesCursor: false,
+            reconstructible: decision.reconstructible
+        ),
+        records: (requirement.loss.map { [$0] } ?? [])
+            + makePaneTapeSynchronizationRecords(synchronization),
+        nextCursor: synchronization.cursor,
+        replicaHistoryIsComplete: synchronization.droppedHistoryRows == 0
+    )
+}
+
+/// What a stream states about where its records came from when no caller names something else.
+let defaultPaneTapeProvenance = JSONValue.object(["source": .string("danterm-live-capture")])
+
+/// Splits the opening decision by policy case, so a raw stream never has a history budget in
+/// scope and never has a branch that could ask for a synchronization.
+private func selectPaneTapeOpeningPayload(
+    request: PaneTapeStreamRequest,
+    fence: PaneTapeStreamFence
+) -> PaneTapePayloadDecision<PaneTapeEventOpening> {
+    switch request.policy {
+    case .raw:
+        return .events(rawOpening(position: request.position, fence: fence))
+    case .reconstructible(let historyBudgetBytes):
+        return reconstructibleOpening(
+            position: request.position,
+            fence: fence,
+            historyBudgetBytes: historyBudgetBytes
+        )
+    }
+}
+
+/// A raw stream preserves recorder evidence and synthesizes nothing, so every start position
+/// answers with records the fence already holds. Its return type says so.
+private func rawOpening(
+    position: PaneTapeStartPosition,
+    fence: PaneTapeStreamFence
+) -> PaneTapeEventOpening {
+    switch position {
     case .now:
-        if request.policy.mode == .reconstructible {
-            return synchronizedSelection(loss: nil, fence: fence)
-        }
-        return PaneTapeOpeningSelection(
-            initial: fence.synchronization.dimensions,
-            publishedCursor: fence.synchronization.cursor,
+        return PaneTapeEventOpening(
+            initial: fence.live.initial,
+            publishedCursor: fence.live.cursor,
             records: [],
-            nextCursor: fence.synchronization.cursor,
+            nextCursor: fence.live.cursor,
             replicaHistoryIsComplete: false
         )
 
     case .beginning:
-        if request.policy.mode == .reconstructible, fence.retained.droppedEventCount > 0 {
-            return synchronizedSelection(
-                loss: makePaneTapeExactGapRecord(fence.retained),
-                fence: fence
-            )
-        }
-        return eventSelection(
+        return eventOpening(
             initial: fence.origin.initial,
             cursor: fence.origin.cursor,
             snapshot: fence.retained,
@@ -176,13 +286,7 @@ private func selectPaneTapeOpening(
     case .cursor(let cursor):
         switch fence.requested {
         case .placed(let snapshot):
-            if request.policy.mode == .reconstructible, snapshot.droppedEventCount > 0 {
-                return synchronizedSelection(
-                    loss: makePaneTapeExactGapRecord(snapshot),
-                    fence: fence
-                )
-            }
-            return eventSelection(
+            return eventOpening(
                 initial: fence.origin.initial,
                 cursor: cursor,
                 snapshot: snapshot,
@@ -191,15 +295,14 @@ private func selectPaneTapeOpening(
                 replicaHistoryIsComplete: false
             )
         case .unplaceable:
-            let totalLoss = makePaneTapeTotalGapRecord()
-            if request.policy.mode == .reconstructible {
-                return synchronizedSelection(loss: totalLoss, fence: fence)
-            }
-            let head = retainedHeadCursor(origin: fence.origin.cursor, snapshot: fence.retained)
-            return PaneTapeOpeningSelection(
+            return PaneTapeEventOpening(
                 initial: fence.origin.initial,
-                publishedCursor: head,
-                records: [totalLoss] + fence.retained.events.map(makePaneTapeEventRecord),
+                publishedCursor: retainedHeadCursor(
+                    origin: fence.origin.cursor,
+                    snapshot: fence.retained
+                ),
+                records: [makePaneTapeTotalGapRecord()]
+                    + fence.retained.events.map(makePaneTapeEventRecord),
                 nextCursor: fence.retained.nextCursor,
                 replicaHistoryIsComplete: false
             )
@@ -207,32 +310,69 @@ private func selectPaneTapeOpening(
     }
 }
 
-private func eventSelection(
+/// A reconstructible stream may replace evidence it cannot deliver with terminal state, so
+/// this is the only place a synchronization requirement -- and a budget -- is minted.
+private func reconstructibleOpening(
+    position: PaneTapeStartPosition,
+    fence: PaneTapeStreamFence,
+    historyBudgetBytes: Int?
+) -> PaneTapePayloadDecision<PaneTapeEventOpening> {
+    func synchronize(loss: JSONValue?) -> PaneTapePayloadDecision<PaneTapeEventOpening> {
+        .synchronize(PaneTapeSynchronizationRequirement(
+            loss: loss,
+            historyBudgetBytes: historyBudgetBytes
+        ))
+    }
+
+    switch position {
+    case .now:
+        return synchronize(loss: nil)
+
+    case .beginning:
+        guard fence.retained.droppedEventCount == 0 else {
+            return synchronize(loss: makePaneTapeExactGapRecord(fence.retained))
+        }
+        return .events(eventOpening(
+            initial: fence.origin.initial,
+            cursor: fence.origin.cursor,
+            snapshot: fence.retained,
+            // Replayed from the recorder's own beginning with nothing evicted: the replica
+            // built every history row the source has.
+            replicaHistoryIsComplete: true
+        ))
+
+    case .cursor(let cursor):
+        switch fence.requested {
+        case .placed(let snapshot):
+            guard snapshot.droppedEventCount == 0 else {
+                return synchronize(loss: makePaneTapeExactGapRecord(snapshot))
+            }
+            return .events(eventOpening(
+                initial: fence.origin.initial,
+                cursor: cursor,
+                snapshot: snapshot,
+                // The client held this cursor, and a cursor is a recorder coordinate: it
+                // reports nothing about the history the replica behind it actually holds.
+                replicaHistoryIsComplete: false
+            ))
+        case .unplaceable:
+            return synchronize(loss: makePaneTapeTotalGapRecord())
+        }
+    }
+}
+
+private func eventOpening(
     initial: PaneTapeDimensions,
     cursor: PaneTapeCursor,
     snapshot: PaneTapeSnapshot,
     replicaHistoryIsComplete: Bool
-) -> PaneTapeOpeningSelection {
-    PaneTapeOpeningSelection(
+) -> PaneTapeEventOpening {
+    PaneTapeEventOpening(
         initial: initial,
         publishedCursor: cursor,
         records: makePaneTapeBatch(from: snapshot).records,
         nextCursor: snapshot.nextCursor,
         replicaHistoryIsComplete: replicaHistoryIsComplete
-    )
-}
-
-private func synchronizedSelection(
-    loss: JSONValue?,
-    fence: PaneTapeStreamFence
-) -> PaneTapeOpeningSelection {
-    PaneTapeOpeningSelection(
-        initial: fence.synchronization.dimensions,
-        publishedCursor: nil,
-        records: (loss.map { [$0] } ?? [])
-            + makePaneTapeSynchronizationRecords(fence.synchronization),
-        nextCursor: fence.synchronization.cursor,
-        replicaHistoryIsComplete: fence.synchronization.droppedHistoryRows == 0
     )
 }
 

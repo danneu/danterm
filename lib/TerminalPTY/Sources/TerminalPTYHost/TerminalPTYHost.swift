@@ -239,8 +239,9 @@ public struct TerminalFlightRecordingStateSynchronization: Equatable, Sendable {
 /// The pairing exists so state and cursor cannot come from different owner turns: only the
 /// isolated mints below can build one, and they derive both ingredients off the owner
 /// themselves rather than taking either from a caller. Serializing is separate because it
-/// walks the whole retained history, which must not run on the owner queue.
-package struct TerminalFlightRecordingStatePairing: Sendable {
+/// walks the whole retained history, which must not run on the owner queue -- and because a
+/// stream that ships recorder events instead never has to pay for it at all.
+public struct TerminalFlightRecordingStatePairing: Sendable {
     private let terminal: Terminal
     private let pinned: Bool
     private let cursor: TerminalFlightRecordingCursor
@@ -255,10 +256,12 @@ package struct TerminalFlightRecordingStatePairing: Sendable {
     /// that does so -- spending at most `historyBudgetBytes` on retained history; `nil`
     /// carries all of it.
     ///
-    /// Call it only after the fence that minted the pairing has returned. Without a budget
-    /// the cost is proportional to retained scrollback, so resolving inside a fence closure
-    /// would stall the owner queue that also ingests PTY output.
-    package func resolve(historyBudgetBytes: Int?) -> TerminalFlightRecordingStateSynchronization {
+    /// Call it only after the fence that minted the pairing has returned, and only once the
+    /// stream has selected a synchronization for the wire. Without a budget the cost is
+    /// proportional to retained scrollback, so resolving inside a fence closure would stall
+    /// the owner queue that also ingests PTY output. The terminal is a fenced copy, so the
+    /// bytes state the fence's moment however much the live pane ingested since.
+    public func resolve(historyBudgetBytes: Int?) -> TerminalFlightRecordingStateSynchronization {
         TerminalFlightRecordingStateSynchronization(
             state: terminal.stateSynchronization(historyBudgetBytes: historyBudgetBytes),
             pinned: pinned,
@@ -968,26 +971,27 @@ public actor TerminalPTYHost {
         )
     }
 
-    /// Fences retained tape, remote cursor placement, and pane state for stream policy. The
-    /// state is serialized under `historyBudgetBytes`; `nil` carries the whole retained
-    /// history, which is what an exact consumer such as a pane snapshot asks for.
+    /// Fences retained tape, remote cursor placement, live geometry, and the pane's state for
+    /// stream policy. Nothing here is serialized: the fence hands back the state unresolved so
+    /// only a stream that ships a synchronization pays to encode one.
     package nonisolated func fencedFlightRecordingStream(
-        from cursor: TerminalFlightRecordingCursor,
-        historyBudgetBytes: Int?
+        from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingStreamFence {
         let fenced = fence(countsAsProduction: false) { owner in
             (
                 owner.liveStatePairing(),
                 owner.flightTape.backlogOrigin(),
                 owner.flightTape.cursorSnapshot(from: .beginning),
-                owner.flightTape.cursorPlacement(from: cursor)
+                owner.flightTape.cursorPlacement(from: cursor),
+                owner.flightTape.fromNowOrigin()
             )
         }.value
         return TerminalFlightRecordingStreamFence(
             origin: fenced.1,
+            live: fenced.4,
             retained: fenced.2,
             requested: fenced.3,
-            synchronization: fenced.0.resolve(historyBudgetBytes: historyBudgetBytes)
+            state: fenced.0
         )
     }
 
@@ -1000,11 +1004,11 @@ public actor TerminalPTYHost {
         }.value
     }
 
-    /// Rearms one follow notice while pairing its suffix with exact state at the same cursor.
+    /// Rearms one follow notice while pairing its suffix with the fenced state at the same
+    /// cursor, left unserialized until the stream selects a synchronization.
     package nonisolated func fencedFlightRecordingFollowStream(
         subscriptionId: UUID,
-        from cursor: TerminalFlightRecordingCursor,
-        historyBudgetBytes: Int?
+        from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingFollowFence? {
         let fenced = fence(countsAsProduction: false) { owner in
             owner.followedStatePairing(subscriptionId: subscriptionId, from: cursor)
@@ -1012,7 +1016,7 @@ public actor TerminalPTYHost {
         guard let fenced else { return nil }
         return TerminalFlightRecordingFollowFence(
             snapshot: fenced.snapshot,
-            synchronization: fenced.pairing.resolve(historyBudgetBytes: historyBudgetBytes)
+            state: fenced.pairing
         )
     }
 

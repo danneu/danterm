@@ -466,7 +466,7 @@ public enum IpcRequest: Equatable, Sendable {
                 "mode": .string(policy.mode.rawValue),
             ]
             if follow { object["follow"] = .bool(true) }
-            if let budget = policy.historyBudgetBytes {
+            if case .reconstructible(let budget) = policy, let budget {
                 object["syncHistoryBytes"] = .number(Double(budget))
             }
             return object

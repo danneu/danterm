@@ -569,15 +569,15 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
-    // Intent: the history budget a stream states reaches the serialization the fence
-    //   performs, on the opening fence and on a follow fence alike; without one, the fence
-    //   still carries the whole retained history.
+    // Intent: the history budget a stream states reaches the serialization it asks the fenced
+    //   state for, from an opening fence and from a follow fence alike; without one, the whole
+    //   retained history is carried.
     // Why it exists: the budget is the only thing standing between a join and a payload
     //   proportional to the whole scrollback. It crosses four layers to get here, and a hop
     //   that dropped it would still produce a correct sync -- just an enormous one, which no
     //   correctness assertion anywhere else would notice.
     // Scenario: a pane whose child printed far more history than the budget allows.
-    @Test("a stream fence serializes its state under the budget it was given", .timeLimit(.minutes(1)))
+    @Test("resolving a fenced state observes the budget it was given", .timeLimit(.minutes(1)))
     func streamFenceHonorsHistoryBudget() async throws {
         let pane = try await startChildlessHost(captureTransitions: false)
         let host = pane.host
@@ -586,14 +586,10 @@ struct TerminalPTYHostTests {
         }
 
         let budget = 2048
-        let bounded = host.fencedFlightRecordingStream(
-            from: .beginning,
-            historyBudgetBytes: budget
-        ).synchronization.state
-        let whole = host.fencedFlightRecordingStream(
-            from: .beginning,
-            historyBudgetBytes: nil
-        ).synchronization.state
+        let bounded = host.fencedFlightRecordingStream(from: .beginning)
+            .state.resolve(historyBudgetBytes: budget).state
+        let whole = host.fencedFlightRecordingStream(from: .beginning)
+            .state.resolve(historyBudgetBytes: nil).state
 
         #expect(bounded.droppedHistoryRows > 0)
         #expect(whole.droppedHistoryRows == 0)
@@ -604,10 +600,9 @@ struct TerminalPTYHostTests {
         host.addFlightRecordingFollowNotice(id: subscriptionId, from: origin.cursor, notify: {})
         let followed = try #require(host.fencedFlightRecordingFollowStream(
             subscriptionId: subscriptionId,
-            from: origin.cursor,
-            historyBudgetBytes: budget
+            from: origin.cursor
         ))
-        #expect(followed.synchronization.state.droppedHistoryRows > 0)
+        #expect(followed.state.resolve(historyBudgetBytes: budget).state.droppedHistoryRows > 0)
         host.removeFlightRecordingFollowNotice(id: subscriptionId)
         await host.close()
     }
@@ -622,7 +617,8 @@ struct TerminalPTYHostTests {
         let host = pane.host
         #expect(await pane.writeFromChild("one\r\n"))
 
-        let fenced = host.fencedFlightRecordingStream(from: .beginning, historyBudgetBytes: nil).synchronization
+        let fenced = host.fencedFlightRecordingStream(from: .beginning)
+            .state.resolve(historyBudgetBytes: nil)
         var resumed = try #require(Terminal(
             columns: fenced.state.columns,
             rows: fenced.state.rows
@@ -667,16 +663,18 @@ struct TerminalPTYHostTests {
             writeBytesBeforeNextSequence: 0
         )
 
-        let fenced = host.fencedFlightRecordingStream(from: foreign, historyBudgetBytes: nil)
+        let fenced = host.fencedFlightRecordingStream(from: foreign)
+        let synchronization = fenced.state.resolve(historyBudgetBytes: nil)
         var resumed = try #require(Terminal(
-            columns: fenced.synchronization.state.columns,
-            rows: fenced.synchronization.state.rows
+            columns: synchronization.state.columns,
+            rows: synchronization.state.rows
         ))
-        resumed.feed(fenced.synchronization.state.bytes)
+        resumed.feed(synchronization.state.bytes)
 
         #expect(fenced.requested.isUnplaceable)
         #expect(fenced.retained.events.isEmpty == false)
-        #expect(fenced.synchronization.cursor == fenced.retained.nextCursor)
+        #expect(synchronization.cursor == fenced.retained.nextCursor)
+        #expect(fenced.live.cursor == fenced.retained.nextCursor)
         #expect(resumed.screenText == host.fencedSnapshot().screenText)
         await host.close()
     }
@@ -704,18 +702,69 @@ struct TerminalPTYHostTests {
 
         let fenced = try #require(host.fencedFlightRecordingFollowStream(
             subscriptionId: subscriptionId,
-            from: origin.cursor,
-            historyBudgetBytes: nil
+            from: origin.cursor
         ))
+        let synchronization = fenced.state.resolve(historyBudgetBytes: nil)
         var resumed = try #require(Terminal(
-            columns: fenced.synchronization.state.columns,
-            rows: fenced.synchronization.state.rows
+            columns: synchronization.state.columns,
+            rows: synchronization.state.rows
         ))
-        resumed.feed(fenced.synchronization.state.bytes)
+        resumed.feed(synchronization.state.bytes)
 
         #expect(fenced.snapshot.events.isEmpty == false)
-        #expect(fenced.synchronization.cursor == fenced.snapshot.nextCursor)
+        #expect(synchronization.cursor == fenced.snapshot.nextCursor)
         #expect(resumed.screenText == host.fencedSnapshot().screenText)
+        host.removeFlightRecordingFollowNotice(id: subscriptionId)
+        await host.close()
+    }
+
+    // Intent: state serialized after a fence returns describes the terminal as the fence saw
+    //   it, however much the pane ingested in between -- for an opening fence and a follow
+    //   fence alike.
+    // Why it exists: the serialization is now deferred until a stream selects a sync, so it
+    //   runs strictly after the fence rather than inside it. If it read the live terminal, a
+    //   sync would state a moment its paired cursor does not, and the replica would apply the
+    //   suffix after it twice.
+    // Scenario: a pane fences a stream, the child keeps printing, and only then does the
+    //   stream ask for bytes.
+    @Test("a fenced state serialized later still states the fence's moment", .timeLimit(.minutes(1)))
+    func deferredSerializationStatesTheFencedMoment() async throws {
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("fenced\r\n"))
+
+        let opening = host.fencedFlightRecordingStream(from: .beginning)
+        let subscriptionId = UUID()
+        host.addFlightRecordingFollowNotice(
+            id: subscriptionId,
+            from: opening.live.cursor,
+            notify: {}
+        )
+        let fencedText = host.fencedSnapshot().screenText
+        #expect(await pane.writeFromChild("after the fence\r\n"))
+        let follow = try #require(host.fencedFlightRecordingFollowStream(
+            subscriptionId: subscriptionId,
+            from: opening.live.cursor
+        ))
+        let followFencedText = host.fencedSnapshot().screenText
+        #expect(await pane.writeFromChild("after the follow fence\r\n"))
+        // Both halves only have teeth while the live terminal has moved past the moment each
+        // fence took, so state the two moves rather than trust the writes above.
+        #expect(followFencedText != fencedText)
+        #expect(host.fencedSnapshot().screenText != followFencedText)
+
+        for (synchronization, expected) in [
+            (opening.state.resolve(historyBudgetBytes: nil), fencedText),
+            (follow.state.resolve(historyBudgetBytes: nil), followFencedText),
+        ] {
+            var resumed = try #require(Terminal(
+                columns: synchronization.state.columns,
+                rows: synchronization.state.rows
+            ))
+            resumed.feed(synchronization.state.bytes)
+            #expect(resumed.screenText == expected)
+        }
+
         host.removeFlightRecordingFollowNotice(id: subscriptionId)
         await host.close()
     }

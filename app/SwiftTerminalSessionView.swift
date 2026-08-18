@@ -92,19 +92,17 @@ func paneTapeSnapshot(
     )
 }
 
-/// Lowers exact terminal state and its continuation cursor into stream-policy values.
-func paneTapeStateSynchronization(
-    _ synchronization: TerminalFlightRecordingStateSynchronization
-) -> PaneTapeStateSynchronization {
+/// Lowers one atomically fenced geometry-and-cursor pair into stream-policy values.
+func paneTapeOrigin(_ origin: TerminalFlightRecordingOrigin) -> PaneTapeOrigin {
     .init(
-        bytes: synchronization.state.bytes,
-        dimensions: paneTapeDimensions(synchronization.geometry),
-        droppedHistoryRows: synchronization.state.droppedHistoryRows,
-        cursor: paneTapeCursor(synchronization.cursor)
+        initial: paneTapeDimensions(origin.initial),
+        cursor: paneTapeCursor(origin.cursor)
     )
 }
 
-/// Lowers one owner-fenced stream-policy input without making the support layer import engines.
+/// Lowers the cheap half of one owner-fenced stream-policy input, without making the support
+/// layer import engines. The fenced terminal stays behind in `fence.state`: only a decision
+/// that selects a synchronization ever serializes it.
 func paneTapeStreamFence(
     _ fence: TerminalFlightRecordingStreamFence
 ) throws -> PaneTapeStreamFence {
@@ -116,23 +114,28 @@ func paneTapeStreamFence(
         requested = .unplaceable
     }
     return PaneTapeStreamFence(
-        origin: .init(
-            initial: paneTapeDimensions(fence.origin.initial),
-            cursor: paneTapeCursor(fence.origin.cursor)
-        ),
+        origin: paneTapeOrigin(fence.origin),
+        live: paneTapeOrigin(fence.live),
         retained: try paneTapeSnapshot(fence.retained),
-        requested: requested,
-        synchronization: paneTapeStateSynchronization(fence.synchronization)
+        requested: requested
     )
 }
 
-/// Lowers a followed suffix and its replacement state without separating their fence.
-func paneTapeFollowStreamFence(
-    _ fence: TerminalFlightRecordingFollowFence
-) throws -> PaneTapeFollowStreamFence {
-    PaneTapeFollowStreamFence(
-        snapshot: try paneTapeSnapshot(fence.snapshot),
-        synchronization: paneTapeStateSynchronization(fence.synchronization)
+/// Serializes one fenced terminal for the requirement a stream decision raised, and lowers the
+/// result into stream-policy values. This is the one place the app crosses from a decision into
+/// terminal bytes, and it runs off the main actor and off the pane-owner queue.
+func paneTapeStateSynchronization(
+    _ state: TerminalFlightRecordingStatePairing,
+    for requirement: PaneTapeSynchronizationRequirement
+) -> PaneTapeStateSynchronization {
+    let synchronization = state.resolve(
+        historyBudgetBytes: requirement.historyBudgetBytes
+    )
+    return .init(
+        bytes: synchronization.state.bytes,
+        dimensions: paneTapeDimensions(synchronization.geometry),
+        droppedHistoryRows: synchronization.state.droppedHistoryRows,
+        cursor: paneTapeCursor(synchronization.cursor)
     )
 }
 #endif
@@ -1185,16 +1188,24 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         case .cursor(let cursor): requestedCursor = cursor
         case .beginning, .now: requestedCursor = .beginning
         }
-        let fence = controller.flightRecordingStreamFence(
-            from: recorderCursor(requestedCursor),
-            historyBudgetBytes: policy.historyBudgetBytes
-        )
+        let fence = controller.flightRecordingStreamFence(from: recorderCursor(requestedCursor))
         return {
-            makePaneTapeOpening(
+            let decision = decidePaneTapeOpening(
                 request: PaneTapeStreamRequest(capture: capture, policy: policy, position: start),
-                fence: try paneTapeStreamFence(fence),
-                provenance: try paneTapeProvenanceJSON()
+                fence: try paneTapeStreamFence(fence)
             )
+            let provenance = try paneTapeProvenanceJSON()
+            switch decision.payload {
+            case .events(let events):
+                return makePaneTapeOpening(decision, events: events, provenance: provenance)
+            case .synchronize(let requirement):
+                return makePaneTapeOpening(
+                    decision,
+                    requirement: requirement,
+                    synchronization: paneTapeStateSynchronization(fence.state, for: requirement),
+                    provenance: provenance
+                )
+            }
         }
     }
 
@@ -1206,17 +1217,25 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     ) -> (@Sendable () throws -> PaneTapeContinuation)? {
         guard let fence = controller.flightRecordingFollowStreamFence(
             subscriptionId: subscriptionId,
-            from: recorderCursor(cursor),
-            historyBudgetBytes: policy.historyBudgetBytes
+            from: recorderCursor(cursor)
         ) else {
             return nil
         }
         return {
-            makePaneTapeContinuation(
+            let decision = decidePaneTapeContinuation(
                 policy: policy,
                 replicaHistoryIsComplete: replicaHistoryIsComplete,
-                fence: try paneTapeFollowStreamFence(fence)
+                snapshot: try paneTapeSnapshot(fence.snapshot)
             )
+            switch decision {
+            case .events(let events):
+                return makePaneTapeContinuation(events: events)
+            case .synchronize(let requirement):
+                return makePaneTapeContinuation(
+                    requirement: requirement,
+                    synchronization: paneTapeStateSynchronization(fence.state, for: requirement)
+                )
+            }
         }
     }
 
