@@ -134,8 +134,14 @@ so a computed path fails rather than slipping past.
 - Deriving the gate's `STEPS` array from the manifests. That is a separate audit
   item; this change only supplies the precondition it needs -- one declaration
   per target -- plus the minimal executed form of its coverage claim.
-- Changing any Swift source. Not one line of `lib/DanTermProtocol`,
-  `lib/DanTermClient`, or `lib/DanTermSupport` changes.
+- Changing what any Swift source does. The split forces exactly one
+  access-level widening, at the boundary it creates: `cli/main.swift` calls
+  `gatherDoctorFacts`, which `lib/DanTermSupport` declares `package`, and
+  `package` no longer reaches the CLI once `lib/DanTermSupport` is a separate
+  package. Only the three declarations the CLI uses become `public` --
+  `DoctorProbeEnv`, its `live` value, and `gatherDoctorFacts`. The struct's
+  stored properties and everything else keep the access they have now, and no
+  behavior changes.
 - `just clean` already matches `.build` by name, so no clean-list edit is
   needed. It does not match `.build-ios-gate`; that gap is real and belongs to
   the `just clean` finding, not here.
@@ -165,6 +171,14 @@ so a computed path fails rather than slipping past.
 - **RI3.** An allowlist exempting `DanTermSupport` from the ownership rule.
   `ios-portability-gate.sh` already argues this down for its own pin: an
   allowlist makes the rule mean "owned, except where a list says otherwise".
+- **RI4.** Move the doctor prober into `cli/` instead of widening its access. It
+  would force `CLIPathInstaller.installDiagnostics()` and `Dependencies` public
+  instead, a bigger surface than the three declarations, and it would evict
+  `DoctorProberTests` from the nested package's suite.
+- **RI5.** A lint over `package`-access declarations instead of a cold-build
+  gate lane. It would re-implement in grep a check the compiler already performs
+  exactly, and it would cover one class of break while the real class is any
+  break that stale incremental state masks.
 
 ## Critical files
 
@@ -175,8 +189,17 @@ modeled on `scripts/ios-portability-gate.sh` and
 
 ## Commit progress
 
-Each slice is independently green under `just test`. Ordering is forced: the
-ownership lint fails on the tree the middle slices clean up, so it lands last.
+Each slice is independently green under `just test`. Ordering is forced: slices
+2 through 4 clean the tree up, and slice 5 repairs the cold build that slice 4
+broke. The ownership lint fails on the tree the middle slices clean up, and
+those slices are committed, so that constraint is already met and it lands at 6.
+The cold-build gate lane follows at 7 because both slices edit
+`scripts/run-test-suite.sh` and the lint's work is already implemented and
+uncommitted in the working tree: if the lane landed first, staging that shared
+file would sweep the lint's gate steps into the wrong commit. Landing the
+already-implemented lint first keeps each commit's touch of
+`scripts/run-test-suite.sh` clean and separate. The audit close comes last at 8,
+because it records the hashes of everything above.
 
 - [x] **1. Close the gate hole.** Add the coverage check, its self-test, and the
       `lib/DanTermClient` gate step. Red first: the check names
@@ -188,12 +211,46 @@ ownership lint fails on the tree the middle slices clean up, so it lands last.
 - [x] **3. `DanTermClient` becomes a package dependency.** Same shape.
 - [x] **4. `DanTermSupport` becomes a package dependency,** carrying the CoreText
       link into `lib/DanTermSupport/Package.swift`.
-- [ ] **5. The ownership lint, its self-test, and the written rule.** An ADR
+- [x] **5. Repair the cold build.** Widen the three `package` declarations in
+      `lib/DanTermSupport/Sources/DanTermSupport/DoctorProber.swift` --
+      `DoctorProbeEnv`, its `live` value, and `gatherDoctorFacts` -- to `public`.
+      They are the only `package`-access declarations in the three split
+      packages, and their only out-of-package user is `cli/main.swift:391`.
+      Slice 4 made `lib/DanTermSupport` a separate package, so `package` access
+      stopped reaching the CLI and a cold `swift build --product DanTermCLI`
+      fails with "cannot find 'gatherDoctorFacts' in scope". Every warm scratch
+      directory hid this, which is why slice 4 verified green. `public` is the
+      right marker: the CLI is now an external consumer of the `DanTermSupport`
+      product, and AGENTS.md names `public` as the `lib/` boundary marker.
+      History stays append-only by the user's decision, so this is its own
+      commit and does not amend d633f92e. The consequence is stated openly:
+      slice 4's commit is not cold-buildable on its own, so a bisect that lands
+      on that one commit hits the failure.
+- [ ] **6. The ownership lint, its self-test, and the written rule.** An ADR
       stating both halves of the rule -- a re-declared target is a violation, a
       symlink inside a target's own declared path is not -- indexed in
       `docs/design/index.md`, referenced from AGENTS.md, and noted in the
       symlink ADR's consequences.
-- [ ] **6. Close S48 in the audit.** In
+- [ ] **7. A cold-build gate lane.** Add one step to `scripts/run-test-suite.sh`
+      that builds the whole root graph with tests into a per-run throwaway
+      scratch (`swift build --build-tests --scratch-path "$(mktemp -d)"`, with
+      cleanup), first in `STEPS`. Every existing step uses a warm per-purpose
+      scratch -- `.build-app-tests`, `.build-gate`, the default `.build` -- so
+      the gate structurally cannot catch a break that stale incremental state
+      masks, which is exactly how slice 4 passed. The step satisfies the
+      step-independence rule by construction: `mktemp -d` shares no build
+      directory with anything. Cost is real: about 27s solo at high CPU, and
+      inside the gate's capped pool it likely becomes the longest pole, moving
+      the gate from about 75s toward about 2 minutes. State the scope limit
+      where the lane is defined: it covers the root graph, where every
+      cross-manifest edge this plan adds terminates, while the nested-package
+      test lanes and the iOS gate still run warm. Red first: run against the
+      tree before slice 5 lands, the lane fails at `cli/main.swift:391`. Slice 5
+      lands first under append-only ordering, so make that demonstration against
+      a checkout or scratch export of d633f92e -- record the failure there, then
+      confirm the lane green on the current tree -- and put both records in the
+      implementation notes.
+- [ ] **8. Close S48 in the audit.** In
       `docs/scratch/2026-08-11-simplification-audit.md`, put the hashes of the
       slices above in the S48 row's Status column, the way every other closed
       finding records the commits that closed it, and rewrite the
@@ -204,8 +261,12 @@ ownership lint fails on the tree the middle slices clean up, so it lands last.
 
 ## Verification
 
-Per slice, and in full after slice 5:
+Per slice, and in full after slice 8:
 
+0. A cold build of the whole root graph with tests, into a throwaway scratch:
+   `swift build --build-tests --scratch-path "$(mktemp -d)"`. Run it first,
+   because every check below reuses a warm scratch and cannot see a break that
+   only a cold build exposes.
 1. `bash ./dev-build.sh --no-install`.
 2. `swift build --product DanTermCLI`, then run the binary from
    `swift build --show-bin-path` -- the default-`.build` path
@@ -285,3 +346,18 @@ Per slice, and in full after slice 5:
   still cross-compiles both pinned packages with tests (PO4), the coverage lint still
   reports 9 estates each run once, and a dev slot launched, answered `ls` over its
   control socket, and quit cleanly (PO3).
+- **Slice 5, red first.** On the tree at d633f92e, `swift build --product DanTermCLI`
+  into a fresh scratch failed with exactly one error: `cli/main.swift:391:37: error:
+  cannot find 'gatherDoctorFacts' in scope`. Widening the three declarations was
+  enough; nothing else in the three split packages carried `package` access, so no
+  other symbol needed a change.
+- **Slice 5.** Only the three declarations named in the plan became `public`. The
+  stored properties of `DoctorProbeEnv` stay `internal`, so its memberwise
+  initializer stays inside the module and `DoctorProbeEnv.live` remains the only way
+  an external consumer builds one -- which is all `cli/main.swift` needs.
+- **Slice 5 verification.** A cold `swift build --build-tests` into a throwaway
+  scratch is green, `bash ./dev-build.sh --no-install` builds, the CLI binary at
+  `swift build --show-bin-path` runs `doctor` and prints its full ladder, `just test`
+  passed all 98 steps in 82s, the iOS gate still cross-compiles `lib/DanTermProtocol`
+  and `lib/DanTermClient` with tests, and a dev slot launched, answered `ls` over its
+  control socket, and quit cleanly.

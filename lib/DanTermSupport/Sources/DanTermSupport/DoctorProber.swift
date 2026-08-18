@@ -5,7 +5,7 @@ import DanTermProtocol
 
 /// Injectable environment for doctor probes. Tests point every path at temp
 /// fixtures; production uses live HOME, PATH, argv0, and installer dependencies.
-package struct DoctorProbeEnv {
+public struct DoctorProbeEnv {
     var fileManager: FileManager
     var environment: [String: String]
     var homeDirectory: URL
@@ -14,7 +14,7 @@ package struct DoctorProbeEnv {
     var configFilePath: String
     var resolveInstalledFontFamily: (String) -> String?
 
-    package static var live: DoctorProbeEnv {
+    public static var live: DoctorProbeEnv {
         let environment = ProcessInfo.processInfo.environment
         return DoctorProbeEnv(
             fileManager: .default,
@@ -31,7 +31,7 @@ package struct DoctorProbeEnv {
 /// Reads the local machine integration state for `danterm doctor`. It performs
 /// no IPC and does not require the app to be launched.
 ///
-package func gatherDoctorFacts(
+public func gatherDoctorFacts(
     env: DoctorProbeEnv = .live,
     permissions: DoctorFacts.Permissions = .unavailable
 ) -> DoctorFacts {
