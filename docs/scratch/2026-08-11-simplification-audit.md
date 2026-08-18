@@ -181,7 +181,7 @@ in itself.
 | d3574ddb | [S15](#s15) | 20    | 4   | 5   | terminal-core  | medium | Replace the four hand-branched mode switches with one mode registry                                                   |
 | 9f0742c3 | [S16](#s16) | 20    | 4   | 5   | terminal-core  | large  | Unify the two search matchers and lift search out of Terminal                                                         |
 | cafc46a7 | [S17](#s17) | 16    | 4   | 4   | pty            | medium | Model master-close asynchrony in the reducer instead of deferring a command tail                                        |
-|        | [S18](#s18) | 16    | 4   | 4   | scrollback     | medium | Derive the grand row/content totals from the block index instead of storing them                                        |
+| 78f49c1d 2652418a 1c6bcf1f | [S18](#s18) | 16    | 4   | 4   | scrollback     | medium | Derive the grand row/content totals from the block index instead of storing them                                        |
 | d9ab5942 | [S19](#s19) | 16    | 4   | 4   | terminal-views | small  | Collapse the two presentation-input change detectors into one entry point                                               |
 | fc6e0659 a3f38257 5156cbad 927caac6 53308921 a483af03 | [S20](#s20) | 16    | 4   | 4   | tests          | medium | Stop forking a PTY child for tests that only exercise engine policy                                                     |
 | 6977454e b910eaba 2d9d4dd4 | [S21](#s21) | 16    | 4   | 4   | tests          | large  | The Command interpreter, the app's highest-churn logic, has no automated coverage                                       |
@@ -194,8 +194,8 @@ in itself.
 | 26dd4afa 5ec5c034 | [S28](#s28) | 15    | 3   | 5   | ipc-cli        | small  | Replace the CLI's two hand-rolled per-byte line readers with the shared framer                                          |
 | part 2fc9f971 | [S29](#s29) | 15    | 3   | 5   | pty            | medium | Record transitions once: fold TerminalPTYAppliedTransition into the flight recorder            |
 | 271fddbd | [S30](#s30) | 15    | 3   | 5   | pty            | small  | Replace the fence operation/output enum pair with typed fence methods                                                   |
-|        | [S31](#s31) | 15    | 3   | 5   | scrollback     | medium | Give the record side tables one owner that maintains its own byte charge                                                |
-|        | [S32](#s32) | 15    | 3   | 5   | scrollback     | small  | Collapse the seven copy-pasted task-local counters and move them out of the store file                                  |
+| 5dfdc6b4 | [S31](#s31) | 15    | 3   | 5   | scrollback     | medium | Give the record side tables one owner that maintains its own byte charge                                                |
+| 90a1cc8b | [S32](#s32) | 15    | 3   | 5   | scrollback     | small  | Collapse the seven copy-pasted task-local counters and move them out of the store file                                  |
 | b0952f47 | [S33](#s33) | 15    | 3   | 5   | sidebar        | medium | Give the sidebar reconcile pipeline one implementation the UI tests drive                                               |
 | cfcbb40f | [S34](#s34) | 15    | 3   | 5   | terminal-core  | medium | Give anchored ranges one registry instead of six hand-written enumerations                                            |
 | e5d82ad8 31d4d252 | [S35](#s35) | 15    | 3   | 5   | terminal-views | medium | Stop re-implementing grid and cell geometry in the UI-test shim                                                         |
