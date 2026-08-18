@@ -590,7 +590,8 @@ import Testing
                 totalTodoCount: 3,
                 uncompletedTodoCount: 2,
                 isZoomed: false,
-                hasSplits: false),
+                hasSplits: false,
+                isGridClaimed: false),
             "all toolbar fields derive from the pane + model.alerts")
     }
 
@@ -619,6 +620,35 @@ import Testing
 
         update(&model, .closePane(paneId: siblingId))
         #expect(desiredPaneToolbar(in: model)[paneId]?.hasSplits == false)
+    }
+
+    @Test("desiredPaneToolbar reports a claimed grid for as long as the override is there")
+    func desiredPaneToolbarTracksGridClaim() {
+        // Intent: the take-back affordance follows the presence of the pane's grid
+        //   override and nothing else -- including an override whose grid is the
+        //   one the pane would have run at anyway.
+        // Why it exists: a durable claim needs a one-gesture exit at the Mac. If
+        //   the affordance were keyed off a comparison instead of presence, a
+        //   claim that happened to match the pane's own size would leave the user
+        //   with a pane that cannot be taken back.
+        // Scenario: spec-first -- the phone claims a pane, claims it again at the
+        //   size the pane already ran at, and the user takes it back.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        #expect(desiredPaneToolbar(in: model)[paneId]?.isGridClaimed == false)
+
+        update(&model, .setPaneGridOverride(
+            paneId: paneId, grid: PaneGridOverride(columns: 60, rows: 20)!))
+        #expect(desiredPaneToolbar(in: model)[paneId]?.isGridClaimed == true)
+
+        update(&model, .setPaneGridOverride(
+            paneId: paneId, grid: PaneGridOverride(columns: 80, rows: 24)!))
+        #expect(desiredPaneToolbar(in: model)[paneId]?.isGridClaimed == true,
+                "a claim equal to the pane's own size is still a claim")
+
+        update(&model, .clearPaneGridOverride(paneId: paneId))
+        #expect(desiredPaneToolbar(in: model)[paneId]?.isGridClaimed == false)
     }
 
     @Test("desiredPaneToolbar reads running command state from immutable pane snapshots")

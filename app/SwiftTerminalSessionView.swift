@@ -175,6 +175,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
     private var currentMetrics: TerminalRenderMetrics?
+    /// The cell box in the pane's own coordinates: equal to the rendered cell box
+    /// whenever the grid fits, smaller by the fit factor when a claimed grid is
+    /// drawn down to its slot. Pointer mapping and positioned chrome read this,
+    /// never `currentMetrics.cellSize`, which describes the pixels rendered.
+    private var displayedCellSize: CGSize?
     private var currentDimensions: TerminalDimensions?
     private var controlClickIsActive = false
     private var mouseTrackingArea: NSTrackingArea?
@@ -248,7 +253,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         let projection = viewport.projection
         return TerminalSessionState(
             scrollbarEnabled: viewport.isScrollbarEnabled,
-            cellHeight: currentMetrics?.cellSize.height ?? 0,
+            cellHeight: displayedCellSize?.height ?? 0,
             scrollPosition: TerminalScrollPosition(
                 total: UInt64(clamping: projection.totalRows),
                 offset: UInt64(clamping: projection.topRow),
@@ -270,6 +275,32 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     private(set) var layerDisplayCountForTesting = 0
     var hasPendingPresentationForTesting: Bool {
         swapchain?.hasPendingPresentation == true
+    }
+
+    /// The presentation geometry one grid resolved to: the scale its pixels are
+    /// rendered at, the cell box those pixels occupy in the pane's own
+    /// coordinates, and the pixel extent of the surface the whole grid renders
+    /// into. Read by the harness to pin both rendering cases -- a grid that fits
+    /// at the pane's own scale, and a claimed grid drawn down into its slot.
+    var presentationGeometryForTesting: (
+        renderScale: CGFloat,
+        cellSize: CGSize,
+        surfacePixelSize: CGSize
+    )? {
+        guard let metrics = currentMetrics,
+              let cellSize = displayedCellSize,
+              let dimensions = currentDimensions
+        else { return nil }
+        return (
+            renderScale: metrics.displayScale,
+            cellSize: cellSize,
+            surfacePixelSize: CGSize(
+                width: metrics.cellSize.width * metrics.displayScale
+                    * CGFloat(dimensions.columns),
+                height: metrics.cellSize.height * metrics.displayScale
+                    * CGFloat(dimensions.rows)
+            )
+        )
     }
 
     func resetSurfaceCountersForTesting() {
@@ -430,7 +461,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         displayedStore = store
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        layer?.contentsScale = store.metrics.displayScale
+        // The pane's own backing scale, not the store's. The two are the same for
+        // every grid that fits its slot. A claimed grid that does not fit renders
+        // at a smaller scale, and presenting those pixels at the pane's scale is
+        // exactly what shows the whole grid, uniformly shrunk, inside the slot.
+        layer?.contentsScale = window?.backingScaleFactor ?? store.metrics.displayScale
         layer?.contents = store.ioSurface
         CATransaction.commit()
     }
@@ -1317,13 +1352,18 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         guard isTornDown == false,
               bounds.width > 0, bounds.height > 0,
               let scale = window?.backingScaleFactor,
-              let metrics = resolvedMetrics(displayScale: scale),
+              let nativeMetrics = resolvedMetrics(displayScale: scale),
               let dimensions = overriddenDimensions ?? terminalGridDimensions(
                   size: .init(width: Double(bounds.width), height: Double(bounds.height)),
                   cellSize: .init(
-                      width: Double(metrics.cellSize.width),
-                      height: Double(metrics.cellSize.height)
+                      width: Double(nativeMetrics.cellSize.width),
+                      height: Double(nativeMetrics.cellSize.height)
                   )
+              ),
+              let metrics = fittedMetrics(
+                  for: dimensions,
+                  native: nativeMetrics,
+                  displayScale: scale
               )
         else {
             return
@@ -1333,6 +1373,14 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         let dimensionsChanged = dimensions != currentDimensions
         currentMetrics = metrics
         currentDimensions = dimensions
+        // What one cell occupies on screen, which is the rendered cell box carried
+        // back to the pane's own scale. Every pointer mapping and every piece of
+        // chrome the view positions reads this rather than the render metrics, so
+        // a shrunk grid is hit-tested at the size the user sees.
+        displayedCellSize = CGSize(
+            width: metrics.cellSize.width * metrics.displayScale / scale,
+            height: metrics.cellSize.height * metrics.displayScale / scale
+        )
         if dimensionsChanged {
             controller.setGridDimensions(dimensions)
         }
@@ -1371,6 +1419,48 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         )
         guard live != swapchainInputs else { return }
         rerenderCurrentPlan()
+    }
+
+    /// The metrics one grid renders at inside the pane's current rectangle.
+    ///
+    /// A grid that fits resolves to the pane's own backing scale, so an unclaimed
+    /// pane -- whose grid is derived from that rectangle and therefore always fits
+    /// -- is untouched by this. A claimed grid too large for its slot resolves to
+    /// a smaller scale, and the surface it renders into is smaller in the same
+    /// proportion: the shrink happens while drawing, so nothing is ever allocated
+    /// at the claimed grid's own pixel extent.
+    ///
+    /// One scale serves both axes, which is what makes the shrink uniform. It is
+    /// derived from the whole pixels each cell may occupy rather than from the
+    /// point extent, because a cell box is ceiled to whole backing pixels:
+    /// dividing the rectangle's pixel budget by the cell count first is what keeps
+    /// the ceiled box inside the budget instead of overshooting it by up to a
+    /// pixel per cell.
+    private func fittedMetrics(
+        for dimensions: TerminalDimensions,
+        native: TerminalRenderMetrics,
+        displayScale: CGFloat
+    ) -> TerminalRenderMetrics? {
+        guard dimensions.columns > 0, dimensions.rows > 0,
+              native.cellSize.width > 0, native.cellSize.height > 0
+        else { return nil }
+        let cellWidthPixels =
+            ((bounds.width * displayScale).rounded(.down) / CGFloat(dimensions.columns))
+            .rounded(.down)
+        let cellHeightPixels =
+            ((bounds.height * displayScale).rounded(.down) / CGFloat(dimensions.rows))
+            .rounded(.down)
+        // A grid so large that a cell cannot have one whole pixel on some axis has
+        // no presentable geometry at all, and the pane keeps the frame it has --
+        // the same answer this method's callers give every other unusable input.
+        guard cellWidthPixels >= 1, cellHeightPixels >= 1 else { return nil }
+        let scale = min(
+            displayScale,
+            cellWidthPixels / native.cellSize.width,
+            cellHeightPixels / native.cellSize.height
+        )
+        guard scale < displayScale else { return native }
+        return resolvedMetrics(displayScale: scale)
     }
 
     /// Metrics for the configured family, falling back to the system monospace font
@@ -1468,13 +1558,13 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     private func normalizedCell(at locationInWindow: NSPoint) -> TerminalViewportCell? {
-        guard let metrics = currentMetrics, let dimensions = currentDimensions else { return nil }
+        guard let cellSize = displayedCellSize, let dimensions = currentDimensions else { return nil }
         let point = convert(locationInWindow, from: nil)
         return terminalCell(
             at: .init(x: Double(point.x), y: Double(point.y)),
             cellSize: .init(
-                width: Double(metrics.cellSize.width),
-                height: Double(metrics.cellSize.height)
+                width: Double(cellSize.width),
+                height: Double(cellSize.height)
             ),
             columns: dimensions.columns,
             rows: dimensions.rows
@@ -1550,11 +1640,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     private func pointerIsOutsideGrid(_ locationInWindow: NSPoint) -> Bool {
-        guard let metrics = currentMetrics, let dimensions = currentDimensions else { return true }
+        guard let cellSize = displayedCellSize, let dimensions = currentDimensions else { return true }
         let point = convert(locationInWindow, from: nil)
         return point.x < 0 || point.y < 0
-            || point.x >= CGFloat(dimensions.columns) * metrics.cellSize.width
-            || point.y >= CGFloat(dimensions.rows) * metrics.cellSize.height
+            || point.x >= CGFloat(dimensions.columns) * cellSize.width
+            || point.y >= CGFloat(dimensions.rows) * cellSize.height
     }
 
     private func showPaneMenu(at cell: TerminalViewportCell) {
@@ -1563,11 +1653,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             paneMenuHandler(cell)
             return
         }
-        guard let paneWrapper, let metrics = currentMetrics else { return }
+        guard let paneWrapper, let cellSize = displayedCellSize else { return }
         let menu = paneWrapper.makePaneMenu(includeClipboard: true)
         let point = NSPoint(
-            x: (CGFloat(cell.column) + 0.5) * metrics.cellSize.width,
-            y: (CGFloat(cell.row) + 1) * metrics.cellSize.height
+            x: (CGFloat(cell.column) + 0.5) * cellSize.width,
+            y: (CGFloat(cell.row) + 1) * cellSize.height
         )
         menu.popUp(positioning: nil, at: point, in: self)
     }

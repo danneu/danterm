@@ -224,7 +224,7 @@ reopen condition.
   reported by `pane.info` and `ls`
 - [x] 3. feat(app): drive the pane grid from the override, including
   restored-pane launch
-- [ ] 4. feat(render): Mac remote-sized rendering with the take-back
+- [x] 4. feat(render): Mac remote-sized rendering with the take-back
   affordance
 - [ ] 5. feat(ios): claim button sends the surface's native grid
 - [ ] 6. feat(ios): destination-bounded observe rendering; amend the D6
@@ -275,3 +275,33 @@ reopen condition.
   half could not be driven through `just launch-slot`, which always
   passes `--fresh`; it is covered by the app tests plus a check that the
   written recovery checkpoint carries the override.
+- Commit 4 realizes I12's destination bound by rendering at a reduced
+  display scale rather than by transforming a native-sized surface. The
+  frame store's pixel extent is `cellPixels * count`, so lowering the
+  scale the cell box is quantized at lowers the allocation in the same
+  proportion, and the pane then presents those pixels at its own backing
+  scale. A layer transform would have left the allocation at the claimed
+  grid's native extent, which I12 forbids.
+- The fit scale comes from the whole pixels each cell may occupy --
+  `floor(pixelBudget / count) / nativeCellPoints` -- not from the point
+  extent. A cell box is ceiled to whole backing pixels, so a scale derived
+  from points can overshoot by up to a pixel per cell, which is a visible
+  fraction of a 179-column grid. Dividing the budget first makes the
+  ceiled box fit by construction, with no iteration.
+- One formula covers both rendering cases: a grid the slot contains
+  resolves to the pane's own backing scale, because floor(budget/count) is
+  then at least the native cell's pixel count. So there is no
+  fits/does-not-fit branch, and an unclaimed pane -- whose grid is derived
+  from its own rectangle and therefore always fits -- renders exactly as
+  before.
+- The view now separates the cell box it renders from the cell box it
+  shows. `displayedCellSize` is the rendered box carried back to the pane's
+  scale, and every pointer mapping, the context-menu anchor, and the
+  scrollbar's cell height read it. I6's "pointer input maps through the
+  same transform" is that one value being the only cell box the view's own
+  coordinates ever meet.
+- A commit-3 test had to move: it proved a font change under a claim moves
+  cell metrics, using a pane too small to contain the claim. Under this
+  commit such a pane draws the claim down to fit, so the font no longer
+  decides the drawn cell size there. The fixture is now a pane that
+  contains the claim, which is the case the assertion was always about.

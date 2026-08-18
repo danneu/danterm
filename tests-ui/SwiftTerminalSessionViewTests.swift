@@ -231,9 +231,14 @@ func swiftTerminalSessionViewTests() {
         //   user pressed Cmd-+.
         // Scenario: spec-first -- the user grows the font while the phone holds a
         //   claim on the pane.
+        //
+        // The pane's rectangle contains the claimed grid at both font sizes, so
+        // the cell box the pane draws at is the font's own. A claim the slot
+        // cannot contain is drawn down to fit instead, and that case is covered
+        // by its own test.
         let controller = TerminalPaneSessionController()
         let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
-        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        pane.frame = NSRect(x: 0, y: 0, width: 1200, height: 1200)
         mountInTestWindow(pane, frame: pane.frame)
         pane.setGridOverride(PaneGridOverride(columns: 60, rows: 30))
         let gridsAfterClaim = controller.gridDimensions.count
@@ -267,6 +272,117 @@ func swiftTerminalSessionViewTests() {
 
         try uiExpect(controller.gridDimensions == [TerminalDimensions(columns: 60, rows: 30)],
                      "a pane created overridden submitted another grid: \(controller.gridDimensions)")
+    }
+
+    uiTest("a claimed grid that fits its slot renders at native cell metrics with blank surround") {
+        // Intent: a claim smaller than the pane's rectangle draws at the pane's
+        //   own scale, at the top-left corner, leaving the rest of the slot empty.
+        // Why it exists: the Mac shows a claimed pane as the claiming client sees
+        //   it. Stretching a small grid over the slot would show the user a size
+        //   nobody is running at.
+        // Scenario: spec-first -- the phone claims a large Mac pane at 10x5.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        pane.frame = NSRect(x: 0, y: 0, width: 200, height: 400)
+        mountInTestWindow(pane, frame: pane.frame)
+        guard let window = pane.window else { throw UITestFailure(message: "pane did not mount") }
+        guard let native = pane.presentationGeometryForTesting else {
+            throw UITestFailure(message: "an unclaimed pane reported no presentation geometry")
+        }
+
+        pane.setGridOverride(PaneGridOverride(columns: 10, rows: 5))
+
+        guard let claimed = pane.presentationGeometryForTesting else {
+            throw UITestFailure(message: "a claimed pane reported no presentation geometry")
+        }
+        try uiExpect(claimed.renderScale == window.backingScaleFactor,
+                     "a fitting claim did not render at the pane's own scale: \(claimed.renderScale)")
+        try uiExpect(claimed.cellSize == native.cellSize,
+                     "a fitting claim moved the cell box: \(claimed.cellSize) vs \(native.cellSize)")
+        try uiExpect(
+            claimed.surfacePixelSize.width < pane.bounds.width * window.backingScaleFactor
+                && claimed.surfacePixelSize.height < pane.bounds.height * window.backingScaleFactor,
+            "a fitting claim left no blank surround: \(claimed.surfacePixelSize)")
+        try uiExpect(pane.layerContentsPlacement == .topLeft,
+                     "the grid was not anchored at the pane's top-left corner")
+    }
+
+    uiTest("a claimed grid larger than its slot is drawn down uniformly into the slot's pixels") {
+        // Intent: an oversized claim shrinks by one factor on both axes, and the
+        //   surface it renders into stays inside the pane's own pixel extent.
+        // Why it exists: the shrink has to happen while drawing. A buffer sized to
+        //   the claimed grid and scaled afterwards would let one remote request
+        //   allocate pixels the pane never had room for.
+        // Scenario: spec-first -- a phone claims 60x30 on a Mac pane too small to
+        //   show that grid at its own cell size.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+        guard let window = pane.window else { throw UITestFailure(message: "pane did not mount") }
+        guard let native = pane.presentationGeometryForTesting else {
+            throw UITestFailure(message: "an unclaimed pane reported no presentation geometry")
+        }
+
+        pane.setGridOverride(PaneGridOverride(columns: 60, rows: 30))
+
+        guard let claimed = pane.presentationGeometryForTesting else {
+            throw UITestFailure(message: "a claimed pane reported no presentation geometry")
+        }
+        let scale = window.backingScaleFactor
+        try uiExpect(
+            claimed.surfacePixelSize.width <= pane.bounds.width * scale
+                && claimed.surfacePixelSize.height <= pane.bounds.height * scale,
+            "the claimed grid rendered outside the pane's pixel extent: \(claimed.surfacePixelSize)")
+        try uiExpect(claimed.renderScale < scale,
+                     "an oversized claim did not draw down: \(claimed.renderScale) vs \(scale)")
+        let horizontal = claimed.cellSize.width / native.cellSize.width
+        let vertical = claimed.cellSize.height / native.cellSize.height
+        try uiExpect(abs(horizontal - vertical) < 0.0001,
+                     "the shrink was not uniform: \(horizontal) horizontally, \(vertical) vertically")
+        try uiExpect(horizontal < 1, "an oversized claim did not shrink the cell box: \(horizontal)")
+    }
+
+    uiTest("pointer input maps through the transform a drawn-down claim is shown at") {
+        // Intent: a click on a shrunk claimed grid names the cell drawn under the
+        //   pointer, not the cell the same point would name at native cell size.
+        // Why it exists: the grid the user sees and the grid the engine is told
+        //   about have to be the same one. Hit-testing against the rendered cell
+        //   box would offset every selection and every mouse-mode report.
+        // Scenario: spec-first -- the user right-clicks inside a pane the phone
+        //   claimed at 60x30.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+        guard let native = pane.presentationGeometryForTesting else {
+            throw UITestFailure(message: "an unclaimed pane reported no presentation geometry")
+        }
+        pane.setGridOverride(PaneGridOverride(columns: 60, rows: 30))
+        guard let claimed = pane.presentationGeometryForTesting else {
+            throw UITestFailure(message: "a claimed pane reported no presentation geometry")
+        }
+        var menuCells: [TerminalViewportCell] = []
+        pane.paneMenuHandler = { menuCells.append($0) }
+
+        // Window coordinates are bottom-up; the pane is flipped, so this lands at
+        // (30, 50) inside it.
+        let location = NSPoint(x: 30, y: 150)
+        pane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: location))
+        pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: location))
+
+        let shown = TerminalViewportCell(
+            column: Int(30 / claimed.cellSize.width),
+            row: Int(50 / claimed.cellSize.height)
+        )
+        let atNativeCellSize = TerminalViewportCell(
+            column: Int(30 / native.cellSize.width),
+            row: Int(50 / native.cellSize.height)
+        )
+        try uiExpect(shown != atNativeCellSize,
+                     "the two cell boxes agree, so this test proves nothing")
+        try uiExpect(menuCells == [shown],
+                     "the click did not name the cell drawn under it: \(menuCells)")
     }
 
     uiTest("geometry that is not finite or is out of Int range yields no grid and no cell") {

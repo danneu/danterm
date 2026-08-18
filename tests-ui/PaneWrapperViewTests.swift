@@ -220,6 +220,52 @@ func paneWrapperViewTests() {
             "unzoomed toolbar should collapse the button below one point again")
     }
 
+    uiTest("the take-back affordance follows the projected claim and clears it in one click") {
+        // Intent: the button appears exactly while the toolbar projection reports
+        //   a claimed grid, and one click sends the clear for this pane.
+        // Why it exists: a claimed grid is durable -- no Mac layout event ends it
+        //   -- so the pane must carry a visible one-gesture exit, and the exit has
+        //   to name the pane the user clicked.
+        // Scenario: spec-first -- the phone claims a pane at its own size and the
+        //   user takes the pane back at the Mac.
+        let fx = makePaneMenuFixture(isZoomed: false, hasSplits: false)
+        fx.wrapper.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
+        fx.wrapper.layoutSubtreeIfNeeded()
+        guard let releaseButton = paneWrapperDescendants(of: fx.wrapper)
+            .compactMap({ $0 as? PaneToolbarButton })
+            .first(where: { $0.toolTip == "Release Claimed Size" }) else {
+            throw UITestFailure(message: "missing take-back button")
+        }
+        try uiExpect(
+            releaseButton.frame.width < 1,
+            "an unclaimed pane should collapse the button below one point, got \(releaseButton.frame.width)")
+
+        fx.wrapper.updateToolbar(label: "Terminal", isGridClaimed: true)
+        releaseButton.superview?.needsLayout = true
+        releaseButton.superview?.layoutSubtreeIfNeeded()
+
+        try uiExpect(
+            releaseButton.frame.width >= 15,
+            "a claimed pane should show the button, got \(releaseButton.frame.width)")
+        try uiExpect(!releaseButton.isHidden, "a claimed pane should not hide the button")
+
+        _ = releaseButton.target?.perform(releaseButton.action, with: releaseButton)
+
+        var sawClear = false
+        for msg in fx.runtime.sentMessages {
+            if case .clearPaneGridOverride(let paneId) = msg, paneId == fx.paneId { sawClear = true }
+        }
+        try uiExpect(sawClear, "the take-back click should clear this pane's override")
+
+        fx.wrapper.updateToolbar(label: "Terminal", isGridClaimed: false)
+        releaseButton.superview?.needsLayout = true
+        releaseButton.superview?.layoutSubtreeIfNeeded()
+
+        try uiExpect(
+            releaseButton.frame.width < 1,
+            "a released pane should collapse the button again, got \(releaseButton.frame.width)")
+    }
+
     uiTest("init points the terminal back at its wrapper") {
         // Intent: after PaneWrapperView.init, terminalView.paneWrapper === the
         //   wrapper.

@@ -201,7 +201,8 @@ extension AppRuntime {
                 totalTodoCount: render.totalTodoCount,
                 uncompletedTodoCount: render.uncompletedTodoCount,
                 isZoomed: render.isZoomed,
-                hasSplits: render.hasSplits
+                hasSplits: render.hasSplits,
+                isGridClaimed: render.isGridClaimed
             )
         })
         applyDiff(desiredSearchOverlays(in: model), &caches.searchOverlay, apply: { paneId, render in

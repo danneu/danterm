@@ -14,6 +14,11 @@ class PaneWrapperView: NSView {
     private let menuButton: NSButton
     private let unzoomButton: PaneToolbarButton
     private var unzoomWidthConstraint: NSLayoutConstraint?
+    /// The pane's take-back gesture: one click ends a claimed grid. Shown from the
+    /// toolbar projection's claim flag alone, so a claim is never left with no way
+    /// out at the Mac.
+    private let releaseGridClaimButton: PaneToolbarButton
+    private var releaseGridClaimWidthConstraint: NSLayoutConstraint?
     private let todoButton: TodoToolbarButton
     private var isZoomed: Bool
     private var hasSplits: Bool
@@ -90,6 +95,27 @@ class PaneWrapperView: NSView {
         ub.isHidden = !isZoomed
         self.unzoomButton = ub
 
+        // The take-back affordance. It names the claim rather than the size: the
+        // pane is small because a client asked for that grid, and this ends it.
+        let rb = PaneToolbarButton()
+        rb.translatesAutoresizingMaskIntoConstraints = false
+        rb.bezelStyle = .inline
+        rb.isBordered = false
+        rb.image = NSImage(
+            systemSymbolName: "iphone",
+            accessibilityDescription: "Release the claimed pane size"
+        )
+        rb.imageScaling = .scaleProportionallyDown
+        rb.contentTintColor = NSColor.secondaryLabelColor
+        rb.wantsLayer = true
+        rb.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        rb.toolTip = "Release Claimed Size"
+        rb.setContentHuggingPriority(.required, for: .horizontal)
+        // Starts hidden and stays that way until the toolbar projection reports a
+        // claim, which is the only thing that may show it.
+        rb.isHidden = true
+        self.releaseGridClaimButton = rb
+
         // TODO button (always visible to provide a stable popover anchor)
         self.todoButton = TodoToolbarButton()
 
@@ -104,6 +130,9 @@ class PaneWrapperView: NSView {
 
         unzoomButton.target = self
         unzoomButton.action = #selector(zoomPaneAction)
+
+        releaseGridClaimButton.target = self
+        releaseGridClaimButton.action = #selector(releaseGridClaimAction)
 
         // Toolbar container
         toolbar.translatesAutoresizingMaskIntoConstraints = false
@@ -213,6 +242,7 @@ class PaneWrapperView: NSView {
         toolbar.addSubview(todoButton)
         toolbar.addSubview(menuButton)
         toolbar.addSubview(unzoomButton)
+        toolbar.addSubview(releaseGridClaimButton)
 
         scrollWrapper.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollWrapper)
@@ -246,9 +276,11 @@ class PaneWrapperView: NSView {
             dragHandle.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
             dragHandle.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
 
-            // TODO button (to the left of unzoom/menu buttons)
+            // TODO button (to the left of the take-back/unzoom/menu buttons)
             todoButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            todoButton.trailingAnchor.constraint(equalTo: unzoomButton.leadingAnchor, constant: -2),
+            todoButton.trailingAnchor.constraint(
+                equalTo: releaseGridClaimButton.leadingAnchor, constant: -2
+            ),
 
             // Menu button
             menuButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -274,6 +306,19 @@ class PaneWrapperView: NSView {
             unzoomButton.heightAnchor.constraint(equalToConstant: 16),
         ])
 
+        // Collapsed to zero width while unclaimed, the way the unzoom button is,
+        // so a pane nobody claimed spends no toolbar width on the affordance.
+        let releaseGridClaimWidthConstraint = releaseGridClaimButton.widthAnchor.constraint(
+            equalToConstant: 0
+        )
+        self.releaseGridClaimWidthConstraint = releaseGridClaimWidthConstraint
+        constraints.append(contentsOf: [
+            releaseGridClaimButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            releaseGridClaimButton.trailingAnchor.constraint(equalTo: unzoomButton.leadingAnchor),
+            releaseGridClaimWidthConstraint,
+            releaseGridClaimButton.heightAnchor.constraint(equalToConstant: 16),
+        ])
+
         NSLayoutConstraint.activate(constraints)
     }
 
@@ -290,7 +335,7 @@ class PaneWrapperView: NSView {
     /// Every string arrives composed by `desiredPaneToolbar`; this method only
     /// reads values out into labels. Composing text here would put untrusted
     /// terminal-reported values back together inside the view.
-    func updateToolbar(label: DisplayLine, progress: ProgressState? = nil, isRemote: Bool = false, remoteLabel: DisplayLine? = nil, agentLabel: DisplayLine? = nil, chipTooltip: DisplayLine? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0, isZoomed: Bool? = nil, hasSplits: Bool? = nil) {
+    func updateToolbar(label: DisplayLine, progress: ProgressState? = nil, isRemote: Bool = false, remoteLabel: DisplayLine? = nil, agentLabel: DisplayLine? = nil, chipTooltip: DisplayLine? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0, isZoomed: Bool? = nil, hasSplits: Bool? = nil, isGridClaimed: Bool? = nil) {
         toolbarLabel.stringValue = label.text
         applyProgressState(progress)
         remoteAccessory.isHidden = !isRemote
@@ -322,6 +367,10 @@ class PaneWrapperView: NSView {
         }
         if let hasSplits {
             self.hasSplits = hasSplits
+        }
+        if let isGridClaimed {
+            releaseGridClaimButton.isHidden = !isGridClaimed
+            releaseGridClaimWidthConstraint?.constant = isGridClaimed ? 16 : 0
         }
     }
 
@@ -499,6 +548,13 @@ class PaneWrapperView: NSView {
         guard case .attached(let session, _) = runtime?.model.pane(paneId)?.session?.agent else { return }
         menuPasteboard.clearContents()
         menuPasteboard.setString(session.sessionId, forType: .string)
+    }
+
+    /// Ends this pane's claimed grid. Pane-scoped for the same reason zoom is: a
+    /// stale retained menu or a click landing after the focus moved must still
+    /// take back the pane the user pointed at.
+    @objc private func releaseGridClaimAction() {
+        runtime?.send(.clearPaneGridOverride(paneId: paneId))
     }
 
     @objc private func zoomPaneAction() {

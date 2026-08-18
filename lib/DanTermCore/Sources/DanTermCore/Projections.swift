@@ -334,6 +334,12 @@ struct PaneToolbarRender: Equatable {
   let uncompletedTodoCount: Int
   let isZoomed: Bool
   let hasSplits: Bool
+  /// Whether a client claimed this pane's grid, which is the whole condition for
+  /// the take-back affordance. Presence of the override, never a comparison
+  /// between the claimed grid and the one the pane's rectangle implies: a claim
+  /// that happens to match the rectangle is still a claim, and the pane still
+  /// needs the one gesture that ends it.
+  let isGridClaimed: Bool
 }
 
 /// Convenience wrapper for tests and cold callers; hot-path callers pass the
@@ -402,7 +408,8 @@ func desiredPaneToolbar(
           totalTodoCount: pane.todos.count,
           uncompletedTodoCount: pane.todos.count { !$0.isDone },
           isZoomed: tab.paneTree.isZoomed && tab.paneTree.focusedPaneId == pane.id,
-          hasSplits: hasSplits
+          hasSplits: hasSplits,
+          isGridClaimed: pane.gridOverride != nil
         )
       }
     }
