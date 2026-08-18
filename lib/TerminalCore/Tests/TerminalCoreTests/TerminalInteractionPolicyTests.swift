@@ -488,13 +488,13 @@ struct TerminalInteractionPolicyTests {
             cellSize: .init(width: 10, height: 13),
             columns: 8,
             rows: 4
-        ) == .init(column: 0, row: 3, offsetX: 0))
+        ) == .init(column: 0, row: 3, offsetX: 0, isInsideGrid: false))
         #expect(terminalCell(
             at: .init(x: 402, y: 0),
             cellSize: .init(width: 10, height: 13),
             columns: 8,
             rows: 4
-        ) == .init(column: 7, row: 0, offsetX: 1))
+        ) == .init(column: 7, row: 0, offsetX: 1, isInsideGrid: false))
         #expect(terminalCell(
             at: .init(x: 1, y: 1),
             cellSize: .init(width: 0, height: 13),
@@ -507,6 +507,33 @@ struct TerminalInteractionPolicyTests {
             columns: 8,
             rows: 4
         ) == nil)
+    }
+
+    @Test("a normalized cell reports whether its point fell inside the grid")
+    func pointInsideness() {
+        // Intent: `terminalCell` answers insideness for both axes independently, with the
+        //   right and bottom edges excluded.
+        // Why it exists: the clamped column and row cannot say whether the point was on the
+        //   grid, so a caller that needs it -- link cancellation on an off-grid pointer --
+        //   would otherwise re-derive the extents with its own math and drift.
+        // Scenario: spec-first -- the pointer leaves an 8x4 grid of 10x13 cells through each
+        //   side in turn.
+        let cellSize = TerminalCellSize(width: 10, height: 13)
+        func insideness(x: Double, y: Double) -> Bool? {
+            terminalCell(at: .init(x: x, y: y), cellSize: cellSize, columns: 8, rows: 4)?
+                .isInsideGrid
+        }
+
+        #expect(insideness(x: 27.5, y: 39.9) == true)
+        #expect(insideness(x: 0, y: 0) == true)
+        // Each side is left with the other axis in range, so an implementation that tests
+        // only one axis cannot pass.
+        #expect(insideness(x: -0.5, y: 20) == false)
+        #expect(insideness(x: 80.5, y: 20) == false)
+        #expect(insideness(x: 80, y: 20) == false, "the exact right edge is the first column past the grid")
+        #expect(insideness(x: 30, y: -0.5) == false)
+        #expect(insideness(x: 30, y: 52.5) == false)
+        #expect(insideness(x: 30, y: 52) == false, "the exact bottom edge is the first row past the grid")
     }
 
     @Test("Cmd link ownership suppresses reports and revalidates the originating run")

@@ -1612,6 +1612,73 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(preview?.isHidden == true, "a stale owner frame restored hover after exit")
     }
 
+    uiTest("an off-grid press or release cannot open a link") {
+        // Intent: whichever half of a Cmd-click lands off the grid, the gesture opens nothing.
+        // Why it exists: the cancellation and the pointer report have to run in the order that
+        //   produces this outcome -- cancel before an off-grid release, deliver before an
+        //   off-grid press -- and the reverse order silently opens a link on either path.
+        // Scenario: the user Cmd-drags off the pane and releases, then Cmd-presses in the
+        //   blank surround beside the grid and releases over the link.
+        let controller = TerminalPaneSessionController()
+        let link = TerminalHyperlink(uri: "https://example.com/offgrid")
+        controller.hoveredLinkForCommandMove = link
+        controller.linkForCommandClick = link
+        let pane = makeMountedPane(controller: controller)
+        var opened: [URL] = []
+        pane.linkOpener = { url in opened.append(url); return true }
+
+        let onGrid = NSPoint(x: 17, y: 125)
+        let offGrid = NSPoint(x: 200, y: -40)
+
+        pane.mouseDown(with: try makeMouseEvent(
+            type: .leftMouseDown, location: onGrid, modifiers: [.command]
+        ))
+        pane.mouseUp(with: try makeMouseEvent(
+            type: .leftMouseUp, location: offGrid, modifiers: [.command]
+        ))
+        try uiExpect(opened.isEmpty, "a release off the grid opened \(opened)")
+
+        pane.mouseDown(with: try makeMouseEvent(
+            type: .leftMouseDown, location: offGrid, modifiers: [.command]
+        ))
+        pane.mouseUp(with: try makeMouseEvent(
+            type: .leftMouseUp, location: onGrid, modifiers: [.command]
+        ))
+        try uiExpect(opened.isEmpty, "a press that began off the grid opened \(opened)")
+    }
+
+    uiTest("a grid that shrinks under a parked pointer drops the hover chrome") {
+        // Intent: the pane decides hover from where the pointer sits in the grid it has now,
+        //   not from where it sat when the last pointer event arrived.
+        // Why it exists: the pointer can stay still while the grid shrinks away from under it,
+        //   and an insideness value stored at event time would keep the pill on a cell that is
+        //   no longer on the grid.
+        // Scenario: spec-first -- a remote client claims a much smaller grid while the pointer
+        //   rests on a link near the pane's right edge.
+        let controller = TerminalPaneSessionController()
+        controller.hoveredLinkForCommandMove = .init(uri: "https://example.com/parked")
+        let pane = makeMountedPane(controller: controller)
+        // The pane is ten 8x16 cells wide, so this parks the pointer in column 8.
+        pane.mouseMoved(with: try makeMouseEvent(
+            type: .mouseMoved,
+            location: .init(x: 65, y: 125),
+            modifiers: [.command]
+        ))
+        let preview = pane.subviews.compactMap { $0 as? LinkPreviewView }.first
+        try uiExpect(preview?.isHidden == false, "hover did not show the URL pill")
+
+        // A claimed 2x1 grid covers only the leftmost 16 points, leaving the pointer in the
+        // blank surround with no pointer event to tell the pane so.
+        guard let claimed = PaneGridOverride(columns: 2, rows: 1) else {
+            throw UITestFailure(message: "a 2x1 grid was refused, so this test claims nothing")
+        }
+        pane.setGridOverride(claimed)
+        controller.emitFrameForTest()
+
+        try uiExpect(preview?.isHidden == true,
+                     "the pill survived a grid that no longer covers the parked pointer")
+    }
+
     uiTest("pane maps viewport state and scrollbar commands through the controller") {
         let controller = TerminalPaneSessionController()
         let pane = SwiftTerminalSessionView(controller: controller)

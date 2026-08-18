@@ -18,12 +18,19 @@ public struct TerminalViewportCell: Equatable, Sendable {
     /// Horizontal position inside the cell, as a `0...1` fraction of its width. Clamped with
     /// the column as one value, so an off-grid point reads as the edge it left through.
     public let offsetX: Double
+    /// Whether the point this cell was normalized from actually fell inside the grid. The
+    /// column and row above are clamped, so they cannot say it; a caller that needs to know
+    /// -- link interaction cancels on an off-grid pointer -- reads it here instead of
+    /// re-deriving the grid extents with its own math. A cell minted from a policy decision
+    /// rather than from a point is inside by construction, which is why the default is `true`.
+    public let isInsideGrid: Bool
 
     /// Creates a normalized cell value for cross-layer input forwarding.
-    public init(column: Int, row: Int, offsetX: Double = 0) {
+    public init(column: Int, row: Int, offsetX: Double = 0, isInsideGrid: Bool = true) {
         self.column = column
         self.row = row
         self.offsetX = offsetX
+        self.isInsideGrid = isInsideGrid
     }
 }
 
@@ -58,7 +65,8 @@ public struct TerminalCellSize: Equatable, Sendable {
 /// Floors a flipped-view point into the grid and clamps it to a valid viewport cell, keeping
 /// the horizontal remainder. Clamping moves the remainder with the column rather than
 /// independently, so a point off the left edge reads as that column's leading edge and one off
-/// the right edge as the last column's trailing edge.
+/// the right edge as the last column's trailing edge. The result also reports whether the
+/// point was on the grid at all, so a caller never has to re-derive the extents to find out.
 public func terminalCell(
     at point: TerminalPoint,
     cellSize: TerminalCellSize,
@@ -86,10 +94,17 @@ public func terminalCell(
     } else {
         min(max(scaledColumn - column, 0), 1)
     }
+    // Insideness is the range test on the raw point, not a read-back of the clamp above:
+    // the clamp compares a floored quotient, which can disagree with the range by one ULP
+    // at an edge. The right and bottom extents are exclusive, so the first point past the
+    // last cell is already outside.
+    let isInsideGrid = point.x >= 0 && point.x < Double(columns) * cellSize.width
+        && point.y >= 0 && point.y < Double(rows) * cellSize.height
     return TerminalViewportCell(
         column: clampedColumn,
         row: min(max(Int(row), 0), rows - 1),
-        offsetX: offsetX
+        offsetX: offsetX,
+        isInsideGrid: isInsideGrid
     )
 }
 

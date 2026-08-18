@@ -1526,8 +1526,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     private func publish(_ frame: TerminalPaneFrame) {
         guard isTornDown == false else { return }
+        // Insideness is re-derived here rather than reused from the last pointer event: the
+        // grid can shrink out from under a parked pointer, and a stored bit would keep
+        // showing hover chrome for a cell that is no longer on the grid.
         let hoveredLink = isPointerInside ? lastPointerLocationInWindow.flatMap { location in
-            pointerIsOutsideGrid(location) ? nil : controller.readHoveredLink()
+            normalizedCell(at: location)?.isInsideGrid == true ? controller.readHoveredLink() : nil
         } : nil
         updateHoveredLinkChrome(hoveredLink)
         guard let metrics = currentMetrics else { return }
@@ -1590,7 +1593,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     private func forwardPointerDown(_ event: NSEvent, button: TerminalMouseButton) {
         guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
         lastPointerLocationInWindow = event.locationInWindow
-        isPointerInside = pointerIsOutsideGrid(event.locationInWindow) == false
+        isPointerInside = cell.isInsideGrid
         controller.sendPointer(
             .down(
                 button,
@@ -1602,7 +1605,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             ),
             origin: PaneInputOrigin.systemEvent(event)
         )
-        if pointerIsOutsideGrid(event.locationInWindow) {
+        // The press is delivered before the cancellation so an off-grid press cannot survive
+        // as an arm that a later on-grid release would activate.
+        if cell.isInsideGrid == false {
             controller.cancelLinkInteraction()
         }
     }
@@ -1610,7 +1615,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     private func forwardPointerUp(_ event: NSEvent, button: TerminalMouseButton) {
         guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
         lastPointerLocationInWindow = event.locationInWindow
-        if pointerIsOutsideGrid(event.locationInWindow) {
+        // The cancellation runs before the release so an off-grid release cannot activate an
+        // arm the press left behind.
+        if cell.isInsideGrid == false {
             isPointerInside = false
             controller.cancelLinkInteraction()
         }
@@ -1627,20 +1634,34 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     private func forwardPointerMove(_ event: NSEvent) {
         lastPointerLocationInWindow = event.locationInWindow
-        isPointerInside = pointerIsOutsideGrid(event.locationInWindow) == false
-        forwardPointerMove(
-            at: event.locationInWindow,
+        let cell = normalizedCell(for: event)
+        // A pointer over unusable geometry names no cell, and the pane cannot claim it is
+        // inside a grid it cannot measure.
+        isPointerInside = cell?.isInsideGrid ?? false
+        guard isTornDown == false, let cell else { return }
+        deliverPointerMove(
+            cell,
             modifiers: event.modifierFlags,
             origin: PaneInputOrigin.systemEvent(event)
         )
     }
 
+    /// Replays the parked pointer for a caller that has no event of its own -- `flagsChanged`
+    /// -- which deliberately leaves `isPointerInside` where the last real event put it.
     private func forwardPointerMove(
         at locationInWindow: NSPoint,
         modifiers: NSEvent.ModifierFlags,
         origin: UInt64
     ) {
         guard isTornDown == false, let cell = normalizedCell(at: locationInWindow) else { return }
+        deliverPointerMove(cell, modifiers: modifiers, origin: origin)
+    }
+
+    private func deliverPointerMove(
+        _ cell: TerminalViewportCell,
+        modifiers: NSEvent.ModifierFlags,
+        origin: UInt64
+    ) {
         controller.sendPointer(
             .move(
                 column: cell.column,
@@ -1650,17 +1671,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             ),
             origin: origin
         )
-        if pointerIsOutsideGrid(locationInWindow) {
+        if cell.isInsideGrid == false {
             controller.cancelLinkInteraction()
         }
-    }
-
-    private func pointerIsOutsideGrid(_ locationInWindow: NSPoint) -> Bool {
-        guard let cellSize = displayedCellSize, let dimensions = currentDimensions else { return true }
-        let point = convert(locationInWindow, from: nil)
-        return point.x < 0 || point.y < 0
-            || point.x >= CGFloat(dimensions.columns) * cellSize.width
-            || point.y >= CGFloat(dimensions.rows) * cellSize.height
     }
 
     private func showPaneMenu(at cell: TerminalViewportCell) {
