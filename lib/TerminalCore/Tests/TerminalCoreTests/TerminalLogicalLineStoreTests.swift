@@ -1391,13 +1391,17 @@ struct TerminalLogicalLineStoreTests {
         //   stayed where `flushOpenTables` put them, moving every later read into the cell words.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for chunk in 0..<3 {
-            var row = Terminal.GridRow(cells: (0..<8).map { column in
-                Self.narrow(
-                    Unicode.Scalar(UInt32(97 + (chunk * 8 + column) % 26))!,
+            let cells: [Terminal.GridCell] = (0..<8).map { (column: Int) -> Terminal.GridCell in
+                let index: Int = chunk * 8 + column
+                let scalarValue: UInt32 = UInt32(97 + index % 26)
+                let identity: Terminal.ContentIdentity = Terminal.ContentIdentity(1_000 + index)
+                return Self.narrow(
+                    Unicode.Scalar(scalarValue)!,
                     hyperlinkId: 7,
-                    contentIdentity: Terminal.ContentIdentity(1_000 + chunk * 8 + column)
+                    contentIdentity: identity
                 )
-            })
+            }
+            var row = Terminal.GridRow(cells: cells)
             row.isSoftWrapped = true
             store.admit(row)
         }
@@ -1415,11 +1419,13 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.recordCount == 1)
         let cells = store.recordCells(at: 0)!
         #expect(cells.count == 16)
-        #expect(cells.allSatisfy { $0.hyperlinkId == 7 })
-        #expect(
-            cells.map(\.contentIdentity)
-                == (0..<16).map { Terminal.ContentIdentity(1_000 + $0) }
-        )
+        #expect(cells.allSatisfy { (cell: Terminal.GridCell) -> Bool in cell.hyperlinkId == 7 })
+        let identities: [Terminal.ContentIdentity?] = cells.map(\.contentIdentity)
+        let expectedIdentities: [Terminal.ContentIdentity?] = (0..<16).map {
+            (offset: Int) -> Terminal.ContentIdentity? in
+            Terminal.ContentIdentity(1_000 + offset)
+        }
+        #expect(identities == expectedIdentities)
     }
 
     @Test("Tail truncation folds every handed-back row before cutting any of them")
