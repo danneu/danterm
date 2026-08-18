@@ -246,9 +246,8 @@ whole, on change, to subscribed connections.
 
 ## Follow Up
 
-- Run the live-rig half of `## Verification`: this session had no access to the
-  physical iPhone or the tailnet listener, so the pushed roster is proved by the
-  MobileKit, client, core, and runtime-socket tests but not yet on the device.
-  With the phone attached, split a pane, close it, and rename a tab from the
-  branch-built CLI, then change the selected pane's terminal title and watch the
-  status pill follow it.
+- Done 2026-08-18. The live-rig half of `## Verification` ran on the physical
+  iPhone against dev slot 1 serving the tailnet listener. Over one uninterrupted
+  connection the phone showed a pane split after connect, the close of that pane,
+  a tab rename, and a terminal title change reaching both the status pill and the
+  sheet row. No reconnect was needed for any of them.
