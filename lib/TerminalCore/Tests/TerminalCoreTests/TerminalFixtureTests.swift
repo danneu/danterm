@@ -209,29 +209,57 @@ struct TerminalFixtureTests {
             from: Data(contentsOf: url)
         )
 
+        assertAlacrittyLedger(manifest)
+
+        let adopted = Self.adoptedAlacrittyNames(in: manifest)
+        let fixtureNames = Set(try alacrittyFixtureURLs().map { (url: URL) -> String in
+            url.deletingPathExtension().lastPathComponent
+        })
+        #expect(fixtureNames == adopted)
+        try assertMilestone8AlacrittyFixtureShape()
+    }
+
+    /// The ledger's own consistency: the pin it was cut from, the inventory size, and the
+    /// disposition and evidence every recording has to carry.
+    private func assertAlacrittyLedger(_ manifest: AlacrittyManifest) {
+        let recordings = manifest.recordings
+        let taken = Self.alacrittyTakenDispositions
+        let known: Set<String> = ["adopted", "adapted", "superseded", "out-of-scope", "pending"]
+        let superseded = recordings.filter { $0.disposition == "superseded" }
+
         #expect(manifest.version == 1)
         #expect(manifest.pinnedCommit == "852e971cddfabe222d2d5bcda466e130f53af207")
-        #expect(Set(manifest.recordings.map(\.name)) == Self.expectedAlacrittyRecordings)
-        #expect(manifest.recordings.count == 45)
-        #expect(manifest.recordings.filter { $0.milestone == 6 && ["adopted", "adapted"].contains($0.disposition) }.count == 15)
-        #expect(manifest.recordings.filter { $0.milestone == 8 && ["adopted", "adapted"].contains($0.disposition) }.count == 5)
-        #expect(manifest.recordings.filter { $0.milestone == 7 }.allSatisfy { $0.disposition != "pending" })
-        #expect(manifest.recordings.filter { $0.disposition == "superseded" }.count == 22)
-        #expect(manifest.recordings.filter { $0.disposition == "superseded" }.allSatisfy { $0.evidence?.isEmpty == false })
-        #expect(manifest.recordings.filter { $0.disposition == "superseded" }.allSatisfy {
-            Self.alacrittyEvidence.contains($0.evidence ?? "")
+        #expect(Set(recordings.map(\.name)) == Self.expectedAlacrittyRecordings)
+        #expect(recordings.count == 45)
+        #expect(recordings.filter { $0.milestone == 6 && taken.contains($0.disposition) }.count == 15)
+        #expect(recordings.filter { $0.milestone == 8 && taken.contains($0.disposition) }.count == 5)
+        #expect(recordings.filter { $0.milestone == 7 }.allSatisfy { $0.disposition != "pending" })
+        #expect(superseded.count == 22)
+        #expect(superseded.allSatisfy { $0.evidence?.isEmpty == false })
+        #expect(superseded.allSatisfy { Self.alacrittyEvidence.contains($0.evidence ?? "") })
+        #expect(recordings.allSatisfy { entry in
+            known.contains(entry.disposition) && entry.rationale.isEmpty == false
         })
-        #expect(manifest.recordings.allSatisfy { entry in
-            ["adopted", "adapted", "superseded", "out-of-scope", "pending"].contains(entry.disposition)
-                && entry.rationale.isEmpty == false
-        })
+    }
 
-        let adopted = Set(manifest.recordings.compactMap { entry in
-            [6, 8].contains(entry.milestone)
-                && ["adopted", "adapted"].contains(entry.disposition) ? entry.name : nil
+    /// The recordings the ledger says milestones 6 and 8 took, which is the set that must have a
+    /// fixture on disk.
+    private static func adoptedAlacrittyNames(in manifest: AlacrittyManifest) -> Set<String> {
+        let taken = Self.alacrittyTakenDispositions
+        let milestones: Set<Int> = [6, 8]
+        return Set(manifest.recordings.compactMap { entry -> String? in
+            guard let milestone = entry.milestone,
+                  milestones.contains(milestone),
+                  taken.contains(entry.disposition) else {
+                return nil
+            }
+            return entry.name
         })
-        let fixtureNames = Set(try alacrittyFixtureURLs().map { $0.deletingPathExtension().lastPathComponent })
-        #expect(fixtureNames == adopted)
+    }
+
+    /// Milestone 8 adopted its recordings for alternate-screen evidence, so each of those fixtures
+    /// has to pin the whole seam rather than a viewport snapshot.
+    private func assertMilestone8AlacrittyFixtureShape() throws {
         for url in try alacrittyFixtureURLs()
             where Self.milestone8AlacrittyRecordings.contains(url.deletingPathExtension().lastPathComponent)
         {
@@ -297,18 +325,23 @@ struct TerminalFixtureTests {
             throw FixtureError.missingResourceRoot
         }
         let root = resources.appending(path: "Fixtures", directoryHint: .isDirectory)
-        return try ["libvterm", "alacritty", "windows-terminal"].flatMap { directory in
-            try FileManager.default.contentsOfDirectory(
-                at: root.appending(path: directory, directoryHint: .isDirectory),
+        let directories: [String] = ["libvterm", "alacritty", "windows-terminal"]
+        var names: [String] = []
+        for directory in directories {
+            let directoryURL: URL = root.appending(path: directory, directoryHint: .isDirectory)
+            let contents: [URL] = try FileManager.default.contentsOfDirectory(
+                at: directoryURL,
                 includingPropertiesForKeys: nil
             )
-            .filter { $0.pathExtension == "json" }
-            .map { "\(directory)/\($0.deletingPathExtension().lastPathComponent)" }
+            for url in contents where url.pathExtension == "json" {
+                let stem: String = url.deletingPathExtension().lastPathComponent
+                if Self.milestone8AlacrittyRecordings.contains(stem) {
+                    continue
+                }
+                names.append("\(directory)/\(stem)")
+            }
         }
-        .filter { name in
-            Self.milestone8AlacrittyRecordings.contains(name.split(separator: "/").last.map(String.init) ?? "") == false
-        }
-        .sorted()
+        return names.sorted()
     }
 
     private static func fixtureURL(named name: String) throws -> URL {
@@ -431,6 +464,10 @@ struct TerminalFixtureTests {
         "vttest-movement-2", "vttest-movement-3", "vttest-movement-4", "vttest-screen-1",
         "vttest-screen-2", "vttest-screen-3", "vttest-screen-4",
     ]
+
+    /// The two dispositions that mean the recording became a fixture in this tree, as opposed to
+    /// being declined or covered elsewhere.
+    private static let alacrittyTakenDispositions: Set<String> = ["adopted", "adapted"]
 
     private static let expectedAlacrittyRecordings: Set<String> = [
         "alt_reset", "clear_underline", "colored_reset", "colored_underline", "csi_rep",
@@ -658,6 +695,28 @@ struct TerminalFixtureTests {
         semanticEvents: [TerminalSemanticEvent]
     ) throws {
         let expectation = try #require(expectation)
+        try assertSideChannels(
+            expectation,
+            replyBytes: replyBytes,
+            inputBytes: inputBytes,
+            clipboardWrites: clipboardWrites,
+            semanticEvents: semanticEvents
+        )
+        try assertStyling(expectation, against: terminal)
+        try assertCellContent(expectation, against: terminal)
+        assertText(expectation, against: terminal)
+        try assertScreenState(expectation, against: terminal)
+    }
+
+    /// The four channels the replay captured outside the grid: what the terminal replied, what it
+    /// asked to be typed back, what it wrote to the clipboard, and which semantic events it emitted.
+    private func assertSideChannels(
+        _ expectation: FixtureExpectation,
+        replyBytes: [UInt8],
+        inputBytes: [UInt8],
+        clipboardWrites: [String],
+        semanticEvents: [TerminalSemanticEvent]
+    ) throws {
         if let expectedReplyBytes = expectation.replyBytes {
             #expect(replyBytes == expectedReplyBytes)
         }
@@ -670,6 +729,10 @@ struct TerminalFixtureTests {
         if let expectedSemanticEvents = expectation.semanticEvents {
             #expect(semanticEvents == expectedSemanticEvents.map(\.terminalEvent))
         }
+    }
+
+    /// Cursor presentation, the pen's current style, and the styles the fixture pins per cell or run.
+    private func assertStyling(_ expectation: FixtureExpectation, against terminal: Terminal) throws {
         if let presentation = expectation.cursorPresentation {
             #expect(terminal.presentation.isCursorVisible == presentation.isVisible)
             #expect(terminal.presentation.isCursorBlinking == presentation.isBlinking)
@@ -700,6 +763,10 @@ struct TerminalFixtureTests {
                 }
             }
         }
+    }
+
+    /// What the cells hold apart from style: scalars, hyperlinks, kind, and the per-row wrap flag.
+    private func assertCellContent(_ expectation: FixtureExpectation, against terminal: Terminal) throws {
         if let cellScalars = expectation.cellScalars {
             for point in cellScalars {
                 let cell = try #require(terminal.cell(row: point.row, column: point.column))
@@ -713,6 +780,16 @@ struct TerminalFixtureTests {
                 #expect(cell.hyperlink?.explicitId == point.hyperlink?.explicitId)
             }
         }
+        if let cellKinds = expectation.cellKinds {
+            #expect(terminal.geometry.rows.map { $0.cells.map(\.kind.fixtureName) } == cellKinds)
+        }
+        if let softWraps = expectation.softWraps {
+            #expect(terminal.geometry.rows.map(\.isSoftWrapped) == softWraps)
+        }
+    }
+
+    /// The rendered text of the viewport and of the history behind it.
+    private func assertText(_ expectation: FixtureExpectation, against terminal: Terminal) {
         if let viewportText = expectation.viewportText {
             #expect(terminal.screenText == viewportText)
         }
@@ -726,12 +803,18 @@ struct TerminalFixtureTests {
                 #expect(terminal.screenText.contains(fragment) == false)
             }
         }
-        if let cellKinds = expectation.cellKinds {
-            #expect(terminal.geometry.rows.map { $0.cells.map(\.kind.fixtureName) } == cellKinds)
+        if let fullHistoryText = expectation.fullHistoryText {
+            #expect(terminal.fullHistoryText == fullHistoryText)
         }
-        if let softWraps = expectation.softWraps {
-            #expect(terminal.geometry.rows.map(\.isSoftWrapped) == softWraps)
+        if let primaryHistoryContains = expectation.primaryHistoryContains {
+            for fragment in primaryHistoryContains {
+                #expect(terminal.primaryHistoryText.contains(fragment))
+            }
         }
+    }
+
+    /// Where the cursor sits, what the scrollback holds, and which screen and input modes are active.
+    private func assertScreenState(_ expectation: FixtureExpectation, against terminal: Terminal) throws {
         if let cursor = expectation.cursor {
             #expect(terminal.geometry.cursor == TerminalCursor(
                 row: cursor.row,
@@ -758,14 +841,6 @@ struct TerminalFixtureTests {
                         #expect(actual.cells[column].style == (try style.terminalStyle()))
                     }
                 }
-            }
-        }
-        if let fullHistoryText = expectation.fullHistoryText {
-            #expect(terminal.fullHistoryText == fullHistoryText)
-        }
-        if let primaryHistoryContains = expectation.primaryHistoryContains {
-            for fragment in primaryHistoryContains {
-                #expect(terminal.primaryHistoryText.contains(fragment))
             }
         }
         if let alternateScreenActive = expectation.alternateScreenActive {

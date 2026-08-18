@@ -233,7 +233,7 @@ budget cannot be armed before the tree clears it with margin.
 
 - [x] **1. Reshape the 710 ms test.** Change one file, with its assertions
       untouched, and record the before and after cost.
-- [ ] **2. Establish the margin.** Measure the package cold and complete at half
+- [x] **2. Establish the margin.** Measure the package cold and complete at half
       the budget, reshape what sits above that line, and record the resulting
       distribution. Nothing above the line is a legitimate outcome, and the
       distribution still gets recorded. If more than a couple of functions sit
@@ -289,3 +289,51 @@ budget cannot be armed before the tree clears it with margin.
   `[Terminal.ContentIdentity?]` and the literal right-hand side had to be
   promoted element-wise to match. Both now use annotated locals and explicit
   closure signatures.
+
+- **Slice 2: reshape, not a new limit.** The first cold measurement at the 250 ms
+  half-budget line found four function bodies above it, which is the count the
+  entry says to put to the user. The user chose to reshape all four and keep the
+  500 ms enforced limit. Giving the worst survivor -- the 448 ms `@Test(arguments:)`
+  generator -- a factor-of-two margin would mean raising the limit to about
+  900 ms, and the 710 ms regression this plan exists to catch would then pass
+  unnoticed. Moving the limit disarms the guard against its own motivating case.
+- **Slice 2: what carried the cost.** The four, as measured cold at a 250 ms
+  limit (log preserved at the gitignored `.build/calib-250.log`):
+  - 448 ms, the `@Test(arguments:)` generator for `reconstructsUnfinishedInput`.
+    The tuple array mixed bare integer literals with `Array(String.utf8)` calls,
+    so the solver picked the element type across all five rows at once. It now
+    carries `as [(prefix: [UInt8], continuation: [UInt8])]`. The test still runs
+    five cases.
+  - 395 ms, `chunkInvariantFixtureNames()`. A `flatMap`/`filter`/`map`/`filter`/
+    `sorted` chain over untyped closures became a loop with annotated locals. The
+    milestone-8 exclusion keyed on the last path component of the composed name,
+    which is the file stem, so it now reads the stem directly.
+  - 340 ms, `assert(_:against:replyBytes:inputBytes:clipboardWrites:semanticEvents:)`.
+    Split into `assertSideChannels`, `assertStyling`, `assertCellContent`,
+    `assertText`, and `assertScreenState`, grouped by concern, with every
+    assertion moved verbatim.
+  - 272 ms, `alacrittyManifestCoverage()`. Repeated `["adopted", "adapted"]`
+    literals became `Set<String>` locals and the repeated `filter` became one
+    local, which brought it only to 253 ms; splitting the ledger checks and the
+    milestone-8 fixture-shape loop into helpers finished the job.
+- **Slice 2: the assertion order moved, the assertions did not.** Splitting
+  `assert` reorders a few independent `#expect` blocks -- viewport text now runs
+  before `cellKinds`, history text before the cursor. The blocks share no state
+  and none of them returns early, so the set of assertions a fixture makes is
+  unchanged.
+- **Slice 2: the resulting distribution.** A cold, complete `swift test
+  --package-path lib/TerminalCore` in a disposable scratch tree at the 250 ms
+  half-budget line reports nothing at all, and all 1173 tests pass. A second cold
+  build at a 100 ms limit reads the top of the real distribution rather than a
+  pass bit: `validateProvenance` 210 ms, `windowsTerminalManifestCoverage()`
+  201 ms, `kuhnStressCorpus()` 164 ms, `assertAlacrittyLedger` 157 ms,
+  `completeLegacyControlKeyMatrix()` and
+  `anchorlessResizeBlanksNothingAndRecovers()` 152 ms each,
+  `canonicalTopology()` 131 ms, `collectionBasics()` 124 ms, then
+  `scheduleContract()` and `hardResetMatrix()` at 123 ms, with a tail of thirteen
+  more between 100 and 116 ms. The worst survivor clears the 500 ms limit by
+  2.4x, so I4 holds with room to spare.
+- **Slice 2: the numbers move between runs.** `validateProvenance` measured
+  197 ms on one cold run and 210 ms on the next with no edit in between, which is
+  the wall-clock noise AR2 names. It is one more reason the margin, not the
+  reading, is what makes the limit safe to arm.

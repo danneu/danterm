@@ -195,7 +195,7 @@ struct TerminalStateSynchronizationTests {
         (prefix: Array("\u{1B}[?6$".utf8), continuation: Array("p".utf8)),
         (prefix: Array("\u{1B}P1;2|payload".utf8), continuation: Array("\u{1B}\\X".utf8)),
         (prefix: Array("\u{1B}]8;id=p;https://partial.test".utf8), continuation: Array("\u{7}X\u{1B}]8;;\u{7}".utf8)),
-    ])
+    ] as [(prefix: [UInt8], continuation: [UInt8])])
     func reconstructsUnfinishedInput(prefix: [UInt8], continuation: [UInt8]) throws {
         // Intent: keep chunk boundaries from changing state after a synchronization fence.
         // Why it exists: a fence can land between any two recorded PTY byte chunks.
