@@ -368,14 +368,7 @@ private func makeProjection(
         fontFamilyChoices: choices,
         fontFamilyWarning: warning,
         themeWarning: themeWarning,
-        remoteThemeWarning: remoteThemeWarning,
-        themeDirtyLabel: nil,
-        fontSizeDirtyLabel: nil,
-        fontFamilyDirtyLabel: nil,
-        alertClearModeDirtyLabel: nil,
-        copyOnSelectDirtyLabel: nil,
-        remoteThemeDirtyLabel: nil,
-        saveEnabled: false
+        remoteThemeWarning: remoteThemeWarning
     )
 }
 

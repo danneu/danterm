@@ -411,9 +411,8 @@ struct GroupModel: Equatable {
 ///
 /// `fontSize` is text rather than a number precisely because it is mid-edit
 /// state: a half-typed "1" must stay "1" until save, not be reinterpreted as a
-/// size. Comparing it against the committed `config.fontSize` therefore renders
-/// that number with `configFontSizeText` at the point of comparison -- the model
-/// never stores a second copy of it.
+/// size. Seeding it from the committed `config.fontSize` therefore renders that
+/// number with `configFontSizeText`, and save parses the text back.
 struct PreferencesDraft: Equatable {
     var alertClearMode: AlertClearMode
     var remoteTheme: String  // selected catalog name

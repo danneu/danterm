@@ -605,16 +605,6 @@ func update(
         model.preferencesDraft!.remoteTheme = rawText
         return []
 
-    case .prefResetAlertClearMode:
-        guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.alertClearMode = model.config.alertClearMode
-        return []
-
-    case .prefResetRemoteTheme:
-        guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.remoteTheme = model.config.remoteTheme
-        return []
-
     case .prefSetTheme(let text):
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.theme = text
@@ -633,26 +623,6 @@ func update(
     case .prefSetCopyOnSelect(let enabled):
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.copyOnSelect = enabled
-        return []
-
-    case .prefResetTheme:
-        guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.theme = model.config.defaultTheme
-        return []
-
-    case .prefResetFontSize:
-        guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.fontSize = model.config.fontSize.map(configFontSizeText)
-        return []
-
-    case .prefResetFontFamily:
-        guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.fontFamily = model.config.fontFamily
-        return []
-
-    case .prefResetCopyOnSelect:
-        guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.copyOnSelect = model.config.copyOnSelect
         return []
 
     case .prefSave:

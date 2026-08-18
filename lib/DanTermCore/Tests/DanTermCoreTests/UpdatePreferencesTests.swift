@@ -1,20 +1,12 @@
-// Swift Testing migration of the legacy `tests/UpdatePreferencesTests.swift`
-// harness suite. Pins the preferences-draft Msg paths: panel lifecycle
-// (preferencesOpened initializes the draft from the saved config without
-// wiping an existing draft, preferencesClosed clears it), the desiredPreferencesPanel
-// projection (clean draft + per-field dirty labels + saveEnabled + invalid
-// font-size persistence), edit operations (prefSet* preserve raw text for
-// remoteTheme, do NOT mutate committed config), reset operations, prefSave
-// (one whole-document transaction, remote-theme propagation to live panes,
-// theme + font-size ownership, and invalid font-size handling),
-// configLoaded while open (resets only DanTerm fields), and the
-// no-op-when-draft-nil guards
-// + the resolveRemoteTheme helper. The eight
-// `guard let projection = ... else { throw }` unwraps convert to `try #require`.
-//
-// Dirty detection is asserted through the projection, never through a helper:
-// the panel's rendered labels are the behavior, and a separate predicate for
-// the same question is free to drift from the one the panel actually uses.
+// Pins the preferences-draft Msg paths: panel lifecycle (preferencesOpened
+// initializes the draft from the saved config without wiping an existing
+// draft, preferencesClosed clears it), the desiredPreferencesPanel projection
+// (the values and warnings the panel renders, plus invalid font-size
+// persistence), edit operations (prefSet* preserve raw text for remoteTheme, do
+// NOT mutate committed config), prefSave (one whole-document transaction,
+// remote-theme propagation to live panes, theme + font-size ownership, and
+// invalid font-size handling), configLoaded while open (resets only DanTerm
+// fields), the no-op-when-draft-nil guards, and the resolveRemoteTheme helper.
 import Foundation
 import Testing
 import DanTermProtocol
@@ -22,7 +14,7 @@ import DanTermProtocol
 @testable import DanTermCore
 
 /// Open the panel against a config whose saved theme and font size are the given
-/// values -- the committed side every dirty/reset assertion here compares against.
+/// values -- the committed side the draft is seeded from.
 @discardableResult
 private func openPrefs(
     _ model: inout AppModel,
@@ -92,12 +84,8 @@ private func openPrefs(
         #expect(desiredPreferencesPanel(in: model) == nil, "closed preferences should not project UI")
     }
 
-    @Test("desiredPreferencesPanel clean draft renders values with save disabled")
-    func desiredPreferencesPanelCleanDraftDisablesSave() throws {
-        // Intent: a clean draft renders current values, no dirty labels,
-        //   Save disabled.
-        // Why it exists: pins the no-changes projection.
-        // Scenario: spec-first clean panel.
+    @Test("a freshly seeded draft renders the committed values")
+    func freshlySeededDraftRendersCommittedValues() throws {
         var model = makeModel()
         model.config.alertClearMode = .manual
         model.config.remoteTheme = "Grape"
@@ -108,11 +96,6 @@ private func openPrefs(
         #expect(projection.remoteThemeText == "Grape")
         #expect(projection.themeText == "Dracula")
         #expect(projection.fontSizeText == "14")
-        #expect(projection.themeDirtyLabel == nil, "theme row hidden")
-        #expect(projection.fontSizeDirtyLabel == nil, "font-size row hidden")
-        #expect(projection.alertClearModeDirtyLabel == nil, "alert row hidden")
-        #expect(projection.remoteThemeDirtyLabel == nil, "remote theme row hidden")
-        #expect(!projection.saveEnabled, "clean draft disables Save")
     }
 
     @Test("unavailable configured themes report the dark fallback")
@@ -145,105 +128,29 @@ private func openPrefs(
         #expect(projection.remoteThemeWarning == nil)
     }
 
-    @Test("desiredPreferencesPanel renders alert clear mode dirty label")
-    func desiredPreferencesPanelRendersAlertClearModeDirty() throws {
-        // Intent: alert clear mode change surfaces a dirty label and
-        //   enables Save.
-        // Why it exists: pins the dirty-label rendering for alert mode.
-        // Scenario: spec-first dirty alert mode.
-        var model = makeModel()
-        _ = openPrefs(&model, theme: "Dracula", fontSize: 14)
-        _ = update(&model, .prefSetAlertClearMode(.manual))
-
-        let projection = try #require(desiredPreferencesPanel(in: model), "expected preferences projection")
-        #expect(projection.alertClearModeDirtyLabel == "Prev: Focus")
-        #expect(projection.saveEnabled, "dirty alert clear mode enables Save")
-    }
-
-    @Test("desiredPreferencesPanel renders remote theme dirty label")
-    func desiredPreferencesPanelRendersRemoteThemeDirty() throws {
-        // Intent: remote-theme change surfaces a dirty label and enables
-        //   Save.
-        // Why it exists: pins the dirty-label rendering for remote theme.
-        // Scenario: spec-first dirty remote theme.
-        var model = makeModel()
-        _ = openPrefs(&model, theme: "Dracula", fontSize: 14)
-        _ = update(&model, .prefSetRemoteTheme("Grape"))
-
-        let projection = try #require(desiredPreferencesPanel(in: model), "expected preferences projection")
-        #expect(projection.remoteThemeDirtyLabel == "Prev: Purplepeter")
-        #expect(projection.saveEnabled, "dirty remote theme enables Save")
-    }
-
-    @Test("desiredPreferencesPanel renders theme dirty label")
-    func desiredPreferencesPanelRendersThemeDirty() throws {
-        // Intent: a theme change surfaces a dirty label.
-        // Why it exists: pins the dirty-label rendering for the theme.
-        // Scenario: spec-first dirty theme.
-        var model = makeModel()
-        _ = openPrefs(&model, theme: "Dracula", fontSize: 14)
-        _ = update(&model, .prefSetTheme("Solarized"))
-
-        let projection = try #require(desiredPreferencesPanel(in: model), "expected preferences projection")
-        #expect(projection.themeDirtyLabel == "Prev: Dracula")
-        #expect(projection.saveEnabled, "dirty theme enables Save")
-    }
-
-    @Test("desiredPreferencesPanel renders font-size dirty label")
-    func desiredPreferencesPanelRendersFontSizeDirty() throws {
-        // Intent: font-size change surfaces a dirty label.
-        // Why it exists: pins the dirty-label rendering for font size.
-        // Scenario: spec-first dirty font size.
-        var model = makeModel()
-        _ = openPrefs(&model, theme: "Dracula", fontSize: 14)
-        _ = update(&model, .prefSetFontSize("16"))
-
-        let projection = try #require(desiredPreferencesPanel(in: model), "expected preferences projection")
-        #expect(projection.fontSizeDirtyLabel == "Prev: 14")
-        #expect(projection.saveEnabled, "dirty font size enables Save")
-    }
-
-    @Test("desiredPreferencesPanel normalizes remote theme dirtiness")
-    func desiredPreferencesPanelNormalizesRemoteThemeDirtiness() throws {
-        // Intent: a whitespace-padded remote theme that normalizes to the
-        //   committed value is treated as clean.
-        // Why it exists: pins the normalize-on-render rule.
-        // Scenario: spec-first normalize-clean.
+    @Test("the remote theme field renders the raw draft text")
+    func remoteThemeFieldRendersRawDraftText() throws {
+        // Intent: the projection hands the panel exactly what the draft holds,
+        //   whitespace included.
+        // Why it exists: normalizing on render would rewrite the field under a
+        //   user who is still typing; the trim belongs to save.
+        // Scenario: spec-first -- type a padded name that trims to the committed
+        //   one.
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetRemoteTheme("  Purplepeter  "))
 
         let projection = try #require(desiredPreferencesPanel(in: model), "expected preferences projection")
         #expect(projection.remoteThemeText == "  Purplepeter  ", "field keeps raw draft text")
-        #expect(projection.remoteThemeDirtyLabel == nil, "normalized remote theme is clean")
-        #expect(!projection.saveEnabled, "normalized clean draft disables Save")
     }
 
-    @Test("desiredPreferencesPanel uses default labels for unset config values")
-    func desiredPreferencesPanelUsesDefaultLabelsForUnsetConfigValues() throws {
-        // Intent: when the saved config sets neither theme nor font size, dirty
-        //   labels read "Prev: (default)".
-        // Why it exists: pins the default-label rendering.
-        // Scenario: spec-first default labels.
-        var model = makeModel()
-        _ = openPrefs(&model)
-        _ = update(&model, .prefSetTheme("Solarized"))
-        _ = update(&model, .prefSetFontSize("16"))
-
-        let projection = try #require(desiredPreferencesPanel(in: model), "expected preferences projection")
-        #expect(projection.themeDirtyLabel == "Prev: (default)")
-        #expect(projection.fontSizeDirtyLabel == "Prev: (default)")
-        #expect(projection.saveEnabled, "dirty draft enables Save")
-    }
-
-    @Test("an untouched panel is clean against the saved theme and font size")
-    func untouchedPanelIsCleanAgainstSavedConfig() throws {
+    @Test("an untouched panel shows the saved theme and font size")
+    func untouchedPanelShowsSavedConfig() throws {
         // Intent: opening the panel on a config that sets a theme and a font size
-        //   shows those values with no dirty rows and Save disabled, for both a
-        //   whole and a fractional size.
-        // Why it exists: the panel compares typed text against a stored number, so
-        //   a mismatch in how the number is rendered would make every panel open
-        //   look edited and light up Save with nothing to save.
+        //   shows those values, for both a whole and a fractional size.
+        // Why it exists: the field holds text while the config holds a number, so
+        //   a mismatch in how the number is rendered would show the user a size
+        //   they never chose.
         // Scenario: spec-first -- open the panel, touch nothing.
         for (size, text) in [(13.0, "13"), (13.5, "13.5")] {
             var model = makeModel()
@@ -251,46 +158,16 @@ private func openPrefs(
 
             let projection = try #require(desiredPreferencesPanel(in: model), "expected projection")
             #expect(projection.themeText == "Dracula")
-            #expect(projection.fontSizeText == text)
-            #expect(projection.themeDirtyLabel == nil, "theme row hidden")
-            #expect(projection.fontSizeDirtyLabel == nil, "font-size row hidden for \(size)")
-            #expect(!projection.saveEnabled, "untouched panel disables Save")
+            #expect(projection.fontSizeText == text, "rendered text for \(size)")
         }
     }
 
-    @Test("Reset returns the theme and font-size rows to the saved config")
-    func resetReturnsThemeAndFontSizeToSavedConfig() throws {
-        // Intent: after editing both fields, Reset on each restores the saved
-        //   value and the panel reads clean again.
-        // Why it exists: pins Reset's source of truth as the saved config, the one
-        //   place those two settings live.
-        // Scenario: spec-first -- edit theme and size, then hit both Reset buttons.
-        var model = makeModel()
-        _ = openPrefs(&model, theme: "Dracula", fontSize: 13.5)
-        _ = update(&model, .prefSetTheme("Solarized"))
-        _ = update(&model, .prefSetFontSize("16"))
-
-        let dirty = try #require(desiredPreferencesPanel(in: model), "expected projection")
-        #expect(dirty.themeDirtyLabel == "Prev: Dracula")
-        #expect(dirty.fontSizeDirtyLabel == "Prev: 13.5")
-
-        _ = update(&model, .prefResetTheme)
-        _ = update(&model, .prefResetFontSize)
-
-        let reset = try #require(desiredPreferencesPanel(in: model), "expected projection")
-        #expect(reset.themeText == "Dracula")
-        #expect(reset.fontSizeText == "13.5", "reset restores the field text, not a re-rendered number")
-        #expect(reset.themeDirtyLabel == nil)
-        #expect(reset.fontSizeDirtyLabel == nil)
-        #expect(!reset.saveEnabled, "a fully reset panel disables Save")
-    }
-
-    @Test("an external config reload repoints the panel's committed values")
-    func externalConfigReloadRepointsCommittedValues() throws {
-        // Intent: a config reload while the panel is open re-seeds the draft AND
-        //   the values it is compared against, leaving the panel clean.
-        // Why it exists: the committed side is read from model.config, so the two
-        //   cannot fall out of step -- this pins that they don't.
+    @Test("an external config reload re-seeds the open panel's fields")
+    func externalConfigReloadReseedsOpenPanel() throws {
+        // Intent: a config reload while the panel is open replaces the draft's
+        //   fields with the reloaded values, discarding the pending edit.
+        // Why it exists: a draft that kept the stale edit would show a setting
+        //   the config no longer holds, and would write it back on the next save.
         // Scenario: spec-first -- edit the theme, then the config file changes.
         var model = makeModel()
         _ = openPrefs(&model, theme: "Dracula", fontSize: 13)
@@ -304,16 +181,14 @@ private func openPrefs(
         let projection = try #require(desiredPreferencesPanel(in: model), "expected projection")
         #expect(projection.themeText == "Nord")
         #expect(projection.fontSizeText == "15")
-        #expect(projection.themeDirtyLabel == nil)
-        #expect(projection.fontSizeDirtyLabel == nil)
-        #expect(!projection.saveEnabled, "a freshly reloaded panel disables Save")
     }
 
-    @Test("invalid font-size stays dirty after save")
-    func invalidFontSizeStaysDirtyAfterSave() throws {
-        // Intent: invalid font-size is not saved; the draft remains dirty
-        //   and Save stays enabled.
-        // Why it exists: pins the validation-skip rule.
+    @Test("an invalid font size is not saved and stays in the field")
+    func invalidFontSizeIsNotSavedAndStaysInField() throws {
+        // Intent: an unparseable font size emits no save command and the text
+        //   the user typed stays on screen.
+        // Why it exists: pins the validation-skip rule -- the field is the only
+        //   place that text lives, so clearing it would lose the user's input.
         // Scenario: spec-first invalid font save.
         var model = makeModel()
         _ = openPrefs(&model)
@@ -323,8 +198,7 @@ private func openPrefs(
         let projection = try #require(desiredPreferencesPanel(in: model), "expected preferences projection")
         #expect(commands.count == 0)
         #expect(projection.fontSizeText == "abc")
-        #expect(projection.fontSizeDirtyLabel == "Prev: (default)")
-        #expect(projection.saveEnabled, "invalid unsaved font size remains dirty")
+        #expect(model.config.fontSize == nil, "the committed size is untouched")
     }
 
     // MARK: - Editing draft
@@ -404,63 +278,6 @@ private func openPrefs(
         #expect(commands.count == 0)
     }
 
-    // MARK: - Reset
-
-    @Test("prefResetAlertClearMode reverts draft to committed")
-    func prefResetAlertClearModeReverts() {
-        // Intent: reset returns the draft alert mode to committed value.
-        // Why it exists: pins the alert-mode reset.
-        // Scenario: spec-first reset alert mode.
-        var model = makeModel()
-        _ = openPrefs(&model)
-        _ = update(&model, .prefSetAlertClearMode(.manual))
-        #expect(model.preferencesDraft?.alertClearMode == .manual)
-        let commands = update(&model, .prefResetAlertClearMode)
-        #expect(model.preferencesDraft?.alertClearMode == .focus, "should revert to committed")
-        #expect(commands.count == 0)
-    }
-
-    @Test("prefResetRemoteTheme reverts draft to committed")
-    func prefResetRemoteThemeReverts() {
-        // Intent: reset returns the draft remote theme to committed value
-        //   (default "Purplepeter").
-        // Why it exists: pins the remote-theme reset.
-        // Scenario: spec-first reset remote theme.
-        var model = makeModel()
-        _ = openPrefs(&model)
-        _ = update(&model, .prefSetRemoteTheme("Grape"))
-        let commands = update(&model, .prefResetRemoteTheme)
-        #expect(model.preferencesDraft?.remoteTheme == "Purplepeter", "should revert to committed")
-        #expect(commands.count == 0)
-    }
-
-    @Test("prefResetTheme reverts draft to the saved config theme")
-    func prefResetThemeReverts() {
-        // Intent: reset returns the draft theme to the saved config value.
-        // Why it exists: pins the theme reset.
-        // Scenario: spec-first reset theme.
-        var model = makeModel()
-        _ = openPrefs(&model, theme: "Dracula")
-        _ = update(&model, .prefSetTheme("Solarized"))
-        #expect(model.preferencesDraft?.theme == "Solarized")
-        let commands = update(&model, .prefResetTheme)
-        #expect(model.preferencesDraft?.theme == "Dracula", "should revert to committed")
-        #expect(commands.count == 0)
-    }
-
-    @Test("prefResetFontSize reverts draft to the saved config font size")
-    func prefResetFontSizeReverts() {
-        // Intent: reset returns the draft font size to committed value.
-        // Why it exists: pins the font-size reset.
-        // Scenario: spec-first reset font size.
-        var model = makeModel()
-        _ = openPrefs(&model, fontSize: 14)
-        _ = update(&model, .prefSetFontSize("20"))
-        let commands = update(&model, .prefResetFontSize)
-        #expect(model.preferencesDraft?.fontSize == "14", "should revert to committed")
-        #expect(commands.count == 0)
-    }
-
     // MARK: - Save
 
     @Test("prefSave applies every valid field and emits one JSON transaction")
@@ -485,14 +302,13 @@ private func openPrefs(
             if case .saveDanTermConfig(let config) = $0 { return config == model.config }
             return false
         })
-        #expect(desiredPreferencesPanel(in: model)?.themeDirtyLabel == nil, "saved theme reads clean")
         #expect(
-            desiredPreferencesPanel(in: model)?.fontSizeDirtyLabel == nil,
-            "the size just saved reads clean against the number it was parsed into"
+            desiredPreferencesPanel(in: model)?.fontSizeText == "17.5",
+            "the field echoes back the number the size was parsed into"
         )
     }
 
-    @Test("invalid font size stays dirty while other fields save together")
+    @Test("an invalid font size does not block the other fields from saving")
     func invalidFontSizeDoesNotBlockOtherFields() {
         var model = makeModel()
         _ = openPrefs(&model)
@@ -504,8 +320,7 @@ private func openPrefs(
         #expect(model.config.alertClearMode == .manual)
         #expect(model.config.fontSize == nil)
         #expect(commands.count == 1)
-        #expect(model.preferencesDraft?.fontSize == "nan")
-        #expect(desiredPreferencesPanel(in: model)?.fontSizeDirtyLabel == "Prev: (default)")
+        #expect(model.preferencesDraft?.fontSize == "nan", "the unparseable text stays in the field")
     }
 
     @Test("prefSave with no changes emits no commands")
@@ -581,20 +396,18 @@ private func openPrefs(
         #expect(model.preferencesDraft?.remoteTheme == "Purplepeter")
     }
 
-    @Test("prefSave resets dirty state")
-    func prefSaveResetsDirtyState() throws {
-        // Intent: after a successful save, the draft is clean against the
-        //   committed config.
-        // Why it exists: pins the post-save invariant.
-        // Scenario: spec-first save clears dirty.
+    @Test("a second save with no further edit emits no command")
+    func secondSaveWithNoFurtherEditEmitsNoCommand() {
+        // Intent: once an edit is committed, saving again writes nothing.
+        // Why it exists: every control change sends prefSave, so a save that
+        //   could not tell the committed config from the draft would rewrite the
+        //   config file on each repeat.
+        // Scenario: spec-first -- edit the alert mode, save, then save again.
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetAlertClearMode(.manual))
-        #expect(try #require(desiredPreferencesPanel(in: model)).saveEnabled,
-            "should be dirty before save")
-        _ = update(&model, .prefSave)
-        #expect(!(try #require(desiredPreferencesPanel(in: model)).saveEnabled),
-            "should be clean after save")
+        #expect(update(&model, .prefSave).count == 1, "the edit is committed")
+        #expect(update(&model, .prefSave).count == 0, "nothing left to write")
     }
 
     @Test("prefSave with remoteTheme change updates the remote pane projection")
@@ -732,26 +545,14 @@ private func openPrefs(
         let e2 = update(&model, .prefSetRemoteTheme("Grape"))
         #expect(e2.count == 0)
 
-        let e3 = update(&model, .prefResetAlertClearMode)
+        let e3 = update(&model, .prefSave)
         #expect(e3.count == 0)
 
-        let e4 = update(&model, .prefResetRemoteTheme)
+        let e4 = update(&model, .prefSetTheme("Dracula"))
         #expect(e4.count == 0)
 
-        let e5 = update(&model, .prefSave)
+        let e5 = update(&model, .prefSetFontSize("14"))
         #expect(e5.count == 0)
-
-        let e6 = update(&model, .prefSetTheme("Dracula"))
-        #expect(e6.count == 0)
-
-        let e7 = update(&model, .prefSetFontSize("14"))
-        #expect(e7.count == 0)
-
-        let e8 = update(&model, .prefResetTheme)
-        #expect(e8.count == 0)
-
-        let e9 = update(&model, .prefResetFontSize)
-        #expect(e9.count == 0)
     }
 
     // MARK: - Helper functions

@@ -146,12 +146,6 @@ enum Msg {
     case prefSetFontSize(String?)
     case prefSetFontFamily(String?)
     case prefSetCopyOnSelect(Bool)
-    case prefResetAlertClearMode
-    case prefResetRemoteTheme
-    case prefResetTheme
-    case prefResetFontSize
-    case prefResetFontFamily
-    case prefResetCopyOnSelect
     case prefSave
 
     // Lifecycle

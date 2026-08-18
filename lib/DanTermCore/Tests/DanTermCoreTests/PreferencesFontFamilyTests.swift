@@ -99,46 +99,6 @@ import DanTermProtocol
         })
     }
 
-    // MARK: - Dirty row
-
-    @Test("editing the family shows the previous committed value")
-    func editingFamilyShowsPreviousValue() throws {
-        var model = makeModel()
-        model.config.fontFamily = "Menlo"
-        openPanel(&model)
-        #expect(try #require(desiredPreferencesPanel(in: model)).fontFamilyDirtyLabel == nil)
-
-        _ = update(&model, .prefSetFontFamily("Courier"))
-
-        #expect(try #require(desiredPreferencesPanel(in: model)).fontFamilyDirtyLabel == "Prev: Menlo")
-    }
-
-    @Test("the previous value reads as the system default when no family is committed")
-    func previousValueReadsAsSystemDefault() throws {
-        var model = makeModel()
-        openPanel(&model)
-
-        _ = update(&model, .prefSetFontFamily("Menlo"))
-
-        #expect(
-            try #require(desiredPreferencesPanel(in: model)).fontFamilyDirtyLabel
-                == "Prev: \(systemMonospaceFontChoiceTitle)"
-        )
-    }
-
-    @Test("prefResetFontFamily restores the committed family")
-    func resetFontFamilyRestoresCommitted() throws {
-        var model = makeModel()
-        model.config.fontFamily = "Menlo"
-        openPanel(&model)
-        _ = update(&model, .prefSetFontFamily("Courier"))
-
-        _ = update(&model, .prefResetFontFamily)
-
-        #expect(model.preferencesDraft?.fontFamily == "Menlo")
-        #expect(try #require(desiredPreferencesPanel(in: model)).fontFamilyDirtyLabel == nil)
-    }
-
     // MARK: - Warning
 
     @Test("an unresolved committed family warns in the panel")

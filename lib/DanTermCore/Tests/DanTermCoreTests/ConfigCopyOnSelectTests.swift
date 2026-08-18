@@ -64,31 +64,15 @@ import DanTermProtocol
         #expect(model.config.copyOnSelect, "committed config only moves on save")
     }
 
-    @Test("prefResetCopyOnSelect restores the committed value")
-    func prefResetCopyOnSelectRestoresCommittedValue() {
+    @Test("the copy-on-select checkbox renders the draft value")
+    func copyOnSelectCheckboxRendersDraftValue() throws {
         var model = makeModel()
         _ = update(&model, .preferencesOpened())
-        _ = update(&model, .prefSetCopyOnSelect(false))
-
-        _ = update(&model, .prefResetCopyOnSelect)
-
-        #expect(model.preferencesDraft?.copyOnSelect == true)
-    }
-
-    @Test("a copy-on-select edit alone enables Save and shows the previous value")
-    func copyOnSelectEditAloneEnablesSave() throws {
-        var model = makeModel()
-        _ = update(&model, .preferencesOpened())
-        let clean = try #require(desiredPreferencesPanel(in: model))
-        #expect(clean.saveEnabled == false)
-        #expect(clean.copyOnSelectDirtyLabel == nil)
+        #expect(try #require(desiredPreferencesPanel(in: model)).copyOnSelect)
 
         _ = update(&model, .prefSetCopyOnSelect(false))
 
-        let dirty = try #require(desiredPreferencesPanel(in: model))
-        #expect(dirty.saveEnabled)
-        #expect(dirty.copyOnSelect == false)
-        #expect(dirty.copyOnSelectDirtyLabel == "Prev: On")
+        #expect(try #require(desiredPreferencesPanel(in: model)).copyOnSelect == false)
     }
 
     @Test("configLoaded while the panel is open resets the copy-on-select draft")

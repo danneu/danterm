@@ -232,7 +232,6 @@ import DanTermProtocol
         #expect(size(model, paneId) == DanTermConfig.fontSizeRange.upperBound)
         var panel = try #require(desiredPreferencesPanel(in: model))
         #expect(panel.fontSizeText == "72")
-        #expect(panel.fontSizeDirtyLabel == nil, "the bounded size reads clean against what was saved")
 
         update(&model, .prefSetFontSize("4"))
         update(&model, .prefSave)
@@ -240,7 +239,6 @@ import DanTermProtocol
         #expect(size(model, paneId) == DanTermConfig.fontSizeRange.lowerBound)
         panel = try #require(desiredPreferencesPanel(in: model))
         #expect(panel.fontSizeText == "8")
-        #expect(panel.fontSizeDirtyLabel == nil)
     }
 
     // MARK: - PO5

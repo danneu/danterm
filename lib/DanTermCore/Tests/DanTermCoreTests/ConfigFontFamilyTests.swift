@@ -137,17 +137,6 @@ import Testing
         #expect(model.config.fontFamily == nil, "committed config only moves on save")
     }
 
-    @Test("a font-family edit alone enables Save")
-    func fontFamilyEditAloneEnablesSave() throws {
-        var model = makeModel()
-        _ = update(&model, .preferencesOpened())
-        #expect(try #require(desiredPreferencesPanel(in: model)).saveEnabled == false)
-
-        _ = update(&model, .prefSetFontFamily("Menlo"))
-
-        #expect(try #require(desiredPreferencesPanel(in: model)).saveEnabled)
-    }
-
     @Test("configLoaded while the panel is open resets the font-family draft")
     func configLoadedResetsFontFamilyDraft() {
         var model = makeModel()
@@ -237,8 +226,8 @@ import Testing
         _ = update(&model, .fontFamilyResolved("Menlo"))
 
         #expect(desiredPaneConfig(in: model)[paneId]?.fontFamily == "Menlo")
-        #expect(try #require(desiredPreferencesPanel(in: model)).saveEnabled == false,
-                "the save is committed, so nothing is dirty")
+        #expect(try #require(desiredPreferencesPanel(in: model)).fontFamilyText == "menlo",
+                "the field echoes back the name that was committed, not the resolved one")
     }
 
     @Test("fontFamilyResolved carries the verdict alone, touching nothing else")

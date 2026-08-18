@@ -59,13 +59,6 @@ struct PreferencesPanelProjection: Equatable {
     /// render paths recover to the built-in dark theme.
     var themeWarning: String?
     var remoteThemeWarning: String?
-    var themeDirtyLabel: String?
-    var fontSizeDirtyLabel: String?
-    var fontFamilyDirtyLabel: String?
-    var alertClearModeDirtyLabel: String?
-    var copyOnSelectDirtyLabel: String?
-    var remoteThemeDirtyLabel: String?
-    var saveEnabled: Bool
 }
 
 /// Project the preferences panel from the model. nil means no draft is open, so
@@ -74,18 +67,6 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
     guard let draft = model.preferencesDraft else { return nil }
 
     let committed = model.config
-    // The draft holds what the user typed, so the committed size is rendered to
-    // text to compare with it: "13" and 13.0 are the same setting, and normalizing
-    // the other direction would have to guess at half-typed input.
-    let committedFontSizeText = committed.fontSize.map(configFontSizeText)
-    let themeDirty = draft.theme != committed.defaultTheme
-    let fontSizeDirty = draft.fontSize != committedFontSizeText
-    let fontFamilyDirty = resolveFontFamilyDraft(draft.fontFamily) != committed.fontFamily
-    let alertDirty = draft.alertClearMode != committed.alertClearMode
-    let copyOnSelectDirty = draft.copyOnSelect != committed.copyOnSelect
-    let remoteThemeDirty = resolveRemoteTheme(draft.remoteTheme) != committed.remoteTheme
-
-    let alertDisplayValue = committed.alertClearMode == .focus ? "Focus" : "Manual"
     // Warn only while the field still holds the unresolved name: once the user
     // edits it, the warning would be describing text no longer on screen, and the
     // new name has not been resolved against the installed families yet.
@@ -121,17 +102,7 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         },
         remoteThemeWarning: unresolvedRemoteTheme.map {
             "Theme \"\($0)\" is not available -- using the built-in dark theme."
-        },
-        themeDirtyLabel: themeDirty ? "Prev: \(committed.defaultTheme ?? "(default)")" : nil,
-        fontSizeDirtyLabel: fontSizeDirty ? "Prev: \(committedFontSizeText ?? "(default)")" : nil,
-        fontFamilyDirtyLabel: fontFamilyDirty
-            ? "Prev: \(committed.fontFamily ?? systemMonospaceFontChoiceTitle)" : nil,
-        alertClearModeDirtyLabel: alertDirty ? "Prev: \(alertDisplayValue)" : nil,
-        copyOnSelectDirtyLabel: copyOnSelectDirty
-            ? "Prev: \(committed.copyOnSelect ? "On" : "Off")" : nil,
-        remoteThemeDirtyLabel: remoteThemeDirty ? "Prev: \(committed.remoteTheme)" : nil,
-        saveEnabled: themeDirty || fontSizeDirty || fontFamilyDirty
-            || alertDirty || copyOnSelectDirty || remoteThemeDirty
+        }
     )
 }
 
