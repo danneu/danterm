@@ -25,7 +25,11 @@ cp "$ROOT_DIR/justfile" "$WORK/justfile"
 # The default SwiftPM trees are implied by every `swift build`/`swift test` step
 # that names no scratch path; the rest are declared by the gate itself.
 SCRATCH_PATHS=(.spm-build .build)
+# A scratch path written as a shell variable is a throwaway directory the step makes
+# with `mktemp -d` and deletes itself, so it is never a tree in the checkout for clean
+# to remove. Only the literal paths belong in this list.
 while IFS= read -r path; do
+    [[ "$path" == *'$'* ]] && continue
     SCRATCH_PATHS+=("$path")
 done < <(grep -o -- '--scratch-path [^ ]*' "$ROOT_DIR/scripts/run-test-suite.sh" \
     | awk '{print $2}' | tr -d "\"'")

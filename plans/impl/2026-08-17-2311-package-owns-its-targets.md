@@ -231,7 +231,7 @@ because it records the hashes of everything above.
       symlink inside a target's own declared path is not -- indexed in
       `docs/design/index.md`, referenced from AGENTS.md, and noted in the
       symlink ADR's consequences.
-- [ ] **7. A cold-build gate lane.** Add one step to `scripts/run-test-suite.sh`
+- [x] **7. A cold-build gate lane.** Add one step to `scripts/run-test-suite.sh`
       that builds the whole root graph with tests into a per-run throwaway
       scratch (`swift build --build-tests --scratch-path "$(mktemp -d)"`, with
       cleanup), first in `STEPS`. Every existing step uses a warm per-purpose
@@ -398,3 +398,20 @@ Per slice, and in full after slice 8:
   ADR's citations, and `just test` passed all 98 steps in 74s with both new steps
   in the ok list. The step count does not rise at this commit because slice 5's run
   already saw these two steps sitting uncommitted in the working tree.
+- **Slice 7.** The lane is an inline step string rather than a new script, so the one
+  fact a reader needs -- this build gets a throwaway scratch -- sits next to the step
+  itself. It uses `rc` for the exit status because `status` is read-only in zsh, and an
+  operator who pastes the step into an interactive shell should not hit that.
+- **Slice 7.** `scripts/tests/just-clean_test.sh` reads scratch paths out of the step
+  list, so the new step's `--scratch-path $scratch` arrived there as a literal build
+  tree named `$scratch;` and the test failed. The test now skips a scratch path written
+  as a shell variable: such a path is a `mktemp -d` directory the step deletes itself,
+  so `just clean` has nothing in the checkout to remove. The literal paths it did check
+  are unchanged.
+- **Slice 7, red first.** The tree at d633f92e, exported with `git archive` to a scratch
+  directory and built with `swift build --build-tests` into a fresh scratch, fails with
+  exactly one error: `cli/main.swift:391:37: error: cannot find 'gatherDoctorFacts' in
+  scope`. That is the break every warm lane hid, and the lane catches it.
+- **Slice 7, green.** The same command on the current tree exits 0 in 26s solo. Inside
+  the gate's capped pool the lane takes 56s and becomes the longest pole; `just test`
+  passed all 99 steps in 83s, up from 74s.

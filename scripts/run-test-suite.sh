@@ -22,7 +22,21 @@ export CLANG_MODULE_CACHE_PATH="$REPO_ROOT/.build/clang-module-cache"
 
 # Ordered longest-measured-first. With a bounded pool this is list scheduling: putting
 # the long poles in front keeps the tail from being one slow step finishing alone.
+#
+# Every entry is a command line for a worker to expand, never for this file to expand,
+# so a `$` inside one stays single-quoted on purpose.
+# shellcheck disable=SC2016
 STEPS=(
+    # The cold-build lane. Every other step builds into a warm per-purpose scratch --
+    # .build-app-tests, .build-gate, the default .build -- so the gate cannot see a break
+    # that stale incremental state hides. A package boundary that stops an access level
+    # from reaching a consumer is exactly that kind of break: the warm lanes stayed green
+    # while a cold `swift build --product DanTermCLI` failed. A throwaway scratch from
+    # `mktemp -d` shares no build directory with anything, so the step is independent by
+    # construction. It carries no quotes because xargs -I strips them from a step line.
+    # Scope: the root graph, where every cross-manifest edge terminates. The nested
+    # package test lanes and the iOS gate still build warm.
+    'scratch=$(mktemp -d); swift build --build-tests --scratch-path $scratch; rc=$?; rm -rf $scratch; exit $rc'
     'swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate -Xswiftc -Xfrontend -Xswiftc -warn-long-function-bodies=500'
     './scripts/ios-portability-gate.sh'
     'swift test --package-path ios/DanTermMobileKit --scratch-path ios/DanTermMobileKit/.build-gate'
