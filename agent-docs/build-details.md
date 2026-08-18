@@ -98,6 +98,37 @@ Themes are tracked JSON under `themes/`, refreshed by
 upstream archive is named `ghostty-themes.tgz`, which is an upstream naming
 detail, not a build dependency.
 
+## The type-check budget on `lib/TerminalCore`
+
+Every target in `lib/TerminalCore/Package.swift` carries one shared
+`SwiftSetting`, `typeCheckBudget`, which caps how long the frontend may spend
+type-checking a single function body and asks for diagnostic names. Two rules
+follow, and both are enforced rather than trusted:
+
+- **A new target in that manifest carries the setting.** Spell it the same way
+  every other target does, `swiftSettings: [.swiftLanguageMode(.v6),
+  typeCheckBudget]`. A target that omits it compiles unmeasured, and
+  `scripts/type-check-budget-gate.sh` fails the gate naming the target rather
+  than letting the step pass having measured nothing.
+- **A body over the limit is reshaped, not exempted.** The cost is expression
+  shape, so the fix is annotated locals and explicit closure signatures at the
+  oversized inference sites, with every assertion left alone. Raising the limit
+  until the tree is quiet stops catching the class the budget exists for.
+
+Because the setting lives in the manifest, every build of the package measures
+what it type-checks -- the app build, the probes, the iOS cross-compile, and a
+bare `swift test --package-path lib/TerminalCore` alike -- so a breach shows up
+as a warning long before the gate turns it into a failure. Editing the manifest
+moves SwiftPM's build-argument hash, so the first build after such an edit is
+cold everywhere.
+
+`just test` reads the warnings through `scripts/type-check-budget-gate.sh`,
+which wraps the package's test lane and exits nonzero when the build reported
+any body over budget. That lane keeps its own scratch tree,
+`lib/TerminalCore/.build-gate`: the compiler reports an over-budget body only
+when it re-type-checks it, so the gate can only judge what its own build has to
+recompile.
+
 ## Stale build plans across the local packages
 
 Adding a new `.swift` file to one local package does not invalidate the build

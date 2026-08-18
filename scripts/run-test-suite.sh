@@ -38,12 +38,14 @@ STEPS=(
     # package test lanes and the iOS gate still build warm.
     'scratch=$(mktemp -d); swift build --build-tests --scratch-path $scratch; rc=$?; rm -rf $scratch; exit $rc'
     # The type-check budget lives in lib/TerminalCore/Package.swift, so this lane needs
-    # no extra flags. It keeps its own scratch path: the compiler reports an
-    # over-budget body only when it type-checks that body, so what the gate can measure
-    # is exactly what the gate's own build has to recompile. A tree only gate runs touch
-    # guarantees every file changed since the last `just test` is re-type-checked, and
-    # therefore measured, during the run that judges it.
-    'swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate'
+    # no extra flags -- but the compiler only warns, and this pool discards a passing
+    # step's output, so the wrapper is what turns a breach into a red step. It keeps its
+    # own scratch path: the compiler reports an over-budget body only when it
+    # type-checks that body, so what the gate can measure is exactly what the gate's own
+    # build has to recompile. A tree only gate runs touch guarantees every file changed
+    # since the last `just test` is re-type-checked, and therefore measured, during the
+    # run that judges it.
+    './scripts/type-check-budget-gate.sh swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate'
     './scripts/ios-portability-gate.sh'
     'swift test --package-path ios/DanTermMobileKit --scratch-path ios/DanTermMobileKit/.build-gate'
     './scripts/test-terminal-pty.sh'
@@ -98,6 +100,7 @@ STEPS=(
     './scripts/tests/terminal-exit-concurrency-lint_test.sh'
     './scripts/tests/checkpoint-off-main-lint_test.sh'
     './scripts/tests/reconcile-pass-lint_test.sh'
+    './scripts/tests/type-check-budget-gate_test.sh'
     './scripts/tests/terminal-scalar-append-lint_test.sh'
     './scripts/tests/terminal-benchmark-draw-path-lint_test.sh'
     './scripts/tests/terminal-benchmark-commands_test.sh'

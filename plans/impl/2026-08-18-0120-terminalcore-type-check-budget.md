@@ -244,7 +244,7 @@ budget cannot be armed before the tree clears it with margin.
       `-Xswiftc` args from the `STEPS` entry while its scratch path stays, and
       rewrite the `.gitignore` comment so it records the measurement window
       instead of a build-argument hash.
-- [ ] **4. The budget starts failing.** The enforcing script, its self-test, both
+- [x] **4. The budget starts failing.** The enforcing script, its self-test, both
       as `STEPS` entries, and the rule written down where a reader of the build
       would meet it.
 - [ ] **5. Close the audit item.** Mark S39 resolved in
@@ -357,3 +357,35 @@ budget cannot be armed before the tree clears it with margin.
   `swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]`. A uniform literal
   line is what slice 4's manifest-coverage check has to recognize, so the
   regular shape is doing work rather than only reading tidily.
+
+- **Slice 4: the script takes the whole command, not a package name.** The step
+  string is `./scripts/type-check-budget-gate.sh swift test --package-path
+  lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate`, and the script
+  runs what it is handed. This is what keeps the two existing readers of that
+  string working: `scripts/gate-test-coverage-lint.py` needs a literal `swift
+  test --package-path lib/TerminalCore` to see the package's one test lane, and
+  it cannot resolve a package path that reaches the compiler through a shell
+  argument. `scripts/tests/just-clean_test.sh` needs the literal
+  `--scratch-path`. A script that composed the command itself would have taken
+  both away. It also gives PO2 its runner seam for free: the self-test hands the
+  script a canned-output runner instead of a compiler.
+- **Slice 4: the usage text had to stop naming the package.** The coverage lint
+  follows every `./scripts/*.sh` token in a step string and reads the commands
+  inside, so a concrete example in the script's `--help` output read as a second
+  whole-estate lane and failed the lint. The example now says `<package>`. The
+  self-test avoids the same trap by naming only fixture paths.
+- **Slice 4: the guard catches the case it missed.** With slice 1's reshape
+  reverted, the step is red -- `truncatingIntoAForcedSplitRecordKeepsItsSide
+  TablesReadable()` at 683 ms against the 500 ms limit -- while all 1173 tests
+  pass. That is exactly the shape of the regression that sat unread for five
+  days: a green test run with a warning nobody saw.
+- **Slice 4: PO3, the warm developer tree does not disarm it.** With the offender
+  restored, a bare `swift test --package-path lib/TerminalCore` ran to completion
+  into the default tree and reported the breach itself (I1 holds with no flags on
+  the command line). The gate step then ran against `.build-gate` and failed
+  anyway.
+- **Slice 4: the price of the measurement window.** Two consecutive `just test`
+  runs with no edit between them put the step at 54 s and 45 s; the whole gate
+  took 124 s then 87 s. `lib/TerminalCore/.build-gate` is 577 MB beside
+  `lib/TerminalCore/.build` at 1.4 GB. The self-test step is 1 s, since it never
+  compiles anything.
