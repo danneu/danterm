@@ -1274,3 +1274,144 @@ splits the join prefix from the steady stream and accounts both.
   encoding and where a magnitude could actually move the framing question.
   T20 sizes the sync-vs-backlog trade the join numbers above already gesture
   at.
+
+### F12 -- a flooding pane ships 3-17 MB/s of wire, an order of magnitude past the frame-coalesced bound
+
+Discharges T21: the flood counterexample H5 names now has magnitudes.
+Reproduction: [t21-run.sh](t21-run.sh) drives every scenario against a
+throwaway **release-configuration** slot (`just launch-slot-optimized`);
+[t19-wire-capture.py](t19-wire-capture.py) is the shared instrument, extended
+with `--start beginning`. Floods are bounded (`yes | head -n N`, and repeated
+cats of real Swift sources) and time themselves with the shell's own `time`,
+so every capture pairs a wire rate with a producer-side drain rate.
+
+- Status: settled for the two flood shapes measured, one run each.
+  **Diagnostic, not benchmark**, per this doc's rules and
+  [agent-docs/terminal-performance.md](../../../agent-docs/terminal-performance.md).
+- Date and investigator: 2026-08-18, agent.
+- Commit and worktree state: `88651b7c`, clean but for this doc's own files.
+- Environment: one release slot on its local Unix socket, one pane pinned at
+  80x24, subscriber is the phone's join (`follow`, `reconstructible`,
+  `start: now`) drained by a local Python reader. The pane's PTY has ONLCR on,
+  so `yes`'s 2-byte lines arrive as 3 PTY bytes; payload numbers below are
+  PTY bytes, the thing the wire actually carries.
+- Result, steady stream (join excluded), raw deflate level 6, shared context:
+
+  | flood | producer `time` | payload B | wire B | wire rate | wire/payload | deflate whole | deflate per-record |
+  |---|---|---|---|---|---|---|---|
+  | `yes`, 5M lines (15.0 MB after ONLCR) | 6.49s | 15,016,154 | 23,979,255 | 3.42 MB/s | 1.60x | 332,975 | 617,448 |
+  | cat 4x TerminalCore sources (5.95 MB) | 0.356s | 5,954,507 | 9,545,718 | 16.7 MB/s | 1.60x | 2,177,308 | 2,385,759 |
+
+- **The wire delivers everything and exceeds the diff bound by 4-18x.** Zero
+  gap records in either capture: reconstructible mode shipped every PTY byte.
+  The frame-coalesced cell-diff bound at the same grid and rate is
+  arithmetic: 80x24 = 1,920 cells at 60 Hz is 115,200 cell updates/s even
+  with every cell changing every frame -- ~120 KB/s as plain full-repaint
+  text, ~920 KB/s under a deliberately fat 8-bytes-per-cell diff spelling.
+  The measured wire runs 3.42 MB/s (`yes`, line-rate-bound) to 16.7 MB/s
+  (real text, byte-rich lines), 4x to 18x the fat bound. Compression does not
+  close it for real content: the cat flood still runs ~4.2 MB/s after
+  per-record deflate (its text only compresses 4x), while `yes` deflates
+  ~39x because its content is trivial. H5's counterexample is confirmed with
+  magnitudes: at flood, the byte stream is the expensive encoding, and
+  skipping -- not compressing -- is what the architecture must lean on.
+- **Skipping's price is F13's number.** A diff wire would have to beat bytes
+  *plus* skipping (the task's own bar), but today the resync a skip ends in
+  costs 19.4 MB of wire on a lived-in pane (F13), which is 1-6 seconds of
+  flood at these rates. The bytes-plus-skipping comparison is therefore not
+  settled against the diff wire until the repair unit shrinks; that is T22's
+  bounded-sync question, not a wire-format change.
+- **Flow control throttles the producer barely, and the control plane holds.**
+  The same 1M-line `yes` drains in 1.18s with no subscriber and at the same
+  per-line rate under capture within ~10% -- one fast local subscriber is
+  nearly free. A timed `ls` issued mid-flood answered in 0.367s, elevated
+  above the ~12ms idle round trip (F5) but responsive. Both halves are
+  local-drain results: a slow remote link would park the flood in the app's
+  writes instead (F5's unstressed no-queue invariant), and that path is still
+  unexercised.
+- **A debug build tells the opposite story, 29x slower.** The first run of
+  this experiment used a default debug slot: `yes` drained at ~26 KB/s
+  payload with a subscriber (~60 KB/s without), an unbounded flood held the
+  wire at 41 KB/s, and a C-c queued ~27s while the CLI gave up with "DanTerm
+  is not responding". `debug-flood-yes.*` in the artifacts preserves that
+  capture. Flood drain is compute-bound, so debug numbers are not evidence
+  about the product; the release rerun above replaced them, and the contrast
+  is recorded so the next measurement starts from `-optimized`.
+- Uncertainty: single runs; the two floods bracket line-rate-bound and
+  byte-rate-bound content but nothing in between; the subscriber is a local
+  drain, so backpressure against a slow phone link is measured nowhere; the
+  control probe is one sample. Artifacts:
+  [t21-artifacts/](t21-artifacts/) holds `summary.json`, per-scenario
+  `.meta.json` chunk timelines, shell timings, and the run log; the
+  multi-megabyte `.raw` captures are deleted as script-reproducible.
+- Next action: T22's subscription scoping is now the live lever -- at these
+  rates a backgrounded flooding pane must not hold a full tape subscription
+  -- and the slow-remote-subscriber backpressure path needs a stress before
+  any repair policy ships.
+
+### F13 -- sync costs what the scrollback holds: 19.4 MB at the cap, and the retained backlog is cheaper wherever it exists
+
+Discharges T20's measurement: a sync payload against the backlog it would
+replace, across the three pane states the task names. Same run, instrument,
+and environment as F12 ([t21-run.sh](t21-run.sh), release slot, 80x24).
+
+- Status: settled for the three pane states, one run each. **Diagnostic, not
+  benchmark.**
+- Date and investigator: 2026-08-18, agent.
+- Commit and worktree state: `88651b7c`, clean but for this doc's own files.
+- Result: each pane state joined twice -- `start: now` (what a sync costs)
+  and `start: beginning` (what replaying the retained backlog costs):
+
+  | pane state | sync join wire / payload | backlog wire / payload | sync vs backlog wire |
+  |---|---|---|---|
+  | fresh prompt | 2,547 / 1,366 | 5,613 / 656 | 0.45x |
+  | quiet, 30k-line history | 3,387,749 / 2,540,264 | 2,846,064 / 1,701,127 | 1.19x |
+  | flooded to the scrollback cap | 19,414,103 / 14,559,650 | 19,414,261 (gap + sync) | equal by construction |
+
+- **Sync is scrollback-bound, and the bound is large.** The flood pane's
+  from-now join carried a 14,559,650-byte sync payload in 4 records (D5's
+  multi-record prefix, chunked at 4 MiB), and that size was constant across
+  four joins while the pane's history kept growing -- the scrollback sitting
+  at `Terminal.swift`'s 16 MiB `scrollbackByteLimit`, re-encoded as ~14.56 MB
+  of replay bytes. Every join of a lived-in pane pays ~19.4 MB of wire, over
+  again, mid-flood or idle.
+- **The retained backlog beats sync in every state where it exists.** On the
+  quiet deep-history pane the backlog replay is 0.84x the sync's wire and
+  0.67x its payload -- sync re-encodes the same history plus screen state,
+  attributes, and modes, so it cannot undercut the bytes it summarizes. On a
+  fresh pane both are trivial (the backlog's 5.6 KB is 2.2x the sync's
+  2.5 KB, mostly per-event envelope around 656 payload bytes -- including 2
+  resize events, because a from-beginning replay carries the pane's whole
+  geometry history). D5's current rule -- backlog when the position is
+  reachable, sync injected only when it is not -- is therefore the cheap side
+  everywhere measured, and the preference rule T20 warned about (resending a
+  scrollback to avoid replaying a few bytes) loses by megabytes.
+- **Eviction produces exactly the D5 injection, at full sync price.** The
+  from-beginning join of the flooded pane, whose early history was evicted
+  from the 8 MiB recorder ring, answered with one `gap` record then the same
+  4-part 19.4 MB sync. So after any flood, "resume from where I was" and
+  "join fresh" converge on the same worst-case transfer.
+- **History is the whole cost.** A fresh pane's sync payload is 1,366 bytes
+  -- screen, cursor, and modes. Everything above that, up to ~14.56 MB, is
+  scrollback history riding along whether the client wants it or not. The
+  repair-policy consequence: drop-forward-to-sync during a flood costs 19.4 MB
+  per repair and can thrash (the task's stated risk, now quantified at 1-6
+  seconds of flood traffic per repair against F12's rates); gap-and-hold with
+  one sync when the flood ends pays the 19.4 MB once. A history-bounded or
+  lazy sync -- T22's open note -- would turn that repair unit into
+  kilobytes, and is the single highest-leverage byte lever these numbers
+  expose.
+- Deflate is content-bound, not structure-bound, on sync: the seq-generated
+  deep history compresses 34x and the `yes` scrollback 285x, but real text
+  compresses ~4x (F12's cat flood), so a compressed lived-in sync should be
+  read as megabytes-to-hundreds-of-kilobytes, not the 68 KB the `yes`
+  artifact shows.
+- Uncertainty: single runs; history content here is synthetic and highly
+  compressible; the 30k-line pane's backlog was fully retained by
+  construction, so the crossover where eviction makes backlog unavailable
+  was only sampled at the far end (the flooded pane). Artifacts shared with
+  F12 under [t21-artifacts/](t21-artifacts/).
+- Next action: T22 should decide the bounded/lazy-history sync alongside
+  subscription scope, with these sizes as its inputs; the slow-subscriber
+  repair policy should prefer gap-and-hold over eager resync until the
+  repair unit shrinks.

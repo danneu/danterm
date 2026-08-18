@@ -1,0 +1,4 @@
+Executed in    1.18 secs      fish           external
+   usr time  104.00 millis    0.16 millis  103.84 millis
+   sys time  546.19 millis    1.01 millis  545.19 millis
+

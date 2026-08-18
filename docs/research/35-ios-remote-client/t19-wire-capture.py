@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""T19's instrument: record and account a pane.tape follow stream's wire bytes.
+"""T19/T21's instrument: record and account a pane.tape follow stream's wire bytes.
 
-capture: subscribes the way the phone joins (follow, reconstructible, from now)
-and writes every byte the server sends into <out>.raw, with per-recv-chunk
-timestamps in <out>.meta.json. It decodes nothing while capturing beyond
-watching for the subscribe reply, so the recording is the socket's bytes.
+capture: subscribes the way the phone joins (follow, reconstructible, from now
+by default; --start beginning asks for the retained backlog instead, which is
+T20's other arm) and writes every byte the server sends into <out>.raw, with
+per-recv-chunk timestamps in <out>.meta.json. It decodes nothing while
+capturing beyond watching for the subscribe reply, so the recording is the
+socket's bytes.
 
 analyze: splits a capture into the join prefix (hello, start reply, sync and
 gap records) and the steady stream that follows, then reports wire bytes,
@@ -17,7 +19,7 @@ Diagnostic instrument, not a benchmark. Run it against a throwaway
 `just launch-slot` instance, never the user's app.
 
     python3 t19-wire-capture.py capture <socket> <pane-id> --out <prefix> \
-        [--duration <s>] [--ready-file <path>]
+        [--duration <s>] [--ready-file <path>] [--start now|beginning]
     python3 t19-wire-capture.py analyze <prefix>...
 """
 import argparse
@@ -41,7 +43,7 @@ def capture(args):
         "params": {
             "pane": args.pane,
             "follow": True,
-            "start": "now",
+            "start": args.start,
             "mode": "reconstructible",
         },
     }
@@ -88,6 +90,7 @@ def capture(args):
     meta = {
         "socket": args.socket,
         "pane": args.pane,
+        "start": args.start,
         "durationSeconds": round(time.monotonic() - started, 3),
         "chunks": chunks,
     }
@@ -202,7 +205,10 @@ def analyze_one(prefix):
         return meta["durationSeconds"]
 
     steady_summary = segment_summary([l for l, _ in steady], [r for _, r in steady])
-    steady_span = round(meta["durationSeconds"] - time_at(steady_start_offset), 3) if steady else 0
+    # The stream can end long before the capture does (a bounded flood, or a
+    # capture left waiting), so the span ends at the last received chunk.
+    stream_end = meta["chunks"][-1][0] if meta["chunks"] else meta["durationSeconds"]
+    steady_span = round(stream_end - time_at(steady_start_offset), 3) if steady else 0
     return {
         "prefix": prefix,
         "captureSeconds": meta["durationSeconds"],
@@ -211,6 +217,11 @@ def analyze_one(prefix):
         "steady": steady_summary,
         "steadySpanSeconds": steady_span,
         "steadyWireBytesPerSecond": round(steady_summary["wireBytes"] / steady_span, 1)
+        if steady_span
+        else None,
+        "steadyPayloadBytesPerSecond": round(
+            steady_summary["payloadBytesTotal"] / steady_span, 1
+        )
         if steady_span
         else None,
     }
@@ -225,6 +236,7 @@ def main():
     cap.add_argument("--out", required=True)
     cap.add_argument("--duration", type=float, default=0)
     cap.add_argument("--ready-file")
+    cap.add_argument("--start", choices=["now", "beginning"], default="now")
     ana = commands.add_parser("analyze")
     ana.add_argument("prefixes", nargs="+")
     args = parser.parse_args()

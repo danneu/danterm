@@ -1,0 +1,433 @@
+== pane A: flood (T21, and T20's flooding arm) ==
+-- ablation-nosub: 1M-line yes, no subscriber --
+-- flood-yes: 5M-line yes under capture, control probe mid-flood --
+-- flood-cat: 4 passes of real Swift sources under capture --
+-- sync-during-flood: T20's flooding-pane join --
+-- backlog-post-flood: from-beginning against an evicted ring --
+== pane B: fresh (T20) ==
+== pane C: quiet with deep history (T20) ==
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t21-artifacts/flood-yes",
+  "captureSeconds": 10.093,
+  "totalWireBytes": 43393358,
+  "join": {
+    "records": 6,
+    "wireBytes": 19414103,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1,
+      "sync": 4
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 14559650,
+      "other": 0
+    },
+    "payloadBytesTotal": 14559650,
+    "base64Chars": 19412876,
+    "envelopeBytes": 1227,
+    "wirePerPayloadByte": 1.33,
+    "deflateWholeBytes": 67672,
+    "deflatePerRecordBytes": 67741,
+    "deflatePayloadOnlyBytes": 35807
+  },
+  "steady": {
+    "records": 15044,
+    "wireBytes": 23979255,
+    "recordKinds": {
+      "event": 15044
+    },
+    "eventTypes": {
+      "write": 3,
+      "feed": 15041
+    },
+    "payloadBytes": {
+      "feed": 15016055,
+      "write": 99,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 15016154,
+    "base64Chars": 20060636,
+    "envelopeBytes": 3918619,
+    "wirePerPayloadByte": 1.6,
+    "deflateWholeBytes": 332975,
+    "deflatePerRecordBytes": 617448,
+    "deflatePayloadOnlyBytes": 49242
+  },
+  "steadySpanSeconds": 7.016,
+  "steadyWireBytesPerSecond": 3417795.8,
+  "steadyPayloadBytesPerSecond": 2140272.8
+}
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t21-artifacts/flood-cat",
+  "captureSeconds": 4.832,
+  "totalWireBytes": 28959811,
+  "join": {
+    "records": 6,
+    "wireBytes": 19414093,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1,
+      "sync": 4
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 14559640,
+      "other": 0
+    },
+    "payloadBytesTotal": 14559640,
+    "base64Chars": 19412864,
+    "envelopeBytes": 1229,
+    "wirePerPayloadByte": 1.33,
+    "deflateWholeBytes": 67679,
+    "deflatePerRecordBytes": 67747,
+    "deflatePayloadOnlyBytes": 35796
+  },
+  "steady": {
+    "records": 6074,
+    "wireBytes": 9545718,
+    "recordKinds": {
+      "event": 6074
+    },
+    "eventTypes": {
+      "write": 3,
+      "feed": 6071
+    },
+    "payloadBytes": {
+      "feed": 5954341,
+      "write": 166,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 5954507,
+    "base64Chars": 7954836,
+    "envelopeBytes": 1590882,
+    "wirePerPayloadByte": 1.6,
+    "deflateWholeBytes": 2177308,
+    "deflatePerRecordBytes": 2385759,
+    "deflatePayloadOnlyBytes": 1336863
+  },
+  "steadySpanSeconds": 0.571,
+  "steadyWireBytesPerSecond": 16717544.7,
+  "steadyPayloadBytesPerSecond": 10428208.4
+}
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t21-artifacts/sync-during-flood",
+  "captureSeconds": 3.207,
+  "totalWireBytes": 25892827,
+  "join": {
+    "records": 6,
+    "wireBytes": 19413433,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1,
+      "sync": 4
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 14559146,
+      "other": 0
+    },
+    "payloadBytesTotal": 14559146,
+    "base64Chars": 19412204,
+    "envelopeBytes": 1229,
+    "wirePerPayloadByte": 1.33,
+    "deflateWholeBytes": 67313,
+    "deflatePerRecordBytes": 67389,
+    "deflatePayloadOnlyBytes": 35579
+  },
+  "steady": {
+    "records": 4182,
+    "wireBytes": 6479394,
+    "recordKinds": {
+      "event": 4182
+    },
+    "eventTypes": {
+      "feed": 4182
+    },
+    "payloadBytes": {
+      "feed": 4030464,
+      "write": 0,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 4030464,
+    "base64Chars": 5384448,
+    "envelopeBytes": 1094946,
+    "wirePerPayloadByte": 1.61,
+    "deflateWholeBytes": 89173,
+    "deflatePerRecordBytes": 165528,
+    "deflatePayloadOnlyBytes": 12915
+  },
+  "steadySpanSeconds": 0.835,
+  "steadyWireBytesPerSecond": 7759753.3,
+  "steadyPayloadBytesPerSecond": 4826903.0
+}
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t21-artifacts/backlog-post-flood",
+  "captureSeconds": 10.11,
+  "totalWireBytes": 19414261,
+  "join": {
+    "records": 7,
+    "wireBytes": 19414261,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1,
+      "gap": 1,
+      "sync": 4
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 14559609,
+      "other": 0
+    },
+    "payloadBytesTotal": 14559609,
+    "base64Chars": 19412820,
+    "envelopeBytes": 1441,
+    "wirePerPayloadByte": 1.33,
+    "deflateWholeBytes": 67749,
+    "deflatePerRecordBytes": 67831,
+    "deflatePayloadOnlyBytes": 35796
+  },
+  "steady": {
+    "records": 0,
+    "wireBytes": 0,
+    "recordKinds": {},
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 0,
+    "base64Chars": 0,
+    "envelopeBytes": 0,
+    "wirePerPayloadByte": null,
+    "deflateWholeBytes": 0,
+    "deflatePerRecordBytes": 0,
+    "deflatePayloadOnlyBytes": 0
+  },
+  "steadySpanSeconds": 0,
+  "steadyWireBytesPerSecond": null,
+  "steadyPayloadBytesPerSecond": null
+}
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t21-artifacts/sync-fresh",
+  "captureSeconds": 3.025,
+  "totalWireBytes": 2547,
+  "join": {
+    "records": 3,
+    "wireBytes": 2547,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1,
+      "sync": 1
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 1366,
+      "other": 0
+    },
+    "payloadBytesTotal": 1366,
+    "base64Chars": 1824,
+    "envelopeBytes": 723,
+    "wirePerPayloadByte": 1.86,
+    "deflateWholeBytes": 909,
+    "deflatePerRecordBytes": 942,
+    "deflatePayloadOnlyBytes": 320
+  },
+  "steady": {
+    "records": 0,
+    "wireBytes": 0,
+    "recordKinds": {},
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 0,
+    "base64Chars": 0,
+    "envelopeBytes": 0,
+    "wirePerPayloadByte": null,
+    "deflateWholeBytes": 0,
+    "deflatePerRecordBytes": 0,
+    "deflatePayloadOnlyBytes": 0
+  },
+  "steadySpanSeconds": 0,
+  "steadyWireBytesPerSecond": null,
+  "steadyPayloadBytesPerSecond": null
+}
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t21-artifacts/backlog-fresh",
+  "captureSeconds": 3.02,
+  "totalWireBytes": 5613,
+  "join": {
+    "records": 2,
+    "wireBytes": 504,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 0,
+    "base64Chars": 0,
+    "envelopeBytes": 504,
+    "wirePerPayloadByte": null,
+    "deflateWholeBytes": 333,
+    "deflatePerRecordBytes": 360,
+    "deflatePayloadOnlyBytes": 0
+  },
+  "steady": {
+    "records": 17,
+    "wireBytes": 5109,
+    "recordKinds": {
+      "event": 17
+    },
+    "eventTypes": {
+      "resize": 2,
+      "feed": 12,
+      "write": 3
+    },
+    "payloadBytes": {
+      "feed": 548,
+      "write": 108,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 656,
+    "base64Chars": 892,
+    "envelopeBytes": 4217,
+    "wirePerPayloadByte": 7.79,
+    "deflateWholeBytes": 1099,
+    "deflatePerRecordBytes": 1369,
+    "deflatePayloadOnlyBytes": 359
+  },
+  "steadySpanSeconds": 0.0,
+  "steadyWireBytesPerSecond": null,
+  "steadyPayloadBytesPerSecond": null
+}
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t21-artifacts/sync-deep",
+  "captureSeconds": 4.031,
+  "totalWireBytes": 3387749,
+  "join": {
+    "records": 3,
+    "wireBytes": 3387749,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1,
+      "sync": 1
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 2540264,
+      "other": 0
+    },
+    "payloadBytesTotal": 2540264,
+    "base64Chars": 3387020,
+    "envelopeBytes": 729,
+    "wirePerPayloadByte": 1.33,
+    "deflateWholeBytes": 98327,
+    "deflatePerRecordBytes": 98200,
+    "deflatePayloadOnlyBytes": 86249
+  },
+  "steady": {
+    "records": 0,
+    "wireBytes": 0,
+    "recordKinds": {},
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 0,
+    "base64Chars": 0,
+    "envelopeBytes": 0,
+    "wirePerPayloadByte": null,
+    "deflateWholeBytes": 0,
+    "deflatePerRecordBytes": 0,
+    "deflatePayloadOnlyBytes": 0
+  },
+  "steadySpanSeconds": 0,
+  "steadyWireBytesPerSecond": null,
+  "steadyPayloadBytesPerSecond": null
+}
+{
+  "prefix": "/Users/dan/Code/danterm/docs/research/35-ios-remote-client/t21-artifacts/backlog-deep",
+  "captureSeconds": 10.074,
+  "totalWireBytes": 2846064,
+  "join": {
+    "records": 2,
+    "wireBytes": 504,
+    "recordKinds": {
+      "rpc:hello": 1,
+      "start": 1
+    },
+    "eventTypes": {},
+    "payloadBytes": {
+      "feed": 0,
+      "write": 0,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 0,
+    "base64Chars": 0,
+    "envelopeBytes": 504,
+    "wirePerPayloadByte": null,
+    "deflateWholeBytes": 335,
+    "deflatePerRecordBytes": 364,
+    "deflatePayloadOnlyBytes": 0
+  },
+  "steady": {
+    "records": 2228,
+    "wireBytes": 2845560,
+    "recordKinds": {
+      "event": 2228
+    },
+    "eventTypes": {
+      "resize": 2,
+      "feed": 2221,
+      "write": 5
+    },
+    "payloadBytes": {
+      "feed": 1700898,
+      "write": 229,
+      "sync": 0,
+      "other": 0
+    },
+    "payloadBytesTotal": 1701127,
+    "base64Chars": 2272340,
+    "envelopeBytes": 573220,
+    "wirePerPayloadByte": 1.67,
+    "deflateWholeBytes": 160360,
+    "deflatePerRecordBytes": 209137,
+    "deflatePayloadOnlyBytes": 78701
+  },
+  "steadySpanSeconds": 0.039,
+  "steadyWireBytesPerSecond": 72963076.9,
+  "steadyPayloadBytesPerSecond": 43618641.0
+}

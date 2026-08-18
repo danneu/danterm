@@ -37,6 +37,11 @@ Research started: 2026-08-12.
   against a throwaway slot, and the instrument that records the socket's bytes
   verbatim and accounts payload against envelope, raw and deflated. Captures
   under [t19-artifacts/](t19-artifacts/).
+- [t21-run.sh](t21-run.sh) -- F12 and F13's reproduction: bounded, self-timing
+  floods plus paired from-now and from-beginning joins of three pane states,
+  against a release slot, using the same instrument. Summaries, chunk
+  timelines, and shell timings under [t21-artifacts/](t21-artifacts/); the
+  multi-megabyte raw captures are deleted as script-reproducible.
 - [briefing.md](briefing.md) -- the initiating brainstorm dump: repo census, IPC
   surface, portability inference, candidate directions. Census-grade evidence;
   every claim that carries weight is re-verified by a Phase 1 task before a
@@ -283,7 +288,9 @@ as settled:
   encoding, and it is also this product's headline workload -- panes running
   coding agents. The architecture survives it by skipping rather than by
   compressing, which is why the repair policy below is load bearing rather than
-  cosmetic. T21 sizes it.
+  cosmetic. F12 sized it: 3.4-16.7 MB/s of wire against a ~0.1-0.9 MB/s
+  frame-coalesced bound, with compression unable to close the gap on real
+  text.
 - **Input encoding contradicts a recorded finding.** F4's payload floor item 5
   states that a client encodes keystrokes from its own `inputModes`, "which is
   what a real client must do". The competing position is that the client sends
@@ -297,9 +304,10 @@ as settled:
   steady stream runs 3-4.3x its PTY payload raw and about 2.5x after
   compression, at 4.2-4.4 KB/s in every active workload measured and exactly
   zero when idle. That settles the encoding half at those workloads -- nothing
-  there motivates a wire change. T21's flood and T20's sync sizes are still
-  unmeasured, and no flood-policy change may cite this section as evidence
-  until they report.
+  there motivates a wire change. F12 and F13 now supply the flood and sync
+  magnitudes: the flood exceeds the diff bound by 4-18x and every join of a
+  lived-in pane costs ~19.4 MB, so the open policy questions are the repair
+  unit's size and the subscription scope (T22), not the steady encoding.
 
 ## Direction
 
@@ -518,13 +526,21 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   so the framing question now rests entirely on T21's flood. Unplanned: the
   from-now join's sync outweighed the steady stream in three of four captures,
   which is T20's trade made visible. Diagnostic, not benchmark.
-- **T21 TODO** -- Size the flood counterexample H5 names: the byte rate for a
-  pane emitting far faster than a screen can show it, against the bound a
-  frame-coalesced cell diff would have at the same grid and frame rate. This is
-  the one workload where the byte stream is the expensive encoding, and it is the
-  agent-supervision workload, so the number decides how much the repair policy in
-  T20 has to carry. It does not reopen the wire format by itself: a diff wire
-  would have to beat bytes *plus* skipping, not bytes alone.
+- **T21 DONE** (F12) -- The flood is sized, on a release slot: 3.42 MB/s of
+  wire for a `yes` flood (line-rate-bound) and 16.7 MB/s for real text
+  (byte-rich lines), every byte delivered with zero gap records, against a
+  frame-coalesced diff bound of ~0.12 MB/s (plain full-repaint text) to
+  ~0.92 MB/s (a fat 8-byte cell spelling) at the same 80x24 / 60 Hz.
+  Compression does not close the gap on real text (4x), so H5's flood
+  counterexample is confirmed with magnitudes: skipping, not compressing, is
+  what the architecture leans on. The task's own bar stands, though: a diff
+  wire would have to beat bytes *plus* skipping, and F13 prices today's skip
+  repair at a 19.4 MB sync, so the comparison stays open until the repair
+  unit shrinks (T22). Unplanned: one local subscriber throttles the producer
+  only ~10% and a mid-flood `ls` answers in 0.37s -- but a debug build is
+  29x slower on this compute-bound path and told the opposite story
+  (26 KB/s, a C-c queued 27s), which is why flood measurements start from
+  `-optimized`.
 - **T22 TODO** -- Subscription scope: a full tape subscription for the pane on
   screen, and 34/D2 activity transitions for every other pane, so a backgrounded
   agent costs a few bytes per state change instead of its whole output. This is
@@ -535,6 +551,10 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   panes is expensive in exactly the way a scrollable pane list invites. Decide
   whether sync's history component can be lazy or bounded for the
   interactive-switch case -- T8-adjacent, but not a question D5 answered.
+  F12 and F13 supply its inputs: a backgrounded flooding pane costs up to
+  16.7 MB/s to follow, and the sync a pane switch splices costs up to
+  19.4 MB, so both halves of this task now have the numbers they were
+  waiting on.
 
 ### Phase 3 -- durable subscriptions and resume
 
@@ -576,19 +596,21 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   reveal it; unfinished input-stream state travels in the payload because a
   fence does not land in ground state; and a cursor is meaningful only to the
   recorder lifetime that minted it.
-- **T20 TODO** -- Measure a sync payload against the backlog it would replace,
-  across three panes: quiet with deep history, freshly started, and flooding.
-  This decides two things H5 left open, and both currently rest on an unchecked
-  assumption that sync is cheap. First, whether a reconnecting client should ever
-  prefer sync to a reconstructible backlog: D5 already injects sync exactly when
-  the requested position is unreachable, and because sync carries the primary
-  screen's history with attributes, a preference rule would resend a whole
-  scrollback to avoid replaying a few bytes on a quiet pane. Second, the repair
-  policy for a subscriber that cannot keep up on a slow link -- drop it forward
-  to a fresh sync, or deliver a gap record and let it hold stale-but-bounded
-  state until the flood ends and then sync once. Under sustained flood the first
-  can thrash, on exactly the deep-history pane where sync is largest. Sizes
-  decide it; the buffering bound itself is not in question and belongs to T5.
+- **T20 DONE** (F13) -- Sync is not cheap, and the unchecked assumption is
+  retired: sync cost tracks the scrollback, up to ~14.56 MB of payload
+  (19.4 MB of wire) when a pane sits at the 16 MiB `scrollbackByteLimit`,
+  paid again on every join. Both open questions resolve the same way. A
+  reconnecting client should never prefer sync to a reachable backlog: on the
+  quiet deep-history pane the backlog replay is 0.84x the sync's wire,
+  because sync re-encodes the same history plus screen state, so D5's
+  existing rule (backlog when reachable, sync only injected on eviction --
+  confirmed on the wire as gap-then-4-part-sync) is the cheap side
+  everywhere measured. And the repair policy should be gap-and-hold with one
+  sync after the flood, since drop-forward costs 19.4 MB per repair -- 1-6
+  seconds of flood at F12's rates -- and can thrash exactly as the task
+  feared. The load-bearing observation: history is the whole cost (a fresh
+  pane's sync payload is 1,366 bytes), so T22's bounded/lazy-history sync
+  would shrink the repair unit from megabytes to kilobytes.
 - **T9 DONE** (F9) -- Reconnect behavior on a real iPhone, against the shipped
   tailnet listener and the shipped D5 sync. The cases split cleanly in two.
   Where the process *closes* its socket -- backgrounding, kill, cold relaunch --
