@@ -175,7 +175,7 @@ struct TerminalStyleTableTests {
         }
         #expect(terminal.retainedRowForTesting(at: 0) != nil)
 
-        let rows = RetainedRowMaterializationCounter.measure {
+        let rows = Instrument.retainedRowMaterialization.measure {
             terminal.reclaimMetadataForTesting()
         }
 

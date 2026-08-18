@@ -61,15 +61,15 @@ struct TerminalSelectionProvenanceTests {
         )
 
         terminal.setSelection(range)
-        let calibration = WholeProjectionCounter.measure {
+        let calibration = Instrument.wholeProjection.measure {
             _ = terminal.selectedText
         }
         #expect(calibration >= 1)
 
-        let cellMaterializations = WholeProjectionCounter.measure {
+        let cellMaterializations = Instrument.wholeProjection.measure {
             terminal.setSelection(from: point, to: point)
         }
-        let rangeMaterializations = WholeProjectionCounter.measure {
+        let rangeMaterializations = Instrument.wholeProjection.measure {
             terminal.setSelection(range)
         }
 
@@ -86,10 +86,10 @@ struct TerminalSelectionProvenanceTests {
                 start: point,
                 end: TerminalTextPosition(row: 5, column: 1)
             )
-            let cell = LocateCounter.measure {
+            let cell = Instrument.displayRowLocate.measure {
                 terminal.setSelection(from: point, to: point)
             }
-            let rangeCost = LocateCounter.measure {
+            let rangeCost = Instrument.displayRowLocate.measure {
                 terminal.setSelection(range)
             }
             return (cell, rangeCost)
@@ -108,7 +108,7 @@ struct TerminalSelectionProvenanceTests {
     func selectAllDoesNotWalkProjectionAgainForProvenance() throws {
         var terminal = try historyFixture(lines: 80)
 
-        let materializations = WholeProjectionCounter.measure {
+        let materializations = Instrument.wholeProjection.measure {
             terminal.selectAll()
         }
 

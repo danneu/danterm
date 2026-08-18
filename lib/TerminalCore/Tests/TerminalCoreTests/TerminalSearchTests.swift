@@ -561,7 +561,7 @@ struct TerminalSearchTests {
         let scans = [0..<totalRows, 0..<(totalRows - 3)]
 
         for rows in scans {
-            let locates = LocateCounter.measure {
+            let locates = Instrument.displayRowLocate.measure {
                 _ = terminal.scannedSearchMatchRanges(in: rows)
             }
 
@@ -585,8 +585,8 @@ struct TerminalSearchTests {
             _ = terminal.beginSearch("hit")
 
             var projectedRows = 0
-            let maintenance = SearchIndexMaintenanceCounter.measure {
-                projectedRows = ProjectionRowCounter.measure {
+            let maintenance = Instrument.searchIndexMaintenance.measure {
+                projectedRows = Instrument.projectionRow.measure {
                     terminal.resize(columns: 9, rows: 3)
                 }
             }
@@ -674,8 +674,8 @@ struct TerminalSearchTests {
         _ = terminal.beginSearch("hit")
 
         var projectedRows = 0
-        let maintenance = SearchIndexMaintenanceCounter.measure {
-            projectedRows = ProjectionRowCounter.measure {
+        let maintenance = Instrument.searchIndexMaintenance.measure {
+            projectedRows = Instrument.projectionRow.measure {
                 terminal.resize(columns: 12, rows: 3)
             }
         }
@@ -751,7 +751,7 @@ struct TerminalSearchTests {
             )
 
             var selected: TerminalTextRange?
-            let spent = SearchDistanceWorkCounter.measure {
+            let spent = Instrument.searchDistanceWork.measure {
                 selected = terminal.activeSearchMatchRange
             }
             #expect(selected != nil)
@@ -787,7 +787,7 @@ struct TerminalSearchTests {
             terminal.feed(Array("seed\r\nseed\r\nseed".utf8))
             _ = terminal.beginSearch(needle)
 
-            return ProjectionRowCounter.measure {
+            return Instrument.projectionRow.measure {
                 for index in 0..<20 {
                     terminal.feed(Array("row \(index)\r\n".utf8))
                 }
@@ -823,8 +823,8 @@ struct TerminalSearchTests {
             _ = terminal.searchStatus
 
             var locates = 0
-            let resolutions = RecordPositionResolutionCounter.measure {
-                locates = LocateCounter.measure {
+            let resolutions = Instrument.recordPositionResolution.measure {
+                locates = Instrument.displayRowLocate.measure {
                     _ = terminal.searchStatus
                     _ = terminal.searchMatchRanges(in: 0..<8)
                     _ = terminal.activeSearchMatchRange
@@ -861,7 +861,7 @@ struct TerminalSearchTests {
             for index in 0..<depth {
                 terminal.feed(Array("line \(index) hit\r\n".utf8))
             }
-            return RecordCellMaterializationCounter.measure {
+            return Instrument.recordCellMaterialization.measure {
                 _ = terminal.beginSearch("hit")
             }
         }
@@ -875,7 +875,7 @@ struct TerminalSearchTests {
         for _ in 0..<8 {
             probe.feed(Array("abcd\r\n".utf8))
         }
-        let materialized = RecordCellMaterializationCounter.measure {
+        let materialized = Instrument.recordCellMaterialization.measure {
             _ = probe.scrollbackRecordContentIdentityShape(at: 0)
         }
         #expect(materialized == 4)
@@ -913,7 +913,7 @@ struct TerminalSearchTests {
         }
         _ = terminal.beginSearch("hit")
 
-        let comparisons = SearchIndexMaintenanceCounter.measure {
+        let comparisons = Instrument.searchIndexMaintenance.measure {
             terminal.feed(Array("miss\r\n".utf8))
         }
 
@@ -937,7 +937,7 @@ struct TerminalSearchTests {
                 terminal.feed(Array("hit\r\n".utf8))
             }
             _ = terminal.beginSearch(needle)
-            return SearchIndexMaintenanceCounter.measure {
+            return Instrument.searchIndexMaintenance.measure {
                 terminal.feed(Array("new\r\n".utf8))
             }
         }
@@ -1077,13 +1077,13 @@ struct TerminalSearchTests {
             terminal.feed(Array("hit\r\nlast".utf8))
             if streaming == false { _ = terminal.beginSearch("hit") }
 
-            let materializations = WholeProjectionCounter.measure {
+            let materializations = Instrument.wholeProjection.measure {
                 _ = terminal.searchNext()
                 _ = terminal.searchPrevious()
                 _ = terminal.searchStatus
             }
             #expect(materializations == 0)
-            return ProjectionRowCounter.measure {
+            return Instrument.projectionRow.measure {
                 _ = terminal.searchNext()
             }
         }

@@ -1,0 +1,231 @@
+# Scrollback pass: one instrument set, owned side tables, derived totals
+
+Audit findings S32, S31, S18 (docs/scratch/2026-08-11-simplification-audit.md),
+implemented as one sequenced pass over
+`lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift`. S31 and S18 are
+symptoms of the audit's T1 root cause -- one fact held in two places that every
+mutation site must move together by hand. S32 shares the file and the pass.
+
+## Problem
+
+Verified live against the tree on 2026-08-18; all three findings have grown
+since the audit:
+
+- **Instruments (S32).** Nine copy-pasted task-local counter enums -- eight
+  opening `LogicalLineStore.swift` (lines ~31-268), one in
+  `TerminalSearch.swift` -- identical but for a field name and the `record`
+  arity. The store's file header says what belongs in the file; 230+ lines of
+  instruments do not, and one of them is recorded only from `Terminal.swift`.
+  Adding a tenth instrument means pasting the pattern again, which is exactly
+  what happened since the audit counted seven.
+- **Side tables (S31).** `spillsBySequence`, `fillStylesBySequence`, the
+  `spillBytes` accumulator, and the `metadataBytes` charge cache are maintained
+  by hand at ~15 sites; `refreshMetadataCharge()` is called 11 times, and the
+  sites have drifted into three different emptiness guards for the same
+  question (`spillBytes > 0`, `spillsBySequence.isEmpty == false`,
+  `record.hasTrailingFill`). A missed prune leaks; a missed refresh loosens the
+  `31/I2` byte bound, and only the `census` assert -- which the write path
+  never reads -- catches it.
+- **Grand totals (S18).** `grandDisplayRowTotal` / `grandContentUnitTotal` are
+  stored and hand-adjusted at every mutation site even though the block index
+  already holds them: blocks carry absolute `rowStart`/`contentStart` against
+  the monotone evicted counts, so each total is an O(1) read off the last
+  block. The file carries two comments explaining the double-subtract ordering
+  hazard -- scar tissue from a real past bug (`removeLastDisplayRow` moved the
+  totals after retiring the block). `firstBlockNumber` is the same redundancy:
+  it always equals `firstRecordSequence / blockSize` while records exist, and
+  `retireEmptyHeadBlocks` exists only to re-establish that.
+
+## Decision
+
+Three commits, in this order. Each lands green with its tests.
+
+**1. Instrument unification.** One instrument enumeration and one task-local
+tally, in their own `TerminalCore` file, replace the nine counter enums; every
+record and measure site moves to the shared API. The store's file then starts
+at the store. The justification prose the counters carry (`31/PO7`, `31/I7`,
+`31/AR5`, `31/AR3`, the free-global-vs-member rationale) survives once, on the
+new declarations.
+
+**2. Side-table ownership.** One value type inside the store owns the spill
+table, the fill table, and their byte charge; every mutation of a table moves
+the charge in the same operation, so a stale charge and a divergent emptiness
+guard become inexpressible. The `metadataBytes` cache and
+`refreshMetadataCharge()` are deleted: `chargedBytes` sums `bytesInUse`, the
+live index charge, the live open-scratch charge, and the side-table owner's
+charge.
+
+**3. Derived totals.** `grandDisplayRowTotal` and `grandContentUnitTotal`
+become computed properties over the block ring; `firstBlockNumber` becomes
+computed from `firstRecordSequence`; `retireEmptyHeadBlocks` is retired by
+dropping the head block where the head-sequence quotient advances. The stored
+fields and their maintenance sites are deleted. The two ordering-hazard comments
+lose only their grand-total half: the surviving requirement -- that
+`evictOneDisplayRow` and `removeLastDisplayRow` update the current block before
+record removal can retire that block, or the decrement lands on the wrong
+surviving block -- keeps a shorter comment at each site. This commit is
+benchmark-gated (I7): if the benchmark rejects it, the stopping point is the
+stored fields plus a mutation-site assertion that they equal the block-derived
+values -- written here so that fallback is a decision, not a discovery.
+
+Sequencing rationale: commit 1 is mechanical and moves the instruments out of
+the file before the riskier edits; commit 3 goes last because it alone carries
+a perf gate and its fallback must not entangle the other two.
+
+## Invariants
+
+- **I1** A measurement observes exactly its own body's spend. Nested
+  measurements -- of a different instrument or of the same one -- neither zero
+  nor double-count an enclosing measurement, and recording with no active
+  measurement remains a no-op. (Three existing test sites in
+  `TerminalSearchTests.swift` nest measures today.)
+- **I2** Every existing recording site keeps its operation: the same events
+  are counted at the same points before and after unification. (Restates the
+  invariant the search-unification plan recorded for the search cost
+  counters.)
+- **I3** The side-table byte charge cannot be stale: only the type that owns
+  the tables can move them, and each mutation updates the charge in the same
+  operation. A full recount agrees with the maintained charge after every
+  mutation trigger.
+- **I4** `chargedBytes` stays O(1) on the write path (the `research/31/F8`
+  premise for caching it at all): every term is either computed from live
+  capacities or maintained by the single owner of the state it prices.
+- **I5** The `31/I2` byte bound and eviction depth are unchanged: the same
+  history at the same budget retains the same rows before and after commit 2.
+- **I6** The grand display-row and content-unit totals equal the independent
+  recounts after every mutation. After commit 3 a block update and a total
+  update cannot disagree, because there is only one update.
+- **I7** Commit 3 is not called free, and it changes both the retained-history
+  read path and the history mutation path, so two calibrated workloads decide
+  it: `retained-browse` for the read path and `terminal-feed` for the mutation
+  path. `just benchmark-confirm baseline=<pre-commit-3 rev>` is the authority
+  for both -- `quick` may be run first for a cheap signal, but it decides
+  nothing here, because "this changes no performance" is a claim only `confirm`
+  has the sensitivity to support (agent-docs/terminal-performance.md). `faster`
+  or `equivalent` on both accepts. Anything else triggers the fallback named in
+  the Decision: `slower` on either, or `terminal-feed: inconclusive`, which is
+  the absence of an answer. The single documented exception is
+  `retained-browse: inconclusive`, which that doc states means the difference is
+  smaller than the ladder resolves; it accepts. `scrollback-stream` is recorded
+  as descriptive evidence only -- it covers the same mutation path as the
+  narrower `terminal-feed`, and it emitted false directional verdicts in 3 of 8
+  identical-source invocations, so it cannot decide this.
+- **I8** No external surface changes anywhere in the pass: instruments,
+  tables, and totals are internal; tests reach them via `@testable` as today.
+
+## Proof obligations
+
+- **PO1** (I1) A spec test for the shared tally's nesting semantics -- an
+  inner measurement of another instrument and of the same instrument, each
+  leaving the outer result intact -- plus the existing nested sites in
+  `TerminalSearchTests.swift` staying green.
+- **PO2** (I2) The existing counter-calibration tests (the `>= 1` guards that
+  distinguish "not measured" from "measured zero", per
+  agent-docs/measurement-discipline.md) pass unmodified in meaning across all
+  three test packages that measure (`TerminalCoreTests`,
+  `TerminalRenderPlanningTests`, both `TerminalPTY` test targets).
+- **PO3** (I3) The existing oracle test "The maintained charge agrees with a
+  full recount after each of the six triggers"
+  (`TerminalLogicalLineStoreTests.swift`) stays, with the drift assertion
+  living wherever the charge now lives.
+- **PO4** (I5) The existing budget and charge tests stay green: charged bytes
+  under budget on content and blanks, spill-table charge retention, trailing
+  fill charged and released, capacity-reserve tests.
+- **PO7** (I5) A new behavioral fixture pins retention depth, which the tests
+  in PO4 do not: they prove the charge agrees with its recount and stays under
+  capacity, so an implementation that consistently overcharges a side table
+  passes them while evicting extra history. Feed a history with spills and
+  trailing fills at a budget where the side-table charge decides the boundary,
+  then assert the retained row count and the oldest retained row's content --
+  the same values before and after commit 2.
+- **PO5** (I6) The existing recount-oracle test "Display and content totals
+  agree with independent recounts after every mutation" and the
+  `TerminalLogicalLineFoldTests` total assertions stay green;
+  `independentDisplayRowRecount()` and its content sibling remain the oracle
+  and are not derived from the same source as the totals.
+- **PO6** (I7) The benchmark protocol in I7, run and recorded in the commit
+  message of commit 3 (or of the fallback): mode, workload, both tree
+  identities, the median symmetric estimate, and the classification, for both
+  deciding workloads and for the descriptive `scrollback-stream` line.
+
+## Non-goals
+
+- No restructuring of `Terminal.swift` or the search subsystem; the recording
+  sites there change spelling only.
+- No change to the `Census` reporting shape, the benchmark harness, or any
+  threshold.
+- The open-tail scratch tables (`openHyperlinks`, `openIdentityRuns`) keep
+  their current ownership; only the sequence-keyed tables and their charge move
+  into the new owner.
+
+## Accepted risks
+
+- **AR1** Commit 3 may be rejected by either deciding workload. Accepted: the
+  fallback (stored totals plus a derived-equality assertion at mutation sites)
+  is the honest stopping point and is pre-authorized above.
+- **AR2** The shared tally trades nine direct field accesses for one
+  instrument-indexed access on recording paths. All sites are same-module, so
+  docs/design/2026-07-29-cross-module-value-dispatch.md imposes no constraint;
+  the record path stays an inlineable task-local read either way.
+- **AR3** Commit 2 is not benchmark-gated, so a constant-factor feed-path cost
+  from summing `chargedBytes` on each read could land unmeasured. Accepted: I4
+  already forbids the shape that would matter (any term that is not O(1) off
+  live capacities or maintained by its owner), and gating a commit whose only
+  exposure is a few additions per evicted row buys less than the run costs.
+
+## Implementation discretion
+
+- Instrument naming, the tally's storage layout, and the new file's name.
+- The exact split of cached versus live-computed terms inside `chargedBytes`,
+  provided I3 and I4 hold.
+
+## Critical files
+
+- `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift` -- all three
+  commits.
+- `lib/TerminalCore/Sources/TerminalCore/TerminalSearch.swift`,
+  `lib/TerminalCore/Sources/TerminalCore/Terminal.swift` -- recording sites
+  (commit 1).
+- New instruments file under `lib/TerminalCore/Sources/TerminalCore/`.
+- Measure sites across `lib/TerminalCore/Tests/TerminalCoreTests/`,
+  `lib/TerminalCore/Tests/TerminalRenderPlanningTests/`, and
+  `lib/TerminalPTY/Tests/` (commit 1, mechanical).
+- `docs/scratch/2026-08-11-simplification-audit.md` -- stamp each finding's
+  Status cell with its landing commit, matching the audit's own convention.
+
+## Verification
+
+Per commit: TDD (failing test first where a new invariant is pinned -- PO1 is
+the one genuinely new test), then
+`swift test --package-path lib/TerminalCore`, the two `TerminalPTY` test
+targets for the cross-package measure sites, and `just test` before each
+commit. Commit 3 additionally runs the I7 benchmark protocol
+before the implementation is accepted.
+
+## Commit progress
+- [x] 1. Instrument unification
+- [ ] 2. Side-table ownership
+- [ ] 3. Derived totals
+
+## Implementation notes
+
+- The shared tally links each `measure` scope to the one it nests inside and
+  forwards every recording outward, so an enclosing measurement keeps counting
+  through a nested one. That is the reading of I1 that keeps every existing
+  count identical: the nine separate task-locals already let an outer scope of
+  one instrument observe its own body through an inner scope of another, and
+  every nested site in the suite pairs two different instruments. The same
+  rule also settles the same-instrument case the old shape left undefined --
+  each scope counts the operation exactly once.
+- `record`'s amount label is `count:` for every instrument, replacing the old
+  `rows:` / `cells:` / `units:` spellings.
+- The audit's ranked-findings Status cell holds commit hashes, which a commit
+  cannot carry for itself, so S32 got the file's other convention -- a
+  `**Status note.**` paragraph in its section. The hash cell still needs a
+  stamp.
+
+## Follow Up
+
+- Stamp the S32 row's Status cell in
+  `docs/scratch/2026-08-11-simplification-audit.md` with this commit's hash,
+  and do the same for S31 and S18 as commits 2 and 3 land.

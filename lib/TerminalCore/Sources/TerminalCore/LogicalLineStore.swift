@@ -28,248 +28,6 @@
 // deliberately reachable without `Terminal`'s 6,000 lines of parser state -- the store's
 // contracts are testable as a store.
 
-/// Counts display-row-to-record locates, so `31/PO7` can assert what one planned frame spends.
-///
-/// A free global rather than a member: `31/I7` is a claim about a *frame*, which spans several
-/// reads of a `Sendable` value type, and a counter inside the store would have to be either a
-/// refcounted box on a hot type -- what
-/// `docs/design/2026-07-29-cross-module-value-dispatch.md` warns off -- or a mutation on a read
-/// path that has none. `31/AR5` already records that `I7` is a discipline the counter guards
-/// rather than a mechanism that enforces it.
-enum LocateCounter {
-    /// The tally one `measure` is collecting. A class so the dynamic scope below can hand the
-    /// same box to every synchronous callee without copying it back out.
-    final class Tally: @unchecked Sendable {
-        var count = 0
-    }
-
-    /// Dynamically scoped rather than global: the test suite runs in parallel, and a process-wide
-    /// counter would tally every terminal every other test is driving at the same time.
-    @TaskLocal static var active: Tally?
-
-    /// Records one locate against whatever `measure` is in scope, and nothing otherwise.
-    @inline(__always)
-    static func record() {
-        active?.count += 1
-    }
-
-    /// Runs `body` and reports the locates it spent.
-    static func measure(_ body: () -> Void) -> Int {
-        let tally = Tally()
-        return $active.withValue(tally) {
-            body()
-            return tally.count
-        }
-    }
-}
-
-/// Counts whole retained-store equality checks at architecture boundaries.
-///
-/// Exists so owner-queue tests can prove that mutation publication never falls back to an
-/// O(history) value comparison. The dynamic scope keeps parallel tests independent and adds one
-/// task-local lookup per comparison, with no work on ordinary store reads or mutations.
-enum WholeStoreEqualityCounter {
-    final class Tally: @unchecked Sendable {
-        var count = 0
-    }
-
-    @TaskLocal static var active: Tally?
-
-    @inline(__always)
-    static func record() {
-        active?.count += 1
-    }
-
-    static func measure(_ body: () -> Void) -> Int {
-        let tally = Tally()
-        return $active.withValue(tally) {
-            body()
-            return tally.count
-        }
-    }
-}
-
-/// Counts the display rows a history-text projection materializes and walks.
-///
-/// Exists so `primaryHistoryTailText`'s reason for existing -- that a bounded read costs the
-/// budget it is given and not the scrollback behind it -- is assertable as an exact number
-/// rather than a wall clock. That claim used to be pinned by timing two histories and bounding
-/// their ratio, which no amount of warm-up or best-of-N sampling makes reliable inside a
-/// parallel test pool; the rows walked are the cost, and they are deterministic.
-///
-/// Same free-global, task-local shape as `LocateCounter` above, and for the same two reasons:
-/// the claim spans several reads of a `Sendable` value type, and a process-wide counter would
-/// tally every terminal the parallel suite is driving at once. It records once per projection
-/// with the whole stream length rather than once per row, so the read path pays a single
-/// task-local lookup per call and nothing per cell.
-enum ProjectionRowCounter {
-    /// The tally one `measure` is collecting. A class for the same reason as `LocateCounter.Tally`.
-    final class Tally: @unchecked Sendable {
-        var count = 0
-    }
-
-    @TaskLocal static var active: Tally?
-
-    /// Records a projection of `rows` display rows against whatever `measure` is in scope.
-    @inline(__always)
-    static func record(rows: Int) {
-        active?.count += rows
-    }
-
-    /// Runs `body` and reports the display rows the projections inside it walked.
-    static func measure(_ body: () -> Void) -> Int {
-        let tally = Tally()
-        return $active.withValue(tally) {
-            body()
-            return tally.count
-        }
-    }
-}
-
-/// Counts complete active-projection materializations so point-local selection reads can prove
-/// they do not scale with retained history depth.
-enum WholeProjectionCounter {
-    /// The tally one `measure` is collecting.
-    final class Tally: @unchecked Sendable {
-        var count = 0
-    }
-
-    @TaskLocal static var active: Tally?
-
-    /// Records one complete active-projection materialization.
-    @inline(__always)
-    static func record() {
-        active?.count += 1
-    }
-
-    /// Runs `body` and reports the complete projections materialized inside it.
-    static func measure(_ body: () -> Void) -> Int {
-        let tally = Tally()
-        return $active.withValue(tally) {
-            body()
-            return tally.count
-        }
-    }
-}
-
-/// Counts record coordinates resolved into current display geometry, so `31/PO7` can assert that
-/// a highlighted frame resolves the matches it draws rather than the matches history holds.
-///
-/// The instrument `31/AR3` names: translating a record coordinate is the new per-visible-match
-/// work on the frame path, and nothing in the type system keeps a reader from resolving a
-/// coordinate inside a binary search over every stored match instead. Same free-global, task-local
-/// shape as `LocateCounter`, and for the same reasons.
-enum RecordPositionResolutionCounter {
-    /// The tally one `measure` is collecting. A class for the same reason as `LocateCounter.Tally`.
-    final class Tally: @unchecked Sendable {
-        var count = 0
-    }
-
-    @TaskLocal static var active: Tally?
-
-    /// Records one record-coordinate resolution against whatever `measure` is in scope.
-    @inline(__always)
-    static func record() {
-        active?.count += 1
-    }
-
-    /// Runs `body` and reports the record coordinates it resolved.
-    static func measure(_ body: () -> Void) -> Int {
-        let tally = Tally()
-        return $active.withValue(tally) {
-            body()
-            return tally.count
-        }
-    }
-}
-
-/// Counts content units inspected while resolving nearest-search distances.
-///
-/// The dynamic scope lets tests distinguish endpoint-local rank work from a walk through the
-/// gap between matches without adding mutable instrumentation to `Terminal` or its history.
-enum SearchDistanceWorkCounter {
-    /// The tally one `measure` is collecting.
-    final class Tally: @unchecked Sendable {
-        var units = 0
-    }
-
-    @TaskLocal static var active: Tally?
-
-    /// Records actual content-unit work against whatever `measure` is in scope.
-    @inline(__always)
-    static func record(units: Int = 1) {
-        active?.units += units
-    }
-
-    /// Runs `body` and reports the content-unit work it spent.
-    static func measure(_ body: () -> Void) -> Int {
-        let tally = Tally()
-        return $active.withValue(tally) {
-            body()
-            return tally.units
-        }
-    }
-}
-
-/// Counts cells decoded through a whole-record materialization, so an index build over closed
-/// history can assert it streams the arena instead of rebuilding cells it does not keep.
-///
-/// A materialized cell carries a style id, a hyperlink probe and a content-identity probe that a
-/// content key never reads, so the count is the difference between the streaming reader and the
-/// materializing one rather than a proxy for it. Recorded once per whole-record read with that
-/// record's cell count, so no per-cell task-local lookup lands on any path.
-enum RecordCellMaterializationCounter {
-    /// The tally one `measure` is collecting.
-    final class Tally: @unchecked Sendable {
-        var cells = 0
-    }
-
-    @TaskLocal static var active: Tally?
-
-    /// Records the cells one whole-record read is about to decode.
-    @inline(__always)
-    static func record(cells: Int) {
-        active?.cells += cells
-    }
-
-    /// Runs `body` and reports the record cells materialized inside it.
-    static func measure(_ body: () -> Void) -> Int {
-        let tally = Tally()
-        return $active.withValue(tally) {
-            body()
-            return tally.cells
-        }
-    }
-}
-
-/// Counts retained display rows constructed by whole-history materializations.
-///
-/// Reclamation only needs packed metadata ids, so this counter makes its zero-row structural
-/// contract testable independently of wall-clock noise.
-enum RetainedRowMaterializationCounter {
-    /// The tally one `measure` is collecting.
-    final class Tally: @unchecked Sendable {
-        var rows = 0
-    }
-
-    @TaskLocal static var active: Tally?
-
-    /// Records the rows one whole-history read is about to construct.
-    @inline(__always)
-    static func record(rows: Int) {
-        active?.rows += rows
-    }
-
-    /// Runs `body` and reports the retained rows materialized inside it.
-    static func measure(_ body: () -> Void) -> Int {
-        let tally = Tally()
-        return $active.withValue(tally) {
-            body()
-            return tally.rows
-        }
-    }
-}
-
 extension Terminal {
     /// Retained history as logical-line records in one fixed-capacity arena.
     ///
@@ -1475,7 +1233,7 @@ extension Terminal {
                 (firstBlockNumber + blockIndex) * Self.blockSize
             ) - firstRecordSequence
             for earlier in blockFirst..<index {
-                SearchDistanceWorkCounter.record()
+                Instrument.searchDistanceWork.record()
                 rank += contentContribution(recordIndex: earlier, recordingWork: true)
             }
             rank += contentCellCount(
@@ -1545,7 +1303,7 @@ extension Terminal {
             let offset = offsets[recordIndex]
             var total = 0
             for cellOffset in range {
-                if recordingWork { SearchDistanceWorkCounter.record() }
+                if recordingWork { Instrument.searchDistanceWork.record() }
                 switch cellKind(recordAt: offset, cell: cellOffset) {
                 case .narrow, .wideHead, .padding:
                     total += 1
@@ -1599,7 +1357,7 @@ extension Terminal {
         /// One binary search over the block totals, then a scan inside the block. A reader plans
         /// a frame with **one** of these and `advance(_:)` for the rest (`research/31/D3` Decision 1).
         func locate(displayRow: Int) -> DisplayRowCursor? {
-            LocateCounter.record()
+            Instrument.displayRowLocate.record()
             guard displayRow >= 0, displayRow < grandDisplayRowTotal else { return nil }
             let target = evictedRowCount + displayRow
 
@@ -1721,7 +1479,7 @@ extension Terminal {
         func recordCells(at recordIndex: Int) -> [Terminal.GridCell]? {
             guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
             let record = self.record(at: offsets[recordIndex])
-            RecordCellMaterializationCounter.record(cells: record.cellCount)
+            Instrument.recordCellMaterialization.record(count: record.cellCount)
             return (0..<record.cellCount).map { cell(recordIndex: recordIndex, cellOffset: $0) }
         }
 
@@ -1853,7 +1611,7 @@ extension Terminal {
         /// `research/31/F13` measured the decoded form at 9.3% of whole-process CPU under ambient
         /// mouse motion. Equality remains a value-semantics oracle for tests.
         static func == (lhs: Self, rhs: Self) -> Bool {
-            WholeStoreEqualityCounter.record()
+            Instrument.wholeStoreEquality.record()
             guard lhs.budget == rhs.budget,
                   lhs.width == rhs.width,
                   lhs.evictedRowCount == rhs.evictedRowCount,
@@ -1954,7 +1712,7 @@ extension Terminal {
         /// Select All and history export all read all of history, and this walks the records once
         /// instead of paying `locate(displayRow:)` per row the way a subscript would.
         func allPaintedDisplayRows() -> [Terminal.GridRow] {
-            RetainedRowMaterializationCounter.record(rows: grandDisplayRowTotal)
+            Instrument.retainedRowMaterialization.record(count: grandDisplayRowTotal)
             var result: [Terminal.GridRow] = []
             result.reserveCapacity(grandDisplayRowTotal)
             for index in 0..<offsets.count {
@@ -2261,7 +2019,7 @@ extension Terminal {
             let offset = offsets[recordIndex]
             let record = self.record(at: offset)
             guard cellOffset >= 0, cellOffset <= record.cellCount else { return nil }
-            RecordPositionResolutionCounter.record()
+            Instrument.recordPositionResolution.record()
             // The fold collapses to arithmetic whenever no wide cell can meet a row boundary --
             // the same fast path, and the same `hasWideCells` reasoning, as `rowCount`'s. It is
             // worth taking here because resolving a coordinate is per-visible-match frame work

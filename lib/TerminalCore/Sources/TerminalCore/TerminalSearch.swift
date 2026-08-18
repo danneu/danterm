@@ -3,28 +3,6 @@
 
 import DequeModule
 
-/// Counts indexed-match visits during closed-history maintenance so its cost remains bounded.
-enum SearchIndexMaintenanceCounter {
-    final class Tally: @unchecked Sendable {
-        var count = 0
-    }
-
-    @TaskLocal static var active: Tally?
-
-    @inline(__always)
-    static func recordComparison() {
-        active?.count += 1
-    }
-
-    static func measure(_ body: () -> Void) -> Int {
-        let tally = Tally()
-        return $active.withValue(tally) {
-            body()
-            return tally.count
-        }
-    }
-}
-
 /// Exposes stable closed-history match endpoints to behavioral tests without display geometry.
 struct IndexedSearchRecordRange: Equatable, Sendable {
     var start: Terminal.LogicalLineStore.RecordTextPosition
@@ -363,7 +341,7 @@ extension Terminal {
             guard retainedStart != search.index.retainedStart
                 || indexedThrough != search.index.indexedThroughRecord
             else { return }
-            SearchIndexMaintenanceCounter.recordComparison()
+            Instrument.searchIndexMaintenance.record()
 
             if let retainedStart {
                 while let first = search.index.prefixMatches.first,
@@ -385,7 +363,7 @@ extension Terminal {
                     var high = search.index.prefixMatches.count
                     while low < high {
                         let middle = low + (high - low) / 2
-                        SearchIndexMaintenanceCounter.recordComparison()
+                        Instrument.searchIndexMaintenance.record()
                         if search.index.prefixMatches[middle].end <= last {
                             low = middle + 1
                         } else {
@@ -647,7 +625,7 @@ extension Terminal {
             context: Context
         ) -> (matches: [TextAnchorRange], trailingUnits: [NeedleWindow<TextAnchor>.Unit]) {
             let stream = suppliedStream ?? context.projection
-            ProjectionRowCounter.record(rows: absoluteRows.count)
+            Instrument.projectionRow.record(count: absoluteRows.count)
             var matches: [TextAnchorRange] = []
             var matcher = NeedleWindow<TextAnchor>(needleKeys: needleKeys)
 
@@ -809,7 +787,7 @@ extension Terminal {
                 lastContentRow: lastContentRow,
                 context: context
             ) { _, start, end in
-                SearchDistanceWorkCounter.record()
+                Instrument.searchDistanceWork.record()
                 if end <= anchor { rank += 1 }
             }
             return rank

@@ -2042,7 +2042,7 @@ struct TerminalPaneSessionControllerTests {
 
         controller.selectAll()
         controller.synchronizeState()
-        let materializations = WholeProjectionCounter.measure {
+        let materializations = Instrument.wholeProjection.measure {
             #expect(controller.hasSelection)
         }
 

@@ -38,7 +38,7 @@ struct TerminalFrameLocateTests {
             // whatever the first one happens to fault in.
             terminal.forEachViewportCell(rows: 0..<24) { _, _, _, _ in }
 
-            return LocateCounter.measure {
+            return Instrument.displayRowLocate.measure {
                 terminal.forEachViewportCell(rows: 0..<24) { _, _, _, _ in }
             }
         }
@@ -75,7 +75,7 @@ struct TerminalFrameLocateTests {
         }
         terminal.scroll(toTopRow: 5)
 
-        let spent = LocateCounter.measure {
+        let spent = Instrument.displayRowLocate.measure {
             for _ in 0..<200 {
                 _ = terminal.scrollProjection
                 _ = terminal.scrollbackRowCount

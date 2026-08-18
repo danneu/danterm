@@ -764,6 +764,15 @@ of the host and belong to S12's account rather than this one: `fca0ea42`,
 
 `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LocateCounter`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#ProjectionRowCounter`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#WholeProjectionCounter`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#SearchDistanceWorkCounter`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#RecordCellMaterializationCounter`
 
+**Status note.** Closed by the ideal fix. One `Instrument` enumeration and one
+nested-aware task-local tally now live in
+`lib/TerminalCore/Sources/TerminalCore/Instruments.swift`; the nine counter
+enums (seven at the time of the audit, eight in the store plus one in
+`TerminalSearch.swift` by the time it was fixed) are gone, and the store's file
+starts at the store. The nesting hazard this finding names is settled by an
+enclosing scope that keeps counting through a nested one, pinned by
+`InstrumentTests`.
+
 **Problem.** Lines 31-245 of the store's file are seven enums that are character-for-character the same design -- a `final class Tally: @unchecked Sendable` with one Int field, an `@TaskLocal static var active`, an `@inline(__always) static func record`, and a `static func measure` -- differing only in the field's name and whether `record` takes an amount. That is 215 lines of boilerplate before the file's actual subject starts, and adding an eighth instrument means pasting the pattern again. They also are not the store's: `WholeProjectionCounter` and `SearchDistanceWorkCounter` are recorded from Terminal.swift, and the file header explicitly says what belongs here is the arena, its operations, the index, the side tables and the fold.
 
 **Evidence.** Read all seven declarations at lines 39-245 and diffed them by eye; the only variation is `count` / `units` / `cells` / `rows` and the `record` arity. Grepped every call site: all recording happens in LogicalLineStore.swift and Terminal.swift (lines 3609 and 4615), and all measuring happens in test targets including TerminalRenderPlanningTests and lib/TerminalPTY's session tests, so nothing about them is store-local.

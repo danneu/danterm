@@ -124,7 +124,7 @@ struct SearchMatchRenderPlanningTests {
         }
         _ = terminal.beginSearch("hit")
 
-        let materializations = WholeProjectionCounter.measure {
+        let materializations = Instrument.wholeProjection.measure {
             _ = planFrame(for: terminal, presentation: presentation)
         }
         #expect(materializations == 0)

@@ -371,7 +371,7 @@ struct TerminalPTYHostTests {
         #expect(await pane.writeFromChild(scrollbackLines))
         _ = host.fencedFrameState()
 
-        let comparisons = WholeStoreEqualityCounter.measure {
+        let comparisons = Instrument.wholeStoreEquality.measure {
             host.applyInteractionForTesting(.pointer(.move(column: 0, row: 0)))
             host.applyInteractionForTesting(.cancelLinkInteraction)
             host.applyInteractionForTesting(.clearSelection)

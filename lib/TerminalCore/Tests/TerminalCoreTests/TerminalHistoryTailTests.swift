@@ -155,12 +155,12 @@ struct TerminalHistoryTailTests {
         let smallTerminal = try historyProjectionTerminal(lines: 400)
         let largeTerminal = try historyProjectionTerminal(lines: 3_200)
 
-        let smallTailRows = ProjectionRowCounter.measure {
+        let smallTailRows = Instrument.projectionRow.measure {
             _ = smallTerminal.primaryHistoryTailText(
                 maxLines: budget.maxLines, maxChars: budget.maxChars
             )
         }
-        let largeTailRows = ProjectionRowCounter.measure {
+        let largeTailRows = Instrument.projectionRow.measure {
             _ = largeTerminal.primaryHistoryTailText(
                 maxLines: budget.maxLines, maxChars: budget.maxChars
             )
@@ -170,8 +170,8 @@ struct TerminalHistoryTailTests {
         // has to separate the tail read from. It is also the control that keeps the equality
         // above from passing vacuously: a counter wired to nothing, or to a path neither read
         // takes, reports equal row counts for the bounded read *and* for the unbounded one.
-        let smallFullRows = ProjectionRowCounter.measure { _ = smallTerminal.primaryHistoryText }
-        let largeFullRows = ProjectionRowCounter.measure { _ = largeTerminal.primaryHistoryText }
+        let smallFullRows = Instrument.projectionRow.measure { _ = smallTerminal.primaryHistoryText }
+        let largeFullRows = Instrument.projectionRow.measure { _ = largeTerminal.primaryHistoryText }
         #expect(
             largeFullRows > smallFullRows * 4,
             """

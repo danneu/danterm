@@ -65,7 +65,7 @@ struct TerminalHistoryTailCostProbe {
         print("  tail 3200 lines: \(largeTail)   ratio \(largeTail / smallTail)")
         print("  full  400 lines: \(smallFull)")
         print("  full 3200 lines: \(largeFull)   ratio \(largeFull / smallFull)")
-        print("  tail rows walked: \(ProjectionRowCounter.measure { _ = large.primaryHistoryTailText(maxLines: 200, maxChars: 20_000) })")
-        print("  full rows walked: \(ProjectionRowCounter.measure { _ = large.primaryHistoryText })")
+        print("  tail rows walked: \(Instrument.projectionRow.measure { _ = large.primaryHistoryTailText(maxLines: 200, maxChars: 20_000) })")
+        print("  full rows walked: \(Instrument.projectionRow.measure { _ = large.primaryHistoryText })")
     }
 }
