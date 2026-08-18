@@ -406,20 +406,35 @@ struct GroupModel: Equatable {
     var tabs: [TabModel] = []
 }
 
-/// Form state for the settings window. Text-entry values remain raw until save;
-/// picker values retain the exact catalog name that was selected.
+/// Form state for the settings window: the config the panel would commit, plus
+/// the one piece of form state a config cannot carry. Text-entry values remain
+/// raw until save; picker values retain the exact catalog name that was
+/// selected.
 ///
-/// `fontSize` is text rather than a number precisely because it is mid-edit
-/// state: a half-typed "1" must stay "1" until save, not be reinterpreted as a
-/// size. Seeding it from the committed `config.fontSize` therefore renders that
-/// number with `configFontSizeText`, and save parses the text back.
+/// Holding a whole candidate `DanTermConfig` rather than a copy of the edited
+/// fields means no preference is stored twice, so opening the panel, an external
+/// reload, and save each move one value. It also carries the settings the panel
+/// has no control for -- a save writes back what was loaded, not a default.
+///
+/// `fontSizeText` is the sole field outside the candidate, because a half-typed
+/// "1" must stay "1" until save rather than be reinterpreted as a size. The two
+/// halves have disjoint roles: the text is what the panel renders and what save
+/// parses, and the candidate's number is only what survives a save whose text
+/// does not parse.
 struct PreferencesDraft: Equatable {
-    var alertClearMode: AlertClearMode
-    var remoteTheme: String  // selected catalog name
-    var theme: String?       // selected catalog name; nil uses the catalog default
-    var fontSize: String?    // nil = no `fontSize` key; use the built-in default
-    var fontFamily: String?  // nil = use the system monospace font (remove key from config)
-    var copyOnSelect: Bool
+    /// The settings a save would commit, with every field already edited in
+    /// place -- except `fontSize`, which `fontSizeText` owns until save.
+    var config: DanTermConfig
+    /// Raw font-size entry; nil = no `fontSize` key, so the built-in default applies.
+    var fontSizeText: String?
+
+    /// Seeds the form from committed settings, rendering the saved size as the
+    /// text the field shows. Used both on open and on an external reload, so the
+    /// two paths cannot drift.
+    init(seededFrom config: DanTermConfig) {
+        self.config = config
+        self.fontSizeText = config.fontSize.map(configFontSizeText)
+    }
 }
 
 // MRU tab switcher state. Ephemeral — never serialized into AppModelSnapshot.

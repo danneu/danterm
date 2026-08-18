@@ -66,33 +66,34 @@ struct PreferencesPanelProjection: Equatable {
 func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? {
     guard let draft = model.preferencesDraft else { return nil }
 
+    let candidate = draft.config
     let committed = model.config
     // Warn only while the field still holds the unresolved name: once the user
     // edits it, the warning would be describing text no longer on screen, and the
     // new name has not been resolved against the installed families yet.
     let unresolvedFamily = committed.fontFamily.flatMap {
-        model.resolvedFontFamily == nil && resolveFontFamilyDraft(draft.fontFamily) == $0 ? $0 : nil
+        model.resolvedFontFamily == nil && resolveFontFamilyDraft(candidate.fontFamily) == $0 ? $0 : nil
     }
     let availableThemeNames = Set(model.availableThemeNames)
     let unresolvedTheme = committed.defaultTheme.flatMap {
-        draft.theme == $0 && !availableThemeNames.contains($0) ? $0 : nil
+        candidate.defaultTheme == $0 && !availableThemeNames.contains($0) ? $0 : nil
     }
     let unresolvedRemoteTheme: String? = {
         let name = committed.remoteTheme
-        return resolveRemoteTheme(draft.remoteTheme) == name && !availableThemeNames.contains(name)
+        return resolveRemoteTheme(candidate.remoteTheme) == name && !availableThemeNames.contains(name)
             ? name
             : nil
     }()
     return PreferencesPanelProjection(
-        selectedAlertClearMode: draft.alertClearMode,
-        remoteThemeText: draft.remoteTheme,
-        themeText: draft.theme ?? "",
-        fontSizeText: draft.fontSize ?? "",
+        selectedAlertClearMode: candidate.alertClearMode,
+        remoteThemeText: candidate.remoteTheme,
+        themeText: candidate.defaultTheme ?? "",
+        fontSizeText: draft.fontSizeText ?? "",
         // Raw draft text, like the other fields: normalizing here would rewrite
         // the field under the user mid-edit. Absent means the sentinel choice, so
         // the picker always displays a selected entry.
-        fontFamilyText: draft.fontFamily ?? systemMonospaceFontChoiceTitle,
-        copyOnSelect: draft.copyOnSelect,
+        fontFamilyText: candidate.fontFamily ?? systemMonospaceFontChoiceTitle,
+        copyOnSelect: candidate.copyOnSelect,
         fontFamilyChoices: [systemMonospaceFontChoiceTitle] + model.installedFontFamilies,
         fontFamilyWarning: unresolvedFamily.map {
             "Font \"\($0)\" is not installed -- using the system monospace font."

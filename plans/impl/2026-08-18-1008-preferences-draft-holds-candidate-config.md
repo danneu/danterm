@@ -154,7 +154,7 @@ UpdatePaneFontSizeTests, UpdateRemoteTests, SnapshotTests), and
 
 ## Commit progress
 - [x] 1. refactor(prefs): delete the dead reset and dirty surface
-- [ ] 2. refactor(prefs): let the draft hold a candidate config
+- [x] 2. refactor(prefs): let the draft hold a candidate config
 - [ ] 3. refactor(prefs): collapse the six set messages into one edit
 
 ## Implementation notes
@@ -174,6 +174,18 @@ UpdatePaneFontSizeTests, UpdateRemoteTests, SnapshotTests), and
   rewritten to assert the command count directly instead of `saveEnabled`,
   which is the observable form of the same rule now that every control change
   sends `prefSave`.
+- Commit 2 seeds the draft through a single `init(seededFrom:)` rather than an
+  assignment at each call site, so open and external reload cannot drift, and
+  the reload arm now replaces the whole draft instead of writing field by field.
+- Commit 2 also widened `an invalid font size does not block the other fields
+  from saving` to open against a committed size of 14. Every invalid-size test
+  started from a nil committed size, so nothing pinned the half of I3 that says
+  the candidate's number survives text that will not parse -- a save that
+  cleared the size would have passed.
+- The core tests that reach into draft fields were rewritten mechanically to
+  `draft.config.<field>` / `draft.fontSizeText`. They were left as draft reads
+  rather than moved onto the projection, so this commit's diff stays a
+  representation change and does not also re-target what those tests assert.
 
 ## Follow Up
 

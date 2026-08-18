@@ -556,14 +556,10 @@ func update(
         // Written as a pair with the config it was resolved from so config, resolution,
         // warning, and pane projection stay coherent and panes never render a stale family.
         model.resolvedFontFamily = resolvedFontFamily
-        // Reset draft to match new config if panel is open.
+        // Re-seed the draft from the new config if the panel is open, so the
+        // candidate cannot keep a value the config no longer holds.
         if model.preferencesDraft != nil {
-            model.preferencesDraft!.alertClearMode = newConfig.alertClearMode
-            model.preferencesDraft!.remoteTheme = newConfig.remoteTheme
-            model.preferencesDraft!.theme = newConfig.defaultTheme
-            model.preferencesDraft!.fontSize = newConfig.fontSize.map(configFontSizeText)
-            model.preferencesDraft!.fontFamily = newConfig.fontFamily
-            model.preferencesDraft!.copyOnSelect = newConfig.copyOnSelect
+            model.preferencesDraft = PreferencesDraft(seededFrom: newConfig)
         }
         return []
 
@@ -578,14 +574,7 @@ func update(
         if model.preferencesDraft == nil {
             model.installedFontFamilies = installedFontFamilies
             model.availableThemeNames = availableThemeNames
-            model.preferencesDraft = PreferencesDraft(
-                alertClearMode: model.config.alertClearMode,
-                remoteTheme: model.config.remoteTheme,
-                theme: model.config.defaultTheme,
-                fontSize: model.config.fontSize.map(configFontSizeText),
-                fontFamily: model.config.fontFamily,
-                copyOnSelect: model.config.copyOnSelect
-            )
+            model.preferencesDraft = PreferencesDraft(seededFrom: model.config)
         }
         return []
 
@@ -597,48 +586,46 @@ func update(
 
     case .prefSetAlertClearMode(let mode):
         guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.alertClearMode = mode
+        model.preferencesDraft!.config.alertClearMode = mode
         return []
 
     case .prefSetRemoteTheme(let rawText):
         guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.remoteTheme = rawText
+        model.preferencesDraft!.config.remoteTheme = rawText
         return []
 
     case .prefSetTheme(let text):
         guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.theme = text
+        model.preferencesDraft!.config.defaultTheme = text
         return []
 
     case .prefSetFontSize(let text):
         guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.fontSize = text
+        model.preferencesDraft!.fontSizeText = text
         return []
 
     case .prefSetFontFamily(let text):
         guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.fontFamily = text
+        model.preferencesDraft!.config.fontFamily = text
         return []
 
     case .prefSetCopyOnSelect(let enabled):
         guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.copyOnSelect = enabled
+        model.preferencesDraft!.config.copyOnSelect = enabled
         return []
 
     case .prefSave:
         guard let draft = model.preferencesDraft else { return [] }
-        let resolvedTheme = resolveRemoteTheme(draft.remoteTheme)
         let oldConfig = model.config
-        var newConfig = oldConfig
-        newConfig.alertClearMode = draft.alertClearMode
-        newConfig.copyOnSelect = draft.copyOnSelect
-        newConfig.remoteTheme = resolvedTheme
-        newConfig.defaultTheme = draft.theme
+        // The candidate already carries every edit, so save resolves the fields
+        // the panel holds raw and commits the whole value.
+        var newConfig = draft.config
+        newConfig.remoteTheme = resolveRemoteTheme(draft.config.remoteTheme)
         // A size outside the renderable range is bounded rather than rejected:
         // the number the user typed says which end they wanted, and storing it
         // raw would leave the panel showing a size no pane draws at.
-        let parsedFontSize: Double? = draft.fontSize.flatMap { Double($0) }
-        let validFontSize = draft.fontSize == nil
+        let parsedFontSize: Double? = draft.fontSizeText.flatMap { Double($0) }
+        let validFontSize = draft.fontSizeText == nil
             || (parsedFontSize.map { $0.isFinite && $0 > 0 } ?? false)
         if validFontSize {
             newConfig.fontSize = parsedFontSize.map(DanTermConfig.boundedFontSize)
@@ -649,15 +636,14 @@ func update(
         // runtime resolves what it writes and feeds the verdict back through
         // fontFamilyResolved, completing a coherent apply and repainting live panes
         // without a manual reload.
-        newConfig.fontFamily = resolveFontFamilyDraft(draft.fontFamily)
+        newConfig.fontFamily = resolveFontFamilyDraft(draft.config.fontFamily)
         model.config = newConfig
-        // Normalize draft to resolved values post-save. The size is echoed back
-        // only when it was saved: text that failed to parse stays on screen for
-        // the user to correct, and the field keeps reading dirty.
-        model.preferencesDraft!.remoteTheme = resolvedTheme
-        model.preferencesDraft!.fontFamily = newConfig.fontFamily
+        // Normalize the candidate to what was committed, so the panel shows the
+        // resolved names. The size text is echoed back only when it was saved:
+        // text that failed to parse stays on screen for the user to correct.
+        model.preferencesDraft!.config = newConfig
         if validFontSize {
-            model.preferencesDraft!.fontSize = newConfig.fontSize.map(configFontSizeText)
+            model.preferencesDraft!.fontSizeText = newConfig.fontSize.map(configFontSizeText)
         }
         return newConfig == oldConfig ? [] : [.saveDanTermConfig(newConfig)]
 

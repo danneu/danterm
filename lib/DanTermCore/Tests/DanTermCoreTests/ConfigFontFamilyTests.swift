@@ -123,7 +123,7 @@ import Testing
 
         _ = update(&model, .preferencesOpened())
 
-        #expect(model.preferencesDraft?.fontFamily == "Menlo")
+        #expect(model.preferencesDraft?.config.fontFamily == "Menlo")
     }
 
     @Test("prefSetFontFamily changes only the draft")
@@ -133,7 +133,7 @@ import Testing
 
         _ = update(&model, .prefSetFontFamily("Menlo"))
 
-        #expect(model.preferencesDraft?.fontFamily == "Menlo")
+        #expect(model.preferencesDraft?.config.fontFamily == "Menlo")
         #expect(model.config.fontFamily == nil, "committed config only moves on save")
     }
 
@@ -147,7 +147,7 @@ import Testing
         config.fontFamily = "Courier"
         _ = update(&model, .configLoaded(config, resolvedFontFamily: "Courier"))
 
-        #expect(model.preferencesDraft?.fontFamily == "Courier")
+        #expect(model.preferencesDraft?.config.fontFamily == "Courier")
     }
 
     // MARK: - Save and coherent config application
@@ -197,7 +197,7 @@ import Testing
         let commands = update(&model, .prefSave)
 
         #expect(model.config.fontFamily == nil)
-        #expect(model.preferencesDraft?.fontFamily == nil, "draft normalizes to the saved value")
+        #expect(model.preferencesDraft?.config.fontFamily == nil, "draft normalizes to the saved value")
         #expect(hasEffect(commands) {
             if case .saveDanTermConfig(let config) = $0 { return config.fontFamily == nil }
             return false
@@ -251,7 +251,7 @@ import Testing
 
         #expect(model.resolvedFontFamily == "Menlo")
         #expect(model.config == configAfterSave)
-        #expect(model.preferencesDraft?.fontSize == "abc", "the bad input stays visible")
+        #expect(model.preferencesDraft?.fontSizeText == "abc", "the bad input stays visible")
         #expect(commands.isEmpty)
     }
 }

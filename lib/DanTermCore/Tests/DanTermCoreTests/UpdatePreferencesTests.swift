@@ -5,8 +5,9 @@
 // persistence), edit operations (prefSet* preserve raw text for remoteTheme, do
 // NOT mutate committed config), prefSave (one whole-document transaction,
 // remote-theme propagation to live panes, theme + font-size ownership, and
-// invalid font-size handling), configLoaded while open (resets only DanTerm
-// fields), the no-op-when-draft-nil guards, and the resolveRemoteTheme helper.
+// invalid font-size handling), configLoaded while open (re-seeds the draft from
+// the reloaded config, including the settings the panel cannot edit), the
+// no-op-when-draft-nil guards, and the resolveRemoteTheme helper.
 import Foundation
 import Testing
 import DanTermProtocol
@@ -39,10 +40,10 @@ private func openPrefs(
         model.config.alertClearMode = .manual
         model.config.remoteTheme = "Grape"
         let commands = openPrefs(&model, theme: "Dracula", fontSize: 14)
-        #expect(model.preferencesDraft?.alertClearMode == .manual)
-        #expect(model.preferencesDraft?.remoteTheme == "Grape")
-        #expect(model.preferencesDraft?.theme == "Dracula")
-        #expect(model.preferencesDraft?.fontSize == "14", "saved size renders as field text")
+        #expect(model.preferencesDraft?.config.alertClearMode == .manual)
+        #expect(model.preferencesDraft?.config.remoteTheme == "Grape")
+        #expect(model.preferencesDraft?.config.defaultTheme == "Dracula")
+        #expect(model.preferencesDraft?.fontSizeText == "14", "saved size renders as field text")
         #expect(commands.count == 0)
     }
 
@@ -54,9 +55,9 @@ private func openPrefs(
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetAlertClearMode(.manual))
-        #expect(model.preferencesDraft?.alertClearMode == .manual)
+        #expect(model.preferencesDraft?.config.alertClearMode == .manual)
         _ = openPrefs(&model)
-        #expect(model.preferencesDraft?.alertClearMode == .manual, "draft should not be wiped")
+        #expect(model.preferencesDraft?.config.alertClearMode == .manual, "draft should not be wiped")
     }
 
     @Test("preferencesClosed clears the draft")
@@ -212,7 +213,7 @@ private func openPrefs(
         var model = makeModel()
         _ = openPrefs(&model)
         let commands = update(&model, .prefSetAlertClearMode(.manual))
-        #expect(model.preferencesDraft?.alertClearMode == .manual)
+        #expect(model.preferencesDraft?.config.alertClearMode == .manual)
         #expect(model.config.alertClearMode == .focus, "committed config should not change")
         #expect(commands.count == 0)
     }
@@ -226,7 +227,7 @@ private func openPrefs(
         var model = makeModel()
         _ = openPrefs(&model)
         let commands = update(&model, .prefSetRemoteTheme("  Grape  "))
-        #expect(model.preferencesDraft?.remoteTheme == "  Grape  ", "should store raw text")
+        #expect(model.preferencesDraft?.config.remoteTheme == "  Grape  ", "should store raw text")
         #expect(model.config.remoteTheme == "Purplepeter", "committed config should not change")
         #expect(commands.count == 0)
     }
@@ -240,7 +241,7 @@ private func openPrefs(
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetRemoteTheme(""))
-        #expect(model.preferencesDraft?.remoteTheme == "", "should store empty string")
+        #expect(model.preferencesDraft?.config.remoteTheme == "", "should store empty string")
     }
 
     @Test("prefSetTheme updates draft")
@@ -251,7 +252,7 @@ private func openPrefs(
         var model = makeModel()
         _ = openPrefs(&model)
         let commands = update(&model, .prefSetTheme("Solarized"))
-        #expect(model.preferencesDraft?.theme == "Solarized")
+        #expect(model.preferencesDraft?.config.defaultTheme == "Solarized")
         #expect(commands.count == 0)
     }
 
@@ -263,7 +264,7 @@ private func openPrefs(
         var model = makeModel()
         _ = openPrefs(&model, theme: "Dracula")
         _ = update(&model, .prefSetTheme(nil))
-        #expect(model.preferencesDraft?.theme == nil, "should be nil")
+        #expect(model.preferencesDraft?.config.defaultTheme == nil, "should be nil")
     }
 
     @Test("prefSetFontSize updates draft")
@@ -274,7 +275,7 @@ private func openPrefs(
         var model = makeModel()
         _ = openPrefs(&model)
         let commands = update(&model, .prefSetFontSize("16"))
-        #expect(model.preferencesDraft?.fontSize == "16")
+        #expect(model.preferencesDraft?.fontSizeText == "16")
         #expect(commands.count == 0)
     }
 
@@ -310,17 +311,20 @@ private func openPrefs(
 
     @Test("an invalid font size does not block the other fields from saving")
     func invalidFontSizeDoesNotBlockOtherFields() {
+        // The committed size is the one half of the draft's font-size split that
+        // survives text that will not parse, so the save has to start from a
+        // config that names one.
         var model = makeModel()
-        _ = openPrefs(&model)
+        _ = openPrefs(&model, fontSize: 14)
         _ = update(&model, .prefSetFontSize("nan"))
         _ = update(&model, .prefSetAlertClearMode(.manual))
 
         let commands = update(&model, .prefSave)
 
         #expect(model.config.alertClearMode == .manual)
-        #expect(model.config.fontSize == nil)
+        #expect(model.config.fontSize == 14, "the committed size survives the unparseable text")
         #expect(commands.count == 1)
-        #expect(model.preferencesDraft?.fontSize == "nan", "the unparseable text stays in the field")
+        #expect(model.preferencesDraft?.fontSizeText == "nan", "the unparseable text stays in the field")
     }
 
     @Test("prefSave with no changes emits no commands")
@@ -378,7 +382,7 @@ private func openPrefs(
         _ = openPrefs(&model)
         _ = update(&model, .prefSetRemoteTheme("  Grape  "))
         _ = update(&model, .prefSave)
-        #expect(model.preferencesDraft?.remoteTheme == "Grape", "draft should be normalized post-save")
+        #expect(model.preferencesDraft?.config.remoteTheme == "Grape", "draft should be normalized post-save")
         #expect(model.config.remoteTheme == "Grape")
     }
 
@@ -393,7 +397,7 @@ private func openPrefs(
         _ = update(&model, .prefSetRemoteTheme("   "))
         _ = update(&model, .prefSave)
         #expect(model.config.remoteTheme == "Purplepeter", "should resolve to default")
-        #expect(model.preferencesDraft?.remoteTheme == "Purplepeter")
+        #expect(model.preferencesDraft?.config.remoteTheme == "Purplepeter")
     }
 
     @Test("a second save with no further edit emits no command")
@@ -512,10 +516,44 @@ private func openPrefs(
         newConfig.defaultTheme = "Monokai"
         newConfig.fontSize = 18
         _ = update(&model, .configLoaded(newConfig, resolvedFontFamily: nil))
-        #expect(model.preferencesDraft?.alertClearMode == .focus, "DanTerm field should match new config")
-        #expect(model.preferencesDraft?.remoteTheme == "Ocean", "DanTerm field should match new config")
-        #expect(model.preferencesDraft?.theme == "Monokai")
-        #expect(model.preferencesDraft?.fontSize == "18")
+        #expect(model.preferencesDraft?.config.alertClearMode == .focus, "DanTerm field should match new config")
+        #expect(model.preferencesDraft?.config.remoteTheme == "Ocean", "DanTerm field should match new config")
+        #expect(model.preferencesDraft?.config.defaultTheme == "Monokai")
+        #expect(model.preferencesDraft?.fontSizeText == "18")
+    }
+
+    @Test("a save after a reload keeps the reloaded settings the panel cannot edit")
+    func saveAfterReloadKeepsSettingsThePanelCannotEdit() throws {
+        // Intent: after a config reload arrives while the panel is open, the next
+        //   save writes the reloaded values of settings the panel has no control
+        //   for, not the values that were current when the panel opened.
+        // Why it exists: the draft carries a whole candidate config, so a
+        //   candidate the reload did not re-seed would silently write the stale
+        //   value of every setting the user cannot see back to the file.
+        // Scenario: spec-first -- open the panel, let the config file change
+        //   underneath it, then edit one visible field and save.
+        var model = makeModel()
+        _ = openPrefs(&model, theme: "Dracula", fontSize: 14)
+
+        var reloaded = DanTermConfig.default
+        reloaded.localeFallback = false
+        reloaded.tailnet = DanTermTailnetConfig(listen: "100.64.0.1:7000", admittedNodeIds: ["node-a"])
+        _ = update(&model, .configLoaded(reloaded, resolvedFontFamily: nil))
+
+        _ = update(&model, .prefSetTheme("Nord"))
+        let commands = update(&model, .prefSave)
+
+        let saved = try #require(
+            commands.compactMap { command -> DanTermConfig? in
+                if case .saveDanTermConfig(let config) = command { return config }
+                return nil
+            }.first,
+            "expected a config save"
+        )
+        #expect(saved.localeFallback == false, "the save should carry the reloaded locale fallback")
+        #expect(saved.tailnet == reloaded.tailnet, "the save should carry the reloaded tailnet")
+        #expect(model.config.localeFallback == false)
+        #expect(model.config.tailnet == reloaded.tailnet)
     }
 
     @Test("configLoaded while panel closed does not create draft")

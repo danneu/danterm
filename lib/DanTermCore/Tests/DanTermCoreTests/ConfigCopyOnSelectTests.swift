@@ -50,7 +50,7 @@ import DanTermProtocol
 
         _ = update(&model, .preferencesOpened())
 
-        #expect(model.preferencesDraft?.copyOnSelect == false)
+        #expect(model.preferencesDraft?.config.copyOnSelect == false)
     }
 
     @Test("prefSetCopyOnSelect changes only the draft")
@@ -60,7 +60,7 @@ import DanTermProtocol
 
         _ = update(&model, .prefSetCopyOnSelect(false))
 
-        #expect(model.preferencesDraft?.copyOnSelect == false)
+        #expect(model.preferencesDraft?.config.copyOnSelect == false)
         #expect(model.config.copyOnSelect, "committed config only moves on save")
     }
 
@@ -83,7 +83,7 @@ import DanTermProtocol
 
         _ = update(&model, .configLoaded(.default, resolvedFontFamily: nil))
 
-        #expect(model.preferencesDraft?.copyOnSelect == true)
+        #expect(model.preferencesDraft?.config.copyOnSelect == true)
     }
 
     // MARK: - Save
