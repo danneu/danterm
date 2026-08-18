@@ -209,7 +209,7 @@ in itself.
 |        | [S43](#s43) | 12    | 3   | 4   | docs           | small  | AGENTS.md maps three of the seven places a document can live                                                            |
 | 8fa415e7 | [S44](#s44) | 12    | 3   | 4   | sidebar        | small  | Delete applyGroupCollapseState; paint the group row from its own projection                                             |
 | 8c34a41f | [S45](#s45) | 12    | 3   | 4   | sidebar        | small  | Drop SidebarView.currentModel; read the runtime's model                                                                 |
-|        | [S46](#s46) | 12    | 3   | 4   | terminal-views | medium | Let the swapchain own its construction inputs instead of mirroring them in the view                                     |
+| 229f3c5e | [S46](#s46) | 12    | 3   | 4   | terminal-views | medium | Let the swapchain own its construction inputs instead of mirroring them in the view                                     |
 | c38ace17 | [S47](#s47) | 10    | 2   | 5   | build          | small  | `just clean` misses two of the five build trees it is supposed to remove                                                |
 | a234ced4 4eff6906 3ace4267 d633f92e 0387412d 26ca0977 4e64e2b2 | [S48](#s48) | 10    | 2   | 5   | build          | small  | Stop running DanTermProtocolTests twice in the gate                                                                     |
 | e7e30252 | [S49](#s49) | 10    | 2   | 5   | core-model     | small  | Delete the three unread-alert reference implementations no render path calls                                            |
@@ -217,7 +217,7 @@ in itself.
 | 3b95df8f | [S51](#s51) | 10    | 2   | 5   | ipc-cli        | small  | Give todo ids the same phantom-typed treatment as every other entity id                                         |
 |        | [S52](#s52) | 10    | 2   | 5   | ipc-cli        | medium | Derive the CLI help text from the parser instead of hand-syncing three copies                                           |
 | b0e2a7f6 | [S53](#s53) | 10    | 2   | 5   | terminal-core  | small  | Move the pure OSC byte helpers off Terminal and split the file at its seams                                           |
-|        | [S54](#s54) | 10    | 2   | 5   | terminal-views | small  | Return the clamp state from terminalCell so the view stops re-deriving grid extents                                     |
+| fb05e7b2 | [S54](#s54) | 10    | 2   | 5   | terminal-views | small  | Return the clamp state from terminalCell so the view stops re-deriving grid extents                                     |
 | 53cef5b7 | [S55](#s55) | 10    | 2   | 5   | tests          | small  | Split ModelOperationsTests along the boundary its name claims                                                           |
 | b8afce66 | [S56](#s56) | 8     | 2   | 4   | core-model     | small  | Unify the three divergent "the selected tab died" fixups                                                                |
 |        | [S57](#s57) | 8     | 2   | 4   | pty            | medium | Read into one reusable buffer through a single read loop                                                                |
@@ -1081,6 +1081,19 @@ behind Msgs, and rename initiation became projected model state.
 
 `app/SwiftTerminalSessionView.swift#SurfaceInputs`, `app/SwiftTerminalSessionView.swift#surfaceSwapchain`, `app/SwiftTerminalSessionView.swift#discardSwapchain`, `lib/TerminalCore/Sources/TerminalRenderExecution/TerminalFrameSwapchain.swift#TerminalFrameSwapchain`
 
+**Status note.** Closed as proposed. `TerminalFrameSwapchain` stores its four
+construction inputs and answers two questions about them: a full
+`matches(columns:rows:metrics:colorSpace:)` for reuse, and a
+metrics-and-colorSpace variant for `synchronizePresentation`, which keeps the
+swapchain's own geometry because a grid resize republishes through
+`setGridDimensions`. `SurfaceInputs` and `swapchainInputs` are deleted, so the
+three lockstep assignments no longer exist. One departure from the finding: the
+comparison stays the deep `TerminalRenderMetrics ==` rather than moving to
+identity, since the identity-token idea changes publish-path semantics for
+unmeasured gain. The color space now compares as `CGColorSpace` instead of
+`NSColorSpace` -- the domain that actually decides the pixels -- so two distinct
+`NSColorSpace` objects over one CG space stop forcing a rebuild.
+
 **Problem.** `TerminalFrameSwapchain.init` already takes columns, rows, metrics and colorSpace, but stores none of them and exposes none of them. The view therefore keeps a parallel copy in `swapchainInputs` that must be nilled and reassigned in lockstep with `swapchain` in three places, and a mismatch between the two is silent -- the view would keep buffers built for the wrong geometry. Comparing that mirror also runs `TerminalRenderMetrics ==` once per publish, which is a deep CoreText comparison (four `CFEqual` calls plus, when the packaged symbols face is present, two `CTFontCopyPostScriptName` allocations) in service of a question the swapchain could answer by identity.
 
 **Evidence.** `swapchain` and `swapchainInputs` are separate stored properties (lines 84-88), assigned together in `surfaceSwapchain` (lines 324-332) and cleared together in `discardSwapchain` (lines 338-341). `TerminalFrameSwapchain.init` (TerminalFrameSwapchain.swift:57-76) consumes columns/rows/metrics/colorSpace only to build stores. `TerminalFontSet.==` (TerminalRenderExecution.swift:367-374) compares four faces with `CFEqual` and calls `optionalFontsEqual` (line 379), which copies PostScript names; `TerminalRenderMetrics` is `Equatable` with `fonts` as a stored member (line 45), so this runs inside `swapchainInputs == inputs` on the publish path (`present` -> `surfaceSwapchain`).
@@ -1212,6 +1225,18 @@ behind Msgs, and rename initiation became projected model state.
 `terminal-views` &middot; duplication &middot; impact 2, confidence 5 &middot; effort small
 
 `app/SwiftTerminalSessionView.swift#pointerIsOutsideGrid`, `app/SwiftTerminalSessionView.swift#normalizedCell(at:)`, `app/SwiftTerminalSessionView.swift#forwardPointerDown`, `lib/TerminalCore/Sources/TerminalCore/TerminalInteractionPolicy.swift#terminalCell`
+
+**Status note.** Closed, but not by returning the clamp state. `terminalCell`
+now carries `isInsideGrid`, and the view reads cell and insideness off that one
+value; `pointerIsOutsideGrid` is gone. The flag is computed from the raw point
+with the range predicate the view used, not derived from whether an axis
+clamped. Those two are not the same test: the clamp comes from a floored
+quotient, so at a boundary a rounding difference of one ULP can put the point
+inside the range and outside the clamp. The normalized cell still comes from
+flooring and clamping, so only the answer to "was it inside" changed hands.
+Insideness is also never stored across events -- the publish path re-derives it
+against current geometry, which is what keeps hover chrome from surviving a
+grid that shrank under a parked pointer.
 
 **Problem.** `terminalCell` computes whether a point falls inside the grid -- that is exactly what its clamp does -- and then throws the answer away, returning only the clamped cell. The view recovers it by recomputing the grid rectangle from `metrics.cellSize` and `dimensions` in `pointerIsOutsideGrid`. So the same grid-extent math lives in a pure, tested core function and again in an AppKit view, and the two can disagree (the core clamps against `columns - 1` after flooring; the view tests `point.x >= columns * cellWidth`). Because the answer is not carried, the view also converts the same window point and redoes the same arithmetic up to three times per pointer event.
 
