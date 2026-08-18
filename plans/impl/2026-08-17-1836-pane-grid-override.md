@@ -226,7 +226,7 @@ reopen condition.
   restored-pane launch
 - [x] 4. feat(render): Mac remote-sized rendering with the take-back
   affordance
-- [ ] 5. feat(ios): claim button sends the surface's native grid
+- [x] 5. feat(ios): claim button sends the surface's native grid
 - [ ] 6. feat(ios): destination-bounded observe rendering; amend the D6
   decision record
 
@@ -305,3 +305,18 @@ reopen condition.
   commit such a pane draws the claim down to fit, so the font no longer
   decides the drawn cell size there. The fixture is now a pane that
   contains the claim, which is the case the assertion was always about.
+- Commit 5 puts the claim's whole computation in one kit value,
+  `MobileSurfaceGrid`, built from backing pixels rather than points: the
+  cell box is quantized to whole pixels, so a point-derived count can name
+  a column the surface cannot draw. The shell's only job is to read its own
+  extent and send what the value returns.
+- The claim carries no clamp to the accepted range. That range lives in
+  `DanTermCore`, which the phone cannot see, and duplicating it would give
+  it a second definition; a grid the Mac refuses comes back as an ordinary
+  request refusal the status line already reports. The kit refuses only the
+  one case it can decide for itself -- a surface with no room for a whole
+  cell has no honest claim to make.
+- The claim uses the terminal view's extent at the moment of the tap, so a
+  claim made with the keyboard up asks for the shorter grid. Re-claiming is
+  one tap, and an automatic re-claim on every layout change is exactly the
+  reassert the plan rejected.

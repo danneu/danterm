@@ -18,6 +18,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private let paneTable = UITableView(frame: .zero, style: .plain)
     private let terminalView = TerminalSurfaceView()
     private let composer = TerminalComposerView()
+    private let claimButton = UIButton(type: .system)
 
     private var panes: [MobilePaneListItem] = []
     private var selectedPaneId: PaneId?
@@ -130,6 +131,12 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             return inputMapper.isControlLatched
         }
         composer.onDismissKeyboard = { [weak self] in self?.view.endEditing(true) }
+        var claimConfiguration = UIButton.Configuration.gray()
+        claimConfiguration.title = "Claim"
+        claimConfiguration.cornerStyle = .capsule
+        claimButton.configuration = claimConfiguration
+        claimButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        claimButton.addTarget(self, action: #selector(claimTapped), for: .touchUpInside)
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
         terminalView.addGestureRecognizer(scroll)
         terminalView.didAdvanceReplica = { [weak self] in self?.scheduleCheckpoint() }
@@ -149,7 +156,9 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
                 refreshStatus()
             }
         }
-        for subview in [connectionHeader, paneTable, terminalView, composer]
+        // The claim button is added after the terminal so it sits above the pixels it
+        // asks the Mac to resize.
+        for subview in [connectionHeader, paneTable, terminalView, composer, claimButton]
         {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
@@ -180,6 +189,12 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             terminalView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             terminalView.topAnchor.constraint(equalTo: paneTable.bottomAnchor),
             terminalView.bottomAnchor.constraint(equalTo: composer.topAnchor),
+
+            // The replica draws from the bottom of its view, so the top trailing corner
+            // is the part of the terminal the button covers least.
+            claimButton.trailingAnchor.constraint(equalTo: terminalView.trailingAnchor, constant: -8),
+            claimButton.topAnchor.constraint(equalTo: terminalView.topAnchor, constant: 8),
+            claimButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
 
             composer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -463,17 +478,28 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         case .scrollViewport(let rows):
             terminalView.scrollViewport(byRows: rows)
         case .send(let input):
-            let request = IpcRequest.paneInput(pane: pane, input: input)
-            do {
-                try runner?.send(JsonRpcRequest(
-                    id: .string(UUID().uuidString),
-                    method: request.method.rawValue,
-                    params: .object(request.params)
-                ))
-            } catch {
-                fail(.transport(.writeFailed, phase: .established))
-            }
+            send(IpcRequest.paneInput(pane: pane, input: input))
         }
+    }
+
+    private func send(_ request: IpcRequest) {
+        do {
+            try runner?.send(JsonRpcRequest(
+                id: .string(UUID().uuidString),
+                method: request.method.rawValue,
+                params: .object(request.params)
+            ))
+        } catch {
+            fail(.transport(.writeFailed, phase: .established))
+        }
+    }
+
+    /// Claims the selected pane for this phone: one ordinary resize carrying the grid
+    /// this surface runs at. No other gesture here sends one, which is what keeps
+    /// typing and scrolling from claiming.
+    @objc private func claimTapped() {
+        guard let pane = selectedPaneId, let grid = terminalView.nativeGrid else { return }
+        send(grid.claimRequest(for: pane))
     }
 
     @objc private func scrolled(_ recognizer: UIPanGestureRecognizer) {

@@ -25,6 +25,10 @@ final class TerminalSurfaceView: UIView {
     private var displayLinkTarget: DisplayLinkTarget?
     private var geometry: (columns: Int, rows: Int)?
 
+    /// The one font size this surface renders and claims at; both readings of the cell
+    /// box must agree or a claim would name a grid the surface does not draw.
+    private static let fontSize: CGFloat = 11
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .black
@@ -97,6 +101,21 @@ final class TerminalSurfaceView: UIView {
         replica.terminal?.isAlternateScreenActive == true
     }
 
+    /// The grid this surface shows at native cell metrics, which is the grid the claim
+    /// gesture asks the pane to run at. It is derived from the current extent rather
+    /// than from the replica, so it answers for the phone even before a stream arrives.
+    var nativeGrid: MobileSurfaceGrid? {
+        let scale = window?.screen.scale ?? traitCollection.displayScale
+        guard let metrics = TerminalRenderMetrics(displayScale: scale, fontSize: Self.fontSize)
+        else { return nil }
+        return MobileSurfaceGrid(
+            widthPixels: Int(bounds.width * scale),
+            heightPixels: Int(bounds.height * scale),
+            cellWidthPixels: metrics.cellWidthPixels,
+            cellHeightPixels: metrics.cellHeightPixels
+        )
+    }
+
     /// Copies one exact value snapshot so checkpoint synthesis can run off the main actor.
     func checkpointSource() -> (replica: PaneReplica, paneId: PaneId)? {
         guard replica.state == .exact, let replicaPaneId else { return nil }
@@ -162,7 +181,8 @@ final class TerminalSurfaceView: UIView {
     private func ensureSurfaces(columns: Int, rows: Int) {
         if geometry?.columns == columns, geometry?.rows == rows { return }
         let scale = window?.screen.scale ?? traitCollection.displayScale
-        guard let metrics = TerminalRenderMetrics(displayScale: scale, fontSize: 11) else { return }
+        guard let metrics = TerminalRenderMetrics(displayScale: scale, fontSize: Self.fontSize)
+        else { return }
         let newStores = (0..<3).compactMap { _ in
             TerminalFrameBackingStore(columns: columns, rows: rows, metrics: metrics)
         }
