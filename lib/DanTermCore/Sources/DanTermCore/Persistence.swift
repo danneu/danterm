@@ -121,6 +121,9 @@ private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
     AgentSessionSnapshot(kind: $0.kind, sessionId: $0.sessionId)
   }
   snapshot.fontSizeSteps = pane.fontSizeSteps == 0 ? nil : pane.fontSizeSteps
+  snapshot.gridOverride = pane.gridOverride.map {
+    PaneGridOverrideSnapshot(columns: $0.columns, rows: $0.rows)
+  }
   return snapshot
 }
 

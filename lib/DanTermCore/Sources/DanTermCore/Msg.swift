@@ -70,6 +70,12 @@ enum Msg {
     // (menubar path), matching .toggleZoomPane.
     case adjustPaneFontSize(paneId: PaneId?, steps: Int)
     case resetPaneFontSize(paneId: PaneId?)
+    // The only two writers of a pane's grid override: a client claims a grid,
+    // and a clear returns the pane to its slot-derived size. The clear serves
+    // both the fit request and the Mac take-back gesture, whose nil paneId
+    // means the selected tab's focused pane.
+    case setPaneGridOverride(paneId: PaneId, grid: PaneGridOverride)
+    case clearPaneGridOverride(paneId: PaneId?)
     case renameTab(id: TabId, name: String?)
     // The one way an inline sidebar rename begins. Every writer -- the menu
     // commands, a double-click on a row, and the group-creating messages --

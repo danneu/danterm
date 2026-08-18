@@ -184,6 +184,11 @@ struct PaneModel: Equatable {
     /// configuration change moves zoomed and unzoomed panes alike. Always inside
     /// `paneFontSizeStepRange` -- every ingress bounds it.
     var fontSizeSteps: Int = 0
+    /// The grid this pane runs at when a client has claimed its size. Absent,
+    /// the grid follows the pane's slot rectangle; present, it is exactly this
+    /// grid regardless of every rectangle input. Durable until an explicit
+    /// clear -- no layout event writes it.
+    var gridOverride: PaneGridOverride? = nil
     var todos: [TodoItem] = []
 
     /// The command this pane is running, if any. The single place that turns the
@@ -778,6 +783,15 @@ struct PaneSnapshot: Codable, Equatable, Sendable {
     // Absent for an unzoomed pane, so a pane at the configured size persists
     // exactly as it did before per-pane zoom existed.
     var fontSizeSteps: Int? = nil
+    // Absent for a pane whose grid follows its slot.
+    var gridOverride: PaneGridOverrideSnapshot? = nil
+}
+
+/// Strictly decoded grid DTO validated through `PaneGridOverride` during load,
+/// so an out-of-range persisted grid restores as no override at all.
+struct PaneGridOverrideSnapshot: Codable, Equatable, Sendable {
+    let columns: Int
+    let rows: Int
 }
 
 // MARK: - Snapshot Validation & Build
@@ -1004,6 +1018,12 @@ private func parseSplitNode(
         // projection, so the restored pane responds to the next adjustment
         // exactly as one the user zoomed to that bound would.
         paneModel.fontSizeSteps = clampedPaneFontSizeSteps(ps.fontSizeSteps ?? 0)
+        // A corrupt or hand-edited grid yields no override rather than a
+        // clamped one: the pane then launches at its slot-derived size, which
+        // is a size some client could have asked for.
+        paneModel.gridOverride = ps.gridOverride.flatMap {
+            PaneGridOverride(columns: $0.columns, rows: $0.rows)
+        }
         if let todoSnaps = ps.todos {
             paneModel.todos = todoSnaps.compactMap { ts in
                 guard let uuid = UUID(uuidString: ts.id) else { return nil }

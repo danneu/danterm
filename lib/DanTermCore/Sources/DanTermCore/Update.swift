@@ -426,6 +426,17 @@ func update(
         model.updatePane(targetId) { $0.fontSizeSteps = 0 }
         return []
 
+    case .setPaneGridOverride(let paneId, let grid):
+        guard let pane = model.pane(paneId), pane.gridOverride != grid else { return [] }
+        model.updatePane(paneId) { $0.gridOverride = grid }
+        return []
+
+    case .clearPaneGridOverride(let paneId):
+        guard let targetId = paneId ?? selectedTab(in: model)?.paneTree.focusedPaneId,
+              model.pane(targetId)?.gridOverride != nil else { return [] }
+        model.updatePane(targetId) { $0.gridOverride = nil }
+        return []
+
     case .renameTab(let id, let name):
         let customTitle = name?.singleLineName
         updateTab(id, in: &model) { t in t.customTitle = customTitle }
