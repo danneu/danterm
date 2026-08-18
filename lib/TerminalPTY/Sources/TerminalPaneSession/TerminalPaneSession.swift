@@ -968,11 +968,13 @@ public final class TerminalPaneSessionController {
         host.fencedFlightRecordingCapture()
     }
 
-    /// Fences every value needed to choose raw events or exact reconstructible state.
+    /// Fences every value needed to choose raw events or reconstructible state. The state is
+    /// serialized under `historyBudgetBytes`; `nil` carries the whole retained history.
     public func flightRecordingStreamFence(
-        from cursor: TerminalFlightRecordingCursor
+        from cursor: TerminalFlightRecordingCursor,
+        historyBudgetBytes: Int?
     ) -> TerminalFlightRecordingStreamFence {
-        host.fencedFlightRecordingStream(from: cursor)
+        host.fencedFlightRecordingStream(from: cursor, historyBudgetBytes: historyBudgetBytes)
     }
 
     /// Arms one append edge without carrying recorder events across the owner boundary.
@@ -1003,11 +1005,13 @@ public final class TerminalPaneSessionController {
     /// Rearms one followed suffix with exact state available for reconstructible loss repair.
     public func flightRecordingFollowStreamFence(
         subscriptionId: UUID,
-        from cursor: TerminalFlightRecordingCursor
+        from cursor: TerminalFlightRecordingCursor,
+        historyBudgetBytes: Int?
     ) -> TerminalFlightRecordingFollowFence? {
         host.fencedFlightRecordingFollowStream(
             subscriptionId: subscriptionId,
-            from: cursor
+            from: cursor,
+            historyBudgetBytes: historyBudgetBytes
         )
     }
 

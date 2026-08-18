@@ -3769,7 +3769,7 @@ import DanTermProtocol
 
         #expect(commands.count == 1)
         guard case .streamPaneTape(
-            _, let commandPaneId, let capture, let start, let mode
+            _, let commandPaneId, let capture, let start, let policy
         ) = commands[0] else {
             Issue.record("expected streamPaneTape command")
             return
@@ -3777,7 +3777,7 @@ import DanTermProtocol
         #expect(commandPaneId == paneId)
         #expect(capture == .dump)
         #expect(start == .beginning)
-        #expect(mode == .raw)
+        #expect(policy == .raw)
     }
 
     @Test("pane.tape follow resolves the addressed pane and preserves tail mode")
@@ -3802,7 +3802,7 @@ import DanTermProtocol
 
         #expect(commands.count == 1)
         guard case .streamPaneTape(
-            _, let commandPaneId, let capture, let start, let mode
+            _, let commandPaneId, let capture, let start, let policy
         ) = commands[0] else {
             Issue.record("expected streamPaneTape command")
             return
@@ -3810,7 +3810,13 @@ import DanTermProtocol
         #expect(commandPaneId == paneId)
         #expect(capture == .follow)
         #expect(start == .now)
-        #expect(mode == .reconstructible)
+        // The request named no budget, so the stream runs under the server default.
+        #expect(
+            policy
+                == .reconstructible(
+                    historyBudgetBytes: PaneTapeSyncPolicy.defaultHistoryBudgetBytes
+                )
+        )
     }
 
     @Test("pane.tape rejects missing and unknown panes")
@@ -3870,7 +3876,7 @@ import DanTermProtocol
 
         #expect(commands.count == 1)
         guard case .streamPaneTape(
-            _, let commandPaneId, let capture, let start, let mode
+            _, let commandPaneId, let capture, let start, let policy
         ) = commands[0] else {
             Issue.record("expected streamPaneTape command")
             return
@@ -3878,7 +3884,9 @@ import DanTermProtocol
         #expect(commandPaneId == paneId)
         #expect(capture == .snapshot)
         #expect(start == .now)
-        #expect(mode == .reconstructible)
+        // A snapshot is the exact-state consumer: it takes no history budget, so a pane with
+        // history deeper than any default still snapshots whole.
+        #expect(policy == .reconstructible(historyBudgetBytes: nil))
     }
 }
 

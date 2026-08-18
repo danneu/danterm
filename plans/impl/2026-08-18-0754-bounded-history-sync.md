@@ -176,6 +176,35 @@ Interface changes:
 
 ## Commit progress
 - [x] 1. feat(engine): bound the history a state synchronization carries
-- [ ] 2. feat(ipc): let a pane.tape stream bound its sync history
+- [x] 2. feat(ipc): let a pane.tape stream bound its sync history
 - [ ] 3. feat(tape): resync a truncated replica instead of replaying a resize
 - [ ] 4. docs(research): record the bounded-sync half of T22
+
+## Implementation notes
+
+- The stream's mode and its history budget travel as one value,
+  `PaneTapeSyncPolicy`, rather than as a mode beside an optional number. A raw
+  stream emits no synchronization, so a budget on one bounds nothing; making
+  that pair unrepresentable keeps the rule at the two request boundaries
+  instead of at every site that reads a stream's mode. `PaneTapeStreamMode`
+  stays as the wire spelling the `mode` field carries.
+- Both wire numbers moved: `paneTapeStreamVersion` 4 -> 5 because the sync
+  record gained a required first-part field, and `danTermIpcProtocolVersion`
+  2 -> 3 because a client that speaks the new shape would reject an old
+  server's sync records rather than merely miss the feature, which is the
+  documented reason that number moves.
+- `--sync-history-bytes` is refused whenever the resolved mode is raw, not
+  only when `--raw` was explicit. A bare `pane tape` dump resolves to raw, so
+  a budget there would be silently inert; requiring `--reconstructible` says
+  so instead.
+- The phone's follow request names the default budget explicitly rather than
+  omitting the field, so the value it runs under is visible at the call site.
+
+## Follow Up
+
+- A raw `pane.tape` stream still pays for a full state serialization it never
+  sends: `TerminalPTYHost.fencedFlightRecordingStream` resolves the state
+  pairing on every open, and a raw policy resolves it with no budget. Passing
+  a zero budget -- or skipping the resolve outright -- for a raw stream would
+  drop that cost, which is proportional to the pane's whole retained
+  scrollback.

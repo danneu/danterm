@@ -137,6 +137,10 @@ public struct PaneTapeSyncRecord: Equatable, Sendable {
     public let rows: Int?
     /// Gives that grid's pinnedness on the first part only, beside its columns and rows.
     public let pinned: Bool?
+    /// States on the first part how many of the source's retained history rows this transfer
+    /// leaves out, oldest first. The bytes look the same either way, so only the producer can
+    /// say it.
+    public let droppedHistoryRows: Int?
     /// Publishes the continuation position on the final part only.
     public let cursor: PaneTapeCursor?
 
@@ -148,6 +152,7 @@ public struct PaneTapeSyncRecord: Equatable, Sendable {
         columns: Int?,
         rows: Int?,
         pinned: Bool?,
+        droppedHistoryRows: Int?,
         cursor: PaneTapeCursor?
     ) {
         self.part = part
@@ -156,6 +161,7 @@ public struct PaneTapeSyncRecord: Equatable, Sendable {
         self.columns = columns
         self.rows = rows
         self.pinned = pinned
+        self.droppedHistoryRows = droppedHistoryRows
         self.cursor = cursor
     }
 }
@@ -171,6 +177,10 @@ public struct PaneTapeStateSynchronization: Equatable, Sendable {
     /// States whether the replaced pane's grid is pinned. A sync replaces a replica outright,
     /// so it restates the whole geometry fact rather than leaving pinnedness to nearby events.
     public let pinned: Bool
+    /// How many of the source's retained history rows this transfer leaves out, oldest first;
+    /// `0` when it carries the whole retained history. A replica reads it to know whether its
+    /// own history is complete.
+    public let droppedHistoryRows: Int
     /// Names the first recorder event after this state.
     public let cursor: PaneTapeCursor
 
@@ -180,12 +190,14 @@ public struct PaneTapeStateSynchronization: Equatable, Sendable {
         columns: Int,
         rows: Int,
         pinned: Bool,
+        droppedHistoryRows: Int,
         cursor: PaneTapeCursor
     ) {
         self.bytes = bytes
         self.columns = columns
         self.rows = rows
         self.pinned = pinned
+        self.droppedHistoryRows = droppedHistoryRows
         self.cursor = cursor
     }
 }
@@ -198,6 +210,7 @@ public struct PaneTapeSyncAssembler: Sendable {
     private var columns: Int?
     private var rows: Int?
     private var pinned: Bool?
+    private var droppedHistoryRows: Int?
 
     /// Starts an assembler with no partial transfer.
     public init() {}
@@ -213,7 +226,8 @@ public struct PaneTapeSyncAssembler: Sendable {
         if record.part == 1 {
             guard let columns = record.columns,
                   let rows = record.rows,
-                  let pinned = record.pinned
+                  let pinned = record.pinned,
+                  let droppedHistoryRows = record.droppedHistoryRows
             else {
                 reset()
                 return nil
@@ -222,7 +236,9 @@ public struct PaneTapeSyncAssembler: Sendable {
             self.columns = columns
             self.rows = rows
             self.pinned = pinned
-        } else if record.columns != nil || record.rows != nil || record.pinned != nil {
+            self.droppedHistoryRows = droppedHistoryRows
+        } else if record.columns != nil || record.rows != nil || record.pinned != nil
+            || record.droppedHistoryRows != nil {
             reset()
             return nil
         }
@@ -235,7 +251,8 @@ public struct PaneTapeSyncAssembler: Sendable {
         guard let cursor = record.cursor,
               let columns,
               let rows,
-              let pinned
+              let pinned,
+              let droppedHistoryRows
         else {
             reset()
             return nil
@@ -245,6 +262,7 @@ public struct PaneTapeSyncAssembler: Sendable {
             columns: columns,
             rows: rows,
             pinned: pinned,
+            droppedHistoryRows: droppedHistoryRows,
             cursor: cursor
         )
         reset()
@@ -258,6 +276,7 @@ public struct PaneTapeSyncAssembler: Sendable {
         columns = nil
         rows = nil
         pinned = nil
+        droppedHistoryRows = nil
     }
 }
 
@@ -381,9 +400,13 @@ public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord? {
         let rows = initial?["rows"]?.asNumber.flatMap(positiveInt)
         let pinned: Bool?
         if case .bool(let value)? = initial?["pinned"] { pinned = value } else { pinned = nil }
-        // Geometry arrives whole or not at all, so a first part missing any one of the three
-        // is malformed rather than a part carrying partial geometry.
-        guard (columns == nil) == (rows == nil), (columns == nil) == (pinned == nil) else {
+        let droppedHistoryRows = value["droppedHistoryRows"]?.asNumber.flatMap(nonnegativeInt)
+        // The whole-transfer facts arrive together or not at all, so a first part missing any
+        // one of them is malformed rather than a part carrying some of them.
+        guard (columns == nil) == (rows == nil),
+              (columns == nil) == (pinned == nil),
+              (columns == nil) == (droppedHistoryRows == nil)
+        else {
             return nil
         }
         let cursor: PaneTapeCursor?
@@ -400,6 +423,7 @@ public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord? {
             columns: columns,
             rows: rows,
             pinned: pinned,
+            droppedHistoryRows: droppedHistoryRows,
             cursor: cursor
         ))
     case "end":

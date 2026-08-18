@@ -104,6 +104,7 @@ private func storedCheckpoint() throws -> PaneReplicaCheckpoint {
         columns: 8,
         rows: 2,
         pinned: false,
+        droppedHistoryRows: 0,
         cursor: PaneTapeCursor(
             recorderLifetimeId: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
             nextSequence: 12,

@@ -49,6 +49,7 @@ struct PaneTapeRecordReaderTests {
             columns: 80,
             rows: 24,
             pinned: true,
+            droppedHistoryRows: 0,
             cursor: nil
         )) == nil)
         #expect(assembler.ingest(PaneTapeSyncRecord(
@@ -58,14 +59,99 @@ struct PaneTapeRecordReaderTests {
             columns: nil,
             rows: nil,
             pinned: nil,
+            droppedHistoryRows: nil,
             cursor: cursor
         )) == PaneTapeStateSynchronization(
             bytes: Array("state".utf8),
             columns: 80,
             rows: 24,
             pinned: true,
+            droppedHistoryRows: 0,
             cursor: cursor
         ))
+    }
+
+    // Intent: the dropped-history count a producer states on the first part survives
+    //   multi-part assembly and arrives on the completed synchronization.
+    // Why it exists: a replica decides whether its own history is complete from this one
+    //   number. Losing it during assembly -- the only place a multi-part transfer can lose a
+    //   first-part fact -- would silently promote a truncated replica to a complete one.
+    // Scenario: spec-first contract for the bounded sync a reader assembles.
+    @Test("an assembled sync carries the dropped history count from its first part")
+    func assembledSyncCarriesDroppedHistoryRows() throws {
+        let cursor = PaneTapeCursor(
+            recorderLifetimeId: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
+            nextSequence: 41,
+            feedBytesBeforeNextSequence: 100,
+            writeBytesBeforeNextSequence: 7
+        )
+        var assembler = PaneTapeSyncAssembler()
+
+        #expect(assembler.ingest(PaneTapeSyncRecord(
+            part: 1,
+            parts: 2,
+            bytes: Array("sta".utf8),
+            columns: 80,
+            rows: 24,
+            pinned: false,
+            droppedHistoryRows: 512,
+            cursor: nil
+        )) == nil)
+        let assembled = assembler.ingest(PaneTapeSyncRecord(
+            part: 2,
+            parts: 2,
+            bytes: Array("te".utf8),
+            columns: nil,
+            rows: nil,
+            pinned: nil,
+            droppedHistoryRows: nil,
+            cursor: cursor
+        ))
+        #expect(assembled?.droppedHistoryRows == 512)
+    }
+
+    // Intent: the count decodes off the wire beside the geometry, and a first part missing it
+    //   is malformed rather than a transfer with an unstated count.
+    // Why it exists: the reader cannot substitute a default here. Reading an absent count as
+    //   zero is exactly the claim "this replica has the whole history", which is the one
+    //   thing a bounded sync must never assert on its own.
+    // Scenario: spec-first contract for the sync record's whole-transfer facts.
+    @Test("a sync record decodes its dropped history count, or fails to decode without it")
+    func syncRecordDecodesDroppedHistoryRows() {
+        func record(_ extra: [String: JSONValue]) -> JSONValue {
+            var object: [String: JSONValue] = [
+                "kind": .string("sync"),
+                "part": .number(1),
+                "parts": .number(1),
+                "base64": .string(Data("state".utf8).base64EncodedString()),
+                "initial": .object([
+                    "columns": .number(80),
+                    "rows": .number(24),
+                    "pinned": .bool(false),
+                ]),
+                "cursor": .object([
+                    "recorderLifetimeId": .string("11111111-1111-4111-8111-111111111111"),
+                    "sequence": .number(41),
+                    "feedByteOffset": .number(100),
+                    "writeByteOffset": .number(7),
+                ]),
+            ]
+            object.merge(extra) { _, new in new }
+            return .object(object)
+        }
+
+        guard case .sync(let sync)? = decodePaneTapeRecord(
+            record(["droppedHistoryRows": .number(512)])
+        ) else {
+            Issue.record("sync record did not decode")
+            return
+        }
+        #expect(sync.droppedHistoryRows == 512)
+
+        // Geometry without the count, and a fractional or negative count, are malformed.
+        #expect(decodePaneTapeRecord(record([:])) == nil)
+        #expect(decodePaneTapeRecord(record(["droppedHistoryRows": .number(1.5)])) == nil)
+        #expect(decodePaneTapeRecord(record(["droppedHistoryRows": .number(-1)])) == nil)
     }
 
     @Test("a record kind this build does not know decodes as unknown, not as a failure")

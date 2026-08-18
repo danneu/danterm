@@ -190,7 +190,7 @@ protocol TerminalSession: AnyObject {
     func paneTapeOpening(
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,
-        mode: PaneTapeStreamMode
+        policy: PaneTapeSyncPolicy
     ) -> (@Sendable () throws -> PaneTapeOpening)?
     /// Arms one append edge at the start cursor without moving recorder events across queues.
     func addPaneTapeFollowNotice(
@@ -202,7 +202,7 @@ protocol TerminalSession: AnyObject {
     func paneTapeFollowBatch(
         subscriptionId: UUID,
         from cursor: PaneTapeCursor,
-        mode: PaneTapeStreamMode
+        policy: PaneTapeSyncPolicy
     ) -> (@Sendable () throws -> PaneTapeBatch)?
     func scroll(toRow row: Int)
     func copySelection()
@@ -262,7 +262,7 @@ extension TerminalSession {
     func paneTapeOpening(
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,
-        mode: PaneTapeStreamMode
+        policy: PaneTapeSyncPolicy
     ) -> (@Sendable () throws -> PaneTapeOpening)? { nil }
     func addPaneTapeFollowNotice(
         id: UUID,
@@ -272,6 +272,6 @@ extension TerminalSession {
     func paneTapeFollowBatch(
         subscriptionId: UUID,
         from cursor: PaneTapeCursor,
-        mode: PaneTapeStreamMode
+        policy: PaneTapeSyncPolicy
     ) -> (@Sendable () throws -> PaneTapeBatch)? { nil }
 }

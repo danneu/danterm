@@ -54,6 +54,70 @@ struct IpcRequestTests {
         ) == request)
     }
 
+    // Intent: the wire decode resolves a tape request's mode and history budget into one
+    //   policy, defaulting an absent budget and refusing the combinations that do not exist.
+    // Why it exists: the budget is the only thing keeping a join off a multi-megabyte
+    //   payload, so a request that stated a bad one must be refused at the door rather than
+    //   silently rounded, dropped, or applied to a raw stream that sends no sync at all.
+    // Scenario: spec-first contract for the bounded pane.tape request.
+    @Test("pane.tape decodes its history budget and refuses budgets it cannot honor")
+    func paneTapeDecodesHistoryBudget() throws {
+        let pane = "11111111-1111-4111-8111-111111111111"
+        func decode(_ extra: [String: JSONValue], mode: String = "reconstructible") throws -> IpcRequest {
+            var params: [String: JSONValue] = [
+                "pane": .string(pane),
+                "start": .string("now"),
+                "mode": .string(mode),
+            ]
+            params.merge(extra) { _, new in new }
+            return try IpcRequest.decode(
+                method: IpcRequestMethod.paneTape.rawValue,
+                params: .object(params)
+            )
+        }
+
+        let explicit = try decode(["syncHistoryBytes": .number(4096)])
+        guard case .paneTape(_, _, _, let policy) = explicit else {
+            Issue.record("expected a pane tape request")
+            return
+        }
+        #expect(policy == .reconstructible(historyBudgetBytes: 4096))
+
+        let defaulted = try decode([:])
+        guard case .paneTape(_, _, _, let defaultPolicy) = defaulted else {
+            Issue.record("expected a pane tape request")
+            return
+        }
+        #expect(
+            defaultPolicy
+                == .reconstructible(
+                    historyBudgetBytes: PaneTapeSyncPolicy.defaultHistoryBudgetBytes
+                )
+        )
+
+        let rawStream = try decode([:], mode: "raw")
+        guard case .paneTape(_, _, _, let rawPolicy) = rawStream else {
+            Issue.record("expected a pane tape request")
+            return
+        }
+        #expect(rawPolicy == .raw)
+
+        for malformed: JSONValue in [.number(-1), .number(1.5), .string("4096"), .bool(true)] {
+            let error = #expect(throws: IpcRequestDecodeError.self) {
+                try decode(["syncHistoryBytes": malformed])
+            }
+            #expect(error?.message == "syncHistoryBytes must be a whole number of bytes, zero or more")
+        }
+
+        let inapplicable = #expect(throws: IpcRequestDecodeError.self) {
+            try decode(["syncHistoryBytes": .number(4096)], mode: "raw")
+        }
+        #expect(
+            inapplicable?.message
+                == "syncHistoryBytes applies only to a reconstructible tape stream"
+        )
+    }
+
     @Test("every CLI request round trips through the shared catalog")
     func everyCLIRequestRoundTripsThroughCatalog() throws {
         // Intent: every command the CLI builds decodes to the same typed request.

@@ -61,7 +61,7 @@ public struct IpcLivenessBound: Equatable, Sendable {
 /// It moves whenever a peer that speaks the previous number would behave incorrectly rather
 /// than merely miss a feature -- a changed pane-tape record shape is exactly that. Skew in
 /// either direction is refused at hello, before any stream starts.
-public let danTermIpcProtocolVersion = 2
+public let danTermIpcProtocolVersion = 3
 
 /// Builds and reads the server's opening hello, so its shape is stated once for the end
 /// that writes it and the end that parses it.

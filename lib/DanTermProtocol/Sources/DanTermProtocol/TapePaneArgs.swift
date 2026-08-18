@@ -9,8 +9,9 @@ public struct ParsedTapePane: Equatable {
     public let follow: Bool
     /// Selects the first recorder position the producer must account for.
     public let start: PaneTapeStartPosition
-    /// Selects exact reconstruction or raw recorder evidence.
-    public let mode: PaneTapeStreamMode
+    /// Selects exact reconstruction or raw recorder evidence, and how much history a
+    /// reconstruction carries.
+    public let policy: PaneTapeSyncPolicy
     /// How the CLI renders each record. It never reaches DanTerm: the app records and sends
     /// exact bytes, and a readable view is derived from those bytes on this side.
     public let format: PaneTapeFormat
@@ -20,13 +21,13 @@ public struct ParsedTapePane: Equatable {
         pane: String,
         follow: Bool = false,
         start: PaneTapeStartPosition = .beginning,
-        mode: PaneTapeStreamMode = .raw,
+        policy: PaneTapeSyncPolicy = .raw,
         format: PaneTapeFormat = .replay
     ) {
         self.pane = pane
         self.follow = follow
         self.start = start
-        self.mode = mode
+        self.policy = policy
         self.format = format
     }
 }
@@ -45,6 +46,12 @@ public enum TapePaneParseError: Error, Equatable {
     case invalidCursor
     /// More than one explicit stream mode was supplied.
     case conflictingMode
+    /// The sync history budget flag had no following value.
+    case missingSyncHistoryBytesArg
+    /// The sync history budget was not a whole, non-negative byte count.
+    case invalidSyncHistoryBytes(String)
+    /// A raw stream emits no synchronization, so a history budget would bound nothing.
+    case syncHistoryBytesOnRawStream
     /// The format flag had no following value.
     case missingFormatArg
     /// The format value does not name a supported renderer.
@@ -62,6 +69,7 @@ public func parseTapePaneArgs(_ args: [String]) throws -> ParsedTapePane {
     var start = PaneTapeStartPosition.beginning
     var hasExplicitStart = false
     var explicitMode: PaneTapeStreamMode?
+    var syncHistoryBytes: Int?
     var format = PaneTapeFormat.replay
     var index = 0
 
@@ -96,6 +104,15 @@ public func parseTapePaneArgs(_ args: [String]) throws -> ParsedTapePane {
             guard explicitMode == nil else { throw TapePaneParseError.conflictingMode }
             explicitMode = argument == "--raw" ? .raw : .reconstructible
             index += 1
+        case "--sync-history-bytes":
+            guard index + 1 < args.count else {
+                throw TapePaneParseError.missingSyncHistoryBytesArg
+            }
+            guard let bytes = Int(args[index + 1]), bytes >= 0 else {
+                throw TapePaneParseError.invalidSyncHistoryBytes(args[index + 1])
+            }
+            syncHistoryBytes = bytes
+            index += 2
         case "--format":
             guard index + 1 < args.count else {
                 throw TapePaneParseError.missingFormatArg
@@ -117,5 +134,13 @@ public func parseTapePaneArgs(_ args: [String]) throws -> ParsedTapePane {
         throw TapePaneParseError.missingPane
     }
     let mode = explicitMode ?? ((follow || hasExplicitStart) ? .reconstructible : .raw)
-    return ParsedTapePane(pane: pane, follow: follow, start: start, mode: mode, format: format)
+    let policy: PaneTapeSyncPolicy
+    do {
+        policy = try paneTapeSyncPolicy(mode: mode, requestedHistoryBudgetBytes: syncHistoryBytes)
+    } catch {
+        // The flag itself already refused anything that is not a whole, non-negative count,
+        // so an inapplicable budget on a raw stream is the only failure left to report.
+        throw TapePaneParseError.syncHistoryBytesOnRawStream
+    }
+    return ParsedTapePane(pane: pane, follow: follow, start: start, policy: policy, format: format)
 }

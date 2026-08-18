@@ -317,7 +317,7 @@ struct AppRuntimeSessionCommandTests {
             paneId: paneId,
             capture: .follow,
             start: .now,
-            mode: .raw
+            policy: .raw
         ))
         _ = try follow.readResponse()
         // The stream is registered only once the start reply's completion hops back to the

@@ -87,6 +87,7 @@ func paneTapeStateSynchronization(
     .init(
         bytes: synchronization.state.bytes,
         dimensions: paneTapeDimensions(synchronization.geometry),
+        droppedHistoryRows: synchronization.state.droppedHistoryRows,
         cursor: paneTapeCursor(synchronization.cursor)
     )
 }
@@ -1168,17 +1169,20 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     func paneTapeOpening(
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,
-        mode: PaneTapeStreamMode
+        policy: PaneTapeSyncPolicy
     ) -> (@Sendable () throws -> PaneTapeOpening)? {
         let requestedCursor: PaneTapeCursor
         switch start {
         case .cursor(let cursor): requestedCursor = cursor
         case .beginning, .now: requestedCursor = .beginning
         }
-        let fence = controller.flightRecordingStreamFence(from: recorderCursor(requestedCursor))
+        let fence = controller.flightRecordingStreamFence(
+            from: recorderCursor(requestedCursor),
+            historyBudgetBytes: policy.historyBudgetBytes
+        )
         return {
             makePaneTapeOpening(
-                request: PaneTapeStreamRequest(capture: capture, mode: mode, position: start),
+                request: PaneTapeStreamRequest(capture: capture, policy: policy, position: start),
                 fence: try paneTapeStreamFence(fence),
                 provenance: try paneTapeProvenanceJSON()
             )
@@ -1188,16 +1192,17 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     func paneTapeFollowBatch(
         subscriptionId: UUID,
         from cursor: PaneTapeCursor,
-        mode: PaneTapeStreamMode
+        policy: PaneTapeSyncPolicy
     ) -> (@Sendable () throws -> PaneTapeBatch)? {
         guard let fence = controller.flightRecordingFollowStreamFence(
             subscriptionId: subscriptionId,
-            from: recorderCursor(cursor)
+            from: recorderCursor(cursor),
+            historyBudgetBytes: policy.historyBudgetBytes
         ) else {
             return nil
         }
         return {
-            makePaneTapeContinuation(mode: mode, fence: try paneTapeFollowStreamFence(fence))
+            makePaneTapeContinuation(policy: policy, fence: try paneTapeFollowStreamFence(fence))
         }
     }
 

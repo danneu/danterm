@@ -82,7 +82,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var viewportText: String?
     var fullHistoryText: String?
     var rowStructure: [TerminalSessionRowStructure]?
-    var paneTapeOpenings: [(PaneTapeCaptureMode, PaneTapeStartPosition, PaneTapeStreamMode)] = []
+    var paneTapeOpenings: [(PaneTapeCaptureMode, PaneTapeStartPosition, PaneTapeSyncPolicy)] = []
     /// The opening this session hands a tape reader. `nil` reports "no terminal to read",
     /// so a test that wants a live follow stream on this pane assigns one.
     var tapeOpening: PaneTapeOpening?
@@ -139,9 +139,9 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     func paneTapeOpening(
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,
-        mode: PaneTapeStreamMode
+        policy: PaneTapeSyncPolicy
     ) -> (@Sendable () throws -> PaneTapeOpening)? {
-        paneTapeOpenings.append((capture, start, mode))
+        paneTapeOpenings.append((capture, start, policy))
         guard let tapeOpening else { return nil }
         return { tapeOpening }
     }

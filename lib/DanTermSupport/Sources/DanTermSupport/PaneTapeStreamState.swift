@@ -6,7 +6,7 @@ import DanTermProtocol
 /// Holds the request facts that decide the stream's opening records.
 struct PaneTapeStreamRequest: Equatable, Sendable {
     let capture: PaneTapeCaptureMode
-    let mode: PaneTapeStreamMode
+    let policy: PaneTapeSyncPolicy
     let position: PaneTapeStartPosition
 }
 
@@ -26,6 +26,10 @@ enum PaneTapeCursorPlacement: Equatable, Sendable {
 struct PaneTapeStateSynchronization: Equatable, Sendable {
     let bytes: [UInt8]
     let dimensions: PaneTapeDimensions
+    /// How many retained history rows these bytes leave out, oldest first. A replica cannot
+    /// derive it -- the bytes look the same whether the source had more history or not -- so
+    /// the record has to state it.
+    let droppedHistoryRows: Int
     let cursor: PaneTapeCursor
 }
 
@@ -52,10 +56,10 @@ struct PaneTapeFollowStreamFence: Equatable, Sendable {
 
 /// Builds one followed suffix, replacing lost events with exact state in reconstructible mode.
 func makePaneTapeContinuation(
-    mode: PaneTapeStreamMode,
+    policy: PaneTapeSyncPolicy,
     fence: PaneTapeFollowStreamFence
 ) -> PaneTapeBatch {
-    if mode == .reconstructible, fence.snapshot.droppedEventCount > 0 {
+    if policy.mode == .reconstructible, fence.snapshot.droppedEventCount > 0 {
         return PaneTapeBatch(
             records: [makePaneTapeExactGapRecord(fence.snapshot)]
                 + makePaneTapeSynchronizationRecords(fence.synchronization),
@@ -78,7 +82,7 @@ func makePaneTapeOpening(
         initial: selection.initial,
         cursor: selection.publishedCursor ?? selection.nextCursor,
         publishesCursor: selection.publishedCursor != nil,
-        reconstructible: request.mode == .reconstructible
+        reconstructible: request.policy.mode == .reconstructible
     )
     return PaneTapeOpening(
         start: start,
@@ -100,7 +104,7 @@ private func selectPaneTapeOpening(
 ) -> PaneTapeOpeningSelection {
     switch request.position {
     case .now:
-        if request.mode == .reconstructible {
+        if request.policy.mode == .reconstructible {
             return synchronizedSelection(loss: nil, fence: fence)
         }
         return PaneTapeOpeningSelection(
@@ -111,7 +115,7 @@ private func selectPaneTapeOpening(
         )
 
     case .beginning:
-        if request.mode == .reconstructible, fence.retained.droppedEventCount > 0 {
+        if request.policy.mode == .reconstructible, fence.retained.droppedEventCount > 0 {
             return synchronizedSelection(
                 loss: makePaneTapeExactGapRecord(fence.retained),
                 fence: fence
@@ -126,7 +130,7 @@ private func selectPaneTapeOpening(
     case .cursor(let cursor):
         switch fence.requested {
         case .placed(let snapshot):
-            if request.mode == .reconstructible, snapshot.droppedEventCount > 0 {
+            if request.policy.mode == .reconstructible, snapshot.droppedEventCount > 0 {
                 return synchronizedSelection(
                     loss: makePaneTapeExactGapRecord(snapshot),
                     fence: fence
@@ -139,7 +143,7 @@ private func selectPaneTapeOpening(
             )
         case .unplaceable:
             let totalLoss = makePaneTapeTotalGapRecord()
-            if request.mode == .reconstructible {
+            if request.policy.mode == .reconstructible {
                 return synchronizedSelection(loss: totalLoss, fence: fence)
             }
             let head = retainedHeadCursor(origin: fence.origin.cursor, snapshot: fence.retained)
@@ -218,6 +222,7 @@ private func makePaneTapeSynchronizationRecords(
         ]
         if index == chunks.startIndex {
             record["initial"] = paneTapeGeometryJSON(synchronization.dimensions)
+            record["droppedHistoryRows"] = .number(Double(synchronization.droppedHistoryRows))
         }
         if index == chunks.index(before: chunks.endIndex) {
             record["cursor"] = paneTapeCursorJSON(synchronization.cursor)

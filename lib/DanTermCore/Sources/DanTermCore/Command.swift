@@ -62,7 +62,7 @@ enum Command {
         paneId: PaneId,
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,
-        mode: PaneTapeStreamMode
+        policy: PaneTapeSyncPolicy
     )
     // System
     // `paneId` is carried for grouping alone: it becomes the banner's thread

@@ -169,12 +169,13 @@ struct PaneTapeRoundTripTests {
         )
         for pinned in [true, false] {
             let batch = makePaneTapeContinuation(
-                mode: .reconstructible,
+                policy: .reconstructible(historyBudgetBytes: 4096),
                 fence: .init(
                     snapshot: evicted,
                     synchronization: .init(
                         bytes: Array("state".utf8),
                         dimensions: .init(columns: 62, rows: 19, pinned: pinned),
+                        droppedHistoryRows: 0,
                         cursor: evicted.nextCursor
                     )
                 )
@@ -210,15 +211,66 @@ struct PaneTapeRoundTripTests {
         )
     }
 
-    @Test("the tape stream version moved with the geometry shape")
-    func streamVersionStatesTheGeometryShape() {
-        // Intent: the version a start record publishes is the one that first carried
-        //   pinnedness in its geometry.
+    // Intent: the count of history rows a sync left out survives the whole producer-to-reader
+    //   path -- built in the Mac host layer, chunked across records, reassembled by the client.
+    // Why it exists: the producer and the reader are the two ends this file exists to pair.
+    //   The count is the replica's only evidence that its history is incomplete, and the bytes
+    //   look identical either way, so a hop that dropped it would leave a truncated replica
+    //   believing it holds everything the pane ever printed.
+    // Scenario: a followed stream repairs a gap with a sync bounded well below the pane's
+    //   retained history.
+    @Test("a bounded sync round-trips its dropped history count to the reader")
+    func syncRoundTripsDroppedHistoryRows() {
+        let evicted = PaneTapeSnapshot(
+            events: [],
+            droppedEventCount: 2,
+            droppedFeedBytes: 3,
+            droppedWriteBytes: 0,
+            nextCursor: PaneTapeCursor(
+                recorderLifetimeId: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!,
+                nextSequence: 9,
+                feedBytesBeforeNextSequence: 3,
+                writeBytesBeforeNextSequence: 0
+            )
+        )
+        // Long enough to chunk, so the count has to survive multi-part assembly.
+        let bytes = [UInt8](repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
+        let batch = makePaneTapeContinuation(
+            policy: .reconstructible(historyBudgetBytes: 4096),
+            fence: .init(
+                snapshot: evicted,
+                synchronization: .init(
+                    bytes: bytes,
+                    dimensions: .init(columns: 62, rows: 19, pinned: false),
+                    droppedHistoryRows: 3141,
+                    cursor: evicted.nextCursor
+                )
+            )
+        )
+
+        var assembler = PaneTapeSyncAssembler()
+        var assembled: DanTermClient.PaneTapeStateSynchronization?
+        var parts = 0
+        for record in batch.records {
+            guard case .sync(let part)? = decodePaneTapeRecord(record) else { continue }
+            parts += 1
+            assembled = assembler.ingest(part) ?? assembled
+        }
+
+        #expect(parts > 1)
+        #expect(assembled?.bytes == bytes)
+        #expect(assembled?.droppedHistoryRows == 3141)
+    }
+
+    @Test("the tape stream version moved with the sync record's shape")
+    func streamVersionStatesTheSyncShape() {
+        // Intent: the version a start record publishes is the one whose sync records state
+        //   how much history they left out.
         // Why it exists: readers key their expectations off this number. Leaving it at the
-        //   value that named grid-only geometry would let a reader accept a stream whose
-        //   shape it does not know, and the protocol number's refusal is the only other
+        //   value that named a sync with no such field would let a reader accept a stream
+        //   whose shape it does not know, and the protocol number's refusal is the only other
         //   guard.
         // Scenario: a reader deciding whether it understands the stream it just opened.
-        #expect(paneTapeStreamVersion == 4)
+        #expect(paneTapeStreamVersion == 5)
     }
 }

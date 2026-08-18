@@ -73,10 +73,14 @@ struct DanTermCLI {
                                       JSON: wrap claim, content end, and width.
           pane tape --pane <pane-id> [--follow]
                     [--from-now | --from-cursor <cursor-json>]
-                    [--raw | --reconstructible] [--format replay|inspect]
+                    [--raw | --reconstructible] [--sync-history-bytes <n>]
+                    [--format replay|inspect]
                                       Print or follow the pane's flight recording.
                                       Follows and resumes reconstruct exact state;
                                       finite beginning dumps default to raw evidence.
+                                      --sync-history-bytes bounds the scrollback each
+                                      sync carries (default 262144, 0 for the grid
+                                      alone); it needs --reconstructible.
                                       --format inspect replaces each payload with
                                       readable spans; replay (the default) keeps
                                       the exact bytes.

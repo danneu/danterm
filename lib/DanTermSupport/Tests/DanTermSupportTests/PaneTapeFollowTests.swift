@@ -79,7 +79,7 @@ struct PaneTapeFollowTests {
 
         #expect(backlog.record == .object([
             "kind": .string("start"),
-            "version": .number(4),
+            "version": .number(Double(paneTapeStreamVersion)),
             "capture": .string("dump"),
             "format": .string("replay"),
             "reconstructible": .bool(false),
@@ -140,7 +140,7 @@ struct PaneTapeFollowTests {
             cursor: cursor
         )
 
-        #expect(start.record["version"] == .number(4))
+        #expect(start.record["version"] == .number(Double(paneTapeStreamVersion)))
         #expect(start.record["capture"] == .string("follow"))
         #expect(start.record["format"] == .string("replay"))
         #expect(start.record["cursor"] == .object([

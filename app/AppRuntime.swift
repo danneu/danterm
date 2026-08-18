@@ -103,7 +103,7 @@ private func appendTerminalCharacterizationEvent(_ description: String) {
 @MainActor
 private struct PaneTapeFollowTransport {
     let connection: IpcConnection
-    let mode: PaneTapeStreamMode
+    let policy: PaneTapeSyncPolicy
     /// Registers the stream in the shutdown census. Its cancel closure closes the socket,
     /// which is right for app teardown and wrong for one stream ending, so every teardown
     /// short of shutdown retires this token with `run` instead of `cancel`.
@@ -584,7 +584,7 @@ class AppRuntime {
         session: any TerminalSession,
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,
-        mode: PaneTapeStreamMode
+        policy: PaneTapeSyncPolicy
     ) {
         guard schedulingLifecycle.isActive else {
             connection.close()
@@ -593,7 +593,7 @@ class AppRuntime {
         guard let prepareOpening = session.paneTapeOpening(
             capture: capture,
             start: start,
-            mode: mode
+            policy: policy
         ) else {
             connection.writeError(
                 reqId: reqId,
@@ -634,7 +634,7 @@ class AppRuntime {
         reqId: UUID,
         paneId: PaneId,
         start: PaneTapeStartPosition,
-        mode: PaneTapeStreamMode,
+        policy: PaneTapeSyncPolicy,
         connection: IpcRequestTransport,
         session: any TerminalSession
     ) {
@@ -645,7 +645,7 @@ class AppRuntime {
         guard let prepareOpening = session.paneTapeOpening(
             capture: .follow,
             start: start,
-            mode: mode
+            policy: policy
         ) else {
             connection.writeError(
                 reqId: reqId,
@@ -671,7 +671,7 @@ class AppRuntime {
                             paneId: paneId,
                             connection: connection.connection,
                             opening: opening,
-                            mode: mode
+                            policy: policy
                         )
                     }
                 }
@@ -695,7 +695,7 @@ class AppRuntime {
         paneId: PaneId,
         connection: IpcConnection,
         opening: PaneTapeOpening,
-        mode: PaneTapeStreamMode
+        policy: PaneTapeSyncPolicy
     ) {
         guard schedulingLifecycle.isActive else { return }
         guard succeeded else { return }
@@ -718,7 +718,7 @@ class AppRuntime {
         )
         paneTapeFollowTransports[subscriptionId] = PaneTapeFollowTransport(
             connection: connection,
-            mode: mode,
+            policy: policy,
             shutdownToken: schedulingLifecycle.arm(
                 .subscription,
                 cancel: { connection.close() }
@@ -790,7 +790,7 @@ class AppRuntime {
         guard let prepareBatch = session.paneTapeFollowBatch(
             subscriptionId: fetch.subscriptionId,
             from: fetch.cursor,
-            mode: transport.mode
+            policy: transport.policy
         ) else {
             failPaneTapeFollow(fetch.subscriptionId)
             return
@@ -1178,7 +1178,7 @@ class AppRuntime {
             }
             connection.writeSuccess(reqId: reqId, result: .object(["rows": .array(rows)]))
 
-        case .streamPaneTape(let reqId, let paneId, let capture, let start, let mode):
+        case .streamPaneTape(let reqId, let paneId, let capture, let start, let policy):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = paneSession(for: paneId) else {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
@@ -1189,7 +1189,7 @@ class AppRuntime {
                     reqId: reqId,
                     paneId: paneId,
                     start: start,
-                    mode: mode,
+                    policy: policy,
                     connection: connection,
                     session: session
                 )
@@ -1200,7 +1200,7 @@ class AppRuntime {
                     session: session,
                     capture: capture,
                     start: start,
-                    mode: mode
+                    policy: policy
                 )
             }
 

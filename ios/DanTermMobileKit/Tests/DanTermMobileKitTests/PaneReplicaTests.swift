@@ -28,6 +28,7 @@ func completeSyncIsAtomic() throws {
         columns: 8,
         rows: 2,
         pinned: false,
+        droppedHistoryRows: 0,
         cursor: nil
     )))
     #expect(replica.terminal == nil)
@@ -40,6 +41,7 @@ func completeSyncIsAtomic() throws {
         columns: nil,
         rows: nil,
         pinned: nil,
+        droppedHistoryRows: nil,
         cursor: cursor
     )))
     #expect(replica.terminal?.viewportText == "first second")
@@ -65,6 +67,7 @@ func gapFreezesReplicaUntilRepair() throws {
         columns: 8,
         rows: 2,
         pinned: false,
+        droppedHistoryRows: 0,
         cursor: nil
     )))
     #expect(replica.terminal == frozen)
@@ -82,6 +85,7 @@ func gapFreezesReplicaUntilRepair() throws {
         columns: nil,
         rows: nil,
         pinned: nil,
+        droppedHistoryRows: nil,
         cursor: repairCursor
     )))
     #expect(replica.terminal?.viewportText == "new")
@@ -241,6 +245,7 @@ func pinnednessTracksStreamGeometry() throws {
         columns: 10,
         rows: 3,
         pinned: false,
+        droppedHistoryRows: 0,
         cursor: testCursor(sequence: 9)
     )))
     #expect(replica.pinned == false)
@@ -326,6 +331,7 @@ func reconnectResumeAndTotalLoss() throws {
         columns: 8,
         rows: 2,
         pinned: false,
+        droppedHistoryRows: 0,
         cursor: replacement
     )))
     #expect(replica.terminal?.viewportText == "fresh")
@@ -428,6 +434,7 @@ private func synchronizedReplica(
         columns: columns,
         rows: rows,
         pinned: pinned,
+        droppedHistoryRows: 0,
         cursor: cursor
     )))
     return replica

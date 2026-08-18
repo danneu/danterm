@@ -389,7 +389,11 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
             pane: pane,
             follow: true,
             start: cursor.map(PaneTapeStartPosition.cursor) ?? .now,
-            mode: .reconstructible
+            // The phone joins over a remote link, so it takes the server's bounded default
+            // rather than paying for a pane's whole retained scrollback on every join.
+            policy: .reconstructible(
+                historyBudgetBytes: PaneTapeSyncPolicy.defaultHistoryBudgetBytes
+            )
         )
         do {
             try session.send(JsonRpcRequest(

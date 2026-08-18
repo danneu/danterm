@@ -680,7 +680,7 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
     let usage = """
         usage: danterm pane tape --pane <pane-id> [--follow] \
         [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] \
-        [--format replay|inspect]
+        [--sync-history-bytes <n>] [--format replay|inspect]
         """
     let parsed: ParsedTapePane
     do {
@@ -697,6 +697,14 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
             throw CLIParseError("invalid tape cursor\n\(usage)")
         case .conflictingMode:
             throw CLIParseError("choose only one tape mode\n\(usage)")
+        case .missingSyncHistoryBytesArg:
+            throw CLIParseError("--sync-history-bytes requires a byte count\n\(usage)")
+        case .invalidSyncHistoryBytes(let value):
+            throw CLIParseError("invalid sync history bytes: \(value)\n\(usage)")
+        case .syncHistoryBytesOnRawStream:
+            throw CLIParseError(
+                "--sync-history-bytes needs --reconstructible: a raw stream sends no sync\n\(usage)"
+            )
         case .missingFormatArg:
             throw CLIParseError("--format requires replay or inspect\n\(usage)")
         case .invalidFormat(let value):
@@ -712,7 +720,7 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
             pane: try paneId(parsed.pane),
             follow: parsed.follow,
             start: parsed.start,
-            mode: parsed.mode
+            policy: parsed.policy
         ),
         outputMode: .tapeStream(parsed.format)
     )

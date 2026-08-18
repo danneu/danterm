@@ -51,7 +51,7 @@ state and skips those rows when the app is unavailable.
     danterm pane zoom --pane <pane-id> on|off|toggle
     danterm pane resize --pane <pane-id> <columns>x<rows>|--fit
     danterm pane rows --pane <pane-id>
-    danterm pane tape --pane <pane-id> [--follow] [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] [--format replay|inspect]
+    danterm pane tape --pane <pane-id> [--follow] [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] [--sync-history-bytes <n>] [--format replay|inspect]
     danterm pane snapshot --pane <pane-id>
     danterm theme set --pane <pane-id> <name>|--clear
     danterm agent attach --pane <pane-id> --kind <kind> --id <session-id>
@@ -534,6 +534,7 @@ default with `--raw` or `--reconstructible`.
     danterm pane tape --pane "$PANE_ID" > tape.jsonl
     danterm pane tape --pane "$PANE_ID" --follow --raw > tape.jsonl
     danterm pane tape --pane "$PANE_ID" --follow --from-now > tape.jsonl
+    danterm pane tape --pane "$PANE_ID" --follow --sync-history-bytes 0
     danterm pane tape --pane "$PANE_ID" --format inspect
 
 `--from-now` starts at current pane state. `--from-cursor '<json>'` resumes from
@@ -543,13 +544,22 @@ cursor from a previous app lifetime is accepted and repaired with total loss
 plus fresh state. `--format replay` is the default and keeps exact bytes;
 `--format inspect` is the readable event view described below.
 
+Every sync this stream sends carries at most 262144 bytes of scrollback by
+default. `--sync-history-bytes <n>` sets that bound for the whole stream; `0`
+sends the visible grid alone. The bound counts terminal-protocol bytes before
+base64, and the grid, alternate screen, and control state are always carried
+whole, so a sync is a little larger than the number you give. The flag needs
+`--reconstructible` (or a default that resolves to it): a raw stream sends no
+sync, so a budget on one is refused. `pane snapshot` ignores the idea entirely
+and always carries the whole retained history.
+
 Every stream opens with `start`. In between come recorded `event` values,
 reported `gap` values, and synthesized `sync` values. A clean finite stream ends
 with `end`. Every line is independently valid JSON; one state transfer can use
 several lines.
 
 - `start` opens every stream:
-  `{"kind":"start","version":4,"capture":"dump"|"follow"|"snapshot",`
+  `{"kind":"start","version":5,"capture":"dump"|"follow"|"snapshot",`
   `"format":"replay"|"inspect","reconstructible":true|false,`
   `"provenance":{...},"initial":{"columns":N,"rows":N,"pinned":true|false},`
   `"cursor":{...}}`.
@@ -567,10 +577,13 @@ several lines.
   A geometry event is
   `{"type":"resize","columns":N,"rows":N,"pinned":true|false}`.
 - `sync` carries synthesized terminal bytes in ordered parts. The first part
-  carries current geometry. The final part carries the continuation cursor:
+  carries current geometry and the count of scrollback rows the budget left out.
+  The final part carries the continuation cursor:
   `{"kind":"sync","part":1,"parts":N,"base64":"...",`
-  `"initial":{"columns":N,"rows":N,"pinned":true|false}}`.
-  Buffer every part and apply the bytes only after the final part arrives.
+  `"initial":{"columns":N,"rows":N,"pinned":true|false},"droppedHistoryRows":N}`.
+  `droppedHistoryRows` is `0` when the sync carries the whole retained history,
+  and the oldest line it does carry is always a complete logical line. Buffer
+  every part and apply the bytes only after the final part arrives.
 - `end` states why the producer stopped:
   `{"kind":"end","reason":"dump-complete"|"snapshot-complete"|"pane-closed"|"stream-failed"}`.
 

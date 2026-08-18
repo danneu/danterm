@@ -27,12 +27,82 @@ public struct PaneTapeCursor: Equatable, Sendable {
     }
 }
 
-/// Selects exact state recovery or an evidence-only view of retained recorder events.
+/// Selects exact state recovery or an evidence-only view of retained recorder events. This is
+/// the spelling the wire carries; the policy a stream actually runs under is
+/// `PaneTapeSyncPolicy`, which a request boundary resolves this mode into.
 public enum PaneTapeStreamMode: String, Equatable, Sendable {
     /// Repairs unavailable history with an exact terminal-state synchronization.
     case reconstructible
     /// Preserves recorder evidence without synthesizing terminal state.
     case raw
+}
+
+/// The synchronization policy one pane-tape stream runs under: whether the producer may
+/// replace lost recorder evidence with terminal state, and how much retained history such a
+/// replacement carries.
+///
+/// It is one value rather than a mode beside an unrelated number because a raw stream never
+/// emits a synchronization, so a budget on one would bound nothing. Making that combination
+/// unrepresentable keeps the rule out of every site that reads a stream's mode.
+public enum PaneTapeSyncPolicy: Equatable, Sendable {
+    /// Preserves recorder evidence without synthesizing terminal state.
+    case raw
+    /// Repairs unavailable history with a state synchronization that spends at most
+    /// `historyBudgetBytes` on retained history; `nil` carries every retained row, which is
+    /// what an exact consumer such as `pane.snapshot` asks for.
+    case reconstructible(historyBudgetBytes: Int?)
+
+    /// What a `pane.tape` stream bounds its syncs by when the request names no budget. A
+    /// screen is worth a couple of kilobytes, so this carries a usable scrollback depth while
+    /// staying two orders of magnitude below the payload a full retained history costs.
+    public static let defaultHistoryBudgetBytes = 262_144
+
+    /// The wire spelling this policy reports as its mode.
+    public var mode: PaneTapeStreamMode {
+        switch self {
+        case .raw: return .raw
+        case .reconstructible: return .reconstructible
+        }
+    }
+
+    /// The bound every sync on this stream obeys, or `nil` when syncs carry all history.
+    public var historyBudgetBytes: Int? {
+        guard case .reconstructible(let budget) = self else { return nil }
+        return budget
+    }
+}
+
+/// Why a requested mode and history budget do not name a policy.
+public enum PaneTapeSyncPolicyError: Error, Equatable {
+    /// A raw stream emits no synchronization, so a history budget has nothing to bound.
+    case budgetOnRawStream
+    /// A budget must be a whole, non-negative byte count.
+    case budgetNotWholeBytes
+}
+
+/// Resolves the mode and optional budget a request stated into the stream's one policy.
+///
+/// Both request boundaries -- the IPC decode and the CLI parser -- go through here, so the
+/// rules about which combinations exist are stated once rather than at each door.
+public func paneTapeSyncPolicy(
+    mode: PaneTapeStreamMode,
+    requestedHistoryBudgetBytes: Int?
+) throws -> PaneTapeSyncPolicy {
+    if let requestedHistoryBudgetBytes, requestedHistoryBudgetBytes < 0 {
+        throw PaneTapeSyncPolicyError.budgetNotWholeBytes
+    }
+    switch mode {
+    case .raw:
+        guard requestedHistoryBudgetBytes == nil else {
+            throw PaneTapeSyncPolicyError.budgetOnRawStream
+        }
+        return .raw
+    case .reconstructible:
+        return .reconstructible(
+            historyBudgetBytes: requestedHistoryBudgetBytes
+                ?? PaneTapeSyncPolicy.defaultHistoryBudgetBytes
+        )
+    }
 }
 
 /// Names the position a tape request asks the producer to continue from.
@@ -70,6 +140,16 @@ public func decodePaneTapeCursor(_ value: JSONValue?) -> PaneTapeCursor? {
         feedBytesBeforeNextSequence: feed,
         writeBytesBeforeNextSequence: write
     )
+}
+
+/// Reads the optional history budget a tape request states, rejecting any value outside the
+/// whole non-negative byte domain rather than rounding it into one.
+public func decodePaneTapeSyncHistoryBytes(_ value: JSONValue?) throws -> Int? {
+    guard let value, value != .null else { return nil }
+    guard let bytes = wholeNonnegativeInt(value) else {
+        throw PaneTapeSyncPolicyError.budgetNotWholeBytes
+    }
+    return bytes
 }
 
 private func wholeUInt64(_ value: JSONValue?) -> UInt64? {

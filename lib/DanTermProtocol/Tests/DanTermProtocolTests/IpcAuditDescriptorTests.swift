@@ -96,7 +96,12 @@ struct IpcAuditDescriptorTests {
         let requests: [IpcRequest] = [
             .paneRead(pane: pane, lineLimit: 20),
             .paneRows(pane: pane),
-            .paneTape(pane: pane, follow: false, start: .now, mode: .reconstructible),
+            .paneTape(
+                pane: pane,
+                follow: false,
+                start: .now,
+                policy: .reconstructible(historyBudgetBytes: 1024)
+            ),
             .paneSnapshot(pane: pane),
         ]
 

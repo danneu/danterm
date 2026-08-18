@@ -158,14 +158,14 @@ struct AppRuntimeIpcCommandTests {
             paneId: paneId,
             capture: .dump,
             start: .beginning,
-            mode: .raw
+            policy: .raw
         ))
         runtime.perform(.streamPaneTape(
             reqId: followId,
             paneId: paneId,
             capture: .follow,
             start: .now,
-            mode: .reconstructible
+            policy: .reconstructible(historyBudgetBytes: 4096)
         ))
 
         #expect(try dump.readResponse().error?.message == "pane has no terminal to read a tape from")
@@ -176,7 +176,7 @@ struct AppRuntimeIpcCommandTests {
         #expect(ports.session.paneTapeOpenings[0].2 == .raw)
         #expect(ports.session.paneTapeOpenings[1].0 == .follow)
         #expect(ports.session.paneTapeOpenings[1].1 == .now)
-        #expect(ports.session.paneTapeOpenings[1].2 == .reconstructible)
+        #expect(ports.session.paneTapeOpenings[1].2 == .reconstructible(historyBudgetBytes: 4096))
     }
 
     @Test("config save failure alerts and completes font resolution before return")

@@ -309,7 +309,7 @@ public enum IpcRequest: Equatable, Sendable {
         pane: PaneId,
         follow: Bool,
         start: PaneTapeStartPosition,
-        mode: PaneTapeStreamMode
+        policy: PaneTapeSyncPolicy
     )
     /// Streams exact terminal state from one owner fence.
     case paneSnapshot(pane: PaneId)
@@ -459,13 +459,16 @@ public enum IpcRequest: Equatable, Sendable {
             case .fit:
                 return ["pane": idValue(pane), "fit": .bool(true)]
             }
-        case .paneTape(let pane, let follow, let start, let mode):
+        case .paneTape(let pane, let follow, let start, let policy):
             var object = [
                 "pane": idValue(pane),
                 "start": paneTapeStartJSON(start),
-                "mode": .string(mode.rawValue),
+                "mode": .string(policy.mode.rawValue),
             ]
             if follow { object["follow"] = .bool(true) }
+            if let budget = policy.historyBudgetBytes {
+                object["syncHistoryBytes"] = .number(Double(budget))
+            }
             return object
         case .paneSnapshot(let pane):
             return ["pane": idValue(pane)]
@@ -579,7 +582,20 @@ public enum IpcRequest: Equatable, Sendable {
             guard case .string(let rawMode)? = object?["mode"],
                   let mode = PaneTapeStreamMode(rawValue: rawMode)
             else { throw invalid("invalid tape mode") }
-            return .paneTape(pane: pane, follow: follow, start: start, mode: mode)
+            let policy: PaneTapeSyncPolicy
+            do {
+                policy = try paneTapeSyncPolicy(
+                    mode: mode,
+                    requestedHistoryBudgetBytes: try decodePaneTapeSyncHistoryBytes(
+                        object?["syncHistoryBytes"]
+                    )
+                )
+            } catch PaneTapeSyncPolicyError.budgetNotWholeBytes {
+                throw invalid("syncHistoryBytes must be a whole number of bytes, zero or more")
+            } catch {
+                throw invalid("syncHistoryBytes applies only to a reconstructible tape stream")
+            }
+            return .paneTape(pane: pane, follow: follow, start: start, policy: policy)
         case .paneSnapshot:
             return .paneSnapshot(pane: try target("pane", object: object))
         case .themeSet:

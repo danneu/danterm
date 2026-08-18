@@ -610,6 +610,7 @@ struct CLIParserTests {
             "follow": .bool(true),
             "start": .string("beginning"),
             "mode": .string("reconstructible"),
+            "syncHistoryBytes": .number(Double(PaneTapeSyncPolicy.defaultHistoryBudgetBytes)),
         ])
 
         let fromNow = try parseCLI([
@@ -620,6 +621,7 @@ struct CLIParserTests {
             "follow": .bool(true),
             "start": .string("now"),
             "mode": .string("reconstructible"),
+            "syncHistoryBytes": .number(Double(PaneTapeSyncPolicy.defaultHistoryBudgetBytes)),
         ])
 
         let cursor = """
@@ -658,6 +660,35 @@ struct CLIParserTests {
         #expect(snapshot.outputMode == .tapeStream(.replay))
     }
 
+    // Intent: `--sync-history-bytes` reaches the request as the stream's history budget, and
+    //   a reconstructible stream that names none carries the server default instead.
+    // Why it exists: the budget is the whole point of the flag -- a stream that silently
+    //   dropped it would sync the entire retained history and no test would notice, because
+    //   the payload is correct either way and only its size differs.
+    // Scenario: spec-first contract for the bounded pane.tape request.
+    @Test("pane tape carries an explicit sync history budget, or the default")
+    func paneTapeCarriesSyncHistoryBudget() throws {
+        let explicit = try parseCLI([
+            "pane", "tape", "--pane", paneId, "--reconstructible", "--sync-history-bytes", "4096",
+        ])
+        #expect(explicit.params["syncHistoryBytes"] == .number(4096))
+
+        let gridOnly = try parseCLI([
+            "pane", "tape", "--pane", paneId, "--follow", "--sync-history-bytes", "0",
+        ])
+        #expect(gridOnly.params["syncHistoryBytes"] == .number(0))
+
+        let defaulted = try parseCLI(["pane", "tape", "--pane", paneId, "--reconstructible"])
+        #expect(
+            defaulted.params["syncHistoryBytes"]
+                == .number(Double(PaneTapeSyncPolicy.defaultHistoryBudgetBytes))
+        )
+
+        // A raw stream emits no synchronization, so it states no budget at all.
+        let raw = try parseCLI(["pane", "tape", "--pane", paneId, "--raw"])
+        #expect(raw.params["syncHistoryBytes"] == nil)
+    }
+
     @Test("pane tape rejects missing and unexpected arguments", arguments: [
         (["pane", "tape"], paneTapeUsage),
         (["pane", "tape", "--follow"], paneTapeUsage),
@@ -666,6 +697,26 @@ struct CLIParserTests {
         (["pane", "tape", "--pane", paneId, "--format", "bogus"], "unknown format: bogus\n\(paneTapeUsage)"),
         (["pane", "tape", "--pane", paneId, "extra"], "unexpected argument: extra"),
         (["pane", "tape", "--bogus"], "unknown flag: --bogus"),
+        (
+            ["pane", "tape", "--pane", paneId, "--reconstructible", "--sync-history-bytes"],
+            "--sync-history-bytes requires a byte count\n\(paneTapeUsage)"
+        ),
+        (
+            ["pane", "tape", "--pane", paneId, "--reconstructible", "--sync-history-bytes", "-1"],
+            "invalid sync history bytes: -1\n\(paneTapeUsage)"
+        ),
+        (
+            ["pane", "tape", "--pane", paneId, "--reconstructible", "--sync-history-bytes", "1.5"],
+            "invalid sync history bytes: 1.5\n\(paneTapeUsage)"
+        ),
+        (
+            ["pane", "tape", "--pane", paneId, "--raw", "--sync-history-bytes", "1024"],
+            "--sync-history-bytes needs --reconstructible: a raw stream sends no sync\n\(paneTapeUsage)"
+        ),
+        (
+            ["pane", "tape", "--pane", paneId, "--sync-history-bytes", "1024"],
+            "--sync-history-bytes needs --reconstructible: a raw stream sends no sync\n\(paneTapeUsage)"
+        ),
     ] as [([String], String)])
     func paneTapeRejectsMissingAndUnexpectedArguments(_ testCase: ([String], String)) {
         let error = #expect(throws: CLIParseError.self) {
@@ -848,4 +899,4 @@ private let groupNewUsage = "usage: danterm group new --name <name> [--cmd <s>] 
 private let groupCloseUsage = "usage: danterm group close --group <group-id> [--move-tabs]"
 private let tabNewUsageWithPositionFlags = "usage: danterm tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end]"
 private let paneSplitUsageWithFocusFlags = "usage: danterm pane split --pane <pane-id> -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
-private let paneTapeUsage = "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] [--format replay|inspect]"
+private let paneTapeUsage = "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] [--sync-history-bytes <n>] [--format replay|inspect]"

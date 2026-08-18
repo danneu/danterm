@@ -41,6 +41,38 @@ struct PaneReplicaCheckpointTests {
         #expect(short.checkpoint(for: paneId) == long.checkpoint(for: paneId))
     }
 
+    // Intent: a replica whose history is deeper than a bounded stream's default budget still
+    //   checkpoints and restores that history whole.
+    // Why it exists: the checkpoint is an exact consumer sitting on the same encoder a
+    //   bounded stream now budgets. Budgeting it too would silently shorten what the phone
+    //   restores after a relaunch, and every other checkpoint test uses a two-row grid with
+    //   no history at all, so none of them could see it.
+    // Scenario: a pane whose scrollback costs more to serialize than the stream default.
+    @Test("a deep-history checkpoint round trip restores every retained row")
+    func checkpointRoundTripKeepsHistoryDeeperThanTheStreamDefault() throws {
+        var source = try #require(Terminal(columns: 80, rows: 24))
+        for line in 0..<12_000 {
+            source.feed(Array("history line \(line)\r\n".utf8))
+        }
+        let sourceState = source.stateSynchronization
+        #expect(sourceState.droppedHistoryRows == 0)
+        #expect(sourceState.bytes.count > PaneTapeSyncPolicy.defaultHistoryBudgetBytes)
+
+        let replica = try checkpointReplica(
+            bytes: sourceState.bytes,
+            cursor: checkpointCursor(sequence: 1),
+            columns: 80,
+            rows: 24
+        )
+        let checkpoint = try #require(replica.checkpoint(for: paneId))
+        let restored = try PaneReplica(checkpoint: checkpoint, for: paneId)
+        let restoredTerminal = try #require(restored.terminal)
+
+        #expect(restoredTerminal.scrollbackRowCount == source.scrollbackRowCount)
+        #expect(restoredTerminal.scrollbackRow(at: 0) == source.scrollbackRow(at: 0))
+        #expect(restoredTerminal.viewportText == source.viewportText)
+    }
+
     @Test("checkpoint size plateaus under continuing grapheme churn")
     func checkpointSizeStopsGrowingWithDroppedScalars() throws {
         // Intent: carry TerminalCore's grapheme bound through replica checkpoint synthesis.
@@ -220,6 +252,7 @@ struct PaneReplicaCheckpointTests {
             columns: 8,
             rows: 2,
             pinned: false,
+            droppedHistoryRows: 0,
             cursor: nil
         )))
         #expect(replica.checkpoint(for: paneId) == exact)
@@ -409,6 +442,7 @@ struct PaneReplicaCheckpointTests {
             columns: 8,
             rows: 2,
             pinned: false,
+            droppedHistoryRows: 0,
             cursor: foreign
         )))
         #expect(restored.terminal?.viewportText == "fresh")
@@ -432,6 +466,7 @@ private func checkpointReplica(
         columns: columns,
         rows: rows,
         pinned: pinned,
+        droppedHistoryRows: 0,
         cursor: cursor
     )))
     return replica

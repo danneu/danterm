@@ -414,14 +414,14 @@ private func dispatchIpc(
         try requirePane(paneId, in: model)
         return [.readPaneRowStructure(reqId: reqId, paneId: paneId)]
 
-    case .paneTape(let paneId, let follow, let start, let mode):
+    case .paneTape(let paneId, let follow, let start, let policy):
         try requirePane(paneId, in: model)
         return [.streamPaneTape(
             reqId: reqId,
             paneId: paneId,
             capture: follow ? .follow : .dump,
             start: start,
-            mode: mode
+            policy: policy
         )]
 
     case .paneSnapshot(let paneId):
@@ -431,7 +431,9 @@ private func dispatchIpc(
             paneId: paneId,
             capture: .snapshot,
             start: .now,
-            mode: .reconstructible
+            // A snapshot is the exact-state consumer, so it takes no history budget: the
+            // whole retained state is the product it promises.
+            policy: .reconstructible(historyBudgetBytes: nil)
         )]
 
     case .todoList(let owner):

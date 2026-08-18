@@ -7,7 +7,7 @@ import Foundation
 
 /// The stream contract producers emit and readers key their expectations off. It moves whenever
 /// a record's shape or vocabulary changes.
-public let paneTapeStreamVersion = 4
+public let paneTapeStreamVersion = 5
 
 /// Names the payload representation a stream carries.
 public enum PaneTapeFormat: String, Sendable {
