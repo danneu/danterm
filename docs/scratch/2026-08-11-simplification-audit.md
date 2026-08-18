@@ -204,7 +204,7 @@ in itself.
 | 6b2e27f0 | [S38](#s38) | 12    | 3   | 4   | app-runtime    | medium | Key pane-tape follow state once, by subscription, instead of four sidecar maps                                  |
 | 8108b081 a635c6d7 eb9a7ba5 e3641526 | [S39](#s39) | 12    | 3   | 4   | build          | small  | Drop .build-gate by deleting the unenforced -warn-long-function-bodies flag                                             |
 |        | [S40](#s40) | 12    | 3   | 4   | core-model     | medium | Nest per-pane search and notification state in PaneModel so cleanup is structural                                       |
-|        | [S41](#s41) | 12    | 3   | 4   | core-reducer   | small  | Drop @discardableResult from update() so nested calls cannot silently swallow commands                                  |
+| ce52856e | [S41](#s41) | 12    | 3   | 4   | core-reducer   | small  | Drop @discardableResult from update() so nested calls cannot silently swallow commands                                  |
 | 17e54263 | [S42](#s42) | 12    | 3   | 4   | core-reducer   | medium | Give all three confirmations one representation instead of half-model, half-command                                     |
 |        | [S43](#s43) | 12    | 3   | 4   | docs           | small  | AGENTS.md maps three of the seven places a document can live                                                            |
 | 8fa415e7 | [S44](#s44) | 12    | 3   | 4   | sidebar        | small  | Delete applyGroupCollapseState; paint the group row from its own projection                                             |
@@ -222,8 +222,8 @@ in itself.
 | b8afce66 | [S56](#s56) | 8     | 2   | 4   | core-model     | small  | Unify the three divergent "the selected tab died" fixups                                                                |
 |        | [S57](#s57) | 8     | 2   | 4   | pty            | medium | Read into one reusable buffer through a single read loop                                                                |
 | e4dd79e1 | [S58](#s58) | 8     | 2   | 4   | sidebar        | medium | Make SidebarItemStore return the outline mutation instead of a Bool the executor re-switches on                         |
-|        | [S59](#s59) | 8     | 2   | 4   | terminal-views | small  | Drop the vestigial optionality in TerminalSessionState.scrollPosition                                                   |
-|        | [S60](#s60) | 5     | 1   | 5   | app-runtime    | small  | Drop the unused runRepeating and captureOwnerCensus lifecycle API                                                       |
+| 0afad3fc | [S59](#s59) | 8     | 2   | 4   | terminal-views | small  | Drop the vestigial optionality in TerminalSessionState.scrollPosition                                                   |
+| d1e4dd79 | [S60](#s60) | 5     | 1   | 5   | app-runtime    | small  | Drop the unused runRepeating and captureOwnerCensus lifecycle API                                                       |
 | 58ffeec1 | [S61](#s61) | 5     | 1   | 5   | build          | small  | Delete the unreferenced scripts/cursor-color-rainbow.sh                                                                 |
 
 ## Findings in detail
@@ -984,6 +984,15 @@ survivors plus their shared helper file now total 692 lines, down from 4,811.
 
 `lib/DanTermCore/Sources/DanTermCore/Update.swift#update`
 
+**Status note.** Closed by propagation plus a gate lint, not by dropping
+`@discardableResult`. The attribute is still on `update()`. Six production call
+sites now return the nested commands, and
+`scripts/reducer-command-discard-lint.sh` fails the gate on a discarded nested
+call, naming the file and line. This is deliberately weaker than the finding's
+fix: a grep is positional, so a discard spelled across a continuation line
+would pass, where dropping the attribute would have made the compiler the
+enforcer.
+
 **Problem.** `update()` composes with itself: fifteen handlers re-enter the reducer to reuse another case's logic. Because the function is `@discardableResult`, two of those call sites discard the returned commands with `_ =`, so any side effect the nested message emits is dropped without a compiler warning. Both are safe only by coincidence -- the nested messages happen to return `[]` today. The moment `.moveTabs` or `.toggleZoomPane` gains a command (a focus move, a checkpoint, an IPC-visible effect), the bug is a silent no-op at a call site nobody will revisit.
 
 **Evidence.** Read Update.swift:5-10 (`@discardableResult func update`). Read line 1040 in `.extractTabsToNewGroup`: `_ = update(&model, .moveTabs(...), env: env)` with the comment "Discard nested commands; the sidebar updates via reconcileSidebar" -- true only because `.moveTabs` (line 971-1018) returns `[]` on every path. Read line 1658 in the IPC `.paneZoom` arm: `_ = update(&model, .toggleZoomPane(paneId: paneId), env: env)`, and `.toggleZoomPane` (line 1055-1075) likewise returns `[]` on all three paths. Every other nested call at lines 45, 120, 139, 145, 168, 247, 752, 893, 927, 1121, 1371, 1377, 1481-1738, 1967 does propagate its result.
@@ -1349,6 +1358,13 @@ parent, index, or group mode, and reload operations write each item once.
 `app-runtime` &middot; dead-code &middot; impact 1, confidence 5 &middot; effort small
 
 `app/AppRuntimeSchedulingLifecycle.swift#runRepeating`, `app/AppRuntimeSchedulingLifecycle.swift#captureOwnerCensus`
+
+**Status note.** Closed, but only `runRepeating` was deleted.
+`captureOwnerCensus` stays: its unit test is a real termination assertion, so
+the API is used, and what was wrong was the doc comment that sold it as a live
+diagnostics surface. That comment now says what the census is for. The finding
+read one call site as no call site; the misleading map it describes was in the
+prose, not in the API.
 
 **Problem.** `AppRuntimeSchedulingLifecycle` exposes two entry points nothing in the app uses. `runRepeating` has no call site anywhere, including tests, and `captureOwnerCensus` is called only by its own unit test even though its doc comment justifies it as being "for termination assertions and diagnostics" - there is no termination assertion. Both make the gate look like it supports a repeating-callback mode and a live diagnostics surface that do not exist, which is a misleading map of the shutdown contract.
 
