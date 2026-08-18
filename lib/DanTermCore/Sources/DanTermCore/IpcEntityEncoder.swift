@@ -187,6 +187,15 @@ struct IpcEntityEncoder {
         } else if includeNullCwd {
             object["cwd"] = .null
         }
+        // Here rather than in the `ls`-only fields, so `pane info` and `ls`
+        // report a claimed grid identically. Absent means the pane's grid
+        // follows its slot.
+        if let gridOverride = pane.gridOverride {
+            object["gridOverride"] = .object([
+                "columns": .number(Double(gridOverride.columns)),
+                "rows": .number(Double(gridOverride.rows)),
+            ])
+        }
         return object
     }
 

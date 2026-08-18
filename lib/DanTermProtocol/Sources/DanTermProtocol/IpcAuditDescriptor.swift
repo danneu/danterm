@@ -103,7 +103,8 @@ public extension IpcRequest {
             return ["tab": auditId(tab)]
         case .paneFocus(let pane), .paneInfo(let pane), .paneClose(let pane),
              .paneInput(let pane, _), .paneRead(let pane, _), .paneRows(let pane),
-             .paneZoom(let pane, _), .paneTape(let pane, _, _, _),
+             .paneZoom(let pane, _), .paneResize(let pane, _),
+             .paneTape(let pane, _, _, _),
              .paneSnapshot(let pane), .themeSet(let pane, _),
              .agentAttach(let pane, _), .agentActivity(let pane, _, _),
              .agentDetach(let pane, _):

@@ -54,6 +54,8 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     case paneRows = "pane.rows"
     /// Changes zoom state for one explicitly named pane's tab.
     case paneZoom = "pane.zoom"
+    /// Sets or clears the grid one explicitly named pane runs at.
+    case paneResize = "pane.resize"
     /// Reads or follows the flight recording for one explicitly named pane.
     case paneTape = "pane.tape"
     /// Streams one exact terminal-state snapshot for an explicitly named pane.
@@ -95,7 +97,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
              .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneTape, .paneSnapshot, .themeSet,
+             .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
              .agentAttach, .agentActivity, .agentDetach,
              .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
              .todoDelete, .todoClearCompleted:
@@ -111,7 +113,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
         case .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneTape, .paneSnapshot, .themeSet,
+             .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
              .agentAttach, .agentActivity, .agentDetach,
              .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
              .todoDelete, .todoClearCompleted:
@@ -128,7 +130,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
              .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneTape, .paneSnapshot, .themeSet,
+             .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
              .agentAttach, .agentActivity, .agentDetach,
              .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
              .todoDelete, .todoClearCompleted:
@@ -150,7 +152,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
              .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneTape, .paneSnapshot, .themeSet,
+             .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
              .agentAttach, .agentActivity, .agentDetach,
              .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
              .todoDelete, .todoClearCompleted:
@@ -183,6 +185,15 @@ public enum IpcPaneZoomState: String, Equatable, Sendable {
     case off
     /// Preserves the explicitly requested state-relative operation.
     case toggle
+}
+
+/// Names the two forms a pane resize request can take, so a request can never
+/// carry a grid and a fit at once.
+public enum IpcPaneResize: Equatable, Sendable {
+    /// Asks the pane to run at exactly this grid, whatever rectangle it occupies.
+    case grid(columns: Int, rows: Int)
+    /// Returns the pane to the grid its slot rectangle implies.
+    case fit
 }
 
 /// Separates paste-style text from parsed key events in pane input requests.
@@ -290,6 +301,9 @@ public enum IpcRequest: Equatable, Sendable {
     case paneRows(pane: PaneId)
     /// Applies a decoded zoom operation to a structurally required pane.
     case paneZoom(pane: PaneId, state: IpcPaneZoomState)
+    /// Sets or clears the grid a structurally required pane runs at. The grid
+    /// itself is validated by the core, which owns the accepted range.
+    case paneResize(pane: PaneId, resize: IpcPaneResize)
     /// Reads or follows recording data from a structurally required pane.
     case paneTape(
         pane: PaneId,
@@ -344,6 +358,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .paneRead: return .paneRead
         case .paneRows: return .paneRows
         case .paneZoom: return .paneZoom
+        case .paneResize: return .paneResize
         case .paneTape: return .paneTape
         case .paneSnapshot: return .paneSnapshot
         case .themeSet: return .themeSet
@@ -375,7 +390,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .tabRename, .tabClose:
             return ["tab"]
         case .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneTape, .paneSnapshot, .themeSet,
+             .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
              .agentAttach, .agentActivity, .agentDetach:
             return ["pane"]
         case .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
@@ -433,6 +448,17 @@ public enum IpcRequest: Equatable, Sendable {
             return object
         case .paneZoom(let pane, let state):
             return ["pane": idValue(pane), "state": .string(state.rawValue)]
+        case .paneResize(let pane, let resize):
+            switch resize {
+            case .grid(let columns, let rows):
+                return [
+                    "pane": idValue(pane),
+                    "columns": .number(Double(columns)),
+                    "rows": .number(Double(rows)),
+                ]
+            case .fit:
+                return ["pane": idValue(pane), "fit": .bool(true)]
+            }
         case .paneTape(let pane, let follow, let start, let mode):
             var object = [
                 "pane": idValue(pane),
@@ -541,6 +567,9 @@ public enum IpcRequest: Equatable, Sendable {
                   let state = IpcPaneZoomState(rawValue: rawState)
             else { throw invalid("state must be one of on, off, toggle") }
             return .paneZoom(pane: pane, state: state)
+        case .paneResize:
+            let pane: PaneId = try target("pane", object: object)
+            return .paneResize(pane: pane, resize: try decodePaneResize(object))
         case .paneTape:
             let pane: PaneId = try target("pane", object: object)
             let follow = try optionalBool(object?["follow"], name: "follow")
@@ -799,6 +828,27 @@ private func lineLimit(_ value: JSONValue?) throws -> Int? {
     default:
         throw invalid("lines must be a positive integer")
     }
+}
+
+/// Admits exactly one of the two resize forms, so "fit to my slot" and "run at
+/// this grid" can never arrive in the same request and leave the daemon
+/// guessing which one the caller meant. The grid's accepted range is the core's
+/// to enforce; this only reads the shape.
+private func decodePaneResize(_ object: [String: JSONValue]?) throws -> IpcPaneResize {
+    let usage = "params must be columns and rows, or fit"
+    let fit = try optionalBool(object?["fit"], name: "fit")
+    let columnsValue = object?["columns"]
+    let rowsValue = object?["rows"]
+    if fit {
+        guard columnsValue == nil, rowsValue == nil else { throw invalid(usage) }
+        return .fit
+    }
+    guard case .number(let columns)? = columnsValue,
+          case .number(let rows)? = rowsValue,
+          let columns = Int(exactly: columns),
+          let rows = Int(exactly: rows)
+    else { throw invalid(usage) }
+    return .grid(columns: columns, rows: rows)
 }
 
 private func agentSession(_ object: [String: JSONValue]?) throws -> IpcAgentSession {

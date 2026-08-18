@@ -70,6 +70,27 @@ struct IpcAuditDescriptorTests {
         ])
     }
 
+    @Test("pane.resize records its method and pane, and both forms audit alike")
+    func paneResizeIsAuditedByMethodAndPane() throws {
+        // Intent: a resize appears in the audit log as the method and the pane it
+        //   named, with no launch or input accounting attached.
+        // Why it exists: any admitted remote caller can shrink a pane mid-use, so
+        //   the record of which pane was resized is the only trace of that.
+        // Scenario: spec-first; a grid claim and a fit on the same pane.
+        for request: IpcRequest in [
+            .paneResize(pane: pane, resize: .grid(columns: 60, rows: 20)),
+            .paneResize(pane: pane, resize: .fit),
+        ] {
+            let descriptor = request.auditDescriptor
+            #expect(descriptor.method == "pane.resize")
+            #expect(descriptor.target == ["pane": pane.rawValue.uuidString.lowercased()])
+            #expect(descriptor.command == nil)
+            #expect(descriptor.cwd == nil)
+            #expect(descriptor.input == nil)
+        }
+        #expect(IpcRequestMethod.paneResize.producesAuditRecord)
+    }
+
     @Test("pane content reads record only method and target")
     func paneContentReadsHaveNoContentField() throws {
         let requests: [IpcRequest] = [

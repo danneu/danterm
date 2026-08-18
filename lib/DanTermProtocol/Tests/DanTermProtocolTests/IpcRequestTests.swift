@@ -116,6 +116,63 @@ struct IpcRequestTests {
         #expect(localOnly == [.quit])
     }
 
+    @Test("pane.resize decodes exactly one of the grid and fit forms")
+    func paneResizeDecodesExactlyOneForm() throws {
+        // Intent: the wire admits a grid or a fit, never both and never neither.
+        // Why it exists: a request carrying a grid and a fit at once would leave
+        //   the daemon to pick which half the caller meant, and picking is exactly
+        //   what a last-writer-wins resize must never do.
+        // Scenario: spec-first, covering both accepted forms and the mixed one.
+        let pane = "11111111-1111-4111-8111-111111111111"
+        let paneId = PaneId(rawValue: UUID(uuidString: pane)!)
+
+        #expect(try IpcRequest.decode(
+            method: IpcRequestMethod.paneResize.rawValue,
+            params: .object(["pane": .string(pane), "columns": .number(60), "rows": .number(20)])
+        ) == .paneResize(pane: paneId, resize: .grid(columns: 60, rows: 20)))
+
+        #expect(try IpcRequest.decode(
+            method: IpcRequestMethod.paneResize.rawValue,
+            params: .object(["pane": .string(pane), "fit": .bool(true)])
+        ) == .paneResize(pane: paneId, resize: .fit))
+
+        let usage = "params must be columns and rows, or fit"
+        for params: [String: JSONValue] in [
+            ["pane": .string(pane)],
+            ["pane": .string(pane), "columns": .number(60)],
+            ["pane": .string(pane), "fit": .bool(true), "columns": .number(60), "rows": .number(20)],
+            ["pane": .string(pane), "columns": .number(60.5), "rows": .number(20)],
+            ["pane": .string(pane), "columns": .string("60"), "rows": .number(20)],
+        ] {
+            let error = #expect(throws: IpcRequestDecodeError.self) {
+                try IpcRequest.decode(
+                    method: IpcRequestMethod.paneResize.rawValue,
+                    params: .object(params)
+                )
+            }
+            #expect(error?.message == usage)
+        }
+    }
+
+    @Test("pane.resize params round trip through the wire encoding")
+    func paneResizeParamsRoundTrip() throws {
+        // Intent: what a client encodes is what the daemon decodes back.
+        // Why it exists: `params` and `decode` are written apart, so a spelling
+        //   change on one side has to fail here rather than in a live session.
+        // Scenario: spec-first, both forms of the same request.
+        let paneId = PaneId(rawValue: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!)
+
+        for request: IpcRequest in [
+            .paneResize(pane: paneId, resize: .grid(columns: 2, rows: 1)),
+            .paneResize(pane: paneId, resize: .fit),
+        ] {
+            #expect(try IpcRequest.decode(
+                method: request.method.rawValue,
+                params: .object(request.params)
+            ) == request)
+        }
+    }
+
     @Test("todo requests accept either owner and reject ambiguous targeting")
     func todoRequestsRequireExactlyOneOwner() throws {
         let pane = "11111111-1111-4111-8111-111111111111"
@@ -193,6 +250,7 @@ struct IpcRequestTests {
             try parseCLI(["pane", "read", "--pane", pane, "--lines", "20"]),
             try parseCLI(["pane", "rows", "--pane", pane]),
             try parseCLI(["pane", "zoom", "--pane", pane, "on"]),
+            try parseCLI(["pane", "resize", "--pane", pane, "60x20"]),
             try parseCLI(["pane", "tape", "--pane", pane, "--follow"]),
             try parseCLI(["pane", "snapshot", "--pane", pane]),
             try parseCLI(["theme", "set", "--pane", pane, "Tokyo Night"]),

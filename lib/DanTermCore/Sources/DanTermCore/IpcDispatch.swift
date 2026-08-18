@@ -350,6 +350,36 @@ private func dispatchIpc(
         try requirePane(paneId, in: model)
         return [.readPaneText(reqId: reqId, paneId: paneId, lineLimit: lineLimit)]
 
+    case .paneResize(let paneId, let requested):
+        try requirePane(paneId, in: model)
+        switch requested {
+        case .grid(let columns, let rows):
+            // The failable init is the whole range check: a grid the model
+            // cannot hold is a grid the PTY, the engine, and a replica would
+            // not all reproduce, so the caller is told rather than clamped.
+            guard let grid = PaneGridOverride(columns: columns, rows: rows) else {
+                throw IpcParamsError(
+                    "columns must be \(paneGridOverrideColumnRange.lowerBound)-"
+                        + "\(paneGridOverrideColumnRange.upperBound) and rows must be "
+                        + "\(paneGridOverrideRowRange.lowerBound)-\(paneGridOverrideRowRange.upperBound)"
+                )
+            }
+            _ = update(&model, .setPaneGridOverride(paneId: paneId, grid: grid), env: env)
+        case .fit:
+            _ = update(&model, .clearPaneGridOverride(paneId: paneId), env: env)
+        }
+        guard let pane = model.pane(paneId),
+              let tab = tabForPane(paneId, in: model),
+              let group = groupForTab(tab.id, in: model)
+        else {
+            throw IpcParamsError("pane not found")
+        }
+        let encoder = IpcEntityEncoder(home: env.homeDirectory())
+        return [.ipcReply(
+            reqId: reqId,
+            result: encoder.paneInfo(pane: pane, tab: tab, group: group, in: model)
+        )]
+
     case .paneZoom(let paneId, let requested):
         try requirePane(paneId, in: model)
         guard let tab = tabForPane(paneId, in: model) else {

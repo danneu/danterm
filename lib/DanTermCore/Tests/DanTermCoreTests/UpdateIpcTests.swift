@@ -74,6 +74,7 @@ import DanTermProtocol
             (IpcRequestMethod.paneRead.rawValue, [:], "pane"),
             (IpcRequestMethod.paneRows.rawValue, [:], "pane"),
             (IpcRequestMethod.paneZoom.rawValue, ["state": .string("on")], "pane"),
+            (IpcRequestMethod.paneResize.rawValue, ["fit": .bool(true)], "pane"),
             (IpcRequestMethod.paneTape.rawValue, [:], "pane"),
             (IpcRequestMethod.themeSet.rawValue, ["themeName": .null], "pane"),
             (IpcRequestMethod.agentAttach.rawValue, ["kind": .string("codex"), "id": .string("thread")], "pane"),
@@ -4030,6 +4031,161 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
             return
         }
     }
+}
+
+// MARK: - pane.resize
+
+@Suite struct UpdateIpcResizeTests {
+    @Test("pane.resize sets, replaces, and clears the pane's grid override")
+    func paneResizeSetsReplacesAndClears() throws {
+        // Intent: a resize stores exactly the grid asked for, a second resize
+        //   replaces the first outright, and the fit form removes the override.
+        // Why it exists: the model records no owner and no tenure, so a claim can
+        //   only be correct if the last request wins and a fit is a plain clear.
+        // Scenario: spec-first; a phone claims a pane at 60x20, claims it again at
+        //   40x16, and the Mac hands it back with a fit.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedPaneId(in: model)
+
+        let claimed = try requireIpcReply(sendIpc(
+            &model,
+            method: IpcRequestMethod.paneResize.rawValue,
+            params: .object(["columns": .number(60), "rows": .number(20)]),
+            pane: paneId
+        ))
+        #expect(model.pane(paneId)?.gridOverride == PaneGridOverride(columns: 60, rows: 20))
+        #expect(claimed["pane"]?["gridOverride"] == .object([
+            "columns": .number(60),
+            "rows": .number(20),
+        ]))
+
+        _ = sendIpc(
+            &model,
+            method: IpcRequestMethod.paneResize.rawValue,
+            params: .object(["columns": .number(40), "rows": .number(16)]),
+            pane: paneId
+        )
+        #expect(model.pane(paneId)?.gridOverride == PaneGridOverride(columns: 40, rows: 16))
+
+        let fitted = try requireIpcReply(sendIpc(
+            &model,
+            method: IpcRequestMethod.paneResize.rawValue,
+            params: .object(["fit": .bool(true)]),
+            pane: paneId
+        ))
+        #expect(model.pane(paneId)?.gridOverride == nil)
+        #expect(fitted["pane"]?["gridOverride"] == nil)
+    }
+
+    // The engine floor and the storage ceiling are the accepted range, and a
+    // request outside it is refused rather than clamped: a clamped grid is a size
+    // nobody asked for, which the caller would then have to discover by reading
+    // the reply back.
+    @Test("pane.resize accepts the range ends and refuses everything past them", arguments: [
+        (columns: 2, rows: 1, accepted: true),
+        (columns: 1024, rows: 1024, accepted: true),
+        (columns: 1, rows: 24, accepted: false),
+        (columns: 80, rows: 0, accepted: false),
+        (columns: 1025, rows: 24, accepted: false),
+        (columns: 80, rows: 1025, accepted: false),
+        (columns: -80, rows: -24, accepted: false),
+    ])
+    func paneResizeBoundsTheAcceptedGrid(columns: Int, rows: Int, accepted: Bool) throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedPaneId(in: model)
+
+        let commands = sendIpc(
+            &model,
+            method: IpcRequestMethod.paneResize.rawValue,
+            params: .object(["columns": .number(Double(columns)), "rows": .number(Double(rows))]),
+            pane: paneId
+        )
+
+        if accepted {
+            _ = try requireIpcReply(commands)
+            #expect(model.pane(paneId)?.gridOverride == PaneGridOverride(columns: columns, rows: rows))
+        } else {
+            let error = try requireIpcError(commands)
+            #expect(error.code == -32602)
+            #expect(error.message == "columns must be 2-1024 and rows must be 1-1024")
+            #expect(model.pane(paneId)?.gridOverride == nil)
+        }
+    }
+
+    @Test("pane.resize refuses an unknown pane without touching the model")
+    func paneResizeRefusesUnknownPane() throws {
+        var model = makeModel()
+        createTab(&model)
+        let before = model
+
+        let commands = sendIpc(
+            &model,
+            method: IpcRequestMethod.paneResize.rawValue,
+            params: .object([
+                "pane": .string(UUID().uuidString),
+                "columns": .number(60),
+                "rows": .number(20),
+            ])
+        )
+
+        #expect(try requireIpcError(commands).code == -32602)
+        #expect(model == before)
+    }
+
+    @Test("ls reports a claimed grid on the pane it belongs to")
+    func lsReportsClaimedGrid() throws {
+        // Intent: `ls` carries the override, so a client can see which panes are
+        //   running at a claimed size without asking about each one.
+        // Why it exists: the override is durable until an explicit take-back, so a
+        //   client that cannot see it cannot tell a small pane from a claimed one.
+        // Scenario: spec-first; one pane of a split tab is claimed at 60x20.
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitFocusedPane(direction: .horizontal))
+        let claimedId = selectedPaneId(in: model)
+        let otherId = try #require(model.allPaneIds.first { $0 != claimedId })
+
+        _ = sendIpc(
+            &model,
+            method: IpcRequestMethod.paneResize.rawValue,
+            params: .object(["columns": .number(60), "rows": .number(20)]),
+            pane: claimedId
+        )
+        let listing = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.ls.rawValue))
+
+        #expect(paneObject(claimedId, in: listing)?["gridOverride"] == .object([
+            "columns": .number(60),
+            "rows": .number(20),
+        ]))
+        #expect(paneObject(otherId, in: listing)?["gridOverride"] == nil)
+    }
+}
+
+/// Finds one pane's encoded object anywhere in an `ls` listing, so a reporting
+/// assertion does not have to restate the split tree's shape.
+private func paneObject(_ paneId: PaneId, in listing: JSONValue) -> JSONValue? {
+    func search(_ value: JSONValue) -> JSONValue? {
+        switch value {
+        case .object(let object):
+            if object["id"] == .string(paneId.rawValue.uuidString), object["title"] != nil {
+                return value
+            }
+            for nested in object.values {
+                if let found = search(nested) { return found }
+            }
+            return nil
+        case .array(let items):
+            for item in items {
+                if let found = search(item) { return found }
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+    return search(listing)
 }
 
 // MARK: - pane.zoom

@@ -63,6 +63,11 @@ struct DanTermCLI {
           pane zoom --pane <pane-id> on|off|toggle
                                       Zoom a pane to fill its tab, or restore the
                                       split. Prints the tab's resulting zoom state.
+          pane resize --pane <pane-id> <columns>x<rows>|--fit
+                                      Run a pane at an exact grid whatever
+                                      rectangle it occupies, or --fit to follow
+                                      the rectangle again. Columns 2-1024,
+                                      rows 1-1024.
           pane rows --pane <pane-id>
                                       Print each display row's line structure as
                                       JSON: wrap claim, content end, and width.

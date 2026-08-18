@@ -220,7 +220,7 @@ reopen condition.
 
 - [x] 1. feat(core): store the pane grid override with set, clear, and
   take-back messages
-- [ ] 2. feat(ipc): add `pane.resize` and the `danterm pane resize` CLI verb,
+- [x] 2. feat(ipc): add `pane.resize` and the `danterm pane resize` CLI verb,
   reported by `pane.info` and `ls`
 - [ ] 3. feat(app): drive the pane grid from the override, including
   restored-pane launch
@@ -239,6 +239,15 @@ reopen condition.
   pane -- the `resetPaneFontSize` precedent. A separate take-back message
   would carry identical semantics and give the model a second way to say
   the same thing, which I2 does not require.
+- Commit 2 splits the two validations by which layer owns the fact.
+  `DanTermProtocol` reads only the shape -- `{columns, rows}` or
+  `{fit: true}`, never both -- because it cannot see `PaneGridOverride`.
+  The accepted range is checked once, in core dispatch, by the failable
+  init, so the range has exactly one definition.
+- Commit 2 reports the override from `IpcEntityEncoder.paneFields`, the
+  field set `pane.info` and `ls` share, rather than from the `ls`-only
+  block that carries `theme` and `fontSizeSteps`. That is what makes I9's
+  "both report it" true by construction instead of by two edits.
 - Only in-range grids are representable: `PaneGridOverride` has a failable
   init bounded by `paneGridOverrideColumnRange` (2...1024) and
   `paneGridOverrideRowRange` (1...1024). That makes I8's "never clamped"

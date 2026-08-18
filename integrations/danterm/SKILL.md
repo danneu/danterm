@@ -49,6 +49,7 @@ state and skips those rows when the app is unavailable.
     danterm pane input --pane <pane-id> [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
     danterm pane zoom --pane <pane-id> on|off|toggle
+    danterm pane resize --pane <pane-id> <columns>x<rows>|--fit
     danterm pane rows --pane <pane-id>
     danterm pane tape --pane <pane-id> [--follow] [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] [--format replay|inspect]
     danterm pane snapshot --pane <pane-id>
@@ -127,8 +128,9 @@ For agent commands:
   `--tab <tab-id>`.
 - `agent attach`, `agent activity`, and `agent detach`: always pass
   `--pane <pane-id>`. The bundled hooks pass `$DANTERM_PANE` explicitly.
-- `pane focus`, `pane info`, `pane read`, `pane rows`, `pane zoom`, `pane tape`,
-  and `pane snapshot`: always name the pane explicitly.
+- `pane focus`, `pane info`, `pane read`, `pane rows`, `pane zoom`,
+  `pane resize`, `pane tape`, and `pane snapshot`: always name the pane
+  explicitly.
 - `quit`: for a slot you launched, always pass `--socket <path>` naming it. The
   CLI also accepts an explicit TCP target so callers can observe the server's
   remote-authority refusal. Never aim a local quit at the user's DanTerm.
@@ -271,6 +273,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "close pane X" | `pane close --pane <pane-id>` |
 | "what's the build doing in the other pane?" | `pane read --pane <pane-id>` |
 | "make this pane fill the tab" / "restore the split" | `pane zoom --pane <pane-id> on` / `pane zoom --pane <pane-id> off` |
+| "run this pane at 60 by 20" / "let it fit the window again" | `pane resize --pane <pane-id> 60x20` / `pane resize --pane <pane-id> --fit` |
 | "why is the pane's text laid out wrong after a resize" | `pane rows --pane <pane-id>` |
 | "dump the pane's flight recording" | `pane tape --pane <pane-id>` |
 | "watch the pane's flight recording live" | `pane tape --pane <pane-id> --follow` |
@@ -461,6 +464,28 @@ check the field, not the exit status.
 
 Zoom is deliberately transient and is not part of the persisted snapshot, so
 `ls` does not report it. `pane info` does.
+
+### Run a pane at an exact grid
+
+`pane resize` decides the grid a pane runs at, whatever rectangle it occupies on
+screen. It is the scripted form of what a small remote client needs: a Mac window
+may run the pane at 179 columns while a phone can only show 60.
+
+    danterm pane resize --pane "$PANE_ID" 60x20
+    danterm pane resize --pane "$PANE_ID" --fit
+
+The grid form pins the pane. The pane then keeps that grid through window
+resizes, divider drags, zoom, and app restarts, until something clears it:
+`--fit` returns the pane to the grid its rectangle implies. Pass one form or the
+other, never both.
+
+Columns must be 2 through 1024 and rows 1 through 1024. A value outside that
+range is an error, never a clamp, so a caller is never left running at a size it
+did not ask for. The reply is the `pane info` shape, whose `pane.gridOverride`
+carries the resulting grid or is absent when the pane follows its rectangle.
+
+Nothing records who asked. The last resize wins, and `ls` reports every claimed
+grid alongside `pane info`.
 
 ### Inspect a pane's line structure
 
@@ -811,7 +836,7 @@ else prints nothing on success and exits 0.
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
 | `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with current `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`) |
 | `focus` | JSON: `{focus: {type: "terminal"|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"|"none"}}` |
-| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, processPhase, command, connection, agent, integration}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
+| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, processPhase, command, connection, agent, integration, gridOverride?}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `group new --name <name>` | Same JSON shape as `tab new`, naming the new group and its first tab |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |
@@ -819,6 +844,7 @@ else prints nothing on success and exits 0.
 | `todo add (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
 | `pane zoom --pane <pane-id> on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `tab.isZoomed` and current session-reported fields |
+| `pane resize --pane <pane-id> <columns>x<rows>\|--fit` | Same JSON shape as `pane info`, with the resulting `pane.gridOverride` (absent when the pane follows its rectangle) |
 | `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
 | `pane tape --pane <pane-id>` | Raw JSON Lines: `start`, retained events or loss, then `dump-complete` |
 | `pane tape --pane <pane-id> --follow [--from-now | --from-cursor <cursor-json>]` | Reconstructible JSON Lines held open for live events |

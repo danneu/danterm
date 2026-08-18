@@ -14,6 +14,7 @@ struct CLIParserTests {
         ["pane", "split", "-h"],
         ["pane", "input", "--", "C-c"],
         ["pane", "zoom", "on"],
+        ["pane", "resize", "80x24"],
         ["theme", "set", "TokyoNight"],
         ["agent", "attach", "--kind", "codex", "--id", "thread-1"],
         ["agent", "activity", "--kind", "codex", "--id", "thread-1", "--state", "working"],
@@ -405,7 +406,10 @@ struct CLIParserTests {
             try parseCLI(["pane"])
         }
 
-        #expect(error?.message == "usage: danterm pane <focus|info|split|close|input|read|rows|zoom|tape|snapshot>")
+        #expect(
+            error?.message
+                == "usage: danterm pane <focus|info|split|close|input|read|rows|zoom|resize|tape|snapshot>"
+        )
     }
 
     @Test("group command usage lists every supported subcommand")
@@ -524,6 +528,43 @@ struct CLIParserTests {
         #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "zoom"]) }
         #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "zoom", "sideways"]) }
         #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "zoom", "on", "off"]) }
+    }
+
+    @Test("pane resize parses the grid form and the fit form")
+    func paneResizeParsesBothForms() throws {
+        let grid = try parseCLI(["pane", "resize", "--pane", paneId, "80x24"])
+        #expect(grid.method == IpcRequestMethod.paneResize.rawValue)
+        #expect(grid.params == [
+            "pane": .string(paneId),
+            "columns": .number(80),
+            "rows": .number(24),
+        ])
+        #expect(grid.outputMode == .json)
+
+        let fit = try parseCLI(["pane", "resize", "--pane", paneId, "--fit"])
+        #expect(fit.method == IpcRequestMethod.paneResize.rawValue)
+        #expect(fit.params == ["pane": .string(paneId), "fit": .bool(true)])
+        #expect(fit.outputMode == .json)
+    }
+
+    // The grammar, not a check, is what keeps a caller from asking for a grid
+    // and a fit at once, so every mixed or malformed spelling has to land on the
+    // same usage error rather than on a silently preferred half.
+    @Test("pane resize refuses every shape that is not exactly one form", arguments: [
+        ["pane", "resize", "--pane", paneId],
+        ["pane", "resize", "--pane", paneId, "80x24", "--fit"],
+        ["pane", "resize", "--pane", paneId, "80x24", "60x20"],
+        ["pane", "resize", "--pane", paneId, "80"],
+        ["pane", "resize", "--pane", paneId, "80x"],
+        ["pane", "resize", "--pane", paneId, "80x24x2"],
+        ["pane", "resize", "--pane", paneId, "-4x24"],
+        ["pane", "resize", "--pane", paneId, "0x24"],
+        ["pane", "resize", "--pane", paneId, "80x0"],
+        ["pane", "resize", "--pane", paneId, "eightyx24"],
+    ])
+    func paneResizeRefusesEveryOtherShape(_ args: [String]) {
+        let error = #expect(throws: CLIParseError.self) { try parseCLI(args) }
+        #expect(error?.message == "usage: danterm pane resize --pane <pane-id> <columns>x<rows>|--fit")
     }
 
     @Test("pane tape defaults a finite beginning dump to raw replay")

@@ -204,7 +204,9 @@ public func parseCLI(
 
     case "pane":
         guard args.count >= 2 else {
-            throw CLIParseError("usage: danterm pane <focus|info|split|close|input|read|rows|zoom|tape|snapshot>")
+            throw CLIParseError(
+                "usage: danterm pane <focus|info|split|close|input|read|rows|zoom|resize|tape|snapshot>"
+            )
         }
         switch args[1] {
         case "focus":
@@ -224,6 +226,8 @@ public func parseCLI(
             return try parsePaneRowsCommand(Array(args.dropFirst(2)))
         case "zoom":
             return try parsePaneZoomCommand(Array(args.dropFirst(2)))
+        case "resize":
+            return try parsePaneResizeCommand(Array(args.dropFirst(2)))
         case "tape":
             return try parsePaneTapeCommand(Array(args.dropFirst(2)))
         case "snapshot":
@@ -590,6 +594,62 @@ private func parsePaneZoomCommand(_ args: [String]) throws -> CLICommand {
         request: .paneZoom(pane: try paneId(pane), state: requestedState),
         outputMode: .json
     )
+}
+
+// The grid is a positional `<columns>x<rows>` word and `--fit` is its only
+// alternative, so the two forms are mutually exclusive by grammar rather than by
+// a check. Only the shape is parsed here: the accepted range belongs to the
+// daemon, which is the one place that has to agree with the model.
+private func parsePaneResizeCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm pane resize --pane <pane-id> <columns>x<rows>|--fit"
+    var pane: String?
+    var grid: (columns: Int, rows: Int)?
+    var fit = false
+    var index = 0
+    while index < args.count {
+        switch args[index] {
+        case "--pane":
+            guard index + 1 < args.count else { throw CLIParseError(usage) }
+            pane = args[index + 1]
+            index += 2
+        case "--fit":
+            guard fit == false else { throw CLIParseError(usage) }
+            fit = true
+            index += 1
+        default:
+            if args[index].hasPrefix("--") {
+                throw CLIParseError("unknown flag: \(args[index])")
+            }
+            guard grid == nil, let parsed = parsePaneGridWord(args[index]) else {
+                throw CLIParseError(usage)
+            }
+            grid = parsed
+            index += 1
+        }
+    }
+    guard let pane else { throw CLIParseError(usage) }
+    let resize: IpcPaneResize
+    switch (grid, fit) {
+    case (let grid?, false): resize = .grid(columns: grid.columns, rows: grid.rows)
+    case (nil, true): resize = .fit
+    default: throw CLIParseError(usage)
+    }
+    return CLICommand(
+        request: .paneResize(pane: try paneId(pane), resize: resize),
+        outputMode: .json
+    )
+}
+
+/// Reads the `<columns>x<rows>` word, rejecting every shape that is not two
+/// positive decimal integers around a single `x`.
+private func parsePaneGridWord(_ word: String) -> (columns: Int, rows: Int)? {
+    let parts = word.split(separator: "x", omittingEmptySubsequences: false)
+    guard parts.count == 2,
+          let columns = Int(parts[0]), let rows = Int(parts[1]),
+          columns > 0, rows > 0,
+          parts[0].allSatisfy(\.isNumber), parts[1].allSatisfy(\.isNumber)
+    else { return nil }
+    return (columns, rows)
 }
 
 // `pane rows` reuses `pane read`'s argument grammar minus `--lines`: the projection is the
