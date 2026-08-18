@@ -82,11 +82,6 @@ final class MobileRootViewController: UIViewController {
         }
         bottomBar.onDismissKeyboard = { [weak self] in self?.terminalInput.resignFirstResponder() }
         bottomBar.menuItems = { [weak self] in self?.geometryMenuItems() ?? [] }
-        // Both gestures belong to the input view, which covers the terminal: a view over
-        // it takes the touches first, so a recognizer on the surface below would never
-        // see one.
-        let scroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
-        terminalInput.addGestureRecognizer(scroll)
         // The input view covers the terminal so a tap anywhere on the grid raises the
         // keyboard, and the pill is added after both because it floats over them.
         // Everything else sits beside the terminal and takes its own space.
@@ -94,6 +89,13 @@ final class MobileRootViewController: UIViewController {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
+        // The chrome sits under the input view, which must keep every touch: its own pan
+        // recognizer is moved onto that view instead, so a swipe scrolls while tap-to-focus
+        // and long-press stay where they were. It sizes itself to the drawn grid rather
+        // than to the terminal's extent, so it is placed by frame and takes no constraint.
+        let scrollChrome = session.scrollChrome
+        view.insertSubview(scrollChrome, aboveSubview: terminalView)
+        terminalInput.addGestureRecognizer(scrollChrome.panGestureRecognizer)
         configureConstraints()
     }
 
@@ -236,12 +238,6 @@ final class MobileRootViewController: UIViewController {
 
     @objc private func statusPillTapped() {
         presentConnectSheet()
-    }
-
-    @objc private func scrolled(_ recognizer: UIPanGestureRecognizer) {
-        guard recognizer.state == .ended else { return }
-        let rows = recognizer.translation(in: terminalView).y > 0 ? -1 : 1
-        session.dispatch(.scrolledByRows(rows, column: 0, row: 0))
     }
 }
 

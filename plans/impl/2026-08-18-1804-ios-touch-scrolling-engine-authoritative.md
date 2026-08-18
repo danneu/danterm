@@ -219,7 +219,7 @@ indicator.
 ## Commit progress
 - [x] 1. Pure scroll geometry, mode selection, and the interaction latch in `DanTermMobileKit`
 - [x] 2. Scroll routing through the session model and the replica's absolute-scroll seam
-- [ ] 3. UIScrollView chrome driving the phone's terminal scroll
+- [x] 3. UIScrollView chrome driving the phone's terminal scroll
 
 ## Implementation notes
 
@@ -258,3 +258,27 @@ indicator.
   `CLICharacterizationTests` and `AppRuntimeRosterPushTests`, both with connect timeouts
   under the oversubscribed pool. Both suites pass on their own, and this slice touches no
   macOS app code.
+- Commit 3: the chrome reports the interaction latch from the delegate callback that fired
+  rather than from `isDragging` / `isDecelerating`. UIKit does not state what those read at
+  the instant a delegate method runs, and one wrong reading would hold the latch for good,
+  which freezes reflection permanently.
+- Commit 3: the scroll view keeps its default `isUserInteractionEnabled` instead of the
+  plan's "non-interactive". It is placed under the input view, which covers every point of
+  it, so no touch reaches it either way; turning interaction off would be a bet on UIKit
+  still running a moved pan recognizer for a view it considers inert.
+- Commit 3: the reflected content size has zero width rather than the view's, so a width
+  left behind by a rotation cannot let a diagonal flick scroll sideways over nothing.
+- Commit 3: the session controller owns the chrome beside the surface and refreshes it from
+  `surfaceDidLayout` and from the `.scrollViewport` effect. A local scroll moves the engine
+  with no record arriving, so that effect is the only place the chrome could learn about it.
+- Commit 3: this slice adds no test. The app package has no test target by design, and
+  every decision it carries -- mode, latch, dedupe, delta accumulation, cell mapping -- is
+  already proved on the pure types in `DanTermMobileKit`.
+
+## Follow Up
+
+- The plan's end-to-end run is still owed: launch a Mac slot, run the app in the simulator
+  against it, fill scrollback, and confirm by hand that a flick scrolls proportionally with
+  momentum and an indicator, that output while at the bottom stays pinned, that output while
+  browsing does not yank, and that a swipe in `less` moves proportionally with no indicator.
+  It needs a real finger, so no agent run can stand in for it.

@@ -26,6 +26,11 @@ final class MobileSessionController {
     /// is: the smoke probe is an effect performed on it.
     let inputView = TerminalInputView()
 
+    /// The scroll chrome over the surface, owned beside it because the two are one thing to
+    /// the session: the chrome describes this surface's engine, and every effect that moves
+    /// that engine's viewport has to reach both.
+    let scrollChrome = TerminalScrollChromeView()
+
     /// Called whenever a redraw effect is performed, with everything the surfaces render.
     var didUpdate: ((MobileSessionProjection) -> Void)?
 
@@ -72,6 +77,13 @@ final class MobileSessionController {
             surfaceDidLayout()
         }
         surfaceView.didLayout = { [weak self] in self?.surfaceDidLayout() }
+        scrollChrome.surface = surfaceView
+        scrollChrome.onScrollToTopRow = { [weak self] row in
+            self?.dispatch(.scrolledToTopRow(row))
+        }
+        scrollChrome.onScrollByRows = { [weak self] rows, column, row in
+            self?.dispatch(.scrolledByRows(rows, column: column, row: row))
+        }
         inputView.onText = { [weak self] text in self?.dispatch(.textEntered(text)) }
         inputView.onDeleteBackward = { [weak self] in self?.dispatch(.deleteBackwardPressed) }
         inputView.onPaste = { [weak self] text in self?.dispatch(.pasted(text)) }
@@ -120,7 +132,11 @@ final class MobileSessionController {
     /// Reports the surface's current facts. The extent decides whether a whole cell fits,
     /// which is one of the facts the claim control projects from, so a layout pass is one
     /// of the things the session has to be told about.
+    ///
+    /// The scroll chrome reads the same moment, because the projection it mirrors and the
+    /// grid it overlays both move for exactly these reasons.
     private func surfaceDidLayout() {
+        scrollChrome.refresh()
         dispatch(.surfaceChanged(MobileSurfaceFacts(
             nativeGrid: surfaceView.nativeGrid,
             pinned: surfaceView.pinned,
@@ -184,6 +200,10 @@ final class MobileSessionController {
             }
         case .scrollViewport(let scroll):
             surfaceView.scrollViewport(scroll)
+            // The engine's viewport moved without a record arriving, so the chrome is told
+            // here. It reflects nothing while the gesture that asked for this is still in
+            // progress; the reconciliation happens when the gesture ends.
+            scrollChrome.refresh()
         case .flushCheckpoint(let savingReplica, let synchronously):
             flushCheckpoint(savingReplica: savingReplica, synchronously: synchronously)
         case .armRetryTimer(let deadline):

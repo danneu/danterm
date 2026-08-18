@@ -8,6 +8,24 @@ import TerminalRenderExecution
 import TerminalRenderPlanning
 import UIKit
 
+/// Everything the scroll chrome needs to describe this surface, read in one pass.
+///
+/// One value rather than four properties, because the viewport the chrome sizes and the
+/// projection it mirrors have to describe the same drawn grid: read separately, a layout
+/// pass between two reads would let the chrome give UIKit a viewport the projection does
+/// not fit, and its maximum offset would then stop short of the engine's maximum top row.
+struct TerminalScrollFacts {
+    /// Nothing while the replica holds no terminal, which is a surface with no stream yet
+    /// rather than one with nothing to scroll.
+    let projection: TerminalScrollProjection?
+    /// One drawn row's height in this view's points, which is the whole conversion between
+    /// the engine's rows and a scroll view's offsets.
+    let rowHeight: CGFloat
+    /// The bottom-pinned rectangle the cells occupy, which the chrome overlays exactly.
+    let drawnFrame: CGRect
+    let isAlternateScreenActive: Bool
+}
+
 /// Owns the replica and reusable surfaces so attached pixels are never mutated.
 @MainActor
 final class TerminalSurfaceView: UIView {
@@ -106,6 +124,25 @@ final class TerminalSurfaceView: UIView {
     /// Prevents local viewport scrolling while the remote pane uses its alternate screen.
     var isAlternateScreenActive: Bool {
         replica.terminal?.isAlternateScreenActive == true
+    }
+
+    /// The engine's scroll truth and the geometry it is drawn with. Nothing until this view
+    /// has fitted a surface, because until then there is no drawn row to measure.
+    var scrollFacts: TerminalScrollFacts? {
+        guard let surface, let box = contentBox else { return nil }
+        return TerminalScrollFacts(
+            projection: replica.terminal?.scrollProjection,
+            rowHeight: surface.cellSize(in: box).height,
+            drawnFrame: surface.drawnFrame(in: box),
+            isAlternateScreenActive: isAlternateScreenActive
+        )
+    }
+
+    /// The grid cell one point in this view's coordinates falls on, so a gesture the owner
+    /// turns into a mouse report names a real position instead of the origin.
+    func gridCell(at point: CGPoint) -> (column: Int, row: Int)? {
+        guard let surface, let box = contentBox else { return nil }
+        return surface.cell(at: point, in: box)
     }
 
     /// Whether the replicated pane's grid is an override, or nothing while the replica
