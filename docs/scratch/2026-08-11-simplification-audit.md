@@ -189,7 +189,7 @@ in itself.
 | ee646ebf 2fc9a3d8 af00a593 | [S23](#s23) | 15    | 3   | 5   | app-runtime    | small  | Delete the divergent inline copy of tearDownSession in tearDownCurrentSession                                           |
 | part 6b2e27f0 2fc9a3d8 | [S24](#s24) | 15    | 3   | 5   | app-runtime    | medium | Give scheduled work one handle instead of a handle plus a shadow token                                     |
 |        | [S25](#s25) | 15    | 3   | 5   | core-model     | small  | Compute a tab's chrome once instead of four times per sidebar row                                                       |
-|        | [S26](#s26) | 15    | 3   | 5   | core-reducer   | medium | Derive preferences-draft sync instead of enumerating the six fields in five places                                      |
+| 1a516b40 f8ca3b4f 35116ae9 | [S26](#s26) | 15    | 3   | 5   | core-reducer   | medium | Derive preferences-draft sync instead of enumerating the six fields in five places                                      |
 |        | [S27](#s27) | 15    | 3   | 5   | ipc-cli        | small  | Make --socket work for `doctor` instead of intercepting local commands before the flag parser                           |
 | 26dd4afa 5ec5c034 | [S28](#s28) | 15    | 3   | 5   | ipc-cli        | small  | Replace the CLI's two hand-rolled per-byte line readers with the shared framer                                          |
 | part 2fc9f971 | [S29](#s29) | 15    | 3   | 5   | pty            | medium | Record transitions once: fold TerminalPTYAppliedTransition into the flight recorder            |
