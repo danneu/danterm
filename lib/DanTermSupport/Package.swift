@@ -28,7 +28,10 @@ let package = Package(
             name: "DanTermSupport",
             dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
             path: "Sources/DanTermSupport",
-            swiftSettings: [.swiftLanguageMode(.v6)]
+            swiftSettings: [.swiftLanguageMode(.v6)],
+            // FontAvailability.swift imports CoreText. Darwin autolinking usually
+            // covers this, but the link belongs with the target that needs it.
+            linkerSettings: [.linkedFramework("CoreText")]
         ),
         .testTarget(
             name: "DanTermSupportTests",

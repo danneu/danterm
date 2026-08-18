@@ -186,7 +186,7 @@ ownership lint fails on the tree the middle slices clean up, so it lands last.
       two targets of one name in the graph, so the swap cannot be split across
       commits. Drop the dead `--filter` from the protocol gate step.
 - [x] **3. `DanTermClient` becomes a package dependency.** Same shape.
-- [ ] **4. `DanTermSupport` becomes a package dependency,** carrying the CoreText
+- [x] **4. `DanTermSupport` becomes a package dependency,** carrying the CoreText
       link into `lib/DanTermSupport/Package.swift`.
 - [ ] **5. The ownership lint, its self-test, and the written rule.** An ADR
       stating both halves of the rule -- a re-declared target is a violation, a
@@ -271,3 +271,17 @@ Per slice, and in full after slice 5:
   `ls` over its control socket, and quit cleanly. The root test step now runs 121
   tests, down from 164 -- exactly the 43 the client suite contributes, which now run
   only under `lib/DanTermClient`.
+- **Slice 4.** The root never declared a `DanTermSupportTests` target, so this slice
+  removes a duplicate source target only. No test moves and no gate step changes: the
+  `swift test --package-path lib/DanTermSupport` lane already ran the estate, and the
+  root test count stays at 121.
+- **Slice 4.** The CoreText link lands on the nested target with a comment naming
+  `FontAvailability.swift` as the importer, so the reason survives the move (I5).
+- **Slice 4.** `client-tests` keeps its `@testable import DanTermSupport` unchanged
+  across the new package boundary (AR2); the root test target reaches the module
+  through `.product(name:package:)` like every other consumer.
+- **Slice 4 verification.** The full gate passed all 96 steps in 76s, the nested
+  support suite passed 102 tests including `FontAvailabilityTests` (PO5), the iOS gate
+  still cross-compiles both pinned packages with tests (PO4), the coverage lint still
+  reports 9 estates each run once, and a dev slot launched, answered `ls` over its
+  control socket, and quit cleanly (PO3).

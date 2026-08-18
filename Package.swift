@@ -13,21 +13,11 @@ let package = Package(
     dependencies: [
         .package(path: "lib/DanTermClient"),
         .package(path: "lib/DanTermProtocol"),
+        .package(path: "lib/DanTermSupport"),
         .package(path: "lib/TerminalCore"),
         .package(path: "lib/TerminalPTY"),
     ],
     targets: [
-        .target(
-            name: "DanTermSupport",
-            dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
-            path: "lib/DanTermSupport/Sources/DanTermSupport",
-            swiftSettings: [
-                .swiftLanguageMode(.v6),
-            ],
-            linkerSettings: [
-                .linkedFramework("CoreText"),
-            ]
-        ),
         .executableTarget(
             name: "DanTerm",
             dependencies: [
@@ -58,9 +48,9 @@ let package = Package(
         .executableTarget(
             name: "DanTermCLI",
             dependencies: [
-                "DanTermSupport",
                 .product(name: "DanTermClient", package: "DanTermClient"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+                .product(name: "DanTermSupport", package: "DanTermSupport"),
             ],
             path: "cli",
             swiftSettings: [
@@ -89,9 +79,9 @@ let package = Package(
         .testTarget(
             name: "DanTermPaneTapeRoundTripTests",
             dependencies: [
-                "DanTermSupport",
                 .product(name: "DanTermClient", package: "DanTermClient"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+                .product(name: "DanTermSupport", package: "DanTermSupport"),
             ],
             path: "client-tests",
             swiftSettings: [
