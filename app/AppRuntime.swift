@@ -1848,9 +1848,9 @@ class AppRuntime {
         lightCheckpointBaseline = currentLightCheckpointProjection()
         cancelCoalescedReconcile()
 
-        // Restore bypasses update(); reconcile MRU here so the first
+        // Restore bypasses update(); reconcile tab state here so the first
         // cmd-shift-i after a restore sees a populated mruOrder.
-        reconcileMru(&model)
+        reconcileTabState(&model)
 
         // Drive the entire post-restore UI through reconcile() (clean build:
         // tearDownCurrentSession reset the caches). reconcileContainers builds every

@@ -1125,13 +1125,24 @@ func moveToFront<T: Equatable>(_ array: inout [T], _ value: T) {
   array.insert(value, at: 0)
 }
 
-/// Reconcile mruOrder against the live tab set.
-/// Idempotent. Removes dead ids, deduplicates (first occurrence wins),
-/// appends missing live tabs at the back, and (when not cycling) hoists
-/// selectedTabId to index 0 so mruOrder[0] always equals the focused tab.
-func reconcileMru(_ model: inout AppModel) {
+/// Reconcile selectedTabId and mruOrder against the live tab set, as one result.
+///
+/// Both derive from the same ordered live-tab snapshot, so the two cannot drift
+/// apart: whichever tab the repair selects is the tab mruOrder leads with.
+/// Idempotent. It drops dead ids from mruOrder, deduplicates (first occurrence
+/// wins), appends missing live tabs at the back, repairs a selectedTabId that
+/// names no live tab to the most recently used survivor (nil when none
+/// survive), and (when not cycling) hoists selectedTabId to index 0 so
+/// mruOrder[0] always equals the focused tab.
+///
+/// Owning the repair here is what lets a removal path stay silent about
+/// selection. The exceptions are the paths that make a deliberate selection
+/// move of their own -- the close family's predecessor-then-successor pick, and
+/// movePaneToTab's jump to the target tab -- which leave a live selection
+/// behind for this pass to accept unchanged.
+func reconcileTabState(_ model: inout AppModel) {
   let liveTabs = liveTabIds(in: model)
-  if mruOrderIsCanonical(model, liveTabs: liveTabs) { return }
+  if tabStateIsCanonical(model, liveTabs: liveTabs) { return }
 
   var seen = Set<TabId>()
   var rebuilt: [TabId] = []
@@ -1145,13 +1156,26 @@ func reconcileMru(_ model: inout AppModel) {
     }
   }
   model.mruOrder = rebuilt
+
+  if selectionIsLive(model.selectedTabId, liveTabs: liveTabs) == false {
+    // The surviving MRU prefix answers "most recently used"; live tabs with no
+    // MRU history sit behind it in flattened order, which is the fallback.
+    model.selectedTabId = rebuilt.first
+  }
   if model.mruCycle == nil, let sel = model.selectedTabId {
     moveToFront(&model.mruOrder, sel)
   }
 }
 
-/// True when mruOrder already matches reconcileMru's canonical output.
-private func mruOrderIsCanonical(_ model: AppModel, liveTabs: Set<TabId>) -> Bool {
+/// True when selectedTabId names a live tab, or is nil because none exist.
+private func selectionIsLive(_ selectedTabId: TabId?, liveTabs: Set<TabId>) -> Bool {
+  guard let selectedTabId else { return liveTabs.isEmpty }
+  return liveTabs.contains(selectedTabId)
+}
+
+/// True when selectedTabId and mruOrder already match reconcileTabState's output.
+private func tabStateIsCanonical(_ model: AppModel, liveTabs: Set<TabId>) -> Bool {
+  guard selectionIsLive(model.selectedTabId, liveTabs: liveTabs) else { return false }
   guard model.mruCycle != nil || model.mruOrder.first == model.selectedTabId else {
     return false
   }
