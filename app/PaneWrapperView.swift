@@ -1,6 +1,7 @@
 // Pane container view that owns the toolbar, drag handling, search overlay, the
 // terminal view, and the single pane context-menu builder (makePaneMenu) behind
 // the terminal right-click, the "..." toolbar button, and the drag-handle menu.
+// It also owns the outline that names the pane while one of those menus tracks.
 import Cocoa
 
 class PaneWrapperView: NSView {
@@ -48,6 +49,10 @@ class PaneWrapperView: NSView {
     private var remoteExpanded = false
     private let progressIndicator: ProgressIndicatorView
     private var currentProgress: ProgressState?
+    /// The context-menu outline, mounted exactly while a menu this wrapper built
+    /// is tracking. Held by name so a second open cannot stack two of them and a
+    /// close cannot miss one.
+    private var contextMenuOutline: PaneContextMenuOutlineView?
 
     init(paneId: PaneId, terminalView: any TerminalSession, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
         self.paneId = paneId
@@ -500,6 +505,10 @@ class PaneWrapperView: NSView {
 
         menu.addItem(wrapperItem("Close Pane", #selector(closePaneAction)))
 
+        // Every entry point gets the outline from here, so none of them can be
+        // left without the sign of which pane the menu acts on.
+        menu.delegate = self
+
         return menu
     }
 
@@ -563,6 +572,28 @@ class PaneWrapperView: NSView {
         runtime?.send(.toggleZoomPane(paneId: paneId))
     }
 
+}
+
+// MARK: - Context-Menu Outline Lifetime
+
+extension PaneWrapperView: NSMenuDelegate {
+    // NSMenuDelegate: called when a menu built by makePaneMenu starts tracking.
+    func menuWillOpen(_ menu: NSMenu) {
+        guard contextMenuOutline == nil else { return }
+        let outline = PaneContextMenuOutlineView(frame: bounds)
+        // An autoresizing frame rather than constraints, so the overlay follows
+        // the pane's size without joining the layout that sizes the pane.
+        outline.autoresizingMask = [.width, .height]
+        addSubview(outline, positioned: .above, relativeTo: nil)
+        contextMenuOutline = outline
+    }
+
+    // NSMenuDelegate: called on dismissal and on selection alike, so the outline
+    // has one removal path for both ways a menu ends.
+    func menuDidClose(_ menu: NSMenu) {
+        contextMenuOutline?.removeFromSuperview()
+        contextMenuOutline = nil
+    }
 }
 
 // MARK: - Toolbar Drag Handle
@@ -846,5 +877,41 @@ class PaneToolbarButton: NSButton {
         if isEnabled {
             contentTintColor = NSColor.secondaryLabelColor
         }
+    }
+}
+
+// MARK: - Context-Menu Outline
+
+/// Draws the system focus ring over a whole pane while that pane's context menu
+/// tracks, so the menu names the pane it acts on the way AppKit names a
+/// right-clicked table row. Mounted and unmounted on the menu's own open/close
+/// callbacks, never by layout: it uses an autoresizing frame rather than
+/// constraints, and answers no hit test, so a pane laid out around it is
+/// unchanged whether it is up or not.
+///
+/// The ring comes from AppKit's focus-ring machinery rather than a stroked
+/// path, so it follows the accent color and the Increase Contrast setting
+/// without this code naming a color.
+class PaneContextMenuOutlineView: NSView {
+    /// Wide enough that the exterior ring AppKit draws around the filled path
+    /// stays inside this view's bounds instead of being clipped away.
+    private static let ringInset: CGFloat = 3
+    private static let cornerRadius: CGFloat = 4
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // Built by hand rather than with `insetBy`, which returns a null rect
+        // for a pane laid out narrower than the two insets it reserves.
+        let rect = CGRect(
+            x: Self.ringInset, y: Self.ringInset,
+            width: bounds.width - 2 * Self.ringInset,
+            height: bounds.height - 2 * Self.ringInset
+        )
+        guard rect.width > 0, rect.height > 0 else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSFocusRingPlacement.only.set()
+        NSBezierPath(roundedRect: rect, xRadius: Self.cornerRadius, yRadius: Self.cornerRadius).fill()
+        NSGraphicsContext.restoreGraphicsState()
     }
 }

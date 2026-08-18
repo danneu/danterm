@@ -311,6 +311,124 @@ func paneWrapperViewTests() {
         }
         try uiExpect(sawClose, "Close Pane should still dispatch after the wrapper's owner released it")
     }
+
+    uiTest("every pane-menu entry point outlines its pane while the menu tracks") {
+        // Intent: each of the three menus the wrapper builds -- the terminal
+        //   right-click, the "..." toolbar button, and the drag-handle
+        //   right-click -- mounts the outline when it opens and removes it when
+        //   it closes.
+        // Why it exists: a pane is a plain NSView, so AppKit gives it none of
+        //   the outline it draws for a right-clicked table row, and a menu
+        //   straddling two panes gives no sign which pane it acts on. Building
+        //   the outline in the shared builder is what keeps the three entry
+        //   points from drifting apart. Spec-first.
+        let fx = makePaneMenuFixture()
+        fx.wrapper.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
+        fx.wrapper.layoutSubtreeIfNeeded()
+        guard let dragHandle = paneWrapperDescendants(of: fx.wrapper)
+            .compactMap({ $0 as? ToolbarDragHandleView }).first else {
+            throw UITestFailure(message: "missing drag handle")
+        }
+        guard let rightClick = NSEvent.mouseEvent(
+            with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 1,
+            windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)
+        else {
+            throw UITestFailure(message: "could not synthesize a right-click event")
+        }
+
+        let entryPoints: [(String, () -> NSMenu?)] = [
+            ("terminal right-click", { fx.wrapper.makePaneMenu(includeClipboard: true) }),
+            ("toolbar button", { fx.wrapper.makePaneMenu() }),
+            ("drag-handle right-click", { dragHandle.menu(for: rightClick) }),
+        ]
+        for (name, build) in entryPoints {
+            guard let menu = build() else { throw UITestFailure(message: "\(name) should yield a menu") }
+            try uiExpect(!paneIsOutlined(fx.wrapper), "\(name): building a menu should not outline the pane yet")
+
+            menu.delegate?.menuWillOpen?(menu)
+            try uiExpect(paneIsOutlined(fx.wrapper), "\(name): an open menu should outline its pane")
+
+            menu.delegate?.menuDidClose?(menu)
+            try uiExpect(!paneIsOutlined(fx.wrapper), "\(name): a closed menu should leave no outline")
+        }
+    }
+
+    uiTest("the outline changes neither pane layout nor hit testing") {
+        // Intent: mounting and unmounting the outline leaves every laid-out
+        //   subview frame in the pane identical, and leaves the same view
+        //   answering a hit test in the terminal area.
+        // Why it exists: the outline is a full-bounds overlay on top of the
+        //   pane. If it took part in layout it would reflow the grid on every
+        //   right-click, and if it answered hit tests it would swallow the
+        //   clicks that dismiss the menu. Spec-first.
+        let fx = makePaneMenuFixture()
+        fx.wrapper.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
+        fx.wrapper.layoutSubtreeIfNeeded()
+        let point = NSPoint(x: 250, y: 150)
+        let framesBefore = paneWrapperDescendants(of: fx.wrapper).map(\.frame)
+        let hitBefore = fx.wrapper.hitTest(point)
+
+        let menu = fx.wrapper.makePaneMenu(includeClipboard: true)
+        menu.delegate?.menuWillOpen?(menu)
+        fx.wrapper.layoutSubtreeIfNeeded()
+
+        try uiExpect(paneIsOutlined(fx.wrapper), "precondition: the menu should have mounted the outline")
+        let framesDuring = paneWrapperDescendants(of: fx.wrapper)
+            .filter { !($0 is PaneContextMenuOutlineView) }.map(\.frame)
+        try uiExpect(framesDuring == framesBefore,
+                     "the outline should not move any subview: \(framesDuring) vs \(framesBefore)")
+        try uiExpect(fx.wrapper.hitTest(point) === hitBefore,
+                     "the outline should answer no hit test, got \(String(describing: fx.wrapper.hitTest(point)))")
+
+        menu.delegate?.menuDidClose?(menu)
+        fx.wrapper.layoutSubtreeIfNeeded()
+
+        let framesAfter = paneWrapperDescendants(of: fx.wrapper).map(\.frame)
+        try uiExpect(framesAfter == framesBefore,
+                     "removing the outline should restore every frame: \(framesAfter) vs \(framesBefore)")
+        try uiExpect(fx.wrapper.hitTest(point) === hitBefore, "removing the outline should restore hit testing")
+    }
+
+    uiTest("the outline draws a ring at its edge and leaves the pane content clear") {
+        // Intent: drawing the outline paints along its border and paints
+        //   nothing in the middle.
+        // Why it exists: the ring is handed to AppKit's focus-ring machinery
+        //   rather than stroked by hand, so this code names no color and the
+        //   mount/unmount tests would pass just as well against a view that
+        //   draws nothing at all. This is the assertion that the outline is
+        //   visible, and that it stays a ring rather than covering the grid.
+        //   Spec-first.
+        let size = NSSize(width: 200, height: 120)
+        let outline = PaneContextMenuOutlineView(frame: NSRect(origin: .zero, size: size))
+        guard
+            let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: Int(size.width), pixelsHigh: Int(size.height),
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+            let context = NSGraphicsContext(bitmapImageRep: rep)
+        else { throw UITestFailure(message: "could not make a bitmap to draw into") }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        outline.draw(outline.bounds)
+        NSGraphicsContext.restoreGraphicsState()
+
+        // Any pixel along the left border: the ring AppKit draws lies outside
+        // the inset path, so it covers the strip this samples.
+        let edgeAlpha = (0..<6).compactMap { rep.colorAt(x: $0, y: Int(size.height) / 2)?.alphaComponent }
+        try uiExpect(edgeAlpha.contains { $0 > 0.1 },
+                     "the outline should paint along its border, got alphas \(edgeAlpha)")
+        let centerAlpha = rep.colorAt(x: Int(size.width) / 2, y: Int(size.height) / 2)?.alphaComponent ?? 1
+        try uiExpect(centerAlpha < 0.01,
+                     "the outline should leave the pane content clear, got alpha \(centerAlpha)")
+    }
+}
+
+/// True while the wrapper is showing the context-menu outline.
+@MainActor
+private func paneIsOutlined(_ wrapper: PaneWrapperView) -> Bool {
+    paneWrapperDescendants(of: wrapper).contains { $0 is PaneContextMenuOutlineView }
 }
 
 /// Returns every descendant used to inspect private wrapper affordances behaviorally.
