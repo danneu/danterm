@@ -142,3 +142,82 @@ func contentBoxDescribesItsPointEdges() throws {
     #expect(box.originX == 12)
     #expect(box.maxY == 852)
 }
+
+@Test("The drawn grid is bottom-pinned inside the content box")
+func observeSurfaceDrawsFromTheBottomOfTheBox() throws {
+    // Intent: the rectangle the cells occupy ends at the box's bottom edge and starts at
+    // its leading edge, whatever is left over above it.
+    // Why it exists: anything that has to line up with the cells -- a scroll viewport, a
+    // hit test -- reads this rectangle. Assuming the view's own bounds instead would put
+    // it a strip of empty pixels away from the grid.
+    // Scenario: a wide remote grid on a handset, so the fit shrinks the cells and leaves
+    // vertical slack.
+    let box = try #require(MobileContentBox(
+        width: 393,
+        height: 700,
+        insetTop: 59,
+        insetLeading: 0,
+        insetTrailing: 0,
+        insetBottom: 0,
+        displayScale: 3
+    ))
+    let surface = try #require(MobileObserveSurface(
+        columns: 200,
+        rows: 20,
+        contentBox: box,
+        fontSize: 11
+    ))
+    let frame = surface.drawnFrame(in: box)
+    #expect(abs(frame.maxY - box.maxY) < 0.001)
+    #expect(frame.minX == box.originX)
+    #expect(frame.height <= CGFloat(box.heightPixels) / box.displayScale)
+    #expect(frame.width <= CGFloat(box.widthPixels) / box.displayScale)
+}
+
+@Test("A point on the terminal names the cell drawn under it")
+func observeSurfaceMapsPointsToCells() throws {
+    // Intent: a touch anywhere in the view resolves to a grid cell, using the fitted cell
+    // size and the bottom-pinned origin, and clamps to the grid outside it.
+    // Why it exists: a scroll gesture carries its cell to the owner for mouse reporting,
+    // and a hardcoded origin would report the wrong cell on every phone with a safe area.
+    let box = try #require(MobileContentBox(
+        width: 393,
+        height: 700,
+        insetTop: 59,
+        insetLeading: 0,
+        insetTrailing: 0,
+        insetBottom: 0,
+        displayScale: 3
+    ))
+    let surface = try #require(MobileObserveSurface(
+        columns: 200,
+        rows: 50,
+        contentBox: box,
+        fontSize: 11
+    ))
+    #expect(surface.columns == 200)
+    #expect(surface.rows == 50)
+
+    let frame = surface.drawnFrame(in: box)
+    let cell = surface.cellSize(in: box)
+
+    let topLeft = surface.cell(at: CGPoint(x: frame.minX, y: frame.minY), in: box)
+    #expect(topLeft.column == 0)
+    #expect(topLeft.row == 0)
+
+    let inside = surface.cell(
+        at: CGPoint(x: frame.minX + cell.width * 3.5, y: frame.minY + cell.height * 2.5),
+        in: box
+    )
+    #expect(inside.column == 3)
+    #expect(inside.row == 2)
+
+    // Above and leading of the grid, and far past its trailing bottom corner.
+    let before = surface.cell(at: CGPoint(x: -50, y: -50), in: box)
+    #expect(before.column == 0)
+    #expect(before.row == 0)
+
+    let after = surface.cell(at: CGPoint(x: 10_000, y: 10_000), in: box)
+    #expect(after.column == 199)
+    #expect(after.row == 49)
+}

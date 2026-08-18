@@ -53,4 +53,57 @@ public struct MobileObserveSurface: Equatable, Sendable {
         pixelWidth = metrics.cellWidthPixels * columns
         pixelHeight = metrics.cellHeightPixels * rows
     }
+
+    /// The grid this surface holds, recovered from the pixels rather than stored: the
+    /// extent is an exact whole number of cells by construction, so the two readings
+    /// cannot disagree.
+    public var columns: Int { pixelWidth / metrics.cellWidthPixels }
+    public var rows: Int { pixelHeight / metrics.cellHeightPixels }
+
+    /// One cell in the point space of the view the box was measured in.
+    ///
+    /// The divisor is the box's scale, not the metrics' own: a grid too large to draw
+    /// natively is rendered at a smaller scale and then shown one backing pixel per
+    /// device pixel, so the drawn cell is smaller in points than the metrics describe.
+    public func cellSize(in box: MobileContentBox) -> CGSize {
+        CGSize(
+            width: CGFloat(metrics.cellWidthPixels) / box.displayScale,
+            height: CGFloat(metrics.cellHeightPixels) / box.displayScale
+        )
+    }
+
+    /// The rectangle the drawn cells occupy in the view's own coordinates.
+    ///
+    /// Bottom-pinned, because the replica draws from the bottom of the content box so
+    /// that new output stays put while the keyboard changes how much of the view is
+    /// left. Anything that has to line up with the cells -- a scroll viewport, a hit
+    /// test -- reads it here rather than assuming the view's bounds.
+    public func drawnFrame(in box: MobileContentBox) -> CGRect {
+        let width = CGFloat(pixelWidth) / box.displayScale
+        let height = CGFloat(pixelHeight) / box.displayScale
+        return CGRect(x: box.originX, y: box.maxY - height, width: width, height: height)
+    }
+
+    /// The cell one point in the view's coordinates falls on, clamped to the grid.
+    ///
+    /// Clamped rather than optional: the caller is a gesture that started somewhere on
+    /// the terminal, and the nearest real cell is a better answer for a mouse report
+    /// than no position at all.
+    public func cell(at point: CGPoint, in box: MobileContentBox) -> (column: Int, row: Int) {
+        let frame = drawnFrame(in: box)
+        let cell = cellSize(in: box)
+        return (
+            column: clampedIndex((point.x - frame.minX) / cell.width, count: columns),
+            row: clampedIndex((point.y - frame.minY) / cell.height, count: rows)
+        )
+    }
+}
+
+/// Turns a fractional cell position into an index inside a grid of `count` cells.
+private func clampedIndex(_ position: CGFloat, count: Int) -> Int {
+    guard count > 0 else { return 0 }
+    guard position.isFinite, position > 0 else { return 0 }
+    let floored = position.rounded(.down)
+    guard floored < CGFloat(count) else { return count - 1 }
+    return Int(floored)
 }
