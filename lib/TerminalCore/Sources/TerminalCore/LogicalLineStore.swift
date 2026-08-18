@@ -202,8 +202,14 @@ extension Terminal {
         /// Cached display-row and content-unit totals, one per `blockSize` records.
         private var blocks: RingBuffer<Block>
 
-        private var firstBlockNumber = 0
         private var firstRecordSequence = 0
+
+        /// The block number the head record sits in.
+        ///
+        /// Derived, because a block number *is* a record sequence divided by the block size:
+        /// storing it separately made the head block's retirement a second step that had to
+        /// re-establish the identity by hand.
+        private var firstBlockNumber: Int { firstRecordSequence / Self.blockSize }
 
         /// Content units removed from the head, on the same monotone-origin rule as
         /// `evictedRowCount`.
@@ -221,46 +227,23 @@ extension Terminal {
         /// record opened continues that line rather than starting one (`research/31/D2` Decision 2).
         private var pendingStartsMidLine = false
 
-        private(set) var grandDisplayRowTotal = 0
-
-        /// Width-free projected content units retained by all records.
-        private(set) var grandContentUnitTotal = 0
-
-        /// Debug-only proof that the two stored totals still equal what the block index says.
+        /// Display rows held by every retained record.
         ///
-        /// The block ring already holds both numbers: a block's `rowStart` and `contentStart` are
-        /// absolute against the same origins `evictedRowCount` and `evictedContentUnitCount` count
-        /// from, so the last block's end *is* the total. Reading them off it and deleting the
-        /// stored pair -- which is the structure in which the ordering hazard the two comments
-        /// below describe cannot happen, because there would be one update rather than two -- was
-        /// built and measured. A `confirm` comparison of that form against this one read
-        /// `retained-browse` slower by 1.17%, past the 1.05% that workload decides on, so the
-        /// stored fields stay and this assertion stands in for the structure. Every operation that
-        /// can move a total ends here, so a mutation that moves one representation and not the
-        /// other fails a test instead of reaching a reader.
-        ///
-        /// Every term sits inside an `assert` autoclosure, so a release build reads no block and
-        /// pays no branch here: the check may not put back the read cost that rejected deriving.
-        private func assertGrandTotalsAgreeWithBlockIndex() {
-            assert(
-                grandDisplayRowTotal == blockDerivedDisplayRowTotal,
-                "the stored display-row total drifted from the block index"
-            )
-            assert(
-                grandContentUnitTotal == blockDerivedContentUnitTotal,
-                "the stored content-unit total drifted from the block index"
-            )
-        }
-
-        /// What `grandDisplayRowTotal` would be if it were read off the index instead of stored.
-        private var blockDerivedDisplayRowTotal: Int {
+        /// Read off the last block rather than stored: a block's `rowStart` is absolute against
+        /// the same monotone origin `evictedRowCount` counts from, so the last block's end is the
+        /// total by construction. Stored, it was a second copy of that fact which every mutation
+        /// had to move in step with the block it touched -- and moving them in the wrong order
+        /// subtracted a row twice, which is the bug the two ordering comments below were written
+        /// for. There is now one update, so there is nothing left to disagree.
+        var grandDisplayRowTotal: Int {
             guard blocks.count > 0 else { return 0 }
             let last = blocks[blocks.count - 1]
             return last.rowStart + last.rowCount - evictedRowCount
         }
 
-        /// What `grandContentUnitTotal` would be if it were read off the index instead of stored.
-        private var blockDerivedContentUnitTotal: Int {
+        /// Width-free projected content units retained by all records, read off the last block on
+        /// the same rule `grandDisplayRowTotal` states.
+        var grandContentUnitTotal: Int {
             guard blocks.count > 0 else { return 0 }
             let last = blocks[blocks.count - 1]
             return last.contentStart + last.contentCount - evictedContentUnitCount
@@ -656,7 +639,6 @@ extension Terminal {
         /// row whose tail past the content is painted by a background erase contributes that
         /// paint as the record's **trailing fill style**, not as cells.
         mutating func admit(_ row: Terminal.GridRow) {
-            defer { assertGrandTotalsAgreeWithBlockIndex() }
             let admission = admissionExtent(row)
 
             // A budget too small to hold one display row of this width retains nothing rather
@@ -825,7 +807,6 @@ extension Terminal {
         /// This is `severScrollbackWrapClaim` under the new store, and the whole of it is one
         /// header bit plus the tables the open record had been accumulating.
         mutating func closeOpenRecord() {
-            defer { assertGrandTotalsAgreeWithBlockIndex() }
             guard var record = openTailRecord() else { return }
             let offset = offsets[offsets.count - 1]
             flushOpenTables(into: &record, at: offset)
@@ -843,7 +824,6 @@ extension Terminal {
         /// line, and a reopened line has no end yet -- its last display row is about to be
         /// extended, and admission re-derives the tail of whatever row finally closes it.
         mutating func reopenTailRecord() {
-            defer { assertGrandTotalsAgreeWithBlockIndex() }
             guard offsets.count > 0 else { return }
             let offset = offsets[offsets.count - 1]
             let record = self.record(at: offset)
@@ -903,7 +883,6 @@ extension Terminal {
         /// display row whose painted content changed and no other.
         @discardableResult
         mutating func repairClearedSpacer(styleId: Terminal.StyleId) -> Bool {
-            defer { assertGrandTotalsAgreeWithBlockIndex() }
             guard styleId != Terminal.defaultStyleId else { return false }
             guard let record = openTailRecord() else { return false }
             let offset = offsets[offsets.count - 1]
@@ -916,7 +895,6 @@ extension Terminal {
         /// Cuts the open logical line here and lets the next admission continue it in a new
         /// record, which readers rejoin by adjacency (`research/31/DD6`).
         mutating func forceSplitOpenRecord() {
-            defer { assertGrandTotalsAgreeWithBlockIndex() }
             guard var record = openTailRecord(), record.cellCount > 0 else { return }
             let offset = offsets[offsets.count - 1]
             flushOpenTables(into: &record, at: offset)
@@ -940,7 +918,6 @@ extension Terminal {
         /// rewritten header, so a step can free nothing and still make progress.
         @discardableResult
         mutating func evictOneDisplayRow() -> Bool {
-            defer { assertGrandTotalsAgreeWithBlockIndex() }
             guard offsets.count > 0 else { return false }
             let offset = offsets[0]
             let record = self.record(at: offset)
@@ -951,10 +928,9 @@ extension Terminal {
                 isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
             )
 
-            // The totals move first: `dropHeadRecord` may retire the head block once its last
-            // record is gone, and the row being dropped belongs to the block as it stands now.
+            // The head block moves first: `dropHeadRecord` may retire it once its last record is
+            // gone, and the row being dropped belongs to the block as it stands now.
             evictedRowCount += 1
-            grandDisplayRowTotal -= 1
             if blocks.count > 0 {
                 blocks.modifyElement(at: 0) { block in
                     block.rowCount -= 1
@@ -1031,7 +1007,15 @@ extension Terminal {
 
             sideTables.removeEntries(at: firstRecordSequence)
             offsets.removeFirst()
+            let retiredSequence = firstRecordSequence
             firstRecordSequence += 1
+            // The head block holds the sequences the head record's block number covers, so it
+            // retires exactly when that quotient advances -- one drop per dropped record, and the
+            // ring stays in step with `firstBlockNumber` without a scan to re-establish it.
+            if blocks.count > 0,
+               retiredSequence / Self.blockSize != firstRecordSequence / Self.blockSize {
+                blocks.removeFirst()
+            }
             headTrimmedCells = 0
 
             if offsets.count == 0 {
@@ -1050,14 +1034,6 @@ extension Terminal {
                 ? nextOffset - oldOffset
                 : (arenaCapacity - oldOffset) + nextOffset
             head = nextOffset
-            retireEmptyHeadBlocks()
-        }
-
-        private mutating func retireEmptyHeadBlocks() {
-            while blocks.count > 0, firstBlockNumber < firstRecordSequence / Self.blockSize {
-                blocks.removeFirst()
-                firstBlockNumber += 1
-            }
         }
 
         private mutating func retireEmptyTailBlocks() {
@@ -1087,7 +1063,6 @@ extension Terminal {
         /// are not lost: they keep their absolute stream positions and merely change which side
         /// of the history/live seam they sit on, which is why `evictedRowCount` does not move.
         mutating func truncateTail(displayRows: Int) -> [Terminal.GridRow] {
-            defer { assertGrandTotalsAgreeWithBlockIndex() }
             let count = min(displayRows, grandDisplayRowTotal)
             guard count > 0 else { return [] }
 
@@ -1114,12 +1089,10 @@ extension Terminal {
             let record = self.record(at: offset)
             let last = lastRowRange(ofRecordAt: offset, cellCount: record.cellCount)
 
-            // The totals move first, for the reason `evictOneDisplayRow` gives at the other end:
-            // `dropTailRecord` may retire the tail block once its last record is gone, and the
-            // row being removed belongs to the block as it stands now. Decrementing afterwards
-            // lands on the block *before* the retired one, subtracting the row twice from the
-            // index and once from the grand total.
-            grandDisplayRowTotal -= 1
+            // The tail block moves first, for the reason `evictOneDisplayRow` gives at the other
+            // end: `dropTailRecord` may retire it once its last record is gone, and the row being
+            // removed belongs to the block as it stands now. Decrementing afterwards lands on the
+            // block *before* the retired one, subtracting the row twice.
             if blocks.count > 0 {
                 blocks[blocks.count - 1].rowCount -= 1
             }
@@ -1216,11 +1189,12 @@ extension Terminal {
         // MARK: - Operation 5: clear all history
 
         mutating func removeAll() {
-            defer { assertGrandTotalsAgreeWithBlockIndex() }
-            evictedRowCount += grandDisplayRowTotal
-            grandDisplayRowTotal = 0
-            evictedContentUnitCount += grandContentUnitTotal
-            grandContentUnitTotal = 0
+            // Read before anything moves: both totals are derived from the block ring and the
+            // evicted counts, and `resetToEmptyArena` empties the ring below.
+            let retainedRows = grandDisplayRowTotal
+            let retainedContentUnits = grandContentUnitTotal
+            evictedRowCount += retainedRows
+            evictedContentUnitCount += retainedContentUnits
             firstRecordSequence += offsets.count
             offsets.removeAll()
             resetToEmptyArena()
@@ -1240,7 +1214,6 @@ extension Terminal {
         /// a width change evicts nothing, at any width down to the engine minimum.
         @discardableResult
         mutating func setWidth(_ newWidth: Int) -> [Terminal.GridCell] {
-            defer { assertGrandTotalsAgreeWithBlockIndex() }
             precondition(newWidth >= 1)
             width = newWidth
             let pulled = pullBackOpenTailRemainder()
@@ -1271,7 +1244,6 @@ extension Terminal {
         /// history at the two-column minimum -- all inside one 60 Hz frame, so neither of
         /// `research/31/D3` Decision 7's mitigations ships.
         private mutating func recomputeIndex() {
-            grandDisplayRowTotal = 0
             var rowStart = evictedRowCount
             for blockIndex in 0..<blocks.count {
                 let blockNumber = firstBlockNumber + blockIndex
@@ -1290,7 +1262,6 @@ extension Terminal {
                     block.rowCount = rows
                 }
                 rowStart += rows
-                grandDisplayRowTotal += rows
             }
         }
 
@@ -2899,7 +2870,6 @@ extension Terminal {
                     // floor), so discarding it has to give that row back or the index goes
                     // stale. Reachable only through `reopenTailRecord()` on a blank line.
                     let offset = offsets[offsets.count - 1]
-                    grandDisplayRowTotal -= 1
                     if blocks.count > 0 { blocks[blocks.count - 1].rowCount -= 1 }
                     removeBoundaryBeforeTailIfNeeded()
                     offsets.removeLast()
@@ -2953,7 +2923,6 @@ extension Terminal {
             let identity = allocateRecordIdentity()
             offsets.append(packedRecordAddress(offset: offset, identity: identity))
             if offsets.count == 1 {
-                firstBlockNumber = sequence / Self.blockSize
                 blocks.removeAll()
                 blocks.append(Block(
                     rowStart: evictedRowCount,
@@ -3042,7 +3011,6 @@ extension Terminal {
         }
 
         private mutating func addDisplayRowsToTail(_ rows: Int) {
-            grandDisplayRowTotal += rows
             if blocks.count > 0 {
                 blocks.modifyElement(at: blocks.count - 1) { $0.rowCount += rows }
             }
@@ -3050,7 +3018,6 @@ extension Terminal {
 
         /// Applies a content delta to the only mutable record and its block.
         private mutating func addContentUnitsToTail(_ units: Int) {
-            grandContentUnitTotal += units
             if blocks.count > 0 {
                 blocks.modifyElement(at: blocks.count - 1) { $0.contentCount += units }
             }
@@ -3061,7 +3028,6 @@ extension Terminal {
             let sequence = firstRecordSequence + recordIndex
             let blockIndex = sequence / Self.blockSize - firstBlockNumber
             precondition(blockIndex >= 0 && blockIndex < blocks.count)
-            grandContentUnitTotal += units
             blocks.modifyElement(at: blockIndex) { $0.contentCount += units }
         }
 
@@ -3077,7 +3043,6 @@ extension Terminal {
         /// Removes content from the head while leaving every later block's absolute start fixed.
         private mutating func removeContentUnitsFromHead(_ units: Int) {
             evictedContentUnitCount += units
-            grandContentUnitTotal -= units
             if blocks.count > 0 {
                 blocks.modifyElement(at: 0) { block in
                     block.contentStart += units

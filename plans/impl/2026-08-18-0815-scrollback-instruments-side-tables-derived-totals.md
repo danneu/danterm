@@ -205,8 +205,8 @@ before the implementation is accepted.
 ## Commit progress
 - [x] 1. Instrument unification
 - [x] 2. Side-table ownership
-- [x] 3. Derived totals (landed as the pre-authorized fallback; I7 rejected the
-      derivation)
+- [x] 3. Derived totals (first landed as the pre-authorized fallback on a reject
+      that did not reproduce; the derivation itself landed after re-measurement)
 
 ## Implementation notes
 
@@ -328,10 +328,10 @@ What this establishes:
 - **`content-churn: slower +6.27%` from commit 3 was noise.** It reads
   `inconclusive` at +0.88%, +1.24% and +0.98% across the three re-runs.
 
-So the structural fix S18 asks for is not blocked by measurement. The stored
-fields and `assertGrandTotalsAgreeWithBlockIndex()` can be replaced by the
-derived form; the assertion is worth keeping only until that lands, since a
-computed total cannot drift from the block index.
+So the structural fix S18 asks for is not blocked by measurement, and it has
+landed: the stored fields and `assertGrandTotalsAgreeWithBlockIndex()` are gone,
+replaced by the derived form. The assertion is not kept alongside it, because a
+computed total cannot drift from the block index -- there is only one update.
 
 Artifacts (`.build/` is disposable; the values above are the durable record):
 `.build/terminal-benchmark-comparisons/confirm/` holding `46c8a59a1425-0000`,

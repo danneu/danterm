@@ -516,8 +516,8 @@ presentation shape described below no longer exist.
 
 `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.grandDisplayRowTotal`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.evictOneDisplayRow`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.removeLastDisplayRow`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.wrapWriteCursorAtSeam`, `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift#LogicalLineStore.recomputeIndex`
 
-**Status note.** Closed on the cheaper fallback, after the ideal fix was built
-and measured. The derived form -- computed `grandDisplayRowTotal` and
+**Status note.** Closed on the ideal fix, after a false reject sent it to the
+fallback first. The derived form -- computed `grandDisplayRowTotal` and
 `grandContentUnitTotal` over the block ring, computed `firstBlockNumber`, and
 `retireEmptyHeadBlocks` replaced by one head-block drop where the head-sequence
 quotient advances -- passed the whole suite, and a `confirm` comparison against
@@ -539,12 +539,11 @@ host conditions of the four and emitted no directional verdict anywhere in the
 suite. The original invocation began at load 14.78 with three test suites still
 draining, which is the likeliest cause. So the ideal fix was **not** refused on
 measurement; it was refused on a number that does not hold up, and it now
-passes I7's rule on both deciding workloads. This finding should close on the
-derived form -- computed totals over the block ring, computed
-`firstBlockNumber`, no `retireEmptyHeadBlocks` -- at which point
-`assertGrandTotalsAgreeWithBlockIndex()` goes away too, because a computed
-total cannot drift from the block index. The full evidence table is in the
-plan's `## Re-measurement of the I7 reject` section.
+passes I7's rule on both deciding workloads. The derived form has since landed --
+computed totals over the block ring, computed `firstBlockNumber`, no
+`retireEmptyHeadBlocks` -- and `assertGrandTotalsAgreeWithBlockIndex()` went
+with it, because a computed total cannot drift from the block index. The full
+evidence table is in the plan's `## Re-measurement of the I7 reject` section.
 
 **Problem.** `grandDisplayRowTotal` and `grandContentUnitTotal` hold numbers the block index already holds. Because block `rowStart`/`contentStart` are absolute against `evictedRowCount`/`evictedContentUnitCount`, the totals are exactly `blocks.last.rowStart + rowCount - evictedRowCount` and the content analogue -- O(1) reads off the ring. Storing them separately means every mutation must move two representations of one quantity in the right order, and the file already carries scar tissue from getting that wrong: two sites have multi-line comments explaining that the totals must move _before_ a block can retire or the row is subtracted twice. `firstBlockNumber` is the same shape of redundancy: while `offsets` is non-empty it is always `firstRecordSequence / blockSize`, and `retireEmptyHeadBlocks` exists only to re-establish that.
 
