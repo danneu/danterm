@@ -37,9 +37,10 @@ final class AppRuntimeSchedulingLifecycle {
     /// Cheap O(1) hot-path gate; per-delivery and per-reconcile guards read this.
     var isActive: Bool { state == .active }
 
-    /// Walks every registered owner to tally a handle-free census, for termination
-    /// assertions and diagnostics. It carries no shutdown state on purpose -- hot-path
-    /// guards read `isActive` instead of paying for this walk.
+    /// Walks every registered owner to tally a handle-free census. This is the only
+    /// window tests have onto runtime ownership: which owners a command armed, and which
+    /// ones a close or a shutdown retired. Production never calls it -- it carries no
+    /// shutdown state, and hot-path guards read `isActive` instead of paying for the walk.
     func captureOwnerCensus() -> [AppRuntimeSchedulingCategory: Int] {
         owners.values.reduce(into: [:]) { counts, owner in
             counts[owner.category, default: 0] += 1
@@ -61,14 +62,6 @@ final class AppRuntimeSchedulingLifecycle {
     @discardableResult
     func run(_ token: AppRuntimeSchedulingToken, action: () -> Void) -> Bool {
         guard state == .active, owners.removeValue(forKey: token) != nil else { return false }
-        action()
-        return true
-    }
-
-    /// Gates a repeating callback without retiring its owner registration.
-    @discardableResult
-    func runRepeating(_ token: AppRuntimeSchedulingToken, action: () -> Void) -> Bool {
-        guard state == .active, owners[token] != nil else { return false }
         action()
         return true
     }
