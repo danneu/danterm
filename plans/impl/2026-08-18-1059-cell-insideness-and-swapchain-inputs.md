@@ -152,7 +152,7 @@ Critical files: `lib/TerminalCore/Sources/TerminalCore/TerminalInteractionVocabu
 
 ## Commit progress
 - [x] 1. S54 -- return clamp state from `terminalCell` and delete `pointerIsOutsideGrid`
-- [ ] 2. S46 -- let `TerminalFrameSwapchain` own its construction inputs
+- [x] 2. S46 -- let `TerminalFrameSwapchain` own its construction inputs
 
 ## Implementation notes
 
@@ -166,6 +166,10 @@ Critical files: `lib/TerminalCore/Sources/TerminalCore/TerminalInteractionVocabu
   silent no-op at the `setGridOverride` call site. The test unwraps the
   override explicitly so a future range change fails loudly instead of
   claiming nothing.
+- The view reads the window color space through one `surfaceColorSpace`
+  accessor rather than converting `NSColorSpace` at each of the two call
+  sites, so construction and both comparisons cannot drift on how they
+  derive it.
 - The PO2 ordering test was checked against a mutant -- the cancellation moved
   ahead of the press in `forwardPointerDown` -- and it fails there, so it
   really pins the order rather than only the outcome.

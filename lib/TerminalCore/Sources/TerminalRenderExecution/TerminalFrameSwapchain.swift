@@ -5,7 +5,9 @@
 // nothing about layers or transactions -- the owning view attaches what this
 // type presents, and replaces the whole swapchain on any trust-breaking
 // input (geometry, backing scale, theme, window color space), so a live
-// swapchain never changes shape.
+// swapchain never changes shape. It remembers what it was built from and
+// answers `matches` for it, so the owner asks the buffers rather than keeping
+// a second copy of their inputs that could drift.
 import CoreGraphics
 import IOSurface
 import TerminalCore
@@ -42,6 +44,15 @@ public final class TerminalFrameSwapchain {
         var lastPresented = -1
     }
 
+    private let columns: Int
+    private let rows: Int
+    private let metrics: TerminalRenderMetrics
+    /// Kept exactly as passed, never substituted for a default: the stand-in
+    /// for an absent space is the backing store's private business, and
+    /// normalizing here would report a match to a caller that asked for
+    /// something else.
+    private let colorSpace: CGColorSpace?
+
     private var buffers: [Buffer]
     private var attachedIndex: Int?
     private var pendingPlan: RenderFramePlan?
@@ -72,8 +83,35 @@ public final class TerminalFrameSwapchain {
             ) else { return nil }
             buffers.append(Buffer(store: store))
         }
+        self.columns = columns
+        self.rows = rows
+        self.metrics = metrics
+        self.colorSpace = colorSpace
         self.buffers = buffers
         self.isStoreInUse = isStoreInUse
+    }
+
+    /// True when these pixels were rendered under exactly these inputs, so the
+    /// owner may keep this swapchain instead of building a fresh one. Any
+    /// inequality is a trust break (research/33 T25 I3), and the answer to that
+    /// is always replacement -- a live swapchain never changes shape.
+    public func matches(
+        columns: Int,
+        rows: Int,
+        metrics: TerminalRenderMetrics,
+        colorSpace: CGColorSpace?
+    ) -> Bool {
+        self.columns == columns && self.rows == rows
+            && matches(metrics: metrics, colorSpace: colorSpace)
+    }
+
+    /// The same test with this swapchain's own geometry held fixed, for the
+    /// owner's re-render check. A grid resize republishes through the
+    /// controller, so presenting the current plan under a grid the plan does not
+    /// have would render a stale frame; only the non-geometry inputs decide
+    /// whether the frame on screen must be redrawn.
+    public func matches(metrics: TerminalRenderMetrics, colorSpace: CGColorSpace?) -> Bool {
+        self.metrics == metrics && self.colorSpace == colorSpace
     }
 
     /// True while the latest published plan has not reached a buffer; the

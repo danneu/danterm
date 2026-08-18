@@ -171,7 +171,10 @@ final class TerminalFrameSwapchain {
     }
 
     private let store: TerminalFrameBackingStore
+    private let columns: Int
     private let rows: Int
+    private let metrics: TerminalRenderMetrics
+    private let colorSpace: CGColorSpace?
     private var pendingPlan: RenderFramePlan?
     private var staleDamage = TerminalDamage.none
     private var isCurrent = false
@@ -192,8 +195,25 @@ final class TerminalFrameSwapchain {
             colorSpace: colorSpace
         ) else { return nil }
         self.store = store
+        self.columns = columns
         self.rows = rows
+        self.metrics = metrics
+        self.colorSpace = colorSpace
         Self.creationCountForTesting += 1
+    }
+
+    func matches(
+        columns: Int,
+        rows: Int,
+        metrics: TerminalRenderMetrics,
+        colorSpace: CGColorSpace?
+    ) -> Bool {
+        self.columns == columns && self.rows == rows
+            && matches(metrics: metrics, colorSpace: colorSpace)
+    }
+
+    func matches(metrics: TerminalRenderMetrics, colorSpace: CGColorSpace?) -> Bool {
+        self.metrics == metrics && self.colorSpace == colorSpace
     }
 
     func publish(plan: RenderFramePlan, damage: TerminalDamage) -> TerminalFrameBackingStore? {

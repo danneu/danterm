@@ -5,7 +5,9 @@
 // byte-identical to a from-scratch render of its plan. The render-server half
 // of the acquisition premise (free stays free) lives in the real-AppKit pins
 // in tests-ui; here the in-use report is injected so every branch is
-// reachable without a compositor.
+// reachable without a compositor. The `matches` pins live here too: a
+// swapchain remembers what it was built from, and the owner asks it rather
+// than mirroring the inputs.
 
 import CoreGraphics
 import Testing
@@ -253,5 +255,81 @@ struct FrameSwapchainTests {
         let plan = planFrame(for: terminal, presentation: blockCursor)
         _ = try #require(swapchain.publish(plan: plan, damage: .none))
         #expect(swapchain.retryPendingPresentation() == nil)
+    }
+
+    @Test("a swapchain matches only the four inputs it was built from")
+    func matchesEveryConstructionInput() throws {
+        // Intent: the full query reports a match only when columns, rows,
+        //   metrics, and color space all hold, and the metrics-only query
+        //   ignores geometry.
+        // Why it exists: the owner used to mirror these four values beside the
+        //   swapchain, so a drift silently kept buffers built for the wrong
+        //   geometry. The swapchain answering for itself removes the mirror,
+        //   and each input has to count.
+        // Scenario: build at 40x10 with sRGB, then vary one input at a time.
+        let metrics = try metrics
+        let otherMetrics = try #require(TerminalRenderMetrics(displayScale: 1))
+        let sRGB = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let displayP3 = try #require(CGColorSpace(name: CGColorSpace.displayP3))
+        let swapchain = try #require(
+            TerminalFrameSwapchain(columns: 40, rows: 10, metrics: metrics, colorSpace: sRGB)
+        )
+
+        #expect(swapchain.matches(columns: 40, rows: 10, metrics: metrics, colorSpace: sRGB))
+        #expect(
+            swapchain.matches(columns: 41, rows: 10, metrics: metrics, colorSpace: sRGB) == false
+        )
+        #expect(
+            swapchain.matches(columns: 40, rows: 11, metrics: metrics, colorSpace: sRGB) == false
+        )
+        #expect(
+            swapchain.matches(
+                columns: 40, rows: 10, metrics: otherMetrics, colorSpace: sRGB
+            ) == false
+        )
+        #expect(
+            swapchain.matches(
+                columns: 40, rows: 10, metrics: metrics, colorSpace: displayP3
+            ) == false
+        )
+
+        // The metrics-only query keeps the swapchain's own geometry, so a grid
+        // that moved does not by itself force a re-render: that republishes
+        // through the controller instead.
+        #expect(swapchain.matches(metrics: metrics, colorSpace: sRGB))
+        #expect(swapchain.matches(metrics: otherMetrics, colorSpace: sRGB) == false)
+        #expect(swapchain.matches(metrics: metrics, colorSpace: displayP3) == false)
+    }
+
+    @Test("color spaces match by value, not by object identity")
+    func colorSpacesMatchByValue() throws {
+        // Intent: two separately constructed color spaces describing the same
+        //   space match, while different spaces and nil-versus-a-space do not.
+        // Why it exists: this pins the premise the whole comparison rests on --
+        //   `CGColorSpace` equality being by value. If a future OS compared by
+        //   identity instead, every publish would rebuild the buffers, and that
+        //   thrash should fail a test here rather than ship.
+        // Scenario: a swapchain built with the named sRGB space, queried with
+        //   an sRGB space rebuilt from its own ICC data.
+        let metrics = try metrics
+        let named = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let iccData = try #require(named.copyICCData())
+        let rebuilt = try #require(CGColorSpace(iccData: iccData))
+        let displayP3 = try #require(CGColorSpace(name: CGColorSpace.displayP3))
+        let swapchain = try #require(
+            TerminalFrameSwapchain(columns: 20, rows: 5, metrics: metrics, colorSpace: named)
+        )
+
+        #expect(swapchain.matches(metrics: metrics, colorSpace: rebuilt))
+        #expect(swapchain.matches(metrics: metrics, colorSpace: displayP3) == false)
+        #expect(swapchain.matches(metrics: metrics, colorSpace: nil) == false)
+
+        // Nil is stored as passed, never normalized to sRGB: the substitution
+        // for a missing space stays private to the backing store.
+        let unspecified = try #require(
+            TerminalFrameSwapchain(columns: 20, rows: 5, metrics: metrics)
+        )
+        #expect(unspecified.matches(metrics: metrics, colorSpace: nil))
+        #expect(unspecified.matches(metrics: metrics, colorSpace: named) == false)
     }
 }

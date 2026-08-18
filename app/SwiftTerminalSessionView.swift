@@ -209,10 +209,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// geometry, and replaced whole -- never reshaped -- whenever a
     /// presentation input moves.
     private var swapchain: TerminalFrameSwapchain?
-    /// The inputs the live swapchain's pixels were rendered under. Any
-    /// inequality is I3's "content cannot be trusted", which is why it decides
-    /// replacement rather than a distrust bit.
-    private var swapchainInputs: SurfaceInputs?
     /// Retains the store the layer is showing, so replacing the swapchain
     /// cannot free the frame currently on screen before its successor renders.
     private var displayedStore: TerminalFrameBackingStore?
@@ -423,17 +419,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     // MARK: - The owned pane surface
 
-    /// Every input that decides a frame store's pixels. An inequality is I3's
-    /// "content cannot be trusted" (research/33 T25), and the answer to that is
-    /// always a fresh swapchain -- a live one never changes shape, so there is
-    /// no distrust state to carry.
-    private struct SurfaceInputs: Equatable {
-        let columns: Int
-        let rows: Int
-        let metrics: TerminalRenderMetrics
-        let colorSpace: NSColorSpace?
-    }
-
     /// Stands in until the view has a window to read a real display from.
     private static let assumedRefreshIntervalNanoseconds: UInt64 = 8_333_333
 
@@ -494,21 +479,34 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         rows: Int,
         metrics: TerminalRenderMetrics
     ) -> TerminalFrameSwapchain? {
-        let inputs = SurfaceInputs(
-            columns: columns,
-            rows: rows,
-            metrics: metrics,
-            colorSpace: window?.colorSpace
-        )
-        if let swapchain, swapchainInputs == inputs { return swapchain }
+        let colorSpace = surfaceColorSpace
+        // The live swapchain answers for its own inputs (research/33 T25 I3):
+        // any inequality means the buffers on screen cannot be trusted, and the
+        // answer to that is always a fresh swapchain, never a distrust bit.
+        if let swapchain,
+           swapchain.matches(
+               columns: columns,
+               rows: rows,
+               metrics: metrics,
+               colorSpace: colorSpace
+           ) {
+            return swapchain
+        }
         swapchain = TerminalFrameSwapchain(
             columns: columns,
             rows: rows,
             metrics: metrics,
-            colorSpace: inputs.colorSpace?.cgColorSpace
+            colorSpace: colorSpace
         )
-        swapchainInputs = swapchain == nil ? nil : inputs
         return swapchain
+    }
+
+    /// The color space the pane's pixels are rendered in, which is the window's
+    /// as `CGColorSpace` -- the domain that actually decides them. Comparing at
+    /// this level rather than on `NSColorSpace` keeps two distinct objects over
+    /// one CG space from forcing a pointless rebuild.
+    private var surfaceColorSpace: CGColorSpace? {
+        window?.colorSpace?.cgColorSpace
     }
 
     /// Drops the swapchain so the next presentation builds fresh buffers, for
@@ -516,7 +514,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// repaints every row, including rows this frame's damage does not name.
     private func discardSwapchain() {
         swapchain = nil
-        swapchainInputs = nil
     }
 
     /// Presents one published frame. This is the single render path (T25 I4):
@@ -1361,7 +1358,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// Every entry point that can move an input arrives here -- resize, window
     /// mount, backing properties, font size, font family, the claimed grid
     /// override, and the runtime's screen-change refresh -- so none of them can
-    /// re-render on a narrower test than the whole `SurfaceInputs` tuple.
+    /// re-render on a narrower test than the one the swapchain answers.
     ///
     /// A claimed override is the grid outright, so the bounds conversion below is
     /// never even evaluated while one is present. That is what makes every
@@ -1423,27 +1420,22 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         // re-renders the current plan itself. The layer's contents scale rides the
         // surface it shows, set in `attach`, so nothing is set here.
         //
-        // Columns and rows come from the live swapchain, not from `dimensions`, and
-        // that is deliberate rather than an omission: a grid resize republishes
-        // through `controller.setGridDimensions`, so presenting the *old* plan under
-        // the *new* shape would render a stale frame and build buffers the next
-        // publish immediately replaces. They live in `SurfaceInputs` to key
-        // swapchain identity, not to drive this test.
+        // The geometry-free `matches` is deliberate rather than an omission: a
+        // grid resize republishes through `controller.setGridDimensions`, so
+        // presenting the *old* plan under the *new* shape would render a stale
+        // frame and build buffers the next publish immediately replaces. The
+        // swapchain keys its identity on its geometry; this test does not.
         //
         // With no live swapchain the current plan has never reached the screen, so
         // it always renders. A swapchain that keeps failing to allocate therefore
         // retries on every entry, which is the right response to that state.
-        guard let swapchainInputs else {
+        guard let swapchain else {
             rerenderCurrentPlan()
             return
         }
-        let live = SurfaceInputs(
-            columns: swapchainInputs.columns,
-            rows: swapchainInputs.rows,
-            metrics: metrics,
-            colorSpace: window?.colorSpace
-        )
-        guard live != swapchainInputs else { return }
+        guard swapchain.matches(metrics: metrics, colorSpace: surfaceColorSpace) == false else {
+            return
+        }
         rerenderCurrentPlan()
     }
 
