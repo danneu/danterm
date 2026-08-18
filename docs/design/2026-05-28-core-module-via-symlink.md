@@ -124,6 +124,14 @@ retired. `tests/` is deleted; the core suite runs under
   of plumbing that ties the two builds together. If the core source directory
   ever moves, re-point the symlink; the root manifest itself does not
   reference the inner path.
+- **The symlink survives the ownership rule because ownership reads declared
+  paths.** The root's app target declares `path: "app"`, so the symlinked
+  sources inside it belong to the manifest that declares them, and
+  `lib/DanTermCore/Package.swift` stays the only manifest naming the core
+  sources. A target re-declared over another package's directory is the thing
+  that rule forbids -- see
+  [2026-08-17: A Package Owns Its Sources](2026-08-17-package-owns-its-targets.md),
+  O3.
 - **CI gating is a follow-up.** This migration kept GitHub Actions changes out of
   scope. The local gate (`just test`) now runs protocol + core + the purity lint;
   CI wiring follows in a separate pass.

@@ -39,6 +39,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from manifest_targets import LintError, balanced_span, declared_targets  # noqa: E402
+
 # Test seam: the self-test points the check at a fixture tree of tiny manifests and a
 # synthetic step list, so it can prove each verdict without running the real gate.
 # Nothing else sets this.
@@ -54,10 +58,6 @@ MANIFEST_GLOBS = ("Package.swift", "lib/*/Package.swift", "ios/*/Package.swift")
 UNRESOLVED = "<unresolved>"
 
 
-class LintError(Exception):
-    """A malformed input the check refuses to interpret, as opposed to a coverage verdict."""
-
-
 @dataclass(frozen=True)
 class Lane:
     """One `swift test` invocation that names a package, plus the selector that narrows it."""
@@ -70,77 +70,6 @@ class Lane:
         if self.selector_flag is None:
             return f"{self.origin}: whole estate"
         return f"{self.origin}: {self.selector_flag} {self.selector}"
-
-
-def strip_comments(text: str) -> str:
-    """Removes `//` line comments without touching a `//` inside a string literal."""
-    out: list[str] = []
-    for line in text.splitlines():
-        in_string = False
-        escaped = False
-        cut = len(line)
-        for index, char in enumerate(line):
-            if escaped:
-                escaped = False
-                continue
-            if char == "\\":
-                escaped = True
-                continue
-            if char == '"':
-                in_string = not in_string
-                continue
-            if not in_string and char == "/" and line[index : index + 2] == "//":
-                cut = index
-                break
-        out.append(line[:cut])
-    return "\n".join(out)
-
-
-def balanced_span(text: str, open_index: int) -> int:
-    """Returns the index just past the `(` at open_index's matching `)`, ignoring parens in strings."""
-    depth = 0
-    in_string = False
-    escaped = False
-    for index in range(open_index, len(text)):
-        char = text[index]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
-        if char == '"':
-            in_string = True
-        elif char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth == 0:
-                return index + 1
-    raise LintError("unbalanced parentheses in manifest")
-
-
-def test_target_names(manifest: Path) -> list[str]:
-    """The names of the test targets a manifest declares -- the package's test estate."""
-    text = strip_comments(manifest.read_text())
-    names: list[str] = []
-    for match in re.finditer(r"\.(testTarget|target|executableTarget)\s*\(", text):
-        body = text[match.start() : balanced_span(text, match.end() - 1)]
-        path_match = re.search(r"\bpath\s*:\s*(.)", body)
-        if path_match and path_match.group(1) != '"':
-            raise LintError(
-                f"{manifest}: a target declares a `path:` that is not a string literal. "
-                "This check reads manifest text and will not guess at a computed path."
-            )
-        if match.group(1) != "testTarget":
-            continue
-        name_match = re.search(r'\bname\s*:\s*"([^"]+)"', body)
-        if not name_match:
-            raise LintError(f"{manifest}: a test target declares no literal name.")
-        names.append(name_match.group(1))
-    return names
 
 
 def gate_steps() -> list[str]:
@@ -384,7 +313,11 @@ def main() -> int:
         complaints: list[str] = []
         checked = 0
         for manifest in manifests:
-            estate = test_target_names(manifest)
+            estate = [
+                target.name
+                for target in declared_targets(manifest)
+                if target.kind == "testTarget"
+            ]
             if not estate:
                 continue
             checked += 1

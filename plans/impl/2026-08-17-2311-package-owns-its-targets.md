@@ -226,7 +226,7 @@ because it records the hashes of everything above.
       commit and does not amend d633f92e. The consequence is stated openly:
       slice 4's commit is not cold-buildable on its own, so a bisect that lands
       on that one commit hits the failure.
-- [ ] **6. The ownership lint, its self-test, and the written rule.** An ADR
+- [x] **6. The ownership lint, its self-test, and the written rule.** An ADR
       stating both halves of the rule -- a re-declared target is a violation, a
       symlink inside a target's own declared path is not -- indexed in
       `docs/design/index.md`, referenced from AGENTS.md, and noted in the
@@ -361,3 +361,40 @@ Per slice, and in full after slice 8:
   passed all 98 steps in 82s, the iOS gate still cross-compiles `lib/DanTermProtocol`
   and `lib/DanTermClient` with tests, and a dev slot launched, answered `ls` over its
   control socket, and quit cleanly.
+- **Slice 6.** The two checks share one manifest text parser,
+  `scripts/manifest_targets.py`, rather than each carrying its own. Both need the
+  same answer to the same question -- which targets does this manifest declare, and
+  where does it say their sources are -- and a second copy of a parser is how two
+  checks come to disagree about the same file. The plan's Critical files list did
+  not name a third file, but the choice sits inside its stated discretion over how
+  the checks parse manifest text. `scripts/gate-test-coverage-lint.py` changes only
+  to import the shared module: it deletes its own copies of `LintError`,
+  `strip_comments`, `balanced_span`, and `test_target_names`, and calls
+  `declared_targets` at the one site that used the last of them.
+- **Slice 6.** The shared parser reads a target's declared path as the literal a
+  manifest wrote, filling in SwiftPM's default -- `Sources/<name>` or
+  `Tests/<name>` -- when none is written, so a nested package that omits `path:`
+  is still placed. It never touches the filesystem, which is what makes O3 hold.
+- **Slice 6, PO1.** The self-test covers all four cases the plan names plus a
+  fifth: a test target re-declared by an ancestor, the shape that escaped the iOS
+  gate. Mutation testing confirms the cases bite. Suppressing the ownership verdict
+  fails cases 2 and 3; accepting a non-literal `path:` fails case 5; and deciding
+  ownership from where the declared path's *contents* resolve to -- the
+  strengthening case 4 exists to forbid -- fails case 4 naming
+  `lib/Alpha/Package.swift` as the supposed owner of the root's `app` target. One
+  mutation is a no-op on any tree this repo has: resolving the declared path itself
+  changes no verdict, because every declared path here is a real directory and the
+  symlinks sit inside one. Case 4 pins the shape the tree actually has, which is
+  what the plan asked for.
+- **Slice 6, PO2 ownership half.** Re-verified against the manifests at
+  `4eff6906^`, exported to a scratch tree and linted through the
+  `MANIFEST_OWNERSHIP_LINT_ROOT` seam: the lint reports exactly five complaints,
+  all against the root manifest -- `DanTermProtocol`, `DanTermClient`, and
+  `DanTermSupport` as source targets, `DanTermProtocolTests` and
+  `DanTermClientTests` as test targets -- and nothing else.
+- **Slice 6 verification.** On the current tree the ownership lint reports 72
+  targets across 10 manifests each declared by its nearest one, the coverage lint
+  still reports 9 estates each run once, `scripts/docs-lint.py` resolves the new
+  ADR's citations, and `just test` passed all 98 steps in 74s with both new steps
+  in the ok list. The step count does not rise at this commit because slice 5's run
+  already saw these two steps sitting uncommitted in the working tree.

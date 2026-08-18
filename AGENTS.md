@@ -324,6 +324,7 @@ API with a general, reusable command or query and update `SKILL.md`.
 | Where terminal-reported pane facts live | [docs/design/2026-08-10-session-owned-terminal-reported-facts.md](docs/design/2026-08-10-session-owned-terminal-reported-facts.md) |
 | Layer placement, a new side-effecting utility, `core-purity-lint.sh` | [docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md) |
 | Test architecture, the `app/DanTermCore` symlink, `lib/*/Package.swift` | [docs/design/2026-05-28-core-module-via-symlink.md](docs/design/2026-05-28-core-module-via-symlink.md) |
+| Declaring a target in any `Package.swift`, or adding a nested package | [docs/design/2026-08-17-package-owns-its-targets.md](docs/design/2026-08-17-package-owns-its-targets.md) |
 | An observer, NSEvent monitor, timer, popover, escaping closure, or C `userdata` callback | [docs/design/2026-06-09-appkit-lifetime-safety.md](docs/design/2026-06-09-appkit-lifetime-safety.md) -- rules bind, the Ghostty half of rule 5 is gone |
 | Sprite classification, geometry, rendering, or their tests | [docs/terminal-sprites.md](docs/terminal-sprites.md) |
 | Measuring or optimizing terminal speed / memory | [agent-docs/terminal-performance.md](agent-docs/terminal-performance.md) |
