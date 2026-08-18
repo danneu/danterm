@@ -247,7 +247,7 @@ budget cannot be armed before the tree clears it with margin.
 - [x] **4. The budget starts failing.** The enforcing script, its self-test, both
       as `STEPS` entries, and the rule written down where a reader of the build
       would meet it.
-- [ ] **5. Close the audit item.** Mark S39 resolved in
+- [x] **5. Close the audit item.** Mark S39 resolved in
       `docs/scratch/2026-08-11-simplification-audit.md`, its status column
       carrying the hashes of the four commits above, the way every settled row
       records its own.
@@ -389,3 +389,12 @@ budget cannot be armed before the tree clears it with margin.
   took 124 s then 87 s. `lib/TerminalCore/.build-gate` is 577 MB beside
   `lib/TerminalCore/.build` at 1.4 GB. The self-test step is 1 s, since it never
   compiles anything.
+
+- **Slice 5: a sha row, not a `n/a` row and not a status note.** S39's own ideal
+  fix was rejected (RI1), so the question was whether the row needs prose saying
+  the finding was answered the other way. It does not. The audit's header defines
+  the three markers: a sha means the finding landed and its section now describes
+  code that no longer exists, so read the commit; `n/a` means the finding was
+  dropped untouched; a `part` sha plus a **Status note** means some of it landed.
+  Four commits rewrote every line S39 cites, so the plain sha form is the true
+  one, and it already sends the reader to the commits for what actually happened.

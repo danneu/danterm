@@ -202,7 +202,7 @@ in itself.
 | d18ac7dc 25835bc9 | [S36](#s36) | 15    | 3   | 5   | tests          | small  | Retire the whole-AppModel golden snapshot; it ratchets on behavior-preserving refactors                                 |
 | d73a6096 | [S37](#s37) | 15    | 3   | 5   | tests          | small  | Move the nine frozen research probes out of the default TerminalCore test target                                        |
 | 6b2e27f0 | [S38](#s38) | 12    | 3   | 4   | app-runtime    | medium | Key pane-tape follow state once, by subscription, instead of four sidecar maps                                  |
-|        | [S39](#s39) | 12    | 3   | 4   | build          | small  | Drop .build-gate by deleting the unenforced -warn-long-function-bodies flag                                             |
+| 8108b081 a635c6d7 eb9a7ba5 e3641526 | [S39](#s39) | 12    | 3   | 4   | build          | small  | Drop .build-gate by deleting the unenforced -warn-long-function-bodies flag                                             |
 |        | [S40](#s40) | 12    | 3   | 4   | core-model     | medium | Nest per-pane search and notification state in PaneModel so cleanup is structural                                       |
 |        | [S41](#s41) | 12    | 3   | 4   | core-reducer   | small  | Drop @discardableResult from update() so nested calls cannot silently swallow commands                                  |
 | 17e54263 | [S42](#s42) | 12    | 3   | 4   | core-reducer   | medium | Give all three confirmations one representation instead of half-model, half-command                                     |
