@@ -219,7 +219,7 @@ in itself.
 | b0e2a7f6 | [S53](#s53) | 10    | 2   | 5   | terminal-core  | small  | Move the pure OSC byte helpers off Terminal and split the file at its seams                                           |
 |        | [S54](#s54) | 10    | 2   | 5   | terminal-views | small  | Return the clamp state from terminalCell so the view stops re-deriving grid extents                                     |
 | 53cef5b7 | [S55](#s55) | 10    | 2   | 5   | tests          | small  | Split ModelOperationsTests along the boundary its name claims                                                           |
-|        | [S56](#s56) | 8     | 2   | 4   | core-model     | small  | Unify the three divergent "the selected tab died" fixups                                                                |
+| b8afce66 | [S56](#s56) | 8     | 2   | 4   | core-model     | small  | Unify the three divergent "the selected tab died" fixups                                                                |
 |        | [S57](#s57) | 8     | 2   | 4   | pty            | medium | Read into one reusable buffer through a single read loop                                                                |
 | e4dd79e1 | [S58](#s58) | 8     | 2   | 4   | sidebar        | medium | Make SidebarItemStore return the outline mutation instead of a Bool the executor re-switches on                         |
 |        | [S59](#s59) | 8     | 2   | 4   | terminal-views | small  | Drop the vestigial optionality in TerminalSessionState.scrollPosition                                                   |
@@ -1244,6 +1244,18 @@ behind Msgs, and rename initiation became projected model state.
 `core-model` &middot; duplication &middot; impact 2, confidence 4 &middot; effort small
 
 `lib/DanTermCore/Sources/DanTermCore/Update.swift#closeTabBody`, `lib/DanTermCore/Sources/DanTermCore/Update.swift#update`, `lib/DanTermCore/Sources/DanTermCore/Model.swift#AppModel`
+
+**Status note.** Closed, by a variant of the ideal fix that also absorbs the
+MRU list. One `reconcileTabState` pass in
+`lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift` now runs at the
+`update()` defer and derives both `selectedTabId` and `mruOrder` from the same
+live-tab snapshot, so a removal path can stay silent about selection and the
+two cannot drift apart. The three hand-written repairs are gone. The repair
+policy is "most recently used survivor" rather than the predecessor rule this
+finding proposed: the close family still makes its own predecessor-then-
+successor pick, which the pass accepts unchanged, so the behaviour those tests
+pin is unaffected, while the two first-tab sites now land on the last tab the
+user was actually in.
 
 **Problem.** `AppModel.selectedTabId` is an optional that must name a live tab, and three separate removal paths repair it with three separately written policies -- two of which disagree with the third about which tab the user lands on. A fourth path (deleteGroup with moveTabs) does not repair it at all, relying on the moved tabs staying live. Nothing in the type prevents a future removal path from forgetting the repair entirely.
 
