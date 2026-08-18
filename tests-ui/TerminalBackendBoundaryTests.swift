@@ -40,7 +40,8 @@ func terminalBackendBoundaryTests() {
         gate.tearDown()
         gate.emit(.bell)
         gate.emit(TerminalSessionState(
-            scrollbarEnabled: true, cellHeight: 16, scrollPosition: nil,
+            scrollbarEnabled: true, cellHeight: 16,
+            scrollPosition: .init(total: 24, offset: 0, length: 24),
             background: NSColor.black.cgColor))
 
         try uiExpect(events.isEmpty, "event escaped after teardown: \(events)")

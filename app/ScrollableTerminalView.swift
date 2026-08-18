@@ -68,8 +68,8 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
 
         terminalSession.stateObserver = self
 
-        // If the session already has cached state after reparenting, sync now.
-        if terminalSession.state.cellHeight > 0 || terminalSession.state.scrollPosition != nil {
+        // If the session already has layout metrics after reparenting, sync now.
+        if terminalSession.state.cellHeight != nil {
             synchronizeScrollView()
         }
 
@@ -184,26 +184,28 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
     private func synchronizeScrollView() {
         let contentHeight = scrollView.contentSize.height
         let state = terminalSession.state
-        let cellHeight = state.cellHeight
 
-        if let sb = state.scrollPosition {
-            documentView.frame.size.height = scrollbarDocumentHeight(
-                contentHeight: contentHeight, cellHeight: cellHeight,
-                total: sb.total, len: sb.length
-            )
-        } else {
+        // Without layout metrics there are no pixels per row, so the document is the
+        // viewport and no row offset can be restored.
+        guard let cellHeight = state.cellHeight, cellHeight > 0 else {
             documentView.frame.size.height = contentHeight
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            return
         }
 
+        let sb = state.scrollPosition
+        documentView.frame.size.height = scrollbarDocumentHeight(
+            contentHeight: contentHeight, cellHeight: cellHeight,
+            total: sb.total, len: sb.length
+        )
+
         if !isLiveScrolling {
-            if cellHeight > 0, let sb = state.scrollPosition {
-                let offsetY = scrollbarOffsetY(
-                    total: sb.total, offset: sb.offset, len: sb.length,
-                    cellHeight: cellHeight
-                )
-                scrollView.contentView.scroll(to: CGPoint(x: 0, y: offsetY))
-                lastSentRow = Int(sb.offset)
-            }
+            let offsetY = scrollbarOffsetY(
+                total: sb.total, offset: sb.offset, len: sb.length,
+                cellHeight: cellHeight
+            )
+            scrollView.contentView.scroll(to: CGPoint(x: 0, y: offsetY))
+            lastSentRow = Int(sb.offset)
         }
 
         scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -219,8 +221,7 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
 
     /// Convert AppKit scroll position to a terminal row and send scroll_to_row action.
     private func handleLiveScroll() {
-        let cellHeight = terminalSession.state.cellHeight
-        guard cellHeight > 0 else { return }
+        guard let cellHeight = terminalSession.state.cellHeight, cellHeight > 0 else { return }
 
         let visibleRect = scrollView.contentView.documentVisibleRect
         let docHeight = documentView.frame.height

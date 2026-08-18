@@ -264,7 +264,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         let projection = viewport.projection
         return TerminalSessionState(
             scrollbarEnabled: viewport.isScrollbarEnabled,
-            cellHeight: displayedCellSize?.height ?? 0,
+            cellHeight: displayedCellSize?.height,
             scrollPosition: TerminalScrollPosition(
                 total: UInt64(clamping: projection.totalRows),
                 offset: UInt64(clamping: projection.topRow),
@@ -736,7 +736,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         let rows = wheelNormalizer.rows(
             delta: Self.verticalScrollDelta(for: event),
             isPrecise: event.hasPreciseScrollingDeltas,
-            cellHeight: Double(state.cellHeight)
+            cellHeight: Double(displayedCellSize?.height ?? 0)
         )
         controller.sendWheel(
             .init(
@@ -908,7 +908,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
         guard let window else { return .zero }
-        let viewRect = NSRect(x: 0, y: 0, width: 0, height: state.cellHeight)
+        let viewRect = NSRect(x: 0, y: 0, width: 0, height: displayedCellSize?.height ?? 0)
         return window.convertToScreen(convert(viewRect, to: nil))
     }
 

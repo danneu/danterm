@@ -94,7 +94,8 @@ class TerminalView: NSView, TerminalSession {
     var performedActions: [String] = []
     var hostView: NSView { self }
     var state = TerminalSessionState(
-        scrollbarEnabled: true, cellHeight: 0, scrollPosition: nil,
+        scrollbarEnabled: true, cellHeight: nil,
+        scrollPosition: .init(total: 24, offset: 0, length: 24),
         background: NSColor.black.cgColor)
     weak var stateObserver: (any TerminalSessionStateObserver)?
     var onEvent: ((TerminalSessionEvent) -> Void)?

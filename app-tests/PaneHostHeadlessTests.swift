@@ -34,8 +34,8 @@ private final class HeadlessPaneHostSession: NSView, TerminalSession {
     var hostView: NSView { self }
     var state = TerminalSessionState(
         scrollbarEnabled: true,
-        cellHeight: 0,
-        scrollPosition: nil,
+        cellHeight: nil,
+        scrollPosition: .init(total: 24, offset: 0, length: 24),
         background: NSColor.black.cgColor
     )
     weak var stateObserver: (any TerminalSessionStateObserver)?

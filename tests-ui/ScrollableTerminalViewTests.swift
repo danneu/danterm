@@ -1,7 +1,8 @@
-// UI-harness coverage for the pane's focus-ring gutter: the permanent inset
+// UI-harness coverage for the pane's focus-ring gutter -- the permanent inset
 // ScrollableTerminalView reserves around the terminal area, the ring it draws
-// inside that inset, and the theme background the gutter paints. Pointer and
-// scrollbar routing for the same view live in their own suites.
+// inside that inset, and the theme background the gutter paints -- plus the
+// scroll chrome the same view sizes from published session state. Pointer
+// routing for the view lives in its own suite.
 import Cocoa
 
 @MainActor
@@ -108,15 +109,80 @@ func scrollableTerminalViewTests() {
 
         let themed = NSColor(red: 0.9, green: 0.4, blue: 0.1, alpha: 1).cgColor
         fx.terminal.emitState(TerminalSessionState(
-            scrollbarEnabled: true, cellHeight: 0, scrollPosition: nil, background: themed))
+            scrollbarEnabled: true, cellHeight: nil,
+            scrollPosition: .init(total: 24, offset: 0, length: 24), background: themed))
 
         try uiExpect(fx.scrollWrapper.layer?.backgroundColor == themed,
                      "gutter did not follow the published background: "
                         + "\(String(describing: fx.scrollWrapper.layer?.backgroundColor))")
     }
+
+    uiTest("a pane with no layout metrics scrolls nowhere and sizes to the viewport") {
+        // Intent: a session that has not laid out a grid yet gives its document
+        //   view exactly the viewport height and leaves the scroll origin at rest.
+        // Why it exists: missing layout metrics is the one absence the session
+        //   boundary can express. This pins what the scroll chrome does with it,
+        //   so the absence cannot quietly turn into a row offset computed from a
+        //   zero-height cell.
+        // Scenario: spec-first -- a pane mounts before its first frame lands.
+        let fx = makeGutterFixture()
+        let chrome = try scrollChrome(of: fx.scrollWrapper)
+
+        fx.terminal.emitState(TerminalSessionState(
+            scrollbarEnabled: true, cellHeight: nil,
+            scrollPosition: .init(total: 40, offset: 10, length: 20),
+            background: NSColor.black.cgColor))
+
+        try uiExpect(fx.terminal.state.cellHeight == nil,
+                     "the session published metrics, so the absence branch is untested")
+        try uiExpect(chrome.documentView?.frame.height == chrome.contentSize.height,
+                     "document height \(String(describing: chrome.documentView?.frame.height)) "
+                        + "is not the viewport height \(chrome.contentSize.height)")
+        try uiExpect(chrome.contentView.bounds.origin.y == 0,
+                     "a pane without metrics scrolled to \(chrome.contentView.bounds.origin.y)")
+    }
+
+    uiTest("a pane with metrics sizes its document to scrollback and restores its row") {
+        // Intent: with a cell height published, the document view spans the whole
+        //   scrollback in pixels and the clip view sits at the row the session
+        //   reports.
+        // Why it exists: this is the whole job of the scroll chrome, and it is the
+        //   branch a test double could previously bypass by reporting no scroll
+        //   position at all.
+        // Scenario: spec-first -- a pane 20 rows tall, scrolled 10 rows down into
+        //   40 rows of history, at a 16pt cell.
+        let fx = makeGutterFixture()
+        let chrome = try scrollChrome(of: fx.scrollWrapper)
+        let viewport = chrome.contentSize.height
+
+        fx.terminal.emitState(TerminalSessionState(
+            scrollbarEnabled: true, cellHeight: 16,
+            scrollPosition: .init(total: 40, offset: 10, length: 20),
+            background: NSColor.black.cgColor))
+
+        let expectedHeight = 40 * 16.0 + (viewport - 20 * 16.0)
+        try uiExpect(chrome.documentView?.frame.height == expectedHeight,
+                     "document height \(String(describing: chrome.documentView?.frame.height)) "
+                        + "is not \(expectedHeight) for 40 rows at a 16pt cell")
+        // AppKit measures Y from the bottom, so row 10 of 40 with 20 visible sits
+        // 10 rows up from the document's bottom edge.
+        try uiExpect(chrome.contentView.bounds.origin.y == 10 * 16.0,
+                     "clip view sits at \(chrome.contentView.bounds.origin.y), not row 10's 160pt")
+    }
 }
 
 // MARK: - Fixture
+
+/// The pane's scroll chrome, found the way AppKit itself reaches it -- by walking the
+/// wrapper's subviews -- so the scroll assertions do not depend on the wrapper's
+/// private storage.
+@MainActor
+private func scrollChrome(of wrapper: ScrollableTerminalView) throws -> NSScrollView {
+    guard let chrome = wrapper.subviews.compactMap({ $0 as? NSScrollView }).first else {
+        throw UITestFailure(message: "the pane wrapper hosts no scroll view")
+    }
+    return chrome
+}
 
 @MainActor
 private struct GutterFixture {
@@ -148,7 +214,8 @@ private func makeGutterFixture(
     // reading of a real layer rather than a nil-coalesced default.
     terminal.wantsLayer = true
     terminal.state = TerminalSessionState(
-        scrollbarEnabled: true, cellHeight: 0, scrollPosition: nil, background: background)
+        scrollbarEnabled: true, cellHeight: nil,
+        scrollPosition: .init(total: 24, offset: 0, length: 24), background: background)
     let wrapper = PaneWrapperView(
         paneId: paneId, terminalView: terminal,
         isZoomed: false, hasSplits: false, runtime: AppRuntime(model: model))

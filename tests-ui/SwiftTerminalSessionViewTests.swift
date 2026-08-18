@@ -250,7 +250,8 @@ func swiftTerminalSessionViewTests() {
             "a font change under an override submitted a grid: \(controller.gridDimensions)"
         )
         try uiExpect(pane.state.cellHeight == 32,
-                     "a font change under an override did not update cell metrics: \(pane.state.cellHeight)")
+                     "a font change under an override did not update cell metrics: "
+                        + "\(String(describing: pane.state.cellHeight))")
     }
 
     uiTest("a pane created with an override submits only that grid") {

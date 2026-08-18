@@ -173,8 +173,38 @@ session test doubles (`app-tests/PaneHostHeadlessTests.swift`,
 
 - [x] 1. `refactor(app)`: delete the dead repeating gate; say what the owner
       census is for. Green gate.
-- [ ] 2. `refactor(app)`: give the terminal-session boundary one absence. Green
+- [x] 2. `refactor(app)`: give the terminal-session boundary one absence. Green
       gate plus `just test-ui`, and the live scroll check above.
 - [ ] 3. `refactor(core)`: propagate nested reducer commands and gate the rule.
       Propagation, lint, and lint self-test travel together. Green gate; no
       behavior change.
+
+## Implementation notes
+
+- Commit 2: the wrapper's construction-time sync guard now reads layout metrics
+  alone, where it used to accept either a positive cell height or any scroll
+  position. With `scrollPosition` non-optional the old disjunction was always
+  true, and the call it now skips was a no-op anyway: a freshly built wrapper has
+  a zero-sized scroll view, so the document height it would set is the zero it
+  already has, and the first `layout()` pass calls the same method.
+- Commit 2: the four non-scroll test doubles report a plausible fresh-pane
+  position (24 rows, viewport at the bottom) rather than an all-zero one, so no
+  double describes a pane the app cannot produce.
+- Commit 2: the live check could confirm only what the CLI can reach. A slot
+  built from this branch launched, rendered 500 lines of output, took input, and
+  split into a fresh pane that mounted and reported `integration: ready` with no
+  layout metrics yet. The scroll chrome's own geometry has no CLI surface, so the
+  document sizing and row restore are pinned by the two new UI-harness tests
+  instead; both were confirmed to fail when the production scroll restore is
+  removed.
+
+## Follow Up
+
+- The `danterm` CLI cannot report or drive a pane's scroll chrome: there is no
+  query for the scrollbar's document height, knob position, or viewport row
+  offset, and no command that scrolls a pane by rows. That left the plan's live
+  scroll verification unreachable from the API and forced it into the UI harness.
+  Adding a `pane scroll` command and scroll state on `pane info` would close it.
+- `lib/DanTermCore/Sources/DanTermCore/Update.swift:717` binds `tabId` and never
+  uses it, which the build reports as a warning on every compile. Commit 3 of
+  this plan edits the same file and can clear it.

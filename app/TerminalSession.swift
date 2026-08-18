@@ -26,10 +26,15 @@ struct TerminalScrollPosition: Equatable {
 }
 
 /// View-local terminal state consumed synchronously by the native scroll chrome.
+///
+/// One field carries the pane's one absence: `cellHeight` is nil until the pane has
+/// laid out a grid, and every other field is always meaningful. A session always
+/// knows where its viewport sits in its own scrollback, so `scrollPosition` cannot
+/// go missing -- what a fresh pane lacks is the cell box that turns rows into pixels.
 struct TerminalSessionState: Equatable {
     let scrollbarEnabled: Bool
-    let cellHeight: CGFloat
-    let scrollPosition: TerminalScrollPosition?
+    let cellHeight: CGFloat?
+    let scrollPosition: TerminalScrollPosition
     /// The pane's current terminal default background. It rides this channel because
     /// the focus-ring gutter lives outside the terminal view and so cannot inherit
     /// that view's theme-colored layer background.
