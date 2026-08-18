@@ -67,6 +67,7 @@ final class MobileSessionController {
             dispatch(.replicaStateChanged(state))
             surfaceDidLayout()
         }
+        surfaceView.didLayout = { [weak self] in self?.surfaceDidLayout() }
         observeLifecycle()
         let environment = ProcessInfo.processInfo.environment
         let defaults = UserDefaults.standard
@@ -112,7 +113,7 @@ final class MobileSessionController {
     /// Reports the surface's current facts. The extent decides whether a whole cell fits,
     /// which is one of the facts the claim control projects from, so a layout pass is one
     /// of the things the session has to be told about.
-    func surfaceDidLayout() {
+    private func surfaceDidLayout() {
         dispatch(.surfaceChanged(MobileSurfaceFacts(
             nativeGrid: surfaceView.nativeGrid,
             pinned: surfaceView.pinned,

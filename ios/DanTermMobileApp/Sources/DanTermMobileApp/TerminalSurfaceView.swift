@@ -14,6 +14,9 @@ final class TerminalSurfaceView: UIView {
     /// Signals that a new exact cursor can replace the saved continuation checkpoint.
     var didAdvanceReplica: (() -> Void)?
     var didChangeReplicaState: ((PaneReplicaState) -> Void)?
+    /// Signals that the extent or the safe area this view claims and draws inside settled
+    /// at new values, so the session can be told the grid it now offers.
+    var didLayout: (() -> Void)?
 
     private var replica = PaneReplica()
     private var replicaPaneId: PaneId?
@@ -125,17 +128,30 @@ final class TerminalSurfaceView: UIView {
         // The extent decides the metrics, so a rotation or a keyboard has to be able to
         // change them. Re-running the fit here is what makes the surfaces follow the view.
         if let geometry { ensureSurfaces(columns: geometry.columns, rows: geometry.rows) }
-        guard let surface, let box = contentBox else { return }
-        let scale = box.displayScale
-        // The pixels are already drawn small enough for this view, so they are shown one
-        // for one rather than scaled by a transform.
-        let width = CGFloat(surface.pixelWidth) / scale
-        let height = CGFloat(surface.pixelHeight) / scale
-        surfaceView.bounds = CGRect(x: 0, y: 0, width: width, height: height)
-        surfaceView.layer.contentsScale = scale
-        // The replica draws from the bottom of the content box, so newly typed output
-        // stays put while the keyboard changes how much of the view is left.
-        surfaceView.layer.position = CGPoint(x: box.originX, y: box.maxY - height)
+        if let surface, let box = contentBox {
+            let scale = box.displayScale
+            // The pixels are already drawn small enough for this view, so they are shown
+            // one for one rather than scaled by a transform.
+            let width = CGFloat(surface.pixelWidth) / scale
+            let height = CGFloat(surface.pixelHeight) / scale
+            surfaceView.bounds = CGRect(x: 0, y: 0, width: width, height: height)
+            surfaceView.layer.contentsScale = scale
+            // The replica draws from the bottom of the content box, so newly typed output
+            // stays put while the keyboard changes how much of the view is left.
+            surfaceView.layer.position = CGPoint(x: box.originX, y: box.maxY - height)
+        }
+        // Reported from here, last, because this is the moment the view's own extent and
+        // safe area are both settled. An owner watching the controller's layout callback
+        // would read them one pass early, since a subview's insets are resolved after its
+        // superview lays out.
+        didLayout?()
+    }
+
+    // The safe area is half of the content box, and iOS delivers inset changes without a
+    // bounds change on some rotations, so the fit has to be re-run for one.
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        setNeedsLayout()
     }
 
     fileprivate func displayTick() {
@@ -214,9 +230,13 @@ final class TerminalSurfaceView: UIView {
         MobileContentBox(
             width: bounds.width,
             height: bounds.height,
-            insetTop: 0,
-            insetLeading: 0,
-            insetTrailing: 0,
+            insetTop: safeAreaInsets.top,
+            // The box's near and far edges are the drawn pixels' own, so the physical
+            // insets map onto them directly rather than by writing direction.
+            insetLeading: safeAreaInsets.left,
+            insetTrailing: safeAreaInsets.right,
+            // The bottom edge of this view is the top of the bottom controls, which is
+            // already clear of anything the system reserves.
             insetBottom: 0,
             displayScale: window?.screen.scale ?? traitCollection.displayScale
         )

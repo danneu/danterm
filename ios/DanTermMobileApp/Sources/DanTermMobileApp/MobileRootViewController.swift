@@ -11,7 +11,7 @@ import UIKit
 @MainActor
 final class MobileRootViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
     private let session = MobileSessionController()
-    private let connectionHeader = ConnectionHeaderView()
+    private let statusPill = ConnectionStatusPillView()
     private let paneTable = UITableView(frame: .zero, style: .plain)
     private let composer = TerminalComposerView()
     private let claimBar = UIStackView()
@@ -22,26 +22,40 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     /// projection, reloaded when the projection moves -- not a second owner of the list.
     private var panes: [MobilePaneListItem] = []
     private var selectedPaneId: PaneId?
+    /// Whether the launch has already been given its answer about the connect sheet. It
+    /// is presentation choreography, not a session fact: whether a sheet is *wanted* is
+    /// read from the model each time.
+    private var hasAnsweredLaunch = false
 
     private var terminalView: TerminalSurfaceView { session.surfaceView }
 
+    /// The terminal runs edge to edge in black, so the status bar's own content is drawn
+    /// light over it whatever the device's appearance setting is.
+    override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        // The terminal reaches the physical edges, so the screen behind it is the
+        // terminal's own black and every control on it resolves its colors for a dark
+        // background.
+        overrideUserInterfaceStyle = .dark
+        view.backgroundColor = .black
         configureViews()
         session.didUpdate = { [weak self] projection in self?.render(projection) }
         session.start()
-        // The fields are the draft's editor, so they are filled once from the launch and
-        // left alone afterwards: a redraw arriving mid-edit must not rewrite what the user
-        // is typing.
-        let launched = session.projection
-        connectionHeader.hostText = launched.draft.host
-        connectionHeader.portText = launched.draft.port
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        session.surfaceDidLayout()
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard hasAnsweredLaunch == false else { return }
+        hasAnsweredLaunch = true
+        // A launch that named a server is already connecting, and a sheet over it would
+        // stall the smoke run behind a form nobody asked for. The sheet is offered only
+        // when the launch could not name one -- no host at all, or a draft the model
+        // refused -- because the problem it reported has nowhere else to be read.
+        let launched = session.projection
+        guard launched.draft.host == nil || launched.draftProblem != nil else { return }
+        presentConnectSheet()
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -82,13 +96,7 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     }
 
     private func configureViews() {
-        connectionHeader.onConnect = { [weak self] in
-            guard let self else { return }
-            session.dispatch(.connectRequested(MobileTargetDraft(
-                host: connectionHeader.hostText,
-                port: connectionHeader.portText
-            )))
-        }
+        statusPill.addTarget(self, action: #selector(statusPillTapped), for: .touchUpInside)
         paneTable.dataSource = self
         paneTable.delegate = self
         paneTable.rowHeight = UITableView.automaticDimension
@@ -119,8 +127,9 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         claimBar.addArrangedSubview(releaseButton)
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
         terminalView.addGestureRecognizer(scroll)
-        for subview in [connectionHeader, paneTable, terminalView, claimBar, composer]
-        {
+        // The pill is added after the terminal because it floats over it. Everything else
+        // sits beside the terminal and takes its own space.
+        for subview in [terminalView, paneTable, claimBar, composer, statusPill] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
@@ -146,21 +155,36 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
         )
         preferredTableHeight.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            connectionHeader.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            connectionHeader.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            connectionHeader.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            // Full bleed: the terminal owns the whole width and everything from the
+            // physical top of the window down to the controls at the bottom. Nothing is
+            // allowed to take vertical space above it -- the pill floats over it instead.
+            terminalView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            terminalView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            terminalView.topAnchor.constraint(equalTo: view.topAnchor),
+            terminalView.bottomAnchor.constraint(equalTo: paneTable.topAnchor),
 
+            statusPill.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            statusPill.topAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.topAnchor,
+                constant: 4
+            ),
+            statusPill.leadingAnchor.constraint(
+                greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor,
+                constant: 12
+            ),
+            statusPill.trailingAnchor.constraint(
+                lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor,
+                constant: -12
+            ),
+
+            // The table sits below the terminal until the pane sheet replaces it, so the
+            // terminal keeps the top of the window either way.
             paneTable.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             paneTable.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            paneTable.topAnchor.constraint(equalTo: connectionHeader.bottomAnchor, constant: 4),
+            paneTable.bottomAnchor.constraint(equalTo: claimBar.topAnchor),
             paneTable.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
             paneTable.heightAnchor.constraint(lessThanOrEqualToConstant: 150),
             preferredTableHeight,
-
-            terminalView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            terminalView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            terminalView.topAnchor.constraint(equalTo: paneTable.bottomAnchor),
-            terminalView.bottomAnchor.constraint(equalTo: claimBar.topAnchor),
 
             // The bar sits beside the terminal rather than over it, so no cell is ever
             // drawn underneath it, claimed or not.
@@ -178,8 +202,20 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     /// Renders every control from the projection. Nothing here decides anything: each
     /// control is whatever the model says it is at this moment.
     private func render(_ projection: MobileSessionProjection) {
-        connectionHeader.showStatus(projection.status.text, color: projection.status.severity.color)
-        connectionHeader.showDraftProblem(projection.draftProblem?.label)
+        let color = projection.status.severity.color
+        // The pill composes the status line with the pane it is about. The two facts stay
+        // separately owned; only this line puts them beside each other.
+        statusPill.show(
+            status: projection.status.text,
+            color: color,
+            paneTitle: projection.panes.first { $0.paneId == projection.selectedPaneId }?.paneTitle
+        )
+        // A draft problem is shown beside the fields it is about, which exist only while
+        // the sheet is up. The status repeats there so the sheet can be read on its own.
+        if let sheet = presentedViewController as? ConnectSheetViewController {
+            sheet.showStatus(projection.status.text, color: color)
+            sheet.showDraftProblem(projection.draftProblem?.label)
+        }
         if panes != projection.panes || selectedPaneId != projection.selectedPaneId {
             panes = projection.panes
             selectedPaneId = projection.selectedPaneId
@@ -199,6 +235,34 @@ final class MobileRootViewController: UIViewController, UITableViewDataSource, U
     private func setOffered(_ button: UIButton, _ offered: Bool) {
         guard button.isHidden == offered else { return }
         button.isHidden = offered == false
+    }
+
+    /// Opens the form that names a server. The sheet is built for this one presentation
+    /// and seeded from the model's draft, so the fields are the draft's editor only while
+    /// they are on screen and no redraw can rewrite what the user is typing.
+    ///
+    /// It is a medium-detent sheet so the pill above it stays visible: the status has to
+    /// be readable while the user is deciding what to type into the form.
+    private func presentConnectSheet() {
+        guard presentedViewController == nil else { return }
+        let sheet = ConnectSheetViewController(draft: session.projection.draft)
+        sheet.onConnect = { [weak self, weak sheet] draft in
+            guard let self, let sheet else { return }
+            session.dispatch(.connectRequested(draft))
+            // The model decides whether that text named a server. When it did, the form
+            // has nothing left to say and gets out of the terminal's way; when it did not,
+            // the sheet stays up holding the problem it was just given.
+            guard session.projection.draftProblem == nil else { return }
+            sheet.dismiss(animated: true)
+        }
+        sheet.sheetPresentationController?.detents = [.medium()]
+        sheet.sheetPresentationController?.prefersGrabberVisible = true
+        present(sheet, animated: true)
+        render(session.projection)
+    }
+
+    @objc private func statusPillTapped() {
+        presentConnectSheet()
     }
 
     @objc private func claimTapped() {

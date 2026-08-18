@@ -250,7 +250,7 @@ until everything else works.
 
 - [x] 1. refactor(ios): give the phone session one pure decision core
 - [x] 2. refactor(ios): derive the phone's grid from one content box
-- [ ] 3. feat(ios): run the terminal full-bleed under a floating status pill
+- [x] 3. feat(ios): run the terminal full-bleed under a floating status pill
 - [ ] 4. feat(ios): move pane choice and claim into the bottom bar
 - [ ] 5. feat(ios): make the terminal itself the text-input target
 
@@ -290,6 +290,28 @@ until everything else works.
   nothing and the type does not have to know which edges the layout happens to use.
 - Commit 2: `TerminalSurfaceView` passes all-zero insets for now, per the plan's
   sequencing constraint. Commit 3 is where the real safe-area insets arrive.
+- Commit 3: the pane table had to leave the top of the window for the terminal to reach
+  it, so it moved into the bottom stack between the terminal and the claim bar. It is
+  deleted in commit 4; until then the terminal's bottom is the table's top rather than
+  the bottom bar's, which is the one part of I1 this commit cannot finish.
+- Commit 3: the surface reports its own layout now, through a `didLayout` callback the
+  session controller wires, instead of the view controller calling in from
+  `viewDidLayoutSubviews`. A subview's safe-area insets are resolved after its superview
+  lays out, so the controller's callback would read the grid one pass stale -- harmless
+  while the insets were zero, and wrong now that they decide the claimable grid.
+- Commit 3: the launch offers the connect sheet when the model holds no host *or* holds a
+  draft problem. The plan names only the missing host (I9), but with the problem label
+  moved into the sheet, a launch whose stored or environment port is unusable would report
+  a problem with no surface to read it on. Both cases are the same fact: the launch could
+  not name a server.
+- Commit 3: the pill sits just below the status bar, which puts it over the first rows of
+  cells rather than inside the top inset -- the inset itself is where the clock and the
+  Dynamic Island are. It takes no layout space, which is what I1 requires; floating over
+  content is the shape the plan's context asks for.
+- Commit 3: the connect sheet states `overrideUserInterfaceStyle = .dark` itself and paints
+  an explicit near-black rather than `.systemBackground`. A presented controller does not
+  inherit the presenter's override, and a system background color under a sheet resolved
+  light over the terminal's black.
 
 ## Follow Up
 
