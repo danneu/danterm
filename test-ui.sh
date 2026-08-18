@@ -108,6 +108,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/DanTermConfigStore.swift" \
         "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalWheelNormalizer.swift" \
         "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalGridSizing.swift" \
+        "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalRenderExecution/TerminalRenderFit.swift" \
         "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTestShim.swift" \
         "$SCRIPT_DIR/app/SwiftTerminalSessionView.swift" \
         "$SCRIPT_DIR/app/TerminalFrameRateSampler.swift" \

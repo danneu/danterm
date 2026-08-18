@@ -1430,35 +1430,25 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// proportion: the shrink happens while drawing, so nothing is ever allocated
     /// at the claimed grid's own pixel extent.
     ///
-    /// One scale serves both axes, which is what makes the shrink uniform. It is
-    /// derived from the whole pixels each cell may occupy rather than from the
-    /// point extent, because a cell box is ceiled to whole backing pixels:
-    /// dividing the rectangle's pixel budget by the cell count first is what keeps
-    /// the ceiled box inside the budget instead of overshooting it by up to a
-    /// pixel per cell.
+    /// The scale itself comes from `fittedRenderScale`, which is the one definition
+    /// of this arithmetic: the phone bounds its own frame stores with the same rule,
+    /// and a second copy of it would let the two ends drift apart.
     private func fittedMetrics(
         for dimensions: TerminalDimensions,
         native: TerminalRenderMetrics,
         displayScale: CGFloat
     ) -> TerminalRenderMetrics? {
-        guard dimensions.columns > 0, dimensions.rows > 0,
-              native.cellSize.width > 0, native.cellSize.height > 0
-        else { return nil }
-        let cellWidthPixels =
-            ((bounds.width * displayScale).rounded(.down) / CGFloat(dimensions.columns))
-            .rounded(.down)
-        let cellHeightPixels =
-            ((bounds.height * displayScale).rounded(.down) / CGFloat(dimensions.rows))
-            .rounded(.down)
         // A grid so large that a cell cannot have one whole pixel on some axis has
         // no presentable geometry at all, and the pane keeps the frame it has --
         // the same answer this method's callers give every other unusable input.
-        guard cellWidthPixels >= 1, cellHeightPixels >= 1 else { return nil }
-        let scale = min(
-            displayScale,
-            cellWidthPixels / native.cellSize.width,
-            cellHeightPixels / native.cellSize.height
-        )
+        guard let scale = fittedRenderScale(
+            columns: dimensions.columns,
+            rows: dimensions.rows,
+            widthPixels: Int((bounds.width * displayScale).rounded(.down)),
+            heightPixels: Int((bounds.height * displayScale).rounded(.down)),
+            nativeCellSize: native.cellSize,
+            nativeDisplayScale: displayScale
+        ) else { return nil }
         guard scale < displayScale else { return native }
         return resolvedMetrics(displayScale: scale)
     }

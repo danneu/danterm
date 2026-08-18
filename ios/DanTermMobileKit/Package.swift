@@ -18,6 +18,7 @@ let package = Package(
             dependencies: [
                 .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
+                .product(name: "TerminalRenderExecution", package: "TerminalCore"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
                 .product(name: "DanTermClient", package: "DanTermClient"),
             ],

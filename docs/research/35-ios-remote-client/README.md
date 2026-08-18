@@ -620,7 +620,10 @@ isolation, and F7 then ran the composition on a phone against a live pane.
   forces. Build-out is staged: observe-only rendering, then `pane.resize`,
   then origin suppression and rendering polish, with every contested fork
   (typing never claims, hybrid reflow, auto-take-back) kept as client policy.
-  Input is untouched; T11 stays free.
+  Input is untouched; T11 stays free. A 2026-08-17 amendment records stage 2
+  as built: the claimed grid is an override in the Mac's model, take-back is
+  a deliberate gesture instead of the next layout event, and the
+  origin-metadata stage dissolves because layout writes no grid any more.
 - **T11 DONE as D8** ([decisions.md](decisions.md)) -- the wire carries
   intent, and the PTY owner encodes. The contradiction is closed by the tree
   itself: no existing writer encodes locally -- the Mac's own keyboard sends

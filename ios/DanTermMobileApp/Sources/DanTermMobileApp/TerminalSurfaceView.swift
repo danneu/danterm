@@ -17,7 +17,7 @@ final class TerminalSurfaceView: UIView {
 
     private var replica = PaneReplica()
     private var replicaPaneId: PaneId?
-    private var metrics: TerminalRenderMetrics?
+    private var surface: MobileObserveSurface?
     private var stores: [TerminalFrameBackingStore] = []
     private var policy: MobilePresentationPolicy<Int>?
     private let surfaceView = UIView()
@@ -64,6 +64,7 @@ final class TerminalSurfaceView: UIView {
         stores = []
         policy = nil
         geometry = nil
+        surface = nil
         surfaceView.layer.contents = nil
         displayLink?.isPaused = true
         if let terminal = replica.terminal {
@@ -105,7 +106,7 @@ final class TerminalSurfaceView: UIView {
     /// gesture asks the pane to run at. It is derived from the current extent rather
     /// than from the replica, so it answers for the phone even before a stream arrives.
     var nativeGrid: MobileSurfaceGrid? {
-        let scale = window?.screen.scale ?? traitCollection.displayScale
+        let scale = displayScale
         guard let metrics = TerminalRenderMetrics(displayScale: scale, fontSize: Self.fontSize)
         else { return nil }
         return MobileSurfaceGrid(
@@ -124,19 +125,20 @@ final class TerminalSurfaceView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard let metrics, let geometry else { return }
-        let width = CGFloat(metrics.cellWidthPixels * geometry.columns) / metrics.displayScale
-        let height = CGFloat(metrics.cellHeightPixels * geometry.rows) / metrics.displayScale
+        // The extent decides the metrics, so a rotation or a keyboard has to be able to
+        // change them. Re-running the fit here is what makes the surfaces follow the view.
+        if let geometry { ensureSurfaces(columns: geometry.columns, rows: geometry.rows) }
+        guard let surface else { return }
+        let scale = displayScale
+        // The pixels are already drawn small enough for this view, so they are shown one
+        // for one rather than scaled by a transform.
+        let width = CGFloat(surface.pixelWidth) / scale
+        let height = CGFloat(surface.pixelHeight) / scale
         surfaceView.bounds = CGRect(x: 0, y: 0, width: width, height: height)
-        let fit = bounds.width / max(width, 1)
-        let scaledHeight = height * fit
-        surfaceView.transform = CGAffineTransform(scaleX: fit, y: fit)
-        // Keep typed output readable while the keyboard reduces height. The remote grid stays
-        // authoritative; only its upper pixels clip until the keyboard is dismissed.
-        surfaceView.layer.position = CGPoint(
-            x: 0,
-            y: bounds.height - scaledHeight
-        )
+        surfaceView.layer.contentsScale = scale
+        // The replica draws from the bottom of the view, so newly typed output stays put
+        // while the keyboard changes how much of the view is left.
+        surfaceView.layer.position = CGPoint(x: 0, y: bounds.height - height)
     }
 
     fileprivate func displayTick() {
@@ -178,21 +180,41 @@ final class TerminalSurfaceView: UIView {
         displayLink?.isPaused = policy.needsTick == false
     }
 
+    /// Allocates the frame stores one grid needs in this view, at the metrics the view
+    /// can actually draw it with. Idempotent: it returns without touching anything when
+    /// neither the grid nor the resolved metrics moved, so the layout pass may call it.
     private func ensureSurfaces(columns: Int, rows: Int) {
-        if geometry?.columns == columns, geometry?.rows == rows { return }
-        let scale = window?.screen.scale ?? traitCollection.displayScale
-        guard let metrics = TerminalRenderMetrics(displayScale: scale, fontSize: Self.fontSize)
-        else { return }
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let scale = displayScale
+        guard let fitted = MobileObserveSurface(
+            columns: columns,
+            rows: rows,
+            widthPixels: Int(bounds.width * scale),
+            heightPixels: Int(bounds.height * scale),
+            displayScale: scale,
+            fontSize: Self.fontSize
+        ) else { return }
+        if geometry?.columns == columns, geometry?.rows == rows, surface == fitted { return }
         let newStores = (0..<3).compactMap { _ in
-            TerminalFrameBackingStore(columns: columns, rows: rows, metrics: metrics)
+            TerminalFrameBackingStore(columns: columns, rows: rows, metrics: fitted.metrics)
         }
         guard newStores.count == 3 else { return }
-        self.metrics = metrics
+        surface = fitted
         stores = newStores
         policy = MobilePresentationPolicy(surfaceIds: Array(stores.indices))
         geometry = (columns, rows)
-        surfaceView.layer.contentsScale = scale
+        // The stores are new and hold no pixels, so the replica has to redraw into them
+        // before anything can be published from them again.
+        policy?.noteDamage()
+        displayLink?.isPaused = false
         setNeedsLayout()
+    }
+
+    /// The one reading of this view's point-to-pixel scale, used for the metrics it
+    /// renders with and for the size it shows those pixels at. The two must agree or the
+    /// grid would be drawn at one size and presented at another.
+    private var displayScale: CGFloat {
+        window?.screen.scale ?? traitCollection.displayScale
     }
 }
 

@@ -227,7 +227,7 @@ reopen condition.
 - [x] 4. feat(render): Mac remote-sized rendering with the take-back
   affordance
 - [x] 5. feat(ios): claim button sends the surface's native grid
-- [ ] 6. feat(ios): destination-bounded observe rendering; amend the D6
+- [x] 6. feat(ios): destination-bounded observe rendering; amend the D6
   decision record
 
 ## Implementation notes
@@ -320,3 +320,23 @@ reopen condition.
   claim made with the keyboard up asks for the shorter grid. Re-claiming is
   one tap, and an automatic re-claim on every layout change is exactly the
   reassert the plan rejected.
+- Commit 6 gives the fit arithmetic one definition. Commit 4 put it in the
+  Mac view; the phone needs the same rule, so it moved to
+  `fittedRenderScale` in `TerminalRenderExecution` and both ends call it.
+  It takes the native cell box as plain numbers rather than as metrics,
+  which is what lets the AppKit UI harness compile that exact file beside
+  its own metrics stand-in instead of a copy of the formula.
+- The phone bounds both axes, where its old layout fit the width and let
+  the height clip while the keyboard was up. A width-only bound leaves the
+  height allocation free, and a tall remote grid could then allocate
+  hundreds of megabytes, so I12 would not be true. The width still decides
+  the scale for every Mac-shaped grid, so what the user sees does not
+  change.
+- The phone now shows its rendered pixels one for one instead of scaling a
+  natively sized surface with a layer transform. The transform looked the
+  same and left the allocation at the remote grid's own pixel extent, which
+  is exactly what I12 forbids.
+- Because the fit reads the view's extent, `ensureSurfaces` became
+  bounds-dependent and the layout pass re-runs it. It is idempotent: it
+  reallocates only when the grid or the resolved metrics move, so a
+  rotation or a keyboard refits and an ordinary layout pass does nothing.

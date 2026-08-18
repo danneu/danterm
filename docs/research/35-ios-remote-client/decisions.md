@@ -716,6 +716,26 @@ in [README.md](README.md) and remains open.
        screen -- the alternate-screen flag is replicated state the phone
        already holds), auto-take-back on T9's death signal, typing-claims if
        the explicit gesture proves to be friction.
+  - **2026-08-17 stage-2-as-built amendment: take-back is durable, and stage 3
+    dissolves.** Stage 2 shipped on top of the model-owned pane geometry ADR
+    ([docs/design/2026-08-16-model-owned-pane-geometry.md](../../design/2026-08-16-model-owned-pane-geometry.md)),
+    which landed after this entry and made a pane's rectangle a pure projection
+    of container bounds and split ratios. A pane's grid is now an optional
+    override in the model: absent, the grid derives from the pane's slot;
+    present, it is exactly the override, and the only writers are `pane.resize`
+    and the Mac's take-back gesture. Two things this entry recorded therefore
+    change. First, the crude take-back is no longer free. "Any Mac layout event
+    reasserts" would need the view to write geometry model-ward on layout, which
+    is the exact feedback edge the ADR deleted, and one transient frame during a
+    structural change would silently drop a deliberate claim. So the override is
+    durable until the user ends it, and the affordance stage 3 deferred moved
+    into stage 2 with it. Second, stage 3 has no job left: origin metadata
+    existed to stop the Mac's incidental layout-driven resizes from clobbering a
+    claim, and under the ADR layout writes no grid at all, so that clobber is
+    structurally impossible. Reopen stage 3 only if a non-model grid writer is
+    ever reintroduced. Nothing else in this entry moves: no ownership is stored,
+    "claimed" stays a derived predicate, and two claimers still settle by last
+    writer wins.
 - What this declines, knowingly:
   - **Tenure.** There is no moment where the phone *has* the pane: a Mac
     take-back mid-vim silently drops the phone to remote-sized. With one
