@@ -75,6 +75,12 @@ private func dispatchIpc(
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
         return [.ipcReply(reqId: reqId, result: encoder.list(model))]
 
+    case .roster:
+        // Subscribing is idempotent, so this arm says nothing about whether the
+        // connection is already a subscriber: the runtime keys subscribers by
+        // connection and a repeat request only re-answers with the same roster.
+        return [.subscribeRoster(reqId: reqId, roster: paneRoster(in: model))]
+
     case .paneInfo(let paneId):
         try requirePane(paneId, in: model)
         guard let pane = model.pane(paneId),

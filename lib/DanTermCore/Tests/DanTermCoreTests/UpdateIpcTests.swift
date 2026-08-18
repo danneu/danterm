@@ -3746,6 +3746,57 @@ import DanTermProtocol
         }
     }
 
+    @Test("roster answers with the current roster and asks for a subscription")
+    func rosterRepliesWithCurrentRosterAndSubscribes() {
+        // Intent: one roster request produces one command that carries the roster the
+        //   model projects right now, and nothing else.
+        // Why it exists: the reply and the subscription share the request's socket, so
+        //   a client that got a roster it cannot keep receiving would look identical to
+        //   a working subscribe until the first change never arrived.
+        // Scenario: the phone client subscribes over its tailnet connection.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+
+        let commands = sendIpc(
+            &model,
+            method: IpcRequestMethod.roster.rawValue,
+            caller: .remote(nodeId: "n1", user: "dan", machineName: "phone")
+        )
+
+        #expect(commands.count == 1)
+        guard case .subscribeRoster(_, let roster) = commands[0] else {
+            Issue.record("expected subscribeRoster command")
+            return
+        }
+        #expect(roster == paneRoster(in: model))
+        #expect(roster.panes.count == 2)
+    }
+
+    @Test("a repeat roster request answers again without a second subscription")
+    func repeatRosterRequestAnswersAgain() {
+        // Intent: subscribing twice on one connection is the same request twice, not
+        //   two subscriptions -- dispatch says nothing about who already subscribed.
+        // Why it exists: the wire carries no subscription id, so idempotence is the
+        //   only thing that keeps a reconnecting client from doubling its own pushes.
+        // Scenario: a phone re-sends its subscribe after a stalled bootstrap.
+        var model = makeModel()
+        createTab(&model)
+
+        let first = sendIpc(&model, method: IpcRequestMethod.roster.rawValue)
+        let second = sendIpc(&model, method: IpcRequestMethod.roster.rawValue)
+
+        guard case .subscribeRoster(_, let firstRoster) = first.first,
+              case .subscribeRoster(_, let secondRoster) = second.first
+        else {
+            Issue.record("expected subscribeRoster commands")
+            return
+        }
+        #expect(first.count == 1)
+        #expect(second.count == 1)
+        #expect(firstRoster == secondRoster)
+    }
+
     @Test("pane.tape resolves the addressed pane and defers its reply")
     func paneTapeResolvesAddressedPane() {
         // Intent: pane.tape emits one dump command for the explicit pane and no

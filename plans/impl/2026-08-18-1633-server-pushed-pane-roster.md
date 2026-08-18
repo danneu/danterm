@@ -201,7 +201,7 @@ whole, on change, to subscribed connections.
 ## Commit progress
 
 - [x] 1. feat(protocol): define the shared roster value and its pure core projection
-- [ ] 2. feat(ipc): serve roster subscriptions and push the roster on change
+- [x] 2. feat(ipc): serve roster subscriptions and push the roster on change
 - [ ] 3. feat(ios): subscribe the phone to server-pushed rosters and delete the ls scrape
 
 ## Implementation notes
@@ -213,3 +213,24 @@ whole, on change, to subscribed connections.
 - `PaneRoster(jsonValue:)` is failable rather than throwing: the deleted
   `malformedReply` vocabulary gave a client no choice to make, and every
   malformed field has the same one recovery.
+- Dispatch emits one `.subscribeRoster(reqId:roster:)` command that both answers
+  and subscribes, rather than an `.ipcReply` plus a subscribe command. Both
+  halves need the request's socket and `.ipcReply` consumes it, so a split pair
+  would leave the second half nothing to hold.
+- The subscriber registry is a runtime dictionary keyed by connection id, with
+  no pure state type beside it. The key is what enforces one subscription per
+  connection, so there is no state machine left for a separate type to own; the
+  tape-follow type exists because a stream carries a cursor and an in-flight
+  batch, and a roster subscription carries neither.
+- The roster's push comparison lives in `pushRosterIfChanged()`, called after
+  `reconcile()` in the inline arm and in `sweepAndDispatchFollowUps()`. The
+  restore commit needs no third call site: it already sweeps through that same
+  function, and it deliberately does not re-seed `rosterBaseline` the way it
+  re-seeds `lightCheckpointBaseline`.
+- `roster` joins the protocol suite's CLI round-trip proof as a directly built
+  request, like `ping` and `doctor.permissions`. It adds no CLI verb; the point
+  of that proof is that a method cannot join the catalog without a decode that
+  round trips.
+- The `DanTermClient` roster-notification decoder stays with the phone work in
+  commit 3, so the runtime delivery tests read notifications straight off the
+  socketpair.

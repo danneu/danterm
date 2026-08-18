@@ -211,6 +211,21 @@ struct CommandIpcConnectionFixture {
         return try JSONDecoder().decode(JsonRpcResponse.self, from: data)
     }
 
+    /// Reads one server-initiated notification that is already on the wire.
+    func readNotification() throws -> JsonRpcRequest {
+        try JSONDecoder().decode(JsonRpcRequest.self, from: readLine())
+    }
+
+    /// Reads one notification off the main thread, so a test may wait for a frame that a
+    /// main-queue timer has not written yet without blocking the timer itself.
+    func readNotificationAsync() async throws -> JsonRpcRequest {
+        let peer = peer
+        let data = try await Task.detached {
+            try readCommandLine(from: peer)
+        }.value
+        return try JSONDecoder().decode(JsonRpcRequest.self, from: data)
+    }
+
     func hasReadableData() -> Bool {
         var readiness = pollfd(fd: peer, events: Int16(POLLIN), revents: 0)
         return Darwin.poll(&readiness, 1, 0) > 0

@@ -111,6 +111,20 @@ private struct PaneTapeFollowTransport {
     var noticeRegistration: PaneTapeFollowNoticeRegistration?
 }
 
+/// Holds one roster subscriber's socket and its shutdown census entry.
+///
+/// Keyed by connection id wherever it is stored, which is what makes a subscription
+/// connection-scoped and a repeat subscribe idempotent: there is nowhere to put a
+/// second one.
+@MainActor
+private struct RosterSubscriber {
+    let connection: IpcConnection
+    /// Registers the subscriber in the shutdown census. Its cancel closure closes the
+    /// socket, which is right for app teardown and wrong for a connection that has
+    /// already gone, so `ipcConnectionClosed` retires this token with `run` instead.
+    let shutdownToken: AppRuntimeSchedulingToken
+}
+
 // App runtime owns the mutable app model, performs the commands emitted by the
 // pure update function, and bridges model changes into AppKit objects and live sessions.
 @MainActor
@@ -196,6 +210,13 @@ class AppRuntime {
     // Keyed by subscription id, like the subscriptions themselves. Anything coarser is shared
     // by sibling streams and cannot be retired one stream at a time.
     private var paneTapeFollowTransports: [UUID: PaneTapeFollowTransport] = [:]
+    // Keyed by connection id: one subscription per connection, and a repeat subscribe
+    // replaces the entry rather than adding a second push target.
+    private var rosterSubscribers: [UUID: RosterSubscriber] = [:]
+    // The last roster a reconcile projected -- never the last one a subscriber was
+    // handed. A bootstrap reply must not advance it, or a change a pending sweep still
+    // owes the existing subscribers would be swallowed by a newcomer's reply.
+    private var rosterBaseline = PaneRoster(panes: [])
     private var ipcServer: IpcServer?
     private var ipcServerToken: AppRuntimeSchedulingToken?
     let schedulingLifecycle = AppRuntimeSchedulingLifecycle()
@@ -230,6 +251,7 @@ class AppRuntime {
         self.model.config = launchConfig
         self.model.resolvedFontFamily = resolveConfiguredFontFamily(launchConfig)
         self.lightCheckpointBaseline = LightCheckpointProjection(snapshot: toSnapshot(model))
+        self.rosterBaseline = paneRoster(in: model)
 
         // Weak on purpose: the runtime owns the outbox, and a drain scheduled on
         // the main queue must be inert once the runtime is gone.
@@ -419,6 +441,7 @@ class AppRuntime {
         case .reconcileNow:
             cancelCoalescedReconcile()
             reconcile()
+            pushRosterIfChanged()
         case .scheduleCoalesced:
             scheduleCoalescedReconcile()
         case .coalesceIntoPending:
@@ -444,7 +467,58 @@ class AppRuntime {
     /// which is why a report never drains on its own stack.
     private func sweepAndDispatchFollowUps() {
         reconcile()
+        pushRosterIfChanged()
         outbox.drain()
+    }
+
+    /// Sends the roster to every subscriber when it moved since the last reconcile, then
+    /// advances the baseline.
+    ///
+    /// The baseline advances whether or not anyone is subscribed, so the first roster a
+    /// later subscriber is pushed describes a change that happened while it was
+    /// listening -- it already has everything before that from its subscribe reply.
+    private func pushRosterIfChanged() {
+        guard schedulingLifecycle.isActive else { return }
+        let roster = paneRoster(in: model)
+        guard roster != rosterBaseline else { return }
+        rosterBaseline = roster
+        guard rosterSubscribers.isEmpty == false else { return }
+        let params = roster.jsonValue
+        for subscriber in rosterSubscribers.values {
+            subscriber.connection.writeNotification(
+                method: Methods.rosterEvent,
+                params: params
+            )
+        }
+    }
+
+    /// Answers a roster subscribe on its own connection and keeps that connection as a
+    /// push target until it closes.
+    ///
+    /// Deliberately does not touch `rosterBaseline`: the reply is this caller's whole
+    /// starting picture, and moving the baseline here would tell every other subscriber
+    /// that a change they have not seen yet has already been delivered.
+    private func subscribeToRoster(reqId: UUID, roster: PaneRoster) {
+        guard let transport = takeIpcConnection(for: reqId) else { return }
+        guard schedulingLifecycle.isActive else {
+            transport.close()
+            return
+        }
+        let connection = transport.connection
+        transport.writeSuccess(reqId: reqId, result: roster.jsonValue)
+        if let existing = rosterSubscribers.removeValue(forKey: connection.id) {
+            schedulingLifecycle.run(existing.shutdownToken, action: {})
+        }
+        guard let token = schedulingLifecycle.arm(.subscription, cancel: {
+            connection.close()
+        }) else {
+            connection.close()
+            return
+        }
+        rosterSubscribers[connection.id] = RosterSubscriber(
+            connection: connection,
+            shutdownToken: token
+        )
     }
 
     /// Close pane-level shortcut help without dismissing the parent todo popover.
@@ -568,6 +642,11 @@ class AppRuntime {
         }
         for subscriptionId in paneTapeFollowSubscriptions.connectionClosed(connectionId) {
             retirePaneTapeFollowTransport(subscriptionId)
+        }
+        // Retired with `run`, not `cancel`: the socket this token would close is the one
+        // that just went away, and cancelling a sibling's is what this key prevents.
+        if let subscriber = rosterSubscribers.removeValue(forKey: connectionId) {
+            schedulingLifecycle.run(subscriber.shutdownToken, action: {})
         }
     }
 
@@ -948,6 +1027,11 @@ class AppRuntime {
         for subscriptionId in paneTapeFollowSubscriptions.removeAll() {
             retirePaneTapeFollowTransport(subscriptionId)?.close()
         }
+        for subscriber in rosterSubscribers.values {
+            schedulingLifecycle.run(subscriber.shutdownToken, action: {})
+            subscriber.connection.close()
+        }
+        rosterSubscribers.removeAll()
         ipcConnections.removeAll()
         ipcConnectionTokens.removeAll()
         for host in paneHosts.values {
@@ -1205,6 +1289,9 @@ class AppRuntime {
                     policy: policy
                 )
             }
+
+        case .subscribeRoster(let reqId, let roster):
+            subscribeToRoster(reqId: reqId, roster: roster)
 
         case .saveDanTermConfig(let config):
             do {

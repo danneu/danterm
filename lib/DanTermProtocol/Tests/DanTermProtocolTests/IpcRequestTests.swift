@@ -297,6 +297,10 @@ struct IpcRequestTests {
         return [
             CLICommand(request: .doctorPermissions, outputMode: .none),
             CLICommand(request: .ping, outputMode: .none),
+            // Built by the phone client rather than by a CLI verb, like the two above.
+            // It still belongs here: the catalog proof is what stops a method from
+            // joining the enum without a decode that round trips.
+            CLICommand(request: .roster, outputMode: .none),
             try parseCLI(["ls"]),
             try parseCLI(["focus"]),
             try parseCLI(["quit"]),

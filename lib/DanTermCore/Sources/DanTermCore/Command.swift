@@ -64,6 +64,11 @@ enum Command {
         start: PaneTapeStartPosition,
         policy: PaneTapeSyncPolicy
     )
+    /// Answers a roster subscribe and registers the connection in one command. Both
+    /// halves need the request's socket, and the reply consumes it, so splitting them
+    /// into a reply plus a subscribe would leave the second half nothing to hold.
+    /// The roster travels with the command because the core is what projects it.
+    case subscribeRoster(reqId: UUID, roster: PaneRoster)
     // System
     // `paneId` is carried for grouping alone: it becomes the banner's thread
     // identifier so a chatty pane stacks into one Notification Center entry
