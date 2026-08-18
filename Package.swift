@@ -9,22 +9,14 @@ let package = Package(
         .executable(name: "DanTermCLI", targets: ["DanTermCLI"]),
         .executable(name: "DanTermBundleLayoutTool", targets: ["DanTermBundleLayoutTool"]),
         .executable(name: "DanTermInstanceIdentityTool", targets: ["DanTermInstanceIdentityTool"]),
-        .library(name: "DanTermClient", targets: ["DanTermClient"]),
     ],
     dependencies: [
+        .package(path: "lib/DanTermClient"),
         .package(path: "lib/DanTermProtocol"),
         .package(path: "lib/TerminalCore"),
         .package(path: "lib/TerminalPTY"),
     ],
     targets: [
-        .target(
-            name: "DanTermClient",
-            dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
-            path: "lib/DanTermClient/Sources/DanTermClient",
-            swiftSettings: [
-                .swiftLanguageMode(.v6),
-            ]
-        ),
         .target(
             name: "DanTermSupport",
             dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
@@ -66,8 +58,8 @@ let package = Package(
         .executableTarget(
             name: "DanTermCLI",
             dependencies: [
-                "DanTermClient",
                 "DanTermSupport",
+                .product(name: "DanTermClient", package: "DanTermClient"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
             ],
             path: "cli",
@@ -91,25 +83,14 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
-        .testTarget(
-            name: "DanTermClientTests",
-            dependencies: [
-                "DanTermClient",
-                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
-            ],
-            path: "lib/DanTermClient/Tests/DanTermClientTests",
-            swiftSettings: [
-                .swiftLanguageMode(.v6),
-            ]
-        ),
         // Pairs the pane-tape producer, which is a Mac-host role, with the client's
         // reader. Neither package can host this on its own: the producer is internal to
         // DanTermSupport, and DanTermClient must not depend on the host layer.
         .testTarget(
             name: "DanTermPaneTapeRoundTripTests",
             dependencies: [
-                "DanTermClient",
                 "DanTermSupport",
+                .product(name: "DanTermClient", package: "DanTermClient"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
             ],
             path: "client-tests",

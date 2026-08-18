@@ -185,7 +185,7 @@ ownership lint fails on the tree the middle slices clean up, so it lands last.
       edit -- adding the dependency while the same-named target still exists puts
       two targets of one name in the graph, so the swap cannot be split across
       commits. Drop the dead `--filter` from the protocol gate step.
-- [ ] **3. `DanTermClient` becomes a package dependency.** Same shape.
+- [x] **3. `DanTermClient` becomes a package dependency.** Same shape.
 - [ ] **4. `DanTermSupport` becomes a package dependency,** carrying the CoreText
       link into `lib/DanTermSupport/Package.swift`.
 - [ ] **5. The ownership lint, its self-test, and the written rule.** An ADR
@@ -254,3 +254,20 @@ Per slice, and in full after slice 5:
   still builds both pinned packages with tests, and a dev slot launched, answered
   `ls` over its control socket, and quit cleanly. The root test step now runs 164
   tests; the protocol suite runs only under `lib/DanTermProtocol`.
+- **Slice 3.** The root also drops its `.library(name: "DanTermClient")` product. Its
+  only consumers outside the root -- `ios/DanTermMobileKit` and
+  `ios/DanTermMobileApp` -- already reach the module through
+  `.package(path: "../../lib/DanTermClient")`, so the root product exported a target
+  nobody asked the root for.
+- **Slice 3.** `cli-tests` imports `DanTermClient` without naming it as a dependency
+  and keeps working, because `DanTermCLI` still carries the product transitively. That
+  was true before this change too, so the slice leaves it alone rather than adding a
+  dependency the plan did not ask for.
+- **Slice 3.** No gate step changed. Slice 1 already added the `lib/DanTermClient`
+  lane, so this slice only removes the second runner rather than moving a lane.
+- **Slice 3 verification.** The full gate passed all 96 steps in 75s, the iOS gate
+  still cross-compiles `lib/DanTermClient` and `lib/DanTermProtocol` with tests, the
+  coverage lint reports 9 estates each run once, and a dev slot launched, answered
+  `ls` over its control socket, and quit cleanly. The root test step now runs 121
+  tests, down from 164 -- exactly the 43 the client suite contributes, which now run
+  only under `lib/DanTermClient`.
