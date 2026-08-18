@@ -120,6 +120,9 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     func clearTheme() {}
     func setFontSize(_ size: Double) {}
     func setFontFamily(_ family: String?) {}
+    /// Recorded so a test can watch a claim reach the pane and a take-back undo it.
+    var gridOverrides: [PaneGridOverride?] = []
+    func setGridOverride(_ grid: PaneGridOverride?) { gridOverrides.append(grid) }
     func setCopyOnSelect(_ enabled: Bool) {}
     func startSearch() { startSearchCount += 1 }
     func setSearchNeedle(_ needle: String) { searchNeedles.append(needle) }
@@ -271,7 +274,8 @@ func makeEmptyPaneTapeOpening() -> PaneTapeOpening {
 func makeCommandSnapshot(
     paneId: PaneId,
     scrollback: String? = nil,
-    splitWith siblingPaneId: PaneId? = nil
+    splitWith siblingPaneId: PaneId? = nil,
+    gridOverride: PaneGridOverrideSnapshot? = nil
 ) -> AppModelSnapshot {
     let groupId = GroupId(rawValue: UUID())
     let tabId = TabId(rawValue: UUID())
@@ -281,7 +285,8 @@ func makeCommandSnapshot(
         cwd: "/tmp/project",
         command: nil,
         scrollback: scrollback,
-        theme: nil
+        theme: nil,
+        gridOverride: gridOverride
     )
     var rootNode = SplitNodeSnapshot.leaf(pane)
     if let siblingPaneId {

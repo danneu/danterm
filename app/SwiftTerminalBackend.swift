@@ -47,7 +47,10 @@ final class SwiftTerminalBackend {
             workingDirectory: request.workingDirectory,
             command: request.command,
             launchCommand: request.launchCommand,
-            environment: request.environment.map(EnvironmentEntry.init(name:value:))
+            environment: request.environment.map(EnvironmentEntry.init(name:value:)),
+            initialDimensions: request.gridOverride.map {
+                TerminalDimensions(columns: $0.columns, rows: $0.rows)
+            }
         )
         let configuration = assembleTerminalPaneLaunch(
             request: launchRequest,
@@ -84,6 +87,7 @@ final class SwiftTerminalBackend {
             controller: controller,
             fontSize: request.fontSize,
             fontFamily: request.fontFamily,
+            gridOverride: request.gridOverride,
             onSessionEnded: { [weak self, weak controller] result in
                 guard case .exited = result, let self, let controller else { return }
                 self.writeRecording(from: controller, id: id)
@@ -93,7 +97,8 @@ final class SwiftTerminalBackend {
         return SwiftTerminalSessionView(
             controller: controller,
             fontSize: request.fontSize,
-            fontFamily: request.fontFamily
+            fontFamily: request.fontFamily,
+            gridOverride: request.gridOverride
         )
         #endif
     }

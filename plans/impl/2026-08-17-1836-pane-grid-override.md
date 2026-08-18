@@ -222,7 +222,7 @@ reopen condition.
   take-back messages
 - [x] 2. feat(ipc): add `pane.resize` and the `danterm pane resize` CLI verb,
   reported by `pane.info` and `ls`
-- [ ] 3. feat(app): drive the pane grid from the override, including
+- [x] 3. feat(app): drive the pane grid from the override, including
   restored-pane launch
 - [ ] 4. feat(render): Mac remote-sized rendering with the take-back
   affordance
@@ -254,3 +254,24 @@ reopen condition.
   and I7's "out-of-range persists as absent" the same one rule, and leaves
   the IPC layer in commit 2 with nothing to validate beyond mapping a nil
   construction to invalid-params.
+- Commit 3 rides the override to the view on the existing per-pane config
+  channel: `PaneConfigKey` gains it and `reconcilePaneConfig` pushes it,
+  so a set and a clear are both just a changed key that the same diff
+  applies. No new command and no new reconcile pass.
+- The view keeps I4 by construction rather than by a suppression rule.
+  `synchronizePresentation` reads `override ?? boundsDerivedGrid`, so
+  while a claim is present the bounds conversion is never evaluated, the
+  computed grid never changes, and the existing "only submit when the
+  grid changed" test already stops every rectangle input at the view.
+- Restored-pane launch takes the override as *spawn* geometry, not as a
+  grid submitted after launch: `TerminalPaneLaunchRequest` gained an
+  optional `initialDimensions`, and `SwiftTerminalSessionView` takes the
+  override at construction so its first presentation pass submits the
+  claim rather than the slot-derived grid. Submitting after launch would
+  have left the 80x24 default observable to the child, which I7 forbids.
+- PO3 was confirmed live against a dev slot: a claim moved the child's
+  real `stty size` to 60x20, survived a split that halved the pane's
+  rectangle, and `--fit` returned it to the rectangle's grid. The restart
+  half could not be driven through `just launch-slot`, which always
+  passes `--fresh`; it is covered by the app tests plus a check that the
+  written recovery checkpoint carries the override.

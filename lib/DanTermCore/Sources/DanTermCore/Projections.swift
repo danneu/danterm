@@ -442,22 +442,28 @@ struct PaneConfigKey: Equatable {
   /// Whether the pane arms copy-on-select. Carried in the key so a reload retargets
   /// already-mounted panes through the same diff as theme and font.
   let copyOnSelect: Bool
+  /// The grid a client claimed for this pane, or nil to derive the grid from the
+  /// pane's rectangle. Carried in the key because a set and a clear are both just
+  /// a changed key, so the same diff that pushes a claim also undoes it.
+  let gridOverride: PaneGridOverride?
 
   init(
     theme: String,
     fontSize: Double = DanTermConfig.default.resolvedFontSize,
     fontFamily: String? = nil,
-    copyOnSelect: Bool = DanTermConfig.default.copyOnSelect
+    copyOnSelect: Bool = DanTermConfig.default.copyOnSelect,
+    gridOverride: PaneGridOverride? = nil
   ) {
     self.theme = theme
     self.fontSize = fontSize
     self.fontFamily = fontFamily
     self.copyOnSelect = copyOnSelect
+    self.gridOverride = gridOverride
   }
 }
 
 /// Projects the resolved theme, per-pane effective font size, resolved font
-/// family, and copy-on-select onto every live pane.
+/// family, copy-on-select, and the claimed grid override onto every live pane.
 func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
@@ -468,7 +474,8 @@ func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
       ),
       fontSize: effectiveFontSize(for: pane, config: model.config),
       fontFamily: model.resolvedFontFamily,
-      copyOnSelect: model.config.copyOnSelect
+      copyOnSelect: model.config.copyOnSelect,
+      gridOverride: pane.gridOverride
     )
   }
   return result

@@ -137,6 +137,7 @@ class TerminalView: NSView, TerminalSession {
     func clearTheme() {}
     func setFontSize(_ size: Double) {}
     func setFontFamily(_ family: String?) {}
+    func setGridOverride(_ grid: PaneGridOverride?) {}
     func setCopyOnSelect(_ enabled: Bool) {}
     func startSearch() {}
     func setSearchNeedle(_ needle: String) {}

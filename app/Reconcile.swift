@@ -163,6 +163,7 @@ extension AppRuntime {
             paneSession(for: paneId)?.setFontSize(key.fontSize)
             paneSession(for: paneId)?.setFontFamily(key.fontFamily)
             paneSession(for: paneId)?.setCopyOnSelect(key.copyOnSelect)
+            paneSession(for: paneId)?.setGridOverride(key.gridOverride)
         }, remove: { paneId in
             paneSession(for: paneId)?.clearTheme()
         })

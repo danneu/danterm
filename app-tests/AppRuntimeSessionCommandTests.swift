@@ -38,6 +38,58 @@ struct AppRuntimeSessionCommandTests {
         #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.subscription] == 1)
     }
 
+    @Test("a restored pane's session request carries the grid it was claimed at")
+    func restoredPaneRequestsItsClaimedGrid() throws {
+        // Intent: the grid a restored pane is claimed at rides its session request,
+        //   so the child is spawned at that grid instead of being resized into it.
+        // Why it exists: a request without it would launch the child at the shared
+        //   default and only then submit the claim, which the child sees as a real
+        //   winsize and the pane's tape records as a resize.
+        // Scenario: spec-first -- the app restarts with a pane the phone claimed.
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let claimed = PaneId(rawValue: UUID())
+        let unclaimed = PaneId(rawValue: UUID())
+
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(
+            paneId: claimed,
+            splitWith: unclaimed,
+            gridOverride: PaneGridOverrideSnapshot(columns: 60, rows: 30)
+        ))
+
+        #expect(fixture.sessionRequests.count == 2)
+        #expect(fixture.sessionRequests[0].gridOverride == PaneGridOverride(columns: 60, rows: 30))
+        #expect(fixture.sessionRequests[1].gridOverride == nil)
+    }
+
+    @Test("claiming and taking back a pane's grid both reach its live session")
+    func gridOverrideReachesTheLiveSession() throws {
+        // Intent: a claim written to the model reaches the pane already on screen,
+        //   and a take-back reaches it as an explicit clear.
+        // Why it exists: the override rides the per-pane config diff, which pushes
+        //   only keys that changed. A claim the projection or the reconcile pass
+        //   dropped would leave the pane running at its rectangle's grid with the
+        //   model insisting otherwise.
+        // Scenario: spec-first -- the phone claims a live pane, the user takes it back.
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+
+        runtime.send(.setPaneGridOverride(
+            paneId: paneId,
+            grid: PaneGridOverride(columns: 60, rows: 30)!
+        ))
+
+        #expect(fixture.session.gridOverrides.last == PaneGridOverride(columns: 60, rows: 30))
+
+        runtime.send(.clearPaneGridOverride(paneId: paneId))
+
+        #expect(fixture.session.gridOverrides.last == .some(nil))
+    }
+
     @Test("session input, focus, and immediate search commands reach the selected session")
     func sessionCommandsReachSession() throws {
         let fixture = RecordingAppRuntimePorts()

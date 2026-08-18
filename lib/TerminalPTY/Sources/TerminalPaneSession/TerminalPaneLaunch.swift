@@ -1,7 +1,8 @@
 // Pure assembly of pane request values and injected ambient launch facts.
 import PaneProcessLifecycle
 
-/// Initial geometry shared by host construction and launch policy for every pane.
+/// Initial geometry for a pane whose request names none: host construction and
+/// launch policy share it.
 public let terminalPaneInitialDimensions = TerminalDimensions(columns: 80, rows: 24)
 
 /// Carries backend-neutral pane values without depending on DanTerm's root package.
@@ -14,18 +15,24 @@ public struct TerminalPaneLaunchRequest: Equatable, Sendable {
     public let launchCommand: String?
     /// Pane-scoped environment layer with final precedence.
     public let environment: [EnvironmentEntry]
+    /// Geometry to install before the child starts, or nil for the shared default.
+    /// A pane restored at a size a client claimed supplies it, so the child never
+    /// observes the default grid ahead of the claim.
+    public let initialDimensions: TerminalDimensions?
 
     /// Captures values already owned by one DanTerm pane request.
     public init(
         workingDirectory: String?,
         command: String?,
         launchCommand: String?,
-        environment: [EnvironmentEntry]
+        environment: [EnvironmentEntry],
+        initialDimensions: TerminalDimensions? = nil
     ) {
         self.workingDirectory = workingDirectory
         self.command = command
         self.launchCommand = launchCommand
         self.environment = environment
+        self.initialDimensions = initialDimensions
     }
 }
 
@@ -97,7 +104,7 @@ public func assembleTerminalPaneLaunch(
     request: TerminalPaneLaunchRequest,
     facts: TerminalPaneLaunchFacts
 ) -> TerminalPaneLaunchConfiguration {
-    let dimensions = terminalPaneInitialDimensions
+    let dimensions = request.initialDimensions ?? terminalPaneInitialDimensions
     var advertisedEnvironment = [
         EnvironmentEntry(name: "TERM", value: "xterm-256color"),
         EnvironmentEntry(name: "COLORTERM", value: "truecolor"),

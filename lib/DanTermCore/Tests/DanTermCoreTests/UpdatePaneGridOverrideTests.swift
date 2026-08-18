@@ -112,6 +112,30 @@ import DanTermProtocol
         #expect(model.pane(source)?.gridOverride == grid(60, 30))
     }
 
+    // MARK: - The projection to the view
+
+    @Test("desiredPaneConfig carries the override and drops it on a clear")
+    func paneConfigCarriesTheOverride() {
+        // Intent: the override reaches the pane's session on the same per-pane
+        //   config channel that already carries theme, font, and copy-on-select.
+        // Why it exists: the reconciler only pushes a key that changed, so an
+        //   override the projection omits would never reach the view at all,
+        //   and a clear that leaves the key equal would never be undone.
+        // Scenario: spec-first -- a phone claims one pane of a split, then the
+        //   user takes it back at the Mac.
+        var model = makeModel()
+        let (plain, claimed) = splitPaneIds(&model)
+
+        update(&model, .setPaneGridOverride(paneId: claimed, grid: grid(60, 30)))
+
+        #expect(desiredPaneConfig(in: model)[claimed]?.gridOverride == grid(60, 30))
+        #expect(desiredPaneConfig(in: model)[plain]?.gridOverride == nil)
+
+        update(&model, .clearPaneGridOverride(paneId: claimed))
+
+        #expect(desiredPaneConfig(in: model)[claimed]?.gridOverride == nil)
+    }
+
     // MARK: - Accepted range
 
     @Test("the accepted range's endpoints are representable and everything outside is not")

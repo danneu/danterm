@@ -94,6 +94,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/ChipRenderer.swift" \
         "$SCRIPT_DIR/app/ChipView.swift" \
         "$SCRIPT_DIR/app/MenuCommandPolicy.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneGridOverride.swift" \
         "$SCRIPT_DIR/app/TerminalSession.swift" \
         "$SCRIPT_DIR/app/AppRuntimeSchedulingLifecycle.swift" \
         "$SCRIPT_DIR/app/AppPresentationLifecycle.swift" \

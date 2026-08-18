@@ -109,6 +109,10 @@ struct TerminalSessionRequest {
     /// The verified-installed family, or nil for the system monospace font; the raw
     /// requested name never reaches rendering.
     let fontFamily: String?
+    /// The grid the pane is already claimed at, or nil to size the child from the
+    /// pane's rectangle. Carried on the request rather than pushed after mount so a
+    /// restored claimed pane's child never observes a grid nobody asked for.
+    let gridOverride: PaneGridOverride?
 }
 
 /// Stable per-pane terminal owner mounted and reparented by the AppKit reconciler.
@@ -160,6 +164,10 @@ protocol TerminalSession: AnyObject {
     func clearTheme()
     func setFontSize(_ size: Double)
     func setFontFamily(_ family: String?)
+    /// Fixes the pane's grid at a claimed size, or with nil hands it back to the
+    /// pane's rectangle. While a grid is set no rectangle, scale, or font input
+    /// may move the grid the child runs at.
+    func setGridOverride(_ grid: PaneGridOverride?)
     /// Arms or disarms copy-on-select. Enabling installs the completion subscriber the
     /// engine gates text extraction on, so disabling costs the pointer path nothing.
     func setCopyOnSelect(_ enabled: Bool)

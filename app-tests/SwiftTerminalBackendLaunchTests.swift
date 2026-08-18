@@ -53,6 +53,42 @@ struct SwiftTerminalBackendLaunchTests {
         }
     }
 
+    @Test("a claimed grid becomes the child's spawn geometry, and no claim keeps the default")
+    @MainActor
+    func claimedGridBecomesSpawnGeometry() throws {
+        // Intent: the grid a request names is installed on the PTY before the child
+        //   starts, and a request that names none still spawns at 80x24.
+        // Why it exists: a restored claimed pane's child must never observe the
+        //   default grid. Only spawn geometry can prevent that -- a submitted grid
+        //   after launch is already one size the child saw.
+        // Scenario: spec-first -- restore builds one claimed pane and one plain one.
+        let fixture = try SyntheticDanTermBundle()
+        defer { fixture.remove() }
+        let bundle = try #require(Bundle(url: fixture.bundleURL))
+        let facts = SwiftTerminalBackend.launchFacts(
+            bundle: bundle,
+            requestedWorkingDirectory: "/",
+            localeFallbackEnabled: true
+        )
+
+        func spawnDimensions(_ dimensions: TerminalDimensions?) throws -> TerminalDimensions {
+            let request = TerminalPaneLaunchRequest(
+                workingDirectory: "/",
+                command: nil,
+                launchCommand: nil,
+                environment: [],
+                initialDimensions: dimensions
+            )
+            let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
+            let launch = try resolveLaunchPlan(configuration.launchInput).get()
+            return try #require(launch.attempts.first).initialDimensions
+        }
+
+        #expect(try spawnDimensions(TerminalDimensions(columns: 60, rows: 30))
+            == TerminalDimensions(columns: 60, rows: 30))
+        #expect(try spawnDimensions(nil) == TerminalDimensions(columns: 80, rows: 24))
+    }
+
     @Test("locale selection prefers the regional candidate and falls back only when needed", arguments: [
         (accepted: ["fr_CA.UTF-8"], expected: "fr_CA.UTF-8"),
         (accepted: ["en_US.UTF-8"], expected: "en_US.UTF-8"),

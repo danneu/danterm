@@ -182,6 +182,93 @@ func swiftTerminalSessionViewTests() {
                      "a sliver pane did not report the floored grid: \(controller.gridDimensions)")
     }
 
+    uiTest("a grid override drives the pane's grid and no rectangle change disturbs it") {
+        // Intent: setting an override submits exactly that grid once, every later
+        //   rectangle change submits nothing at all, and clearing submits exactly
+        //   the grid the pane's current rectangle derives.
+        // Why it exists: a claimed pane runs at the claiming client's size. If a
+        //   resize still reached the child the Mac's own layout would silently
+        //   undo the claim, which is the whole reason the override exists.
+        // Scenario: spec-first -- the phone claims a pane at 60x30, then the user
+        //   drags the Mac window's divider, then takes the pane back.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+        let gridsAtMount = controller.gridDimensions.count
+
+        pane.setGridOverride(PaneGridOverride(columns: 60, rows: 30))
+
+        try uiExpect(
+            controller.gridDimensions.count == gridsAtMount + 1,
+            "the override did not submit exactly one grid: \(controller.gridDimensions)"
+        )
+        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 60, rows: 30),
+                     "the override did not reach the child: \(controller.gridDimensions)")
+
+        pane.setFrameSize(NSSize(width: 200, height: 400))
+
+        try uiExpect(
+            controller.gridDimensions.count == gridsAtMount + 1,
+            "a rectangle change under an override submitted a grid: \(controller.gridDimensions)"
+        )
+
+        pane.setGridOverride(nil)
+
+        try uiExpect(
+            controller.gridDimensions.count == gridsAtMount + 2,
+            "clearing the override did not submit exactly one grid: \(controller.gridDimensions)"
+        )
+        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 25, rows: 25),
+                     "clearing did not return the pane to its rectangle's grid: \(controller.gridDimensions)")
+    }
+
+    uiTest("a font change under an override moves cell metrics but not the grid") {
+        // Intent: an override fixes rows and columns, so a font change only
+        //   changes how large a cell is drawn.
+        // Why it exists: font size is a pixel input, not a grid input. Letting it
+        //   re-derive the grid would resize a claimed pane's child every time the
+        //   user pressed Cmd-+.
+        // Scenario: spec-first -- the user grows the font while the phone holds a
+        //   claim on the pane.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.setGridOverride(PaneGridOverride(columns: 60, rows: 30))
+        let gridsAfterClaim = controller.gridDimensions.count
+
+        pane.setFontSize(26)
+
+        try uiExpect(
+            controller.gridDimensions.count == gridsAfterClaim,
+            "a font change under an override submitted a grid: \(controller.gridDimensions)"
+        )
+        try uiExpect(pane.state.cellHeight == 32,
+                     "a font change under an override did not update cell metrics: \(pane.state.cellHeight)")
+    }
+
+    uiTest("a pane created with an override submits only that grid") {
+        // Intent: a pane that starts overridden reports the override as its very
+        //   first grid, with no rectangle-derived grid ahead of it.
+        // Why it exists: a restored pane's child must never observe a size no
+        //   client asked for. An earlier grid would reach the PTY as a real
+        //   winsize and show up on the pane's tape.
+        // Scenario: spec-first -- the app restarts with a pane the phone had
+        //   claimed at 60x30.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(
+            controller: controller,
+            fontSize: 13,
+            gridOverride: PaneGridOverride(columns: 60, rows: 30)
+        )
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+
+        try uiExpect(controller.gridDimensions == [TerminalDimensions(columns: 60, rows: 30)],
+                     "a pane created overridden submitted another grid: \(controller.gridDimensions)")
+    }
+
     uiTest("geometry that is not finite or is out of Int range yields no grid and no cell") {
         // Intent: both pure geometry conversions the pane view calls refuse an unusable
         //   input instead of returning a value built from it.

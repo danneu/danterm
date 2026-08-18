@@ -992,7 +992,8 @@ class AppRuntime {
                 fontSize: model.pane(paneId).map {
                     effectiveFontSize(for: $0, config: model.config)
                 } ?? model.config.resolvedFontSize,
-                fontFamily: model.resolvedFontFamily
+                fontFamily: model.resolvedFontFamily,
+                gridOverride: model.pane(paneId)?.gridOverride
             ) else {
                 send(.sessionCreationFailed(sessionId: sessionId))
                 break
@@ -1791,6 +1792,7 @@ class AppRuntime {
                                 effectiveFontSize(for: $0, config: restoredModel.config)
                             } ?? restoredModel.config.resolvedFontSize,
                             fontFamily: restoredModel.resolvedFontFamily,
+                            gridOverride: restoredModel.pane(paneId)?.gridOverride,
                             replayFile: replayFile
                         ) else {
                             throw RestoreBuildError.sessionCreationFailed
@@ -1887,6 +1889,7 @@ class AppRuntime {
         themeName: String?,
         fontSize: Double,
         fontFamily: String?,
+        gridOverride: PaneGridOverride?,
         replayFile: URL? = nil
     ) -> PaneHost? {
         let request = TerminalSessionRequest(
@@ -1898,7 +1901,8 @@ class AppRuntime {
             localeFallbackEnabled: model.config.localeFallback,
             themeName: themeName,
             fontSize: fontSize,
-            fontFamily: fontFamily
+            fontFamily: fontFamily,
+            gridOverride: gridOverride
         )
         guard let session = ports.createTerminalSession(request) else {
             if let replayFile { try? FileManager.default.removeItem(at: replayFile) }

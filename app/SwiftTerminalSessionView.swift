@@ -210,6 +210,15 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// The verified-installed family to render, or nil for the system monospace
     /// font. Never a raw name from config -- only a resolved family reaches here.
     private var fontFamily: String?
+    /// The grid a client claimed for this pane, or nil to derive the grid from the
+    /// view's own bounds. Present, it is the pane's grid outright: no bound, scale,
+    /// or font input can move it, so a claim survives every Mac layout event.
+    private var gridOverride: PaneGridOverride?
+    /// The claimed grid in the engine's own dimension type, so the presentation
+    /// pass compares and submits one kind of value.
+    private var overriddenDimensions: TerminalDimensions? {
+        gridOverride.map { TerminalDimensions(columns: $0.columns, rows: $0.rows) }
+    }
 
     weak var paneWrapper: PaneWrapperView?
     /// The pane's clipboard in both directions -- explicit selection copies out and Edit > Paste
@@ -289,12 +298,17 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller: TerminalPaneSessionController,
         fontSize: Double = DanTermConfig.default.resolvedFontSize,
         fontFamily: String? = nil,
+        gridOverride: PaneGridOverride? = nil,
         resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
         onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
     ) {
         self.controller = controller
         self.fontSize = CGFloat(fontSize)
         self.fontFamily = fontFamily
+        // Supplied at construction, not pushed after mount: the pane's first
+        // presentation pass already submits a grid, and for a restored claimed
+        // pane that grid has to be the claim itself.
+        self.gridOverride = gridOverride
         self.resolveTheme = resolveTheme
         super.init(frame: .zero)
         wantsLayer = true
@@ -1016,6 +1030,15 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         synchronizePresentation()
     }
 
+    /// Claims the pane's grid, or hands it back to the pane's rectangle with nil.
+    /// The model is the only writer, so both directions arrive here through the
+    /// per-pane config reconcile and nothing else.
+    func setGridOverride(_ grid: PaneGridOverride?) {
+        guard grid != gridOverride else { return }
+        gridOverride = grid
+        synchronizePresentation()
+    }
+
     /// Installing the handler is the whole gate: with it absent the engine never extracts
     /// a completed selection's text, so the option being off costs the pointer path nothing.
     /// The text arrives already captured at the gesture's completion and is written as
@@ -1277,9 +1300,14 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// The view's only presentation-input detector, and the only place that decides
     /// whether the buffers on screen can still be trusted (research/33 T25 I3).
     /// Every entry point that can move an input arrives here -- resize, window
-    /// mount, backing properties, font size, font family, and the runtime's
-    /// screen-change refresh -- so none of them can re-render on a narrower test
-    /// than the whole `SurfaceInputs` tuple.
+    /// mount, backing properties, font size, font family, the claimed grid
+    /// override, and the runtime's screen-change refresh -- so none of them can
+    /// re-render on a narrower test than the whole `SurfaceInputs` tuple.
+    ///
+    /// A claimed override is the grid outright, so the bounds conversion below is
+    /// never even evaluated while one is present. That is what makes every
+    /// rectangle input inert for a claimed pane: the grid it computes to is the
+    /// one already submitted, so nothing reaches the controller or the PTY.
     ///
     /// The bail below is the display-scaling invariant, not a defensive check
     /// (docs/design/2026-03-05-display-scaling.md): a zero-area surface, an absent
@@ -1290,7 +1318,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
               bounds.width > 0, bounds.height > 0,
               let scale = window?.backingScaleFactor,
               let metrics = resolvedMetrics(displayScale: scale),
-              let dimensions = terminalGridDimensions(
+              let dimensions = overriddenDimensions ?? terminalGridDimensions(
                   size: .init(width: Double(bounds.width), height: Double(bounds.height)),
                   cellSize: .init(
                       width: Double(metrics.cellSize.width),
