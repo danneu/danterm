@@ -37,7 +37,13 @@ STEPS=(
     # Scope: the root graph, where every cross-manifest edge terminates. The nested
     # package test lanes and the iOS gate still build warm.
     'scratch=$(mktemp -d); swift build --build-tests --scratch-path $scratch; rc=$?; rm -rf $scratch; exit $rc'
-    'swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate -Xswiftc -Xfrontend -Xswiftc -warn-long-function-bodies=500'
+    # The type-check budget lives in lib/TerminalCore/Package.swift, so this lane needs
+    # no extra flags. It keeps its own scratch path: the compiler reports an
+    # over-budget body only when it type-checks that body, so what the gate can measure
+    # is exactly what the gate's own build has to recompile. A tree only gate runs touch
+    # guarantees every file changed since the last `just test` is re-type-checked, and
+    # therefore measured, during the run that judges it.
+    'swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate'
     './scripts/ios-portability-gate.sh'
     'swift test --package-path ios/DanTermMobileKit --scratch-path ios/DanTermMobileKit/.build-gate'
     './scripts/test-terminal-pty.sh'

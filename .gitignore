@@ -5,9 +5,12 @@ build/
 
 # SwiftPM
 .spm-build/
-# The `just test` gate builds lib/TerminalCore with extra -Xswiftc args, which change
-# SwiftPM's build-argument hash. Sharing .build/ with a bare `swift test` made the two
-# invalidate each other on every switch; the gate gets its own scratch path instead.
+# A scratch path only the `just test` gate builds into. The compiler reports a function
+# body over lib/TerminalCore's type-check budget only when it type-checks that body, so
+# the gate can only measure what its own build has to recompile. A tree nothing else
+# warms guarantees that window: every file changed since the last gate run is
+# re-type-checked, and therefore measured, during the run that judges it. Other packages
+# use the name for step independence.
 .build-gate/
 # The root app/CLI tests are an independent parallel gate step and need their own SwiftPM build tree.
 .build-app-tests/

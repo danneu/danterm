@@ -239,7 +239,7 @@ budget cannot be armed before the tree clears it with margin.
       distribution still gets recorded. If more than a couple of functions sit
       above it, stop and put the choice between reshaping them and moving the
       limit to the user; do not absorb it silently.
-- [ ] **3. The budget becomes a package property.** Confirm a consumer's graph
+- [x] **3. The budget becomes a package property.** Confirm a consumer's graph
       loads with the setting in place, then add it to every target, drop the
       `-Xswiftc` args from the `STEPS` entry while its scratch path stays, and
       rewrite the `.gitignore` comment so it records the measurement window
@@ -337,3 +337,23 @@ budget cannot be armed before the tree clears it with margin.
   197 ms on one cold run and 210 ms on the next with no edit in between, which is
   the wall-clock noise AR2 names. It is one more reason the margin, not the
   reading, is what makes the limit safe to arm.
+
+- **Slice 3: the graph loads.** `swift package describe` succeeds on the root
+  package and on `ios/DanTermMobileKit` with the manifest carrying
+  `.unsafeFlags`, so SwiftPM's path-dependency exemption holds on the real
+  toolchain as the plan predicted. `bash ./dev-build.sh --no-install` and
+  `./scripts/ios-portability-gate.sh` both succeed, and a full
+  `swift test --package-path lib/TerminalCore --scratch-path
+  lib/TerminalCore/.build-gate` passes 1173 tests cold with no budget warning.
+- **Slice 3: what the toolchain emits.** With the manifest setting temporarily
+  lowered to 25 ms, a build of `TerminalSpriteGeometry` with no flags on the
+  command line reports:
+  `warning: static method 'runs(pattern:cellWidthPixels:cellHeightPixels:lightStrokePixels:)'
+  took 96ms to type-check (limit: 25ms) [debug_long_function_body]`. That is the
+  identifier slice 4's script keys on, and it proves the budget is in force from
+  the manifest rather than from a command line.
+- **Slice 3: one shared value, not a helper.** The setting is a top-level
+  `let typeCheckBudget: SwiftSetting`, and every target spells
+  `swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]`. A uniform literal
+  line is what slice 4's manifest-coverage check has to recognize, so the
+  regular shape is doing work rather than only reading tidily.
