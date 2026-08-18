@@ -2,6 +2,7 @@
 // behavior, styling, and non-hit-testing event contract.
 import Cocoa
 
+@MainActor
 func linkPreviewViewTests() {
     print("LinkPreviewView")
 

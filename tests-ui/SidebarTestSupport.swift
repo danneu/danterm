@@ -3,6 +3,7 @@
 import Cocoa
 
 /// Drives the production sidebar reconciler and optionally materializes every row.
+@MainActor
 @discardableResult
 func applySidebarTestModel(
     _ model: AppModel,
@@ -21,6 +22,7 @@ func applySidebarTestModel(
 /// Begins an inline rename the way production does: the model records the
 /// target and the reconcile pass hands the field editor over. The view has no
 /// entry point of its own, so every suite opens an editor through here.
+@MainActor
 @discardableResult
 func beginRenameThroughModel(
     _ target: RenameTarget,
@@ -68,6 +70,7 @@ func pumpMainQueue(
 /// Runs the main queue for one turn, so a report that had a turn to arrive has
 /// taken it. The 10ms is a probe that is meant to expire, not a guard: the point
 /// is to give delivery its chance before asserting that nothing arrived.
+@MainActor
 func pumpMainQueueOnce() {
     RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
 }

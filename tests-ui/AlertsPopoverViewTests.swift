@@ -3,6 +3,7 @@
 import Cocoa
 
 /// Runs alerts popover coverage in the AppKit UI harness.
+@MainActor
 func alertsPopoverViewTests() {
     print("AlertsPopoverView")
 

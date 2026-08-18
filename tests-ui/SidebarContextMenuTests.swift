@@ -3,6 +3,7 @@
 // re-enabled by autoenablesItems drift.
 import Cocoa
 
+@MainActor
 func sidebarContextMenuTests() {
     print("SidebarContextMenu")
 
@@ -74,6 +75,7 @@ func sidebarContextMenuTests() {
 
 /// Sidebar in a real window with one group holding two tabs, rows materialized,
 /// so a synthesized right-click lands on a known row index (row 0 is the group).
+@MainActor
 private func makeSidebarRightClickHarness() -> (SidebarView, NSOutlineView, NSWindow) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
     sidebar.runtime = AppRuntime()
@@ -98,6 +100,7 @@ private func makeSidebarRightClickHarness() -> (SidebarView, NSOutlineView, NSWi
     return (sidebar, outline, window)
 }
 
+@MainActor
 private func makeSidebarContextMenuHarness(groupCount: Int) -> (SidebarView, AppModel) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
     let groups = (0..<groupCount).map { index in

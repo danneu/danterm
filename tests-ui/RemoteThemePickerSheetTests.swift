@@ -4,6 +4,7 @@
 import Cocoa
 
 /// Registers RemoteThemePickerSheet coverage in the standalone UI harness.
+@MainActor
 func remoteThemePickerSheetTests() {
     print("RemoteThemePickerSheet")
 

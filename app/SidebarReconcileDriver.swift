@@ -12,6 +12,9 @@ struct SidebarReconcileResult {
 
 /// Owns the only sidebar reconcile pipeline and its last-applied projection.
 /// Constructing a new driver guarantees that its first pass is a full rebuild.
+/// The cache tracks a main-actor view's applied rows, so the driver is
+/// main-actor state: reconciling reads and mutates `SidebarView` in the pass.
+@MainActor
 final class SidebarReconcileDriver {
     private var appliedProjection: SidebarProjection?
 

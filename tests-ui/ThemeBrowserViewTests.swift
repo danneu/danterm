@@ -3,6 +3,7 @@
 import Cocoa
 
 /// Registers ThemeBrowserView coverage in the standalone UI harness.
+@MainActor
 func themeBrowserViewTests() {
     print("ThemeBrowserView")
 

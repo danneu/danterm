@@ -2,6 +2,7 @@
 // routing, edit/compose modes, reconcile preservation, and pasteboard payloads.
 import Cocoa
 
+@MainActor
 func tabTodoPopoverViewTests() {
     print("TabTodoPopoverView")
 

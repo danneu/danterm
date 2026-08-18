@@ -4,6 +4,7 @@
 import Cocoa
 
 /// Runs pane-scoped todo popover coverage in the AppKit UI harness.
+@MainActor
 func todoPopoverViewTests() {
     print("TodoPopoverView")
 

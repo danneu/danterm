@@ -7,6 +7,7 @@
 // SidebarView executor, so they need the WindowServer like the rest of the UI harness.
 import Cocoa
 
+@MainActor
 func sidebarRenameRecycleTests() {
     print("SidebarRenameRecycle")
 
@@ -1245,6 +1246,7 @@ private func renameRecycleModel(
     )
 }
 
+@MainActor
 @discardableResult
 private func applyRenameRecycleModel(
     _ model: AppModel,
@@ -1257,6 +1259,7 @@ private func applyRenameRecycleModel(
     return driver
 }
 
+@MainActor
 @discardableResult
 private func applyRenameRecycleTransition(
     old driver: SidebarReconcileDriver,
@@ -1268,6 +1271,7 @@ private func applyRenameRecycleTransition(
     return driver
 }
 
+@MainActor
 @discardableResult
 private func applyRenameRecycleTransitionResult(
     old driver: SidebarReconcileDriver,

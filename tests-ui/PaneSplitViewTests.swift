@@ -44,9 +44,13 @@ struct UITestRunner {
 
 // MARK: - Test Harness
 
-var uiFailures = 0
-var uiTotal = 0
+@MainActor var uiFailures = 0
+@MainActor var uiTotal = 0
 
+// The runner drives every UI test from `@MainActor main()`, and each body
+// touches AppKit views, so the harness states that isolation instead of
+// leaving each caller to re-declare it.
+@MainActor
 func uiTest(_ name: String, _ body: () throws -> Void) {
     uiTotal += 1
     do {
@@ -71,6 +75,7 @@ func uiExpect(_ condition: Bool, _ message: String = "assertion failed", file: S
 
 // MARK: - Tests
 
+@MainActor
 func paneDividerViewTests() {
     print("PaneDividerView")
 

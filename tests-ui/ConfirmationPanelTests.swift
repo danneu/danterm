@@ -7,6 +7,7 @@
 import Cocoa
 
 /// Registers confirmation-panel coverage in the standalone UI harness.
+@MainActor
 func confirmationPanelTests() {
     print("ConfirmationPanel")
 

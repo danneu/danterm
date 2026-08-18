@@ -3,6 +3,7 @@
 // app runtime into the UI harness.
 import Foundation
 
+@MainActor
 func menuCommandPolicyTests() {
     print("MenuCommandPolicy")
 

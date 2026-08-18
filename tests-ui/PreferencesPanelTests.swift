@@ -7,6 +7,7 @@
 import Cocoa
 
 /// Registers Preferences-panel coverage in the standalone UI harness.
+@MainActor
 func preferencesPanelTests() {
     print("PreferencesPanel")
 

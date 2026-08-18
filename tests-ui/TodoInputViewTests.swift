@@ -2,6 +2,7 @@
 
 import Cocoa
 
+@MainActor
 func todoInputViewTests() {
     print("TodoInputView")
 

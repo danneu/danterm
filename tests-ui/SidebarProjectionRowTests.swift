@@ -395,6 +395,7 @@ func sidebarProjectionRowTests() {
 
 // MARK: - Harness helpers
 
+@MainActor
 private func makeProjectionRowHarness() -> (
     SidebarView, SidebarOutlineView, NSWindow, AppRuntime, SidebarReconcileDriver
 ) {

@@ -325,6 +325,7 @@ func sidebarSelectionCacheTests() {
     }
 }
 
+@MainActor
 func sidebarScrollRevealTests() {
     print("SidebarScrollReveal")
 
@@ -427,6 +428,7 @@ private func makeSidebarSelectionHarness() -> (SidebarView, NSOutlineView, NSWin
     return (sidebar, outline, window)
 }
 
+@MainActor
 @discardableResult
 private func applyInitialSidebarModel(
     _ model: AppModel,
@@ -438,6 +440,7 @@ private func applyInitialSidebarModel(
     return driver
 }
 
+@MainActor
 @discardableResult
 private func applySidebarTransition(
     old driver: SidebarReconcileDriver,
@@ -449,6 +452,7 @@ private func applySidebarTransition(
     return driver
 }
 
+@MainActor
 @discardableResult
 private func applySidebarTransitionResult(
     old driver: SidebarReconcileDriver,
