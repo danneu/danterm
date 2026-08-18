@@ -280,18 +280,71 @@ before the implementation is accepted.
   `TerminalLogicalLineStoreTests` fail on it, and restoring the line made the
   suite green again.
 
+## Re-measurement of the I7 reject (2026-08-18)
+
+The rejecting number does not reproduce, and a decision-grade run accepts the
+derivation. Commit 3's `retained-browse: slower +1.17%` was re-measured three
+times; every run returns `equivalent` on both deciding workloads.
+
+| run | baseline | candidate tree | arm | load at invocation | `retained-browse` | `terminal-feed` |
+| --- | --- | --- | --- | ---: | --- | --- |
+| original (commit 3) | `5dfdc6b4` | `46c8a59a1425` | `a` | 14.78 | **slower +1.17%** | equivalent +0.10% |
+| arm flip | `5dfdc6b4` | `d05d288b23c4` | `b` | 9.10 | equivalent +0.30% | equivalent -0.74% |
+| exact reproduction | `5dfdc6b4` | `46c8a59a1425` | `a` | 4.44 | equivalent -0.00% | equivalent -0.61% |
+| **decision** | **`78f49c1d`** | `167ecd3841ad` | `a` | **1.70** | **equivalent -0.26%** | **equivalent +0.58%** |
+
+The first three hold the compiled source byte-identical to the rejected
+candidate: the reproduction reuses the identical candidate tree and therefore the
+identical physical arm, and the arm-flip tree differs from it by one untracked log
+file that no build reads, which is the `research/33/F28` technique for varying the
+slot while holding source fixed. The decision run is the one that matters for
+re-landing: its baseline is the commit carrying the fallback, so it prices the
+derived form against what actually shipped.
+
+What this establishes:
+
+- **The derivation is accepted under I7.** The decision run reads `equivalent` on
+  both deciding workloads, at the quietest host conditions of the four (0.17 per
+  processor), with no invalidations. I7's rule is `faster` or `equivalent` on
+  both, so this accepts.
+- **The arm slot is not the variable.** The two arms sit 0.30 points apart, less
+  than the ~0.6 points agent-docs/terminal-performance.md attributes to a slot
+  change. The same tree on the same arm moved 1.17 points between the original
+  and the reproduction, far outside that doc's 0.3-point same-tree scatter. The
+  likeliest cause is the original invocation's host conditions: it began at load
+  14.78, while three test suites from the same session were still draining.
+- **The original invocation never supported a decision.** It is not reproducible,
+  so it is evidence neither for nor against the derivation. The reading rule for
+  the re-measurement was written before any run and fixed that outcome in
+  advance, including the bar against a third tie-break run.
+- **The middle two runs were taken on a noisy machine, and the decision run was
+  not.** On identical source, `style-churn` read `equivalent +0.32%` then `faster
+  -2.61%` -- a false directional verdict past both its 1.75% threshold and its
+  1.8-point distrust floor, from a rule that made 0 false calls across the 8 A/A
+  invocations of `research/33/F28`; `scrollback-stream` likewise went `slower
+  +2.60%` then `faster -3.43%`. The decision run, taken after waiting for load to
+  fall below 2.0, produced no directional verdict anywhere in the suite. That is
+  what separates it from the two before it.
+- **`content-churn: slower +6.27%` from commit 3 was noise.** It reads
+  `inconclusive` at +0.88%, +1.24% and +0.98% across the three re-runs.
+
+So the structural fix S18 asks for is not blocked by measurement. The stored
+fields and `assertGrandTotalsAgreeWithBlockIndex()` can be replaced by the
+derived form; the assertion is worth keeping only until that lands, since a
+computed total cannot drift from the block index.
+
+Artifacts (`.build/` is disposable; the values above are the durable record):
+`.build/terminal-benchmark-comparisons/confirm/` holding `46c8a59a1425-0000`,
+`d05d288b23c4-0000` and `167ecd3841ad-0000`.
+
 ## Follow Up
 
 - Stamp the S32, S31 and S18 rows' Status cells in
   `docs/scratch/2026-08-11-simplification-audit.md` with their landing commit
   hashes. All three sections now carry a `**Status note.**` paragraph; only the
   ranked-table cell is pending, because a commit cannot carry its own hash.
-- Decide whether `retained-browse`'s +1.17% is worth attributing before S18 is
-  considered settled. The rejected candidate changed two things on that read
-  path at once -- two ring subscripts per `grandDisplayRowTotal` read and a
-  division per `firstBlockNumber` read -- and the run cannot say which cost the
-  1.17%. A `quick baseline=<this commit> workload=retained-browse` over a
-  candidate that derives *only* `firstBlockNumber` would separate them, and if
-  the division is the cheap half, the totals could still be derived. Worth one
-  run only if the stored pair is in the way of later work; the assertion covers
-  the drift risk in the meantime.
+- **Superseded by the re-measurement above.** The +1.17% does not reproduce, so
+  there is nothing to attribute yet. The decomposition run this bullet proposed
+  (a candidate deriving *only* `firstBlockNumber`, to separate the division from
+  the two ring subscripts) is still the right probe, but only if a reproducible
+  cost is established first.

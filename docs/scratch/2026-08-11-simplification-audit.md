@@ -527,8 +527,24 @@ That is the read-path cost the Risk paragraph below predicted, so the stored
 fields stay and this finding lands its named fallback instead: a debug
 `assertGrandTotalsAgreeWithBlockIndex()` that compares both stored totals with
 the block-derived values, run at the end of every store operation that can move
-one. It is the check the Risk paragraph asks for; the structure that would have
-made the drift inexpressible is refused on measurement, not on effort.
+one. It is the check the Risk paragraph asks for.
+
+**Correction: the rejecting measurement does not reproduce, and the ideal fix
+is accepted.** Re-measured the same day, the +1.17% is not there. Three fresh
+`confirm` invocations all read `retained-browse: equivalent` -- `-0.00%` on the
+identical candidate tree and physical arm, `+0.30%` with only the arm slot
+varied, and `-0.26%` for the decision run against the commit carrying the
+fallback, which also read `terminal-feed: equivalent +0.58%` at the quietest
+host conditions of the four and emitted no directional verdict anywhere in the
+suite. The original invocation began at load 14.78 with three test suites still
+draining, which is the likeliest cause. So the ideal fix was **not** refused on
+measurement; it was refused on a number that does not hold up, and it now
+passes I7's rule on both deciding workloads. This finding should close on the
+derived form -- computed totals over the block ring, computed
+`firstBlockNumber`, no `retireEmptyHeadBlocks` -- at which point
+`assertGrandTotalsAgreeWithBlockIndex()` goes away too, because a computed
+total cannot drift from the block index. The full evidence table is in the
+plan's `## Re-measurement of the I7 reject` section.
 
 **Problem.** `grandDisplayRowTotal` and `grandContentUnitTotal` hold numbers the block index already holds. Because block `rowStart`/`contentStart` are absolute against `evictedRowCount`/`evictedContentUnitCount`, the totals are exactly `blocks.last.rowStart + rowCount - evictedRowCount` and the content analogue -- O(1) reads off the ring. Storing them separately means every mutation must move two representations of one quantity in the right order, and the file already carries scar tissue from getting that wrong: two sites have multi-line comments explaining that the totals must move _before_ a block can retire or the row is subtracted twice. `firstBlockNumber` is the same shape of redundancy: while `offsets` is non-empty it is always `firstRecordSequence / blockSize`, and `retireEmptyHeadBlocks` exists only to re-establish that.
 
