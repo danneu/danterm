@@ -313,20 +313,160 @@ extension PaneTapeEventRecord: Sendable where Event: Sendable {}
 /// name. Both would encode to a lossy object, so the encoder does not accept them -- and it
 /// refuses them by construction rather than at runtime, which is why this is a separate
 /// enum instead of a precondition inside the encode.
-public enum PaneTapeOutgoingRecord: Equatable, Sendable {
+///
+/// The event payload is a type parameter for the same reason it is one on the read family:
+/// this module names no engine type, and a producer that owns the event vocabulary hands its
+/// own event straight to the encoder, which writes it through the event's own `Codable`
+/// conformance. Carrying it as `any Encodable` instead would cost the conditional
+/// `Equatable` and `Sendable` conformances the producer's stream types are built on.
+public enum PaneTapeOutgoingRecord<Event> {
     case start(PaneTapeStartRecord)
     case gap(PaneTapeGapRecord)
-    case event(PaneTapeEventRecord<JSONValue>)
+    case event(PaneTapeEventRecord<Event>)
     case sync(PaneTapeSyncRecord)
     case end(reason: PaneTapeEndReason)
 }
 
-/// Encodes one record to the JSON object the wire carries.
+extension PaneTapeOutgoingRecord: Equatable where Event: Equatable {}
+extension PaneTapeOutgoingRecord: Sendable where Event: Sendable {}
+
+/// Names every key by its one declaration in `PaneTapeRecordKey`. A `String`-raw-valued
+/// `CodingKey` enum cannot: raw values must be literals, so the spellings would be
+/// written a second time.
+private struct RecordKey: CodingKey {
+    let stringValue: String
+    var intValue: Int? { nil }
+
+    init(_ key: String) { stringValue = key }
+    init?(stringValue: String) { self.init(stringValue) }
+    init?(intValue: Int) { nil }
+
+    static let kind = RecordKey(PaneTapeRecordKey.kind)
+    static let version = RecordKey(PaneTapeRecordKey.version)
+    static let capture = RecordKey(PaneTapeRecordKey.capture)
+    static let format = RecordKey(PaneTapeRecordKey.format)
+    static let provenance = RecordKey(PaneTapeRecordKey.provenance)
+    static let initial = RecordKey(PaneTapeRecordKey.initial)
+    static let cursor = RecordKey(PaneTapeRecordKey.cursor)
+    static let reconstructible = RecordKey(PaneTapeRecordKey.reconstructible)
+    static let loss = RecordKey(PaneTapeRecordKey.loss)
+    static let droppedEventCount = RecordKey(PaneTapeRecordKey.droppedEventCount)
+    static let droppedFeedBytes = RecordKey(PaneTapeRecordKey.droppedFeedBytes)
+    static let droppedWriteBytes = RecordKey(PaneTapeRecordKey.droppedWriteBytes)
+    static let sequence = RecordKey(PaneTapeRecordKey.sequence)
+    static let elapsedNanoseconds = RecordKey(PaneTapeRecordKey.elapsedNanoseconds)
+    static let originElapsedNanoseconds = RecordKey(PaneTapeRecordKey.originElapsedNanoseconds)
+    static let byteOffset = RecordKey(PaneTapeRecordKey.byteOffset)
+    static let byteLength = RecordKey(PaneTapeRecordKey.byteLength)
+    static let event = RecordKey(PaneTapeRecordKey.event)
+    static let part = RecordKey(PaneTapeRecordKey.part)
+    static let parts = RecordKey(PaneTapeRecordKey.parts)
+    static let base64 = RecordKey(PaneTapeRecordKey.base64)
+    static let droppedHistoryRows = RecordKey(PaneTapeRecordKey.droppedHistoryRows)
+    static let reason = RecordKey(PaneTapeRecordKey.reason)
+    static let columns = RecordKey(PaneTapeRecordKey.columns)
+    static let rows = RecordKey(PaneTapeRecordKey.rows)
+    static let pinned = RecordKey(PaneTapeRecordKey.pinned)
+}
+
+/// Writes the record as the JSON object the wire carries -- the only encode of this shape,
+/// paired with `decodePaneTapeRecord`.
 ///
 /// A field the record does not hold is omitted rather than stated as null: a reader treats a
 /// present key as a measurement the producer made, so a null origin stamp or byte span would
 /// report a measurement of something that had none.
-public func encodePaneTapeRecord(_ record: PaneTapeOutgoingRecord) -> JSONValue {
+///
+/// The event object is the event's own encoding, written inline. Restating that vocabulary
+/// here would give the producer a second spelling of it that only a test could keep honest.
+extension PaneTapeOutgoingRecord: Encodable where Event: Encodable {
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: RecordKey.self)
+        switch self {
+        case .start(let start):
+            try container.encode(PaneTapeRecordKind.start.rawValue, forKey: .kind)
+            try container.encode(start.version, forKey: .version)
+            try container.encode(start.capture.rawValue, forKey: .capture)
+            try container.encode(start.format.rawValue, forKey: .format)
+            try container.encodeIfPresent(start.provenance, forKey: .provenance)
+            try encodeGeometry(
+                columns: start.columns,
+                rows: start.rows,
+                pinned: start.pinned,
+                into: &container
+            )
+            try container.encode(start.reconstructible, forKey: .reconstructible)
+            // The baseline every later offset is read against. A stream withholds it only when
+            // another record publishes the same position, because a stream that starts past the
+            // beginning otherwise reports offsets a reader has no origin for.
+            if let cursor = start.cursor {
+                try container.encode(paneTapeCursorJSON(cursor), forKey: .cursor)
+            }
+        case .gap(let gap):
+            try container.encode(PaneTapeRecordKind.gap.rawValue, forKey: .kind)
+            switch gap.loss {
+            case .total:
+                try container.encode(PaneTapeLoss.total.rawValue, forKey: .loss)
+            case .exact(let events, let feedBytes, let writeBytes):
+                try container.encode(events, forKey: .droppedEventCount)
+                try container.encode(feedBytes, forKey: .droppedFeedBytes)
+                try container.encode(writeBytes, forKey: .droppedWriteBytes)
+            }
+        case .event(let event):
+            try container.encode(PaneTapeRecordKind.event.rawValue, forKey: .kind)
+            try container.encode(event.sequence, forKey: .sequence)
+            try container.encode(event.elapsedNanoseconds, forKey: .elapsedNanoseconds)
+            try container.encodeIfPresent(
+                event.originElapsedNanoseconds,
+                forKey: .originElapsedNanoseconds
+            )
+            try container.encodeIfPresent(event.byteOffset, forKey: .byteOffset)
+            try container.encodeIfPresent(event.byteLength, forKey: .byteLength)
+            try container.encode(event.event, forKey: .event)
+        case .sync(let sync):
+            try container.encode(PaneTapeRecordKind.sync.rawValue, forKey: .kind)
+            try container.encode(sync.part, forKey: .part)
+            try container.encode(sync.parts, forKey: .parts)
+            try container.encode(Data(sync.bytes).base64EncodedString(), forKey: .base64)
+            if let transfer = sync.transfer {
+                try encodeGeometry(
+                    columns: transfer.columns,
+                    rows: transfer.rows,
+                    pinned: transfer.pinned,
+                    into: &container
+                )
+                try container.encode(transfer.droppedHistoryRows, forKey: .droppedHistoryRows)
+            }
+            if let cursor = sync.cursor {
+                try container.encode(paneTapeCursorJSON(cursor), forKey: .cursor)
+            }
+        case .end(let reason):
+            try container.encode(PaneTapeRecordKind.end.rawValue, forKey: .kind)
+            try container.encode(reason.rawValue, forKey: .reason)
+        }
+    }
+
+    /// States one pane's geometry whole, so the start record and a sync's first part cannot
+    /// disagree about the shape they publish it in.
+    private func encodeGeometry(
+        columns: Int,
+        rows: Int,
+        pinned: Bool,
+        into container: inout KeyedEncodingContainer<RecordKey>
+    ) throws {
+        var geometry = container.nestedContainer(keyedBy: RecordKey.self, forKey: .initial)
+        try geometry.encode(columns, forKey: .columns)
+        try geometry.encode(rows, forKey: .rows)
+        try geometry.encode(pinned, forKey: .pinned)
+    }
+}
+
+/// Builds the same object as a `JSONValue` tree, for the producer sites that still pass tape
+/// records around as JSON.
+///
+/// Temporary: the support producer builds records in one place and writes them in another,
+/// and both halves move to the typed record together. This entry point and the tree it builds
+/// go away with that move, leaving the `Encodable` conformance above as the only encode.
+public func encodePaneTapeRecord(_ record: PaneTapeOutgoingRecord<JSONValue>) -> JSONValue {
     switch record {
     case .start(let start):
         var fields: [String: JSONValue] = [

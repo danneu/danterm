@@ -223,5 +223,25 @@ reader sees an unchanged stream, then `just stop-slot <n>`.
 
 ## Commit progress
 - [x] 1. protocol: make the JSON-RPC envelopes generic over their payload
-- [ ] 2. protocol: give the outgoing pane-tape record its own Encodable conformance
+- [x] 2. protocol: give the outgoing pane-tape record its own Encodable conformance
 - [ ] 3. support+app: carry pane-tape records typed to the wire and encode once
+
+## Implementation notes
+
+- The record's coding keys are a `CodingKey` struct with one static member per key,
+  each built from `PaneTapeRecordKey`. A `String`-raw-valued `CodingKey` enum would
+  have written every spelling a second time as a literal, and a nested struct inside
+  the now-generic record cannot hold static members at all, so the struct sits at file
+  scope beside the conformance.
+- The commit 2 slice leaves the shape with two writers for one commit: the new
+  `Encodable` conformance and the `JSONValue` builder the support producer still calls.
+  Making the builder forward to the conformance would need either a `try!` or a lossy
+  fallback, because the builder's callers are non-throwing, so the builder keeps its own
+  body until commit 3 deletes it. A transitional test pins the two writers to the same
+  object, and it goes away with the builder.
+- PO1's drift pin landed in the protocol package
+  (`PaneTapeRecordEncodingTests.swift`) rather than in
+  `client-tests/PaneTapeRoundTripTests.swift`: at this slice the producer still builds
+  JSON trees, so no client-tests case can exercise the typed encode. Migrating the
+  existing producer-driven cases to the typed path stays with commit 3.
+
