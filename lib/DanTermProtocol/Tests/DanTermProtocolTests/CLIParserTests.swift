@@ -15,8 +15,8 @@ struct CLIParserTests {
             _ = try parseCLI(args)
         }
         #expect(
-            error?.message.contains(command.usageToken) == true,
-            "\(command.label) should name \(command.usageToken), got: \(error?.message ?? "no error")"
+            error?.message.contains(command.flag) == true,
+            "\(command.label) should name \(command.flag), got: \(error?.message ?? "no error")"
         )
     }
 
@@ -39,7 +39,7 @@ struct CLIParserTests {
     // The target leads a subcommand's arguments. A target flag that trails
     // another argument is a usage error rather than an accepted second spelling,
     // and the message quotes the same usage line the absent case reports.
-    @Test("every targeting command requires the target to lead", arguments: sharedTargetCommands)
+    @Test("every targeting command requires the target to lead", arguments: targetingCommands)
     func everyTargetingCommandRequiresTheTargetToLead(_ command: TargetingCommand) throws {
         let usage = try #require(usageLine(of: command))
         let args = command.args(["extra", command.flag, validId(for: command.entity)])
@@ -55,7 +55,7 @@ struct CLIParserTests {
     // A target flag a subcommand does not take reads as the wrong target rather
     // than as an unknown flag, so `pane info --tab <id>` says what is wrong with
     // the command instead of what is wrong with the word.
-    @Test("every targeting command names a target flag it does not take", arguments: sharedTargetCommands)
+    @Test("every targeting command names a target flag it does not take", arguments: targetingCommands)
     func everyTargetingCommandRefusesAnotherTargetFlag(_ command: TargetingCommand) throws {
         let usage = try #require(usageLine(of: command))
         let other = wrongTarget(of: command)
@@ -72,6 +72,7 @@ struct CLIParserTests {
     // of them separate a flag nobody knows from a word that has no place here.
     @Test("a subcommand that ends at its target rejects a tail", arguments: [
         ["tab", "close", "--tab", tabId],
+        ["pane", "focus", "--pane", paneId],
         ["pane", "info", "--pane", paneId],
         ["pane", "close", "--pane", paneId],
         ["pane", "rows", "--pane", paneId],
@@ -310,12 +311,28 @@ struct CLIParserTests {
 
     @Test("pane focus parses pane param")
     func paneFocusParsesPaneParam() throws {
-        let command = try parseCLI(["pane", "focus", paneId])
+        let command = try parseCLI(["pane", "focus", "--pane", paneId])
 
         #expect(command.method == IpcRequestMethod.paneFocus.rawValue)
         #expect(command.outputMode == .none)
         #expect(command.params["pane"] == .string(paneId))
         #expect(command.params["paneId"] == nil)
+    }
+
+    // Intent: the pane a caller writes as a bare word is refused, and the
+    //   refusal quotes the flag form that replaced it.
+    // Why it exists: `pane focus` was the one targeting subcommand that took
+    //   its pane positionally, so a caller who learned the flag form everywhere
+    //   else met "invalid pane id: --pane" here. The positional form is gone
+    //   rather than kept as a second spelling, and only a message that names
+    //   `--pane` tells the caller that.
+    @Test("pane focus refuses a positional pane and names the flag form")
+    func paneFocusRefusesAPositionalPane() {
+        let error = #expect(throws: CLIParseError.self) {
+            _ = try parseCLI(["pane", "focus", paneId])
+        }
+
+        #expect(error?.message == "usage: danterm pane focus --pane <pane-id>")
     }
 
     @Test("agent attach parses to silent mutation")
@@ -1009,9 +1026,6 @@ struct TargetingCommand: Sendable {
     /// A target flag this command does not accept. It is a per-row fact because
     /// a command that takes either of two targets rejects only the third.
     let wrongFlag: String
-    /// What the usage line names when the target is absent. Defaults to the
-    /// flag, which every targeting command but `pane focus` uses.
-    let usageToken: String
     /// The full invocation, with the target's tokens spliced in where the
     /// grammar puts them. An empty array supplies no target at all.
     let args: @Sendable ([String]) -> [String]
@@ -1021,14 +1035,12 @@ struct TargetingCommand: Sendable {
         entity: String,
         flag: String? = nil,
         wrongFlag: String? = nil,
-        usageToken: String? = nil,
         args: @escaping @Sendable ([String]) -> [String]
     ) {
         self.label = label
         self.entity = entity
         self.flag = flag ?? "--\(entity)"
         self.wrongFlag = wrongFlag ?? (entity == "pane" ? "--tab" : "--pane")
-        self.usageToken = usageToken ?? (flag ?? "--\(entity)")
         self.args = args
     }
 }
@@ -1065,8 +1077,9 @@ private func wrongTarget(of command: TargetingCommand) -> (flag: String, id: Str
     }
 }
 
-/// Rows whose target the shared step parses before the command parser runs.
-let sharedTargetCommands: [TargetingCommand] = [
+/// Every subcommand that names an entity. There is no second list: the shared
+/// step parses the target of all of them, so every row is swept on every axis.
+let targetingCommands: [TargetingCommand] = [
     .init("tab rename", entity: "tab", args: { ["tab", "rename"] + $0 + ["work"] }),
     .init("tab close", entity: "tab", args: { ["tab", "close"] + $0 }),
     .init("tab new --group", entity: "group", args: { ["tab", "new"] + $0 }),
@@ -1075,6 +1088,7 @@ let sharedTargetCommands: [TargetingCommand] = [
     }),
     .init("group rename", entity: "group", args: { ["group", "rename"] + $0 + ["notes"] }),
     .init("group close", entity: "group", args: { ["group", "close"] + $0 }),
+    .init("pane focus", entity: "pane", args: { ["pane", "focus"] + $0 }),
     .init("pane info", entity: "pane", args: { ["pane", "info"] + $0 }),
     .init("pane close", entity: "pane", args: { ["pane", "close"] + $0 }),
     .init("pane rows", entity: "pane", args: { ["pane", "rows"] + $0 }),
@@ -1126,17 +1140,3 @@ private let todoVerbs: [TodoVerb] = [
     ("delete", { ["todo", "delete"] + $0 + [todoId] }),
     ("clear-completed", { ["todo", "clear-completed"] + $0 }),
 ]
-
-/// Rows whose command parser still reads its own target. The list shrinks to
-/// nothing as those parsers move onto the shared step, and the two arrays then
-/// collapse back into one.
-let ownTargetCommands: [TargetingCommand] = [
-    // `pane focus` is the one targeting command that takes its pane
-    // positionally rather than behind --pane, so its usage line names the
-    // placeholder instead and this row drops the flag token.
-    .init("pane focus", entity: "pane", usageToken: "<pane-id>", args: {
-        ["pane", "focus"] + $0.dropFirst()
-    }),
-]
-
-let targetingCommands: [TargetingCommand] = sharedTargetCommands + ownTargetCommands

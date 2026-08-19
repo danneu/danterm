@@ -392,7 +392,7 @@ struct IpcRequestTests {
             RepresentativeCLICommand(try parseCLI(["group", "new", "--name", "notes"], currentDirectory: "/caller")),
             RepresentativeCLICommand(try parseCLI(["group", "rename", "--group", group, "notes"]), removing: ["group"], expects: "group required"),
             RepresentativeCLICommand(try parseCLI(["group", "close", "--group", group]), removing: ["group"], expects: "group required"),
-            RepresentativeCLICommand(try parseCLI(["pane", "focus", pane]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "focus", "--pane", pane]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "info", "--pane", pane]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "split", "--pane", pane, "-h"]), removing: ["pane"], expects: "pane or tab required"),
             RepresentativeCLICommand(try parseCLI(["pane", "close", "--pane", pane]), removing: ["pane"], expects: "pane required"),

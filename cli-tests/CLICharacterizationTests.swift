@@ -307,6 +307,39 @@ struct CLICharacterizationTests {
         #expect(try jsonLines(run.stdout) == [start, event, end])
     }
 
+    // Intent: `danterm pane focus --pane <id>` sends `pane.focus` with the pane
+    //   behind a `pane` param, and prints nothing on success.
+    // Why it exists: the subcommand took its pane as a bare word until the CLI
+    //   moved every target behind a flag. Only a run of the real binary against
+    //   a real endpoint shows that the new spelling still reaches the app with
+    //   the request the app has always answered.
+    // Scenario: a caller focuses the pane a split just created.
+    @Test("pane focus sends the pane behind the pane param")
+    func paneFocusSendsPaneParam() throws {
+        let recorder = RequestRecorder()
+
+        let run = try withScriptedEndpoint { connection in
+            writeLine(helloLine(protocolVersion: danTermIpcProtocolVersion), to: connection)
+            guard let request = readLine(from: connection),
+                  let id = requestId(of: request)
+            else { Darwin.close(connection); return }
+            recorder.record(request)
+            writeLine(responseLine(id: id, result: .object([:])), to: connection)
+            Darwin.close(connection)
+        } run: { path in
+            try runCLI(["pane", "focus", "--pane", samplePaneId], socketPath: path)
+        }
+
+        #expect(run.status == 0)
+        #expect(run.stdout == "")
+        #expect(run.stderr == "")
+
+        let request = try #require(recorder.value)
+        let decoded = try JSONDecoder().decode(JsonRpcRequest.self, from: Data(request.utf8))
+        #expect(decoded.method == IpcRequestMethod.paneFocus.rawValue)
+        #expect(decoded.params == .object(["pane": .string(samplePaneId)]))
+    }
+
     @Test("a parse error is reported before any socket is touched")
     func parseErrorNeedsNoEndpoint() throws {
         let directory = try temporaryDirectory()
@@ -404,6 +437,25 @@ private func withScriptedTCPEndpoint(
 }
 
 // MARK: - The scripted endpoint
+
+/// Carries one request line out of the endpoint script, which runs on another
+/// queue, so a test can assert what the CLI actually put on the wire.
+private final class RequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var line: String?
+
+    func record(_ line: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.line = line
+    }
+
+    var value: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return line
+    }
+}
 
 /// Binds a control socket, hands the accepted connection to `script` on a background
 /// thread, and runs `run` against the socket path while the script plays out.

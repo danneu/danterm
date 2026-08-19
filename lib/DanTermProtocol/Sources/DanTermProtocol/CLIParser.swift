@@ -216,8 +216,7 @@ public func parseCLI(
         }
         switch args[1] {
         case "focus":
-            guard args.count == 3 else { throw CLIParseError("usage: danterm pane focus <pane-id>") }
-            return CLICommand(request: .paneFocus(pane: try parsePaneId(args[2])), outputMode: .none)
+            return try parsePaneFocusCommand(Array(args.dropFirst(2)))
         case "info":
             return try parsePaneInfoCommand(Array(args.dropFirst(2)))
         case "split":
@@ -386,6 +385,13 @@ private func parseTabCloseCommand(_ args: [String]) throws -> CLICommand {
     let (tab, remaining) = try parseTabTarget(args, usage: "usage: danterm tab close --tab <tab-id>")
     try rejectTrailingArguments(remaining)
     return CLICommand(request: .tabClose(tab: tab), outputMode: .none)
+}
+
+private func parsePaneFocusCommand(_ args: [String]) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(
+        args, usage: "usage: danterm pane focus --pane <pane-id>")
+    try rejectTrailingArguments(remaining)
+    return CLICommand(request: .paneFocus(pane: pane), outputMode: .none)
 }
 
 private func parsePaneInfoCommand(_ args: [String]) throws -> CLICommand {

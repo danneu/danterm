@@ -117,6 +117,8 @@ fi
 grep -qF 'Usage:' "$err"
 grep -qF 'ls' "$err"
 grep -qE '^ *focus +Print the main window' "$err"
+grep -qF 'pane focus --pane <pane-id>' "$err"
+refute 'pane focus <pane-id>' "$err"
 grep -qF 'pane info --pane <pane-id>' "$err"
 grep -qF 'group new --name <name>' "$err"
 grep -qF 'group rename --group <group-id> <name>' "$err"
@@ -148,6 +150,8 @@ for help_arg in help --help -h; do
     grep -qF 'Usage:' "$out"
     grep -qF 'ls' "$out"
     grep -qE '^ *focus +Print the main window' "$out"
+    grep -qF 'pane focus --pane <pane-id>' "$out"
+    refute 'pane focus <pane-id>' "$out"
     grep -qF 'pane info --pane <pane-id>' "$out"
     grep -qF 'group new --name <name>' "$out"
     grep -qF 'group rename --group <group-id> <name>' "$out"
@@ -178,6 +182,11 @@ run_cli skill
 [[ $status -eq 0 ]]
 [[ ! -s "$err" ]]
 cmp "$SCRIPT_DIR/integrations/danterm/SKILL.md" "$out"
+# The cmp above only proves the bundle matches its source file, so it passes
+# whatever the source says. These two check what the bundle teaches: every
+# target is named behind a flag, and no subcommand shows a positional one.
+grep -qF 'danterm pane focus --pane <pane-id>' "$out"
+refute 'danterm pane focus <pane-id>' "$out"
 
 skill_bin=$(mktemp -d)
 ln -s "$CLI_PATH" "$skill_bin/danterm"
@@ -401,7 +410,7 @@ run_cli --socket "$socket" pane close
 [[ ! -s "$out" ]]
 grep -qx 'danterm: usage: danterm pane close --pane <pane-id>' "$err"
 
-slot_cli pane focus "$other_pane_id"
+slot_cli pane focus --pane "$other_pane_id"
 slot_cli theme set --pane "$pane_id" SmokeTheme
 slot_cli ls | jq -e \
     --arg target "$pane_id" \

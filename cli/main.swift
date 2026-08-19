@@ -48,7 +48,8 @@ struct DanTermCLI {
                                       Rename a tab or clear its custom title
           tab close --tab <tab-id>
                                       Close a tab
-          pane focus <pane-id>        Focus a pane by id
+          pane focus --pane <pane-id>
+                                      Focus a pane by id
           pane info --pane <pane-id>
                                       Print pane, tab, and group metadata as JSON
           pane split --pane <pane-id> -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]

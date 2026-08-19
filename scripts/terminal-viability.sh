@@ -666,7 +666,7 @@ hidden_event_line="$(grep -nF "$hidden_event" "$EVENT_LOG" | tail -1 | cut -d: -
 hidden_start_line="$(wc -l <"$EVENT_LOG" | tr -d ' ')"
 sed -n "${hidden_event_line}p" "$EVENT_LOG" >"$CAPTURE_DIRECTORY/hidden-trace.log"
 send_command_and_wait "$PRIMARY_PANE_ID" "echo HIDDEN-PANE-OUTPUT" "HIDDEN-PANE-OUTPUT"
-"$CLI" pane focus "$PRIMARY_PANE_ID"
+"$CLI" pane focus --pane "$PRIMARY_PANE_ID"
 wait_for_pane_marker "$PRIMARY_PANE_ID" "HIDDEN-PANE-OUTPUT"
 tail -n "+$((hidden_start_line + 1))" "$EVENT_LOG" \
     >>"$CAPTURE_DIRECTORY/hidden-trace.log"
@@ -718,7 +718,7 @@ if grep -Eq "pid[[:space:]]+$APP_PID\\(" "$CAPTURE_DIRECTORY/power-assertions.tx
     exit 1
 fi
 
-"$CLI" pane focus "$SECOND_PANE_ID"
+"$CLI" pane focus --pane "$SECOND_PANE_ID"
 resize_to_grid "$SECOND_PANE_ID" "$EXTERNAL_COLUMNS" "$EXTERNAL_ROWS"
 "$RUN_ROOT/terminal-recording-replay" screen "$EXTERNAL_FIXTURE" \
     >"$CAPTURE_DIRECTORY/external-headless-screen.txt"
@@ -747,7 +747,7 @@ wait_for_pane_absent "$SECOND_PANE_ID"
 wait_for_recording_count 1
 kill -0 "$APP_PID"
 
-"$CLI" pane focus "$PRIMARY_PANE_ID"
+"$CLI" pane focus --pane "$PRIMARY_PANE_ID"
 send_command_and_wait "$PRIMARY_PANE_ID" "echo VIABILITY-FINAL" "VIABILITY-FINAL"
 
 collect_descendants() {

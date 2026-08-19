@@ -43,7 +43,7 @@ state and skips those rows when the app is unavailable.
     danterm tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end]
     danterm tab rename --tab <tab-id> <name>|--clear
     danterm tab close --tab <tab-id>
-    danterm pane focus <pane-id>
+    danterm pane focus --pane <pane-id>
     danterm pane info --pane <pane-id>
     danterm pane split (--pane <pane-id> -h|-v | --tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm pane close --pane <pane-id>
@@ -132,8 +132,8 @@ For agent commands:
 - `agent attach`, `agent activity`, and `agent detach`: always pass
   `--pane <pane-id>`. The bundled hooks pass `$DANTERM_PANE` explicitly.
 - `pane focus`, `pane info`, `pane read`, `pane rows`, `pane zoom`,
-  `pane resize`, `pane tape`, and `pane snapshot`: always name the pane
-  explicitly.
+  `pane resize`, `pane tape`, and `pane snapshot`: always pass
+  `--pane <pane-id>`.
 - `quit`: for a slot you launched, always pass `--socket <path>` naming it. The
   CLI also accepts an explicit TCP target so callers can observe the server's
   remote-authority refusal. Never aim a local quit at the user's DanTerm.
@@ -442,7 +442,7 @@ To capture the new pane id for later:
 To navigate to a new pane that was split in another tab:
 
     NEW=$(danterm pane split --pane "$PANE_ID" -v --cmd 'just test' | jq -r '.pane.id')
-    danterm pane focus "$NEW"
+    danterm pane focus --pane "$NEW"
 
 When the caller knows the tab but has no pane or direction to name, let DanTerm
 choose from that tab's arranged layout:

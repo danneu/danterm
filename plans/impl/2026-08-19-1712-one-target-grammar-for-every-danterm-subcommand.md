@@ -162,7 +162,7 @@ the `pane focus` call sites in `scripts/terminal-viability.sh`.
   `pane read`, `pane input`, `pane tape`, `pane split`, `tab new`'s anchor, and
   the todo owner move onto the shared step and lose their target fields and
   target error cases. Carries PO4 and the rest of PO1.
-- [ ] 3. `feat(cli): danterm pane focus takes --pane` -- the positional form
+- [x] 3. `feat(cli): danterm pane focus takes --pane` -- the positional form
   goes away and the parser test table loses its exception row. Carries PO2,
   PO5, and the `SKILL.md`, help-text, gate-check, and script updates for PO6.
 
@@ -221,3 +221,24 @@ the `pane focus` call sites in `scripts/terminal-viability.sh`.
   new --group <id> --after-tab <id>` would have reported `--after-tab` as an
   unknown flag. A target is named once, so a repeat is the same misplacement as
   one written too early rather than a fifth failure kind.
+- With `pane focus` on the shared step, `sharedTargetCommands` and
+  `ownTargetCommands` collapsed back into one `targetingCommands` list and all
+  four sweeps read it. `TargetingCommand.usageToken` went with them: it existed
+  only so the `pane focus` row could name `<pane-id>` where every other row
+  names its flag.
+- The gate check for the bundled `SKILL.md` greps the emitted bytes for
+  `danterm pane focus --pane <pane-id>` and refutes the positional spelling. The
+  existing `cmp` against the source file cannot catch a wrong spelling, because
+  it passes whatever the source says.
+
+## Follow Up
+
+- `scripts/tests/danterm-cli_test.sh` fails before it reaches the app: line 138
+  and line 171 grep the help text for
+  `danterm [--socket <path>] <command> [args]`, but `cli/main.swift` has spelled
+  that line `danterm [--socket <path> | --tcp <host:port>] <command> [args]`
+  since the tailnet work added a TCP target. The script is opt-in (`just
+  test-cli`), so the gate never saw it go stale.
+- With that line patched locally, `scripts/tests/danterm-cli_test.sh` then fails
+  at line 306: the `pane tape` assertion requires `.version == 3`, which the
+  running app no longer reports. Both breaks predate this change.
