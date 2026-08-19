@@ -1142,7 +1142,7 @@ rewrites.
 - [ ] **[WIRE-6](#wire-6)** (3x5, small) Chunk and base64 the sync payload from slices, without copying the bytes three times first _(after [PERSIST-6](#persist-6))_
 - [ ] **[IPC-4](#ipc-4)** (3x5, medium) Return one traits value from a single exhaustive switch instead of six parallel per-method enumerations _(after [IPC-3](#ipc-3))_
 - [x] **[STORE-2](#store-2)** (3x5, medium) Delete PackedRetainedRow's dead body and move the cell-word constants to the store that uses them _(after [STORE-1](#store-1))_ -- `863a81f4`
-- [ ] **[PTY-3](#pty-3)** (3x5, large) Record every applied transition on the flight tape and delete the five parallel capture buffers _(after [XPORT-1](#xport-1))_
+- [x] **[PTY-3](#pty-3)** (3x5, large) Record every applied transition on the flight tape and delete the five parallel capture buffers _(after [XPORT-1](#xport-1))_ -- `63deec97..32296d30`
 - [ ] **[HIST-3](#hist-3)** (3x4, medium) Carry the fold's result in DisplayRowCursor so a row is folded once, not three times _(after [STORE-5](#store-5))_
 - [ ] **[HIST-1](#hist-1)** (3x4, large) Give the open tail record one home: move its header and spills into the open scratch _(after [STORE-4](#store-4))_
 - [ ] **[FRAME-3](#frame-3)** (2x5, small) Give TerminalDamage the predicates its consumers ask for, so no hot caller materializes a folded copy or a row array _(after [INTERACT-3](#interact-3), [FRAME-1](#frame-1))_
@@ -1272,7 +1272,7 @@ cheapest to do once nothing else is going to add a caller.
 - [ ] **[BUILD-4](#build-4)** (2x5, small) Lint the Swift file-header rule AGENTS.md states, which is already violated nine times
 - [ ] **[IOS-5](#ios-5)** (2x5, small) Delete the session vocabulary only tests can reach
 - [ ] **[IPC-6](#ipc-6)** (2x5, small) Collapse CLIResolvedTarget into CLIConnectionTarget
-- [ ] **[PTY-6](#pty-6)** (2x5, small) Give viewport navigation its own three-case type instead of a nine-case enum guarded by preconditionFailure
+- [x] **[PTY-6](#pty-6)** (2x5, small) Give viewport navigation its own three-case type instead of a nine-case enum guarded by preconditionFailure -- `570cf066`
 - [ ] **[REDUCE-7](#reduce-7)** (2x5, small) Delete the senderless .markAlertRead message
 - [ ] **[PERSIST-7](#persist-7)** (2x5, large) Drive doctor's agent probes from one agent registry shared with KnownAgent
 
