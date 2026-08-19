@@ -264,19 +264,29 @@ the wave checklists (the `- [ ] **[FEED-2](#feed-2)**` /
   consistency makes both boundary checks provably no-ops there, and the run
   keeps its own single `clearPreviousSpacer` call. The three destination
   writes the plan names all prepare their own range.
-- D2's benchmark (PO4) was not run: the machine was not quiet enough to
-  measure on. D2 removes a dead `GridCell` construct, store, and destroy per
-  printed character, so it is a payoff check rather than a gate -- rerun
-  `just benchmark-quick baseline=HEAD workload=terminal-feed` (and
-  `scrollback-stream`'s per-arm drain MB/s) on an idle machine to record it.
+- D2's benchmark (PO4), run later on a quiet machine: `just benchmark-quick
+  cd2a6960 <workload>`, baseline `cd2a6960` (D1) against candidate `f841cd87`
+  (D1+D2). `terminal-feed` inconclusive, -1.04% symmetric median of 2 pairs;
+  `scrollback-stream` equivalent, +0.87% symmetric median of 2 pairs. Its
+  per-arm drain, which the harness marks descriptive with no verdict: baseline
+  65.0 ms / 23.5 MB/s, candidate 64.6 ms / 23.6 MB/s over a 1.53 MB corpus at
+  179x66; draw tail 14.3 ms (17.8% of block) baseline against 15.3 ms (19.1%)
+  candidate. So D2 shows no detectable effect on either workload.
+  `scrollback-stream`'s "equivalent" is a detection of no difference;
+  `terminal-feed`'s "inconclusive" is the harness declining to call anything at
+  2 pairs, so neither the -1.04% nor the +0.87% is a result to read a direction
+  from. Two pairs is a screen, not a freeze. This changes nothing about D2:
+  PO4 is a payoff record, not a gate, and D2's case is structural -- every
+  printed cell is stored exactly once (I3), and the dead `GridCell` construct,
+  store, and destroy per printed character are gone whether or not a 2-pair
+  screen can see them.
 - The closeout commit ran `just test` as the plan's final gate (101 steps
-  passed). D2's benchmark stayed deferred: the machine was still busy, and the
-  user asked to hold it until the machine is quiet.
+  passed). D2's benchmark was still deferred at that point, because the machine
+  was busy and the user asked to hold it until the machine was quiet; it ran
+  afterwards and is recorded above.
 
 ## Follow Up
 
-- Run D2's deferred PO4 benchmark on an idle machine:
-  `just benchmark-quick cd2a6960 terminal-feed`, reading
-  `feedDurationNanoseconds`, plus `scrollback-stream`'s per-arm drain MB/s.
-  `cd2a6960` is D2's parent (the D1 commit). This is a payoff record, not a
-  gate -- D1 already measured 16.92% faster on the same workload.
+- [closed] Run D2's deferred PO4 benchmark on an idle machine. Done on
+  2026-08-19; both workloads are recorded in the implementation notes above.
+  Nothing is outstanding on this plan.
