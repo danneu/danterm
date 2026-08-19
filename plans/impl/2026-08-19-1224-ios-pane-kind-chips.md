@@ -174,7 +174,7 @@ Critical files: `lib/DanTermProtocol/Sources/DanTermProtocol/PaneRoster.swift`,
 ## Commit progress
 - [x] 1. Ship the pane chip as a roster fact
 - [x] 2. Lift the chip artwork into a shared ChipArtwork package
-- [ ] 3. Draw the chip in the iOS pane list
+- [x] 3. Draw the chip in the iOS pane list
 
 ## Implementation notes
 
@@ -206,3 +206,14 @@ Critical files: `lib/DanTermProtocol/Sources/DanTermProtocol/PaneRoster.swift`,
   in a `UIImage` in commit 3.
 - `icon/chips/README.md` names the two Swift files by path in four places, so it
   moved with them.
+- D1 resolved as a `UIImage` in the cell's own content configuration: the row asks
+  the chip for a `CGImage` at the sheet's display scale and wraps it, rather than
+  hosting a custom drawing view. The scale and the light/dark appearance both come
+  from the controller's trait collection, so neither is a constant that can drift
+  from the style the sheet overrides itself to. Every row also reserves the chip's
+  box, so a row whose bitmap failed to allocate keeps its title in the same column
+  as its neighbours.
+- The hosting half of PO8 -- the simulator run in `## Verification` -- was not run
+  for this commit. The image half (PO4) passes in the package suite and the iOS
+  portability gate links the phone target against it, so what is left unproven is
+  only that a cell shows the image, which no automated estate here can assert.

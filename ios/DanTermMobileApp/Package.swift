@@ -10,6 +10,7 @@ let package = Package(
         .package(path: "../../lib/TerminalCore"),
         .package(path: "../../lib/DanTermProtocol"),
         .package(path: "../../lib/DanTermClient"),
+        .package(path: "../../lib/ChipArtwork"),
     ],
     targets: [
         .executableTarget(
@@ -21,6 +22,7 @@ let package = Package(
                 .product(name: "TerminalRenderExecution", package: "TerminalCore"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
                 .product(name: "DanTermClient", package: "DanTermClient"),
+                .product(name: "ChipArtwork", package: "ChipArtwork"),
             ],
             path: "Sources/DanTermMobileApp",
             swiftSettings: [.swiftLanguageMode(.v6)]

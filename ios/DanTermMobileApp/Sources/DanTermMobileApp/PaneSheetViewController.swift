@@ -6,6 +6,7 @@
 //
 // It decides nothing. It reports the row the user picked and paints the list it is given;
 // the session model owns which panes exist and which one is selected.
+import ChipArtwork
 import DanTermProtocol
 import UIKit
 
@@ -76,10 +77,32 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
         var content = cell.defaultContentConfiguration()
         content.text = pane.paneTitle
         content.secondaryText = "\(pane.groupName) / \(pane.tabTitle)"
+        content.image = chipImage(for: pane.chip)
+        // Every row reserves the chip's box whether or not its image was drawn, so a
+        // row that failed to rasterize does not pull its title left out of the column.
+        content.imageProperties.reservedLayoutSize = CGSize(width: Self.chipEdge, height: Self.chipEdge)
         cell.contentConfiguration = content
         cell.backgroundColor = .clear
         cell.accessoryType = pane.paneId == selectedPaneId ? .checkmark : .none
         return cell
+    }
+
+    /// The chip's edge in points. Sized against the row's own two lines of text rather
+    /// than borrowed from the Mac sidebar's metric, which answers to a different row.
+    private static let chipEdge: CGFloat = 18
+
+    /// Wraps the chip the roster named in the image type a table cell wants.
+    ///
+    /// The colors are the agent's own: this row stands for one pane, as the macOS
+    /// sidebar row does, not for one pane among a tab's others. The appearance comes
+    /// from the trait collection rather than a constant, so the chip follows the
+    /// style this sheet overrides itself to instead of drifting from it.
+    private func chipImage(for kind: ChipKind) -> UIImage? {
+        let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 1
+        let appearance: ChipAppearance = traitCollection.userInterfaceStyle == .light ? .light : .dark
+        guard let drawn = kind.drawnImage(edge: Self.chipEdge, scale: scale, appearance: appearance)
+        else { return nil }
+        return UIImage(cgImage: drawn, scale: scale, orientation: .up)
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
