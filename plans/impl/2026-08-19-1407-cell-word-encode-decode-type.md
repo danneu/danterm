@@ -127,4 +127,4 @@ After the refactor commit lands and `just test` is green, record it in
 
 ## Commit progress
 - [x] 1. refactor(core): route every cell-word encode and decode through CellWord
-- [ ] 2. docs(audit): mark STORE-3 done
+- [x] 2. docs(audit): mark STORE-3 done

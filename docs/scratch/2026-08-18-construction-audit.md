@@ -1165,7 +1165,7 @@ projection work in MODEL-2/MODEL-4. LOOKUP-1 and LOOKUP-2 sit here as a pair
 -- LOOKUP-1 was downgraded to 3x3 large, so it is worth doing only once the
 reducer and projection churn above it has stopped.
 
-- [ ] **[STORE-3](#store-3)** (3x5, small) Give the 8-byte cell word one encode/decode type instead of eight hand-inlined shift sites _(after [STORE-1](#store-1), [STORE-2](#store-2))_
+- [x] **[STORE-3](#store-3)** (3x5, small) Give the 8-byte cell word one encode/decode type instead of eight hand-inlined shift sites _(after [STORE-1](#store-1), [STORE-2](#store-2))_ -- `0a64d509`
 - [ ] **[PARSE-2](#parse-2)** (3x5, medium) Make "alternate screen live without a retained primary" unrepresentable
 - [ ] **[PARSE-3](#parse-3)** (3x5, medium) Derive DEC/ANSI mode set, reset, query and resynchronization from one mode table
 - [ ] **[RUNTIME-6](#runtime-6)** (3x5, medium) Move the pane-tape follow broker out of AppRuntime into its own owner
