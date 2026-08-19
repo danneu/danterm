@@ -1084,7 +1084,7 @@ wave.
 - [x] **[CHROME-1](#chrome-1)** (4x5, large) Replace the fatalError-based TODO popover base class with one controller parameterized by a scope value -- `ab1173b8..6fcae32d`
 - [ ] **[FEED-2](#feed-2)** (3x5, small) Reach a row's cells once per run, not once per cell, on the bulk ASCII write and scan loops
 - [ ] **[IPC-3](#ipc-3)** (3x5, small) Give the todo state change one catalog case so three unreachable `preconditionFailure` arms disappear
-- [ ] **[MODEL-3](#model-3)** (3x5, small) Collapse ContainerShape to layout plus zoomedLeaf; derive the structural fingerprint
+- [x] **[MODEL-3](#model-3)** (3x5, small) Collapse ContainerShape to layout plus zoomedLeaf; derive the structural fingerprint -- `8b39fd1e`
 - [ ] **[PERSIST-4](#persist-4)** (3x5, small) Confine the IPC connection's descriptor to its write queue so a queued write cannot land on a reused fd
 - [ ] **[MODEL-1](#model-1)** (3x5, medium) Replace PendingConfirmation's subject-plus-optional-payloads with one per-subject enum
 - [ ] **[PERSIST-2](#persist-2)** (3x5, medium) Give the recovery directory one owner: a RecoveryPaths value threaded from launch
