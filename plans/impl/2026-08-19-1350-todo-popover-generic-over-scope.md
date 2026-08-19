@@ -205,5 +205,26 @@ Stop the slot when done.
 
 ## Commit progress
 - [x] 1. refactor(app): close todo shortcut help through the controller base
-- [ ] 2. test(ui): pin the todo popover behaviors the scope boundary will own
+- [x] 2. test(ui): pin the todo popover behaviors the scope boundary will own
 - [ ] 3. refactor(app): one TODO popover controller generic over its scope
+
+## Implementation notes
+
+- Commit 2 adds `tests-ui/TodoPopoverDragTestSupport.swift`, an NSDraggingInfo
+  double, and lists it in `test-ui.sh`. Both `acceptDrop` handlers read only the
+  dragging pasteboard, so every other protocol requirement answers with an inert
+  value. Tab drop tests round-trip the payload through the controller's own
+  `pasteboardWriterForRow` instead of hand-written JSON, so the drop tests read
+  the same bytes a real drag would carry.
+- Ablation check on the new drop tests: deleting the post-dispatch
+  `selectTarget` from the tab `acceptDrop` fails both new tab drop tests, but
+  deleting the matching `selectTodo` restore from the pane `acceptDrop` leaves
+  the pane drop test green. The pane's `apply` already re-selects the surviving
+  todo by id during the re-entrant reapply, so the pane's explicit restore is
+  redundant on every reachable path. The pane test still pins the observable
+  contract the refactor must keep: a drop leaves the previously selected row
+  selected, rather than adopting the tab's select-the-dropped-todo behavior.
+- The gate step `swift test --scratch-path .build-app-tests` failed once under
+  parallel load with 30-second socket timeouts in the IPC and CLI suites, and
+  passes standalone. This commit compiles no product code, so the failure is
+  environmental.

@@ -177,6 +177,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/PaneWrapperViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/ObserveOnMainTests.swift" \
         "$SCRIPT_DIR/tests-ui/ScrollableTerminalViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/TodoPopoverDragTestSupport.swift" \
         "$SCRIPT_DIR/tests-ui/TabTodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/ThemeBrowserViewTests.swift" \

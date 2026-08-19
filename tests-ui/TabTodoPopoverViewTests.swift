@@ -406,6 +406,313 @@ func tabTodoPopoverViewTests() {
 
         try uiExpect(!fx.vc.hasShortcutHelpPopover, "shortcut help should close before the tab parent disappears")
     }
+
+    uiTest("Escape in list mode sends toggleTodoPopover") {
+        // Intent: Escape with the list focused dismisses the tab popover
+        //   through the toggle message.
+        // Why it exists: the pane suite already pins this; the tab suite was
+        //   silent about its own dismiss owner. Spec-first.
+        // Scenario: the user presses Escape while the tab TODO list is focused.
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+
+        fx.table.cancelOperation(nil)
+
+        try expectSingleMessage(fx.runtime, "list escape dismiss") { msg in
+            if case .toggleTodoPopover(.tab(let tabId)) = msg { return tabId == fx.tabId }
+            return false
+        }
+    }
+
+    uiTest("Cmd-Backspace deletes the selected row and selects the nearest survivor") {
+        // Intent: Cmd-Backspace dispatches delete for the selected row and
+        //   moves selection to the nearest remaining selectable row.
+        // Why it exists: the tab list has non-selectable header and
+        //   placeholder rows, so the survivor search has to skip them.
+        //   Spec-first.
+        // Scenario: the user selects "Tab alpha" and presses Cmd-Backspace.
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+        installTabTodoReapplyHook(fx)
+        let row = try rowIndex(titled: "Tab alpha", in: fx)
+        fx.table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        fx.window.makeFirstResponder(fx.table)
+
+        let handled = fx.vc.view.performKeyEquivalent(
+            with: keyDownEvent(characters: "\u{8}", modifiers: [.command], keyCode: 51, window: fx.window))
+        settleTabTodoFixture(fx)
+
+        try uiExpect(handled, "Cmd-Backspace should be handled by the popover root view")
+        try expectSingleMessage(fx.runtime, "keyboard delete tab todo") { msg in
+            if case .deleteTodo(.tab(let tabId), let todoId) = msg {
+                return tabId == fx.tabId && todoId.rawValue == fx.tabOpenId
+            }
+            return false
+        }
+        try uiExpect(try selectedRowTitle(in: fx) == "Tab done",
+                     "selection should move to the nearest surviving row")
+    }
+
+    uiTest("Cmd-N while editing saves, clears the compose draft, and focuses compose") {
+        // Intent: Cmd-N in edit mode saves the edit, clears the compose draft,
+        //   leaves edit mode, and focuses compose.
+        // Why it exists: the pane suite pins this route; the tab suite was
+        //   silent even though the tab controller reaches it through a
+        //   different key-equivalent branch. Spec-first.
+        // Scenario: the user has a stale compose draft, edits a tab task, then
+        //   presses Cmd-N.
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+        installTabTodoReapplyHook(fx)
+        let compose = try visibleTodoInput(in: fx)
+        compose.string = "draft to clear"
+        fx.vc.textDidChange(Notification(name: NSText.didChangeNotification, object: compose.textView))
+        try enterEdit(rowTitle: "Tab alpha", in: fx)
+        let editInput = try visibleTodoInput(in: fx)
+        editInput.string = "  Tab renamed  "
+
+        let handled = fx.vc.view.performKeyEquivalent(
+            with: keyDownEvent(characters: "n", modifiers: [.command], keyCode: 45, window: fx.window))
+        settleTabTodoFixture(fx)
+
+        try uiExpect(handled, "Cmd-N should be handled by the popover root view")
+        try expectSingleMessage(fx.runtime, "Cmd-N save edit") { msg in
+            if case .editTodoText(.tab(let tabId), let todoId, let text) = msg {
+                return tabId == fx.tabId && todoId.rawValue == fx.tabOpenId && text == "Tab renamed"
+            }
+            return false
+        }
+        let visible = try visibleTodoInput(in: fx)
+        try uiExpect(visible.string.isEmpty, "compose draft should be cleared")
+        try uiExpect(fx.window.firstResponder === visible.textView, "compose input should be first responder")
+    }
+
+    uiTest("apply preserves compose focus and draft") {
+        // Intent: applying a fresh projection while compose is first responder
+        //   keeps compose focused and preserves its draft.
+        // Why it exists: pins the compose branch of first-responder restore on
+        //   the tab controller, matching the pane suite. Spec-first.
+        // Scenario: model data refreshes while the user is typing a new tab
+        //   task.
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+        let compose = try visibleTodoInput(in: fx)
+        compose.string = "compose draft"
+        fx.window.makeFirstResponder(compose.textView)
+
+        var model = fx.model
+        model.groups[0].tabs[0].todos[0].text = "Tab alpha refreshed"
+        fx.vc.apply(desiredTabTodoPopover(tabId: fx.tabId, in: model)!)
+        settleTabTodoFixture(fx)
+
+        let visible = try visibleTodoInput(in: fx)
+        try uiExpect(visible === compose, "compose input should remain visible")
+        try uiExpect(visible.string == "compose draft", "compose draft should survive apply")
+        try uiExpect(fx.window.firstResponder === compose.textView, "compose input should remain first responder")
+    }
+
+    uiTest("apply preserves table focus or falls back to compose when no row is selectable") {
+        // Intent: applying while the table is focused keeps table focus when
+        //   the selected item survives; when every task disappears, focus
+        //   moves to compose.
+        // Why it exists: pins the table branch of first-responder restore,
+        //   including its fallback, on a list whose remaining rows are all
+        //   headers and placeholders. Spec-first.
+        // Scenario: a selected tab task survives one refresh, then every task
+        //   in the tab and its panes is removed.
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+        let row = try rowIndex(titled: "Tab alpha", in: fx)
+        fx.table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        fx.window.makeFirstResponder(fx.table)
+
+        var model = fx.model
+        model.groups[0].tabs[0].todos[0].text = "Tab alpha refreshed"
+        fx.vc.apply(desiredTabTodoPopover(tabId: fx.tabId, in: model)!)
+        settleTabTodoFixture(fx)
+
+        try uiExpect(fx.window.firstResponder === fx.table, "table should remain first responder while selection survives")
+        try uiExpect(try selectedRowTitle(in: fx) == "Tab alpha refreshed",
+                     "selected row should survive the refresh")
+
+        model.groups[0].tabs[0].todos = []
+        for paneId in fx.paneIds {
+            model.updatePane(paneId) { $0.todos = [] }
+        }
+        fx.vc.apply(desiredTabTodoPopover(tabId: fx.tabId, in: model)!)
+        settleTabTodoFixture(fx)
+
+        let compose = try visibleTodoInput(in: fx)
+        try uiExpect(fx.window.firstResponder === compose.textView,
+                     "a list with no selectable row should move focus back to compose")
+    }
+
+    uiTest("accepted same-bucket drop reorders the tab section and keeps the dropped todo selected") {
+        // Intent: dropping a tab task inside its own section accepts the drop,
+        //   dispatches the reorder message with the section-local index, and
+        //   leaves the dropped task selected.
+        // Why it exists: the drop path decides both which message to send and
+        //   what stays selected across the re-entrant apply, and no test
+        //   reached it. Spec-first.
+        // Scenario: the user drags "Tab alpha" and drops it above "Tab done".
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+        installTabTodoReapplyHook(fx)
+        let source = try rowIndex(titled: "Tab alpha", in: fx)
+        let destination = try rowIndex(titled: "Tab done", in: fx)
+
+        let info = try tabDropInfo(forRow: source, in: fx)
+        let accepted = fx.vc.tableView(fx.table, acceptDrop: info, row: destination, dropOperation: .above)
+        settleTabTodoFixture(fx)
+
+        try uiExpect(accepted, "same-bucket drop should be accepted")
+        try expectSingleMessage(fx.runtime, "tab drop reorder") { msg in
+            if case .reorderTodo(.tab(let tabId), let todoId, let toIndex) = msg {
+                return tabId == fx.tabId && todoId.rawValue == fx.tabOpenId && toIndex == 1
+            }
+            return false
+        }
+        try uiExpect(rowTextValues(materializedTabTodoRows(fx)).prefix(3) == ["This tab", "Tab done", "Tab alpha"],
+                     "dropped task should follow Tab done, got \(rowTextValues(materializedTabTodoRows(fx)))")
+        try uiExpect(try selectedRowTitle(in: fx) == "Tab alpha", "dropped task should stay selected")
+        try uiExpect(try selectedRowDragPayload(in: fx).kind == "tab",
+                     "dropped task should still belong to the tab section")
+    }
+
+    uiTest("accepted cross-bucket drop moves the todo and selects it under its new owner") {
+        // Intent: dropping a tab task into a pane section accepts the drop,
+        //   dispatches moveTodo rather than reorderTodo, and selects the task
+        //   at its new owner.
+        // Why it exists: same-bucket and cross-bucket drops send different
+        //   messages and resolve selection against different owners; only a
+        //   drop test separates them. Spec-first.
+        // Scenario: the user drags "Tab alpha" and drops it above "Pane alpha".
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+        installTabTodoReapplyHook(fx)
+        let source = try rowIndex(titled: "Tab alpha", in: fx)
+        let destination = try rowIndex(titled: "Pane alpha", in: fx)
+
+        let info = try tabDropInfo(forRow: source, in: fx)
+        let accepted = fx.vc.tableView(fx.table, acceptDrop: info, row: destination, dropOperation: .above)
+        settleTabTodoFixture(fx)
+
+        try uiExpect(accepted, "cross-bucket drop should be accepted")
+        try expectSingleMessage(fx.runtime, "tab drop move") { msg in
+            if case .moveTodo(.tab(let tabId), let todoId, .pane(let paneId), let atIndex) = msg {
+                return tabId == fx.tabId
+                    && todoId.rawValue == fx.tabOpenId
+                    && paneId == fx.paneIds[0]
+                    && atIndex == 0
+            }
+            return false
+        }
+        try uiExpect(try selectedRowTitle(in: fx) == "Tab alpha", "moved task should stay selected")
+        let payload = try selectedRowDragPayload(in: fx)
+        try uiExpect(payload.kind == "pane" && payload.paneId == fx.paneIds[0].rawValue.uuidString,
+                     "moved task should be selected under its new pane owner")
+    }
+
+    uiTest("Shift-L and Shift-H move the selected todo between buckets and keep it selected") {
+        // Intent: the bucket keys move the selected task to the adjacent
+        //   section and leave it selected under its new owner in both
+        //   directions.
+        // Why it exists: bucket moves are the tab popover's only scope-unique
+        //   list action, and nothing pinned the message or the selection that
+        //   follows it. Spec-first.
+        // Scenario: the user selects "Tab alpha", presses Shift-L to push it
+        //   into the first pane, then Shift-H to pull it back.
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+        installTabTodoReapplyHook(fx)
+        let row = try rowIndex(titled: "Tab alpha", in: fx)
+        fx.table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        fx.window.makeFirstResponder(fx.table)
+
+        fx.table.keyDown(with: keyDownEvent(characters: "L", modifiers: [.shift], keyCode: 37, window: fx.window))
+        settleTabTodoFixture(fx)
+
+        try uiExpect(fx.runtime.sentMessages.count == 1, "Shift-L should send one message")
+        try uiExpect(message(fx.runtime.sentMessages[0]) { msg in
+            if case .moveTodo(.tab(let tabId), let todoId, .pane(let paneId), let atIndex) = msg {
+                return tabId == fx.tabId
+                    && todoId.rawValue == fx.tabOpenId
+                    && paneId == fx.paneIds[0]
+                    && atIndex == 0
+            }
+            return false
+        }, "Shift-L should move the task into the first pane")
+        try uiExpect(try selectedRowTitle(in: fx) == "Tab alpha", "moved task should stay selected")
+        try uiExpect(try selectedRowDragPayload(in: fx).paneId == fx.paneIds[0].rawValue.uuidString,
+                     "moved task should be selected under the pane it landed in")
+
+        fx.table.keyDown(with: keyDownEvent(characters: "H", modifiers: [.shift], keyCode: 4, window: fx.window))
+        settleTabTodoFixture(fx)
+
+        try uiExpect(fx.runtime.sentMessages.count == 2, "Shift-H should send a second message")
+        try uiExpect(message(fx.runtime.sentMessages[1]) { msg in
+            if case .moveTodo(.pane(let paneId), let todoId, .tab(let tabId), let atIndex) = msg {
+                return paneId == fx.paneIds[0]
+                    && todoId.rawValue == fx.tabOpenId
+                    && tabId == fx.tabId
+                    && atIndex == 0
+            }
+            return false
+        }, "Shift-H should move the task back to the tab section")
+        try uiExpect(try selectedRowTitle(in: fx) == "Tab alpha", "returned task should stay selected")
+        try uiExpect(try selectedRowDragPayload(in: fx).kind == "tab",
+                     "returned task should be selected under the tab section")
+    }
+
+    uiTest("Cmd-Shift-H and Cmd-Shift-L are swallowed by the tab popover") {
+        // Intent: the tab popover claims the Cmd-Shift bucket keys so they
+        //   never reach the surrounding app, and dispatches nothing for them.
+        // Why it exists: the pane popover deliberately lets the same keys
+        //   bubble; only the returned handled flag distinguishes the two.
+        //   Spec-first.
+        // Scenario: the user presses Cmd-Shift-H and Cmd-Shift-L with a tab
+        //   TODO popover open.
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+
+        let left = fx.vc.view.performKeyEquivalent(
+            with: keyDownEvent(characters: "h", modifiers: [.command, .shift], keyCode: 4, window: fx.window))
+        let right = fx.vc.view.performKeyEquivalent(
+            with: keyDownEvent(characters: "l", modifiers: [.command, .shift], keyCode: 37, window: fx.window))
+
+        try uiExpect(left, "Cmd-Shift-H should be swallowed by the tab popover")
+        try uiExpect(right, "Cmd-Shift-L should be swallowed by the tab popover")
+        try uiExpect(fx.runtime.sentMessages.isEmpty, "swallowed bucket keys should send nothing")
+    }
+
+    uiTest("compose submit selects the newly added tab task") {
+        // Intent: after adding a task from compose, the tab popover selects the
+        //   row that just appeared.
+        // Why it exists: the selection is resolved against the projection the
+        //   re-entrant apply installed during send, so it only holds if the
+        //   controller reads the new projection after dispatch. Spec-first.
+        // Scenario: with "Tab done" selected, the user types a new task in
+        //   compose and presses Return.
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+        installTabTodoReapplyHook(fx)
+        let row = try rowIndex(titled: "Tab done", in: fx)
+        fx.table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        let compose = try visibleTodoInput(in: fx)
+        compose.string = "Tab gamma"
+
+        _ = fx.vc.textView(compose.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
+        settleTabTodoFixture(fx)
+
+        try expectSingleMessage(fx.runtime, "add tab todo") { msg in
+            if case .addTodo(.tab(let tabId), let text) = msg {
+                return tabId == fx.tabId && text == "Tab gamma"
+            }
+            return false
+        }
+        try uiExpect(try selectedRowTitle(in: fx) == "Tab gamma",
+                     "the newly added task should be selected")
+    }
 }
 
 private struct TabTodoFixture {
@@ -633,10 +940,11 @@ private struct DragPayload {
     let todoId: String?
 }
 
+private let tabTodoDragType = NSPasteboard.PasteboardType("com.danneu.danterm.tab-todo-row")
+
 private func dragPayload(row: Int, in fx: TabTodoFixture) throws -> DragPayload {
-    let type = NSPasteboard.PasteboardType("com.danneu.danterm.tab-todo-row")
     guard let item = fx.vc.tableView(fx.table, pasteboardWriterForRow: row) as? NSPasteboardItem,
-          let json = item.string(forType: type),
+          let json = item.string(forType: tabTodoDragType),
           let data = json.data(using: .utf8),
           let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
           let source = object["source"] as? [String: Any]
@@ -647,4 +955,123 @@ private func dragPayload(row: Int, in fx: TabTodoFixture) throws -> DragPayload 
         kind: source["kind"] as? String,
         paneId: source["paneId"] as? String,
         todoId: object["todoId"] as? String)
+}
+
+private func selectedRowDragPayload(in fx: TabTodoFixture) throws -> DragPayload {
+    try dragPayload(row: fx.table.selectedRow, in: fx)
+}
+
+/// Round-trip a row's real drag payload back through a dragging-info double, so
+/// drop tests exercise the same bytes AppKit would carry.
+private func tabDropInfo(forRow row: Int, in fx: TabTodoFixture) throws -> FakeTodoDraggingInfo {
+    guard let item = fx.vc.tableView(fx.table, pasteboardWriterForRow: row) as? NSPasteboardItem,
+          let json = item.string(forType: tabTodoDragType) else {
+        throw UITestFailure(message: "missing drag payload for row \(row)")
+    }
+    return todoDraggingInfo(type: tabTodoDragType, string: json)
+}
+
+private func rowTitle(at row: Int, in fx: TabTodoFixture) throws -> String {
+    let rows = materializedTabTodoRows(fx)
+    guard rows.indices.contains(row), let title = firstTextValue(in: rows[row]) else {
+        throw UITestFailure(message: "missing row title at \(row)")
+    }
+    return title
+}
+
+private func selectedRowTitle(in fx: TabTodoFixture) throws -> String {
+    try rowTitle(at: fx.table.selectedRow, in: fx)
+}
+
+private func keyDownEvent(
+    characters: String,
+    modifiers: NSEvent.ModifierFlags,
+    keyCode: UInt16,
+    window: NSWindow
+) -> NSEvent {
+    NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: modifiers,
+        timestamp: 0,
+        windowNumber: window.windowNumber,
+        context: nil,
+        characters: characters,
+        charactersIgnoringModifiers: characters.lowercased(),
+        isARepeat: false,
+        keyCode: keyCode)!
+}
+
+/// Reproduce production's send timing: reduce the message into a running model
+/// and re-apply the resulting projection inside the same `send` frame, so the
+/// controller's post-dispatch selection runs against the updated rows.
+private func installTabTodoReapplyHook(_ fx: TabTodoFixture) {
+    var model = fx.model
+    let tabId = fx.tabId
+    fx.runtime.onSend = { [weak vc = fx.vc] msg in
+        applyTabTodoMessage(msg, tabId: tabId, model: &model)
+        if let projection = desiredTabTodoPopover(tabId: tabId, in: model) {
+            vc?.apply(projection)
+        }
+    }
+}
+
+private func applyTabTodoMessage(_ msg: Msg, tabId: TabId, model: inout AppModel) {
+    func mutate(_ owner: TodoOwner, _ body: (inout [TodoItem]) -> Void) {
+        switch owner {
+        case .tab(let ownerTabId):
+            guard ownerTabId == tabId else { return }
+            body(&model.groups[0].tabs[0].todos)
+        case .pane(let paneId):
+            model.updatePane(paneId) { pane in body(&pane.todos) }
+        }
+    }
+
+    func insert(_ item: TodoItem, into owner: TodoOwner, at index: Int) {
+        mutate(owner) { todos in
+            todos.insert(item, at: max(0, min(index, todos.count)))
+        }
+    }
+
+    switch msg {
+    case .addTodo(let owner, let text):
+        mutate(owner) { $0.append(TodoItem(id: UUID(), text: text, isDone: false)) }
+    case .setTodoDone(let owner, let todoId, let isDone):
+        mutate(owner) { todos in
+            guard let index = todos.firstIndex(where: { $0.id == todoId }) else { return }
+            todos[index].isDone = isDone
+        }
+    case .toggleTodoDone(let owner, let todoId):
+        mutate(owner) { todos in
+            guard let index = todos.firstIndex(where: { $0.id == todoId }) else { return }
+            todos[index].isDone.toggle()
+        }
+    case .editTodoText(let owner, let todoId, let text):
+        mutate(owner) { todos in
+            guard let index = todos.firstIndex(where: { $0.id == todoId }) else { return }
+            todos[index].text = text
+        }
+    case .deleteTodo(let owner, let todoId):
+        mutate(owner) { $0.removeAll { $0.id == todoId } }
+    case .clearCompletedTodos(let owner):
+        mutate(owner) { $0.removeAll { $0.isDone } }
+    case .reorderTodo(let owner, let todoId, let toIndex):
+        var moved: TodoItem?
+        mutate(owner) { todos in
+            guard let index = todos.firstIndex(where: { $0.id == todoId }) else { return }
+            moved = todos.remove(at: index)
+        }
+        guard let item = moved else { return }
+        insert(item, into: owner, at: toIndex)
+    case .moveTodo(let from, let todoId, let to, let atIndex):
+        var moved: TodoItem?
+        mutate(from) { todos in
+            guard let index = todos.firstIndex(where: { $0.id == todoId }) else { return }
+            moved = todos.remove(at: index)
+        }
+        guard let item = moved else { return }
+        insert(item, into: to, at: atIndex)
+    default:
+        break
+    }
 }
