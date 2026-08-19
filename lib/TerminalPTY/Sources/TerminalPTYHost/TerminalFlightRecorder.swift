@@ -6,25 +6,52 @@ import Foundation
 import TerminalCore
 import TerminalCoreRecording
 
-/// Bounds retained payload and metadata independently so both bulk and tiny PTY chunks fit.
+/// Bounds retained payload and metadata independently so both bulk and tiny PTY chunks fit,
+/// and states which vocabulary the tape is worth spending those slots on.
+///
+/// Vocabulary belongs beside retention because both answer the same question -- what is worth
+/// a slot on this pane's tape. A live pane records only the boundary it must replay from; a
+/// characterization pane records the interaction intent behind that boundary too.
 package struct TerminalFlightRecorderConfiguration: Sendable {
+    /// What a live pane records: bounded history, boundary vocabulary only.
     package static let production = Self(
         budgetBytes: 8 * 1_024 * 1_024,
         eventLimit: 32_768,
         eventOverheadBytes: 128
     )
 
+    /// What a characterization pane records: every applied transition, never evicted, so the
+    /// recording a replay is checked against is the pane's whole life.
+    package static let complete = Self(
+        budgetBytes: .max,
+        eventLimit: .max,
+        eventOverheadBytes: 0,
+        recordsInteractionIntent: true
+    )
+
     package let budgetBytes: Int
     package let eventLimit: Int
     package let eventOverheadBytes: Int
+    /// Whether `.input`, `.paste`, `.focus`, `.mouse`, and `.viewport` reach the tape.
+    ///
+    /// Off is the production answer, and not merely to save room: a replica applies `.mouse`
+    /// and `.viewport`, so recording them on a live pane would mirror this pane's selection
+    /// and yank a follower's viewport.
+    package let recordsInteractionIntent: Bool
 
-    package init(budgetBytes: Int, eventLimit: Int, eventOverheadBytes: Int) {
+    package init(
+        budgetBytes: Int,
+        eventLimit: Int,
+        eventOverheadBytes: Int,
+        recordsInteractionIntent: Bool = false
+    ) {
         precondition(budgetBytes >= 0)
         precondition(eventLimit >= 0)
         precondition(eventOverheadBytes >= 0)
         self.budgetBytes = budgetBytes
         self.eventLimit = eventLimit
         self.eventOverheadBytes = eventOverheadBytes
+        self.recordsInteractionIntent = recordsInteractionIntent
     }
 }
 
@@ -212,7 +239,9 @@ package final class TerminalFlightRecorder {
     /// Keeps retention accounting beside each event without allocating an object per entry.
     private struct Slot {
         let event: TerminalFlightRecordingEvent
-        let payloadBytes: Int
+        /// What this event costs the retention budget, which is not the same as what it
+        /// contributes to a direction's watermark: a paste is charged and moves neither.
+        let chargedBytes: Int
         let feedBytesBeforeEvent: Int
         let writeBytesBeforeEvent: Int
     }
@@ -256,14 +285,19 @@ package final class TerminalFlightRecorder {
     /// clock, and belongs only to bytes travelling toward the child. Callers pass nil for
     /// anything that originated at the pane owner. Unlike the transfer stamp, origins are not
     /// forced monotonic along the sequence: they describe their own event, not this one.
+    ///
+    /// The interaction-intent gate lives here rather than at the call sites, so a capture site
+    /// added later cannot forget it: every owner records unconditionally and the configuration
+    /// decides what survives.
     package func record(_ event: NeutralTerminalRecordingEvent, origin: UInt64? = nil) {
+        guard configuration.recordsInteractionIntent || Self.isInteractionIntent(event) == false
+        else { return }
         let current = now()
         let measured = current >= startedNanoseconds ? current - startedNanoseconds : 0
         let elapsed = max(lastElapsedNanoseconds, measured)
         lastElapsedNanoseconds = elapsed
         let originElapsed = origin.map { $0 >= startedNanoseconds ? $0 - startedNanoseconds : 0 }
         let direction = Self.direction(of: event)
-        let payloadBytes = direction?.byteCount ?? 0
         let payload = direction.map { direction in
             TerminalFlightRecordingPayloadSpan(
                 byteOffset: direction.isFeed ? totalFeedBytes : totalWriteBytes,
@@ -278,7 +312,7 @@ package final class TerminalFlightRecorder {
                 originElapsedNanoseconds: originElapsed,
                 payload: payload
             ),
-            payloadBytes: payloadBytes,
+            chargedBytes: Self.budgetCharge(of: event),
             feedBytesBeforeEvent: totalFeedBytes,
             writeBytesBeforeEvent: totalWriteBytes
         )
@@ -294,7 +328,7 @@ package final class TerminalFlightRecorder {
             currentGeometry = .init(columns: columns, rows: rows, pinned: pinned)
         }
         slots.append(slot)
-        accountedBytes += payloadBytes + configuration.eventOverheadBytes
+        accountedBytes += slot.chargedBytes + configuration.eventOverheadBytes
         enforceBounds()
         assert(
             slots.isEmpty
@@ -461,7 +495,28 @@ package final class TerminalFlightRecorder {
         {
             guard !slots.isEmpty else { break }
             let evicted = slots.removeFirst()
-            accountedBytes -= evicted.payloadBytes + configuration.eventOverheadBytes
+            accountedBytes -= evicted.chargedBytes + configuration.eventOverheadBytes
+        }
+    }
+
+    /// Whether an event states what someone meant to do to the pane rather than what crossed
+    /// its boundary. Only these kinds are gated: a replica applies them, and the byte-carrying
+    /// kinds beside them are what every reader replays from.
+    private static func isInteractionIntent(_ event: NeutralTerminalRecordingEvent) -> Bool {
+        switch event {
+        case .input, .paste, .focus, .mouse, .viewport: true
+        case .feed, .write, .resize, .checkpoint: false
+        }
+    }
+
+    /// What one event costs the retention budget. A paste is charged its own bytes even though
+    /// it moves no watermark: it can carry a whole clipboard, and an uncharged one would let a
+    /// single event push the retained suffix past the per-pane budget.
+    private static func budgetCharge(of event: NeutralTerminalRecordingEvent) -> Int {
+        switch event {
+        case .feed(let bytes), .write(let bytes): bytes.count
+        case .paste(let text): text.utf8.count
+        case .input, .focus, .mouse, .resize, .viewport, .checkpoint: 0
         }
     }
 

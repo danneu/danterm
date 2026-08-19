@@ -1,6 +1,7 @@
 // Behavioral proofs for the bounded live-pane recorder independent of real PTY timing.
 import Foundation
 import DanTermProtocol
+import TerminalCore
 import TerminalCoreRecording
 @testable import TerminalPTYHost
 import Synchronization
@@ -654,6 +655,140 @@ struct TerminalFlightRecorderTests {
                     == Methods.paneTapeEvent
             )
         }
+    }
+
+    // Intent: a production-configured recorder drops every interaction-intent kind it is
+    // handed and keeps only the boundary vocabulary.
+    // Why it exists: host call sites record unconditionally, so the configuration is the
+    // only thing standing between a live pane's tape and events a following replica would
+    // apply -- mirrored selection, a yanked viewport, doubled keystroke records.
+    // Scenario: one pane is driven through every recordable kind; its production tape keeps
+    // the feed, the write, and the resize.
+    @Test("a production-configured recorder keeps only boundary events")
+    func productionConfigurationRecordsNoInteractionIntent() {
+        let recorder = TerminalFlightRecorder(
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
+            configuration: .production,
+            now: { 0 }
+        )
+
+        recordEveryKind(into: recorder)
+
+        let expected: [NeutralTerminalRecordingEvent] = [
+            .feed([1, 2, 3]),
+            .write([4, 5]),
+            .resize(columns: 100, rows: 30, pinned: true),
+        ]
+        #expect(recorder.capture().snapshot.events.map(\.event) == expected)
+    }
+
+    // Intent: the complete configuration records every kind in the order it was applied,
+    // and the interaction kinds carry neither a payload span nor an origin stamp.
+    // Why it exists: characterization replay reproduces a pane from this order alone, and a
+    // payload span on a byteless event would misplace every later byte-carrying one.
+    @Test("the complete configuration records every applied kind in order")
+    func completeConfigurationRecordsInteractionIntentInOrder() {
+        let recorder = TerminalFlightRecorder(
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
+            configuration: .complete,
+            now: { 0 }
+        )
+
+        recordEveryKind(into: recorder)
+
+        let events = recorder.capture().snapshot.events
+        let expected: [NeutralTerminalRecordingEvent] = [
+            .feed([1, 2, 3]),
+            .input(key: .character("a"), modifiers: []),
+            .paste("hé"),
+            .focus(true),
+            .mouse(.init(action: .move, column: 2, row: 3)),
+            .viewport(.byRows(-4)),
+            .write([4, 5]),
+            .resize(columns: 100, rows: 30, pinned: true),
+        ]
+        #expect(events.map(\.event) == expected)
+        let interaction = events.filter { event in
+            switch event.event {
+            case .input, .paste, .focus, .mouse, .viewport: true
+            default: false
+            }
+        }
+        #expect(interaction.count == 5)
+        #expect(interaction.allSatisfy { $0.payload == nil })
+        #expect(interaction.allSatisfy { $0.originElapsedNanoseconds == nil })
+    }
+
+    // Intent: interaction events sit between byte-carrying ones without moving either
+    // direction's lifetime watermark.
+    // Why it exists: a cursor turns a byte offset back into a position, so an interaction
+    // event that advanced a watermark would silently shift every following payload span.
+    @Test("interaction events leave both byte watermarks where they were")
+    func interactionEventsNeverAdvanceByteWatermarks() {
+        let recorder = TerminalFlightRecorder(
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
+            configuration: .complete,
+            now: { 0 }
+        )
+
+        recorder.record(.feed([1, 2, 3]))
+        recorder.record(.paste("hello"))
+        recorder.record(.write([9, 9]))
+        recorder.record(.mouse(.init(action: .move, column: 0, row: 0)))
+        recorder.record(.feed([4]))
+
+        let expected: [TerminalFlightRecordingPayloadSpan?] = [
+            .init(byteOffset: 0, byteLength: 3),
+            nil,
+            .init(byteOffset: 0, byteLength: 2),
+            nil,
+            .init(byteOffset: 3, byteLength: 1),
+        ]
+        #expect(recorder.capture().snapshot.events.map(\.payload) == expected)
+        #expect(recorder.liveCursor().feedBytesBeforeNextSequence == 4)
+        #expect(recorder.liveCursor().writeBytesBeforeNextSequence == 2)
+    }
+
+    // Intent: a paste is charged its UTF-8 byte count against the retention budget, yet
+    // evicting it reports no lost feed or write bytes.
+    // Why it exists: a paste can carry megabytes, so leaving it uncharged would let one
+    // clipboard drop blow past the per-pane budget the IPC line ceiling was chosen against;
+    // charging it as feed or write bytes would instead report a byte gap that never existed.
+    @Test("a bounded recorder charges a paste but reports no payload loss when it evicts")
+    func boundedConfigurationChargesPasteWithoutReportingByteLoss() {
+        let recorder = TerminalFlightRecorder(
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
+            configuration: .init(
+                budgetBytes: 16,
+                eventLimit: 64,
+                eventOverheadBytes: 0,
+                recordsInteractionIntent: true
+            ),
+            now: { 0 }
+        )
+
+        recorder.record(.paste("abcdefgh"))
+        recorder.record(.feed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]))
+
+        let snapshot = recorder.capture().snapshot
+        let expected: [NeutralTerminalRecordingEvent] = [.feed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])]
+        #expect(snapshot.events.map(\.event) == expected)
+        #expect(snapshot.droppedEventCount == 1)
+        #expect(snapshot.droppedFeedBytes == 0)
+        #expect(snapshot.droppedWriteBytes == 0)
+    }
+
+    /// Drives one recorder through every kind `record` accepts, so a configuration test can
+    /// assert on what survived rather than on what it chose to offer.
+    private func recordEveryKind(into recorder: TerminalFlightRecorder) {
+        recorder.record(.feed([1, 2, 3]))
+        recorder.record(.input(key: .character("a"), modifiers: []))
+        recorder.record(.paste("hé"))
+        recorder.record(.focus(true))
+        recorder.record(.mouse(.init(action: .move, column: 2, row: 3)))
+        recorder.record(.viewport(.byRows(-4)))
+        recorder.record(.write([4, 5]))
+        recorder.record(.resize(columns: 100, rows: 30, pinned: true))
     }
 }
 
