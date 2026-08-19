@@ -341,6 +341,8 @@ final class TerminalPaneSessionController {
     /// Origin stamps in submission order, so a test can assert which moment the pane view
     /// attributed its input to. The real controller forwards these to the flight recorder.
     private(set) var inputOrigins: [UInt64?] = []
+    /// The wait generation stamped on each user-directed submission, in submission order.
+    private(set) var submittedWaitGenerations: [PaneInputWaitGeneration?] = []
     private(set) var focusChanges: [Bool] = []
     private(set) var pointerEvents: [TerminalPointerEvent] = []
     private(set) var wheelEvents: [TerminalWheelEvent] = []
@@ -382,38 +384,50 @@ final class TerminalPaneSessionController {
         self.processIsRunning = processIsRunning
     }
 
-    func sendText(_ text: String, origin: UInt64?) {
-        sendText(text, origin: origin, onCompletion: nil)
+    func sendText(_ text: String, origin: UInt64?, waitGeneration: PaneInputWaitGeneration?) {
+        sendText(text, origin: origin, waitGeneration: waitGeneration, onCompletion: nil)
     }
     func sendText(
         _ text: String,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration?,
         onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?
     ) {
         textInputs.append(text)
         inputOrigins.append(origin)
-        deliverOrBuffer(onCompletion) { $0.deliveredTextInputs.append(text) }
+        submittedWaitGenerations.append(waitGeneration)
+        deliverOrBuffer(onCompletion, waitGeneration: waitGeneration) {
+            $0.deliveredTextInputs.append(text)
+        }
     }
     func sendKey(
         _ key: TerminalInputKey,
         modifiers: TerminalKeyModifiers,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration?,
         onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
     ) {
         let bytes = encodeTerminalKey(key, modifiers: modifiers, modes: inputModes)
         inputBytes.append(bytes)
         inputOrigins.append(origin)
-        deliverOrBuffer(onCompletion) { $0.deliveredInputBytes.append(bytes) }
+        submittedWaitGenerations.append(waitGeneration)
+        deliverOrBuffer(onCompletion, waitGeneration: waitGeneration) {
+            $0.deliveredInputBytes.append(bytes)
+        }
     }
     func sendPaste(
         _ text: String,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration?,
         onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
     ) {
         let bytes = encodeTerminalPaste(text, modes: inputModes)
         inputBytes.append(bytes)
         inputOrigins.append(origin)
-        deliverOrBuffer(onCompletion) { $0.deliveredInputBytes.append(bytes) }
+        submittedWaitGenerations.append(waitGeneration)
+        deliverOrBuffer(onCompletion, waitGeneration: waitGeneration) {
+            $0.deliveredInputBytes.append(bytes)
+        }
     }
 
     func emitProcessStarted() {
@@ -430,6 +444,7 @@ final class TerminalPaneSessionController {
     /// delivered-input logs untouched the way a refused write leaves the descriptor untouched.
     private func deliverOrBuffer(
         _ onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?,
+        waitGeneration: PaneInputWaitGeneration?,
         recording record: @escaping (TerminalPaneSessionController) -> Void
     ) {
         let delivery: () -> Void = { [weak self] in
@@ -438,6 +453,9 @@ final class TerminalPaneSessionController {
                 complete(onCompletion, with: .rejected(submissionFailure))
             } else {
                 record(self)
+                // The real owner reports the occurrence only once every byte has crossed
+                // the PTY, so the shim reports it only on the delivered branch too.
+                onSemanticEvents?([.userInputDelivered(waitGeneration: waitGeneration)])
                 complete(onCompletion, with: .delivered)
             }
         }
@@ -472,18 +490,33 @@ final class TerminalPaneSessionController {
     }
     // `origin` is accepted and dropped: this shim records wheel and pointer input as events
     // rather than as bytes, and only the byte-producing paths above assert on their stamps.
-    func sendWheel(_ event: TerminalWheelEvent, origin: UInt64?) {
+    func sendWheel(
+        _ event: TerminalWheelEvent,
+        origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration?
+    ) {
         wheelEvents.append(event)
+        submittedWaitGenerations.append(waitGeneration)
     }
     func sendWheel(
         _ event: TerminalWheelEvent,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration?,
         onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?
     ) {
         wheelEvents.append(event)
+        submittedWaitGenerations.append(waitGeneration)
         complete(onCompletion, with: submissionFailure.map { .rejected($0) } ?? .delivered)
     }
-    func sendPointer(_ event: TerminalPointerEvent, origin: UInt64?) {
+    func sendPointer(
+        _ event: TerminalPointerEvent,
+        origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration?
+    ) {
+        submittedWaitGenerations.append(waitGeneration)
+        sendPointer(event, origin: origin)
+    }
+    private func sendPointer(_ event: TerminalPointerEvent, origin: UInt64?) {
         pointerEvents.append(event)
         switch event {
         case let .move(_, _, _, modifiers):

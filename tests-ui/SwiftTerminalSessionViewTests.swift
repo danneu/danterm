@@ -1897,6 +1897,42 @@ func swiftTerminalSessionViewTests() {
                      "process start did not deliver the buffered GUI keystroke exactly once")
     }
 
+    uiTest("a typed key stamps the wait the pane holds and reports it back on delivery") {
+        // Intent: a real AppKit keystroke reads the pane's current agent wait at the moment
+        //   it is submitted, and the delivered occurrence reaches the app naming that wait.
+        // Why it exists: this is the only proof of the app-side origin read. Scripted input
+        //   snapshots the wait inside core dispatch, so every core test would still pass if
+        //   the typed path stamped nothing and no keystroke ever retracted a wait.
+        // Scenario: an agent reports `waiting`, the user presses Escape in the pane.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller)
+        var generation: AgentWaitGeneration? = AgentWaitGeneration(rawValue: 7)
+        pane.currentAgentWaitGeneration = { generation }
+        var events: [TerminalSessionEvent] = []
+        pane.onEvent = { events.append($0) }
+
+        pane.keyDown(with: try makeKeyEvent(keyCode: 53, modifiers: []))
+
+        try uiExpect(
+            controller.submittedWaitGenerations == [PaneInputWaitGeneration(rawValue: 7)],
+            "the typed key did not stamp the pane's wait: \(controller.submittedWaitGenerations)"
+        )
+        try uiExpect(
+            events == [.report(.userInputDelivered(waitGeneration: AgentWaitGeneration(rawValue: 7)))],
+            "the delivered occurrence did not reach the app naming the wait: \(events)"
+        )
+
+        // A pane holding no wait stamps none, so its delivery can retract nothing.
+        generation = nil
+        events = []
+        pane.keyDown(with: try makeKeyEvent(keyCode: 53, modifiers: []))
+
+        try uiExpect(
+            events == [.report(.userInputDelivered(waitGeneration: nil))],
+            "input with no wait behind it did not report an empty occurrence: \(events)"
+        )
+    }
+
     uiTest("a refused submission names its reason and reaches the app boundary rejected") {
         // Intent: when lifecycle policy refuses a submission, the reason stays attached to
         //   the terminal result, and the pane reports the refusal to the app as a rejection.
@@ -1910,9 +1946,9 @@ func swiftTerminalSessionViewTests() {
         controller.submissionFailure = .bufferLimitExceeded
         let pane = SwiftTerminalSessionView(controller: controller)
         var results: [TerminalInputSubmissionResult] = []
-        pane.sendInputText("ls") { results.append($0) }
+        pane.sendInputText("ls", waitGeneration: nil) { results.append($0) }
         controller.submissionFailure = .launchFailed(.noUsableShell)
-        pane.sendInputText("pwd") { results.append($0) }
+        pane.sendInputText("pwd", waitGeneration: nil) { results.append($0) }
 
         pumpRunLoop(untilTrue: { results.count == 2 })
 
@@ -1962,8 +1998,8 @@ func swiftTerminalSessionViewTests() {
         let pane = SwiftTerminalSessionView(controller: controller)
 
         let before = DispatchTime.now().uptimeNanoseconds
-        pane.sendInputText("ls")
-        pane.sendInputKey(.named(.enter), modifiers: [])
+        pane.sendInputText("ls", waitGeneration: nil)
+        pane.sendInputKey(.named(.enter), modifiers: [], waitGeneration: nil)
         let after = DispatchTime.now().uptimeNanoseconds
 
         try uiExpect(controller.inputOrigins.count == 2,
@@ -2063,8 +2099,8 @@ func swiftTerminalSessionViewTests() {
         let pane = SwiftTerminalSessionView(controller: controller)
         let payload = "one\u{1B}[201~\ntwo"
 
-        pane.sendText(payload)
-        pane.sendInputText(payload)
+        pane.sendText(payload, waitGeneration: nil)
+        pane.sendInputText(payload, waitGeneration: nil)
 
         try uiExpect(controller.inputBytes == [Array("\u{1B}[200~one[201~\ntwo\u{1B}[201~".utf8)],
                      "IPC text lost paste semantics: \(controller.inputBytes)")

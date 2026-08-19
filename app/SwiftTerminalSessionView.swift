@@ -259,6 +259,10 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         get { callbackGate.onEvent }
         set { callbackGate.onEvent = newValue }
     }
+    var currentAgentWaitGeneration: (() -> AgentWaitGeneration?)? {
+        get { callbackGate.currentAgentWaitGeneration }
+        set { callbackGate.currentAgentWaitGeneration = newValue }
+    }
     var onPrimaryHistoryMutation: (() -> Void)? {
         get { controller.onPrimaryHistoryMutation }
         set { controller.onPrimaryHistoryMutation = newValue }
@@ -751,7 +755,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
                 modifiers: Self.terminalModifiers(event.modifierFlags),
                 phase: Self.wheelPhase(for: event)
             ),
-            origin: PaneInputOrigin.systemEvent(event)
+            origin: PaneInputOrigin.systemEvent(event),
+            waitGeneration: originatedWaitGeneration
         )
     }
 
@@ -889,6 +894,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         // Every submission below reports the event's own occurrence time, not the clock now:
         // whatever delayed this handler is the app's, and stamping it here would hide that.
         let origin = PaneInputOrigin.systemEvent(event)
+        // Read once for the whole event: every submission below is the same keystroke,
+        // so they all answer the wait that was current when the key arrived.
+        let waitGeneration = originatedWaitGeneration
         let markedTextBefore = hasMarkedText()
         interpretKeyEvents([event])
         if markedTextBefore == false, hasMarkedText() == false,
@@ -896,13 +904,16 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             controller.sendKey(
                 key,
                 modifiers: Self.terminalModifiers(event.modifierFlags),
-                origin: origin
+                origin: origin,
+                waitGeneration: waitGeneration
             )
             return
         }
         if let texts = keyTextAccumulator, texts.isEmpty == false,
            texts.allSatisfy(Self.isCommittedTerminalText) {
-            for text in texts { controller.sendText(text, origin: origin) }
+            for text in texts {
+                controller.sendText(text, origin: origin, waitGeneration: waitGeneration)
+            }
             return
         }
         guard markedTextBefore == false, hasMarkedText() == false else { return }
@@ -910,7 +921,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller.sendKey(
             key,
             modifiers: Self.terminalModifiers(event.modifierFlags),
-            origin: origin
+            origin: origin,
+            waitGeneration: waitGeneration
         )
     }
 
@@ -974,7 +986,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         } else {
             // Reached outside a `keyDown`, so there is no system event whose time this text
             // is the product of; the app-entry stamp is the earliest moment it can claim.
-            controller.sendText(text, origin: PaneInputOrigin.appEntry())
+            controller.sendText(
+                text,
+                origin: PaneInputOrigin.appEntry(),
+                waitGeneration: originatedWaitGeneration
+            )
         }
     }
 
@@ -985,46 +1001,66 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     // TerminalSessionView: `Command.sendText`, the IPC top-level `text` field. Contractually the
     // paste path, so it goes through owner-side safe-paste policy (control stripping, bracket
     // markers) exactly like the clipboard entry points.
-    func sendText(_ text: String) {
-        controller.sendPaste(text, origin: PaneInputOrigin.appEntry())
+    func sendText(_ text: String, waitGeneration: AgentWaitGeneration?) {
+        controller.sendPaste(
+            text,
+            origin: PaneInputOrigin.appEntry(),
+            waitGeneration: Self.paneWaitGeneration(waitGeneration)
+        )
     }
 
     func sendText(
         _ text: String,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) {
-        controller.sendPaste(text, origin: PaneInputOrigin.appEntry()) {
+        controller.sendPaste(
+            text,
+            origin: PaneInputOrigin.appEntry(),
+            waitGeneration: Self.paneWaitGeneration(waitGeneration)
+        ) {
             onCompletion(Self.inputResult($0))
         }
     }
 
     // TerminalSessionView: `Command.sendInputText`, structured `input` text. Deliberately raw --
     // vim and htop must see the characters as if typed, so paste semantics must not apply.
-    func sendInputText(_ text: String) {
-        controller.sendText(text, origin: PaneInputOrigin.appEntry())
+    func sendInputText(_ text: String, waitGeneration: AgentWaitGeneration?) {
+        controller.sendText(
+            text,
+            origin: PaneInputOrigin.appEntry(),
+            waitGeneration: Self.paneWaitGeneration(waitGeneration)
+        )
     }
 
     func sendInputText(
         _ text: String,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) {
-        controller.sendText(text, origin: PaneInputOrigin.appEntry()) {
+        controller.sendText(
+            text,
+            origin: PaneInputOrigin.appEntry(),
+            waitGeneration: Self.paneWaitGeneration(waitGeneration)
+        ) {
             onCompletion(Self.inputResult($0))
         }
     }
 
-    func sendInputKey(_ key: KeyName, modifiers: KeyMods) {
+    func sendInputKey(_ key: KeyName, modifiers: KeyMods, waitGeneration: AgentWaitGeneration?) {
         guard let key = Self.terminalKey(for: key) else { return }
         controller.sendKey(
             key,
             modifiers: Self.terminalModifiers(modifiers),
-            origin: PaneInputOrigin.appEntry()
+            origin: PaneInputOrigin.appEntry(),
+            waitGeneration: Self.paneWaitGeneration(waitGeneration)
         )
     }
 
     func sendInputKey(
         _ key: KeyName,
         modifiers: KeyMods,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) {
         guard let key = Self.terminalKey(for: key) else {
@@ -1036,16 +1072,23 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller.sendKey(
             key,
             modifiers: Self.terminalModifiers(modifiers),
-            origin: PaneInputOrigin.appEntry()
+            origin: PaneInputOrigin.appEntry(),
+            waitGeneration: Self.paneWaitGeneration(waitGeneration)
         ) {
             onCompletion(Self.inputResult($0))
         }
     }
 
-    func sendInputWheel(_ direction: InputWheelDirection, column: Int, row: Int) {
+    func sendInputWheel(
+        _ direction: InputWheelDirection,
+        column: Int,
+        row: Int,
+        waitGeneration: AgentWaitGeneration?
+    ) {
         controller.sendWheel(
             Self.terminalWheelEvent(direction, column: column, row: row),
-            origin: PaneInputOrigin.appEntry()
+            origin: PaneInputOrigin.appEntry(),
+            waitGeneration: Self.paneWaitGeneration(waitGeneration)
         )
     }
 
@@ -1053,11 +1096,13 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         _ direction: InputWheelDirection,
         column: Int,
         row: Int,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) {
         controller.sendWheel(
             Self.terminalWheelEvent(direction, column: column, row: row),
-            origin: PaneInputOrigin.appEntry()
+            origin: PaneInputOrigin.appEntry(),
+            waitGeneration: Self.paneWaitGeneration(waitGeneration)
         ) { result in
             onCompletion(Self.inputResult(result))
         }
@@ -1077,6 +1122,27 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             column: column,
             row: row
         )
+    }
+
+    /// The wait to stamp on input this view originates itself. Read at the submission,
+    /// never cached: a wait admitted a moment ago must be the one the next keystroke ends.
+    private var originatedWaitGeneration: PaneInputWaitGeneration? {
+        Self.paneWaitGeneration(callbackGate.agentWaitGeneration())
+    }
+
+    /// Restates a model wait generation in the input owner's opaque form, and the owner's
+    /// form back again. The two types stay distinct because neither layer may read the
+    /// other's meaning; this view is the seam that carries the value across.
+    private static func paneWaitGeneration(
+        _ generation: AgentWaitGeneration?
+    ) -> PaneInputWaitGeneration? {
+        generation.map { PaneInputWaitGeneration(rawValue: $0.rawValue) }
+    }
+
+    private static func agentWaitGeneration(
+        _ generation: PaneInputWaitGeneration?
+    ) -> AgentWaitGeneration? {
+        generation.map { AgentWaitGeneration(rawValue: $0.rawValue) }
     }
 
     private static func inputResult(
@@ -1342,7 +1408,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     func pasteClipboard() {
         guard let text = selectionPasteboard.string(forType: .string) else { return }
-        controller.sendPaste(text, origin: PaneInputOrigin.appEntry())
+        controller.sendPaste(
+            text,
+            origin: PaneInputOrigin.appEntry(),
+            waitGeneration: originatedWaitGeneration
+        )
     }
 
     func requestClose() {
@@ -1381,8 +1451,10 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             switch event {
             case .terminal(let terminalEvent):
                 publish(terminalEvent)
-            case .userInputDelivered:
-                continue
+            case .userInputDelivered(let generation):
+                callbackGate.emit(.report(.userInputDelivered(
+                    waitGeneration: Self.agentWaitGeneration(generation)
+                )))
             }
         }
     }
@@ -1667,7 +1739,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
                 modifiers: Self.terminalModifiers(event.modifierFlags),
                 clickCount: event.clickCount
             ),
-            origin: PaneInputOrigin.systemEvent(event)
+            origin: PaneInputOrigin.systemEvent(event),
+            waitGeneration: originatedWaitGeneration
         )
         // The press is delivered before the cancellation so an off-grid press cannot survive
         // as an arm that a later on-grid release would activate.
@@ -1692,7 +1765,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
                 row: cell.row,
                 modifiers: Self.terminalModifiers(event.modifierFlags)
             ),
-            origin: PaneInputOrigin.systemEvent(event)
+            origin: PaneInputOrigin.systemEvent(event),
+            waitGeneration: originatedWaitGeneration
         )
     }
 
@@ -1733,7 +1807,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
                 offsetX: cell.offsetX,
                 modifiers: Self.terminalModifiers(modifiers)
             ),
-            origin: origin
+            origin: origin,
+            waitGeneration: originatedWaitGeneration
         )
         if cell.isInsideGrid == false {
             controller.cancelLinkInteraction()
@@ -1953,7 +2028,11 @@ extension SwiftTerminalSessionView {
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         guard let content = dragDropContent(from: sender.draggingPasteboard) else { return false }
-        controller.sendPaste(content, origin: PaneInputOrigin.appEntry())
+        controller.sendPaste(
+            content,
+            origin: PaneInputOrigin.appEntry(),
+            waitGeneration: originatedWaitGeneration
+        )
         return true
     }
 }

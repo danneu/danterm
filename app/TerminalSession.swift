@@ -71,6 +71,10 @@ protocol TerminalSessionStateObserver: AnyObject {
 @MainActor
 final class TerminalSessionCallbackGate {
     var onEvent: ((TerminalSessionEvent) -> Void)?
+    /// The session's on-demand read of its own agent wait. It is gated with the emit
+    /// channels because it closes over the runtime the same way they do, so a torn-down
+    /// session must not call it either.
+    var currentAgentWaitGeneration: (() -> AgentWaitGeneration?)?
     weak var stateObserver: (any TerminalSessionStateObserver)?
     private(set) var isActive = true
 
@@ -84,9 +88,15 @@ final class TerminalSessionCallbackGate {
         stateObserver?.terminalSessionStateDidChange(state)
     }
 
+    func agentWaitGeneration() -> AgentWaitGeneration? {
+        guard isActive else { return nil }
+        return currentAgentWaitGeneration?()
+    }
+
     func tearDown() {
         isActive = false
         onEvent = nil
+        currentAgentWaitGeneration = nil
         stateObserver = nil
     }
 }
@@ -130,6 +140,16 @@ protocol TerminalSession: AnyObject {
     var state: TerminalSessionState { get }
     var stateObserver: (any TerminalSessionStateObserver)? { get set }
     var onEvent: ((TerminalSessionEvent) -> Void)? { get set }
+    /// Reads the agent wait this pane's session holds right now, for input the session
+    /// originates itself -- typing, paste, drag-and-drop, the pointer.
+    ///
+    /// A closure rather than a pushed value because the answer must be read at the
+    /// instant of the submission. The view sweep that refreshes pushed pane state is
+    /// coalesced, so a copy would still name the previous wait exactly when a wait has
+    /// just been admitted -- and the one keystroke that dismisses it would retract
+    /// nothing. Input the runtime dispatches as a `Command` carries its own snapshot
+    /// instead, taken in the same pure dispatch that read the model.
+    var currentAgentWaitGeneration: (() -> AgentWaitGeneration?)? { get set }
     var onPrimaryHistoryMutation: (() -> Void)? { get set }
     var hasSelection: Bool { get }
     #if DANTERM_TERMINAL_BENCHMARK
@@ -137,27 +157,36 @@ protocol TerminalSession: AnyObject {
     var benchmarkGeometry: TerminalBenchmarkGeometry? { get }
     #endif
 
-    func sendText(_ text: String)
-    func sendInputText(_ text: String)
-    func sendInputKey(_ key: KeyName, modifiers: KeyMods)
-    func sendInputWheel(_ direction: InputWheelDirection, column: Int, row: Int)
+    func sendText(_ text: String, waitGeneration: AgentWaitGeneration?)
+    func sendInputText(_ text: String, waitGeneration: AgentWaitGeneration?)
+    func sendInputKey(_ key: KeyName, modifiers: KeyMods, waitGeneration: AgentWaitGeneration?)
+    func sendInputWheel(
+        _ direction: InputWheelDirection,
+        column: Int,
+        row: Int,
+        waitGeneration: AgentWaitGeneration?
+    )
     func sendText(
         _ text: String,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     )
     func sendInputText(
         _ text: String,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     )
     func sendInputKey(
         _ key: KeyName,
         modifiers: KeyMods,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     )
     func sendInputWheel(
         _ direction: InputWheelDirection,
         column: Int,
         row: Int,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     )
     func setFocused(_ focused: Bool)
@@ -228,9 +257,10 @@ protocol TerminalSession: AnyObject {
 extension TerminalSession {
     func sendText(
         _ text: String,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) {
-        sendText(text)
+        sendText(text, waitGeneration: waitGeneration)
         DispatchQueue.main.async {
             MainActor.assumeIsolated { onCompletion(.delivered) }
         }
@@ -238,9 +268,10 @@ extension TerminalSession {
 
     func sendInputText(
         _ text: String,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) {
-        sendInputText(text)
+        sendInputText(text, waitGeneration: waitGeneration)
         DispatchQueue.main.async {
             MainActor.assumeIsolated { onCompletion(.delivered) }
         }
@@ -249,9 +280,10 @@ extension TerminalSession {
     func sendInputKey(
         _ key: KeyName,
         modifiers: KeyMods,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) {
-        sendInputKey(key, modifiers: modifiers)
+        sendInputKey(key, modifiers: modifiers, waitGeneration: waitGeneration)
         DispatchQueue.main.async {
             MainActor.assumeIsolated { onCompletion(.delivered) }
         }
@@ -261,9 +293,10 @@ extension TerminalSession {
         _ direction: InputWheelDirection,
         column: Int,
         row: Int,
+        waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) {
-        sendInputWheel(direction, column: column, row: row)
+        sendInputWheel(direction, column: column, row: row, waitGeneration: waitGeneration)
         DispatchQueue.main.async {
             MainActor.assumeIsolated { onCompletion(.delivered) }
         }

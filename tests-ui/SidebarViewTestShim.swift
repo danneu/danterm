@@ -99,6 +99,7 @@ class TerminalView: NSView, TerminalSession {
         background: NSColor.black.cgColor)
     weak var stateObserver: (any TerminalSessionStateObserver)?
     var onEvent: ((TerminalSessionEvent) -> Void)?
+    var currentAgentWaitGeneration: (() -> AgentWaitGeneration?)?
     var onPrimaryHistoryMutation: (() -> Void)?
     var renderingAvailability: [Bool] = []
     var visibility: [Bool] = []
@@ -119,10 +120,15 @@ class TerminalView: NSView, TerminalSession {
         performedActions.append("pasteClipboard")
     }
 
-    func sendText(_ text: String) {}
-    func sendInputText(_ text: String) {}
-    func sendInputKey(_ key: KeyName, modifiers: KeyMods) {}
-    func sendInputWheel(_ direction: InputWheelDirection, column: Int, row: Int) {}
+    func sendText(_ text: String, waitGeneration: AgentWaitGeneration?) {}
+    func sendInputText(_ text: String, waitGeneration: AgentWaitGeneration?) {}
+    func sendInputKey(_ key: KeyName, modifiers: KeyMods, waitGeneration: AgentWaitGeneration?) {}
+    func sendInputWheel(
+        _ direction: InputWheelDirection,
+        column: Int,
+        row: Int,
+        waitGeneration: AgentWaitGeneration?
+    ) {}
     func setFocused(_ focused: Bool) {}
     func setVisible(_ visible: Bool) {
         if visible, visibility.last == false {

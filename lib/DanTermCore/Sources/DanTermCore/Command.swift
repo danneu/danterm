@@ -19,14 +19,36 @@ enum Command {
     // same safe-paste policy as the clipboard: control bytes stripped, bracketed-paste
     // markers applied when the child asked for them. Deliberately distinct from
     // sendInputText -- an untrusted blob must not be able to fake keystrokes.
-    case sendText(paneId: PaneId, text: String, submissionId: InputSubmissionId? = nil)
+    //
+    // Every input command carries `waitGeneration`: the agent wait the pane's session
+    // held when `update()` dispatched the command, or nil when it held none. Scripted
+    // input ends a wait exactly the way typing does, and the snapshot is taken here --
+    // in the same pure dispatch that read the model -- so the value cannot age between
+    // the read and the write.
+    case sendText(
+        paneId: PaneId,
+        text: String,
+        submissionId: InputSubmissionId? = nil,
+        waitGeneration: AgentWaitGeneration? = nil
+    )
     // The structured-input path, taken by IPC's `input` array alongside sendInputKey.
     // Delivered raw, with no stripping and no paste brackets, because the caller is
     // scripting a keyboard: vim and htop must see the characters as if typed.
-    case sendInputText(paneId: PaneId, text: String, submissionId: InputSubmissionId? = nil)
+    case sendInputText(
+        paneId: PaneId,
+        text: String,
+        submissionId: InputSubmissionId? = nil,
+        waitGeneration: AgentWaitGeneration? = nil
+    )
     // One named/letter key with modifiers, encoded by the terminal's key encoder so
     // arrows, F-keys, C-c, and Esc reach the PTY as real escape sequences.
-    case sendInputKey(paneId: PaneId, key: KeyName, mods: KeyMods, submissionId: InputSubmissionId? = nil)
+    case sendInputKey(
+        paneId: PaneId,
+        key: KeyName,
+        mods: KeyMods,
+        submissionId: InputSubmissionId? = nil,
+        waitGeneration: AgentWaitGeneration? = nil
+    )
     // One vertical wheel step, routed by the terminal owner against its current mouse and
     // screen modes so a remote writer follows the same policy as the AppKit wheel path.
     case sendInputWheel(
@@ -34,7 +56,8 @@ enum Command {
         direction: InputWheelDirection,
         column: Int,
         row: Int,
-        submissionId: InputSubmissionId? = nil
+        submissionId: InputSubmissionId? = nil,
+        waitGeneration: AgentWaitGeneration? = nil
     )
 
     // Focus

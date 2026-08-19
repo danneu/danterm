@@ -2,6 +2,8 @@
 // delivered user input ends it. Covers the pure half: generation renewal, the
 // retraction guard, and the silence of a retraction. The producer of the input
 // occurrence and its transport are proved in their own layers.
+import Foundation
+import DanTermProtocol
 import Testing
 
 @testable import DanTermCore
@@ -28,12 +30,22 @@ struct AgentWaitRetractionTests {
         _ model: AppModel,
         _ paneId: PaneId
     ) -> AgentWaitGeneration? {
-        guard case .attached(_, .waiting(let generation)) =
-            model.pane(paneId)?.session?.agent ?? AgentLifecycle.none
-        else {
-            return nil
-        }
-        return generation
+        model.pane(paneId)?.session?.agent.currentWaitGeneration
+    }
+
+    /// Dispatches one `pane.input` request against `paneId`, the way the CLI does.
+    private func paneInput(
+        _ model: inout AppModel,
+        paneId: PaneId,
+        params: [String: JSONValue]
+    ) throws -> [Command] {
+        var params = params
+        params["pane"] = .string(paneId.rawValue.uuidString)
+        let request = try IpcRequest.decode(
+            method: IpcRequestMethod.paneInput.rawValue,
+            params: .object(params)
+        )
+        return update(&model, .ipcRequest(reqId: UUID(), caller: .local, request: request))
     }
 
     // Intent: input delivered to a waiting pane leaves its agent attached with
@@ -313,5 +325,73 @@ struct AgentWaitRetractionTests {
                 "predicate disagreed with the reducer for \(lifecycle) and \(String(describing: generation))"
             )
         }
+    }
+
+    // Intent: `pane.input` stamps its commands with the wait the pane holds at
+    //   dispatch, so scripted input ends a wait the way typing does.
+    // Why it exists: the snapshot has to be taken where the model is read. A
+    //   command that carried no wait would leave every scripted Escape unable to
+    //   retract, and the CLI is how the whole path is exercised.
+    // Scenario: an agent reports `waiting` and `danterm pane input -- Escape`
+    //   answers it.
+    @Test("scripted pane input carries the wait its pane holds at dispatch")
+    func scriptedInputCarriesTheCurrentWait() throws {
+        var (model, paneId, session, agent) = try makeAttachedPane()
+        update(&model, .sessionReport(
+            sessionId: session,
+            report: .agentActivityChanged(session: agent, activity: .waiting)
+        ))
+        let generation = try #require(currentWaitGeneration(model, paneId))
+
+        let commands = try paneInput(
+            &model,
+            paneId: paneId,
+            params: [
+                "input": .array([
+                    .object(["key": .string("Escape")]),
+                ])
+            ]
+        )
+
+        var stamps: [AgentWaitGeneration?] = []
+        for command in commands {
+            if case .sendInputKey(_, _, _, _, let waitGeneration) = command {
+                stamps.append(waitGeneration)
+            }
+        }
+        #expect(stamps == [generation])
+
+        update(&model, .sessionReport(
+            sessionId: session,
+            report: .userInputDelivered(waitGeneration: generation)
+        ))
+        #expect(attachedAgent(model.pane(paneId)?.session?.agent ?? .none)?.activity == nil)
+    }
+
+    // Intent: `pane.input` into a pane with no wait stamps its commands with no
+    //   wait, so their later delivery retracts nothing.
+    // Why it exists: an occurrence that named some wait it did not answer could
+    //   erase a question raised while the input was in flight.
+    @Test("scripted pane input carries no wait when the pane holds none")
+    func scriptedInputCarriesNoWaitWhenNoneIsHeld() throws {
+        var (model, paneId, session, agent) = try makeAttachedPane()
+        update(&model, .sessionReport(
+            sessionId: session,
+            report: .agentActivityChanged(session: agent, activity: .working)
+        ))
+
+        let commands = try paneInput(
+            &model,
+            paneId: paneId,
+            params: ["text": .string("y\n")]
+        )
+
+        var stamps: [AgentWaitGeneration?] = []
+        for command in commands {
+            if case .sendText(_, _, _, let waitGeneration) = command {
+                stamps.append(waitGeneration)
+            }
+        }
+        #expect(stamps == [nil])
     }
 }

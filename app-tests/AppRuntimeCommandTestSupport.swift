@@ -75,6 +75,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     )
     weak var stateObserver: (any TerminalSessionStateObserver)?
     var onEvent: ((TerminalSessionEvent) -> Void)?
+    var currentAgentWaitGeneration: (() -> AgentWaitGeneration?)?
     var onPrimaryHistoryMutation: (() -> Void)?
     var hasSelection = false
     var primaryHistoryText: String?
@@ -93,6 +94,8 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var sentInputText: [String] = []
     var sentInputKeys: [(key: KeyName, modifiers: KeyMods)] = []
     var sentInputWheels: [(direction: InputWheelDirection, column: Int, row: Int)] = []
+    /// The wait stamped on each input submission, in submission order.
+    var submittedWaitGenerations: [AgentWaitGeneration?] = []
     var focusedValues: [Bool] = []
     var visibleValues: [Bool] = []
     var renderingAvailableValues: [Bool] = []
@@ -102,13 +105,26 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var endSearchCount = 0
     var tearDownCount = 0
 
-    func sendText(_ text: String) { sentText.append(text) }
-    func sendInputText(_ text: String) { sentInputText.append(text) }
-    func sendInputKey(_ key: KeyName, modifiers: KeyMods) {
-        sentInputKeys.append((key, modifiers))
+    func sendText(_ text: String, waitGeneration: AgentWaitGeneration?) {
+        sentText.append(text)
+        submittedWaitGenerations.append(waitGeneration)
     }
-    func sendInputWheel(_ direction: InputWheelDirection, column: Int, row: Int) {
+    func sendInputText(_ text: String, waitGeneration: AgentWaitGeneration?) {
+        sentInputText.append(text)
+        submittedWaitGenerations.append(waitGeneration)
+    }
+    func sendInputKey(_ key: KeyName, modifiers: KeyMods, waitGeneration: AgentWaitGeneration?) {
+        sentInputKeys.append((key, modifiers))
+        submittedWaitGenerations.append(waitGeneration)
+    }
+    func sendInputWheel(
+        _ direction: InputWheelDirection,
+        column: Int,
+        row: Int,
+        waitGeneration: AgentWaitGeneration?
+    ) {
         sentInputWheels.append((direction, column, row))
+        submittedWaitGenerations.append(waitGeneration)
     }
     func setFocused(_ focused: Bool) { focusedValues.append(focused) }
     func setVisible(_ visible: Bool) { visibleValues.append(visible) }

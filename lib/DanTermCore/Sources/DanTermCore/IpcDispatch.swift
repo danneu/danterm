@@ -304,6 +304,10 @@ private func dispatchIpc(
         try requirePane(paneId, in: model)
         var commands: [Command] = []
         var submissionIds: [InputSubmissionId] = []
+        // One read of the wait this pane's agent holds now, shared by every submission
+        // in the request: they are all the same input act, and a wait raised while they
+        // are in flight belongs to the next act, not this one.
+        let waitGeneration = model.pane(paneId)?.session?.agent.currentWaitGeneration
         switch input {
         case .text(let text):
             let submissionId = InputSubmissionId(rawValue: env.newId())
@@ -311,7 +315,8 @@ private func dispatchIpc(
             commands.append(.sendText(
                 paneId: paneId,
                 text: text,
-                submissionId: submissionId
+                submissionId: submissionId,
+                waitGeneration: waitGeneration
             ))
         case .events(let events):
             commands.reserveCapacity(events.count)
@@ -323,14 +328,16 @@ private func dispatchIpc(
                     commands.append(.sendInputText(
                         paneId: paneId,
                         text: text,
-                        submissionId: submissionId
+                        submissionId: submissionId,
+                        waitGeneration: waitGeneration
                     ))
                 case .key(let key, let mods):
                     commands.append(.sendInputKey(
                         paneId: paneId,
                         key: key,
                         mods: mods,
-                        submissionId: submissionId
+                        submissionId: submissionId,
+                        waitGeneration: waitGeneration
                     ))
                 case .wheel(let direction, let column, let row):
                     commands.append(.sendInputWheel(
@@ -338,7 +345,8 @@ private func dispatchIpc(
                         direction: direction,
                         column: column,
                         row: row,
-                        submissionId: submissionId
+                        submissionId: submissionId,
+                        waitGeneration: waitGeneration
                     ))
                 }
             }

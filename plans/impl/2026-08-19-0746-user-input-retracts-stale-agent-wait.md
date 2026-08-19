@@ -264,7 +264,7 @@ Scripted input also uses the existing completion-aware commands in `IpcDispatch.
 ## Commit progress
 - [x] 1. core: retract an agent wait on delivered pane input
 - [x] 2. pty: report each delivered user-input operation with its wait generation
-- [ ] 3. app: wire delivered pane input and scripted input to wait retraction
+- [x] 3. app: wire delivered pane input and scripted input to wait retraction
 
 ## Implementation notes
 
@@ -308,3 +308,17 @@ Scripted input also uses the existing completion-aware commands in `IpcDispatch.
   pane does not hold its occurrence until the next output. That is why
   `queryReplyOrderingAndCapture` now takes its signal baseline after its own
   input has landed: the wake it rules out is the query's, not the user's.
+- Input this pane originates itself reads its wait through a closure the runtime
+  installs (`TerminalSession.currentAgentWaitGeneration`), and input the runtime
+  dispatches as a `Command` carries the snapshot `update()` took. Both are live
+  model reads at the submission; the two paths exist because typing never passes
+  through a command, and scripted input never passes through the view's own
+  entry points.
+- The read is stored on `TerminalSessionCallbackGate` beside the emit channels,
+  so a torn-down session structurally cannot call back into the runtime.
+- The `waitGeneration` parameter on the controller and host keeps its nil
+  default. Dropping it would have forced every call site in `lib/TerminalPTY` to
+  restate nil -- 116 of them, nearly all tests -- for a compiler check the app's
+  own call sites already get from the widened `TerminalSession` methods.
+- The runtime's fast path is `retractionIsLive`, which asks
+  `AgentLifecycle.retractsWait` and passes every other event untouched.

@@ -1086,48 +1086,56 @@ class AppRuntime {
             }
             installPane(host, paneId: paneId)
 
-        case .sendText(let paneId, let text, let submissionId):
+        case .sendText(let paneId, let text, let submissionId, let waitGeneration):
             guard let submissionId else {
-                paneSession(for: paneId)?.sendText(text)
+                paneSession(for: paneId)?.sendText(text, waitGeneration: waitGeneration)
                 break
             }
             guard let session = paneSession(for: paneId) else {
                 send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
                 break
             }
-            session.sendText(text) { [weak self] result in
+            session.sendText(text, waitGeneration: waitGeneration) { [weak self] result in
                 self?.send(.inputSubmissionCompleted(
                     id: submissionId,
                     result: result == .delivered ? .delivered : .rejected
                 ))
             }
 
-        case .sendInputText(let paneId, let text, let submissionId):
+        case .sendInputText(let paneId, let text, let submissionId, let waitGeneration):
             guard let submissionId else {
-                paneSession(for: paneId)?.sendInputText(text)
+                paneSession(for: paneId)?.sendInputText(text, waitGeneration: waitGeneration)
                 break
             }
             guard let session = paneSession(for: paneId) else {
                 send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
                 break
             }
-            session.sendInputText(text) { [weak self] result in
+            session.sendInputText(text, waitGeneration: waitGeneration) { [weak self] result in
                 self?.send(.inputSubmissionCompleted(
                     id: submissionId,
                     result: result == .delivered ? .delivered : .rejected
                 ))
             }
 
-        case .sendInputKey(let paneId, let key, let mods, let submissionId):
+        case .sendInputKey(let paneId, let key, let mods, let submissionId, let waitGeneration):
             guard let submissionId else {
-                paneSession(for: paneId)?.sendInputKey(key, modifiers: mods)
+                paneSession(for: paneId)?.sendInputKey(
+                    key,
+                    modifiers: mods,
+                    waitGeneration: waitGeneration
+                )
                 break
             }
             guard let session = paneSession(for: paneId) else {
                 send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
                 break
             }
-            session.sendInputKey(key, modifiers: mods) { [weak self] result in
+            session.sendInputKey(
+                key,
+                modifiers: mods,
+                waitGeneration: waitGeneration
+            ) { [weak self] result in
                 self?.send(.inputSubmissionCompleted(
                     id: submissionId,
                     result: result == .delivered ? .delivered : .rejected
@@ -1139,17 +1147,28 @@ class AppRuntime {
             let direction,
             let column,
             let row,
-            let submissionId
+            let submissionId,
+            let waitGeneration
         ):
             guard let submissionId else {
-                paneSession(for: paneId)?.sendInputWheel(direction, column: column, row: row)
+                paneSession(for: paneId)?.sendInputWheel(
+                    direction,
+                    column: column,
+                    row: row,
+                    waitGeneration: waitGeneration
+                )
                 break
             }
             guard let session = paneSession(for: paneId) else {
                 send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
                 break
             }
-            session.sendInputWheel(direction, column: column, row: row) { [weak self] result in
+            session.sendInputWheel(
+                direction,
+                column: column,
+                row: row,
+                waitGeneration: waitGeneration
+            ) { [weak self] result in
                 self?.send(.inputSubmissionCompleted(
                     id: submissionId,
                     result: result == .delivered ? .delivered : .rejected
@@ -1997,11 +2016,15 @@ class AppRuntime {
             if let replayFile { try? FileManager.default.removeItem(at: replayFile) }
             return nil
         }
+        session.currentAgentWaitGeneration = { [weak self] in
+            self?.model.pane(owning: sessionId)?.session?.agent.currentWaitGeneration
+        }
         session.onEvent = { [weak self, weak session] event in
             #if DANTERM_TERMINAL_CHARACTERIZATION
             recordTerminalCharacterizationEvent(event)
             #endif
             guard let self, let session else { return }
+            guard self.retractionIsLive(event, sessionId: sessionId) else { return }
             withExtendedLifetime(session) {
                 for message in terminalMessages(
                     for: event,
@@ -2016,6 +2039,7 @@ class AppRuntime {
         session.onPrimaryHistoryMutation = { [weak self] in self?.notePrimaryHistoryMutation() }
         let subscriptionToken = schedulingLifecycle.arm(.subscription, cancel: {
             session.onEvent = nil
+            session.currentAgentWaitGeneration = nil
             session.onPrimaryHistoryMutation = nil
         })
         session.setRenderingAvailable(renderingAvailable)
@@ -2029,6 +2053,20 @@ class AppRuntime {
             subscriptionToken: subscriptionToken,
             replayFile: replayFile
         )
+    }
+
+    /// Drops a delivered-input occurrence that can retract nothing before it reaches
+    /// `send()`, which snapshots and compares the whole model for every message. Typing
+    /// is the highest-rate producer of session events, and almost none of it answers a
+    /// wait.
+    ///
+    /// A fast path, never a second rule: it asks `AgentLifecycle.retractsWait`, the same
+    /// predicate `reduceSession` guards with, so deleting this function changes nothing
+    /// observable. Every other event passes untouched.
+    private func retractionIsLive(_ event: TerminalSessionEvent, sessionId: SessionId) -> Bool {
+        guard case .report(.userInputDelivered(let waitGeneration)) = event else { return true }
+        guard let agent = model.pane(owning: sessionId)?.session?.agent else { return false }
+        return agent.retractsWait(carrying: waitGeneration)
     }
 
     private func importErrorMessage(for error: AppInitFileLoadError) -> String {

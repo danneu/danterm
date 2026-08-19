@@ -3080,7 +3080,7 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(hasEffect(commands) {
-            if case .sendText(let pid, let text, _) = $0 { return pid == paneId && text == "echo hi" }
+            if case .sendText(let pid, let text, _, _) = $0 { return pid == paneId && text == "echo hi" }
             return false
         }, "expected sendText command")
     }
@@ -3105,7 +3105,7 @@ import DanTermProtocol
         let commands = update(&model, .ipcRequest(reqId: requestId, caller: .local, request: request))
         let submissions = commands.compactMap { command -> InputSubmissionId? in
             switch command {
-            case .sendInputText(_, _, let id), .sendInputKey(_, _, _, let id): id
+            case .sendInputText(_, _, let id, _), .sendInputKey(_, _, _, let id, _): id
             default: nil
             }
         }
@@ -3142,7 +3142,7 @@ import DanTermProtocol
         )
         let commands = update(&model, .ipcRequest(reqId: requestId, caller: .local, request: request))
         let submissions = commands.compactMap { command -> InputSubmissionId? in
-            if case .sendInputText(_, _, let id) = command { return id }
+            if case .sendInputText(_, _, let id, _) = command { return id }
             return nil
         }
 
@@ -3181,13 +3181,13 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(commands.count == 2)
-        guard case .sendInputText(let p0, let t0, _) = commands[0] else {
+        guard case .sendInputText(let p0, let t0, _, _) = commands[0] else {
             Issue.record("expected first command = sendInputText")
             return
         }
         #expect(p0 == paneId)
         #expect(t0 == "ls")
-        guard case .sendInputKey(let p1, let key1, let mods1, _) = commands[1] else {
+        guard case .sendInputKey(let p1, let key1, let mods1, _, _) = commands[1] else {
             Issue.record("expected second command = sendInputKey")
             return
         }
@@ -3223,7 +3223,7 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(hasEffect(commands) {
-            if case .sendInputKey(let p, let k, let m, _) = $0 {
+            if case .sendInputKey(let p, let k, let m, _, _) = $0 {
                 return p == paneId && k == .named(.enter) && m == KeyMods()
             }
             return false
@@ -3280,7 +3280,7 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(hasEffect(commands) {
-            if case .sendInputKey(let p, let k, let m, _) = $0 {
+            if case .sendInputKey(let p, let k, let m, _, _) = $0 {
                 return p == paneId && k == .character("c") && m == [.ctrl]
             }
             return false
@@ -3315,7 +3315,8 @@ import DanTermProtocol
                 direction: .up,
                 column: 4,
                 row: 2,
-                submissionId: _
+                submissionId: _,
+                waitGeneration: _
             ) = command {
                 return target == paneId
             }
@@ -3507,7 +3508,7 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(commands.contains { command in
-            if case .sendInputKey(let target, .named(.tab), let modifiers, _) = command {
+            if case .sendInputKey(let target, .named(.tab), let modifiers, _, _) = command {
                 return target == paneId && modifiers == [.shift]
             }
             return false
@@ -3534,7 +3535,7 @@ import DanTermProtocol
             pane: foregroundPaneId
         )
         #expect(hasEffect(commands) {
-            if case .sendInputText(let p, let t, _) = $0 {
+            if case .sendInputText(let p, let t, _, _) = $0 {
                 return p == backgroundPaneId && t == "hi"
             }
             return false

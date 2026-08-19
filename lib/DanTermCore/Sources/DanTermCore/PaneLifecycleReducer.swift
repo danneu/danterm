@@ -69,6 +69,13 @@ enum AgentLifecycle: Equatable {
     case none
     case attached(session: AgentSession, activity: AgentActivityState?)
 
+    /// Names the wait this lifecycle holds right now, so an input being submitted
+    /// can carry the wait it is about to answer. Nil whenever no wait is current.
+    var currentWaitGeneration: AgentWaitGeneration? {
+        guard case .attached(_, .waiting(let current)) = self else { return nil }
+        return current
+    }
+
     /// Decides whether input carrying `waitGeneration` retracts the wait this
     /// lifecycle currently holds.
     ///
@@ -77,11 +84,7 @@ enum AgentLifecycle: Equatable {
     /// `update()` must ask this and nothing else -- which is what makes removing
     /// such a fast path unable to change anything observable.
     func retractsWait(carrying waitGeneration: AgentWaitGeneration?) -> Bool {
-        guard let waitGeneration,
-              case .attached(_, .waiting(let current)) = self
-        else {
-            return false
-        }
+        guard let waitGeneration, let current = currentWaitGeneration else { return false }
         return current == waitGeneration
     }
 }
