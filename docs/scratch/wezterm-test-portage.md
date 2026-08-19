@@ -88,7 +88,10 @@ The counts below are exact for `term/src/test/`: 56 `#[test]` functions in six
 files. Every one is now adjudicated; the census is frozen. All six tests that
 entered the queue as candidates were adapted, into three Swift tests -- the
 counts differ because upstream splits by transition where DanTerm's resize is
-order-canonical, so several upstream cases collapse into one walk.
+order-canonical, so several upstream cases collapse into one walk. A seventh,
+`test_resize_wrap_sgc_issue_978`, joined them on 2026-08-19 once DEC Special
+Graphics was implemented; it became a fourth leg of an existing test, so the
+Swift test count is unchanged.
 
 | File | Tests | Adapted | Superseded or policy-covered | Unsupported / implementation-coupled |
 | --- | ---: | ---: | ---: | ---: |
@@ -97,16 +100,17 @@ order-canonical, so several upstream cases collapse into one walk.
 | `csi.rs` | 13 | 0 | 13 | 0 |
 | `selection.rs` | 5 | 1 | 4 | 0 |
 | `image.rs` | 3 | 0 | 0 | 3 |
-| `mod.rs` | 27 | 5 | 16 | 6 |
-| Total | 56 | 6 | 41 | 9 |
+| `mod.rs` | 27 | 6 | 16 | 5 |
+| Total | 56 | 7 | 41 | 8 |
 
-The six adapted cases and where they landed, all in
+The seven adapted cases and where they landed, all in
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalWezTermAdaptedTests.swift`:
 
 | Upstream test | DanTerm test |
 | --- | --- |
 | `mod.rs#test_resize_wrap_dectcm_issue_978` | `exactWidthHardBoundarySurvivesInterveningControl` |
 | `mod.rs#test_resize_wrap_escape_code_issue_978` | same, second leg |
+| `mod.rs#test_resize_wrap_sgc_issue_978` | same, fourth leg (adapted 2026-08-19) |
 | `mod.rs#test_resize_2162` | `cursorAnchorSurvivesNarrowAndRewidenWalk` |
 | `mod.rs#test_resize_2162_by_2` | same walk |
 | `mod.rs#test_resize_2162_by_2_then_up_1` | same walk |
@@ -252,16 +256,24 @@ Resize and reflow cases:
   CRLF must not turn the hard boundary into a reflow join. Keep them only if
   existing pending-wrap/control coverage does not already prove the whole
   resize outcome.
-- `test_resize_wrap_sgc_issue_978` remains out of scope because DEC Special
-  Graphics designation is deliberately unsupported. Its general "an absorbed
-  escape does not corrupt a later hard boundary" idea may inform the supported
-  control variants, but do not adopt the line-drawing verdict.
+- `test_resize_wrap_sgc_issue_978` was originally out of scope because DEC
+  Special Graphics designation was deliberately unsupported.
 
   *Superseded 2026-08-19.* DanTerm now implements the whole 7-bit GL half of
   ISO 2022, register row C9 in
   [../design/2026-08-06-swift-terminal-engine.md](../design/2026-08-06-swift-terminal-engine.md).
-  Porting this case is possible; the "deliberately unsupported" verdict above,
-  and the same verdict in the closing summary of this note, no longer hold.
+  The "deliberately unsupported" verdict above, and the same verdict in the
+  closing summary of this note, no longer hold.
+
+  **Adapted 2026-08-19** as the fourth leg of
+  `TerminalWezTermAdaptedTests#exactWidthHardBoundarySurvivesInterveningControl`:
+  `ESC ( 0 qqqq ESC ( B CRLF SS CRLF` at 4 columns, widened to 6. It passed on
+  first run, like the other legs. The mutation aimed at its own dispatch path --
+  `dispatchEscape` clearing pending motion state before an SCS designation --
+  did not fail it, because DanTerm flags a wrapped row lazily at the next print.
+  So the leg is retained for a narrower claim than the ASCII ones: a row of
+  translated, non-ASCII scalars reaches the margin and reflows exactly as an
+  ASCII row does. The reflow-join-from-fullness mutation does fail it.
 
 Scrollback, Unicode, region, and hyperlink cases, likely superseded or policy-
 different:
@@ -453,7 +465,7 @@ adopted Swift tests: the inline citation remains the single source of truth.
 - **Should the final 56-case disposition remain only in this scratch document,
   or become a small tracked ledger?** It has become the ledger, so it stays.
   The three adapted tests carry their own provenance and divergences inline, but
-  the 41 superseded and 9 unsupported dispositions -- and the reasoning that
+  the 41 superseded and 8 unsupported dispositions -- and the reasoning that
   produced them -- have no other home, and without them a future portage repeats
   the whole audit. Open question for the owner: whether it should move out of
   `docs/scratch/` (which implies disposable) to sit beside
@@ -645,5 +657,5 @@ Each clause, with its evidence:
 - the policy differences that survive are named in the tests themselves: wide
   cells snap outward, off-grid drag ends clamp to retained content, selection
   coordinates stay in the retained stream, DEC Special Graphics is not
-  implemented (superseded 2026-08-19: it is, see the note above), and terminal
-  graphics stay out of scope.
+  implemented (superseded 2026-08-19: it is, and its resize case is now adapted
+  -- see the note above), and terminal graphics stay out of scope.

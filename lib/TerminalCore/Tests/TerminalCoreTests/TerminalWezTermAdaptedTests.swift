@@ -47,12 +47,21 @@ struct TerminalWezTermAdaptedTests {
     @Test(
         "a control between an exactly-full row and its CRLF still yields a hard boundary",
         arguments: [
-            ("no control", "====\r\nSS\r\n"),
-            ("DECTCM around the text", "\u{1B}[?25l====\u{1B}[?25h\r\nSS\r\n"),
-            ("SGR reset before the CR", "====\u{1B}[0m\r\nSS\r\n"),
+            ("no control", "====\r\nSS\r\n", "===="),
+            ("DECTCM around the text", "\u{1B}[?25l====\u{1B}[?25h\r\nSS\r\n", "===="),
+            ("SGR reset before the CR", "====\u{1B}[0m\r\nSS\r\n", "===="),
+            (
+                "DEC Special Graphics run, then back to ASCII",
+                "\u{1B}(0qqqq\u{1B}(B\r\nSS\r\n",
+                "\u{2500}\u{2500}\u{2500}\u{2500}"
+            ),
         ]
     )
-    func exactWidthHardBoundarySurvivesInterveningControl(label: String, stream: String) throws {
+    func exactWidthHardBoundarySurvivesInterveningControl(
+        label: String,
+        stream: String,
+        firstRow: String
+    ) throws {
         // Intent: when text exactly fills the final column and a supported control sequence
         //   is dispatched before the CR/LF that ends the row, the row is still a hard line
         //   end -- so widening the terminal must not pull the next row up into it.
@@ -76,6 +85,12 @@ struct TerminalWezTermAdaptedTests {
         //   pinned them end to end. Verified non-tautological by three injected mutations
         //   (eager wrap-flagging in printNarrow, dispatchCSI committing a deferred wrap, and
         //   reflow inferring a join from row fullness); this test failed under all three.
+        //   The DEC Special Graphics leg also passed first run, and the mutation aimed at its
+        //   own dispatch path -- `dispatchEscape` clearing pending motion state before an SCS
+        //   designation -- did *not* fail it, for the same lazy-flag reason. So that leg's
+        //   claim is narrower than the others: it pins that a row of translated, non-ASCII
+        //   scalars reaches the margin and reflows exactly as the ASCII rows do, not that SCS
+        //   dispatch is a hazard to the boundary. The reflow-join mutation does fail it.
         //
         // Adapted from term/src/test/mod.rs#test_resize_wrap_dectcm_issue_978 and
         //   term/src/test/mod.rs#test_resize_wrap_escape_code_issue_978 (WezTerm d69264d),
@@ -83,10 +98,12 @@ struct TerminalWezTermAdaptedTests {
         //   Divergence: WezTerm asserts rendered `visible_lines()` text only; we also assert
         //   per-row `isSoftWrapped` and the cursor, which is what actually distinguishes a
         //   hard boundary from a soft one that happens to render the same before the widen.
-        //   WezTerm's `test_resize_wrap_sgc_issue_978` leg is deliberately not ported: it
-        //   asserts DEC Special Graphics glyph mapping, which DanTerm does not implement.
+        //   The fourth leg is #test_resize_wrap_sgc_issue_978, where the intervening controls
+        //   are the SCS designations that switch G0 to DEC Special Graphics and back, and the
+        //   exactly-full row is line-drawing glyphs rather than ASCII. Divergence: none beyond
+        //   the shared one above.
         try expectAcrossFeedSplits(columns: 4, rows: 4, Array(stream.utf8)) { terminal, chunking in
-            #expect(terminal.screenText == "====\nSS  \n    \n    ", "\(label), \(chunking)")
+            #expect(terminal.screenText == "\(firstRow)\nSS  \n    \n    ", "\(label), \(chunking)")
             #expect(
                 terminal.geometry.rows.map(\.isSoftWrapped) == [false, false, false, false],
                 "\(label), \(chunking)"
@@ -104,7 +121,10 @@ struct TerminalWezTermAdaptedTests {
             Array(stream.utf8),
             after: { $0.resize(columns: 6, rows: 4) }
         ) { terminal, chunking in
-            #expect(terminal.screenText == "====  \nSS    \n      \n      ", "\(label), \(chunking)")
+            #expect(
+                terminal.screenText == "\(firstRow)  \nSS    \n      \n      ",
+                "\(label), \(chunking)"
+            )
             #expect(
                 terminal.geometry.rows.map(\.isSoftWrapped) == [false, false, false, false],
                 "\(label), \(chunking)"
