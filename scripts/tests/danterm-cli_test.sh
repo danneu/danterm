@@ -89,8 +89,14 @@ refute() {
     fi
 }
 
-# Help-text smoke tests. These run against the freshly built helper but
-# do not require the app to be running -- help is local arg handling.
+# Runs the bundled helper and captures what a caller of the shell would see.
+#
+# Everything below that uses this runs against the bundle rather than the build
+# products, which is the only thing this file can prove that the gate cannot. The
+# usage and help text used to be asserted here too; it needs no app and no socket,
+# so it lives in `cli-tests/UsageTextTests.swift` where `just test` runs it. This
+# script is opt-in, and its copy of the invocation line sat stale for the whole
+# life of the `--tcp` flag before anyone ran it.
 out=$(mktemp); err=$(mktemp)
 run_cli() {
     : >"$out"
@@ -101,78 +107,6 @@ run_cli() {
         status=$?
     fi
 }
-
-# Bare `danterm`: usage on stderr, exit 1, stdout silent. We assert
-# stderr does NOT carry the old `danterm:` error-line prefix so that a
-# regression which prepends `danterm: missing command` before/with the
-# usage block fails loudly.
-run_cli
-[[ $status -eq 1 ]]
-[[ ! -s "$out" ]]
-[[ -s "$err" ]]
-if grep -q '^danterm:' "$err"; then
-    echo "regression: bare invocation prefixed with 'danterm:'" >&2
-    exit 1
-fi
-grep -qF 'Usage:' "$err"
-grep -qF 'ls' "$err"
-grep -qE '^ *focus +Print the main window' "$err"
-grep -qF 'pane focus --pane <pane-id>' "$err"
-refute 'pane focus <pane-id>' "$err"
-grep -qF 'pane info --pane <pane-id>' "$err"
-grep -qF 'group new --name <name>' "$err"
-grep -qF 'group rename --group <group-id> <name>' "$err"
-grep -qF 'group close --group <group-id> [--move-tabs]' "$err"
-grep -qF 'tab new (--group <group-id> | --after-tab <tab-id>)' "$err"
-grep -qF 'tab close --tab <tab-id>' "$err"
-grep -qF 'pane split --pane <pane-id> -h|-v' "$err"
-grep -qF 'pane close --pane <pane-id>' "$err"
-grep -qF 'agent attach --pane <pane-id> --kind <kind> --id <session-id>' "$err"
-grep -qF 'agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>' "$err"
-grep -qF 'agent detach --pane <pane-id> --kind <kind> --id <session-id>' "$err"
-grep -qF 'todo clear-completed (--pane <pane-id> | --tab <tab-id>)' "$err"
-grep -qE '^ *doctor +Check DanTerm integration health' "$err"
-grep -qE '^ *skill +Print DanTerm' "$err"
-refute 'doctor [--all|-v]' "$err"
-grep -qF 'tab new opens in the background at the target group end' "$err"
-grep -qF 'danterm [--socket <path>] <command> [args]' "$err"
-grep -qF 'DANTERM_SOCK' "$err"
-grep -qF 'DANTERM_PANE' "$err"
-refute 'DANTERM_TAB' "$err"
-
-# Explicit help requests: usage on stdout, exit 0, stderr silent. Same
-# stable tokens checked across each flag form.
-for help_arg in help --help -h; do
-    run_cli "$help_arg"
-    [[ $status -eq 0 ]]
-    [[ ! -s "$err" ]]
-    [[ -s "$out" ]]
-    grep -qF 'Usage:' "$out"
-    grep -qF 'ls' "$out"
-    grep -qE '^ *focus +Print the main window' "$out"
-    grep -qF 'pane focus --pane <pane-id>' "$out"
-    refute 'pane focus <pane-id>' "$out"
-    grep -qF 'pane info --pane <pane-id>' "$out"
-    grep -qF 'group new --name <name>' "$out"
-    grep -qF 'group rename --group <group-id> <name>' "$out"
-    grep -qF 'group close --group <group-id> [--move-tabs]' "$out"
-    grep -qF 'tab new (--group <group-id> | --after-tab <tab-id>)' "$out"
-    grep -qF 'tab close --tab <tab-id>' "$out"
-    grep -qF 'pane split --pane <pane-id> -h|-v' "$out"
-    grep -qF 'pane close --pane <pane-id>' "$out"
-    grep -qF 'agent attach --pane <pane-id> --kind <kind> --id <session-id>' "$out"
-    grep -qF 'agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>' "$out"
-    grep -qF 'agent detach --pane <pane-id> --kind <kind> --id <session-id>' "$out"
-    grep -qF 'todo clear-completed (--pane <pane-id> | --tab <tab-id>)' "$out"
-    grep -qE '^ *doctor +Check DanTerm integration health' "$out"
-    grep -qE '^ *skill +Print DanTerm' "$out"
-    refute 'doctor [--all|-v]' "$out"
-    grep -qF 'tab new opens in the background at the target group end' "$out"
-    grep -qF 'danterm [--socket <path>] <command> [args]' "$out"
-    grep -qF 'DANTERM_SOCK' "$out"
-    grep -qF 'DANTERM_PANE' "$out"
-    refute 'DANTERM_TAB' "$out"
-done
 
 # `skill` is local-only and emits the canonical bundled skill bytes without
 # consulting pane targeting or the control socket. Exercise the helper directly

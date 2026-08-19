@@ -12,17 +12,6 @@ import Testing
 import Darwin
 import DanTermProtocol
 
-/// Locates the test bundle so the CLI executable beside it can be found. `Bundle.main`
-/// under `swift test` points at the toolchain's test helper, not at the build products.
-private final class BuildProductsAnchor: NSObject {}
-
-/// One finished run of the `danterm` executable, as a caller of the shell would see it.
-private struct CLIRun {
-    let status: Int32
-    let stdout: String
-    let stderr: String
-}
-
 /// A syntactically valid pane id. The parser rejects anything that is not a UUID before
 /// the socket is touched, so a placeholder like "p1" would never reach an endpoint.
 private let samplePaneId = "1B4E28BA-2FA1-11D2-883F-0016D3CCA427"
@@ -357,39 +346,6 @@ struct CLICharacterizationTests {
 }
 
 // MARK: - Running the executable
-
-private func cliExecutableURL() -> URL {
-    Bundle(for: BuildProductsAnchor.self)
-        .bundleURL
-        .deletingLastPathComponent()
-        .appendingPathComponent("DanTermCLI")
-}
-
-private func runCLI(_ arguments: [String], socketPath: String) throws -> CLIRun {
-    try runCLI(arguments, environment: ["DANTERM_SOCK": socketPath])
-}
-
-private func runCLI(_ arguments: [String], environment: [String: String]) throws -> CLIRun {
-    let process = Process()
-    process.executableURL = cliExecutableURL()
-    process.arguments = arguments
-    process.environment = environment.merging(["PATH": "/usr/bin:/bin"]) { current, _ in current }
-    let out = Pipe()
-    let err = Pipe()
-    process.standardOutput = out
-    process.standardError = err
-    try process.run()
-    // Read both pipes before waiting: a reply larger than one pipe buffer would
-    // otherwise block the child on write while this thread blocks on exit.
-    let outData = out.fileHandleForReading.readDataToEndOfFile()
-    let errData = err.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    return CLIRun(
-        status: process.terminationStatus,
-        stdout: String(decoding: outData, as: UTF8.self),
-        stderr: String(decoding: errData, as: UTF8.self)
-    )
-}
 
 /// Binds an IPv4 loopback listener and runs the CLI against its selected port.
 private func withScriptedTCPEndpoint(
