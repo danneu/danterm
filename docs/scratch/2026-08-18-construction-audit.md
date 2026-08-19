@@ -1033,6 +1033,13 @@ leads a later reader to all three. Check the hash against `git log` at the
 moment you write it -- a rebase gives the same work a new hash, and a stale
 hash here points at nothing.
 
+Then commit this file, on your own, as the last step of the item. Nobody has
+to ask you for it. The tick cannot ride in the commit it names, because that
+hash does not exist until the commit is made, so a small `docs(audit):`
+commit straight after is the right shape. An item is not finished while its
+tick sits uncommitted in the working tree, where the next agent reads the
+list as still open and the edit goes out with unrelated work.
+
 ### W1. Wave 1 -- settle the shapes everything else is written against
 
 These are the unblocked roots. Each one either heads a dependency chain the
