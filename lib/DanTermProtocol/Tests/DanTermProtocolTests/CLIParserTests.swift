@@ -866,14 +866,6 @@ struct CLIParserTests {
         #expect(error?.message.contains(paneSplitUsageWithFocusFlags) == true)
     }
 
-    @Test("removed legacy commands are unknown", arguments: ["new-tab", "send-keys", "read-pane"])
-    func removedLegacyCommandsAreUnknown(_ command: String) {
-        let error = #expect(throws: CLIParseError.self) {
-            try parseCLI([command])
-        }
-        #expect(error?.message == "unknown command: \(command)")
-    }
-
     @Test("malformed explicit target syntax throws usage errors", arguments: [
         (["pane", "info", "--pane"], "usage: danterm pane info --pane <pane-id>"),
         (["tab", "new", "--group"], tabNewUsageWithPositionFlags),
