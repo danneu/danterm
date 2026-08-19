@@ -217,7 +217,7 @@ public func parseCLI(
         switch args[1] {
         case "focus":
             guard args.count == 3 else { throw CLIParseError("usage: danterm pane focus <pane-id>") }
-            return CLICommand(request: .paneFocus(pane: try paneId(args[2])), outputMode: .none)
+            return CLICommand(request: .paneFocus(pane: try parsePaneId(args[2])), outputMode: .none)
         case "info":
             return try parsePaneInfoCommand(Array(args.dropFirst(2)))
         case "split":
@@ -297,15 +297,15 @@ private func parseTabNewCommand(_ args: [String], currentDirectory: String) thro
     switch parsed.position {
     case .none:
         guard let group = parsed.group else { throw CLIParseError(tabNewUsage) }
-        target = .group(try groupId(group), position: .atGroupEnd)
+        target = .group(try parseGroupId(group), position: .atGroupEnd)
     case .afterSelected:
         guard let group = parsed.group else { throw CLIParseError(tabNewUsage) }
-        target = .group(try groupId(group), position: .afterSelected)
+        target = .group(try parseGroupId(group), position: .afterSelected)
     case .atGroupEnd:
         guard let group = parsed.group else { throw CLIParseError(tabNewUsage) }
-        target = .group(try groupId(group), position: .atGroupEnd)
+        target = .group(try parseGroupId(group), position: .atGroupEnd)
     case .afterTab(let id):
-        target = .afterTab(try tabId(id))
+        target = .afterTab(try parseTabId(id))
     }
     return CLICommand(
         request: .tabNew(target: target, launch: launch, background: parsed.foreground == false),
@@ -333,11 +333,8 @@ private func parseGroupNewCommand(_ args: [String], currentDirectory: String) th
 // Sibling of `parseTabRenameCommand` minus `--clear`: a group always has a name,
 // so there is nothing to clear it to.
 private func parseGroupRenameCommand(_ args: [String]) throws -> CLICommand {
-    var remaining = args
     let usage = "usage: danterm group rename --group <group-id> <name>"
-    guard remaining.count >= 2, remaining.first == "--group" else { throw CLIParseError(usage) }
-    let group = try groupId(remaining[1])
-    remaining.removeFirst(2)
+    let (group, remaining) = try parseGroupTarget(args, usage: usage)
     guard remaining.isEmpty == false else { throw CLIParseError(usage) }
     if remaining[0].hasPrefix("--") {
         throw CLIParseError("unknown flag: \(remaining[0])")
@@ -350,15 +347,9 @@ private func parseGroupRenameCommand(_ args: [String]) throws -> CLICommand {
 /// Keeps destructive group closure explicit at parse time, like `pane close`.
 private func parseGroupCloseCommand(_ args: [String]) throws -> CLICommand {
     let usage = "usage: danterm group close --group <group-id> [--move-tabs]"
-    guard args.count >= 2, args[0] == "--group" else {
-        if let argument = args.first, argument.hasPrefix("--"), argument != "--group" {
-            throw CLIParseError("unknown flag: \(argument)")
-        }
-        throw CLIParseError(usage)
-    }
-    let group = try groupId(args[1])
+    let (group, remaining) = try parseGroupTarget(args, usage: usage)
     var moveTabs = false
-    for argument in args.dropFirst(2) {
+    for argument in remaining {
         guard argument == "--move-tabs" else {
             if argument.hasPrefix("--") {
                 throw CLIParseError("unknown flag: \(argument)")
@@ -374,11 +365,8 @@ private func parseGroupCloseCommand(_ args: [String]) throws -> CLICommand {
 }
 
 private func parseTabRenameCommand(_ args: [String]) throws -> CLICommand {
-    var remaining = args
     let usage = "usage: danterm tab rename --tab <tab-id> <name>|--clear"
-    guard remaining.count >= 2, remaining.first == "--tab" else { throw CLIParseError(usage) }
-    let tab = try tabId(remaining[1])
-    remaining.removeFirst(2)
+    let (tab, remaining) = try parseTabTarget(args, usage: usage)
     guard !remaining.isEmpty else {
         throw CLIParseError(usage)
     }
@@ -399,15 +387,15 @@ private func parseTabRenameCommand(_ args: [String]) throws -> CLICommand {
 }
 
 private func parseTabCloseCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm tab close --tab <tab-id>"
-    guard args.count == 2, args[0] == "--tab" else { throw CLIParseError(usage) }
-    return CLICommand(request: .tabClose(tab: try tabId(args[1])), outputMode: .none)
+    let (tab, remaining) = try parseTabTarget(args, usage: "usage: danterm tab close --tab <tab-id>")
+    try rejectTrailingArguments(remaining)
+    return CLICommand(request: .tabClose(tab: tab), outputMode: .none)
 }
 
 private func parsePaneInfoCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm pane info --pane <pane-id>"
-    guard args.count == 2, args[0] == "--pane" else { throw CLIParseError(usage) }
-    return CLICommand(request: .paneInfo(pane: try paneId(args[1])), outputMode: .json)
+    let (pane, remaining) = try parsePaneTarget(args, usage: "usage: danterm pane info --pane <pane-id>")
+    try rejectTrailingArguments(remaining)
+    return CLICommand(request: .paneInfo(pane: pane), outputMode: .json)
 }
 
 private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
@@ -415,9 +403,9 @@ private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
     let target: IpcPaneSplitTarget
     switch parsed.target {
     case .pane(let pane, let direction):
-        target = .pane(try paneId(pane), direction: direction)
+        target = .pane(try parsePaneId(pane), direction: direction)
     case .tab(let tab):
-        target = .tab(try tabId(tab))
+        target = .tab(try parseTabId(tab))
     }
     return CLICommand(
         request: .paneSplit(
@@ -431,24 +419,9 @@ private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
 
 /// Keeps destructive pane closure explicit at parse time before any request is sent.
 private func parsePaneCloseCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm pane close --pane <pane-id>"
-    guard args.count >= 2, args[0] == "--pane", args[1].isEmpty == false else {
-        if let argument = args.first, argument.hasPrefix("--"), argument != "--pane" {
-            throw CLIParseError("unknown flag: \(argument)")
-        }
-        throw CLIParseError(usage)
-    }
-    guard args.count == 2 else {
-        let argument = args[2]
-        if argument.hasPrefix("--") {
-            throw CLIParseError("unknown flag: \(argument)")
-        }
-        throw CLIParseError("unexpected argument: \(argument)")
-    }
-    return CLICommand(
-        request: .paneClose(pane: try paneId(args[1])),
-        outputMode: .none
-    )
+    let (pane, remaining) = try parsePaneTarget(args, usage: "usage: danterm pane close --pane <pane-id>")
+    try rejectTrailingArguments(remaining)
+    return CLICommand(request: .paneClose(pane: pane), outputMode: .none)
 }
 
 /// The one `pane input` usage line. Two distinct parse failures report it: no
@@ -475,7 +448,7 @@ private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
         throw CLIParseError(paneInputUsage)
     }
     return CLICommand(
-        request: .paneInput(pane: try paneId(pane), input: .events(parsed.events)),
+        request: .paneInput(pane: try parsePaneId(pane), input: .events(parsed.events)),
         outputMode: .none
     )
 }
@@ -485,10 +458,7 @@ private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
 let themeSetUsage = "usage: danterm theme set --pane <pane-id> <name>|--clear"
 
 private func parseThemeSetCommand(_ args: [String]) throws -> CLICommand {
-    var remaining = args
-    guard remaining.count >= 2, remaining.first == "--pane" else { throw CLIParseError(themeSetUsage) }
-    let pane = try paneId(remaining[1])
-    remaining.removeFirst(2)
+    let (pane, remaining) = try parsePaneTarget(args, usage: themeSetUsage)
     guard !remaining.isEmpty else {
         throw CLIParseError(themeSetUsage)
     }
@@ -526,7 +496,7 @@ private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
     }
 
     return CLICommand(
-        request: .paneRead(pane: try paneId(parsed.pane), lineLimit: parsed.lineLimit),
+        request: .paneRead(pane: try parsePaneId(parsed.pane), lineLimit: parsed.lineLimit),
         outputMode: .text
     )
 }
@@ -536,33 +506,14 @@ private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
 // point of the command is to reach a known one.
 private func parsePaneZoomCommand(_ args: [String]) throws -> CLICommand {
     let usage = "usage: danterm pane zoom --pane <pane-id> on|off|toggle"
-    var pane: String?
-    var state: String?
-    var index = 0
-    while index < args.count {
-        switch args[index] {
-        case "--pane":
-            guard index + 1 < args.count else { throw CLIParseError(usage) }
-            pane = args[index + 1]
-            index += 2
-        case "on", "off", "toggle":
-            guard state == nil else { throw CLIParseError(usage) }
-            state = args[index]
-            index += 1
-        default:
-            if args[index].hasPrefix("--") {
-                throw CLIParseError("unknown flag: \(args[index])")
-            }
-            throw CLIParseError(usage)
-        }
-    }
-    guard let pane, let state, let requestedState = IpcPaneZoomState(rawValue: state) else {
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
+    guard let word = remaining.first else { throw CLIParseError(usage) }
+    guard let state = IpcPaneZoomState(rawValue: word) else {
+        if word.hasPrefix("--") { throw CLIParseError("unknown flag: \(word)") }
         throw CLIParseError(usage)
     }
-    return CLICommand(
-        request: .paneZoom(pane: try paneId(pane), state: requestedState),
-        outputMode: .json
-    )
+    try rejectTrailingArguments(Array(remaining.dropFirst()))
+    return CLICommand(request: .paneZoom(pane: pane, state: state), outputMode: .json)
 }
 
 // The grid is a positional `<columns>x<rows>` word and `--fit` is its only
@@ -571,42 +522,30 @@ private func parsePaneZoomCommand(_ args: [String]) throws -> CLICommand {
 // daemon, which is the one place that has to agree with the model.
 private func parsePaneResizeCommand(_ args: [String]) throws -> CLICommand {
     let usage = "usage: danterm pane resize --pane <pane-id> <columns>x<rows>|--fit"
-    var pane: String?
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     var grid: (columns: Int, rows: Int)?
     var fit = false
-    var index = 0
-    while index < args.count {
-        switch args[index] {
-        case "--pane":
-            guard index + 1 < args.count else { throw CLIParseError(usage) }
-            pane = args[index + 1]
-            index += 2
-        case "--fit":
+    for argument in remaining {
+        if argument == "--fit" {
             guard fit == false else { throw CLIParseError(usage) }
             fit = true
-            index += 1
-        default:
-            if args[index].hasPrefix("--") {
-                throw CLIParseError("unknown flag: \(args[index])")
-            }
-            guard grid == nil, let parsed = parsePaneGridWord(args[index]) else {
-                throw CLIParseError(usage)
-            }
-            grid = parsed
-            index += 1
+            continue
         }
+        if argument.hasPrefix("--") {
+            throw CLIParseError("unknown flag: \(argument)")
+        }
+        guard grid == nil, let parsed = parsePaneGridWord(argument) else {
+            throw CLIParseError(usage)
+        }
+        grid = parsed
     }
-    guard let pane else { throw CLIParseError(usage) }
     let resize: IpcPaneResize
     switch (grid, fit) {
     case (let grid?, false): resize = .grid(columns: grid.columns, rows: grid.rows)
     case (nil, true): resize = .fit
     default: throw CLIParseError(usage)
     }
-    return CLICommand(
-        request: .paneResize(pane: try paneId(pane), resize: resize),
-        outputMode: .json
-    )
+    return CLICommand(request: .paneResize(pane: pane, resize: resize), outputMode: .json)
 }
 
 /// Reads the `<columns>x<rows>` word, rejecting every shape that is not two
@@ -625,24 +564,9 @@ private func parsePaneGridWord(_ word: String) -> (columns: Int, rows: Int)? {
 // whole stream by construction, so a tail limit would only hide the retained rows it exists
 // to inspect.
 private func parsePaneRowsCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm pane rows --pane <pane-id>"
-    var pane: String?
-    var index = 0
-    while index < args.count {
-        switch args[index] {
-        case "--pane":
-            guard index + 1 < args.count else { throw CLIParseError(usage) }
-            pane = args[index + 1]
-            index += 2
-        default:
-            if args[index].hasPrefix("--") {
-                throw CLIParseError("unknown flag: \(args[index])")
-            }
-            throw CLIParseError("unexpected argument: \(args[index])")
-        }
-    }
-    guard let pane, pane.isEmpty == false else { throw CLIParseError(usage) }
-    return CLICommand(request: .paneRows(pane: try paneId(pane)), outputMode: .json)
+    let (pane, remaining) = try parsePaneTarget(args, usage: "usage: danterm pane rows --pane <pane-id>")
+    try rejectTrailingArguments(remaining)
+    return CLICommand(request: .paneRows(pane: pane), outputMode: .json)
 }
 
 private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
@@ -686,7 +610,7 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
     }
     return CLICommand(
         request: .paneTape(
-            pane: try paneId(parsed.pane),
+            pane: try parsePaneId(parsed.pane),
             follow: parsed.follow,
             start: parsed.start,
             policy: parsed.policy
@@ -696,12 +620,10 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
 }
 
 private func parsePaneSnapshotCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm pane snapshot --pane <pane-id>"
-    guard args.count == 2, args[0] == "--pane" else { throw CLIParseError(usage) }
-    return CLICommand(
-        request: .paneSnapshot(pane: try paneId(args[1])),
-        outputMode: .tapeStream(.replay)
-    )
+    let (pane, remaining) = try parsePaneTarget(
+        args, usage: "usage: danterm pane snapshot --pane <pane-id>")
+    try rejectTrailingArguments(remaining)
+    return CLICommand(request: .paneSnapshot(pane: pane), outputMode: .tapeStream(.replay))
 }
 
 /// The one `agent` subcommand usage line, reported both when the subcommand is
@@ -714,18 +636,14 @@ private func parseAgentSessionCommand(
     attach: Bool
 ) throws -> CLICommand {
     let usage = "usage: danterm agent \(action) --pane <pane-id> --kind <kind> --id <session-id>"
-    var remaining = args
-    var pane: String?
+    let (pane, tail) = try parsePaneTarget(args, usage: usage)
+    var remaining = tail
     var kind: String?
     var sessionId: String?
 
     while !remaining.isEmpty {
         let flag = remaining.removeFirst()
         switch flag {
-        case "--pane":
-            guard let value = remaining.first else { throw CLIParseError(usage) }
-            pane = value
-            remaining.removeFirst()
         case "--kind":
             guard let value = remaining.first else { throw CLIParseError(usage) }
             kind = value
@@ -742,23 +660,22 @@ private func parseAgentSessionCommand(
         }
     }
 
-    guard let pane, let kind, let sessionId else {
+    guard let kind, let sessionId else {
         throw CLIParseError(usage)
     }
-    let requestPane = try paneId(pane)
     let session = IpcAgentSession(kind: kind, id: sessionId)
     return CLICommand(
         request: attach
-            ? .agentAttach(pane: requestPane, session: session)
-            : .agentDetach(pane: requestPane, session: session),
+            ? .agentAttach(pane: pane, session: session)
+            : .agentDetach(pane: pane, session: session),
         outputMode: .none
     )
 }
 
 private func parseAgentActivityCommand(_ args: [String]) throws -> CLICommand {
     let usage = "usage: danterm agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>"
-    var remaining = args
-    var pane: String?
+    let (pane, tail) = try parsePaneTarget(args, usage: usage)
+    var remaining = tail
     var kind: String?
     var sessionId: String?
     var state: String?
@@ -768,7 +685,6 @@ private func parseAgentActivityCommand(_ args: [String]) throws -> CLICommand {
         guard let value = remaining.first else { throw CLIParseError(usage) }
         remaining.removeFirst()
         switch flag {
-        case "--pane": pane = value
         case "--kind": kind = value
         case "--id": sessionId = value
         case "--state": state = value
@@ -778,13 +694,13 @@ private func parseAgentActivityCommand(_ args: [String]) throws -> CLICommand {
         }
     }
 
-    guard let pane, let kind, let sessionId, let state else { throw CLIParseError(usage) }
+    guard let kind, let sessionId, let state else { throw CLIParseError(usage) }
     guard let activity = IpcAgentActivity(rawValue: state) else {
         throw CLIParseError("agent activity state must be working, waiting, or idle")
     }
     return CLICommand(
         request: .agentActivity(
-            pane: try paneId(pane),
+            pane: pane,
             session: IpcAgentSession(kind: kind, id: sessionId),
             activity: activity
         ),
@@ -848,8 +764,8 @@ private func parseTodoOwnerPrefix(_ args: [String], usage: String) throws -> (To
     guard args.first == "--pane" || args.first == "--tab" else { throw CLIParseError(usage) }
     guard args.count >= 2 else { throw CLIParseError(usage) }
     let owner: TodoOwner = args[0] == "--pane"
-        ? .pane(try paneId(args[1]))
-        : .tab(try tabId(args[1]))
+        ? .pane(try parsePaneId(args[1]))
+        : .tab(try parseTabId(args[1]))
     let rest = Array(args.dropFirst(2))
     guard rest.contains("--pane") == false, rest.contains("--tab") == false else {
         throw CLIParseError(usage)
@@ -868,19 +784,4 @@ private func parseTodoIdCommand(
     let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
     guard rest.count == 1, let rawTodoId = UUID(uuidString: rest[0]) else { throw CLIParseError(usage) }
     return CLICommand(request: makeRequest(owner, TodoId(rawValue: rawTodoId)), outputMode: .none)
-}
-
-private func paneId(_ raw: String) throws -> PaneId {
-    guard let uuid = UUID(uuidString: raw) else { throw CLIParseError("invalid pane id: \(raw)") }
-    return PaneId(rawValue: uuid)
-}
-
-private func tabId(_ raw: String) throws -> TabId {
-    guard let uuid = UUID(uuidString: raw) else { throw CLIParseError("invalid tab id: \(raw)") }
-    return TabId(rawValue: uuid)
-}
-
-private func groupId(_ raw: String) throws -> GroupId {
-    guard let uuid = UUID(uuidString: raw) else { throw CLIParseError("invalid group id: \(raw)") }
-    return GroupId(rawValue: uuid)
 }

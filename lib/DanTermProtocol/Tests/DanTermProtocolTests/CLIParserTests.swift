@@ -10,7 +10,7 @@ struct CLIParserTests {
     // parser rejected the command for some unrelated reason.
     @Test("every targeting command requires an explicit target", arguments: targetingCommands)
     func everyTargetingCommandRequiresAnExplicitTarget(_ command: TargetingCommand) {
-        let args = command.args(nil)
+        let args = command.args([])
         let error = #expect(throws: CLIParseError.self) {
             _ = try parseCLI(args)
         }
@@ -26,7 +26,7 @@ struct CLIParserTests {
     // sweep above, so a command cannot be checked on one axis and not the other.
     @Test("every targeting command refuses a target that is not an id", arguments: targetingCommands)
     func everyTargetingCommandRefusesAMalformedId(_ command: TargetingCommand) {
-        let args = command.args("not-an-id")
+        let args = command.args([command.flag, "not-an-id"])
         let error = #expect(throws: CLIParseError.self) {
             _ = try parseCLI(args)
         }
@@ -34,6 +34,59 @@ struct CLIParserTests {
             error?.message == "invalid \(command.entity) id: not-an-id",
             "\(command.label) got: \(error?.message ?? "no error")"
         )
+    }
+
+    // The target leads a subcommand's arguments. A target flag that trails
+    // another argument is a usage error rather than an accepted second spelling,
+    // and the message quotes the same usage line the absent case reports.
+    @Test("every targeting command requires the target to lead", arguments: sharedTargetCommands)
+    func everyTargetingCommandRequiresTheTargetToLead(_ command: TargetingCommand) throws {
+        let usage = try #require(usageLine(of: command))
+        let args = command.args(["extra", command.flag, validId(for: command.entity)])
+        let error = #expect(throws: CLIParseError.self) {
+            _ = try parseCLI(args)
+        }
+        #expect(
+            error?.message == "\(command.flag) must come first\n\(usage)",
+            "\(command.label) got: \(error?.message ?? "no error")"
+        )
+    }
+
+    // A target flag a subcommand does not take reads as the wrong target rather
+    // than as an unknown flag, so `pane info --tab <id>` says what is wrong with
+    // the command instead of what is wrong with the word.
+    @Test("every targeting command names a target flag it does not take", arguments: sharedTargetCommands)
+    func everyTargetingCommandRefusesAnotherTargetFlag(_ command: TargetingCommand) throws {
+        let usage = try #require(usageLine(of: command))
+        let other = otherTarget(for: command.entity)
+        let error = #expect(throws: CLIParseError.self) {
+            _ = try parseCLI(command.args([other.flag, other.id]))
+        }
+        #expect(
+            error?.message == "\(other.flag) is not a target of this command\n\(usage)",
+            "\(command.label) got: \(error?.message ?? "no error")"
+        )
+    }
+
+    // Every subcommand whose grammar ends at its target rejects a tail, and all
+    // of them separate a flag nobody knows from a word that has no place here.
+    @Test("a subcommand that ends at its target rejects a tail", arguments: [
+        ["tab", "close", "--tab", tabId],
+        ["pane", "info", "--pane", paneId],
+        ["pane", "close", "--pane", paneId],
+        ["pane", "rows", "--pane", paneId],
+        ["pane", "snapshot", "--pane", paneId],
+    ])
+    func subcommandsWithNoTailRejectTrailingArguments(_ command: [String]) {
+        let unexpected = #expect(throws: CLIParseError.self) {
+            _ = try parseCLI(command + ["extra"])
+        }
+        #expect(unexpected?.message == "unexpected argument: extra")
+
+        let unknown = #expect(throws: CLIParseError.self) {
+            _ = try parseCLI(command + ["--nope"])
+        }
+        #expect(unknown?.message == "unknown flag: --nope")
     }
 
     @Test("global socket target parses before the command")
@@ -888,7 +941,7 @@ struct CLIParserTests {
         (["group", "close", "--group", groupId, "extra"], "unexpected argument: extra"),
         (["group", "close", "--group", groupId, "--nope"], "unknown flag: --nope"),
         (["pane", "close", "--pane", paneId, "extra"], "unexpected argument: extra"),
-        (["pane", "close", "--nope"], "unknown flag: --nope"),
+        (["pane", "close", "--nope"], "usage: danterm pane close --pane <pane-id>"),
         (["pane", "split", "--pane"], paneSplitUsageWithFocusFlags),
         (["pane", "input", "--pane"], "usage: danterm pane input --pane <pane-id> ..."),
         (["theme", "set", "--pane"], "usage: danterm theme set --pane <pane-id> <name>|--clear"),
@@ -916,10 +969,10 @@ private let paneTapeUsage = "usage: danterm pane tape --pane <pane-id> [--follow
 
 private let todoId = "44444444-4444-4444-8444-444444444444"
 
-/// One row per command that names an entity, shared by the two target sweeps.
-/// Both axes -- no target at all, and a target that is not an id -- read this
-/// list, so a command can only be unchecked by being missing from it, which is
-/// one visible line rather than a silence.
+/// One row per command that names an entity, shared by every target sweep. Each
+/// axis -- no target, a malformed target, a trailing target, another entity's
+/// target flag -- reads this list, so a command can only be unchecked by being
+/// missing from it, which is one visible line rather than a silence.
 struct TargetingCommand: Sendable {
     let label: String
     /// pane, tab, or group -- the id helper that must refuse a malformed value.
@@ -927,69 +980,98 @@ struct TargetingCommand: Sendable {
     /// What the usage line names when the target is absent. Defaults to the
     /// flag, which every targeting command but `pane focus` uses.
     let usageToken: String
-    /// The full invocation. `nil` supplies no target at all.
-    let args: @Sendable (String?) -> [String]
+    /// The full invocation, with the target's tokens spliced in where the
+    /// grammar puts them. An empty array supplies no target at all.
+    let args: @Sendable ([String]) -> [String]
 
     init(
         _ label: String,
         entity: String,
         usageToken: String? = nil,
-        args: @escaping @Sendable (String?) -> [String]
+        args: @escaping @Sendable ([String]) -> [String]
     ) {
         self.label = label
         self.entity = entity
         self.usageToken = usageToken ?? "--\(entity)"
         self.args = args
     }
+
+    var flag: String { "--\(entity)" }
 }
 
-private func paneFlag(_ target: String?) -> [String] {
-    target.map { ["--pane", $0] } ?? []
+/// The usage line a command reports when its target is absent. The other target
+/// sweeps quote it back, so no sweep repeats a usage string the parser owns.
+private func usageLine(of command: TargetingCommand) -> String? {
+    do {
+        _ = try parseCLI(command.args([]))
+        return nil
+    } catch let error as CLIParseError {
+        return error.message
+    } catch {
+        return nil
+    }
 }
 
-private func tabFlag(_ target: String?) -> [String] {
-    target.map { ["--tab", $0] } ?? []
+private func validId(for entity: String) -> String {
+    switch entity {
+    case "pane": return paneId
+    case "tab": return tabId
+    default: return groupId
+    }
 }
 
-private func groupFlag(_ target: String?) -> [String] {
-    target.map { ["--group", $0] } ?? []
+/// A target flag naming some other entity, for the sweep that proves a command
+/// rejects the wrong target rather than treating it as an unknown word.
+private func otherTarget(for entity: String) -> (flag: String, id: String) {
+    entity == "pane" ? ("--tab", tabId) : ("--pane", paneId)
 }
 
-let targetingCommands: [TargetingCommand] = [
-    .init("tab new", entity: "group", args: { ["tab", "new"] + groupFlag($0) }),
-    .init("tab rename", entity: "tab", args: { ["tab", "rename"] + tabFlag($0) + ["work"] }),
-    .init("tab close", entity: "tab", args: { ["tab", "close"] + tabFlag($0) }),
-    .init("group rename", entity: "group", args: { ["group", "rename"] + groupFlag($0) + ["notes"] }),
-    .init("group close", entity: "group", args: { ["group", "close"] + groupFlag($0) }),
-    // `pane focus` is the one targeting command that takes its pane
-    // positionally rather than behind --pane, so its usage line names the
-    // placeholder instead. SKILL.md documents that form.
-    .init("pane focus", entity: "pane", usageToken: "<pane-id>", args: { ["pane", "focus"] + ($0.map { [$0] } ?? []) }),
-    .init("pane info", entity: "pane", args: { ["pane", "info"] + paneFlag($0) }),
-    .init("pane split", entity: "pane", args: { ["pane", "split"] + paneFlag($0) + ["-h"] }),
-    .init("pane close", entity: "pane", args: { ["pane", "close"] + paneFlag($0) }),
-    .init("pane input", entity: "pane", args: { ["pane", "input"] + paneFlag($0) + ["--", "C-c"] }),
-    .init("pane read", entity: "pane", args: { ["pane", "read"] + paneFlag($0) }),
-    .init("pane rows", entity: "pane", args: { ["pane", "rows"] + paneFlag($0) }),
-    .init("pane zoom", entity: "pane", args: { ["pane", "zoom"] + paneFlag($0) + ["on"] }),
-    .init("pane resize", entity: "pane", args: { ["pane", "resize"] + paneFlag($0) + ["80x24"] }),
-    .init("pane tape", entity: "pane", args: { ["pane", "tape"] + paneFlag($0) }),
-    .init("pane snapshot", entity: "pane", args: { ["pane", "snapshot"] + paneFlag($0) }),
-    .init("theme set", entity: "pane", args: { ["theme", "set"] + paneFlag($0) + ["TokyoNight"] }),
+/// Rows whose target the shared step parses before the command parser runs.
+let sharedTargetCommands: [TargetingCommand] = [
+    .init("tab rename", entity: "tab", args: { ["tab", "rename"] + $0 + ["work"] }),
+    .init("tab close", entity: "tab", args: { ["tab", "close"] + $0 }),
+    .init("group rename", entity: "group", args: { ["group", "rename"] + $0 + ["notes"] }),
+    .init("group close", entity: "group", args: { ["group", "close"] + $0 }),
+    .init("pane info", entity: "pane", args: { ["pane", "info"] + $0 }),
+    .init("pane close", entity: "pane", args: { ["pane", "close"] + $0 }),
+    .init("pane rows", entity: "pane", args: { ["pane", "rows"] + $0 }),
+    .init("pane zoom", entity: "pane", args: { ["pane", "zoom"] + $0 + ["on"] }),
+    .init("pane resize", entity: "pane", args: { ["pane", "resize"] + $0 + ["80x24"] }),
+    .init("pane snapshot", entity: "pane", args: { ["pane", "snapshot"] + $0 }),
+    .init("theme set", entity: "pane", args: { ["theme", "set"] + $0 + ["TokyoNight"] }),
     .init("agent attach", entity: "pane", args: {
-        ["agent", "attach"] + paneFlag($0) + ["--kind", "codex", "--id", "thread-1"]
+        ["agent", "attach"] + $0 + ["--kind", "codex", "--id", "thread-1"]
     }),
     .init("agent activity", entity: "pane", args: {
-        ["agent", "activity"] + paneFlag($0) + ["--kind", "codex", "--id", "thread-1", "--state", "working"]
+        ["agent", "activity"] + $0 + ["--kind", "codex", "--id", "thread-1", "--state", "working"]
     }),
     .init("agent detach", entity: "pane", args: {
-        ["agent", "detach"] + paneFlag($0) + ["--kind", "codex", "--id", "thread-1"]
+        ["agent", "detach"] + $0 + ["--kind", "codex", "--id", "thread-1"]
     }),
-    .init("todo list", entity: "pane", args: { ["todo", "list"] + paneFlag($0) }),
-    .init("todo add", entity: "pane", args: { ["todo", "add"] + paneFlag($0) + ["write", "test"] }),
-    .init("todo edit", entity: "pane", args: { ["todo", "edit"] + paneFlag($0) + [todoId, "write", "test"] }),
-    .init("todo done", entity: "pane", args: { ["todo", "done"] + paneFlag($0) + [todoId] }),
-    .init("todo open", entity: "pane", args: { ["todo", "open"] + paneFlag($0) + [todoId] }),
-    .init("todo delete", entity: "pane", args: { ["todo", "delete"] + paneFlag($0) + [todoId] }),
-    .init("todo clear-completed", entity: "pane", args: { ["todo", "clear-completed"] + paneFlag($0) }),
 ]
+
+/// Rows whose command parser still reads its own target. The list shrinks to
+/// nothing as those parsers move onto the shared step, and the two arrays then
+/// collapse back into one.
+let ownTargetCommands: [TargetingCommand] = [
+    .init("tab new", entity: "group", args: { ["tab", "new"] + $0 }),
+    // `pane focus` is the one targeting command that takes its pane
+    // positionally rather than behind --pane, so its usage line names the
+    // placeholder instead and this row drops the flag token.
+    .init("pane focus", entity: "pane", usageToken: "<pane-id>", args: {
+        ["pane", "focus"] + $0.dropFirst()
+    }),
+    .init("pane split", entity: "pane", args: { ["pane", "split"] + $0 + ["-h"] }),
+    .init("pane input", entity: "pane", args: { ["pane", "input"] + $0 + ["--", "C-c"] }),
+    .init("pane read", entity: "pane", args: { ["pane", "read"] + $0 }),
+    .init("pane tape", entity: "pane", args: { ["pane", "tape"] + $0 }),
+    .init("todo list", entity: "pane", args: { ["todo", "list"] + $0 }),
+    .init("todo add", entity: "pane", args: { ["todo", "add"] + $0 + ["write", "test"] }),
+    .init("todo edit", entity: "pane", args: { ["todo", "edit"] + $0 + [todoId, "write", "test"] }),
+    .init("todo done", entity: "pane", args: { ["todo", "done"] + $0 + [todoId] }),
+    .init("todo open", entity: "pane", args: { ["todo", "open"] + $0 + [todoId] }),
+    .init("todo delete", entity: "pane", args: { ["todo", "delete"] + $0 + [todoId] }),
+    .init("todo clear-completed", entity: "pane", args: { ["todo", "clear-completed"] + $0 }),
+]
+
+let targetingCommands: [TargetingCommand] = sharedTargetCommands + ownTargetCommands
