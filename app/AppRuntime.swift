@@ -527,15 +527,11 @@ class AppRuntime {
         )
     }
 
-    /// Close pane-level shortcut help without dismissing the parent todo popover.
+    /// Close a todo popover's shortcut help without dismissing the popover itself.
+    /// Every todo scope's controller inherits the close from the base, so one cast
+    /// covers pane and tab alike.
     func closeTodoShortcutHelpPopover() {
-        (todoPopover?.contentViewController as? TodoPopoverViewController)?.closeShortcutHelpPopover()
-        (todoPopover?.contentViewController as? TabTodoPopoverViewController)?.closeShortcutHelpPopover()
-    }
-
-    /// Close tab-level shortcut help without dismissing the parent todo popover.
-    func closeTabTodoShortcutHelpPopover() {
-        (todoPopover?.contentViewController as? TabTodoPopoverViewController)?.closeShortcutHelpPopover()
+        (todoPopover?.contentViewController as? TodoPopoverControllerBase)?.closeShortcutHelpPopover()
     }
 
     /// Detach close reporting, dismiss child help, then silently close its parent.
