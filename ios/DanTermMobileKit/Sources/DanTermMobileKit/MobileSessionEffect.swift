@@ -1,10 +1,11 @@
 // The only way anything leaves the phone's session model.
 //
 // Two effect types, one per entry point. The ordinary one has no resize case at all, so a
-// layout, keyboard, lifecycle, timer, or frame branch cannot return a resize whatever it
-// constructs; the geometry one adds exactly that case. The interpreter's array is the
-// wider type and ordinary results are widened into it, so there is still one effect
-// stream and one perform loop.
+// keyboard, lifecycle, timer, or frame branch cannot return a resize whatever it
+// constructs; the geometry one adds exactly that case, for the two gestures and for the
+// surface report that renews a standing claim a gesture created. The interpreter's array
+// is the wider type and ordinary results are widened into it, so there is still one
+// effect stream and one perform loop.
 import DanTermClient
 import DanTermProtocol
 import Foundation
@@ -47,11 +48,12 @@ public enum MobileSessionEffect: Equatable, Sendable {
     case redraw
 }
 
-/// What the claim and release gestures may produce: everything an ordinary event can, plus
-/// the one resize.
+/// What the geometry entry point may produce: everything an ordinary event can, plus the
+/// one resize.
 public enum MobileSessionGeometryEffect: Equatable, Sendable {
     case session(MobileSessionEffect)
-    /// The pane resize a claim or a release sends. This case exists in no other effect
-    /// type, which is what keeps the gesture the only source of one.
+    /// The pane resize a claim, a release, or a standing claim's renewal sends. This case
+    /// exists in no other effect type, which is what keeps the geometry entry point the
+    /// only source of one.
     case resizePane(requestId: JSONValue, request: IpcRequest)
 }

@@ -273,6 +273,68 @@ struct AppRuntimeIpcCommandTests {
         #expect(runtime.model.pendingInputSubmissions.isEmpty)
     }
 
+    @Test("a pane-resize reply is written before the resize reaches the pane")
+    func paneResizeReplyPrecedesTheResizeItself() throws {
+        // Intent: within one send frame, the pane.resize response is on the wire before
+        //   the runtime applies the override to the pane's session -- the earliest moment
+        //   any tape record of that resize can exist.
+        // Why it exists: the phone's claim protocol reads a tape record's pinnedness as
+        //   post-claim truth exactly when the record follows the claim's success response
+        //   on the frame stream. That reading is sound only while the server replies
+        //   before it reconciles; this pins the ordering premise.
+        let ports = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let wire = try CommandIpcConnectionFixture()
+        defer {
+            wire.connection.close()
+            wire.closePeer()
+        }
+        let paneId = PaneId(rawValue: UUID())
+        let tabId = TabId(rawValue: UUID())
+        runtime.model = AppModel(
+            groups: [GroupModel(
+                id: GroupId(rawValue: UUID()),
+                name: "General",
+                tabs: [TabModel(
+                    id: tabId,
+                    paneTree: PaneTree(root: .leaf(PaneModel(id: paneId)))
+                )]
+            )],
+            selectedTabId: tabId
+        )
+        runtime.installTerminalSession(ports.session, paneId: paneId)
+        let requestId = UUID()
+        wire.remember(reqId: requestId, rpcId: .number(7))
+        runtime.registerIpcConnection(wire.connection, for: requestId)
+        // The reply rides the connection's serial write queue, so enqueue order is wire
+        // order. This hook runs on the main thread, mid-send: a reply enqueued only
+        // after the override would have to be enqueued by this same blocked thread, so
+        // it could never become readable during the wait -- which makes the bounded
+        // wait a true ordering observation, not a timing one. The bound is a hang
+        // guard: a passing run flushes in microseconds and cannot approach it.
+        var replyPrecededOverride: [Bool] = []
+        ports.session.onGridOverride = { _ in
+            let deadline = Date().addingTimeInterval(30)
+            while wire.hasReadableData() == false, Date() < deadline {
+                usleep(1_000)
+            }
+            replyPrecededOverride.append(wire.hasReadableData())
+        }
+
+        runtime.send(.ipcRequest(
+            reqId: requestId,
+            caller: .local,
+            request: .paneResize(pane: paneId, resize: .grid(columns: 100, rows: 30))
+        ))
+
+        let response = try wire.readResponse()
+        #expect(response.id == .number(7))
+        #expect(response.error == nil)
+        #expect(ports.session.gridOverrides == [PaneGridOverride(columns: 100, rows: 30)])
+        #expect(replyPrecededOverride == [true])
+    }
+
     @Test("one send orders a notification port before its IPC reply")
     func sendPreservesCommandOrderAcrossPortAndWire() throws {
         let ports = RecordingAppRuntimePorts()

@@ -122,7 +122,13 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     func setFontFamily(_ family: String?) {}
     /// Recorded so a test can watch a claim reach the pane and a take-back undo it.
     var gridOverrides: [PaneGridOverride?] = []
-    func setGridOverride(_ grid: PaneGridOverride?) { gridOverrides.append(grid) }
+    /// Called as the override is applied, so an ordering test can observe what is already
+    /// on the wire at that moment.
+    var onGridOverride: ((PaneGridOverride?) -> Void)?
+    func setGridOverride(_ grid: PaneGridOverride?) {
+        gridOverrides.append(grid)
+        onGridOverride?(grid)
+    }
     func setCopyOnSelect(_ enabled: Bool) {}
     func startSearch() { startSearchCount += 1 }
     func setSearchNeedle(_ needle: String) { searchNeedles.append(needle) }

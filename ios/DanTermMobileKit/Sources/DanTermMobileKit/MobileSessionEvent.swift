@@ -3,7 +3,9 @@
 //
 // The split is the claim contract in the type system: an ordinary event reaches an entry
 // point whose effect type has no resize case, so no ordinary branch can send one whatever
-// it constructs. Only the geometry event reaches the entry point that can.
+// it constructs. Only the geometry event reaches the entry point that can, and its inputs
+// are the two deliberate gestures plus the surface report -- which resizes only while a
+// standing claim created by a gesture exists.
 //
 // What does not belong here: anything a view decides for itself (raising a keyboard,
 // dismissing one, a scroll position inside a sheet). An event is a fact about the session,
@@ -85,7 +87,6 @@ public enum MobileSessionEvent: Equatable, Sendable {
     case replicaStateChanged(PaneReplicaState)
     /// The replica reached a newer exact position worth saving.
     case replicaAdvanced
-    case surfaceChanged(MobileSurfaceFacts)
     case textEntered(String)
     /// The keyboard's backspace, which the terminal's input responder is the first thing
     /// on this phone able to report.
@@ -106,11 +107,15 @@ public enum MobileSessionEvent: Equatable, Sendable {
     case scrolledByRows(Int, column: Int, row: Int)
 }
 
-/// The two gestures that may change the grid the pane runs at.
+/// The inputs that may change the grid the pane runs at: the two deliberate gestures, and
+/// the surface report that renews a standing claim a gesture created.
 ///
 /// They are their own event type because they are the only ones allowed to produce a
 /// resize: the entry point they reach is the only one whose effect type can carry one.
 public enum MobileSessionGeometryEvent: Equatable, Sendable {
     case claimRequested
     case releaseRequested
+    /// The surface's current facts. It resizes nothing on its own: while a standing claim
+    /// exists, a report offering a different grid renews the claim at that grid.
+    case surfaceChanged(MobileSurfaceFacts)
 }

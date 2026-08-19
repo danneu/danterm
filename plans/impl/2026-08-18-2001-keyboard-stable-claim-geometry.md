@@ -274,7 +274,35 @@ test-before-code within each change, not the order between them.
   parity with the keyboard up, scroll-chrome alignment during a gesture)
   needs a live Mac DanTerm instance and touch input, so it remains for the
   user's walk with `scripts/ios-app.sh simulator`.
+- The standing claim is a private `StandingClaim` value in
+  `MobileSessionModel`: the claimed grid plus the unanswered request id,
+  nil once its success response arrives. Confirmation and external release
+  are decided in the model's frame receive path, at the decode point, per
+  I6. A record's pinnedness statement is read from the opening contract, a
+  sync transfer's first part, or the recorder's resize event; a resize
+  event without the `pinned` key decodes as unpinned, matching the
+  recording decoder's own default for the pre-pinnedness corpus.
+- "Ends on the release gesture" is read as the release that sends its fit
+  resize. A release tap the facts offer no request for sends nothing and
+  ends nothing -- PO4's prescribed renewal (claim, then an empty release
+  tap, then a changed-grid report that must renew) requires this reading.
+- PO8 is pinned at the AppRuntime seam: the test asserts the pane-resize
+  reply is already on the wire when reconcile applies the override to the
+  pane's session -- the earliest moment any tape record of that resize can
+  exist -- rather than driving a live engine-backed tape follow.
+- One residual race, accepted: PO8 orders the response before records the
+  resize itself emits, but a record recorded *before* the claim (the Mac
+  unpinning moments earlier) can ride the asynchronous follow fetch and be
+  written after the claim's response. The phone then reads it as an
+  external release and drops the standing claim. The failure direction is
+  benign -- the pane stays exactly as the server has it, the phone merely
+  stops renewing until the user re-claims -- and it matches the design's
+  stated conservatism about re-pinning after a take-back.
+- PO7 (rotation renews on the phone, not after Release or a take-back)
+  needs a live Mac instance and device rotation, so like PO6's interactive
+  half it remains for the user's walk with `scripts/ios-app.sh simulator`.
+  The model-level halves are PO1-PO3.
 
 ## Commit progress
 - [x] 1. D1: keyboard-stable content box and the placement offset (I1-I3, PO5-PO6)
-- [ ] 2. D2/D3: model-owned standing claim and rotation renewal (I4-I6, PO1-PO4, PO7-PO8)
+- [x] 2. D2/D3: model-owned standing claim and rotation renewal (I4-I6, PO1-PO4, PO7-PO8)

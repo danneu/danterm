@@ -59,6 +59,27 @@ public struct MobileSessionModel: Equatable, Sendable {
     private var pendingSmokeInput: String?
     private var checkpointIsDirty = false
     private var checkpointDeadlineIsArmed = false
+    /// The claim this phone made and still holds. In-memory only: it ends with the
+    /// connection and is never persisted, so a reconnect starts with no claim.
+    private var standingClaim: StandingClaim?
+
+    /// The grid this phone last requested for the pane, and whether the server has
+    /// confirmed it yet.
+    ///
+    /// Confirmation comes only from the success response to this phone's own latest claim
+    /// or renewal request -- the request id below -- never from replica state or a tape
+    /// record: a resize naming the grid the pane already runs at is a server-side no-op
+    /// that emits no tape transition, so the response is the only confirmation that exists
+    /// in every case. Once confirmed, a tape record stating the pane unpinned is an
+    /// external release and ends the claim; before confirmation such a record is pre-claim
+    /// truth and does not.
+    private struct StandingClaim: Equatable, Sendable {
+        var grid: MobileSurfaceGrid
+        /// The unanswered claim or renewal request, or nil once its success response
+        /// arrived. A renewal replaces it, which resets confirmation until its own
+        /// response.
+        var pendingRequestId: JSONValue?
+    }
 
     /// Creates the session of an app that has not launched yet.
     public init() {}
@@ -211,11 +232,6 @@ public struct MobileSessionModel: Equatable, Sendable {
             checkpointDeadlineIsArmed = true
             return [.armCheckpointTimer(deadline: env.now + Self.checkpointInterval)]
 
-        case .surfaceChanged(let facts):
-            guard facts != surface else { return [] }
-            surface = facts
-            return [.redraw]
-
         case .textEntered(let text):
             return mapKeyInput({ $0.text(text) }, env: env)
 
@@ -255,24 +271,50 @@ public struct MobileSessionModel: Equatable, Sendable {
         }
     }
 
-    /// Advances the session by one geometry gesture, the only entry point whose effects can
+    /// Advances the session by one geometry event, the only entry point whose effects can
     /// carry a resize.
     ///
-    /// The request is built here, from the facts the model holds at this moment, so a tap
-    /// that arrives after the pane was unpinned or the connection dropped either sends the
-    /// request those facts imply or sends nothing.
+    /// A gesture's request is built here, from the facts the model holds at this moment, so
+    /// a tap that arrives after the pane was unpinned or the connection dropped either sends
+    /// the request those facts imply or sends nothing. A claim that sends its resize becomes
+    /// the standing claim; a surface report offering a different grid while one is held
+    /// renews it at the new grid, which is how a rotation re-claims without a gesture.
     public mutating func handle(
         _ event: MobileSessionGeometryEvent,
         env: MobileSessionEnv
     ) -> [MobileSessionGeometryEffect] {
-        let control = claimControl
-        let request: IpcRequest?
         switch event {
-        case .claimRequested: request = control.claim
-        case .releaseRequested: request = control.release
+        case .claimRequested:
+            guard let request = claimControl.claim, let grid = surface.nativeGrid else {
+                return []
+            }
+            let requestId = env.newRequestId()
+            standingClaim = StandingClaim(grid: grid, pendingRequestId: requestId)
+            return [.resizePane(requestId: requestId, request: request)]
+
+        case .releaseRequested:
+            // A tap the facts no longer offer a release for sends nothing and ends
+            // nothing; only the gesture that sends the fit resize gives the claim up.
+            guard let request = claimControl.release else { return [] }
+            standingClaim = nil
+            return [.resizePane(requestId: env.newRequestId(), request: request)]
+
+        case .surfaceChanged(let facts):
+            guard facts != surface else { return [] }
+            surface = facts
+            // A renewal fires only on this phone's own grid change while it holds the
+            // claim, so no report about another client's pane can start one, and a
+            // momentary nil grid neither renews nor ends anything.
+            if standingClaim != nil,
+               let grid = facts.nativeGrid,
+               grid != standingClaim?.grid,
+               let request = claimControl.claim {
+                let requestId = env.newRequestId()
+                standingClaim = StandingClaim(grid: grid, pendingRequestId: requestId)
+                return [.resizePane(requestId: requestId, request: request)]
+            }
+            return [.session(.redraw)]
         }
-        guard let request else { return [] }
-        return [.resizePane(requestId: env.newRequestId(), request: request)]
     }
 
     /// The control the phone offers right now, computed from the facts and stored nowhere.
@@ -363,6 +405,7 @@ public struct MobileSessionModel: Equatable, Sendable {
         status.noteRequestOutcome(nil)
         tapeRequestId = nil
         serverVersion = nil
+        standingClaim = nil
     }
 
     /// Reports whether a checkpoint write has anything to save, and clears the dirt in the
@@ -379,6 +422,11 @@ public struct MobileSessionModel: Equatable, Sendable {
         switch frame {
         case .response(let response):
             if let error = response.error {
+                // `pending` is unwrapped first so a confirmed claim (pending nil) can
+                // never match a response that carries no id.
+                if let pending = standingClaim?.pendingRequestId, pending == response.id {
+                    standingClaim = nil
+                }
                 // Only the tape subscription's refusal ends the connection. A refused input
                 // request is the newest outcome on a stream that is still serving, and the
                 // next completed request replaces it.
@@ -388,6 +436,9 @@ public struct MobileSessionModel: Equatable, Sendable {
                 }
                 return end(with: .requestRefused(reason: error.message), env: env)
             }
+            if let pending = standingClaim?.pendingRequestId, pending == response.id {
+                standingClaim?.pendingRequestId = nil
+            }
             guard response.id == tapeRequestId else {
                 status.noteRequestOutcome(.succeeded)
                 return [.redraw]
@@ -395,6 +446,7 @@ public struct MobileSessionModel: Equatable, Sendable {
             guard let value = response.result, let record = decodePaneTapeRecord(value) else {
                 return []
             }
+            noteRecordPinnedness(record)
             return [.applyRecord(record)]
         case .notification(let method, let params):
             // A roster replaces the list and nothing else. The streamed pane leaving the
@@ -407,7 +459,41 @@ public struct MobileSessionModel: Equatable, Sendable {
             guard let notification = PaneTapeStreamNotification(method: method, params: params),
                   let record = decodePaneTapeRecord(notification.record)
             else { return [] }
+            noteRecordPinnedness(record)
             return [.applyRecord(record)]
+        }
+    }
+
+    /// Ends a confirmed standing claim when the tape states the pane unpinned.
+    ///
+    /// This runs at the decode point because the frame stream is what orders records
+    /// against responses: a record decoded after the latest claim or renewal's success
+    /// response states post-claim truth (the server replies before it reconciles), while
+    /// one decoded before it is pre-claim truth and ends nothing. Surface facts lawfully
+    /// lag the response, so they never end a claim; no record confirms one either.
+    private mutating func noteRecordPinnedness(_ record: PaneTapeRecord) {
+        guard let claim = standingClaim, claim.pendingRequestId == nil else { return }
+        guard pinnedStatement(in: record) == false else { return }
+        standingClaim = nil
+    }
+
+    /// The pinnedness one tape record states, or nil for a record that says nothing
+    /// about it. Three kinds state it: the opening contract, a sync transfer's first
+    /// part, and the recorder's resize event.
+    private func pinnedStatement(in record: PaneTapeRecord) -> Bool? {
+        switch record {
+        case .start(let start):
+            return start.pinned
+        case .sync(let sync):
+            return sync.pinned
+        case .event(let event):
+            guard event.event["type"]?.asString == "resize" else { return nil }
+            // The producer always writes the bit; absent means a pre-pinnedness
+            // recording, whose grids are all derived rather than overridden.
+            if case .bool(let pinned)? = event.event["pinned"] { return pinned }
+            return false
+        case .gap, .end, .unknown:
+            return nil
         }
     }
 

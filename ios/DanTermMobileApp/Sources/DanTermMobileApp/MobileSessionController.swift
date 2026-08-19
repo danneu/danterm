@@ -131,7 +131,9 @@ final class MobileSessionController {
 
     /// Reports the surface's current facts. The extent decides whether a whole cell fits,
     /// which is one of the facts the claim control projects from, so a layout pass is one
-    /// of the things the session has to be told about.
+    /// of the things the session has to be told about. The report is a geometry event:
+    /// while the model holds a standing claim, a rotated grid renews that claim, so this
+    /// is one of the inputs allowed to produce a resize.
     ///
     /// The scroll chrome reads the same moment, because the projection it mirrors and the
     /// grid it overlays both move for exactly these reasons.

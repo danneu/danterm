@@ -1,6 +1,7 @@
 // The grid the phone can show at native cell metrics, and the one request its claim
-// gesture sends. Typing and scrolling never reach this file: D6's claim is a deliberate
-// gesture, so no other phone action may produce a resize.
+// gesture sends. Typing and scrolling never reach this file: a resize starts with the
+// deliberate claim gesture, and the only other source is the model renewing a standing
+// claim that gesture created when the phone's own grid changes (rotation).
 import DanTermProtocol
 
 /// Carries the whole-cell grid one phone surface runs at, so the claim gesture has a
@@ -22,9 +23,9 @@ public struct MobileSurfaceGrid: Equatable, Sendable {
         self.rows = rows
     }
 
-    /// The claim gesture's entire wire effect: one ordinary last-writer-wins resize. It
-    /// carries no client identity and takes no lock, so a second claimer simply replaces
-    /// this grid.
+    /// The claim's entire wire effect -- the gesture's and each renewal's: one ordinary
+    /// last-writer-wins resize. It carries no client identity and takes no lock, so a
+    /// second claimer simply replaces this grid.
     public func claimRequest(for pane: PaneId) -> IpcRequest {
         .paneResize(pane: pane, resize: .grid(columns: columns, rows: rows))
     }

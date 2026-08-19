@@ -65,10 +65,14 @@ func geometryGesturesSendTheCurrentGrid() throws {
     ])
     #expect(resizes(session.handle(.releaseRequested)).isEmpty)
 
-    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+    // The changed-grid report lands on a standing claim (the release above ended none:
+    // it sent nothing), so it renews rather than merely storing the facts.
+    #expect(resizes(session.handle(.surfaceChanged(MobileSurfaceFacts(
         nativeGrid: grid(columns: 40, rows: 12),
         pinned: true
-    )))
+    )))) == [
+        .paneResize(pane: session.pane, resize: .grid(columns: 40, rows: 12)),
+    ])
     #expect(resizes(session.handle(.claimRequested)) == [
         .paneResize(pane: session.pane, resize: .grid(columns: 40, rows: 12)),
     ])
@@ -112,6 +116,203 @@ func noClaimWithoutAWholeCell() throws {
     try session.reachServingStream()
     _ = session.handle(.surfaceChanged(MobileSurfaceFacts(nativeGrid: nil, pinned: false)))
     #expect(resizes(session.handle(.claimRequested)).isEmpty)
+}
+
+@Test("A surface report renews only a claim this phone made")
+func surfaceReportRenewsOnlyThePhonesOwnClaim() throws {
+    // Intent: after a claim, a surface report offering a different grid emits exactly one
+    //   effect -- a resize at that grid; the same report without a prior claim, including
+    //   on an externally pinned pane whose grid moves, emits no resize.
+    // Why it exists: the renewal is what re-claims on rotation without a gesture, and its
+    //   gate is what keeps this phone from renewing a claim it never made -- the only
+    //   thing standing between two clients and a renewal loop.
+    var session = Session()
+    try session.reachServingStream()
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: false
+    )))
+    _ = session.handle(.claimRequested)
+
+    let rotated = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 60),
+        pinned: true
+    )))
+    #expect(rotated.count == 1)
+    #expect(resizes(rotated) == [
+        .paneResize(pane: session.pane, resize: .grid(columns: 40, rows: 60)),
+    ])
+
+    var observer = Session()
+    try observer.reachServingStream()
+    _ = observer.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: true
+    )))
+    #expect(resizes(observer.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 60),
+        pinned: true
+    )))).isEmpty)
+}
+
+@Test("Renewals are self-quiescing")
+func renewalQuiescesOnRepeatedFactsAndItsOwnEcho() throws {
+    // Intent: after a renewal, repeating the same facts emits nothing, and the renewal's
+    //   own echo -- the pinned flip at the renewed grid -- emits no further resize.
+    // Why it exists: the renewal reads the same facts it changes, so without quiescence
+    //   the echo would renew again and the phone would resize the pane forever.
+    var session = Session()
+    try session.reachServingStream()
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: false
+    )))
+    _ = session.handle(.claimRequested)
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 60),
+        pinned: false
+    )))
+
+    #expect(session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 60),
+        pinned: false
+    ))).isEmpty)
+    let echo = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 60),
+        pinned: true
+    )))
+    #expect(resizes(echo).isEmpty)
+    #expect(session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 60),
+        pinned: true
+    ))).isEmpty)
+}
+
+@Test("The standing claim ends on release, on connection end, and on an error response")
+func standingClaimEndsOnReleaseConnectionEndAndErrorResponse() throws {
+    // Intent: each of the three endings leaves no claim behind, proven by the next
+    //   changed-grid report emitting no renewal.
+    // Why it exists: a claim that outlived its ending would re-pin the pane on the next
+    //   rotation -- after the user released it, on a connection the server never
+    //   confirmed, or over a request the server refused.
+    var released = Session()
+    try released.reachServingStream()
+    _ = released.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: false
+    )))
+    _ = released.handle(.claimRequested)
+    _ = released.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: true
+    )))
+    #expect(resizes(released.handle(.releaseRequested)).isEmpty == false)
+    #expect(resizes(released.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 60),
+        pinned: true
+    )))).isEmpty)
+
+    var dropped = Session()
+    try dropped.reachServingStream()
+    _ = dropped.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: false
+    )))
+    _ = dropped.handle(.claimRequested)
+    _ = dropped.handle(.connectionEnded(.transport(.peerClosed, phase: .established)))
+    _ = dropped.handle(.attemptSucceeded(roster: roster(), serverVersion: "1.2.3"))
+    _ = dropped.handle(.paneAttached(pane: dropped.pane, cursor: nil))
+    #expect(resizes(dropped.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 60),
+        pinned: false
+    )))).isEmpty)
+
+    var refused = Session()
+    try refused.reachServingStream()
+    _ = refused.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: false
+    )))
+    let claimId = try #require(resizeRequestIds(refused.handle(.claimRequested)).first)
+    _ = refused.handle(.frameReceived(.response(JsonRpcResponse(
+        id: claimId,
+        error: JsonRpcError(code: -1, message: "no")
+    ))))
+    #expect(resizes(refused.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 60),
+        pinned: false
+    )))).isEmpty)
+}
+
+@Test("Only the phone's own response confirms, and only a later unpinned record ends")
+func claimConfirmationAndExternalReleaseFollowTheFrameOrder() throws {
+    // Intent: a replica report showing the pane pinned at exactly the claimed grid does
+    //   not confirm the claim, so an unpinned record decoded before the request's success
+    //   response is pre-claim truth and ends nothing; the same record decoded after the
+    //   response is an external release and ends it.
+    // Why it exists: the pane may already be pinned at this phone's grid by another
+    //   client, so the phone's resize is a server-side no-op with no tape transition --
+    //   the response is the only confirmation that exists, and reading the record's
+    //   pinnedness anywhere but the decode point would misorder it against the response.
+    var session = Session()
+    try session.reachServingStream()
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: true
+    )))
+    let claimId = try #require(resizeRequestIds(session.handle(.claimRequested)).first)
+
+    // Pinned-at-the-claimed-grid replica facts must not confirm: the unpinned record
+    // decoded next still precedes the response, so the claim must survive it.
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: true,
+        isAlternateScreenActive: true
+    )))
+    _ = session.handle(tapeResizeNotification(columns: 80, rows: 24, pinned: false))
+    _ = session.handle(.frameReceived(.response(JsonRpcResponse(
+        id: claimId,
+        result: .object(["ok": .bool(true)])
+    ))))
+
+    // The claim survived the pre-response record, the pinned facts, the pre-claim
+    // unpinned facts repeated after confirmation, and a momentary nil-grid report.
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: false
+    )))
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(nativeGrid: nil, pinned: false)))
+    let renewal = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 60),
+        pinned: false
+    )))
+    let renewalId = try #require(resizeRequestIds(renewal).first)
+    #expect(resizes(renewal) == [
+        .paneResize(pane: session.pane, resize: .grid(columns: 40, rows: 60)),
+    ])
+
+    // The renewal reset confirmation, so an unpinned record before its response ends
+    // nothing; after the response, the same record is an external release.
+    _ = session.handle(tapeResizeNotification(columns: 40, rows: 60, pinned: false))
+    _ = session.handle(.frameReceived(.response(JsonRpcResponse(
+        id: renewalId,
+        result: .object(["ok": .bool(true)])
+    ))))
+    let survived = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 30, rows: 50),
+        pinned: false
+    )))
+    let secondRenewalId = try #require(resizeRequestIds(survived).first)
+    _ = session.handle(.frameReceived(.response(JsonRpcResponse(
+        id: secondRenewalId,
+        result: .object(["ok": .bool(true)])
+    ))))
+
+    _ = session.handle(tapeResizeNotification(columns: 30, rows: 50, pinned: false))
+    #expect(resizes(session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: false
+    )))).isEmpty)
 }
 
 @Test("Typing reaches the pane the model holds, and nothing before it holds one")
@@ -394,6 +595,39 @@ private func resizes(_ effects: [MobileSessionGeometryEffect]) -> [IpcRequest] {
         guard case .resizePane(_, let request) = effect else { return nil }
         return request
     }
+}
+
+private func resizeRequestIds(_ effects: [MobileSessionGeometryEffect]) -> [JSONValue] {
+    effects.compactMap { effect in
+        guard case .resizePane(let requestId, _) = effect else { return nil }
+        return requestId
+    }
+}
+
+/// One streamed tape record carrying the recorder's resize event, which is how the tape
+/// states a pane's pinnedness mid-stream.
+private func tapeResizeNotification(
+    columns: Int,
+    rows: Int,
+    pinned: Bool
+) -> MobileSessionEvent {
+    .frameReceived(.notification(
+        method: Methods.paneTapeEvent,
+        params: .object([
+            "subscription": .string("subscription-1"),
+            "record": .object([
+                "kind": .string("event"),
+                "sequence": .number(1),
+                "elapsedNanoseconds": .number(0),
+                "event": .object([
+                    "type": .string("resize"),
+                    "columns": .number(Double(columns)),
+                    "rows": .number(Double(rows)),
+                    "pinned": .bool(pinned),
+                ]),
+            ]),
+        ])
+    ))
 }
 
 private func requests(_ effects: [MobileSessionEffect]) -> [IpcRequest] {
