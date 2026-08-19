@@ -6854,7 +6854,7 @@ public struct Terminal: Equatable, Sendable {
 
         // Cut at the right margin, then before the first cell an overwrite cannot simply replace:
         // a wide pair blanks its other half and a wrap spacer retires the wrap it stands for,
-        // which is `clearCellAndPair`'s job and not this one's.
+        // which is `prepareDestination`'s job and not this one's.
         let available = min(limit - start, columnCount - column)
         let count = readingRowCells(row) { cells -> Int in
             var count = 0
@@ -6882,9 +6882,9 @@ public struct Terminal: Equatable, Sendable {
         }
 
         invalidateInspection(inViewportRows: row..<(row + 1))
-        // `clearCellAndPair` would ask this per cell; asking once is the same answer because the
-        // first call retires the spacer and every later one finds nothing to retire. Columns above
-        // 1 never had a spacer to clear.
+        // The run's own destination preparation: the boundary halves `prepareDestination` looks
+        // for cannot be here, because the cut above already stopped at the first wide cell, so the
+        // spacer retirement is all that is left of it. Columns above 1 never had a spacer.
         if column <= 1 {
             clearPreviousSpacer(beforeRow: row, column: column)
         }
@@ -7194,7 +7194,10 @@ public struct Terminal: Equatable, Sendable {
                 by: 1
             )
         }
-        clearCellAndPair(row: screen.cursor.row, column: screen.cursor.column)
+        prepareDestination(
+            row: screen.cursor.row,
+            columns: screen.cursor.column..<(screen.cursor.column + 1)
+        )
         writeNarrowCells(
             row: screen.cursor.row,
             column: screen.cursor.column,
@@ -7213,7 +7216,10 @@ public struct Terminal: Equatable, Sendable {
         var preservesWrappedSpacer = false
         if screen.cursor.column == columnCount - 1 {
             if modes.isAutoWrapMode {
-                clearCellAndPair(row: screen.cursor.row, column: screen.cursor.column)
+                prepareDestination(
+                    row: screen.cursor.row,
+                    columns: screen.cursor.column..<(screen.cursor.column + 1)
+                )
                 screen.rows[screen.cursor.row].cells[screen.cursor.column] = GridCell(
                     kind: .spacerHead,
                     styleId: currentStyleId(),
@@ -7240,14 +7246,9 @@ public struct Terminal: Equatable, Sendable {
             )
         }
 
-        clearCellAndPair(
+        prepareDestination(
             row: screen.cursor.row,
-            column: screen.cursor.column,
-            clearsPreviousSpacer: preservesWrappedSpacer == false
-        )
-        clearCellAndPair(
-            row: screen.cursor.row,
-            column: screen.cursor.column + 1,
+            columns: screen.cursor.column..<(screen.cursor.column + 2),
             clearsPreviousSpacer: preservesWrappedSpacer == false
         )
         let styleId = currentStyleId()
@@ -7729,6 +7730,50 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Makes a range of one row's columns safe to overwrite wholesale, writing only *outside* it.
+    ///
+    /// What a print owes the grid before it stores belongs to the whole destination range, not to
+    /// each column on its own: a wide pair straddling a boundary must stop claiming the partner
+    /// the range is about to take, and the previous row's wrap spacer retires once. Columns inside
+    /// the range are left untouched because the caller is about to store every one of them, so
+    /// each printed cell is written exactly once.
+    ///
+    /// Pass `clearsPreviousSpacer: false` from the caller that wrote that spacer itself: a wide
+    /// glyph which wrapped off the right margin must preserve the spacer standing for its own
+    /// wrap while it prepares columns 0 and 1.
+    private mutating func prepareDestination(
+        row: Int,
+        columns: Range<Int>,
+        clearsPreviousSpacer: Bool = true,
+        replacementStyleId: StyleId = Terminal.defaultStyleId
+    ) {
+        // Checking the two boundary columns is enough only because wide pairs are consistent -- a
+        // `.wideHead` is always followed by its `.wideTail` -- so a partner the range severs can
+        // only sit immediately outside it.
+        let before = columns.lowerBound - 1
+        if before >= 0, screen.rows[row].cells[before].kind == .wideHead {
+            screen.rows[row].cells[before] = GridCell(styleId: replacementStyleId)
+        }
+        let after = columns.upperBound
+        if after < columnCount, screen.rows[row].cells[after].kind == .wideTail {
+            screen.rows[row].cells[after] = GridCell(styleId: replacementStyleId)
+        }
+
+        if clearsPreviousSpacer {
+            clearPreviousSpacer(
+                beforeRow: row,
+                column: columns.lowerBound,
+                replacementStyleId: replacementStyleId
+            )
+        }
+    }
+
+    /// Blanks one cell whose blank is load-bearing, severing the partner it may claim.
+    ///
+    /// This is `prepareDestination` over a one-column range plus the blank itself, so the partner
+    /// rule has one spelling. The print path does not come here -- it prepares its range and then
+    /// stores over it -- and what is left are the callers that need the cleared cell to stay
+    /// cleared.
     private mutating func clearCellAndPair(
         row: Int,
         column: Int,
@@ -7736,28 +7781,13 @@ public struct Terminal: Equatable, Sendable {
         replacementStyleId: StyleId = Terminal.defaultStyleId
     ) {
         guard screen.rows.indices.contains(row), screen.rows[row].cells.indices.contains(column) else { return }
-        switch screen.rows[row].cells[column].kind {
-        case .wideHead:
-            screen.rows[row].cells[column] = GridCell(styleId: replacementStyleId)
-            if column + 1 < columnCount {
-                screen.rows[row].cells[column + 1] = GridCell(styleId: replacementStyleId)
-            }
-        case .wideTail:
-            screen.rows[row].cells[column] = GridCell(styleId: replacementStyleId)
-            if column > 0 {
-                screen.rows[row].cells[column - 1] = GridCell(styleId: replacementStyleId)
-            }
-        case .padding, .narrow, .spacerHead:
-            screen.rows[row].cells[column] = GridCell(styleId: replacementStyleId)
-        }
-
-        if clearsPreviousSpacer {
-            clearPreviousSpacer(
-                beforeRow: row,
-                column: column,
-                replacementStyleId: replacementStyleId
-            )
-        }
+        prepareDestination(
+            row: row,
+            columns: column..<(column + 1),
+            clearsPreviousSpacer: clearsPreviousSpacer,
+            replacementStyleId: replacementStyleId
+        )
+        screen.rows[row].cells[column] = GridCell(styleId: replacementStyleId)
     }
 
     private mutating func clearPreviousSpacer(

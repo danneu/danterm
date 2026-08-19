@@ -242,7 +242,7 @@ the wave checklists (the `- [ ] **[FEED-2](#feed-2)**` /
 
 ## Commit progress
 - [x] 1. D1 -- row-cells accessor (FEED-2)
-- [ ] 2. D2 -- prepare a destination range (ROW-4)
+- [x] 2. D2 -- prepare a destination range (ROW-4)
 - [ ] 3. Mark FEED-2 and ROW-4 done in the construction audit
 
 ## Implementation notes
@@ -259,3 +259,13 @@ the wave checklists (the `- [ ] **[FEED-2](#feed-2)**` /
 - D1's benchmark (PO4): `just benchmark-quick baseline=HEAD
   workload=terminal-feed` reports `terminal-feed` 16.92% faster (symmetric
   median of 2 pairs).
+- `printBulkASCII` does not call `prepareDestination`. Its cut rule already
+  stops the run at the first cell that is not `.narrow`/`.padding`, so pair
+  consistency makes both boundary checks provably no-ops there, and the run
+  keeps its own single `clearPreviousSpacer` call. The three destination
+  writes the plan names all prepare their own range.
+- D2's benchmark (PO4) was not run: the machine was not quiet enough to
+  measure on. D2 removes a dead `GridCell` construct, store, and destroy per
+  printed character, so it is a payoff check rather than a gate -- rerun
+  `just benchmark-quick baseline=HEAD workload=terminal-feed` (and
+  `scrollback-stream`'s per-arm drain MB/s) on an idle machine to record it.
