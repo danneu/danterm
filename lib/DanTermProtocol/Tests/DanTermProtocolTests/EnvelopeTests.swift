@@ -103,6 +103,65 @@ struct EnvelopeTests {
         #expect(String(decoding: encoded, as: UTF8.self).contains("_ctx") == false)
     }
 
+    // Intent: a typed payload written through the envelope reaches the wire as the same line
+    // the JSONValue-built envelope produces, and reads back as the JSONValue envelope.
+    // Why it exists: the producer encodes typed values once at `encodeIpcLine` while every
+    // reader still decodes into `JSONValue`. If the generic and the JSONValue instantiations
+    // could disagree about `jsonrpc`, `id`, or an omitted payload, one encode pass would
+    // change the wire.
+    // Scenario: one notification carrying a typed params value, and one response carrying a
+    // typed result value, both read back with the reader's own envelope type.
+    @Test("typed payload envelopes decode as the JSONValue envelopes")
+    func typedPayloadEnvelopesDecodeAsJSONValueEnvelopes() throws {
+        let typedRequest = JsonRpcRequestEnvelope(
+            id: .number(7),
+            method: "probe",
+            params: EnvelopePayloadProbe(name: "pane", count: 3)
+        )
+        let decodedRequest = try JSONDecoder().decode(
+            JsonRpcRequest.self,
+            from: try encodeIpcLine(typedRequest)
+        )
+        #expect(decodedRequest == JsonRpcRequest(
+            id: .number(7),
+            method: "probe",
+            params: .object(["name": .string("pane"), "count": .number(3)])
+        ))
+
+        let typedResponse = JsonRpcResponseEnvelope(
+            id: .string("abc"),
+            result: EnvelopePayloadProbe(name: "tape", count: 0)
+        )
+        let decodedResponse = try JSONDecoder().decode(
+            JsonRpcResponse.self,
+            from: try encodeIpcLine(typedResponse)
+        )
+        #expect(decodedResponse == JsonRpcResponse(
+            id: .string("abc"),
+            result: .object(["name": .string("tape"), "count": .number(0)])
+        ))
+    }
+
+    // Intent: an envelope with no payload omits the key rather than stating null, whichever
+    // payload type it was instantiated with.
+    @Test("payload-free typed envelopes omit their payload key")
+    func payloadFreeTypedEnvelopesOmitTheirPayloadKey() throws {
+        let request = JsonRpcRequestEnvelope<EnvelopePayloadProbe>(method: "probe")
+        #expect(
+            String(decoding: try sortedEncoder().encode(request), as: UTF8.self)
+                == #"{"jsonrpc":"2.0","method":"probe"}"#
+        )
+
+        let response = JsonRpcResponseEnvelope<EnvelopePayloadProbe>(
+            id: .null,
+            error: JsonRpcError(code: -1, message: "no")
+        )
+        #expect(
+            String(decoding: try sortedEncoder().encode(response), as: UTF8.self)
+                == #"{"error":{"code":-1,"message":"no"},"id":null,"jsonrpc":"2.0"}"#
+        )
+    }
+
     @Test("JSON value does not encode object as base64 data")
     func jSONValueDoesNotEncodeObjectAsBase64Data() throws {
         let value = JSONValue.object(["x": .number(1)])
@@ -115,4 +174,11 @@ struct EnvelopeTests {
         encoder.outputFormatting = [.sortedKeys]
         return encoder
     }
+}
+
+/// A stand-in for any typed payload a producer hands the envelope, so the envelope's own
+/// behavior is tested without a real payload's vocabulary in the way.
+private struct EnvelopePayloadProbe: Encodable {
+    let name: String
+    let count: Int
 }
