@@ -414,7 +414,7 @@ step 3 is a GUI stimulus. Adding a CLI route is out of scope here.
 ## Commit progress
 - [x] 1. feat(app): one dialog action row that owns macOS button order
 - [x] 2. refactor(app): confirmations project their choices
-- [ ] 3. refactor(app): theme sheet and todo editor adopt the action row
+- [x] 3. refactor(app): theme sheet and todo editor adopt the action row
 
 ## Implementation notes
 
@@ -438,3 +438,13 @@ step 3 is a GUI stimulus. Adding a CLI route is out of scope here.
 - `ConfirmationChoice.isDestructive` and `ConfirmationProjection.alternatives`
   are `var` with defaults, so the four single-answer branches state neither.
 
+- PO15 was stated as "Cancel sits past the container midpoint". The remote
+  theme sheet is 300pt wide and the pair plus spacing is about 166pt, so a
+  trailing-aligned Cancel legitimately starts left of the midpoint. The
+  assertion pins the same regression from the other side instead: Cancel is no
+  longer at the leading inset, and the two buttons are adjacent.
+- The todo editor's button spacing goes from 8pt to the row's shared 12pt,
+  because the row states the constant once for the whole app.
+- Verification step 3 (a live slot, screenshots of all four surfaces) was not
+  run: the harness frame assertions cover the drawn geometry, and another
+  agent was editing build scripts in this working tree at the time.

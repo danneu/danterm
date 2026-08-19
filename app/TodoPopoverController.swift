@@ -112,8 +112,11 @@ final class TodoPopoverController<Scope: TodoPopoverScope>: NSViewController,
         return tf
     }()
     let editInput = TodoInputView(placeholder: "Edit task...", visibleLineCount: TodoInputView.editVisibleLineCount)
-    let saveButton = NSButton(title: "Save", target: nil, action: nil)
-    let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
+    /// Built in `loadView`. The row owns the editor's buttons, so the focus
+    /// restore and the key-view loop read them back instead of storing them.
+    private var editButtons: DialogActionRow!
+    var saveButton: NSButton { editButtons.button(for: .defaultAction)! }
+    var cancelButton: NSButton { editButtons.button(for: .cancel)! }
     var bottomStack: NSStackView!
     var editContainer: NSStackView!
     var isSyncingTableSelection = false
@@ -233,20 +236,21 @@ final class TodoPopoverController<Scope: TodoPopoverScope>: NSViewController,
             emptyLabel = label
         }
 
-        saveButton.target = self
-        saveButton.action = #selector(saveEditButtonClicked(_:))
-        saveButton.bezelStyle = .rounded
-
-        cancelButton.target = self
-        cancelButton.action = #selector(cancelEditButtonClicked(_:))
-        cancelButton.bezelStyle = .rounded
-
         editInput.textView.delegate = self
 
-        let editButtons = NSStackView(views: [saveButton, cancelButton])
-        editButtons.orientation = .horizontal
-        editButtons.alignment = .centerY
-        editButtons.spacing = 8
+        // The row reserves no key equivalents: `editInput.textView` classifies
+        // Return and Escape itself, and a default button claiming Return would
+        // take the press before the text view sees it.
+        editButtons = DialogActionRow(
+            actions: [
+                DialogAction(title: "Save", role: .defaultAction) { [weak self] in
+                    self?.saveEditButtonClicked(nil)
+                },
+                DialogAction(title: "Cancel", role: .cancel) { [weak self] in
+                    self?.cancelEditButtonClicked(nil)
+                },
+            ],
+            reservesKeyEquivalents: false)
 
         editContainer = NSStackView(views: [editTitleLabel, editInput, editHintLabel, editButtons])
         editContainer.orientation = .vertical
@@ -295,6 +299,9 @@ final class TodoPopoverController<Scope: TodoPopoverScope>: NSViewController,
             editContainer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
             editContainer.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -12),
             editInput.widthAnchor.constraint(equalTo: editContainer.widthAnchor),
+            // The edit column is leading-aligned, so the row would otherwise get
+            // only its fitting width and its trailing gravity nothing to pin to.
+            editButtons.widthAnchor.constraint(equalTo: editContainer.widthAnchor),
 
             bottomStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             bottomStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
@@ -595,16 +602,19 @@ final class TodoPopoverController<Scope: TodoPopoverScope>: NSViewController,
         }
     }
 
+    /// Tab order follows the drawn order, so the loop cannot disagree with the
+    /// layout the action row chose.
     private func installEditKeyLoop() {
-        editInput.textView.nextKeyView = saveButton
-        saveButton.nextKeyView = cancelButton
-        cancelButton.nextKeyView = editInput.textView
+        let chain: [NSView] = [editInput.textView] + editButtons.buttonsInVisualOrder
+        for (view, next) in zip(chain, chain.dropFirst() + [chain[0]]) {
+            view.nextKeyView = next
+        }
     }
 
     private func tearDownEditKeyLoop() {
-        editInput.textView.nextKeyView = nil
-        saveButton.nextKeyView = nil
-        cancelButton.nextKeyView = nil
+        for view in [editInput.textView] + editButtons.buttonsInVisualOrder {
+            view.nextKeyView = nil
+        }
     }
 
     // MARK: - List actions

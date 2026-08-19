@@ -220,6 +220,70 @@ func todoPopoverViewTests() {
         try uiExpect(try selectedRowTitle(in: fx) == "Pane beta", "edit target should be re-selected")
     }
 
+    uiTest("edit mode draws Cancel left of Save at the trailing inset") {
+        // Intent: the editor's buttons sit together at the trailing edge with
+        //   Save rightmost, and the key-view loop follows the drawn order.
+        // Why it exists: the editor used to draw [Save] [Cancel] left-aligned,
+        //   and restated the tab order separately from the layout, so the two
+        //   could disagree. Spec-first.
+        // Scenario: the user enters edit mode on a pane task.
+        let fx = makePaneTodoFixture()
+        defer { fx.window.close() }
+        try enterEdit(rowTitle: "Pane alpha", in: fx)
+        settlePaneTodoFixture(fx)
+
+        let container = fx.vc.view
+        let save = try onlyTodoButton(titled: "Save", in: container)
+        let cancel = try onlyTodoButton(titled: "Cancel", in: container)
+        let saveFrame = save.convert(save.bounds, to: container)
+        let cancelFrame = cancel.convert(cancel.bounds, to: container)
+
+        try uiExpect(cancelFrame.maxX <= saveFrame.minX, "Cancel should be drawn left of Save")
+        try uiExpect(abs(saveFrame.maxX - (container.bounds.maxX - 12)) < 1,
+                     "Save should end at the 12pt trailing inset, got \(saveFrame.maxX) in \(container.bounds.width)")
+        try uiExpect(cancelFrame.minX > container.bounds.midX,
+                     "the pair should hug the trailing edge, not start at the leading inset")
+
+        let editInput = try visibleTodoInput(in: fx)
+        var chain: [NSView] = []
+        var next = editInput.textView.nextKeyView
+        while let view = next, !chain.contains(where: { $0 === view }), chain.count < 8 {
+            chain.append(view)
+            next = view.nextKeyView
+        }
+        try uiExpect(chain.count == 3, "expected the loop to visit both buttons and close back, got \(chain.count)")
+        try uiExpect(chain[0] === cancel, "tab from the input should reach Cancel, the leftmost button")
+        try uiExpect(chain[1] === save, "tab should then reach Save")
+        try uiExpect(chain[2] === editInput.textView, "the loop should close back on the edit input")
+    }
+
+    uiTest("Return in the edit input saves rather than being taken by a button") {
+        // Intent: Return typed in the edit input runs the input's own submit
+        //   path; no button in the editor claims Return as a key equivalent.
+        // Why it exists: the action row assigns Return to a default button, and
+        //   in this popover that would fight the text view's own classifier.
+        //   Spec-first.
+        // Scenario: the user edits a pane task and presses Return.
+        let fx = makePaneTodoFixture()
+        defer { fx.window.close() }
+        try enterEdit(rowTitle: "Pane alpha", in: fx)
+        let editInput = try visibleTodoInput(in: fx)
+        editInput.string = "Pane via Return"
+
+        for button in allSubviews(of: NSButton.self, in: fx.vc.view) where !isEffectivelyHidden(button) {
+            try uiExpect(button.keyEquivalent != "\r",
+                         "\(button.title) must not claim Return in the editor")
+        }
+
+        let handled = fx.vc.textView(editInput.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
+
+        try uiExpect(handled, "the input should handle Return itself")
+        try expectSingleMessage(fx.runtime, "Return save") { msg in
+            if case .editTodoText(.pane, _, let text) = msg { return text == "Pane via Return" }
+            return false
+        }
+    }
+
     uiTest("apply mid-edit preserves draft when target still exists") {
         // Intent: reconcile preserves an in-progress edit draft when the same
         //   todo target survives in the new projection.

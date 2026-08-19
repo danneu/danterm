@@ -131,6 +131,29 @@ func remoteThemePickerSheetTests() {
         try uiExpect(fx.recorder.names.isEmpty, "Cancel should not fire onSelect")
     }
 
+    uiTest("Cancel and Select sit together at the trailing edge") {
+        // Intent: the sheet draws Cancel immediately left of Select, with
+        //   Select's trailing edge at the container's content inset.
+        // Why it exists: the sheet used to pin Cancel to the bottom-left corner
+        //   and Select to the bottom-right, splitting the pair across the
+        //   dialog. Pins the macOS action-row convention for this surface.
+        // Scenario: the sheet is laid out at its natural width. Spec-first.
+        let fx = makeRemotePickerFixture()
+        defer { fx.window.close() }
+
+        let container = fx.sheet.view
+        let cancel = fx.sheet.cancelButton.convert(fx.sheet.cancelButton.bounds, to: container)
+        let select = fx.sheet.selectButton.convert(fx.sheet.selectButton.bounds, to: container)
+
+        try uiExpect(cancel.maxX <= select.minX, "Cancel should be drawn left of Select")
+        try uiExpect(select.minX - cancel.maxX < 40,
+                     "the pair should be adjacent, got a \(select.minX - cancel.maxX)pt gap")
+        try uiExpect(abs(select.maxX - (container.bounds.maxX - 12)) < 1,
+                     "Select should end at the 12pt trailing inset, got \(select.maxX) in \(container.bounds.width)")
+        try uiExpect(cancel.minX > 12 + 40,
+                     "Cancel should be carried along by the pair, not pinned at the leading inset")
+    }
+
     uiTest("current theme preselects its row and marks the cell") {
         let fx = makeRemotePickerFixture(currentTheme: "Nord")
         defer { fx.window.close() }

@@ -13,8 +13,11 @@ class RemoteThemePickerSheet: NSViewController, NSTableViewDataSource, NSTableVi
     let searchField = NSSearchField()
     private let scrollView = NSScrollView()
     let tableView = NSTableView()
-    let selectButton = NSButton(title: "Select", target: nil, action: nil)
-    let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
+    /// Built in `loadView`; the row owns the buttons, so these read them back
+    /// for the enable/disable logic and the harness.
+    private var actionRow: DialogActionRow!
+    var selectButton: NSButton { actionRow.button(for: .defaultAction)! }
+    var cancelButton: NSButton { actionRow.button(for: .cancel)! }
 
     private var allNames: [String]
     private var filteredNames: [String]
@@ -56,17 +59,15 @@ class RemoteThemePickerSheet: NSViewController, NSTableViewDataSource, NSTableVi
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
 
-        cancelButton.target = self
-        cancelButton.action = #selector(cancel)
-        cancelButton.keyEquivalent = "\u{1b}" // Escape
-
-        selectButton.target = self
-        selectButton.action = #selector(commitSelection)
-        selectButton.keyEquivalent = "\r" // Enter
-        selectButton.isEnabled = false
+        actionRow = DialogActionRow(actions: [
+            DialogAction(title: "Select", role: .defaultAction, isEnabled: false) { [weak self] in
+                self?.commitSelection()
+            },
+            DialogAction(title: "Cancel", role: .cancel) { [weak self] in self?.cancel() },
+        ])
 
         // Layout
-        for v in [searchField, scrollView, cancelButton, selectButton] as [NSView] {
+        for v in [searchField, scrollView, actionRow] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(v)
         }
@@ -79,13 +80,11 @@ class RemoteThemePickerSheet: NSViewController, NSTableViewDataSource, NSTableVi
             scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: cancelButton.topAnchor, constant: -12),
+            scrollView.bottomAnchor.constraint(equalTo: actionRow.topAnchor, constant: -12),
 
-            cancelButton.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            cancelButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
-
-            selectButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            selectButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+            actionRow.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            actionRow.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            actionRow.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
         ])
 
         self.view = container
