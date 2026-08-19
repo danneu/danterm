@@ -236,13 +236,42 @@ and the three btop profiling recipes.
 
 ## D. Improve in place, do not delete
 
-- [ ] **`scripts/tests/terminal_benchmark_compare_test.py`** repeats the same
-      four-claim block for each auxiliary metric (plan estimate, process CPU,
-      drain composition): "reported for every workload", "never carries a
-      verdict", "never changes the draw verdict", "no evidence -> no estimate".
-      That is ~12 tests stating one invariant. One parameterized test over the
-      auxiliary-metric registry is *stronger*: a newly added auxiliary metric
-      gets covered automatically instead of needing four hand-copied tests.
+- [x] **`scripts/tests/terminal_benchmark_compare_test.py` -- examined
+      2026-08-19, and the proposal is withdrawn.** The plan was: one
+      parameterized test over the auxiliary-metric registry, replacing ~12
+      hand-copied tests, so a newly added metric is covered automatically.
+      Reading the code kills all three parts of that.
+
+      **There is no registry.** `terminal-benchmark-compare.py:85-131` holds
+      three deliberately separate tables and spends 45 lines saying why they must
+      stay separate: `AUXILIARY_BLOCK_METRICS` drives the `planWorkloads` rule
+      lookup; `UNCALIBRATED_BLOCK_METRICS` is kept out of it *because* it has no
+      rule to look up, which `research/17/F15` establishes as a measured outcome
+      rather than a gap; `COMPOSITION_WORKLOADS` pairs nothing and classifies
+      nothing. A test-side registry would still need one hand-written entry per
+      metric -- the same edit as writing the test, only less explicit. So the
+      "covered automatically" benefit is not available at any price.
+
+      **The duplication is smaller than claimed.** Not 12 tests stating one
+      invariant. The four drain-composition tests are structurally different: an
+      absolute composition, not a paired percentage. Of the other eight, the
+      genuinely parallel pairs are two -- "never changes the draw verdict" and
+      "no evidence -> no estimate", for plan and CPU. That is 4 tests, differing
+      in the summary key (`auxiliary` vs `uncalibrated`), the metric field, and
+      the closing assertion.
+
+      **Merging those four would lose information.** Their `Why it exists` blocks
+      carry different rationales: plan is uncalibrated but classifiable per
+      workload; CPU is permanently unclassified, with the reason and the research
+      citation attached. One parameterized test replaces two specific
+      explanations with one generic one, which is a loss under this project's
+      test-comment convention.
+
+      **Lesson for this audit's method:** this item was written from test *names*.
+      Every finding that survived was one where the bodies or the call graph were
+      read instead -- the same error as the "frozen perf cluster" (grouped by
+      last-touch date) and the "legacy format tests" (grouped by the word
+      "legacy" in a name).
 
 ## What we checked and found healthy
 
@@ -278,3 +307,4 @@ Append one line per drop: date, what went, what broke or did not.
 | 2026-08-19 | `CustomTitleTests` "testLegacySnapshotWithTitleSubtitleDecodesSuccessfully" | Nothing broke. It only re-confirmed Swift's default `Codable` handling of unknown keys. |
 | 2026-08-19 | C1: four bundle gate steps merged into `bundle-contract-suite.sh` | No test lost. 57.0s and 7 tool builds became 21.2s and 1. Gate step count 104 -> 101. |
 | 2026-08-19 | C2: 11 `core-purity-lint.sh` steps became 1 sweep | No check lost, and 27 previously unchecked modules gained the portable floor. Gate step count 101 -> 91. |
+| 2026-08-19 | D: nothing dropped -- proposal withdrawn on evidence | The registry it would parameterize over does not exist, and production documents why it must not. No code changed. |
