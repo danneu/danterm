@@ -72,6 +72,14 @@ public struct MobileObserveSurface: Equatable, Sendable {
         )
     }
 
+    /// The drawn pixels below one viewport row's bottom edge -- the slack a keyboard
+    /// lift may consume before that row must move. A row outside the grid answers zero,
+    /// which the placement treats as no slack and lifts fully.
+    public func slackPixels(belowRow row: Int) -> Int {
+        guard (0..<rows).contains(row) else { return 0 }
+        return (rows - 1 - row) * metrics.cellHeightPixels
+    }
+
     /// The rectangle the drawn cells occupy in the view's own coordinates.
     ///
     /// Bottom-pinned to the placement's visible bottom edge, so new output stays put at

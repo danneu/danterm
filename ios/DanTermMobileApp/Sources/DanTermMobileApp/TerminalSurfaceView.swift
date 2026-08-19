@@ -109,6 +109,8 @@ final class TerminalSurfaceView: UIView {
     /// Applies one exact stream record and schedules only the presentation work it creates.
     func apply(_ record: PaneTapeRecord) throws {
         let previousCursor = replica.cursor
+        let previousSlack = anchorSlackPixels
+        defer { invalidateLayoutOnAnchorMove(from: previousSlack) }
         try replica.apply(record)
         didChangeReplicaState?(replica.state)
         if replica.state == .exact, replica.cursor != previousCursor {
@@ -122,6 +124,8 @@ final class TerminalSurfaceView: UIView {
 
     /// Applies local primary-screen scroll without sending authoritative terminal bytes.
     func scrollViewport(_ scroll: MobileViewportScroll) {
+        let previousSlack = anchorSlackPixels
+        defer { invalidateLayoutOnAnchorMove(from: previousSlack) }
         switch scroll {
         case .byRows(let rows): replica.scrollViewport(byRows: rows)
         case .toTopRow(let row): replica.scrollViewport(toTopRow: row)
@@ -187,9 +191,9 @@ final class TerminalSurfaceView: UIView {
             let frame = surface.drawnFrame(in: placement)
             surfaceView.bounds = CGRect(origin: .zero, size: frame.size)
             surfaceView.layer.contentsScale = scale
-            // The replica draws bottom-pinned at the placement's visible bottom, so newly
-            // typed output stays put on the bar's top and the keyboard only slides the
-            // top rows up out of the clip.
+            // The replica draws bottom-pinned at the placement's drawn bottom, which the
+            // keyboard lifts only as far as the cursor anchor needs: a fresh prompt stays
+            // put, and a full screen slides its top rows up out of the clip.
             surfaceView.layer.position = frame.origin
         }
         // Reported from here, last, because this is the moment the view's own extent and
@@ -300,8 +304,27 @@ final class TerminalSurfaceView: UIView {
     /// them in different places.
     private var placement: MobileSurfacePlacement? {
         contentBox.map {
-            MobileSurfacePlacement(contentBox: $0, obscuredHeight: obscuredBottomHeight)
+            MobileSurfacePlacement(
+                contentBox: $0,
+                obscuredHeight: obscuredBottomHeight,
+                anchorSlackPixels: anchorSlackPixels
+            )
         }
+    }
+
+    /// The drawn pixels below the replica's anchored cursor row, or nothing without an
+    /// eligible anchor, which makes the placement fall back to the full lift.
+    private var anchorSlackPixels: Int? {
+        guard let surface, let row = replica.cursorAnchorRow else { return nil }
+        return surface.slackPixels(belowRow: row)
+    }
+
+    /// Schedules a layout pass when a record or a local scroll moved the anchor while
+    /// the keyboard is up; the drawn layer's position is only written in `layoutSubviews`,
+    /// so a moved anchor that schedules nothing would leave the lift stale.
+    private func invalidateLayoutOnAnchorMove(from previousSlack: Int?) {
+        guard obscuredBottomHeight > 0, anchorSlackPixels != previousSlack else { return }
+        setNeedsLayout()
     }
 }
 

@@ -44,6 +44,22 @@ public struct PaneReplica: Sendable {
     /// would act on a claim that may no longer exist.
     public var pinned: Bool? { state == .exact ? heldPinned : nil }
 
+    /// The viewport row the phone's keyboard lift anchors to, or nothing when no anchor
+    /// is trustworthy: only an exact replica whose projection is following and whose
+    /// cursor is inside the viewport can vouch for where the user is typing. A browsing
+    /// window -- even one shallow enough to keep the cursor on screen -- and a terminal
+    /// retained behind a gap both describe a position the user is not watching, so they
+    /// answer nothing and the caller falls back to its anchorless lift. The gate is the
+    /// cursor's position, not its visibility: shells wrap redraws in hide/show, and a
+    /// visibility gate would flap the lift on every repaint.
+    public var cursorAnchorRow: Int? {
+        guard state == .exact, let terminal,
+              terminal.scrollProjection.isFollowing,
+              let placement = terminal.cursorPlacement
+        else { return nil }
+        return placement.row
+    }
+
     private var heldPinned: Bool?
     private var syncAssembler = PaneTapeSyncAssembler()
     private var interactionState = TerminalInteractionState()

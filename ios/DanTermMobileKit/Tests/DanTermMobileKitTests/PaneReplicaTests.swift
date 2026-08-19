@@ -421,6 +421,45 @@ func reconnectRejectsForeignStartCursor() throws {
     #expect(replica.terminal?.viewportText == "old")
 }
 
+@Test("The cursor anchor exists only for an exact, following replica with a visible cursor")
+func cursorAnchorRequiresExactFollowingVisibleCursor() throws {
+    // Intent: `cursorAnchorRow` answers only when the replica is exact, its projection is
+    //   following, and the cursor is inside the viewport. A browsing window yields nothing
+    //   even when it is shallow enough to keep the cursor on screen, and so does an
+    //   inexact replica that still retains its terminal.
+    // Why it exists: the phone's keyboard lift anchors to this row. An anchor taken from a
+    //   browsing window or a stale terminal would slide live rows toward a cursor the user
+    //   is not looking at; without an eligible anchor the lift must fall back to the full
+    //   obscured height.
+    // Scenario: four lines on a three-row window with the cursor moved two rows up, so a
+    //   one-row scroll-back keeps the cursor visible while browsing.
+    var replica = try synchronizedReplica(
+        bytes: Array("one\r\ntwo\r\nthree\r\nfour\u{1b}[A\u{1b}[A".utf8),
+        cursor: testCursor(sequence: 1),
+        columns: 8,
+        rows: 3
+    )
+    #expect(replica.cursorAnchorRow == 0)
+
+    replica.scrollViewport(byRows: -1)
+    #expect(replica.terminal?.cursorPlacement != nil)
+    #expect(replica.cursorAnchorRow == nil)
+
+    replica.scrollViewport(toTopRow: 1)
+    #expect(replica.terminal?.scrollProjection.isFollowing == true)
+    #expect(replica.cursorAnchorRow == 0)
+
+    try replica.apply(.gap(PaneTapeGapRecord(
+        droppedEventCount: 1,
+        droppedFeedBytes: 1,
+        droppedWriteBytes: 0
+    )))
+    #expect(replica.terminal != nil)
+    #expect(replica.cursorAnchorRow == nil)
+
+    #expect(PaneReplica().cursorAnchorRow == nil)
+}
+
 // Intent: every gap the replica reaches on its own finding is marked detected, and only a
 // producer gap record is marked declared.
 //

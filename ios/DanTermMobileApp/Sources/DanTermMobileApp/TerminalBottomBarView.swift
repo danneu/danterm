@@ -47,6 +47,9 @@ final class TerminalBottomBarView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        // Opaque, because a partial keyboard lift leaves live rows behind this strip;
+        // no cell may show through the bar.
+        backgroundColor = .black
         configureViews()
         configureConstraints()
     }
