@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
-# Local purity lint with two profiles plus an opt-in import-free gate:
+# Local purity lint. Run with no target it sweeps every first-party module; run
+# with one it checks that module alone.
 #
-#   pure     (default; target lib/DanTermCore/Sources/DanTermCore)
+# The sweep is the entry point the gate uses, and it is what makes coverage total.
+# The gate used to list eleven targets by hand while the tree held thirty-five
+# modules, so twenty-seven went unchecked and the step list gave no sign of it.
+# Now the lint enumerates lib/*/Sources/* and ios/*/Sources/* itself and reads
+# scripts/core-purity-policy.conf for the modules whose contract deviates from the
+# portable floor. A module nobody declares is checked anyway; a policy entry whose
+# module is gone fails, because an entry that checks nothing still reads as
+# coverage. See docs/design/2026-05-28-pure-core-support-split.md.
+#
+# Profiles, plus an opt-in import-free gate:
+#
+#   pure     (the default for a single-target run)
 #            Bans Cocoa/AppKit/SwiftUI imports AND a denylist of side-effecting /
 #            nondeterministic tokens, so the pure core stays free of IO and
 #            ambient nondeterminism. Two tiers:
@@ -13,11 +25,14 @@
 #                ambient-seam` (the three designated ambient seams: CoreEnv.live
 #                and the abbreviateHome/expandTilde leaf defaults). Anywhere else
 #                they are a fresh nondeterminism leak.
-#   portable (target lib/DanTermSupport/Sources/DanTermSupport)
+#   portable (the sweep's floor for an undeclared module)
 #            Bans Cocoa/AppKit/SwiftUI imports -- and nothing else.
 #            DanTermSupport legitimately performs portable IO (FileManager,
 #            Process, DispatchSource, ProcessInfo), so the pure-tier IO bans do
 #            NOT apply here. The profiles are deliberately kept separate.
+#   ui       Sweep-only. Declares a module that legitimately draws with a
+#            platform toolkit, so no check runs. It is an exemption, which is why
+#            it must be written down rather than inferred from an absent target.
 #   --forbid-imports
 #            Rejects every real Swift import, including Foundation. Import-free
 #            modules use this alongside the pure profile so they cannot silently
@@ -40,7 +55,66 @@
 # (scripts/tests/core-purity-lint_test.sh) pins every edge case in both directions.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CORE_DEFAULT="$SCRIPT_DIR/../lib/DanTermCore/Sources/DanTermCore"
+
+# Test seams: the self-test points the sweep at a fixture tree of module
+# directories and a fixture policy file, so each verdict is proven without the
+# real tree. Nothing else sets these.
+SWEEP_ROOT="${CORE_PURITY_LINT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+POLICY_FILE="${CORE_PURITY_LINT_POLICY:-$SCRIPT_DIR/core-purity-policy.conf}"
+
+# Checks every first-party module in one pass, at the policy file's profile or the
+# portable floor.
+#
+# The sweep, not the policy file, is what makes coverage total: it enumerates the
+# tree and looks each module up, so a module nobody declared is checked anyway. The
+# gate used to name eleven targets by hand against thirty-five modules, and the
+# twenty-seven it missed were silent. A policy entry naming a module that no longer
+# exists fails too -- an entry that checks nothing reads as coverage.
+run_sweep() {
+    local status=0 module rel spec profile rule
+
+    while read -r rel _; do
+        [[ -z "$rel" || "$rel" == \#* ]] && continue
+        if [[ ! -d "$SWEEP_ROOT/$rel" ]]; then
+            echo "core-purity-lint: $POLICY_FILE names '$rel', which is not a module directory" >&2
+            status=1
+        fi
+    done < "$POLICY_FILE"
+
+    for module in "$SWEEP_ROOT"/lib/*/Sources/*/ "$SWEEP_ROOT"/ios/*/Sources/*/; do
+        [[ -d "$module" ]] || continue
+        module="${module%/}"
+        rel="${module#"$SWEEP_ROOT"/}"
+        spec="$(awk -v want="$rel" '$1 == want { $1 = ""; sub(/#.*/, ""); print; exit }' "$POLICY_FILE")"
+        read -r profile rule <<<"$spec"
+        [[ -n "$profile" ]] || profile="portable"
+
+        case "$profile" in
+            ui) continue ;;
+            pure | portable) ;;
+            *)
+                echo "core-purity-lint: $rel declares unknown profile '$profile'" >&2
+                status=1
+                continue
+                ;;
+        esac
+
+        case "$rule" in
+            "") "$0" --profile "$profile" "$module" || status=1 ;;
+            forbid-imports) "$0" --profile "$profile" --forbid-imports "$module" || status=1 ;;
+            allow=*) "$0" --profile "$profile" --allow-imports "${rule#allow=}" "$module" || status=1 ;;
+            *)
+                echo "core-purity-lint: $rel declares unknown import rule '$rule'" >&2
+                status=1
+                ;;
+        esac
+    done
+
+    if [[ "$status" -eq 0 ]]; then
+        echo "core-purity lint: every module checked (portable floor, policy in ${POLICY_FILE#"$SWEEP_ROOT"/})"
+    fi
+    return "$status"
+}
 
 PROFILE="pure"
 TARGET=""
@@ -56,7 +130,16 @@ while [[ $# -gt 0 ]]; do
         *) TARGET="$1"; shift ;;
     esac
 done
-[[ -n "$TARGET" ]] || TARGET="$CORE_DEFAULT"
+# No target means the whole tree. A flag with no target would silently apply to
+# every module, so it is an error rather than a sweep with a surprising profile.
+if [[ -z "$TARGET" ]]; then
+    if [[ "$PROFILE" != "pure" || "$FORBID_IMPORTS" -eq 1 || -n "$ALLOWED_IMPORTS" ]]; then
+        echo "core-purity-lint: flags need a target; the sweep takes its profiles from $POLICY_FILE" >&2
+        exit 2
+    fi
+    run_sweep
+    exit $?
+fi
 
 if [[ "$FORBID_IMPORTS" -eq 1 && -n "$ALLOWED_IMPORTS" ]]; then
     echo "core-purity-lint: --forbid-imports and --allow-imports are mutually exclusive" >&2
@@ -77,6 +160,9 @@ if [[ "$FORBID_IMPORTS" -eq 1 ]] &&
 fi
 
 if [[ -n "$ALLOWED_IMPORTS" ]]; then
+    # Single-quoted for the same reason as the token pass below: the $0/FILENAME
+    # inside belong to awk, not to bash.
+    # shellcheck disable=SC2016
     if ! find "$TARGET" -name '*.swift' -print0 | xargs -0 awk -v allowed="$ALLOWED_IMPORTS" '
     BEGIN {
         count = split(allowed, modules, ",")

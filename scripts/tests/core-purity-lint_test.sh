@@ -167,4 +167,86 @@ assert_import_allowlist TerminalCore trip "allowed module subpath is exact" "imp
 assert_import_allowlist TerminalCore,Testing pass "multiple allowed modules" "import Testing"
 assert_import_allowlist TerminalCore,Testing trip "module outside list"      "import AppKit"
 
-echo "core-purity lint self-test passed ($TOTAL assertions across pure + portable profiles and import gates)"
+# ---------------------------------------------------------------------------
+# sweep mode -- the whole-tree pass the gate runs as one step.
+#
+# The property that matters here is coverage, not any single rule: a module the
+# policy file never names must still be checked, at the portable floor. Before
+# the sweep existed the gate named eleven targets by hand and the tree had
+# thirty-five modules, so twenty-seven were unchecked and nothing said so.
+#
+# Each case builds a throwaway tree of module directories plus a policy file and
+# points the sweep at both, so a verdict is proven without touching the real tree.
+# ---------------------------------------------------------------------------
+
+# sweep_module <module-path-under-root> <source-line>
+sweep_module() {
+    local dir="$SWEEP_ROOT/$1"
+    mkdir -p "$dir"
+    printf '%s\n' "$2" > "$dir/Module.swift"
+}
+
+sweep_reset() {
+    SWEEP_ROOT="$TMP/sweep-root"
+    SWEEP_POLICY="$TMP/sweep-policy.conf"
+    rm -rf "$SWEEP_ROOT"; mkdir -p "$SWEEP_ROOT"
+    : > "$SWEEP_POLICY"
+}
+
+# assert_sweep <trip|pass> <description>
+assert_sweep() {
+    local expect="$1" desc="$2" got
+    if CORE_PURITY_LINT_ROOT="$SWEEP_ROOT" CORE_PURITY_LINT_POLICY="$SWEEP_POLICY" \
+        "$LINT" >/dev/null 2>&1; then got="pass"; else got="trip"; fi
+    [[ "$got" == "$expect" ]] || fail "[sweep] expected '$expect' got '$got' :: $desc"
+    TOTAL=$((TOTAL + 1))
+}
+
+# An undeclared module is not an unchecked module: it gets the portable floor,
+# which bans platform UI and tolerates portable IO.
+sweep_reset
+sweep_module lib/Pkg/Sources/Undeclared "import AppKit"
+assert_sweep trip "undeclared module still gets the UI ban"
+
+sweep_reset
+sweep_module lib/Pkg/Sources/Undeclared "        let d = FileManager.default"
+assert_sweep pass "the floor is portable, so portable IO is fine"
+
+sweep_reset
+sweep_module lib/Pkg/Sources/Strict "        let d = FileManager.default"
+printf 'lib/Pkg/Sources/Strict pure\n' > "$SWEEP_POLICY"
+assert_sweep trip "a module declared pure gets the IO denylist"
+
+sweep_reset
+sweep_module lib/Pkg/Sources/Strict "import DequeModule"
+printf 'lib/Pkg/Sources/Strict pure allow=DequeModule\n' > "$SWEEP_POLICY"
+assert_sweep pass "a pure module carries its import allowlist"
+
+sweep_reset
+sweep_module lib/Pkg/Sources/Strict "import Foundation"
+printf 'lib/Pkg/Sources/Strict pure forbid-imports\n' > "$SWEEP_POLICY"
+assert_sweep trip "a pure module carries its import-free rule"
+
+sweep_reset
+sweep_module lib/Pkg/Sources/Chrome "import AppKit"
+printf 'lib/Pkg/Sources/Chrome ui\n' > "$SWEEP_POLICY"
+assert_sweep pass "a declared ui module is exempt from the UI ban"
+
+# A policy line outliving the module it names is the failure the hand-written
+# step list used to hide: the entry reads as coverage while checking nothing.
+sweep_reset
+sweep_module lib/Pkg/Sources/Present "struct Cell {}"
+printf 'lib/Pkg/Sources/Renamed ui\n' > "$SWEEP_POLICY"
+assert_sweep trip "a policy entry naming no module fails"
+
+sweep_reset
+sweep_module lib/Pkg/Sources/Mystery "struct Cell {}"
+printf 'lib/Pkg/Sources/Mystery quarantined\n' > "$SWEEP_POLICY"
+assert_sweep trip "an unknown policy word fails rather than being ignored"
+
+sweep_reset
+sweep_module lib/Pkg/Sources/Clean "struct Cell {}"
+sweep_module ios/App/Sources/MobileClean "import Foundation"
+assert_sweep pass "a clean tree passes, iOS modules included"
+
+echo "core-purity lint self-test passed ($TOTAL assertions across pure + portable profiles, import gates, and the sweep)"

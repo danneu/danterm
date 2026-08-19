@@ -11,7 +11,8 @@ Step count since then: 107 at the start; **102** after sections A and B (four
 cuts in A, two in B -- the two Swift-test drops are tests inside existing steps,
 so they do not change the count); **104** when separate work on the CLI flag
 grammar added a lint and its self-test; **101** after C1 merged the four bundle
-steps into one.
+steps into one; **91** after C2 replaced the eleven purity-lint steps with one
+sweep.
 
 This is a working document. Each candidate below is a checkbox. Tick one, drop
 that thing, move on -- nothing here depends on anything else here.
@@ -37,7 +38,7 @@ These are two separate jobs and the numbers say so.
 |---|---|---|
 | The 4 bundle steps, each rebuilding `DanTermBundleLayoutTool` (**done, C1**) | 74s | 105s |
 | The 86 steps that take <= 5s | 122s | 559s |
-| `core-purity-lint.sh` x 11 | 7s | 10s |
+| `core-purity-lint.sh` x 11 (**done, C2**) | 7s | 10s |
 | Frozen perf-instrument cluster x 12 | 14s | 35s |
 
 Deleting the frozen perf cluster saves 14s of run time. Its case is rent -- 249
@@ -193,8 +194,41 @@ and the three btop profiling recipes.
       still runs standalone: with the variable unset, a script builds its own copy
       (verified -- 19.5s, 1 build).
 
-- [ ] **Collapse `core-purity-lint.sh` from 11 steps to 1.** Eleven separate
-      steps, each paying a CPU-token queue wait to do 0-2s of work.
+- [x] **Collapse `core-purity-lint.sh` from 11 steps to 1 -- done 2026-08-19,
+      and it was a coverage bug, not a consolidation.** The eleven steps named
+      **8 distinct modules**. The tree has **35**. So 27 modules were unchecked,
+      and because the target list lived in the gate script, "nobody remembered
+      this module" and "this module is exempt" were the same observation.
+
+      Three of the eleven were also plain duplication: `--allow-imports` and
+      `--forbid-imports` run *before* the Cocoa check and the pure token pass, so
+      an invocation carrying either flag is a strict superset of the bare one.
+      `TerminalCore`, `TerminalRenderPlanning`, and `PaneProcessLifecycle` were
+      each linted twice.
+
+      **Fix:** the lint owns its coverage. With no target it sweeps every
+      `lib/*/Sources/*` and `ios/*/Sources/*` module, reading
+      `scripts/core-purity-policy.conf` for deviations. The floor for an
+      undeclared module is `portable` (UI-free), so a new module is covered the
+      day it lands with no policy edit. A policy entry naming a module that no
+      longer exists fails the sweep.
+
+      **What the 27 could take:** probing each module in both profiles, only
+      **two** failed both -- `TerminalRenderExecution` and `GlyphPreview`, both
+      real AppKit drawing code. `DanTermMobileApp` passed `portable` only because
+      the ban list names Cocoa/AppKit/SwiftUI and it imports UIKit, so calling it
+      portable would have been false. Those three are declared `ui`, a written
+      exemption. Everything else now carries at least the portable floor.
+
+      **Verified by ablation, not by the lint reporting success:** an
+      `import AppKit` planted in `TerminalCoreRecording` -- one of the 27 -- fails
+      the sweep, and the tree is clean once removed.
+
+      **Open question for later, not decided here:** 21 of the swept modules
+      would pass the stricter `pure` profile today. Declaring them `pure` would
+      buy a real IO/nondeterminism guard, but it is a policy call per module --
+      a module that passes today is not necessarily one whose author intended it
+      to stay IO-free. Left at the floor deliberately.
 
 - [ ] **Batch the sub-2s lints and lint self-tests.** 86 steps wait 559s
       collectively to do 122s of work. Grouping the ~40 smallest into a handful
@@ -243,3 +277,4 @@ Append one line per drop: date, what went, what broke or did not.
 | 2026-08-19 | `terminal_fixed_cost_probe_test.py` (gate step + file) | Nothing broke. `scripts/terminal-fixed-cost-probe.py` stayed as a directly-runnable diagnostic. |
 | 2026-08-19 | `CustomTitleTests` "testLegacySnapshotWithTitleSubtitleDecodesSuccessfully" | Nothing broke. It only re-confirmed Swift's default `Codable` handling of unknown keys. |
 | 2026-08-19 | C1: four bundle gate steps merged into `bundle-contract-suite.sh` | No test lost. 57.0s and 7 tool builds became 21.2s and 1. Gate step count 104 -> 101. |
+| 2026-08-19 | C2: 11 `core-purity-lint.sh` steps became 1 sweep | No check lost, and 27 previously unchecked modules gained the portable floor. Gate step count 101 -> 91. |

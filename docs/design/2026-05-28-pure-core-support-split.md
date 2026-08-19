@@ -167,7 +167,7 @@ Purity is proven *structurally* and guarded *heuristically*:
   strict checking at all. Do not lower any target to `.v5` to silence a new
   error: the error is the point, and in the pure layers the value it names
   belongs in `app/`.
-- **Heuristic regression guard (`scripts/core-purity-lint.sh`, two profiles).**
+- **Heuristic regression guard (`scripts/core-purity-lint.sh`, three profiles).**
   A separate module would *not* catch Foundation/Darwin IO -- the compiler
   enforces IO-freeness in no design -- so the lint closes that gap with a token
   denylist over comment/string-stripped lines:
@@ -180,9 +180,20 @@ Purity is proven *structurally* and guarded *heuristically*:
     `NSHomeDirectory`, bare `UUID()`, bare `Date()` (empty parens only, so the
     deterministic `UUID(uuidString:)`/`Date(timeIntervalSince1970:)` parses never
     trip).
-  - **`portable`** (target `lib/DanTermSupport/Sources/DanTermSupport`): the
-    Cocoa rule plus a `GhosttyKit` import rule and nothing else -- support
-    legitimately performs portable IO, so the pure-tier IO bans do not apply.
+  - **`portable`**: the Cocoa rule and nothing else -- support legitimately
+    performs portable IO, so the pure-tier IO bans do not apply.
+  - **`ui`**: no check. A module that legitimately draws with a platform toolkit
+    declares this, so an exemption is a written decision rather than an absence.
+
+**Coverage is the lint's own responsibility, not the gate's.** Run with no
+target, the lint sweeps every `lib/*/Sources/*` and `ios/*/Sources/*` module and
+checks each one, reading `scripts/core-purity-policy.conf` for the modules whose
+contract deviates. The floor for a module the policy never names is `portable`,
+so a new module is covered the day it is added. The gate used to name its
+targets by hand -- eleven of them against a tree of thirty-five modules -- which
+made "nobody remembered this module" and "this module is exempt" the same
+observation. A policy entry naming a module that no longer exists fails the
+sweep, because an entry that checks nothing still reads as coverage.
 
 The lint's denylist is a regression guard, not the proof; the structural compile
 is the proof. The lint exists to keep it that way, and its failure message is the
@@ -362,7 +373,8 @@ does not carry the model's per-field tax.)
   superseded): the symlink + nested-package pattern is reused verbatim for
   `DanTermSupport`, and the access-control tax it rejected is what keeps this
   split annotation-free.
-- `scripts/core-purity-lint.sh` -- the two-profile purity lint (and its self-test
+- `scripts/core-purity-lint.sh` -- the purity lint (and its self-test
   `scripts/tests/core-purity-lint_test.sh`) that enforces the core/support
-  boundary and whose failure message points back at this ADR.
+  boundary and whose failure message points back at this ADR. Its per-module
+  policy is `scripts/core-purity-policy.conf`.
 - The parked real-target plan: `plans/wip/polish-this-into-a-vectorized-stearns.md`.
