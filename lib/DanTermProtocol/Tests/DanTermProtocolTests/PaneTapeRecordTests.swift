@@ -67,12 +67,22 @@ struct PaneTapeRecordTests {
             Issue.record("sync record did not decode")
             return
         }
-        #expect(sync.droppedHistoryRows == 512)
+        #expect(sync.transfer?.droppedHistoryRows == 512)
+        #expect(sync.transfer?.columns == 80)
 
         // Geometry without the count, and a fractional or negative count, are malformed.
         #expect(decodePaneTapeRecord(record([:])) == nil)
         #expect(decodePaneTapeRecord(record(["droppedHistoryRows": .number(1.5)])) == nil)
         #expect(decodePaneTapeRecord(record(["droppedHistoryRows": .number(-1)])) == nil)
+
+        // So is the count without the geometry: the whole-transfer facts travel as one, and
+        // a record stating half of them describes a transfer no reader can apply.
+        var countOnly: [String: JSONValue] = [:]
+        if case .object(let fields) = record(["droppedHistoryRows": .number(512)]) {
+            countOnly = fields
+        }
+        countOnly.removeValue(forKey: "initial")
+        #expect(decodePaneTapeRecord(.object(countOnly)) == nil)
     }
 
     @Test("a record kind this build does not know decodes as unknown, not as a failure")

@@ -412,10 +412,14 @@ private func makePaneTapeSynchronizationRecords(
             part: index + 1,
             parts: chunks.count,
             bytes: bytes,
-            columns: isFirst ? synchronization.dimensions.columns : nil,
-            rows: isFirst ? synchronization.dimensions.rows : nil,
-            pinned: isFirst ? synchronization.dimensions.pinned : nil,
-            droppedHistoryRows: isFirst ? synchronization.droppedHistoryRows : nil,
+            transfer: isFirst
+                ? PaneTapeSyncRecord.Transfer(
+                    columns: synchronization.dimensions.columns,
+                    rows: synchronization.dimensions.rows,
+                    pinned: synchronization.dimensions.pinned,
+                    droppedHistoryRows: synchronization.droppedHistoryRows
+                )
+                : nil,
             cursor: isLast ? synchronization.cursor : nil
         )))
     }

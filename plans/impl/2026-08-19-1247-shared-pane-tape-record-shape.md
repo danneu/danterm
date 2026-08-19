@@ -162,10 +162,14 @@ the moved types from DanTermProtocol; all already import it.
 
 ## Follow Up
 
-- `PaneTapeSyncRecord` in
+- ~~`PaneTapeSyncRecord` in
   `lib/DanTermProtocol/Sources/DanTermProtocol/PaneTapeRecord.swift` holds its
   four first-part-only fields (`columns`, `rows`, `pinned`,
   `droppedHistoryRows`) as independent optionals, so both the decode and the
   encode enforce "all four or none" by hand. Folding them into one optional
   struct would make the rule structural; it touches every reader of the decoded
-  sync record (`PaneTapeSyncAssembler`, the CLI, `ios/DanTermMobileKit`).
+  sync record (`PaneTapeSyncAssembler`, the CLI, `ios/DanTermMobileKit`).~~
+  Done: the four fields are now one optional `PaneTapeSyncRecord.Transfer`, so
+  the encode emits them together and the assembler reads one value. The decode
+  still names the rule once, where it turns four independently malformed wire
+  fields into that value or a rejection.

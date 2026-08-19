@@ -21,20 +21,19 @@ struct PaneTapeRecordReaderTests {
             part: 1,
             parts: 2,
             bytes: Array("sta".utf8),
-            columns: 80,
-            rows: 24,
-            pinned: true,
-            droppedHistoryRows: 0,
+            transfer: PaneTapeSyncRecord.Transfer(
+                columns: 80,
+                rows: 24,
+                pinned: true,
+                droppedHistoryRows: 0
+            ),
             cursor: nil
         )) == nil)
         #expect(assembler.ingest(PaneTapeSyncRecord(
             part: 2,
             parts: 2,
             bytes: Array("te".utf8),
-            columns: nil,
-            rows: nil,
-            pinned: nil,
-            droppedHistoryRows: nil,
+            transfer: nil,
             cursor: cursor
         )) == PaneTapeStateSynchronization(
             bytes: Array("state".utf8),
@@ -66,20 +65,19 @@ struct PaneTapeRecordReaderTests {
             part: 1,
             parts: 2,
             bytes: Array("sta".utf8),
-            columns: 80,
-            rows: 24,
-            pinned: false,
-            droppedHistoryRows: 512,
+            transfer: PaneTapeSyncRecord.Transfer(
+                columns: 80,
+                rows: 24,
+                pinned: false,
+                droppedHistoryRows: 512
+            ),
             cursor: nil
         )) == nil)
         let assembled = assembler.ingest(PaneTapeSyncRecord(
             part: 2,
             parts: 2,
             bytes: Array("te".utf8),
-            columns: nil,
-            rows: nil,
-            pinned: nil,
-            droppedHistoryRows: nil,
+            transfer: nil,
             cursor: cursor
         ))
         #expect(assembled?.droppedHistoryRows == 512)

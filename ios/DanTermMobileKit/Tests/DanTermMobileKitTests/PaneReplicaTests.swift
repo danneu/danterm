@@ -25,10 +25,12 @@ func completeSyncIsAtomic() throws {
         part: 1,
         parts: 2,
         bytes: Array("first".utf8),
-        columns: 8,
-        rows: 2,
-        pinned: false,
-        droppedHistoryRows: 0,
+        transfer: PaneTapeSyncRecord.Transfer(
+            columns: 8,
+            rows: 2,
+            pinned: false,
+            droppedHistoryRows: 0
+        ),
         cursor: nil
     )))
     #expect(replica.terminal == nil)
@@ -38,10 +40,7 @@ func completeSyncIsAtomic() throws {
         part: 2,
         parts: 2,
         bytes: Array(" second".utf8),
-        columns: nil,
-        rows: nil,
-        pinned: nil,
-        droppedHistoryRows: nil,
+        transfer: nil,
         cursor: cursor
     )))
     #expect(replica.terminal?.viewportText == "first second")
@@ -64,10 +63,12 @@ func gapFreezesReplicaUntilRepair() throws {
         part: 1,
         parts: 2,
         bytes: Array("new".utf8),
-        columns: 8,
-        rows: 2,
-        pinned: false,
-        droppedHistoryRows: 0,
+        transfer: PaneTapeSyncRecord.Transfer(
+            columns: 8,
+            rows: 2,
+            pinned: false,
+            droppedHistoryRows: 0
+        ),
         cursor: nil
     )))
     #expect(replica.terminal == frozen)
@@ -82,10 +83,7 @@ func gapFreezesReplicaUntilRepair() throws {
         part: 2,
         parts: 2,
         bytes: [],
-        columns: nil,
-        rows: nil,
-        pinned: nil,
-        droppedHistoryRows: nil,
+        transfer: nil,
         cursor: repairCursor
     )))
     #expect(replica.terminal?.viewportText == "new")
@@ -242,10 +240,12 @@ func pinnednessTracksStreamGeometry() throws {
         part: 1,
         parts: 1,
         bytes: Array("repaired".utf8),
-        columns: 10,
-        rows: 3,
-        pinned: false,
-        droppedHistoryRows: 0,
+        transfer: PaneTapeSyncRecord.Transfer(
+            columns: 10,
+            rows: 3,
+            pinned: false,
+            droppedHistoryRows: 0
+        ),
         cursor: testCursor(sequence: 9)
     )))
     #expect(replica.pinned == false)
@@ -387,10 +387,12 @@ func reconnectResumeAndTotalLoss() throws {
         part: 1,
         parts: 1,
         bytes: Array("fresh".utf8),
-        columns: 8,
-        rows: 2,
-        pinned: false,
-        droppedHistoryRows: 0,
+        transfer: PaneTapeSyncRecord.Transfer(
+            columns: 8,
+            rows: 2,
+            pinned: false,
+            droppedHistoryRows: 0
+        ),
         cursor: replacement
     )))
     #expect(replica.terminal?.viewportText == "fresh")
@@ -529,10 +531,12 @@ private func synchronizedReplica(
         part: 1,
         parts: 1,
         bytes: bytes,
-        columns: columns,
-        rows: rows,
-        pinned: pinned,
-        droppedHistoryRows: 0,
+        transfer: PaneTapeSyncRecord.Transfer(
+            columns: columns,
+            rows: rows,
+            pinned: pinned,
+            droppedHistoryRows: 0
+        ),
         cursor: cursor
     )))
     return replica

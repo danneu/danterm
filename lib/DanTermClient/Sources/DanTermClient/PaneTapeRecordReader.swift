@@ -45,10 +45,7 @@ public struct PaneTapeSyncAssembler: Sendable {
     private var expectedPart = 1
     private var expectedCount: Int?
     private var bytes: [UInt8] = []
-    private var columns: Int?
-    private var rows: Int?
-    private var pinned: Bool?
-    private var droppedHistoryRows: Int?
+    private var transfer: PaneTapeSyncRecord.Transfer?
 
     /// Starts an assembler with no partial transfer.
     public init() {}
@@ -62,21 +59,13 @@ public struct PaneTapeSyncAssembler: Sendable {
             return nil
         }
         if record.part == 1 {
-            guard let columns = record.columns,
-                  let rows = record.rows,
-                  let pinned = record.pinned,
-                  let droppedHistoryRows = record.droppedHistoryRows
-            else {
+            guard let transfer = record.transfer else {
                 reset()
                 return nil
             }
             expectedCount = record.parts
-            self.columns = columns
-            self.rows = rows
-            self.pinned = pinned
-            self.droppedHistoryRows = droppedHistoryRows
-        } else if record.columns != nil || record.rows != nil || record.pinned != nil
-            || record.droppedHistoryRows != nil {
+            self.transfer = transfer
+        } else if record.transfer != nil {
             reset()
             return nil
         }
@@ -86,21 +75,16 @@ public struct PaneTapeSyncAssembler: Sendable {
             if record.cursor != nil { reset() }
             return nil
         }
-        guard let cursor = record.cursor,
-              let columns,
-              let rows,
-              let pinned,
-              let droppedHistoryRows
-        else {
+        guard let cursor = record.cursor, let transfer else {
             reset()
             return nil
         }
         let synchronization = PaneTapeStateSynchronization(
             bytes: bytes,
-            columns: columns,
-            rows: rows,
-            pinned: pinned,
-            droppedHistoryRows: droppedHistoryRows,
+            columns: transfer.columns,
+            rows: transfer.rows,
+            pinned: transfer.pinned,
+            droppedHistoryRows: transfer.droppedHistoryRows,
             cursor: cursor
         )
         reset()
@@ -111,10 +95,7 @@ public struct PaneTapeSyncAssembler: Sendable {
         expectedPart = 1
         expectedCount = nil
         bytes.removeAll(keepingCapacity: true)
-        columns = nil
-        rows = nil
-        pinned = nil
-        droppedHistoryRows = nil
+        transfer = nil
     }
 }
 

@@ -183,22 +183,39 @@ public struct PaneTapeGapRecord: Equatable, Sendable {
 
 /// One ordered part of an atomic terminal-state synchronization transfer.
 public struct PaneTapeSyncRecord: Equatable, Sendable {
+    /// What the whole transfer states about itself, carried by its first part alone.
+    ///
+    /// The four facts are one value rather than four optional fields so "all four or none"
+    /// holds by construction: a record cannot state the geometry without the history count,
+    /// and no encoder, decoder, or assembler has to check that it did not.
+    public struct Transfer: Equatable, Sendable {
+        /// Gives the terminal width the state must be applied at.
+        public let columns: Int
+        /// Gives the terminal height the state must be applied at.
+        public let rows: Int
+        /// Gives that grid's pinnedness, beside its columns and rows.
+        public let pinned: Bool
+        /// States how many of the source's retained history rows this transfer leaves out,
+        /// oldest first. The bytes look the same either way, so only the producer can say it.
+        public let droppedHistoryRows: Int
+
+        /// Creates the whole-transfer facts one first part publishes.
+        public init(columns: Int, rows: Int, pinned: Bool, droppedHistoryRows: Int) {
+            self.columns = columns
+            self.rows = rows
+            self.pinned = pinned
+            self.droppedHistoryRows = droppedHistoryRows
+        }
+    }
+
     /// Gives this part's one-based position.
     public let part: Int
     /// Gives the complete transfer's part count.
     public let parts: Int
     /// Carries this part's terminal-state bytes.
     public let bytes: [UInt8]
-    /// Gives the terminal width on the first part only.
-    public let columns: Int?
-    /// Gives the terminal height on the first part only.
-    public let rows: Int?
-    /// Gives that grid's pinnedness on the first part only, beside its columns and rows.
-    public let pinned: Bool?
-    /// States on the first part how many of the source's retained history rows this transfer
-    /// leaves out, oldest first. The bytes look the same either way, so only the producer can
-    /// say it.
-    public let droppedHistoryRows: Int?
+    /// Carries the whole-transfer facts on the first part, and nil on every later part.
+    public let transfer: Transfer?
     /// Publishes the continuation position on the final part only.
     public let cursor: PaneTapeCursor?
 
@@ -207,19 +224,13 @@ public struct PaneTapeSyncRecord: Equatable, Sendable {
         part: Int,
         parts: Int,
         bytes: [UInt8],
-        columns: Int?,
-        rows: Int?,
-        pinned: Bool?,
-        droppedHistoryRows: Int?,
+        transfer: Transfer?,
         cursor: PaneTapeCursor?
     ) {
         self.part = part
         self.parts = parts
         self.bytes = bytes
-        self.columns = columns
-        self.rows = rows
-        self.pinned = pinned
-        self.droppedHistoryRows = droppedHistoryRows
+        self.transfer = transfer
         self.cursor = cursor
     }
 }
@@ -337,17 +348,14 @@ public func encodePaneTapeRecord(_ record: PaneTapeOutgoingRecord) -> JSONValue 
             PaneTapeRecordKey.parts: .number(Double(sync.parts)),
             PaneTapeRecordKey.base64: .string(Data(sync.bytes).base64EncodedString()),
         ]
-        // The whole-transfer facts ride the first part alone, and the decode requires them
-        // together, so a record that holds part of the group states none of it.
-        if let columns = sync.columns, let rows = sync.rows, let pinned = sync.pinned {
+        if let transfer = sync.transfer {
             fields[PaneTapeRecordKey.initial] = encodePaneTapeGeometry(
-                columns: columns,
-                rows: rows,
-                pinned: pinned
+                columns: transfer.columns,
+                rows: transfer.rows,
+                pinned: transfer.pinned
             )
-        }
-        if let droppedHistoryRows = sync.droppedHistoryRows {
-            fields[PaneTapeRecordKey.droppedHistoryRows] = .number(Double(droppedHistoryRows))
+            fields[PaneTapeRecordKey.droppedHistoryRows] =
+                .number(Double(transfer.droppedHistoryRows))
         }
         if let cursor = sync.cursor {
             fields[PaneTapeRecordKey.cursor] = paneTapeCursorJSON(cursor)
@@ -470,12 +478,20 @@ public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord? {
         }
         let droppedHistoryRows = value[PaneTapeRecordKey.droppedHistoryRows]?
             .asNumber.flatMap(nonnegativeInt)
-        // The whole-transfer facts arrive together or not at all, so a first part missing any
-        // one of them is malformed rather than a part carrying some of them.
-        guard (columns == nil) == (rows == nil),
-              (columns == nil) == (pinned == nil),
-              (columns == nil) == (droppedHistoryRows == nil)
-        else {
+        // The whole-transfer facts arrive together or not at all, so a record carrying some of
+        // them is malformed rather than a part that states a subset.
+        let transfer: PaneTapeSyncRecord.Transfer?
+        switch (columns, rows, pinned, droppedHistoryRows) {
+        case (nil, nil, nil, nil):
+            transfer = nil
+        case (let columns?, let rows?, let pinned?, let droppedHistoryRows?):
+            transfer = PaneTapeSyncRecord.Transfer(
+                columns: columns,
+                rows: rows,
+                pinned: pinned,
+                droppedHistoryRows: droppedHistoryRows
+            )
+        default:
             return nil
         }
         let cursor: PaneTapeCursor?
@@ -489,10 +505,7 @@ public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord? {
             part: part,
             parts: parts,
             bytes: Array(data),
-            columns: columns,
-            rows: rows,
-            pinned: pinned,
-            droppedHistoryRows: droppedHistoryRows,
+            transfer: transfer,
             cursor: cursor
         ))
     case .end:
