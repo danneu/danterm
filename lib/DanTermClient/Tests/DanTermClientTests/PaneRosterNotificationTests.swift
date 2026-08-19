@@ -72,6 +72,7 @@ struct PaneRosterNotificationTests {
             tabTitle: "Tab",
             paneId: PaneId(rawValue: uuid(3)),
             paneTitle: paneTitle,
+            chip: .terminal,
             isSelectedTab: true,
             isFocused: true
         )])

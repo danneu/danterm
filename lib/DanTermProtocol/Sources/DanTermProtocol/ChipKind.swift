@@ -1,7 +1,11 @@
-// Which pane-kind chip a sidebar row or pane toolbar identifies a pane with.
-// The choice is a fact about the model's agent lifecycle, so it is decided here
-// in the pure core; app/ owns the artwork and the drawing, and nothing about
-// either belongs in this file.
+// The pane-kind chip vocabulary: which mark a client draws beside a pane.
+//
+// It lives at the protocol boundary because the server decides a pane's chip
+// and every client renders that decision verbatim -- so the four spellings are
+// wire vocabulary and there is no second classification on the client side.
+//
+// Not here: how a chip is decided from a pane's agent (a pure DanTermCore
+// projection), and what a chip looks like (the ChipArtwork package).
 
 /// The chip that identifies what a pane is running.
 ///
@@ -12,17 +16,9 @@
 /// `CaseIterable` so the tests that must cover every kind -- each one painting
 /// distinct pixels, above all -- iterate the enum instead of a hand-written list
 /// that a new kind would quietly fall off.
-enum ChipKind: Equatable, CaseIterable {
+public enum ChipKind: String, Equatable, CaseIterable, Sendable {
     case terminal
     case claude
     case codex
     case agent
-
-    init(agent: AgentLifecycle) {
-        guard case .attached(let session, _) = agent else {
-            self = .terminal
-            return
-        }
-        self = KnownAgent(kind: session.kind)?.chipKind ?? .agent
-    }
 }

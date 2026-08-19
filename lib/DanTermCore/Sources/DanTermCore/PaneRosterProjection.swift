@@ -24,6 +24,7 @@ func paneRoster(in model: AppModel) -> PaneRoster {
                     tabTitle: tabTitle,
                     paneId: pane.id,
                     paneTitle: rosterPaneTitle(pane),
+                    chip: ChipKind(agent: pane.session?.agent ?? .none),
                     isSelectedTab: isSelectedTab,
                     isFocused: pane.id == tab.paneTree.focusedPaneId
                 ))

@@ -11,6 +11,7 @@
 // The seven `return try expect(false, "msg")` patterns inside
 // completion-message destructures convert to `Issue.record + return`
 // to preserve the failure-site count.
+import DanTermProtocol
 import Foundation
 import Testing
 

@@ -84,6 +84,52 @@ struct AppRuntimeRosterPushTests {
         #expect(try requireRoster(wire.readNotification()).panes.count == 2)
     }
 
+    @Test("attaching an agent pushes a roster and its activity alone pushes none")
+    func agentAttachPushesRosterAndActivityDoesNot() async throws {
+        // Intent: an agent arriving on a pane reaches a subscriber as a new roster,
+        //   and the activity that agent then reports reaches nobody.
+        // Why it exists: the chip is what a phone draws to say which agent a pane is
+        //   running, so a silent attach leaves the phone showing a plain terminal for
+        //   as long as nothing else moves -- while a push per activity report would
+        //   put the roster stream back at the mercy of a busy agent.
+        // Scenario: a phone subscribes, an agent attaches to the one pane, and the
+        //   agent then reports that it is waiting.
+        let ports = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let wire = try CommandIpcConnectionFixture()
+        defer {
+            wire.connection.close()
+            wire.closePeer()
+        }
+        subscribe(wire, rpcId: .number(1), runtime: runtime)
+        _ = try wire.readResponse()
+        runtime.send(.createTabInSelectedGroup())
+        let created = try requireRoster(wire.readNotification())
+        #expect(created.panes.map(\.chip) == [.terminal])
+        let paneId = try #require(created.panes.first?.paneId)
+        let sessionId = try #require(runtime.model.pane(paneId)?.session?.id)
+        let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+
+        runtime.send(.sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
+
+        #expect(try requireRoster(wire.readNotification()).panes.map(\.chip) == [.claude])
+
+        runtime.send(.sessionReport(
+            sessionId: sessionId,
+            report: .agentActivityChanged(session: agent, activity: .waiting)
+        ))
+        // An activity report defers its sweep, so this wait is meant to expire: it is
+        // far longer than the coalesce window, and a roster the sweep pushed would be
+        // readable by the time it ends.
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(wire.hasReadableData() == false, "agent activity must not move the roster")
+
+        runtime.send(.sessionReport(sessionId: sessionId, report: .agentDetached(agent)))
+
+        #expect(try requireRoster(wire.readNotification()).panes.map(\.chip) == [.terminal])
+    }
+
     @Test("committing a restore pushes the restored roster")
     func restoreCommitPushesRoster() throws {
         // Intent: the restore commit is the third delivery path.

@@ -3,6 +3,7 @@
 // the terminal right-click, the "..." toolbar button, and the drag-handle menu.
 // It also owns the outline that names the pane while one of those menus tracks.
 import Cocoa
+import DanTermProtocol
 
 class PaneWrapperView: NSView {
     /// Names the zoom button for the view tests. Its tooltip states the direction

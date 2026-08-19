@@ -68,8 +68,8 @@ is why it isn't in `just test`; `gen-chips.sh` stays dependency-free.
 
 1. Drop the SVG here and add an entry to `chips.json`.
 2. Run `gen-chips.sh` and fix the box if it complains.
-3. Add the case to `ChipKind` in `lib/DanTermCore/Sources/DanTermCore/` and to
-   `ChipKind.artwork` in `app/ChipView.swift`.
+3. Add the case to `ChipKind` in `lib/DanTermProtocol/Sources/DanTermProtocol/`
+   and to `ChipKind.artwork` in `app/ChipView.swift`.
 
 `preview.html` and `render-check.sh` both walk the manifest, so they pick up the
 new kind on their own.

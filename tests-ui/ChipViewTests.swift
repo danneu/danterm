@@ -7,6 +7,7 @@
 // rather than reaching at named subviews, so rearranging the toolbar's stacks
 // does not break them.
 import Cocoa
+import DanTermProtocol
 
 @MainActor
 func chipViewTests() {

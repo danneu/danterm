@@ -56,7 +56,6 @@ echo "Compiling UI tests..."
         -lPaneProcessLifecycle \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DisplayLine.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/AgentSession.swift" \
-        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ChipKind.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Model.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLayout.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/CoreEnvironment.swift" \

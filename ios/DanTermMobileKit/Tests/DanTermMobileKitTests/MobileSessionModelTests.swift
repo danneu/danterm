@@ -658,6 +658,7 @@ private func roster(panes: [(id: Int, title: String)] = [(201, "zsh")]) -> PaneR
             tabTitle: "Tab",
             paneId: paneId(pane.id),
             paneTitle: pane.title,
+            chip: .terminal,
             isSelectedTab: true,
             isFocused: index == 0
         )

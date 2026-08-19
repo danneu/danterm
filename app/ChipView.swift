@@ -3,10 +3,11 @@
 //
 // The mapping lives here rather than in ChipRenderer.swift because that file is
 // compiled standalone by icon/render-check.sh against ChipArtwork.swift alone;
-// referring to a DanTermCore type there would break the check. It does not live
-// in DanTermCore either, which stays free of CoreGraphics.
+// referring to a ChipKind there would break the check. It does not live in
+// DanTermProtocol either, which stays free of CoreGraphics.
 
 import AppKit
+import DanTermProtocol
 
 extension ChipKind {
     /// The artwork this kind is drawn with.

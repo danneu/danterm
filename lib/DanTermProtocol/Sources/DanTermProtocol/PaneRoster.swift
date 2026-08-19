@@ -18,6 +18,9 @@ public struct PaneRosterItem: Equatable, Sendable {
     public let tabTitle: String
     public let paneId: PaneId
     public let paneTitle: String
+    /// The chip this pane shows, already resolved from its agent by the server.
+    /// A client draws the named mark and never classifies an agent itself.
+    public let chip: ChipKind
     public let isSelectedTab: Bool
     /// Whether this pane holds focus within its own tab, which is what a client
     /// marks in the list. Only the selected tab's focused pane holds app focus.
@@ -30,6 +33,7 @@ public struct PaneRosterItem: Equatable, Sendable {
         tabTitle: String,
         paneId: PaneId,
         paneTitle: String,
+        chip: ChipKind,
         isSelectedTab: Bool,
         isFocused: Bool
     ) {
@@ -39,6 +43,7 @@ public struct PaneRosterItem: Equatable, Sendable {
         self.tabTitle = tabTitle
         self.paneId = paneId
         self.paneTitle = paneTitle
+        self.chip = chip
         self.isSelectedTab = isSelectedTab
         self.isFocused = isFocused
     }
@@ -82,6 +87,7 @@ extension PaneRosterItem {
             "tabTitle": .string(tabTitle),
             "paneId": .string(paneId.rawValue.uuidString),
             "paneTitle": .string(paneTitle),
+            "chip": .string(chip.rawValue),
             "isSelectedTab": .bool(isSelectedTab),
             "isFocused": .bool(isFocused),
         ])
@@ -94,6 +100,7 @@ extension PaneRosterItem {
               let tabTitle = jsonValue["tabTitle"]?.asString,
               let paneId = TypedId<PaneTag>(wire: jsonValue["paneId"]),
               let paneTitle = jsonValue["paneTitle"]?.asString,
+              let chip = jsonValue["chip"]?.asString.flatMap(ChipKind.init(rawValue:)),
               let isSelectedTab = jsonValue["isSelectedTab"]?.asBool,
               let isFocused = jsonValue["isFocused"]?.asBool
         else { return nil }
@@ -104,6 +111,7 @@ extension PaneRosterItem {
             tabTitle: tabTitle,
             paneId: paneId,
             paneTitle: paneTitle,
+            chip: chip,
             isSelectedTab: isSelectedTab,
             isFocused: isFocused
         )

@@ -1,6 +1,7 @@
 // Coverage for the pane-kind chip: the mapping from a pane's agent lifecycle to
 // a chip, and the two projections that carry it to the sidebar and the pane
 // toolbar. Chip drawing is not here -- the core only decides which chip.
+import DanTermProtocol
 import Foundation
 import Testing
 

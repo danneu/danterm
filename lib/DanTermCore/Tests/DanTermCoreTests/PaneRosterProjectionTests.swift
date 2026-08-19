@@ -58,6 +58,25 @@ struct PaneRosterProjectionTests {
         #expect(roster.panes.map(\.tabTitle) == ["Terminal"])
     }
 
+    @Test("A pane reports the chip its attached agent earns")
+    func chipFollowsTheAttachedAgent() {
+        // Intent: the roster resolves an agent kind to a chip, including the
+        //   collapse of every agent DanTerm ships no mark for onto the generic one.
+        // Why it exists: this is the only place the collapse happens, so a client
+        //   that drew the wrong mark would have no second classification to blame.
+        // Scenario: three panes -- a plain shell, Claude, and an agent DanTerm has
+        //   never heard of.
+        var model = makeRosterModel(tabCount: 3)
+        attachAgent(&model, tab: 1, kind: "claude")
+        attachAgent(&model, tab: 2, kind: "someagent")
+
+        #expect(paneRoster(in: model).panes.map(\.chip) == [.terminal, .claude, .agent])
+
+        attachAgent(&model, tab: 1, kind: "codex")
+
+        #expect(paneRoster(in: model).panes.map(\.chip) == [.terminal, .codex, .agent])
+    }
+
     @Test("Roster-relevant changes move the projection")
     func rosterRelevantChangesMoveTheProjection() {
         // Every case starts from the same model value, so a difference can only
@@ -84,17 +103,29 @@ struct PaneRosterProjectionTests {
         model = base
         update(&model, .splitPane(paneId: model.groups[0].tabs[0].paneTree.focusedPaneId, direction: .vertical))
         #expect(paneRoster(in: model) != baseline)
+
+        // Attaching an agent changes the pane's chip, which is roster state now that
+        // the roster carries it. Measured against a model that already holds the
+        // session, so the agent is the only difference.
+        model = base
+        setFocusedSession(&model, tab: 0, title: "vim")
+        let withSession = paneRoster(in: model)
+        attachAgent(&model, tab: 0, kind: "codex")
+        #expect(paneRoster(in: model) != withSession)
     }
 
     @Test("Non-roster changes leave the projection alone")
     func nonRosterChangesLeaveTheProjectionAlone() {
         var model = makeRosterModel()
         setFocusedSession(&model, tab: 0, title: "vim")
+        attachAgent(&model, tab: 0, kind: "codex")
         let baseline = paneRoster(in: model)
 
         mutateFocusedSession(&model, tab: 0) { $0.cwd = "/Users/testhome/code" }
         #expect(paneRoster(in: model) == baseline)
 
+        // The chip says which agent is attached, not what it is doing, so activity
+        // must not push a roster to every subscriber on each turn.
         mutateFocusedSession(&model, tab: 0) {
             $0.agent = .attached(
                 session: AgentSession(kind: "codex", sessionId: "thread-1")!,
@@ -141,6 +172,19 @@ private func setFocusedSession(
         var session = pane.session ?? SessionModel(id: SessionId())
         session.title = title
         session.command = command.map { CommandLifecycle.running($0) } ?? .idle
+        pane.session = session
+    }
+}
+
+/// Attaches an agent of `kind` to a tab's focused pane, creating the terminal
+/// session first when the pane has none, so a chip test can name only the agent.
+private func attachAgent(_ model: inout AppModel, tab index: Int, kind: String) {
+    mutateFocusedPane(&model, tab: index) { pane in
+        var session = pane.session ?? SessionModel(id: SessionId())
+        session.agent = .attached(
+            session: AgentSession(kind: kind, sessionId: "thread-1")!,
+            activity: nil
+        )
         pane.session = session
     }
 }

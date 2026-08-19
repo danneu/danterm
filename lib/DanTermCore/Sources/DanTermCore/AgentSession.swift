@@ -3,6 +3,7 @@
 // constructed snapshot DTOs, plus the small known-agent
 // catalog used for toolbar and recovery text. Keep it free of AppKit and IPC
 // transport details; callers hand raw strings in and get safe display text out.
+import DanTermProtocol
 import Foundation
 
 /// An agent session reported as currently running inside a pane.
@@ -142,6 +143,21 @@ enum KnownAgent: String {
         case .claude: return "claude --resume \(sessionId)"
         case .codex: return "codex resume \(sessionId)"
         }
+    }
+}
+
+extension ChipKind {
+    /// Decides the chip a pane shows from its agent lifecycle.
+    ///
+    /// The one place the known-agent collapse happens: an agent DanTerm ships no
+    /// mark for lands on `.agent`, and no client repeats this mapping because the
+    /// roster carries the answer.
+    init(agent: AgentLifecycle) {
+        guard case .attached(let session, _) = agent else {
+            self = .terminal
+            return
+        }
+        self = KnownAgent(kind: session.kind)?.chipKind ?? .agent
     }
 }
 
