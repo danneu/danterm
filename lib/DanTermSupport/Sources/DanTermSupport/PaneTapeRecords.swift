@@ -27,16 +27,6 @@ struct PaneTapeDimensions: Equatable, Sendable {
     let pinned: Bool
 }
 
-/// States one pane's geometry whole, so the start record and the sync payload cannot
-/// disagree about the shape they publish it in.
-func paneTapeGeometryJSON(_ geometry: PaneTapeDimensions) -> JSONValue {
-    .object([
-        "columns": .number(Double(geometry.columns)),
-        "rows": .number(Double(geometry.rows)),
-        "pinned": .bool(geometry.pinned),
-    ])
-}
-
 /// Locates one event's bytes inside its own direction's lifetime byte stream.
 struct PaneTapePayloadSpan: Equatable, Sendable {
     let byteOffset: Int
@@ -97,23 +87,20 @@ func makePaneTapeStart(
     publishesCursor: Bool = true,
     reconstructible: Bool = false
 ) -> PaneTapeStart {
-    var record: [String: JSONValue] = [
-        "kind": .string("start"),
-        "version": .number(Double(paneTapeStreamVersion)),
-        "capture": .string(capture.rawValue),
-        "format": .string(PaneTapeFormat.replay.rawValue),
-        "provenance": provenance,
-        "initial": paneTapeGeometryJSON(initial),
-    ]
-    if publishesCursor {
-        // The baseline every later offset is read against. Without it a stream that starts
-        // past the beginning -- a tail-only follow, or a dump whose head was evicted --
-        // reports offsets a reader has no origin for.
-        record["cursor"] = paneTapeCursorJSON(cursor)
-    }
-    record["reconstructible"] = .bool(reconstructible)
-    return PaneTapeStart(
-        record: .object(record),
+    PaneTapeStart(
+        record: encodePaneTapeRecord(.start(PaneTapeStartRecord(
+            version: paneTapeStreamVersion,
+            capture: capture,
+            format: .replay,
+            provenance: provenance,
+            columns: initial.columns,
+            rows: initial.rows,
+            pinned: initial.pinned,
+            // A stream withholds its baseline only when another record publishes the same
+            // position; the caller owns that decision, so it arrives as a flag.
+            cursor: publishesCursor ? cursor : nil,
+            reconstructible: reconstructible
+        ))),
         cursor: cursor
     )
 }
@@ -131,12 +118,11 @@ func makePaneTapeBatch(from snapshot: PaneTapeSnapshot) -> PaneTapeBatch {
 
 /// States exact loss for a cursor the recorder placed in its own lifetime.
 func makePaneTapeExactGapRecord(_ snapshot: PaneTapeSnapshot) -> JSONValue {
-    .object([
-        "kind": .string("gap"),
-        "droppedEventCount": .number(Double(snapshot.droppedEventCount)),
-        "droppedFeedBytes": .number(Double(snapshot.droppedFeedBytes)),
-        "droppedWriteBytes": .number(Double(snapshot.droppedWriteBytes)),
-    ])
+    encodePaneTapeRecord(.gap(PaneTapeGapRecord(
+        droppedEventCount: snapshot.droppedEventCount,
+        droppedFeedBytes: snapshot.droppedFeedBytes,
+        droppedWriteBytes: snapshot.droppedWriteBytes
+    )))
 }
 
 /// Orders every record a finite dump owes after its start record.
@@ -152,32 +138,23 @@ func makePaneTapeDumpRecords(after dump: PaneTapeDump) -> [JSONValue] {
 /// Builds one event record, with its timing and byte position hoisted out of the event object.
 ///
 /// The origin sits beside the transfer stamp rather than inside the event, because this shape
-/// already hoists timing out of the event object. An absent origin omits the key: a number
-/// there would read as a measurement of an event that had none, and the same reasoning omits
-/// the byte position of an event that carries no bytes.
+/// already hoists timing out of the event object. The span the recorder holds as one value
+/// splits into the two keys the record shape declares, and an event carrying no bytes states
+/// neither.
 func makePaneTapeEventRecord(_ event: PaneTapeEvent) -> JSONValue {
-    var record: [String: JSONValue] = [
-        "kind": .string("event"),
-        "sequence": .number(Double(event.sequence)),
-        "elapsedNanoseconds": .number(Double(event.elapsedNanoseconds)),
-        "event": event.event,
-    ]
-    if let origin = event.originElapsedNanoseconds {
-        record["originElapsedNanoseconds"] = .number(Double(origin))
-    }
-    if let payload = event.payload {
-        record["byteOffset"] = .number(Double(payload.byteOffset))
-        record["byteLength"] = .number(Double(payload.byteLength))
-    }
-    return .object(record)
+    encodePaneTapeRecord(.event(PaneTapeEventRecord(
+        sequence: event.sequence,
+        elapsedNanoseconds: event.elapsedNanoseconds,
+        originElapsedNanoseconds: event.originElapsedNanoseconds,
+        byteOffset: event.payload?.byteOffset,
+        byteLength: event.payload?.byteLength,
+        event: event.event
+    )))
 }
 
 /// Produces the only explicit stream terminator a producer promises while it can still write.
 func makePaneTapeEndRecord(reason: PaneTapeEndReason) -> JSONValue {
-    .object([
-        "kind": .string("end"),
-        "reason": .string(reason.rawValue),
-    ])
+    encodePaneTapeRecord(.end(reason: reason))
 }
 
 /// The single site that puts a tape record on the wire, for dumps, batches, and terminators.

@@ -11,15 +11,15 @@ import Foundation
 /// memory would give back exactly what the line-oriented stream was built to avoid.
 public func paneTapeInspectRecord(_ record: JSONValue) throws -> JSONValue {
     guard var fields = record.asObject else { return record }
-    switch record["kind"] {
-    case .string("start"):
+    switch record[PaneTapeRecordKey.kind]?.asString.flatMap(PaneTapeRecordKind.init(rawValue:)) {
+    case .start:
         // Only the format field moves. Everything else a start record states -- its version,
         // its capture, its provenance, its geometry, its cursor baseline -- describes the
         // recording itself and is as true of this view as of the bytes it came from.
-        fields["format"] = .string(PaneTapeFormat.inspect.rawValue)
+        fields[PaneTapeRecordKey.format] = .string(PaneTapeFormat.inspect.rawValue)
         return .object(fields)
-    case .string("event"):
-        guard var event = record["event"]?.asObject,
+    case .event:
+        guard var event = record[PaneTapeRecordKey.event]?.asObject,
               let encoded = event["base64"]?.asString
         else { return record }
         guard let payload = Data(base64Encoded: encoded) else {
@@ -27,7 +27,7 @@ public func paneTapeInspectRecord(_ record: JSONValue) throws -> JSONValue {
         }
         event["base64"] = nil
         event["spans"] = .array(paneTapeInspectSpans(Array(payload)))
-        fields["event"] = .object(event)
+        fields[PaneTapeRecordKey.event] = .object(event)
         return .object(fields)
     default:
         return record

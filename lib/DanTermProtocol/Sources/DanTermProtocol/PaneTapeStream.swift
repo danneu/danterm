@@ -1,8 +1,9 @@
 // The vocabulary of the pane-tape record stream: its version, its two payload formats, its two
 // capture shapes, and the reasons a producer can state for stopping. It lives at the protocol
 // boundary because the producer and every reader must agree on these spellings. The record
-// values themselves are built in DanTermSupport; the inspect view derived from them is in
-// PaneTapeInspect.swift beside this file, and only the CLI decides to apply it.
+// shape that carries them -- its keys, its typed family, its decode -- is in
+// PaneTapeRecord.swift beside this file, and the inspect view derived from a record is in
+// PaneTapeInspect.swift, which only the CLI decides to apply.
 import Foundation
 
 /// The stream contract producers emit and readers key their expectations off. It moves whenever

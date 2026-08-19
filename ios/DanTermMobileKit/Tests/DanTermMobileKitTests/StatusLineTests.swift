@@ -1,7 +1,7 @@
 // Tests the composed phone status line: what it says, how severe it reads, and that its
 // four facts stay in their own slots.
-import DanTermClient
 import DanTermMobileKit
+import DanTermProtocol
 import Testing
 
 private let declaredLoss = PaneTapeGapRecord.Loss.exact(

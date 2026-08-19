@@ -377,10 +377,7 @@ private func eventOpening(
 }
 
 private func makePaneTapeTotalGapRecord() -> JSONValue {
-    .object([
-        "kind": .string("gap"),
-        "loss": .string("total"),
-    ])
+    encodePaneTapeRecord(.gap(.total))
 }
 
 private func retainedHeadCursor(
@@ -407,19 +404,23 @@ private func makePaneTapeSynchronizationRecords(
             Array(synchronization.bytes[start..<min(start + maximumPayloadBytes, synchronization.bytes.count)])
         }
     return chunks.enumerated().map { index, bytes in
-        var record: [String: JSONValue] = [
-            "kind": .string("sync"),
-            "part": .number(Double(index + 1)),
-            "parts": .number(Double(chunks.count)),
-            "base64": .string(Data(bytes).base64EncodedString()),
-        ]
-        if index == chunks.startIndex {
-            record["initial"] = paneTapeGeometryJSON(synchronization.dimensions)
-            record["droppedHistoryRows"] = .number(Double(synchronization.droppedHistoryRows))
-        }
-        if index == chunks.index(before: chunks.endIndex) {
-            record["cursor"] = paneTapeCursorJSON(synchronization.cursor)
-        }
-        return .object(record)
+        // The transfer's whole-state facts ride the first part, and the position it leaves the
+        // reader at rides the last, so a single-part transfer carries both.
+        let isFirst = index == chunks.startIndex
+        let isLast = index == chunks.index(before: chunks.endIndex)
+        return encodePaneTapeRecord(.sync(PaneTapeSyncRecord(
+            part: index + 1,
+            parts: chunks.count,
+            bytes: bytes,
+            transfer: isFirst
+                ? PaneTapeSyncRecord.Transfer(
+                    columns: synchronization.dimensions.columns,
+                    rows: synchronization.dimensions.rows,
+                    pinned: synchronization.dimensions.pinned,
+                    droppedHistoryRows: synchronization.droppedHistoryRows
+                )
+                : nil,
+            cursor: isLast ? synchronization.cursor : nil
+        )))
     }
 }

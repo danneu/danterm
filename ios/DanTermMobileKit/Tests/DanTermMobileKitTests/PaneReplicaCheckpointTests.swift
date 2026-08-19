@@ -249,10 +249,12 @@ struct PaneReplicaCheckpointTests {
             part: 1,
             parts: 2,
             bytes: Array("new".utf8),
-            columns: 8,
-            rows: 2,
-            pinned: false,
-            droppedHistoryRows: 0,
+            transfer: PaneTapeSyncRecord.Transfer(
+                columns: 8,
+                rows: 2,
+                pinned: false,
+                droppedHistoryRows: 0
+            ),
             cursor: nil
         )))
         #expect(replica.checkpoint(for: paneId) == exact)
@@ -439,10 +441,12 @@ struct PaneReplicaCheckpointTests {
             part: 1,
             parts: 1,
             bytes: Array("fresh".utf8),
-            columns: 8,
-            rows: 2,
-            pinned: false,
-            droppedHistoryRows: 0,
+            transfer: PaneTapeSyncRecord.Transfer(
+                columns: 8,
+                rows: 2,
+                pinned: false,
+                droppedHistoryRows: 0
+            ),
             cursor: foreign
         )))
         #expect(restored.terminal?.viewportText == "fresh")
@@ -463,10 +467,12 @@ private func checkpointReplica(
         part: 1,
         parts: 1,
         bytes: bytes,
-        columns: columns,
-        rows: rows,
-        pinned: pinned,
-        droppedHistoryRows: 0,
+        transfer: PaneTapeSyncRecord.Transfer(
+            columns: columns,
+            rows: rows,
+            pinned: pinned,
+            droppedHistoryRows: 0
+        ),
         cursor: cursor
     )))
     return replica

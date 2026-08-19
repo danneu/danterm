@@ -1,37 +1,12 @@
-// Coverage for the reading side of the pane-tape record shape. The producer lives in the
-// Mac host layer, so the test that pairs the two ends is in the root package; this file
-// covers what a reader must do on its own -- most of all, survive a record it predates.
+// Coverage for the reader's own side of the stream: assembling a multi-part state transfer,
+// and recognising the notification that carries a record. The record shape's decode is
+// covered beside its declaration in DanTermProtocol.
 import Foundation
 import Testing
 import DanTermProtocol
 @testable import DanTermClient
 
 struct PaneTapeRecordReaderTests {
-    @Test("a state sync decodes its ordered part and completion cursor")
-    func stateSyncDecodes() throws {
-        let record = JSONValue.object([
-            "kind": .string("sync"),
-            "part": .number(2),
-            "parts": .number(2),
-            "base64": .string(Data("state".utf8).base64EncodedString()),
-            "cursor": .object([
-                "recorderLifetimeId": .string("11111111-1111-4111-8111-111111111111"),
-                "sequence": .number(41),
-                "feedByteOffset": .number(100),
-                "writeByteOffset": .number(7),
-            ]),
-        ])
-
-        guard case .sync(let sync)? = decodePaneTapeRecord(record) else {
-            Issue.record("sync record did not decode")
-            return
-        }
-        #expect(sync.part == 2)
-        #expect(sync.parts == 2)
-        #expect(sync.bytes == Array("state".utf8))
-        #expect(sync.cursor?.nextSequence == 41)
-    }
-
     @Test("a state sync becomes visible only after its final ordered part")
     func stateSyncAssemblesAtomically() throws {
         let cursor = PaneTapeCursor(
@@ -46,20 +21,19 @@ struct PaneTapeRecordReaderTests {
             part: 1,
             parts: 2,
             bytes: Array("sta".utf8),
-            columns: 80,
-            rows: 24,
-            pinned: true,
-            droppedHistoryRows: 0,
+            transfer: PaneTapeSyncRecord.Transfer(
+                columns: 80,
+                rows: 24,
+                pinned: true,
+                droppedHistoryRows: 0
+            ),
             cursor: nil
         )) == nil)
         #expect(assembler.ingest(PaneTapeSyncRecord(
             part: 2,
             parts: 2,
             bytes: Array("te".utf8),
-            columns: nil,
-            rows: nil,
-            pinned: nil,
-            droppedHistoryRows: nil,
+            transfer: nil,
             cursor: cursor
         )) == PaneTapeStateSynchronization(
             bytes: Array("state".utf8),
@@ -91,199 +65,22 @@ struct PaneTapeRecordReaderTests {
             part: 1,
             parts: 2,
             bytes: Array("sta".utf8),
-            columns: 80,
-            rows: 24,
-            pinned: false,
-            droppedHistoryRows: 512,
+            transfer: PaneTapeSyncRecord.Transfer(
+                columns: 80,
+                rows: 24,
+                pinned: false,
+                droppedHistoryRows: 512
+            ),
             cursor: nil
         )) == nil)
         let assembled = assembler.ingest(PaneTapeSyncRecord(
             part: 2,
             parts: 2,
             bytes: Array("te".utf8),
-            columns: nil,
-            rows: nil,
-            pinned: nil,
-            droppedHistoryRows: nil,
+            transfer: nil,
             cursor: cursor
         ))
         #expect(assembled?.droppedHistoryRows == 512)
-    }
-
-    // Intent: the count decodes off the wire beside the geometry, and a first part missing it
-    //   is malformed rather than a transfer with an unstated count.
-    // Why it exists: the reader cannot substitute a default here. Reading an absent count as
-    //   zero is exactly the claim "this replica has the whole history", which is the one
-    //   thing a bounded sync must never assert on its own.
-    // Scenario: spec-first contract for the sync record's whole-transfer facts.
-    @Test("a sync record decodes its dropped history count, or fails to decode without it")
-    func syncRecordDecodesDroppedHistoryRows() {
-        func record(_ extra: [String: JSONValue]) -> JSONValue {
-            var object: [String: JSONValue] = [
-                "kind": .string("sync"),
-                "part": .number(1),
-                "parts": .number(1),
-                "base64": .string(Data("state".utf8).base64EncodedString()),
-                "initial": .object([
-                    "columns": .number(80),
-                    "rows": .number(24),
-                    "pinned": .bool(false),
-                ]),
-                "cursor": .object([
-                    "recorderLifetimeId": .string("11111111-1111-4111-8111-111111111111"),
-                    "sequence": .number(41),
-                    "feedByteOffset": .number(100),
-                    "writeByteOffset": .number(7),
-                ]),
-            ]
-            object.merge(extra) { _, new in new }
-            return .object(object)
-        }
-
-        guard case .sync(let sync)? = decodePaneTapeRecord(
-            record(["droppedHistoryRows": .number(512)])
-        ) else {
-            Issue.record("sync record did not decode")
-            return
-        }
-        #expect(sync.droppedHistoryRows == 512)
-
-        // Geometry without the count, and a fractional or negative count, are malformed.
-        #expect(decodePaneTapeRecord(record([:])) == nil)
-        #expect(decodePaneTapeRecord(record(["droppedHistoryRows": .number(1.5)])) == nil)
-        #expect(decodePaneTapeRecord(record(["droppedHistoryRows": .number(-1)])) == nil)
-    }
-
-    @Test("a record kind this build does not know decodes as unknown, not as a failure")
-    func unknownKindSurvives() throws {
-        // Intent: an unfamiliar kind is reported as unfamiliar and the reader keeps going.
-        // Why it exists: the producer will gain record kinds -- a resume fence is already
-        //   planned -- and every one of them would be a breaking change if a reader that
-        //   predates it could not tell "I do not handle this" from "this stream is broken".
-        // Scenario: a client built today reads a stream from a newer DanTerm.
-        let record = JSONValue.object([
-            "kind": .string("future"),
-            "sequence": .number(41),
-            "someFieldFromTheFuture": .bool(true),
-        ])
-
-        #expect(decodePaneTapeRecord(record) == .unknown(kind: "future"))
-    }
-
-    @Test("an end reason this build does not know still reads as an end")
-    func unknownEndReasonStillEnds() throws {
-        // Intent: the terminator is recognised even when its stated reason is not.
-        // Why it exists: a reader that failed here would turn a clean end into a
-        //   truncated capture the moment a new reason was added.
-        // Scenario: a producer states a reason spelled after this client shipped.
-        let record = JSONValue.object([
-            "kind": .string("end"),
-            "reason": .string("resumed-elsewhere"),
-        ])
-
-        #expect(decodePaneTapeRecord(record) == .end(reason: nil))
-    }
-
-    @Test("a value with no kind is not a record")
-    func kindlessValueIsNotARecord() {
-        #expect(decodePaneTapeRecord(.object(["sequence": .number(0)])) == nil)
-        #expect(decodePaneTapeRecord(.string("start")) == nil)
-    }
-
-    @Test("a known kind missing its own required fields fails to decode")
-    func malformedKnownKindFails() {
-        // Intent: "unknown kind" and "known kind, broken record" stay apart.
-        // Why it exists: tolerating a future kind must not also tolerate a corrupt one.
-        #expect(decodePaneTapeRecord(.object(["kind": .string("event")])) == nil)
-        #expect(decodePaneTapeRecord(.object([
-            "kind": .string("start"),
-            "capture": .string("snapshot"),
-            "format": .string("replay"),
-        ])) == nil)
-    }
-
-    @Test("numeric record coordinates must be whole and inside their decoded domains")
-    func malformedNumericCoordinatesFail() {
-        #expect(decodePaneTapeRecord(.object([
-            "kind": .string("start"),
-            "version": .number(3),
-            "capture": .string("snapshot"),
-            "format": .string("replay"),
-            "reconstructible": .bool(true),
-            "initial": .object([
-                "columns": .number(80.5),
-                "rows": .number(24),
-                "pinned": .bool(false),
-            ]),
-        ])) == nil)
-        #expect(decodePaneTapeRecord(.object([
-            "kind": .string("gap"),
-            "droppedEventCount": .number(-1),
-            "droppedFeedBytes": .number(0),
-            "droppedWriteBytes": .number(0),
-        ])) == nil)
-        #expect(decodePaneTapeRecord(.object([
-            "kind": .string("event"),
-            "sequence": .number(1.5),
-            "elapsedNanoseconds": .number(2),
-            "event": .object([:]),
-        ])) == nil)
-    }
-
-    @Test("a reconstructible start may withhold its cursor until sync completion")
-    func synchronizedStartWithholdsCursor() throws {
-        let record = JSONValue.object([
-            "kind": .string("start"),
-            "version": .number(3),
-            "capture": .string("snapshot"),
-            "format": .string("replay"),
-            "reconstructible": .bool(true),
-            "initial": .object([
-                "columns": .number(80),
-                "rows": .number(24),
-                "pinned": .bool(false),
-            ]),
-        ])
-
-        guard case .start(let start)? = decodePaneTapeRecord(record) else {
-            Issue.record("start record did not decode")
-            return
-        }
-        #expect(start.cursor == nil)
-        #expect(start.reconstructible)
-    }
-
-    @Test("a total gap stays distinct from exact loss")
-    func totalGapDecodes() {
-        #expect(decodePaneTapeRecord(.object([
-            "kind": .string("gap"),
-            "loss": .string("total"),
-        ])) == .gap(.total))
-    }
-
-    @Test("a capture mode this build does not know is malformed rather than tolerated")
-    func unknownCaptureModeIsMalformed() {
-        // Intent: an unfamiliar capture is refused even though an unfamiliar record kind
-        //   is not.
-        // Why it exists: the two captures differ in whether EOF is a legitimate ending. A
-        //   reader that guessed would apply the permissive rule to a stream that never
-        //   claimed it, and report a truncated capture as whole.
-        #expect(decodePaneTapeRecord(.object([
-            "kind": .string("start"),
-            "version": .number(2),
-            "capture": .string("mirror"),
-            "format": .string("replay"),
-            "initial": .object([
-                "columns": .number(80),
-                "rows": .number(24),
-                "pinned": .bool(false),
-            ]),
-            "cursor": .object([
-                "sequence": .number(0),
-                "feedByteOffset": .number(0),
-                "writeByteOffset": .number(0),
-            ]),
-        ])) == nil)
     }
 
     @Test("a tape notification is recognised by method and carries its record verbatim")

@@ -47,6 +47,41 @@ struct PaneTapeRoundTripTests {
         }
     }
 
+    @Test("the start record round-trips the provenance the producer stamps on it")
+    func startRecordRoundTripsProvenance() throws {
+        // Intent: whatever the producer stamps as provenance arrives whole in the decoded
+        //   start record, and a start record that states none still decodes.
+        // Why it exists: provenance is the only field on the opening record whose meaning
+        //   the producer alone gives. A reader that dropped it would leave a saved capture
+        //   unable to say which pane it came from, and one that required it would reject
+        //   every stream that states none.
+        // Scenario: a capture written to a file, opened later with nothing but its bytes.
+        let provenance = JSONValue.object([
+            "pane": .string("p7"),
+            "startedAt": .number(1_700_000_000),
+        ])
+        let start = makePaneTapeStart(
+            capture: .dump,
+            provenance: provenance,
+            initial: PaneTapeDimensions(columns: 80, rows: 24, pinned: false),
+            cursor: .beginning
+        )
+
+        guard case .start(let decoded)? = decodePaneTapeRecord(start.record) else {
+            Issue.record("start record did not decode as a start")
+            return
+        }
+        #expect(decoded.provenance == provenance)
+
+        var withoutProvenance = try #require(start.record.asObject)
+        withoutProvenance["provenance"] = nil
+        guard case .start(let bare)? = decodePaneTapeRecord(.object(withoutProvenance)) else {
+            Issue.record("a start record stating no provenance must still decode as a start")
+            return
+        }
+        #expect(bare.provenance == nil)
+    }
+
     @Test("the gap record round-trips every eviction count the producer states")
     func gapRecordRoundTrips() throws {
         let batch = makePaneTapeBatch(from: PaneTapeSnapshot(
@@ -63,6 +98,56 @@ struct PaneTapeRoundTripTests {
             droppedFeedBytes: 900,
             droppedWriteBytes: 11
         )))
+    }
+
+    @Test("a total-loss gap round-trips as loss the producer could not measure")
+    func totalGapRecordRoundTrips() throws {
+        // Intent: the gap record a stream emits for a cursor it cannot place decodes as
+        //   total loss, not as an exact count of zero.
+        // Why it exists: the two gap shapes share a kind and differ only in which keys they
+        //   carry, so a reader that fell through to the exact branch would report a
+        //   discontinuity of nothing where the producer said it cannot measure the loss.
+        // Scenario: a client resumes a follow with a cursor from a recorder lifetime that
+        //   has since been replaced.
+        let stranded = PaneTapeCursor(
+            recorderLifetimeId: UUID(uuidString: "33333333-3333-4333-8333-333333333333")!,
+            nextSequence: 500,
+            feedBytesBeforeNextSequence: 0,
+            writeBytesBeforeNextSequence: 0
+        )
+        let opening = try #require(rawOpening(startingFrom: .cursor(stranded)))
+        let record = try #require(opening.records.first)
+
+        #expect(decodePaneTapeRecord(record) == .gap(.total))
+    }
+
+    @Test("a start record that withholds its cursor round-trips with no cursor")
+    func startRecordRoundTripsAWithheldCursor() throws {
+        // Intent: a start record built without publishing its cursor decodes as a start
+        //   whose cursor is absent, and stays a valid start record.
+        // Why it exists: an opening repaired by a sync withholds the cursor because the sync
+        //   record states it instead. A reader that required the key would reject exactly the
+        //   openings that carry exact state, and one that defaulted it would hand the client
+        //   a continuation position no producer ever published.
+        // Scenario: a follow that opens at `now` and is answered with a state sync.
+        let start = makePaneTapeStart(
+            capture: .follow,
+            provenance: .object(["pane": .string("p")]),
+            initial: PaneTapeDimensions(columns: 80, rows: 24, pinned: false),
+            cursor: .beginning,
+            publishesCursor: false,
+            reconstructible: true
+        )
+
+        guard case .start(let decoded)? = decodePaneTapeRecord(start.record) else {
+            Issue.record("a start record withholding its cursor must still decode as a start")
+            return
+        }
+        #expect(decoded.cursor == nil)
+        #expect(decoded.nextSequence == nil)
+        #expect(decoded.feedByteOffset == nil)
+        #expect(decoded.writeByteOffset == nil)
+        #expect(decoded.reconstructible)
     }
 
     @Test("an event round-trips with and without its origin stamp and its payload span")
@@ -268,6 +353,36 @@ struct PaneTapeRoundTripTests {
         //   guard.
         // Scenario: a reader deciding whether it understands the stream it just opened.
         #expect(paneTapeStreamVersion == 5)
+    }
+
+    /// Builds the prefix a raw follow ships from one start position, over a fence whose
+    /// retained events are empty and whose requested cursor cannot be placed, so the records
+    /// are exactly the ones the stream states about loss.
+    private func rawOpening(startingFrom position: PaneTapeStartPosition) -> PaneTapeOpening? {
+        let origin = PaneTapeOrigin(
+            initial: PaneTapeDimensions(columns: 80, rows: 24, pinned: false),
+            cursor: .beginning
+        )
+        let decision = decidePaneTapeOpening(
+            request: PaneTapeStreamRequest(capture: .follow, policy: .raw, position: position),
+            fence: PaneTapeStreamFence(
+                origin: origin,
+                live: origin,
+                retained: PaneTapeSnapshot(
+                    events: [],
+                    droppedEventCount: 0,
+                    droppedFeedBytes: 0,
+                    droppedWriteBytes: 0,
+                    nextCursor: .beginning
+                ),
+                requested: .unplaceable
+            )
+        )
+        guard case .events(let events) = decision.payload else {
+            Issue.record("a raw stream never asks for a synchronization")
+            return nil
+        }
+        return makePaneTapeOpening(decision, events: events)
     }
 
     /// Builds the suffix a reconstructible stream ships when eviction forced it to replace

@@ -485,7 +485,7 @@ public struct MobileSessionModel: Equatable, Sendable {
         case .start(let start):
             return start.pinned
         case .sync(let sync):
-            return sync.pinned
+            return sync.transfer?.pinned
         case .event(let event):
             guard event.event["type"]?.asString == "resize" else { return nil }
             // The producer always writes the bit; absent means a pre-pinnedness
