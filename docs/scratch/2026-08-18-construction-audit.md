@@ -1051,7 +1051,7 @@ and every later wave is cheaper because these landed first. INTERACT-1 in
 particular removes a live process-trapping bug, so it goes early inside the
 wave.
 
-- [ ] **[MOBILE-1](#mobile-1)** (5x5, medium) Resolve cell metrics where the display scale changes, not on every applied tape record
+- [x] **[MOBILE-1](#mobile-1)** (5x5, medium) Resolve cell metrics where the display scale changes, not on every applied tape record -- `76aed4ab`
 - [ ] **[HIST-2](#hist-2)** (4x5, small) Skip the per-cell content-unit walk when the record's hasWideCells bit proves the count
 - [x] **[WIRE-1](#wire-1)** (4x5, small) Frame IPC lines by scanning for the newline, not by appending one byte at a time -- `cea20832`
 - [ ] **[INTERACT-1](#interact-1)** (4x5, medium) Refresh the search index through one history-mutation funnel instead of seven hand-placed calls
