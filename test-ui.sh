@@ -34,6 +34,18 @@ xcrun swiftc \
     -o "$PROTO_BUILD/libDanTermProtocol.a" \
     "$SCRIPT_DIR"/lib/DanTermProtocol/Sources/DanTermProtocol/*.swift
 
+# The chip artwork and its renderer live in their own package now, and the AppKit
+# chip files import it. Built here the same way DanTermProtocol is, against that
+# module, so the harness draws through the shipped renderer rather than a copy.
+echo "Compiling ChipArtwork..."
+xcrun swiftc \
+    -emit-module -emit-library -static \
+    -module-name ChipArtwork \
+    -I "$PROTO_BUILD" \
+    -emit-module-path "$PROTO_BUILD/ChipArtwork.swiftmodule" \
+    -o "$PROTO_BUILD/libChipArtwork.a" \
+    "$SCRIPT_DIR"/lib/ChipArtwork/Sources/ChipArtwork/*.swift
+
 # A leaf target with no imports and no dependencies, built as a module so the harness
 # compiles the real lifecycle and geometry vocabulary instead of re-declaring it.
 echo "Compiling PaneProcessLifecycle..."
@@ -53,6 +65,7 @@ echo "Compiling UI tests..."
         -I "$PROTO_BUILD" \
         -L "$PROTO_BUILD" \
         -lDanTermProtocol \
+        -lChipArtwork \
         -lPaneProcessLifecycle \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DisplayLine.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/AgentSession.swift" \
@@ -90,8 +103,6 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/TextPasteboard.swift" \
         "$SCRIPT_DIR/app/SingleLineLabel.swift" \
         "$SCRIPT_DIR/app/BadgeLabel.swift" \
-        "$SCRIPT_DIR/app/ChipArtwork.swift" \
-        "$SCRIPT_DIR/app/ChipRenderer.swift" \
         "$SCRIPT_DIR/app/ChipView.swift" \
         "$SCRIPT_DIR/app/MenuCommandPolicy.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneGridOverride.swift" \

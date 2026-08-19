@@ -6,55 +6,57 @@
 //
 // Only data lives here. Drawing, and the mapping from a pane to a chip kind,
 // belong elsewhere: this file must stay free of anything a generator cannot
-// reproduce from those two inputs.
+// reproduce from those two inputs. It therefore names CoreGraphics and nothing
+// else, which is what lets icon/render-check.sh compile it as a loose file;
+// scripts/chip-artwork-isolation-gate.sh keeps that true.
 
 import CoreGraphics
 
 /// A chip glyph as flattened geometry. Coordinates stay in the source
 /// viewBox rather than being normalized, so the drawing code performs the
 /// same aspect fit that icon/chips/preview.html does and the two agree.
-struct ChipGlyph {
+public struct ChipGlyph: Sendable {
     /// Opcodes: 0 move, 1 line, 2 cubic, 3 close. Each consumes 2, 2, 6, and 0
     /// coordinates from `points` respectively, in order.
-    let opcodes: [UInt8]
-    let points: [CGFloat]
-    let viewBox: CGSize
+    public let opcodes: [UInt8]
+    public let points: [CGFloat]
+    public let viewBox: CGSize
     /// Stroke width in viewBox units for a stroked mark; nil for a filled one.
-    let strokeWidth: CGFloat?
-    let lineCap: CGLineCap
-    let lineJoin: CGLineJoin
-    let usesEvenOddFill: Bool
+    public let strokeWidth: CGFloat?
+    public let lineCap: CGLineCap
+    public let lineJoin: CGLineJoin
+    public let usesEvenOddFill: Bool
 }
 
 /// How one chip is painted at a given appearance.
-struct ChipPalette {
-    let background: CGColor
-    let foreground: CGColor
+public struct ChipPalette: Sendable {
+    public let background: CGColor
+    public let foreground: CGColor
 }
 
 /// The two states of a chip in a tab row's pane strip, plus the two colors
 /// its state dot can take.
-struct ChipPaneListPalette {
-    let inactive: ChipPalette
-    let active: ChipPalette
+public struct ChipPaneListPalette: Sendable {
+    public let inactive: ChipPalette
+    public let active: ChipPalette
     /// A pane that wants you: an unread alert, or an agent blocked on a prompt.
-    let attentionDot: CGColor
+    public let attentionDot: CGColor
     /// A pane whose agent is mid-turn. The same dot as `attentionDot` in a
     /// different hue -- see the stateDot note in chips.json.
-    let busyDot: CGColor
+    public let busyDot: CGColor
     /// Separates a dot from the mark, the chip, and the row it overhangs.
     /// The unselected row, which is every row the manifest can speak for: a
     /// selected row is painted in a color only SidebarRowView knows, and it
     /// pushes that one down to the strip instead.
-    let stateDotRing: CGColor
+    public let stateDotRing: CGColor
 }
 
 /// How a state dot is drawn, in points at `ChipArtwork.paneRowSize`. One
 /// value for both states, so neither can lose the ring the other keeps.
-struct ChipStateDotGeometry {
-    let diameter: CGFloat
+public struct ChipStateDotGeometry: Sendable {
+    public let diameter: CGFloat
     /// Width of the `stateDotRing` band outside the dot.
-    let ringWidth: CGFloat
+    public let ringWidth: CGFloat
 }
 
 /// One pane-kind chip: its glyph, its optical tuning, and its colors.
@@ -64,24 +66,24 @@ struct ChipStateDotGeometry {
 /// a filled path in its own color to hold thin features at chip size, and is
 /// expressed on a 24-unit box for every mark so the value stays comparable
 /// across glyphs with different viewBoxes.
-struct ChipDefinition {
-    let glyph: ChipGlyph
-    let fill: CGFloat
-    let dilate: CGFloat
-    let light: ChipPalette
-    let dark: ChipPalette
+public struct ChipDefinition: Sendable {
+    public let glyph: ChipGlyph
+    public let fill: CGFloat
+    public let dilate: CGFloat
+    public let light: ChipPalette
+    public let dark: ChipPalette
 }
 
-enum ChipArtwork {
+public enum ChipArtwork {
     /// Chip corner radius as a fraction of the chip's edge length.
-    static let cornerRadius: CGFloat = 0.23
-    static let sidebarSize: CGFloat = 15
-    static let toolbarSize: CGFloat = 13
+    public static let cornerRadius: CGFloat = 0.23
+    public static let sidebarSize: CGFloat = 15
+    public static let toolbarSize: CGFloat = 13
     /// The per-pane chips on a multi-pane tab's second line, smaller than the
     /// row's own chip so the enumeration reads as subordinate to the title.
-    static let paneRowSize: CGFloat = 12
+    public static let paneRowSize: CGFloat = 12
 
-    static let terminal = ChipDefinition(
+    public static let terminal = ChipDefinition(
         glyph: ChipGlyph(
             opcodes: [0, 1, 1, 0, 1],
             points: [1.3, 1.3, 7.8, 6.8, 1.3, 12.3, 11.3, 12.3, 19.3, 12.3],
@@ -97,7 +99,7 @@ enum ChipArtwork {
         dark: ChipPalette(background: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.2), foreground: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
     )
 
-    static let claude = ChipDefinition(
+    public static let claude = ChipDefinition(
         glyph: ChipGlyph(
             opcodes: [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3],
             points: [4.71, 15.96, 9.43, 13.31, 9.51, 13.08, 9.43, 12.95, 9.2, 12.95, 8.41, 12.9, 5.71, 12.83, 3.38, 12.73, 1.11, 12.61, 0.54, 12.49, 0.01, 11.79, 0.06, 11.43, 0.54, 11.11, 1.23, 11.17, 2.75, 11.27, 5.02, 11.43, 6.68, 11.53, 9.12, 11.78, 9.52, 11.78, 9.57, 11.63, 9.43, 11.53, 9.33, 11.43, 6.97, 9.83, 4.42, 8.15, 3.09, 7.18, 2.36, 6.68, 2, 6.22, 1.84, 5.22, 2.5, 4.49, 3.38, 4.55, 3.6, 4.61, 4.5, 5.3, 6.4, 6.78, 8.9, 8.6, 9.26, 8.9, 9.4, 8.8, 9.42, 8.73, 9.26, 8.45, 7.9, 6.02, 6.46, 3.52, 5.8, 2.5, 5.63, 1.88, 5.57, 1.62, 5.53, 1.41, 5.53, 1.15, 6.29, 0.13, 6.7, 0, 7.7, 0.13, 8.11, 0.5, 8.73, 1.91, 9.73, 4.14, 11.29, 7.17, 11.74, 8.07, 11.99, 8.9, 12.08, 9.16, 12.24, 9.16, 12.24, 9, 12.36, 7.3, 12.6, 5.2, 12.83, 2.5, 12.91, 1.74, 13.29, 0.84, 14.03, 0.34, 14.62, 0.62, 15.1, 1.31, 15.03, 1.75, 14.74, 3.6, 14.19, 6.5, 13.82, 8.45, 14.03, 8.45, 14.28, 8.2, 15.26, 6.9, 16.91, 4.83, 17.64, 4.02, 18.49, 3.12, 19.04, 2.68, 20.07, 2.68, 20.83, 3.81, 20.49, 4.97, 19.43, 6.32, 18.54, 7.46, 17.28, 9.16, 16.49, 10.52, 16.57, 10.63, 16.75, 10.61, 19.61, 10.01, 21.15, 9.73, 22.99, 9.41, 23.82, 9.81, 23.92, 10.2, 23.58, 11, 21.62, 11.49, 19.31, 11.95, 15.87, 12.76, 15.83, 12.79, 15.88, 12.86, 17.43, 13, 18.09, 13.04, 19.71, 13.04, 22.73, 13.26, 23.52, 13.78, 23.99, 14.42, 23.91, 14.91, 22.7, 15.53, 21.06, 15.13, 17.23, 14.23, 15.93, 13.9, 15.74, 13.9, 15.74, 14, 16.84, 15.08, 18.84, 16.88, 21.34, 19.22, 21.47, 19.79, 21.15, 20.25, 20.81, 20.2, 18.61, 18.54, 17.76, 17.8, 15.83, 16.18, 15.7, 16.18, 15.7, 16.35, 16.15, 17, 18.49, 20.52, 18.61, 21.6, 18.44, 21.95, 17.84, 22.16, 17.17, 22.04, 15.79, 20.12, 14.38, 17.95, 13.24, 16.01, 13.1, 16.09, 12.42, 23.34, 12.11, 23.71, 11.38, 23.99, 10.78, 23.53, 10.45, 22.78, 10.77, 21.31, 11.17, 19.38, 11.47, 17.85, 11.77, 15.95, 11.93, 15.32, 11.93, 15.28, 11.78, 15.3, 10.35, 17.26, 8.17, 20.21, 6.44, 22.05, 6.04, 22.22, 5.32, 21.85, 5.38, 21.19, 5.78, 20.59, 8.17, 17.56, 9.61, 15.68, 10.54, 14.59, 10.54, 14.43, 10.48, 14.43, 4.14, 18.55, 3.01, 18.7, 2.52, 18.24, 2.58, 17.49, 2.81, 17.25, 4.72, 15.94],
@@ -113,7 +115,7 @@ enum ChipArtwork {
         dark: ChipPalette(background: CGColor(srgbRed: 0.851, green: 0.4667, blue: 0.3412, alpha: 1), foreground: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
     )
 
-    static let codex = ChipDefinition(
+    public static let codex = ChipDefinition(
         glyph: ChipGlyph(
             opcodes: [0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 2, 1, 1, 2, 1, 1, 2, 1, 2, 0, 2, 1, 1, 2, 1, 1, 1, 1, 2, 0, 2, 1, 2, 1, 1, 1, 1, 2, 3, 0, 1, 1, 1, 1, 2, 2, 1, 2, 0, 1, 1, 2, 1, 1, 1, 1, 2, 2, 3, 0, 1, 1, 1, 2, 2, 1, 1, 2, 3, 0, 1, 1, 1, 1, 1, 3],
             points: [239.2, 106.2, 245.025, 88.5149, 242.986, 69.1809, 233.6, 53.1, 219.541, 28.3464, 191.011, 15.6212, 163.2, 21.7, 147.533, 4.3001, 123.781, -3.4308, 100.874, 1.4145, 77.967, 6.2598, 59.3791, 22.9466, 52.1, 45.2, 33.8665, 48.9944, 18.1366, 60.4278, 8.9, 76.6, -5.5254, 101.158, -2.2828, 132.247, 16.9, 153.3, 11.045, 170.971, 13.0475, 190.304, 22.4, 206.4, 36.4831, 231.236, 65.1245, 243.975, 93, 237.8, 105.383, 251.665, 123.111, 259.563, 141.7, 259.5, 170.143, 259.469, 195.315, 241.085, 204, 214, 222.252, 210.255, 238.02, 198.857, 247.3, 182.7, 261.436, 158.133, 258.167, 127.262, 239.2, 106.2, 141.6, 242.5, 130.269, 242.543, 119.287, 238.575, 110.6, 231.3, 112.1, 230.4, 163.7, 200.6, 166.29, 199.016, 167.906, 196.234, 168, 193.2, 168, 120.4, 189.8, 133, 190, 133.133, 190.133, 133.333, 190.2, 133.6, 190.2, 193.9, 190.145, 220.718, 168.418, 242.445, 141.6, 242.5, 37.2, 198, 31.4611, 188.165, 29.4054, 176.611, 31.4, 165.4, 32.9, 166.4, 84.6, 196, 87.199, 197.63, 90.501, 197.63, 93.1, 196, 156.3, 159.6, 156.3, 184.8, 155.9, 185.4, 103.6, 215.6, 80.394, 229.001, 50.7215, 221.136, 37.2, 198, 23.5, 85.4, 29.2671, 75.4915, 38.3259, 67.9188, 49.1, 64, 49.1, 125.4, 48.9634, 128.468, 50.5955, 131.344, 53.3, 132.8, 116.2, 169, 94.4, 181.7, 93.6, 181.7, 41.4, 151.5, 18.1552, 138.081, 10.1496, 108.384, 23.5, 85.1, 203, 127, 140, 90.3, 161.6, 78, 162.4, 78, 214.6, 108.1, 230.943, 117.491, 240.382, 135.486, 238.818, 154.27, 237.255, 173.054, 224.971, 189.24, 207.3, 195.8, 207.3, 134.4, 207.119, 131.419, 205.471, 128.721, 202.9, 127.2, 224.7, 94.5, 223.1, 93.5, 171.5, 63.5, 168.901, 61.8703, 165.599, 61.8703, 163, 63.5, 100, 99.8, 100, 74.6, 100.3, 73.9, 152.5, 43.8, 168.851, 34.3886, 189.167, 35.2679, 204.644, 46.0567, 220.12, 56.8455, 227.974, 75.6027, 224.8, 94.2, 88, 139, 66.1, 126.4, 65.7, 125.8, 65.7, 65.7, 65.7296, 46.8354, 76.6512, 29.6848, 93.7328, 21.6792, 110.814, 13.6735, 130.983, 16.253, 145.5, 28.3, 143.9, 29.3, 92.4, 59, 89.8105, 60.5837, 88.1937, 63.366, 88.1, 66.4, 99.8, 113.4, 128, 97.2, 156.2, 113.4, 156.2, 146, 128.1, 162.2, 100, 146],
@@ -129,7 +131,7 @@ enum ChipArtwork {
         dark: ChipPalette(background: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1), foreground: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1))
     )
 
-    static let agent = ChipDefinition(
+    public static let agent = ChipDefinition(
         glyph: ChipGlyph(
             opcodes: [0, 1, 2, 1, 2, 1, 2, 1, 2, 3, 0, 2, 2, 2, 2, 3, 0, 2, 2, 2, 2, 3, 0, 2, 2, 2, 2, 2, 2, 2, 2, 3],
             points: [7.2, 0, 16.8, 0, 20.7765, 0, 24, 3.2235, 24, 7.2, 24, 16.8, 24, 20.7765, 20.7765, 24, 16.8, 24, 7.2, 24, 3.2235, 24, 0, 20.7765, 0, 16.8, 0, 7.2, -0, 3.2235, 3.2235, 0, 7.2, 0, 3.87, 7.2, 3.87, 8.9673, 5.3027, 10.4, 7.07, 10.4, 8.8373, 10.4, 10.27, 8.9673, 10.27, 7.2, 10.27, 5.4327, 8.8373, 4, 7.07, 4, 5.3027, 4, 3.87, 5.4327, 3.87, 7.2, 13.73, 7.2, 13.73, 8.9673, 15.1627, 10.4, 16.93, 10.4, 18.6973, 10.4, 20.13, 8.9673, 20.13, 7.2, 20.13, 5.4327, 18.6973, 4, 16.93, 4, 15.1627, 4, 13.73, 5.4327, 13.73, 7.2, 5.06, 15.64, 6.6613, 17.8807, 9.2459, 19.2104, 12, 19.2104, 14.7541, 19.2104, 17.3387, 17.8807, 18.94, 15.64, 19.4536, 14.9193, 19.2857, 13.9186, 18.565, 13.405, 17.8443, 12.8914, 16.8436, 13.0593, 16.33, 13.78, 15.3288, 15.1748, 13.717, 16.0019, 12, 16.0019, 10.283, 16.0019, 8.6712, 15.1748, 7.67, 13.78, 7.1564, 13.0593, 6.1557, 12.8914, 5.435, 13.405, 4.7143, 13.9186, 4.5464, 14.9193, 5.06, 15.64],
@@ -151,14 +153,14 @@ enum ChipArtwork {
     /// Fixed per appearance for that reason -- sidebar selection is
     /// NSOutlineView-owned and does not reload the cell, so nothing in here
     /// may depend on whether the row is selected.
-    static let paneListLight = ChipPaneListPalette(
+    public static let paneListLight = ChipPaneListPalette(
         inactive: ChipPalette(background: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.1216), foreground: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.451)),
         active: ChipPalette(background: CGColor(srgbRed: 0.1137, green: 0.1137, blue: 0.1216, alpha: 1), foreground: CGColor(srgbRed: 0.9804, green: 0.9804, blue: 0.9804, alpha: 1)),
         attentionDot: CGColor(srgbRed: 1, green: 0.2314, blue: 0.1882, alpha: 1),
         busyDot: CGColor(srgbRed: 0.7804, green: 0.4667, blue: 0, alpha: 1),
         stateDotRing: CGColor(srgbRed: 0.9804, green: 0.9804, blue: 0.9804, alpha: 1)
     )
-    static let paneListDark = ChipPaneListPalette(
+    public static let paneListDark = ChipPaneListPalette(
         inactive: ChipPalette(background: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.1412), foreground: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.549)),
         active: ChipPalette(background: CGColor(srgbRed: 0.949, green: 0.949, blue: 0.9569, alpha: 1), foreground: CGColor(srgbRed: 0.1176, green: 0.1176, blue: 0.1255, alpha: 1)),
         attentionDot: CGColor(srgbRed: 1, green: 0.2706, blue: 0.2275, alpha: 1),
@@ -170,13 +172,13 @@ enum ChipArtwork {
     /// Attention and busy share it and differ only in hue, so the ring is a
     /// property of the dot rather than of one state. See the stateDot note
     /// in chips.json.
-    static let stateDotGeometry = ChipStateDotGeometry(diameter: 4.5, ringWidth: 1)
+    public static let stateDotGeometry = ChipStateDotGeometry(diameter: 4.5, ringWidth: 1)
     /// How far the dot overhangs its chip's top-right corner. Lands in margins
     /// the strip already has, so it stays out of the strip's fitting math.
-    static let stateDotBleed: CGFloat = 1
+    public static let stateDotBleed: CGFloat = 1
 
     /// Every chip in the manifest, in declaration order.
-    static let all: [(name: String, chip: ChipDefinition)] = [
+    public static let all: [(name: String, chip: ChipDefinition)] = [
         ("terminal", terminal),
         ("claude", claude),
         ("codex", codex),

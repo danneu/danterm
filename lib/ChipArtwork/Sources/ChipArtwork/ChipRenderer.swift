@@ -1,8 +1,14 @@
 // Draws a pane-kind chip into a CGContext.
 //
-// View-independent on purpose: no NSView, no AppKit. The sidebar cell, the pane
-// toolbar, and the headless render check in icon/render-check all call this one
-// function, so a chip cannot look different depending on where it is shown.
+// View-independent on purpose: no NSView, no UIKit, no AppKit. The sidebar cell,
+// the pane toolbar, the iOS pane list, and the headless render check in
+// icon/render-check all call this one function, so a chip cannot look different
+// depending on where it is shown.
+//
+// It names no chip vocabulary either -- the ChipKind mapping lives in
+// ChipKindArtwork.swift -- so this file and ChipArtwork.swift stay compilable
+// against CoreGraphics alone, which is what icon/render-check.sh relies on and
+// scripts/chip-artwork-isolation-gate.sh keeps true.
 //
 // The geometry here mirrors icon/chips/preview.html exactly -- the same aspect
 // fit, the same optical `fill` fraction, the same dilation stroke. If you change
@@ -13,13 +19,13 @@ import CoreGraphics
 /// Which palette of a `ChipDefinition` to paint with. Named after the two
 /// entries in chips.json rather than after an AppKit appearance, so the
 /// renderer stays free of AppKit.
-enum ChipAppearance {
+public enum ChipAppearance: Sendable {
     case light
     case dark
 }
 
 /// The one place chip drawing lives. Stateless; every call is self-contained.
-enum ChipRenderer {
+public enum ChipRenderer {
     /// Paints the chip's background and mark to fill `rect`.
     ///
     /// `flipped` describes the context, not the chip: pass true when y grows
@@ -30,7 +36,7 @@ enum ChipRenderer {
     /// outside the mark's box, which matches the preview page's `overflow:
     /// visible` and keeps the mark's own edges from being shaved.
     ///
-    static func draw(
+    public static func draw(
         _ definition: ChipDefinition,
         in context: CGContext,
         rect: CGRect,
@@ -46,7 +52,7 @@ enum ChipRenderer {
     /// The same chip in colors that are not its own. A tab row's pane strip
     /// paints every chip from one shared palette, so the strip reads as "which
     /// pane" rather than as four brands competing for attention.
-    static func draw(
+    public static func draw(
         _ definition: ChipDefinition,
         in context: CGContext,
         rect: CGRect,
@@ -70,7 +76,7 @@ enum ChipRenderer {
     /// The mark alone, in an explicit color and with no background. Split out
     /// because a chip is not the only thing that may want the glyph, and
     /// because the render check compares marks without paint getting in the way.
-    static func drawMark(
+    public static func drawMark(
         _ definition: ChipDefinition,
         in context: CGContext,
         rect: CGRect,
@@ -121,7 +127,7 @@ enum ChipRenderer {
 
     /// Where the mark's viewBox lands inside the chip: centered, aspect
     /// preserved, and sized so its longer edge takes up `fill` of the chip.
-    static func markBox(glyph: ChipGlyph, in rect: CGRect, fill: CGFloat) -> CGRect {
+    public static func markBox(glyph: ChipGlyph, in rect: CGRect, fill: CGFloat) -> CGRect {
         let ratio = glyph.viewBox.width / glyph.viewBox.height
         let width: CGFloat
         let height: CGFloat
@@ -141,7 +147,7 @@ enum ChipRenderer {
     }
 
     /// Rebuilds the flattened opcode stream into a CGPath, in viewBox units.
-    static func path(of glyph: ChipGlyph) -> CGPath {
+    public static func path(of glyph: ChipGlyph) -> CGPath {
         let path = CGMutablePath()
         var index = 0
         func point() -> CGPoint {

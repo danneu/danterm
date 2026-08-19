@@ -8,6 +8,7 @@
 // dots are the exception: whether a dot is ringed is a fact about paint, so
 // that one test reads the paint. The `+N` label's width comes from real font
 // metrics, which is why these live here and not in the pure core suite.
+import ChipArtwork
 import Cocoa
 
 @MainActor

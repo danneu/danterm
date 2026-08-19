@@ -11,6 +11,7 @@ let package = Package(
         .executable(name: "DanTermInstanceIdentityTool", targets: ["DanTermInstanceIdentityTool"]),
     ],
     dependencies: [
+        .package(path: "lib/ChipArtwork"),
         .package(path: "lib/DanTermClient"),
         .package(path: "lib/DanTermProtocol"),
         .package(path: "lib/DanTermSupport"),
@@ -21,6 +22,7 @@ let package = Package(
         .executableTarget(
             name: "DanTerm",
             dependencies: [
+                .product(name: "ChipArtwork", package: "ChipArtwork"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
                 .product(name: "PaneProcessLifecycle", package: "TerminalPTY"),
                 .product(name: "TerminalCore", package: "TerminalCore"),

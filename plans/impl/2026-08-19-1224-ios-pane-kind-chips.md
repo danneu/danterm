@@ -173,7 +173,7 @@ Critical files: `lib/DanTermProtocol/Sources/DanTermProtocol/PaneRoster.swift`,
 
 ## Commit progress
 - [x] 1. Ship the pane chip as a roster fact
-- [ ] 2. Lift the chip artwork into a shared ChipArtwork package
+- [x] 2. Lift the chip artwork into a shared ChipArtwork package
 - [ ] 3. Draw the chip in the iOS pane list
 
 ## Implementation notes
@@ -190,3 +190,19 @@ Critical files: `lib/DanTermProtocol/Sources/DanTermProtocol/PaneRoster.swift`,
   to expire: the activity report defers its sweep by 75 ms, so a roster that
   sweep pushed would be readable by the time the wait ends. The negative itself
   is proved deterministically in the core projection test.
+- The artwork's public types needed explicit `Sendable` conformances. Swift
+  infers `Sendable` for an internal struct but not for a public one, so making
+  the generated types public turned every `static let` in `ChipArtwork` into a
+  concurrency error under Swift 6. The conformances are emitted by
+  `icon/gen-chips.sh`, not hand-added, so a regeneration keeps them.
+- PO5 is `scripts/chip-artwork-isolation-gate.sh`, and it checks I4 in two ways
+  rather than one. Reading the imports catches a UI framework, but a reference
+  to a sibling type inside the same module needs no import at all, so the gate
+  also compiles the two files loose with `swiftc -typecheck`. Only the second
+  half catches the failure that actually broke `icon/render-check.sh`.
+- The platform-neutral entry point is `ChipKind.drawnImage(edge:scale:appearance:)`,
+  returning a `CGImage`. It lands in this commit rather than the iOS one because
+  the package's own tests are PO4 and draw through it; the phone wraps the result
+  in a `UIImage` in commit 3.
+- `icon/chips/README.md` names the two Swift files by path in four places, so it
+  moved with them.

@@ -1,25 +1,14 @@
-// The AppKit host for a pane-kind chip, and the one place a ChipKind is turned
-// into artwork.
+// The AppKit host for a pane-kind chip: the view the sidebar and the pane
+// toolbar show, and the NSImage wrapper for the places AppKit wants one.
 //
-// The mapping lives here rather than in ChipRenderer.swift because that file is
-// compiled standalone by icon/render-check.sh against ChipArtwork.swift alone;
-// referring to a ChipKind there would break the check. It does not live in
-// DanTermProtocol either, which stays free of CoreGraphics.
+// The kind-to-artwork mapping and the drawing itself belong to the ChipArtwork
+// package, which the phone links too. Only what AppKit needs lives here.
 
 import AppKit
+import ChipArtwork
 import DanTermProtocol
 
 extension ChipKind {
-    /// The artwork this kind is drawn with.
-    var artwork: ChipDefinition {
-        switch self {
-        case .terminal: return ChipArtwork.terminal
-        case .claude: return ChipArtwork.claude
-        case .codex: return ChipArtwork.codex
-        case .agent: return ChipArtwork.agent
-        }
-    }
-
     /// The chip as an image, for the places AppKit wants an `NSImage` instead of
     /// a view -- a menu item, a table column, an alert.
     ///

@@ -1,5 +1,6 @@
 // Typed sidebar row cells. Each cell owns the complete view tree that its projection paints,
 // so row updates cannot silently skip a child because an identifier lookup stopped matching.
+import ChipArtwork
 import Cocoa
 
 /// Owns every painted child of a sidebar tab row and applies one complete tab projection.

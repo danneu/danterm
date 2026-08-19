@@ -2,27 +2,32 @@
 
 The small square marks that say what a pane is running: a plain terminal, Claude
 Code, Codex, or an agent DanTerm doesn't have a mark for. They appear in sidebar
-rows and in the pane toolbar.
+rows, in the pane toolbar, and in the iOS pane list.
 
 ## The land
 
 ```
-chips.json + *.svg  ->  icon/gen-chips.sh  ->  app/ChipArtwork.swift
+chips.json + *.svg  ->  icon/gen-chips.sh  ->  ChipArtwork.swift
         |                                              |
-        +--> preview.html (browser)                    +--> app/ChipRenderer.swift
+        +--> preview.html (browser)                    +--> ChipRenderer.swift
                      \                                              /
                       +----- icon/render-check.sh compares them ---+
 ```
+
+Both Swift files live in `lib/ChipArtwork/Sources/ChipArtwork/`, a package the Mac
+app and the iOS app both link, so one artwork feeds both.
 
 - **`chips.json`** -- one entry per kind: which SVG, how big to draw it
   (`fill`), how much to thicken it (`dilate`), and its light and dark colors.
 - **`*.svg`** -- one `<path>` each, either stroked or filled.
 - **`preview.html`** -- reads those two directly and draws every chip at every
   size in both appearances. Edit either file, reload, see the result.
-- **`app/ChipArtwork.swift`** -- generated, never edited by hand. Paths arrive
-  flattened to move/line/cubic/close, so the app needs no SVG parser.
-- **`app/ChipRenderer.swift`** -- the only code that paints a chip. Sidebar,
-  toolbar, and menu images all go through it.
+- **`ChipArtwork.swift`** -- generated, never edited by hand. Paths arrive
+  flattened to move/line/cubic/close, so no client needs an SVG parser.
+- **`ChipRenderer.swift`** -- the only code that paints a chip. Sidebar, toolbar,
+  menu images, and the phone's rows all go through it. It and the generated file
+  name CoreGraphics and nothing else, which is what lets `render-check.sh` build
+  them loose; `scripts/chip-artwork-isolation-gate.sh` keeps that true.
 
 ## The one rule: the viewBox is the ink
 
@@ -56,7 +61,7 @@ scaling ink and viewBox together does nothing, and scaling ink alone breaks the
 rule above. Then:
 
 ```
-./icon/gen-chips.sh        # regenerate app/ChipArtwork.swift
+./icon/gen-chips.sh        # regenerate ChipArtwork.swift
 ./icon/render-check.sh     # prove the app paints what the preview showed
 ```
 

@@ -1,7 +1,9 @@
 // UI-harness tests for the pane-kind chips: that the chip a surface shows
-// follows the pane's agent kind, that the toolbar does not spell out in text
-// what the chip already says, and that the chip actually paints something
-// different per kind and appearance.
+// follows the pane's agent kind, and that the toolbar does not spell out in
+// text what the chip already says.
+//
+// That a kind reaches distinct pixels is proved in the ChipArtwork package's
+// own suite, which the phone rests on too.
 //
 // The assertions walk the view tree for a ChipView or for visible label text
 // rather than reaching at named subviews, so rearranging the toolbar's stacks
@@ -96,38 +98,6 @@ func chipViewTests() {
             !visibleLabelTexts(in: wrapper).contains("aider"),
             "text fallback should clear, got \(visibleLabelTexts(in: wrapper))")
     }
-
-    uiTest("each kind paints a distinct chip") {
-        // Intent: every kind is told apart by its pixels, not only by the stored
-        //   enum.
-        // Why it exists: the chip's whole job is to be recognized at a glance,
-        //   and every path from artwork to screen -- opcode decoding, the
-        //   aspect fit, the palette -- sits between the kind and what is drawn.
-        //   The generic agent chip raises the stakes: it has to differ from the
-        //   terminal chip, or an unknown agent reads as a bare shell again.
-        //   Spec-first.
-        var renders: [ChipKind: Data] = [:]
-        for kind in ChipKind.allCases {
-            renders[kind] = try renderChip(kind: kind, appearance: .light)
-        }
-        try uiExpect(
-            Set(renders.values).count == ChipKind.allCases.count,
-            "the \(ChipKind.allCases.count) kinds should not paint alike")
-        try uiExpect(
-            renders.values.allSatisfy { $0.contains(where: { $0 != 0 }) },
-            "no kind should paint an empty chip")
-    }
-
-    uiTest("codex is repainted for a dark appearance") {
-        // Intent: the codex chip's two palettes differ, so switching appearance
-        //   changes what is drawn.
-        // Why it exists: codex inverts (black on white, white on black) while
-        //   claude keeps one orange in both, so codex is the kind that proves
-        //   the appearance actually reaches the renderer. Spec-first.
-        let light = try renderChip(kind: .codex, appearance: .light)
-        let dark = try renderChip(kind: .codex, appearance: .dark)
-        try uiExpect(light != dark, "codex should paint differently in dark")
-    }
 }
 
 /// A PaneWrapperView with one plain pane, which is all these tests need.
@@ -173,23 +143,4 @@ private func visibleLabelTexts(in root: NSView) -> Set<String> {
 @MainActor
 private func descendants(of root: NSView) -> [NSView] {
     root.subviews.flatMap { [$0] + descendants(of: $0) }
-}
-
-/// A chip's pixels at a fixed size, so two renderings can be compared exactly.
-@MainActor
-private func renderChip(kind: ChipKind, appearance: ChipAppearance) throws -> Data {
-    let edge = 32
-    guard let context = CGContext(
-        data: nil, width: edge, height: edge, bitsPerComponent: 8, bytesPerRow: 0,
-        space: CGColorSpace(name: CGColorSpace.sRGB)!,
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    ) else {
-        throw UITestFailure(message: "could not create a bitmap context")
-    }
-    ChipRenderer.draw(
-        kind.artwork, in: context,
-        rect: CGRect(x: 0, y: 0, width: edge, height: edge),
-        appearance: appearance, flipped: false)
-    guard let bytes = context.data else { throw UITestFailure(message: "bitmap context had no data") }
-    return Data(bytes: bytes, count: context.bytesPerRow * context.height)
 }

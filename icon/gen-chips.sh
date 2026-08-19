@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Generate app/ChipArtwork.swift from icon/chips/*.svg and icon/chips/chips.json.
+# Generate lib/ChipArtwork/Sources/ChipArtwork/ChipArtwork.swift from
+# icon/chips/*.svg and icon/chips/chips.json.
 #
 # The SVGs and the manifest are the source of truth: preview.html and this
 # script read the same two inputs, so what the preview shows is what ships.
@@ -19,7 +20,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-OUT="$REPO_ROOT/app/ChipArtwork.swift"
+OUT="$REPO_ROOT/lib/ChipArtwork/Sources/ChipArtwork/ChipArtwork.swift"
 CHIPS="$SCRIPT_DIR/chips"
 DUMP=""
 
@@ -445,55 +446,57 @@ w('// Do not edit by hand -- rerun the script after changing artwork or tuning.'
 w('//')
 w('// Only data lives here. Drawing, and the mapping from a pane to a chip kind,')
 w('// belong elsewhere: this file must stay free of anything a generator cannot')
-w('// reproduce from those two inputs.')
+w('// reproduce from those two inputs. It therefore names CoreGraphics and nothing')
+w('// else, which is what lets icon/render-check.sh compile it as a loose file;')
+w('// scripts/chip-artwork-isolation-gate.sh keeps that true.')
 w('')
 w('import CoreGraphics')
 w('')
 w('/// A chip glyph as flattened geometry. Coordinates stay in the source')
 w('/// viewBox rather than being normalized, so the drawing code performs the')
 w('/// same aspect fit that icon/chips/preview.html does and the two agree.')
-w('struct ChipGlyph {')
+w('public struct ChipGlyph: Sendable {')
 w('    /// Opcodes: 0 move, 1 line, 2 cubic, 3 close. Each consumes 2, 2, 6, and 0')
 w('    /// coordinates from `points` respectively, in order.')
-w('    let opcodes: [UInt8]')
-w('    let points: [CGFloat]')
-w('    let viewBox: CGSize')
+w('    public let opcodes: [UInt8]')
+w('    public let points: [CGFloat]')
+w('    public let viewBox: CGSize')
 w('    /// Stroke width in viewBox units for a stroked mark; nil for a filled one.')
-w('    let strokeWidth: CGFloat?')
-w('    let lineCap: CGLineCap')
-w('    let lineJoin: CGLineJoin')
-w('    let usesEvenOddFill: Bool')
+w('    public let strokeWidth: CGFloat?')
+w('    public let lineCap: CGLineCap')
+w('    public let lineJoin: CGLineJoin')
+w('    public let usesEvenOddFill: Bool')
 w('}')
 w('')
 w('/// How one chip is painted at a given appearance.')
-w('struct ChipPalette {')
-w('    let background: CGColor')
-w('    let foreground: CGColor')
+w('public struct ChipPalette: Sendable {')
+w('    public let background: CGColor')
+w('    public let foreground: CGColor')
 w('}')
 w('')
 w('/// The two states of a chip in a tab row\'s pane strip, plus the two colors')
 w('/// its state dot can take.')
-w('struct ChipPaneListPalette {')
-w('    let inactive: ChipPalette')
-w('    let active: ChipPalette')
+w('public struct ChipPaneListPalette: Sendable {')
+w('    public let inactive: ChipPalette')
+w('    public let active: ChipPalette')
 w('    /// A pane that wants you: an unread alert, or an agent blocked on a prompt.')
-w('    let attentionDot: CGColor')
+w('    public let attentionDot: CGColor')
 w('    /// A pane whose agent is mid-turn. The same dot as `attentionDot` in a')
 w('    /// different hue -- see the stateDot note in chips.json.')
-w('    let busyDot: CGColor')
+w('    public let busyDot: CGColor')
 w('    /// Separates a dot from the mark, the chip, and the row it overhangs.')
 w('    /// The unselected row, which is every row the manifest can speak for: a')
 w('    /// selected row is painted in a color only SidebarRowView knows, and it')
 w('    /// pushes that one down to the strip instead.')
-w('    let stateDotRing: CGColor')
+w('    public let stateDotRing: CGColor')
 w('}')
 w('')
 w('/// How a state dot is drawn, in points at `ChipArtwork.paneRowSize`. One')
 w('/// value for both states, so neither can lose the ring the other keeps.')
-w('struct ChipStateDotGeometry {')
-w('    let diameter: CGFloat')
+w('public struct ChipStateDotGeometry: Sendable {')
+w('    public let diameter: CGFloat')
 w('    /// Width of the `stateDotRing` band outside the dot.')
-w('    let ringWidth: CGFloat')
+w('    public let ringWidth: CGFloat')
 w('}')
 w('')
 w('/// One pane-kind chip: its glyph, its optical tuning, and its colors.')
@@ -503,22 +506,22 @@ w('/// equal measured size does not read as equal optical size. `dilate` re-stro
 w('/// a filled path in its own color to hold thin features at chip size, and is')
 w('/// expressed on a 24-unit box for every mark so the value stays comparable')
 w('/// across glyphs with different viewBoxes.')
-w('struct ChipDefinition {')
-w('    let glyph: ChipGlyph')
-w('    let fill: CGFloat')
-w('    let dilate: CGFloat')
-w('    let light: ChipPalette')
-w('    let dark: ChipPalette')
+w('public struct ChipDefinition: Sendable {')
+w('    public let glyph: ChipGlyph')
+w('    public let fill: CGFloat')
+w('    public let dilate: CGFloat')
+w('    public let light: ChipPalette')
+w('    public let dark: ChipPalette')
 w('}')
 w('')
-w('enum ChipArtwork {')
+w('public enum ChipArtwork {')
 w(f'    /// Chip corner radius as a fraction of the chip\'s edge length.')
-w(f'    static let cornerRadius: CGFloat = {fmt(manifest["cornerRadius"])}')
-w(f'    static let sidebarSize: CGFloat = {fmt(manifest["sizes"]["sidebar"])}')
-w(f'    static let toolbarSize: CGFloat = {fmt(manifest["sizes"]["toolbar"])}')
+w(f'    public static let cornerRadius: CGFloat = {fmt(manifest["cornerRadius"])}')
+w(f'    public static let sidebarSize: CGFloat = {fmt(manifest["sizes"]["sidebar"])}')
+w(f'    public static let toolbarSize: CGFloat = {fmt(manifest["sizes"]["toolbar"])}')
 w('    /// The per-pane chips on a multi-pane tab\'s second line, smaller than the')
 w('    /// row\'s own chip so the enumeration reads as subordinate to the title.')
-w(f'    static let paneRowSize: CGFloat = {fmt(manifest["sizes"]["paneRow"])}')
+w(f'    public static let paneRowSize: CGFloat = {fmt(manifest["sizes"]["paneRow"])}')
 
 
 def color(c):
@@ -536,7 +539,7 @@ for name, spec in kinds.items():
         points.extend(op[1:])
 
     w('')
-    w(f'    static let {name} = ChipDefinition(')
+    w(f'    public static let {name} = ChipDefinition(')
     w('        glyph: ChipGlyph(')
     w('            opcodes: [' + ', '.join(str(o) for o in opcodes) + '],')
     w('            points: [' + ', '.join(fmt(v) for v in points) + '],')
@@ -569,7 +572,7 @@ w('    /// NSOutlineView-owned and does not reload the cell, so nothing in here'
 w('    /// may depend on whether the row is selected.')
 for mode in ('light', 'dark'):
     m = pl[mode]
-    w(f'    static let paneList{mode.capitalize()} = ChipPaneListPalette(')
+    w(f'    public static let paneList{mode.capitalize()} = ChipPaneListPalette(')
     w(f'        inactive: ChipPalette(background: {color(m["fixed"]["bg"])}, '
       f'foreground: {color(m["fixed"]["fg"])}),')
     w(f'        active: ChipPalette(background: {color(m["fixed"]["onBg"])}, '
@@ -585,18 +588,18 @@ w('    /// State-dot geometry, in points at `paneRowSize` and scaled with it.')
 w('    /// Attention and busy share it and differ only in hue, so the ring is a')
 w('    /// property of the dot rather than of one state. See the stateDot note')
 w('    /// in chips.json.')
-w(f'    static let stateDotGeometry = ChipStateDotGeometry('
+w(f'    public static let stateDotGeometry = ChipStateDotGeometry('
   f'diameter: {fmt(sd["diameter"])}, ringWidth: {fmt(sd["ringWidth"])})')
 w('    /// How far the dot overhangs its chip\'s top-right corner. Lands in margins')
 w('    /// the strip already has, so it stays out of the strip\'s fitting math.')
-w(f'    static let stateDotBleed: CGFloat = {fmt(sd["bleed"])}')
+w(f'    public static let stateDotBleed: CGFloat = {fmt(sd["bleed"])}')
 
 # Every chip, named. Emitted rather than hand-listed so a kind added to
 # chips.json cannot be missed by a caller that walks all of them -- which is how
 # the render check silently stopped covering a new mark.
 w('')
 w('    /// Every chip in the manifest, in declaration order.')
-w('    static let all: [(name: String, chip: ChipDefinition)] = [')
+w('    public static let all: [(name: String, chip: ChipDefinition)] = [')
 for name in kinds:
     w(f'        ("{name}", {name}),')
 w('    ]')

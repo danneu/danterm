@@ -40,8 +40,8 @@ mkdir -p "$WORK/swift" "$WORK/svg" "$WORK/reference"
 
 echo "== compiling the renderer"
 swiftc -O \
-  "$REPO_DIR/app/ChipArtwork.swift" \
-  "$REPO_DIR/app/ChipRenderer.swift" \
+  "$REPO_DIR/lib/ChipArtwork/Sources/ChipArtwork/ChipArtwork.swift" \
+  "$REPO_DIR/lib/ChipArtwork/Sources/ChipArtwork/ChipRenderer.swift" \
   "$SCRIPT_DIR/render-check/main.swift" \
   -o "$WORK/render-check"
 

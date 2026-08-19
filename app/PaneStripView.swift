@@ -10,6 +10,7 @@
 // is a model fact, decided by `tabPaneChips` in the core.
 
 import AppKit
+import ChipArtwork
 
 /// A tab row's pane enumeration, drawn to fit whatever width it is given.
 ///
