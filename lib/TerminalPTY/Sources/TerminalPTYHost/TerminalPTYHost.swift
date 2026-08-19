@@ -278,6 +278,9 @@ public actor TerminalPTYHost {
         let endOffset: Int
         let origin: UInt64?
         let submissionId: PaneInputSubmissionId?
+        /// Who chose these bytes, decided where they were submitted and carried to the tape,
+        /// because a partial write records at transmission and cannot ask again by then.
+        let attribution: TerminalFlightRecordingWriteAttribution
     }
 
     /// Says whether one submission is the user acting on this pane, and if so which
@@ -290,6 +293,15 @@ public actor TerminalPTYHost {
     private enum PaneInputAttribution {
         case user(waitGeneration: PaneInputWaitGeneration?)
         case pane
+
+        /// How this submission's bytes name their chooser once they reach the tape. The wait
+        /// generation is a delivery concern and has no place on a recording.
+        var recorded: TerminalFlightRecordingWriteAttribution {
+            switch self {
+            case .user: .user
+            case .pane: .pane
+            }
+        }
     }
 
     /// One submission still owed a result, holding what to call and what the delivery
@@ -1620,7 +1632,12 @@ public actor TerminalPTYHost {
                 capturedInputWrites.append(bytes)
                 capturedSubmittedTransitions.append(.input(bytes))
             }
-            enqueueInput(bytes, origin: origin, submissionId: submissionId)
+            enqueueInput(
+                bytes,
+                origin: origin,
+                submissionId: submissionId,
+                attribution: writeAttribution(of: submissionId)
+            )
         case .completeInput(let submissionId, let result):
             completeInput(submissionId, with: result)
         case .resize(let grid):
@@ -1803,10 +1820,23 @@ public actor TerminalPTYHost {
         process(.sendInput(bytes, origin: origin, submissionId: submissionId))
     }
 
+    /// Who chose the bytes of one write the reducer released. The reducer forwards the pane's
+    /// launch line with no submission of its own, and that line is the pane's own business,
+    /// so an absent submission is the pane rather than an unknown.
+    private func writeAttribution(
+        of submissionId: PaneInputSubmissionId?
+    ) -> TerminalFlightRecordingWriteAttribution {
+        guard let submissionId, let submission = inputSubmissions[submissionId] else {
+            return .pane
+        }
+        return submission.attribution.recorded
+    }
+
     private func enqueueInput(
         _ bytes: [UInt8],
         origin: UInt64?,
-        submissionId: PaneInputSubmissionId?
+        submissionId: PaneInputSubmissionId?,
+        attribution: TerminalFlightRecordingWriteAttribution
     ) {
         guard descriptorOwnershipSealed == false,
               bytes.isEmpty == false,
@@ -1829,7 +1859,8 @@ public actor TerminalPTYHost {
         pendingInputSpans.append(.init(
             endOffset: pendingInput.count,
             origin: origin,
-            submissionId: submissionId
+            submissionId: submissionId,
+            attribution: attribution
         ))
         flushInput()
     }
@@ -1872,7 +1903,8 @@ public actor TerminalPTYHost {
     }
 
     /// Records the bytes one successful write transmitted, split at the boundaries of the
-    /// submissions they came from so each event reports the origin of its own bytes.
+    /// submissions they came from so each event reports the origin and chooser of its own
+    /// bytes.
     private func recordWrittenInput(count: Int) {
         var start = pendingInputOffset
         let end = pendingInputOffset + count
@@ -1882,7 +1914,11 @@ public actor TerminalPTYHost {
                 assertionFailure("pending input span ends before the bytes it covers")
                 return
             }
-            flightTape.record(.write(Array(pendingInput[start..<spanEnd])), origin: span.origin)
+            flightTape.recordWrite(
+                Array(pendingInput[start..<spanEnd]),
+                origin: span.origin,
+                attribution: span.attribution
+            )
             if spanEnd == span.endOffset {
                 pendingInputSpans.removeFirst()
                 if let submissionId = span.submissionId {
@@ -1919,7 +1955,8 @@ public actor TerminalPTYHost {
             PendingInputSpan(
                 endOffset: $0.endOffset - consumed,
                 origin: $0.origin,
-                submissionId: $0.submissionId
+                submissionId: $0.submissionId,
+                attribution: $0.attribution
             )
         })
     }
@@ -2161,7 +2198,7 @@ public actor TerminalPTYHost {
             if captureTransitions {
                 capturedReplyWrites.append(replies)
             }
-            enqueueInput(replies, origin: nil, submissionId: nil)
+            enqueueInput(replies, origin: nil, submissionId: nil, attribution: .reply)
         }
         if terminal.hasPendingConsumerWork,
            consumerWorkWasSignaled == false

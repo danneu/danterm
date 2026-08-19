@@ -107,7 +107,7 @@ struct TerminalFlightRecorderTests {
             now: clock.now
         )
 
-        recorder.record(.write([1, 2]), origin: 120)
+        recorder.recordWrite([1, 2], origin: 120, attribution: .user)
         recorder.record(.feed([3]))
 
         let snapshot = recorder.capture().snapshot
@@ -128,7 +128,7 @@ struct TerminalFlightRecorderTests {
             now: clock.now
         )
 
-        recorder.record(.write([1]), origin: 40)
+        recorder.recordWrite([1], origin: 40, attribution: .user)
 
         #expect(recorder.capture().snapshot.events.map(\.originElapsedNanoseconds) == [0])
     }
@@ -162,8 +162,8 @@ struct TerminalFlightRecorderTests {
             now: { 0 }
         )
 
-        recorder.record(.write([1, 2, 3]))
-        recorder.record(.write([4, 5, 6, 7]))
+        recorder.recordWrite([1, 2, 3], origin: nil, attribution: .user)
+        recorder.recordWrite([4, 5, 6, 7], origin: nil, attribution: .user)
 
         let snapshot = recorder.capture().snapshot
         #expect(snapshot.events.map(\.event) == [.write([4, 5, 6, 7])])
@@ -226,10 +226,10 @@ struct TerminalFlightRecorderTests {
         )
 
         recorder.record(.feed([1, 2, 3]))
-        recorder.record(.write([4, 5]))
+        recorder.recordWrite([4, 5], origin: nil, attribution: .user)
         recorder.record(.resize(columns: 90, rows: 25, pinned: false))
         recorder.record(.feed([]))
-        recorder.record(.write([6]))
+        recorder.recordWrite([6], origin: nil, attribution: .user)
         recorder.record(.feed([7, 8]))
 
         #expect(recorder.capture().snapshot.events.map(\.payload) == [
@@ -259,11 +259,11 @@ struct TerminalFlightRecorderTests {
             now: { 0 }
         )
         recorder.record(.feed([1, 2, 3]))
-        recorder.record(.write([4, 5]))
+        recorder.recordWrite([4, 5], origin: nil, attribution: .user)
         recorder.record(.feed([6]))
-        recorder.record(.write([7, 8, 9, 10]))
+        recorder.recordWrite([7, 8, 9, 10], origin: nil, attribution: .user)
         recorder.record(.feed([11, 12]))
-        recorder.record(.write([13]))
+        recorder.recordWrite([13], origin: nil, attribution: .user)
 
         let fromBeginning = recorder.cursorSnapshot(from: .beginning)
         let fromTrailingReader = recorder.cursorSnapshot(from: .init(
@@ -547,7 +547,7 @@ struct TerminalFlightRecorderTests {
             now: { 0 }
         )
         recorder.record(.feed([1, 2]))
-        recorder.record(.write([9, 10, 11]))
+        recorder.recordWrite([9, 10, 11], origin: nil, attribution: .user)
         recorder.record(.resize(columns: 100, rows: 30, pinned: false))
 
         let origin = recorder.fromNowOrigin()
@@ -638,7 +638,7 @@ struct TerminalFlightRecorderTests {
             now: { 0 }
         )
         for _ in 0..<32_768 {
-            tinyRecorder.record(.write([0xFF]), origin: .max)
+            tinyRecorder.recordWrite([0xFF], origin: .max, attribution: .user)
         }
 
         for recorder in [bulkRecorder, tinyRecorder] {
@@ -733,7 +733,7 @@ struct TerminalFlightRecorderTests {
 
         recorder.record(.feed([1, 2, 3]))
         recorder.record(.paste("hello"))
-        recorder.record(.write([9, 9]))
+        recorder.recordWrite([9, 9], origin: nil, attribution: .user)
         recorder.record(.mouse(.init(action: .move, column: 0, row: 0)))
         recorder.record(.feed([4]))
 
@@ -787,7 +787,7 @@ struct TerminalFlightRecorderTests {
         recorder.record(.focus(true))
         recorder.record(.mouse(.init(action: .move, column: 2, row: 3)))
         recorder.record(.viewport(.byRows(-4)))
-        recorder.record(.write([4, 5]))
+        recorder.recordWrite([4, 5], origin: nil, attribution: .user)
         recorder.record(.resize(columns: 100, rows: 30, pinned: true))
     }
 }

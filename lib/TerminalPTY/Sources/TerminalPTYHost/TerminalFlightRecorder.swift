@@ -75,6 +75,21 @@ public struct TerminalFlightRecordingPayloadSpan: Equatable, Sendable {
     }
 }
 
+/// Names who chose the bytes of one write toward the child.
+///
+/// The fact has to be carried because it cannot be derived: a terminal reply and a plain user
+/// send both cross the boundary with no origin stamp, so a reader that only sees the bytes
+/// cannot tell an answer from a keystroke. This is capture metadata alone -- it never enters
+/// `NeutralTerminalRecordingEvent`, so no replay and no pane-tape record can depend on it.
+public enum TerminalFlightRecordingWriteAttribution: Equatable, Sendable {
+    /// Somebody acted on this pane and these bytes encode that act.
+    case user
+    /// The pane settled its own business with the child: its launch line, a focus report.
+    case pane
+    /// The terminal answered a query the child asked.
+    case reply
+}
+
 /// Pairs one neutral transition with capture time relative to pane construction.
 public struct TerminalFlightRecordingEvent: Equatable, Sendable {
     /// Lifetime-monotonic position assigned before retention bounds can evict the event.
@@ -91,16 +106,25 @@ public struct TerminalFlightRecordingEvent: Equatable, Sendable {
     /// Where these bytes sit in their own direction's stream. Nil for an event that carries
     /// no bytes at all, such as a resize.
     public let payload: TerminalFlightRecordingPayloadSpan?
+    /// Who chose these bytes, for a write; nil for every kind that writes nothing.
+    public let writeAttribution: TerminalFlightRecordingWriteAttribution?
 
     /// Keeps timing and byte-position metadata beside, but behaviorally independent from, the
-    /// replay event.
+    /// replay event, and refuses a write whose chooser is unstated.
     public init(
         sequence: UInt64,
         event: NeutralTerminalRecordingEvent,
         elapsedNanoseconds: UInt64,
         originElapsedNanoseconds: UInt64? = nil,
-        payload: TerminalFlightRecordingPayloadSpan? = nil
+        payload: TerminalFlightRecordingPayloadSpan? = nil,
+        writeAttribution: TerminalFlightRecordingWriteAttribution? = nil
     ) {
+        if case .write = event {
+            precondition(writeAttribution != nil, "a recorded write must state who chose its bytes")
+        } else {
+            precondition(writeAttribution == nil, "only a write has a chooser to name")
+        }
+        self.writeAttribution = writeAttribution
         self.sequence = sequence
         self.event = event
         self.elapsedNanoseconds = elapsedNanoseconds
@@ -281,15 +305,43 @@ package final class TerminalFlightRecorder {
         startedNanoseconds = now()
     }
 
-    /// `origin` is when the event that produced these bytes occurred, on this recorder's own
-    /// clock, and belongs only to bytes travelling toward the child. Callers pass nil for
-    /// anything that originated at the pane owner. Unlike the transfer stamp, origins are not
-    /// forced monotonic along the sequence: they describe their own event, not this one.
+    /// Records one transition that sends the child nothing.
     ///
-    /// The interaction-intent gate lives here rather than at the call sites, so a capture site
-    /// added later cannot forget it: every owner records unconditionally and the configuration
-    /// decides what survives.
-    package func record(_ event: NeutralTerminalRecordingEvent, origin: UInt64? = nil) {
+    /// Writes have their own entry point because only a write has bytes travelling toward the
+    /// child, and so only a write has an origin stamp and a chooser to name. Splitting the two
+    /// is what makes "every write on the tape states who chose it" true by construction rather
+    /// than by the discipline of each call site.
+    package func record(_ event: NeutralTerminalRecordingEvent) {
+        if case .write = event {
+            preconditionFailure("record a write through recordWrite, which states who chose it")
+        }
+        append(event, origin: nil, writeAttribution: nil)
+    }
+
+    /// `origin` is when the event that produced these bytes occurred, on this recorder's own
+    /// clock. Callers pass nil for anything that originated at the pane owner. Unlike the
+    /// transfer stamp, origins are not forced monotonic along the sequence: they describe
+    /// their own event, not this one.
+    ///
+    /// `attribution` is the fact the bytes themselves cannot carry -- a reply and a user send
+    /// look identical on the wire -- so the submitting path has to state it here.
+    package func recordWrite(
+        _ bytes: [UInt8],
+        origin: UInt64?,
+        attribution: TerminalFlightRecordingWriteAttribution
+    ) {
+        append(.write(bytes), origin: origin, writeAttribution: attribution)
+    }
+
+    /// The one place an event reaches the ring, so the interaction-intent gate, the byte
+    /// watermarks, and the retention charge are each applied exactly once. The gate lives here
+    /// rather than at the call sites, so a capture site added later cannot forget it: every
+    /// owner records unconditionally and the configuration decides what survives.
+    private func append(
+        _ event: NeutralTerminalRecordingEvent,
+        origin: UInt64?,
+        writeAttribution: TerminalFlightRecordingWriteAttribution?
+    ) {
         guard configuration.recordsInteractionIntent || Self.isInteractionIntent(event) == false
         else { return }
         let current = now()
@@ -310,7 +362,8 @@ package final class TerminalFlightRecorder {
                 event: event,
                 elapsedNanoseconds: elapsed,
                 originElapsedNanoseconds: originElapsed,
-                payload: payload
+                payload: payload,
+                writeAttribution: writeAttribution
             ),
             chargedBytes: Self.budgetCharge(of: event),
             feedBytesBeforeEvent: totalFeedBytes,

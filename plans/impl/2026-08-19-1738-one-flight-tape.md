@@ -235,5 +235,20 @@ attribution, and grouping-sensitive shapes assert tape `.write` spans.
 
 ## Commit progress
 - [x] 1. Gate interaction-intent kinds on the flight recorder's configuration
-- [ ] 2. Carry write attribution from the submitting path onto the tape
+- [x] 2. Carry write attribution from the submitting path onto the tape
 - [ ] 3. Source characterization recordings from the tape and delete the five capture buffers
+
+## Implementation notes
+
+- Commit 2 gave writes their own recorder entry point (`recordWrite(_:origin:
+  attribution:)`) instead of adding a defaulted parameter to `record`. Only a
+  write has bytes travelling toward the child, so only a write has an origin
+  stamp or a chooser; splitting the two makes I5 true by construction rather
+  than by call-site discipline, and `TerminalFlightRecordingEvent.init` refuses
+  the two mismatched pairings outright. `record` and `recordWrite` share one
+  private `append`, so the interaction-intent gate, the byte watermarks, and the
+  retention charge each stay in one place.
+- The reducer releases the pane's launch line as a write with no submission of
+  its own. That line is attributed `.pane`: nobody typed it, and it is the same
+  kind of fact as a focus report. So an absent submission means the pane, not an
+  unknown chooser.

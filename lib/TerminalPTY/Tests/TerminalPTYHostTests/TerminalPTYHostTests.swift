@@ -1826,6 +1826,46 @@ struct TerminalPTYHostTests {
         }, within: .seconds(20)))
         await host.close()
     }
+
+    @Test("every recorded write states who chose its bytes", .timeLimit(.minutes(1)))
+    func recordedWritesStateTheirChooser() async throws {
+        // Intent: the tape separates the three choosers of bytes going to the child -- the
+        //   user, the pane's own business, and the terminal's answer to a query -- and the
+        //   pane's launch line is the pane's own.
+        // Why it exists: a reply and a plain user send are byte-identical and both cross with
+        //   no origin stamp, so a reader that could not ask the tape would have to guess, and
+        //   a wait for the user's input would end on an answer nobody typed.
+        // Scenario: focus reporting is on, the user presses a key, focus arrives, and then
+        //   the child asks for the cursor position.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[?1004h"))
+        let submission = host.fencedFlightRecordingOriginFromNow().cursor
+
+        host.sendKey(.up, modifiers: [])
+        #expect(await host.settledPendingInputByteCount() == 0)
+        host.sendFocus(true)
+        #expect(await host.settledPendingInputByteCount() == 0)
+        #expect(await pane.writeFromChild("\u{1B}[6n"))
+        #expect(await host.settledPendingInputByteCount() == 0)
+
+        let writes = host.fencedFlightRecording(from: submission).events
+            .filter { writtenBytes($0) != nil }
+        #expect(writes.compactMap(writtenBytes) == [
+            Array("\u{1B}[A".utf8),
+            Array("\u{1B}[I".utf8),
+            Array("\u{1B}[1;1R".utf8),
+        ])
+        #expect(writes.map(\.writeAttribution) == [.user, .pane, .reply])
+
+        let lifetime = host.fencedFlightRecordingCapture().snapshot.events
+            .filter { writtenBytes($0) != nil }
+        #expect(
+            lifetime.first?.writeAttribution == .pane,
+            "the launch line is the pane's own business, not the user's"
+        )
+        await host.close()
+    }
 }
 
 /// Exercises the owner against a real child process: launch ownership, signals, and exit.
