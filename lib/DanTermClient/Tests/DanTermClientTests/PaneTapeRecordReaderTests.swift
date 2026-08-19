@@ -1,6 +1,6 @@
-// Coverage for the reader's own side of the stream: assembling a multi-part state transfer,
-// and recognising the notification that carries a record. The record shape's decode is
-// covered beside its declaration in DanTermProtocol.
+// Coverage for the reader's own side of the stream: assembling a multi-part state transfer.
+// The record shape's decode and the notification envelope that carries it are covered beside
+// their declarations in DanTermProtocol.
 import Foundation
 import Testing
 import DanTermProtocol
@@ -81,18 +81,5 @@ struct PaneTapeRecordReaderTests {
             cursor: cursor
         ))
         #expect(assembled?.droppedHistoryRows == 512)
-    }
-
-    @Test("a tape notification is recognised by method and carries its record verbatim")
-    func notificationCarriesItsRecord() throws {
-        let record = JSONValue.object(["kind": .string("end"), "reason": .string("pane-closed")])
-        let carried = try #require(PaneTapeStreamNotification(
-            method: Methods.paneTapeEvent,
-            params: .object(["subscription": .string("s7"), "record": record])
-        ))
-
-        #expect(carried.subscriptionId == "s7")
-        #expect(carried.record == record)
-        #expect(PaneTapeStreamNotification(method: "pane.other", params: .object([:])) == nil)
     }
 }

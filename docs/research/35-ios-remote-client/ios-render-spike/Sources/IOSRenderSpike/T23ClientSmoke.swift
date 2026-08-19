@@ -308,7 +308,7 @@ final class T23StreamReader: @unchecked Sendable {
                             + " syncPending=\(start.cursor == nil)"
                     ))
                 case .notification(let method, let params):
-                    guard let notification = PaneTapeStreamNotification(
+                    guard let notification = PaneTapeEventNotification<JSONValue>(
                         method: method,
                         params: params
                     ) else { continue }

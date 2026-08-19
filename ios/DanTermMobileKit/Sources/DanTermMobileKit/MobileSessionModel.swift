@@ -456,7 +456,10 @@ public struct MobileSessionModel: Equatable, Sendable {
                 panes = carried.roster.panes
                 return [.redraw]
             }
-            guard let notification = PaneTapeStreamNotification(method: method, params: params),
+            guard let notification = PaneTapeEventNotification<JSONValue>(
+                      method: method,
+                      params: params
+                  ),
                   let record = decodePaneTapeRecord(notification.record)
             else { return [] }
             return take(record, env: env)

@@ -90,7 +90,7 @@ func renderPaneTapeStream(
     }
 
     while let notification = try session.nextNotification() {
-        guard let carried = PaneTapeStreamNotification(
+        guard let carried = PaneTapeEventNotification<JSONValue>(
             method: notification.method,
             params: notification.params
         ) else { continue }

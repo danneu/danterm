@@ -300,7 +300,10 @@ final class T5Probe: @unchecked Sendable {
         params: JSONValue?,
         matching marker: [UInt8]? = nil
     ) -> Bool {
-        guard let notification = PaneTapeStreamNotification(method: method, params: params),
+        guard let notification = PaneTapeEventNotification<JSONValue>(
+                  method: method,
+                  params: params
+              ),
               let record = decodePaneTapeRecord(notification.record)
         else { return false }
         switch record {

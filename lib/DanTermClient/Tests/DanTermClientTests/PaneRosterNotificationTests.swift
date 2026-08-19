@@ -51,7 +51,10 @@ struct PaneRosterNotificationTests {
 
         var arrivals: [String] = []
         while let next = try session.nextNotification() {
-            if let tape = PaneTapeStreamNotification(method: next.method, params: next.params) {
+            if let tape = PaneTapeEventNotification<JSONValue>(
+                method: next.method,
+                params: next.params
+            ) {
                 arrivals.append("tape:" + (try #require(tape.record["kind"]?.asString)))
             } else if let carried = PaneRosterNotification(
                 method: next.method,

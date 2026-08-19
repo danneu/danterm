@@ -175,17 +175,6 @@ func makePaneTapeEventRecord<Event>(
     ))
 }
 
-/// The params object a `pane.tape.event` notification carries.
-///
-/// The record rides it as the typed value it is, so the whole line -- envelope, params, record,
-/// and the recorded event inside it -- is written in the single JSON pass `encodeIpcLine` makes.
-struct PaneTapeEventNotification<Event: Encodable>: Encodable {
-    /// Names the stream this record belongs to, so a client following several panes on one
-    /// socket can route it.
-    let subscription: String
-    let record: PaneTapeOutgoingRecord<Event>
-}
-
 /// The single site that puts a tape record on the wire, for dumps, batches, and terminators.
 ///
 /// Each call enqueues straight onto the connection's serial write queue, so records reach the

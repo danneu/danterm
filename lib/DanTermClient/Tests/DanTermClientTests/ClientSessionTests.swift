@@ -354,7 +354,10 @@ struct ClientSessionTests {
 
         var records: [String] = []
         while let next = try session.nextNotification() {
-            let carried = try #require(PaneTapeStreamNotification(method: next.method, params: next.params))
+            let carried = try #require(PaneTapeEventNotification<JSONValue>(
+                method: next.method,
+                params: next.params
+            ))
             records.append(try #require(carried.record["kind"]?.asString))
         }
         #expect(records == ["first", "second", "third"])

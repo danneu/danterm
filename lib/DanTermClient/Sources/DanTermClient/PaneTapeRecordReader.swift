@@ -1,7 +1,7 @@
-// The reader's side of the pane-tape stream: assembling a multi-part state transfer, and
-// recognising the notification that carries a record. The record shape itself -- its keys,
-// its typed family, and its decode -- is declared once in DanTermProtocol, so nothing here
-// spells a record key.
+// The reader's side of the pane-tape stream: assembling a multi-part state transfer out of the
+// records a stream delivers. The record shape itself -- its keys, its typed family, and its
+// decode -- and the notification envelope that carries it are declared once in DanTermProtocol,
+// so nothing here spells a wire key.
 import DanTermProtocol
 
 /// The complete state transfer a reader may apply atomically at its continuation cursor.
@@ -96,26 +96,5 @@ public struct PaneTapeSyncAssembler: Sendable {
         expectedCount = nil
         bytes.removeAll(keepingCapacity: true)
         transfer = nil
-    }
-}
-
-/// One `pane.tape.event` notification: which subscription it belongs to, and the record it
-/// carries in the exact bytes the producer sent.
-///
-/// The record stays a `JSONValue` beside its decoded form because a consumer that replays
-/// a capture must forward what arrived, not a re-encoding of what this build understood.
-public struct PaneTapeStreamNotification: Equatable, Sendable {
-    public let subscriptionId: String
-    public let record: JSONValue
-
-    /// Returns nil when the notification is not a tape event, so a client can hold one
-    /// conversation carrying more than one kind of notification.
-    public init?(method: String, params: JSONValue?) {
-        guard method == Methods.paneTapeEvent,
-              let subscription = params?["subscription"]?.asString,
-              let record = params?["record"]
-        else { return nil }
-        self.subscriptionId = subscription
-        self.record = record
     }
 }
