@@ -121,7 +121,7 @@ references are the requirement.
 | 4 | [BUG-04](#bug-04) | CSI n P (DCH), CSI n @ (ICH) | **pinned by a test** | Stop suppressing ICH and DCH when the cursor row is outside the vertical scroll region |
 | 4 | [BUG-05](#bug-05) | Legacy (non-kitty) Ctrl+key text encoding | **pinned by a test** | Map Ctrl with / and the digits 2-8 to their C0 control bytes |
 | 4 | [BUG-06](#bug-06) | OSC 10 ; ? BEL and OSC 11 ; ? BEL (dynamic c | **pinned by a test** | Reply to an OSC query with the terminator the request used, not always ST |
-| 3 | [BUG-07](#bug-07) | SO (0x0E, LS1) and SI (0x0F, LS0), with ESC  | unpinned | Add G1 designation and SI/SO locking shifts so 0x0E/0x0F switch the active charset |
+| 3 | [BUG-07](#bug-07) | SO (0x0E, LS1) and SI (0x0F, LS0), with ESC  | **done** `e0d2e80c` | Add G1 designation and SI/SO locking shifts so 0x0E/0x0F switch the active charset |
 | 3 | [BUG-08](#bug-08) | ESC # 8 (DECALN) | unpinned | Make DECALN reset the margins, origin mode, and rendition, and home the cursor |
 | 3 | [BUG-09](#bug-09) | CSI n L (IL), CSI n M (DL) | **pinned by a test** | Move the cursor to column 0 on IL and DL |
 | 3 | [BUG-10](#bug-10) | CSI ? Ps J (DECSED) and CSI ? Ps K (DECSEL) | unpinned | Dispatch DECSED and DECSEL (CSI ? Ps J / CSI ? Ps K) as ED and EL |
@@ -161,7 +161,7 @@ references are the requirement.
 wider than this item asked for: DanTerm implements the whole 7-bit GL half of
 ISO 2022 -- SCS designation into all four slots, SI/SO and LS2/LS3 locking
 shifts, SS2/SS3 single shifts, and GL translation on the print path -- so
-[BUG-07](#bug-07) is closed by the same commit. `d61c196e` then carries the
+[BUG-07](#bug-07) is closed by the same commit and ticked as such. `d61c196e` then carries the
 live and saved charset state across a state-synchronization fence, and
 `473b8087` adapts WezTerm's line-drawing resize case now that the glyphs exist.
 The probe below now yields the expected `┌─┐ab     `.
@@ -318,6 +318,12 @@ The probe below now yields the expected `┌─┐ab     `.
 ### BUG-07. Add G1 designation and SI/SO locking shifts so 0x0E/0x0F switch the active charset
 
 `SO (0x0E, LS1) and SI (0x0F, LS0), with ESC ) 0 (SCS, designate into G1)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5
+
+**Done** in `e0d2e80c`, the same commit as [BUG-01](#bug-01): that work
+implements the whole 7-bit GL half of ISO 2022, so SI/SO and LS2/LS3 locking
+shifts and SS2/SS3 single shifts all dispatch, not just G0 designation. The
+item is right that these are separate dispatch paths, and both were fixed. The
+probe below now yields the expected `┌─┐ab     `.
 
 **Problem.** SO and SI are C0 controls that select which designated charset is invoked into GL. DanTerm's C0 executor has no case for either, so they are silently discarded, and since there is no G1 slot the ESC ) 0 that precedes them is discarded too. A stream that switches to line drawing with the locking-shift form prints raw ASCII for its whole graphics run. This is the same missing state as the ESC ( 0 defect but a separate dispatch path: a fix for one does not fix the other.
 
