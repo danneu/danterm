@@ -723,6 +723,76 @@ import Testing
         ) == false)
     }
 
+    @Test("every structural discriminator emits a tree edit, never a layout-only op")
+    func containerOpsClassifyEveryStructuralDiscriminatorAsTreeEdit() {
+        // Intent: each way one pane tree can differ structurally from another --
+        //   node kind, split id, split direction, leaf pane id, and a change
+        //   buried in a nested descendant -- makes computeContainerOps emit
+        //   `.setTree` and never `.setLayout`.
+        // Why it exists: the tree-vs-ratio decision compares two layout trees
+        //   while skipping their ratios. A comparison that drops one
+        //   discriminator would report a real tree edit as a ratio-only change,
+        //   and containerOpsEditVisibleTree would then fail to cancel a pane
+        //   drag whose split no longer exists.
+        // Scenario: spec-first sweep over the structural discriminators.
+        let tabId = TabId()
+        let p1 = PaneId(), p2 = PaneId(), p3 = PaneId()
+        let sid = SplitId(), otherSid = SplitId(), innerSid = SplitId()
+
+        func tab(_ root: SplitNodeModel) -> TabModel {
+            TabModel(id: tabId, paneTree: PaneTree(root: root, focusedPaneId: p1))
+        }
+        func expectTreeEdit(_ old: SplitNodeModel, _ new: SplitNodeModel, _ what: String) {
+            let ops = computeContainerOps(
+                old: [tabId: containerShape(of: tab(old))],
+                new: [tabId: containerShape(of: tab(new))],
+                selectedTabId: tabId
+            )
+            #expect(ops.contains(.setTree(tabId: tabId)), "\(what) is a tree edit")
+            #expect(ops.contains(.setLayout(tabId: tabId)) == false,
+                "\(what) must not be reported as a ratio-only layout change")
+        }
+
+        let leaf = SplitNodeModel.leaf(PaneModel(id: p1))
+        let split = splitNode(sid, p1, p2, ratio: 0.5)
+        expectTreeEdit(leaf, split, "splitting a leaf")
+        expectTreeEdit(split, leaf, "closing a pane")
+        expectTreeEdit(split, splitNode(otherSid, p1, p2, ratio: 0.5), "a new split id")
+        expectTreeEdit(
+            split,
+            .split(
+                id: sid,
+                direction: .vertical,
+                first: .leaf(PaneModel(id: p1)),
+                second: .leaf(PaneModel(id: p2)),
+                ratio: 0.5
+            ),
+            "a split direction change")
+        expectTreeEdit(split, splitNode(sid, p1, p3, ratio: 0.5), "a swapped leaf pane id")
+
+        let nested = SplitNodeModel.split(
+            id: sid,
+            direction: .horizontal,
+            first: .leaf(PaneModel(id: p1)),
+            second: splitNode(innerSid, p2, p3, ratio: 0.5),
+            ratio: 0.5
+        )
+        let nestedEdited = SplitNodeModel.split(
+            id: sid,
+            direction: .horizontal,
+            first: .leaf(PaneModel(id: p1)),
+            second: .split(
+                id: innerSid,
+                direction: .vertical,
+                first: .leaf(PaneModel(id: p2)),
+                second: .leaf(PaneModel(id: p3)),
+                ratio: 0.5
+            ),
+            ratio: 0.5
+        )
+        expectTreeEdit(nested, nestedEdited, "a change confined to a nested descendant")
+    }
+
     @Test("ContainerShape: a leaf PaneModel metadata edit compares equal")
     func containerShapeIgnoresLeafMetadata() {
         // Intent: leaf metadata (title/cwd/progress/todos/theme) is NOT
@@ -880,10 +950,19 @@ private func checkRowOps(_ old: SidebarProjection?, _ new: SidebarProjection, _ 
 // MARK: - Container shape + op model-apply (Stage 8)
 
 private func cShape(_ p: PaneId) -> ContainerShape {
-    ContainerShape(tree: .leaf(p), isZoomed: false, zoomedLeaf: nil)
+    ContainerShape(layout: .leaf(p), zoomedLeaf: nil)
 }
 private func cSplitShape(_ a: PaneId, _ b: PaneId) -> ContainerShape {
-    ContainerShape(tree: .split(id: SplitId(), direction: .horizontal, first: .leaf(a), second: .leaf(b)), isZoomed: false, zoomedLeaf: nil)
+    ContainerShape(
+        layout: .split(
+            id: SplitId(),
+            direction: .horizontal,
+            first: .leaf(a),
+            second: .leaf(b),
+            ratio: 0.5
+        ),
+        zoomedLeaf: nil
+    )
 }
 private func splitNode(_ sid: SplitId, _ a: PaneId, _ b: PaneId, ratio: CGFloat) -> SplitNodeModel {
     .split(id: sid, direction: .horizontal, first: .leaf(PaneModel(id: a)), second: .leaf(PaneModel(id: b)), ratio: ratio)

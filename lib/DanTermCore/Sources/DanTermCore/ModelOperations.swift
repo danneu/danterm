@@ -979,12 +979,6 @@ private func sumUnread(in node: SplitNodeModel, byPane: [PaneId: Int]) -> Int {
   }
 }
 
-/// Structural fingerprint used to distinguish tree edits from ratio-only layout changes.
-indirect enum ContainerShapeNode: Equatable {
-  case leaf(PaneId)
-  case split(id: SplitId, direction: SplitNodeModel.Direction, first: ContainerShapeNode, second: ContainerShapeNode)
-}
-
 /// Carries every pure pane-layout input while excluding unrelated pane payload.
 indirect enum ContainerLayoutNode: Equatable {
   case leaf(PaneId)
@@ -997,36 +991,18 @@ indirect enum ContainerLayoutNode: Equatable {
   )
 }
 
-/// Structural, layout, and zoom inputs that can change a mounted container.
+/// Layout and zoom inputs that can change a mounted container.
+///
+/// Two fields only: the structural fingerprint is not stored, because
+/// `sameContainerStructure` reads it out of `layout` in place. That makes a
+/// shape whose structure contradicts its own layout unrepresentable.
 struct ContainerShape: Equatable {
-  let tree: ContainerShapeNode
   let layout: ContainerLayoutNode
-  let isZoomed: Bool
   // focusedPaneId while zoomed; nil otherwise -- so a focus change in an unzoomed
   // tab does NOT drift the shape (which is why a pane click needs no tree update).
+  // It also carries the zoom fact on its own: `PaneTree.zoomedPaneId` is nil iff
+  // the tab is unzoomed.
   let zoomedLeaf: PaneId?
-
-  init(
-    tree: ContainerShapeNode,
-    layout: ContainerLayoutNode? = nil,
-    isZoomed: Bool,
-    zoomedLeaf: PaneId?
-  ) {
-    self.tree = tree
-    self.layout = layout ?? defaultContainerLayoutNode(tree)
-    self.isZoomed = isZoomed
-    self.zoomedLeaf = zoomedLeaf
-  }
-}
-
-/// Reduce a split tree to its structural fingerprint (drops ratios + payload).
-func containerShapeNode(_ node: SplitNodeModel) -> ContainerShapeNode {
-  switch node {
-  case .leaf(let pane):
-    return .leaf(pane.id)
-  case .split(let id, let dir, let first, let second, _):
-    return .split(id: id, direction: dir, first: containerShapeNode(first), second: containerShapeNode(second))
-  }
 }
 
 /// Drops pane payload while retaining every input to the pane layout function.
@@ -1045,28 +1021,30 @@ func containerLayoutNode(_ node: SplitNodeModel) -> ContainerLayoutNode {
   }
 }
 
-/// Supplies neutral ratios for fixtures concerned only with structural container behavior.
-private func defaultContainerLayoutNode(_ node: ContainerShapeNode) -> ContainerLayoutNode {
-  switch node {
-  case .leaf(let paneId):
-    return .leaf(paneId)
-  case .split(let id, let direction, let first, let second):
-    return .split(
-      id: id,
-      direction: direction,
-      first: defaultContainerLayoutNode(first),
-      second: defaultContainerLayoutNode(second),
-      ratio: 0.5
-    )
+/// Compares two layout trees while skipping ratios, so a divider drag reads as
+/// equal and every real tree edit reads as different.
+///
+/// Compares in place rather than deriving a ratio-free tree per call: building
+/// one would heap-allocate a box per node on every diff, which is the cost this
+/// comparison exists to avoid.
+func sameContainerStructure(_ a: ContainerLayoutNode, _ b: ContainerLayoutNode) -> Bool {
+  switch (a, b) {
+  case (.leaf(let aId), .leaf(let bId)):
+    return aId == bId
+  case (.split(let aId, let aDir, let aFirst, let aSecond, _),
+        .split(let bId, let bDir, let bFirst, let bSecond, _)):
+    return aId == bId && aDir == bDir
+      && sameContainerStructure(aFirst, bFirst)
+      && sameContainerStructure(aSecond, bSecond)
+  case (.leaf, .split), (.split, .leaf):
+    return false
   }
 }
 
 /// The container shape for one tab.
 func containerShape(of tab: TabModel) -> ContainerShape {
   ContainerShape(
-    tree: containerShapeNode(tab.paneTree.root),
     layout: containerLayoutNode(tab.paneTree.root),
-    isZoomed: tab.paneTree.isZoomed,
     zoomedLeaf: tab.paneTree.zoomedPaneId
   )
 }

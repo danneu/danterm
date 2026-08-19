@@ -953,7 +953,9 @@ func computeContainerOps(
       ops.append(.build(tabId: tabId))
       continue
     }
-    if oldShape.tree != shape.tree {
+    // Structure first: a tree edit is also a layout inequality, so the
+    // ratio-skipping comparison has to claim it before the layout check.
+    if !sameContainerStructure(oldShape.layout, shape.layout) {
       ops.append(.setTree(tabId: tabId))
     } else if oldShape.layout != shape.layout {
       ops.append(.setLayout(tabId: tabId))
