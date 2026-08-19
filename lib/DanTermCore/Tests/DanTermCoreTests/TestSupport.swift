@@ -227,3 +227,28 @@ func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, paneA: Pan
     let paneOrder = allPaneIds(selectedTab(in: model)!.paneTree.root)
     return (model, tabId, paneOrder[0], paneOrder[1])
 }
+
+/// Lifts a reported activity into the form `AgentLifecycle` stores, so a test
+/// about chips, projections, or alerts can keep naming the vocabulary a hook
+/// uses instead of minting a wait generation it does not care about.
+func storedActivity(
+    _ activity: AgentActivity?,
+    waitGeneration: UInt64 = 1
+) -> AgentActivityState? {
+    switch activity {
+    case .working: .working
+    case .waiting: .waiting(generation: AgentWaitGeneration(rawValue: waitGeneration))
+    case .idle: .idle
+    case nil: nil
+    }
+}
+
+/// Reads an attached agent's session and reported activity, dropping the wait
+/// generation so an assertion pins the vocabulary rather than the scheme that
+/// allocates generations.
+func attachedAgent(
+    _ agent: AgentLifecycle
+) -> (session: AgentSession, activity: AgentActivity?)? {
+    guard case .attached(let session, let activity) = agent else { return nil }
+    return (session, activity?.reported)
+}

@@ -173,6 +173,16 @@ struct SessionModel: Equatable {
     var agent: AgentLifecycle = .none
     var lastCommand: String?
     var lastAgentSession: AgentSession?
+    /// Counts the wait generations minted for this session. It is per session
+    /// because retraction is too: input to one pane can only name that pane's
+    /// wait, so generations never have to be unique across panes.
+    private(set) var waitGenerationCounter: UInt64 = 0
+
+    /// Hands out the next never-before-used wait generation for this session.
+    mutating func mintWaitGeneration() -> AgentWaitGeneration {
+        waitGenerationCounter &+= 1
+        return AgentWaitGeneration(rawValue: waitGenerationCounter)
+    }
 }
 
 struct PaneModel: Equatable {

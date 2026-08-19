@@ -372,6 +372,12 @@ import Testing
                 sessionId: sessionId,
                 report: .agentActivityChanged(session: agent, activity: .waiting)
             ),
+            // A typing burst is the highest-rate producer of all: one report per
+            // delivered key. It defers its sweep the way an activity report does.
+            .sessionReport(
+                sessionId: sessionId,
+                report: .userInputDelivered(waitGeneration: AgentWaitGeneration(rawValue: 1))
+            ),
         ]
 
         for msg in coalescedMessages {

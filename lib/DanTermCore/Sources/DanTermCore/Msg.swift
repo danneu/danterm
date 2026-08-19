@@ -237,7 +237,7 @@ extension Msg {
         case .sessionReport(_, let report):
             switch report {
             case .title, .cwd, .progress, .commandStarted, .commandEnded,
-                 .connectionDeclared, .agentActivityChanged:
+                 .connectionDeclared, .agentActivityChanged, .userInputDelivered:
                 return true
             case .integrationReady, .agentAttached, .agentDetached:
                 return false

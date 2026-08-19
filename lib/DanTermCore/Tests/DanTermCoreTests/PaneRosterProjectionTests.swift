@@ -98,7 +98,7 @@ struct PaneRosterProjectionTests {
         mutateFocusedSession(&model, tab: 0) {
             $0.agent = .attached(
                 session: AgentSession(kind: "codex", sessionId: "thread-1")!,
-                activity: .waiting
+                activity: storedActivity(.waiting)
             )
         }
         #expect(paneRoster(in: model) == baseline)

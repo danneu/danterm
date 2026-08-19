@@ -19,7 +19,7 @@ struct PaneLifecycleConsumerTests {
             integration: .ready,
             command: .running("swift test"),
             connection: .remote(identity: RemoteSession(user: "dan", host: "caja")),
-            agent: .attached(session: agent, activity: .waiting)
+            agent: .attached(session: agent, activity: storedActivity(.waiting))
         )
 
         let value = paneLifecycleInspectionFields(state)

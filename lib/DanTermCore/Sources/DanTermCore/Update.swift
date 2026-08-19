@@ -526,10 +526,16 @@ func update(
     // MARK: - Session Lifecycles
 
     case .sessionReport(let sessionId, let report):
+        // Read inside the same mutation the reducer runs in, because the alert
+        // below turns on the visible activity the pane had *before* this report.
+        var priorAgent: AgentLifecycle = .none
         guard report.isAdmitted,
               let mutation = model.updateSession(
                 sessionId,
-                { reduceSession(&$0, report: report) }
+                { session in
+                    priorAgent = session.agent
+                    reduceSession(&session, report: report)
+                }
               )
         else { return [] }
         switch report {
@@ -539,6 +545,10 @@ func update(
             return []
         case .agentActivityChanged(_, .waiting):
             guard mutation.didChange else { return [] }
+            // Every admitted wait mints a fresh generation, so the model always
+            // differs here. The alert belongs to the transition the user can
+            // see, so a report that repeats an already-visible wait raises none.
+            if case .attached(_, .waiting) = priorAgent { return [] }
             guard selectedTab(in: model)?.paneTree.focusedPaneId != mutation.paneId else { return [] }
             return desktopAlertCommands(
                 model: &model,
@@ -547,6 +557,12 @@ func update(
                 body: "Waiting for input",
                 env: env
             )
+        // Retraction is silent by design: input tells us the wait ended, not
+        // what the agent does next, so it raises no alert and clears none.
+        // Whether the pane's unread badge clears is `alertClearMode` policy,
+        // which already has an owner.
+        case .userInputDelivered:
+            return []
         case .integrationReady, .connectionDeclared, .agentActivityChanged:
             return []
         }

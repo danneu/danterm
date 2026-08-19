@@ -23,7 +23,8 @@ struct PaneLifecycleReducerTests {
         #expect(state.integration == .ready)
         #expect(state.command == .idle)
         #expect(state.connection == .remote(identity: nil))
-        #expect(state.agent == .attached(session: session, activity: .waiting))
+        #expect(attachedAgent(state.agent)?.session == session)
+        #expect(attachedAgent(state.agent)?.activity == .waiting)
     }
 
     @Test("initial state has no reported live lifecycles")
@@ -77,7 +78,8 @@ struct PaneLifecycleReducerTests {
         #expect(state.integration == .ready)
         #expect(state.command == .idle)
         #expect(state.connection == .remote(identity: remote))
-        #expect(state.agent == .attached(session: session, activity: .waiting))
+        #expect(attachedAgent(state.agent)?.session == session)
+        #expect(attachedAgent(state.agent)?.activity == .waiting)
     }
 
     // Intent: reported progress belongs to the foreground command that emitted

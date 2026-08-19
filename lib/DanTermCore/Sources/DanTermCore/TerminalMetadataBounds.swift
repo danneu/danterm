@@ -29,7 +29,7 @@ extension SessionReport {
             (identity?.user.utf8.count ?? 0) + (identity?.host.utf8.count ?? 0)
                 <= TerminalMetadataBounds.maximumValueBytes
         case .progress, .integrationReady, .commandEnded, .connectionDeclared(.local),
-             .agentAttached, .agentActivityChanged, .agentDetached:
+             .agentAttached, .agentActivityChanged, .agentDetached, .userInputDelivered:
             true
         }
     }

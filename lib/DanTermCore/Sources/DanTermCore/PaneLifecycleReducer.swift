@@ -30,11 +30,60 @@ enum AgentActivity: Equatable {
     case idle
 }
 
+/// Identifies one admitted `waiting` claim so a later input can name the exact
+/// wait it ended.
+///
+/// Opaque and ephemeral: the number is only ever compared, never ordered or
+/// read for meaning, and no snapshot persists it. It exists because a wait
+/// raised after an input was submitted must survive that input's later
+/// delivery, which a bare "the agent is waiting" bit cannot express.
+struct AgentWaitGeneration: Equatable {
+    let rawValue: UInt64
+}
+
+/// The stored form of agent activity, where `waiting` carries the generation
+/// that identifies it.
+///
+/// Separate from `AgentActivity` because a reporter can only name the state; the
+/// generation is DanTerm's, minted when the report is admitted. Coupling it to
+/// the `waiting` case makes a generation without a wait unrepresentable.
+enum AgentActivityState: Equatable {
+    case working
+    case waiting(generation: AgentWaitGeneration)
+    case idle
+
+    /// The state as a reporter named it, for every surface that shows activity
+    /// and must not see the generation.
+    var reported: AgentActivity {
+        switch self {
+        case .working: .working
+        case .waiting: .waiting
+        case .idle: .idle
+        }
+    }
+}
+
 /// Couples an attached session with its optional reported activity so activity
 /// cannot outlive or precede attachment in stored state.
 enum AgentLifecycle: Equatable {
     case none
-    case attached(session: AgentSession, activity: AgentActivity?)
+    case attached(session: AgentSession, activity: AgentActivityState?)
+
+    /// Decides whether input carrying `waitGeneration` retracts the wait this
+    /// lifecycle currently holds.
+    ///
+    /// The one definition of the retraction rule. `reduceSession` guards with
+    /// it, and a runtime fast path that drops an occurrence before it reaches
+    /// `update()` must ask this and nothing else -- which is what makes removing
+    /// such a fast path unable to change anything observable.
+    func retractsWait(carrying waitGeneration: AgentWaitGeneration?) -> Bool {
+        guard let waitGeneration,
+              case .attached(_, .waiting(let current)) = self
+        else {
+            return false
+        }
+        return current == waitGeneration
+    }
 }
 
 /// Defines the stored facts a terminal session can report to the pure model.
@@ -49,6 +98,16 @@ enum SessionReport: Equatable {
     case agentAttached(AgentSession)
     case agentActivityChanged(session: AgentSession, activity: AgentActivity)
     case agentDetached(AgentSession)
+    /// Reports that a user-directed pane input operation put every one of its
+    /// bytes across the PTY, carrying the wait generation the model held when
+    /// the operation was submitted.
+    ///
+    /// A hook may assert that a wait began, but only DanTerm can observe the
+    /// user ending it, so this is the one report that ends a wait without the
+    /// agent saying anything. It retracts rather than replaces: input says the
+    /// wait is over, not what the agent does next. `nil` -- no wait was current
+    /// at submission -- retracts nothing.
+    case userInputDelivered(waitGeneration: AgentWaitGeneration?)
 }
 
 /// Applies one admitted report and keeps recovery memo updates atomic with the
@@ -97,7 +156,28 @@ func reduceSession(_ session: inout SessionModel, report: SessionReport) {
         else {
             return
         }
-        session.agent = .attached(session: currentSession, activity: activity)
+        let stored: AgentActivityState
+        switch activity {
+        case .working:
+            stored = .working
+        case .idle:
+            stored = .idle
+        // Every admitted wait renews the generation, including one that repeats
+        // the visible state. Otherwise a wait raised while an input was in
+        // flight would share the retiring wait's identity, and that input's
+        // later delivery would erase a wait the user has not seen yet.
+        case .waiting:
+            stored = .waiting(generation: session.mintWaitGeneration())
+        }
+        session.agent = .attached(session: currentSession, activity: stored)
+
+    case .userInputDelivered(let waitGeneration):
+        guard case .attached(let currentSession, _) = session.agent,
+              session.agent.retractsWait(carrying: waitGeneration)
+        else {
+            return
+        }
+        session.agent = .attached(session: currentSession, activity: nil)
 
     case .agentDetached(let reportingSession):
         guard case .attached(let currentSession, _) = session.agent,

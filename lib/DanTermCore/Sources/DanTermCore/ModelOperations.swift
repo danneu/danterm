@@ -695,7 +695,7 @@ func tabPaneChips(_ tab: TabModel, unreadByPane: [PaneId: Int]) -> [TabPaneChip]
 func paneChipState(agent: AgentLifecycle, hasUnreadAlert: Bool) -> PaneChipState {
   if hasUnreadAlert { return .attention }
   guard case .attached(_, let activity) = agent else { return .quiet }
-  switch activity {
+  switch activity?.reported {
   case .waiting: return .attention
   case .working: return .busy
   case .idle, nil: return .quiet

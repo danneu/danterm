@@ -18,7 +18,7 @@ struct ChipKindTests {
         let codex = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
 
         #expect(ChipKind(agent: .attached(session: claude, activity: nil)) == .claude)
-        #expect(ChipKind(agent: .attached(session: codex, activity: .waiting)) == .codex)
+        #expect(ChipKind(agent: .attached(session: codex, activity: storedActivity(.waiting))) == .codex)
     }
 
     // Why it exists: hook strings are untrusted and open-ended, so any kind
@@ -40,7 +40,7 @@ struct ChipKindTests {
         let claude = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
 
         for activity: AgentActivity? in [nil, .working, .waiting, .idle] {
-            #expect(ChipKind(agent: .attached(session: claude, activity: activity)) == .claude)
+            #expect(ChipKind(agent: .attached(session: claude, activity: storedActivity(activity))) == .claude)
         }
     }
 
@@ -169,7 +169,7 @@ struct ChipKindTests {
     func paneStateCollapsesAlertAndActivity() throws {
         let claude = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
         func state(_ activity: AgentActivity?, alert: Bool = false) -> PaneChipState {
-            paneChipState(agent: .attached(session: claude, activity: activity), hasUnreadAlert: alert)
+            paneChipState(agent: .attached(session: claude, activity: storedActivity(activity)), hasUnreadAlert: alert)
         }
 
         #expect(state(.waiting) == .attention)

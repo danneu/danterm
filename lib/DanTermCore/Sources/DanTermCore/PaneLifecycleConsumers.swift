@@ -41,7 +41,7 @@ func paneLifecycleInspectionFields(_ session: SessionModel?) -> [String: JSONVal
                 "kind": .string(session.kind),
                 "sessionId": .string(session.sessionId),
             ]),
-            "activity": activity.map { .string($0.ipcValue) } ?? .null,
+            "activity": activity.map { .string($0.reported.ipcValue) } ?? .null,
         ])
     }
 
