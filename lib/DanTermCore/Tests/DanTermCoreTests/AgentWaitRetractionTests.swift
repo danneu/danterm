@@ -49,7 +49,8 @@ struct AgentWaitRetractionTests {
     }
 
     // Intent: input delivered to a waiting pane leaves its agent attached with
-    //   no reported activity, and the pane's dot goes quiet.
+    //   no reported activity, so its agent mark goes quiet and its alert bit is
+    //   left where it was.
     // Why it exists: dismissing an AskUserQuestion with Esc emits no hook event
     //   at all, so a pane pinned at `waiting` claimed the agent needed the user
     //   long after the user had dealt with it.
@@ -62,10 +63,7 @@ struct AgentWaitRetractionTests {
             sessionId: session,
             report: .agentActivityChanged(session: agent, activity: .waiting)
         ))
-        #expect(paneChipState(
-            agent: model.pane(paneId)!.session!.agent,
-            hasUnreadAlert: false
-        ) == .attention)
+        #expect(paneAgentMark(agent: model.pane(paneId)!.session!.agent) == .waiting)
         let generation = try #require(currentWaitGeneration(model, paneId))
 
         update(&model, .sessionReport(
@@ -75,10 +73,10 @@ struct AgentWaitRetractionTests {
 
         #expect(attachedAgent(model.pane(paneId)?.session?.agent ?? .none)?.session == agent)
         #expect(attachedAgent(model.pane(paneId)?.session?.agent ?? .none)?.activity == nil)
-        #expect(paneChipState(
-            agent: model.pane(paneId)!.session!.agent,
-            hasUnreadAlert: false
-        ) == .quiet)
+        #expect(paneAgentMark(agent: model.pane(paneId)!.session!.agent) == .quiet)
+        // Retraction speaks for the agent alone; the pane's alert bit is not
+        // its to touch.
+        #expect(unreadAlertTally(for: model).byPane[paneId] == nil)
     }
 
     // Intent: retraction is silent -- it emits no command, raises no alert, and

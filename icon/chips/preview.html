@@ -200,9 +200,10 @@ function opaque(hex) {
 // --- state dots ----------------------------------------------------------
 //
 // The strip says which pane you are in. These candidates add a third channel:
-// which pane wants you, and which is still churning. One dot slot per chip,
-// precedence-ordered -- a pane can be mid-turn *and* have rung a bell, and the
-// bell is the more urgent fact, so it takes the slot.
+// which pane wants you, and which is still churning. The exploratory variants
+// spend one dot slot per chip and order it by precedence -- a pane can be
+// mid-turn *and* have rung a bell, and the bell takes the slot. What ships
+// gives the two facts a corner each instead, so a pane that is both says so.
 //
 // The states are the ones the hooks actually report (`agent activity --state`)
 // plus the unread-alert tally the sidebar already computes per pane:
@@ -211,10 +212,17 @@ function opaque(hex) {
 //   working turn in flight                 "still churning"
 //   idle    turn finished, nothing running
 //   none    no agent attached, or attached with nothing reported yet
+// The two are independent, so a state may pair them: "alert+working" is a pane
+// that rang while its agent kept going.
 // `idle` and `none` share a rendering on purpose: a turn that finished worth
 // knowing about already rang a bell, and an unreported activity is a state the
 // hooks have not claimed -- neither earns a mark.
-const DOT_STATES = ["alert", "waiting", "working", "idle", "none"];
+const DOT_STATES = ["alert", "waiting", "working", "alert+waiting", "alert+working",
+                    "idle", "none"];
+
+// The single-slot variants cannot say "both", so they see the collapse they
+// proposed -- alert takes the slot -- and stay exactly as they were written.
+function collapseState(s) { return s.indexOf("alert") === 0 ? "alert" : s; }
 
 // Each variant maps a state to {d, color, ringWidth, ring} or null for no dot.
 // `d` is the diameter in points at the 12pt pane-row chip.
@@ -231,20 +239,26 @@ const DOT_VARIANTS = [
     : s === "working"                  ? {d: 4, color: mode === "light" ? "#C77700" : "#FF9F0A"}
     : null],
   // What ships, read from the manifest rather than restated, so tuning a color
-  // or the diameter there shows up here and in the app together. One dot in two
-  // hues: the ring is what lets either of them hold an edge against the mark,
-  // the chip, and the row, so neither state goes without it.
-  ["shipped", "red / amber, one ringed dot (ships)", (s, mode, M, surface) => {
+  // or the diameter there shows up here and in the app together. Two corners:
+  // the alert on top in red, the agent below in green while it waits for you
+  // and amber while it works. Every mark is the same ringed dot, and the ring
+  // is what lets any of them hold an edge against the mark, the chip, and the
+  // row, so none of them goes without it.
+  ["shipped", "alert on top, agent below (ships)", (s, mode, M, surface) => {
       const P = M.paneList[mode].stateDot, G = M.stateDot;
-      const color = s === "alert" || s === "waiting" ? P.attention
-                  : s === "working"                  ? P.busy
-                  : null;
-      if (!color) return null;
       // The ring matches the row, so it reads as a gap around the dot rather
       // than a halo. On a selected row that is the accent, which the app gets
       // from SidebarRowView; the fixed neutral covers every other row.
-      return {d: G.diameter, color: color, ringWidth: G.ringWidth,
-              ring: surface === "sel" ? undefined : P.ring};
+      const mark = (color, corner) => ({
+        d: G.diameter, color: color, corner: corner, ringWidth: G.ringWidth,
+        ring: surface === "sel" ? undefined : P.ring});
+      const agent = s.indexOf("waiting") >= 0 ? P.waiting
+                  : s.indexOf("working") >= 0 ? P.busy
+                  : null;
+      const dots = [];
+      if (s.indexOf("alert") >= 0) dots.push(mark(P.alert, "top"));
+      if (agent) dots.push(mark(agent, "bottom"));
+      return dots;
   }],
   // The control: attention only, busy shown nowhere in the strip. Worth seeing
   // beside the others, because the case against marking `working` is that a
@@ -256,23 +270,27 @@ const DOT_VARIANTS = [
 
 const SHIPPED_DOT = DOT_VARIANTS.find(v => v[0] === "shipped")[2];
 
-// Mirrors PaneStripView.drawStateDot. The dot bleeds past the chip's corner --
+// Mirrors PaneStripView.drawStateDots. A dot bleeds past the chip's corner --
 // held fully inside a 12pt chip it would cover a third of the mark that
 // identifies the pane -- and is ringed so it reads against the mark, the chip,
-// and the row it overhangs alike. `ringFor` supplies that ring color: the
+// and the row it overhangs alike. `spec.ring` supplies that ring color: the
 // shipping variant takes a fixed neutral from the manifest, while the
-// exploratory ones fall back to the row they sit on.
-function stateDot(spec, size, M, mode, surfaceBg) {
-  if (!spec) return "";
-  const k = size / M.sizes.paneRow;
-  const d = spec.d * k;
-  const rw = (spec.ringWidth === undefined ? 1 : spec.ringWidth) * k;
-  const ring = spec.ring === undefined ? surfaceBg : spec.ring;
-  return `<span class="dot" style="width:${d.toFixed(2)}px;height:${d.toFixed(2)}px;` +
-         `top:${(-M.stateDot.bleed * k).toFixed(2)}px;` +
-         `right:${(-M.stateDot.bleed * k).toFixed(2)}px;` +
-         `background:${spec.color};` +
-         (rw > 0 ? `box-shadow:0 0 0 ${rw.toFixed(2)}px ${ring}` : "") + `"></span>`;
+// exploratory ones fall back to the row they sit on. A variant may return one
+// spec or a list of them, and `corner` says which end of the chip each takes.
+function stateDots(specs, size, M, mode, surfaceBg) {
+  if (!specs) return "";
+  if (!Array.isArray(specs)) specs = [specs];
+  return specs.map(spec => {
+    const k = size / M.sizes.paneRow;
+    const d = spec.d * k;
+    const rw = (spec.ringWidth === undefined ? 1 : spec.ringWidth) * k;
+    const ring = spec.ring === undefined ? surfaceBg : spec.ring;
+    const bleed = (-M.stateDot.bleed * k).toFixed(2);
+    const edge = spec.corner === "bottom" ? `bottom:${bleed}px;` : `top:${bleed}px;`;
+    return `<span class="dot" style="width:${d.toFixed(2)}px;height:${d.toFixed(2)}px;` +
+           edge + `right:${bleed}px;background:${spec.color};` +
+           (rw > 0 ? `box-shadow:0 0 0 ${rw.toFixed(2)}px ${ring}` : "") + `"></span>`;
+  }).join("");
 }
 
 function paneChip(M, art, kind, size, mode, treat, surface, surfaceBg, active, opts) {
@@ -299,7 +317,7 @@ function paneChip(M, art, kind, size, mode, treat, surface, surfaceBg, active, o
                glyph(art[kind], size, k.fill, fg, k.dilate) + `</span>`;
   if (!opts.dot) return body;
   return `<span class="chipwrap">` + body +
-         stateDot(opts.dot(opts.state || "none", mode, M, surface), size, M, mode, surfaceBg) +
+         stateDots(opts.dot(opts.state || "none", mode, M, surface), size, M, mode, surfaceBg) +
          `</span>`;
 }
 
@@ -355,16 +373,23 @@ const DOT_SCENARIOS = [
   ["one wants you",0, [["terminal","none"],["claude","alert"],["codex","working"],["agent","idle"]]],
   ["waiting vs working", 2,
                       [["claude","working"],["codex","working"],["agent","waiting"],["claude","working"]]],
+  // The pair one dot could never report: a pane that rang while its agent kept
+  // going, and one that rang while its agent stalled on a prompt.
+  ["rang and running", 0,
+                      [["claude","alert+working"],["codex","working"],["agent","idle"]]],
+  ["rang and waiting", 0,
+                      [["claude","alert+waiting"],["codex","alert"],["terminal","none"]]],
   ["mostly busy",  3, [["claude","working"],["codex","working"],["agent","working"],
                        ["claude","alert"],["codex","working"],["terminal","none"],
                        ["agent","working"],["claude","idle"]]]
 ];
 
-function dotStrip(M, art, mode, surface, surfaceBg, selected, scen, dot) {
+function dotStrip(M, art, mode, surface, surfaceBg, selected, scen, dot, id) {
   const [, focused, panes] = scen;
   const chips = panes.map(([k, state], i) =>
     paneChip(M, art, k, M.sizes.paneRow, mode, SHIPPED, surface, surfaceBg,
-             i === focused, {state, dot})
+             i === focused,
+             {state: id === "shipped" ? state : collapseState(state), dot})
   ).join("");
   return `<div class="striprow${selected ? " sel" : ""}">` +
          `<span class="stripe" style="background:#e0a44b"></span>` +
@@ -398,18 +423,21 @@ function build(M, art, mode) {
   }
 
   h += `<h2>pane list &mdash; showing state</h2>`;
-  h += `<p class="note2">One dot slot per chip, on top of the shipped
-        treatment. The dot is punched out of the row color so it survives both
-        the lifted active chip and the dim ones. Judge on <b>mostly busy</b>:
-        the alert dot has to still pull your eye on a row where six others are
-        already lit, and that is the case that decides whether marking
-        <code>working</code> at all is worth it.</p>`;
+  h += `<p class="note2">State marks on top of the shipped treatment, punched
+        out of the row color so they survive both the lifted active chip and the
+        dim ones. What ships gives the alert the top-trailing corner and the
+        agent the bottom-trailing one; the losing candidates above it spend one
+        slot and collapse the two facts, which is why the combined rows show
+        them reporting only the alert. Judge on <b>mostly busy</b>, where the
+        alert has to still pull your eye on a row where six others are lit, and
+        on <b>rang and running</b>, where a chip carries both marks at once and
+        has to read as two facts rather than as noise.</p>`;
   for (const [id, label, dot] of DOT_VARIANTS) {
     h += `<h3>${id} &mdash; ${label}</h3>`;
     for (const scen of DOT_SCENARIOS) {
       h += `<div class="trow"><span class="scen">${scen[0]}</span>` +
-           dotStrip(M, art, mode, "rest", rowBg, false, scen, dot) +
-           dotStrip(M, art, mode, "sel", selBg, true, scen, dot) + `</div>`;
+           dotStrip(M, art, mode, "rest", rowBg, false, scen, dot, id) +
+           dotStrip(M, art, mode, "sel", selBg, true, scen, dot, id) + `</div>`;
     }
   }
 

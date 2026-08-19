@@ -19,10 +19,12 @@ import ChipArtwork
 /// the strip exists to answer "which pane am I in", so that chip is the one
 /// thing it may never elide.
 ///
-/// Each chip may carry one state dot on its corner: red for a pane that wants
-/// you, amber for one whose agent is mid-turn. The two are the same ringed dot
-/// and differ only in hue. Which of them a pane gets is decided in the core by
-/// `paneChipState`, not here.
+/// Each chip may carry two state dots, one per trailing corner: red at the top
+/// for a pane with an unread alert, and at the bottom green for an agent
+/// waiting on a prompt or amber for one mid-turn. They are the same ringed dot
+/// and differ only in hue and in corner, so a pane that is both alerting and
+/// running an agent draws both. Which facts a pane has is decided in the core
+/// by `tabPaneChips`, not here.
 final class PaneStripView: NSView {
     var chips: [TabPaneChip] = [] {
         didSet {
@@ -31,7 +33,7 @@ final class PaneStripView: NSView {
         }
     }
 
-    /// What the strip should punch its attention rings out of, or nil for the
+    /// What the strip should punch its dot rings out of, or nil for the
     /// appearance's fixed neutral.
     ///
     /// The strip cannot work this out for itself: a selected row is painted by
@@ -52,7 +54,7 @@ final class PaneStripView: NSView {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
         // State dots bleed a point past the chips they mark, and past the
-        // strip's own bounds at the top and trailing edges. Set explicitly
+        // strip's own bounds at the top, bottom, and trailing edges. Set explicitly
         // rather than left to the default so the bleed does not depend on
         // whether AppKit decided to back this view with a layer.
         clipsToBounds = false
@@ -141,49 +143,70 @@ final class PaneStripView: NSView {
             ])
     }
 
-    private func dotColor(for state: PaneChipState, appearance: ChipAppearance) -> CGColor? {
-        let palette = appearance == .light ? ChipArtwork.paneListLight : ChipArtwork.paneListDark
-        switch state {
-        case .quiet: return nil
-        case .attention: return palette.attentionDot
-        case .busy: return palette.busyDot
-        }
+    /// The two corners a chip's state dots take. Separate corners because the
+    /// two facts are independent: a pane can be alerting and running an agent
+    /// at once, and each mark has to survive the other.
+    enum MarkCorner {
+        case topTrailing
+        case bottomTrailing
     }
 
-    /// Where a chip's state dot lands, or nil for a pane with nothing to say.
+    /// Where one of a chip's state dots lands.
     ///
-    /// The dot deliberately bleeds past the chip's top-right corner: the strip's
-    /// own margins have room for it, and a dot held fully inside a 12pt chip
-    /// would cover a third of the mark that identifies the pane. That bleed is
-    /// what `clipsToBounds = false` is for, so it has to stay bounded --
-    /// internal so the harness can hold this to the budget.
-    func stateDotRect(_ state: PaneChipState, on chip: NSRect) -> NSRect? {
-        guard state != .quiet else { return nil }
+    /// The dot deliberately bleeds past the chip's corner: the strip's own
+    /// margins have room for it, and a dot held fully inside a 12pt chip would
+    /// cover a third of the mark that identifies the pane. That bleed is what
+    /// `clipsToBounds = false` is for, so it has to stay bounded -- internal so
+    /// the harness can hold this to the budget.
+    func markRect(_ corner: MarkCorner, on chip: NSRect) -> NSRect {
         let scale = edge / ChipArtwork.paneRowSize
         let diameter = ChipArtwork.stateDotGeometry.diameter * scale
         let bleed = ChipArtwork.stateDotBleed * scale
+        // A flipped strip's visual top is its minY, so the two corners swap.
+        let top = isFlipped ? chip.minY - bleed : chip.maxY + bleed - diameter
+        let bottom = isFlipped ? chip.maxY + bleed - diameter : chip.minY - bleed
         return NSRect(
             x: chip.maxX + bleed - diameter,
-            y: isFlipped ? chip.minY - bleed : chip.maxY + bleed - diameter,
+            y: corner == .topTrailing ? top : bottom,
             width: diameter,
             height: diameter)
     }
 
-    /// Paints one chip's state dot, ringed so it reads against the mark, the
-    /// chip, and the row it overhangs alike. Both states get the same dot and
-    /// the same ring, and are told apart by hue alone.
-    private func drawStateDot(
-        _ state: PaneChipState,
+    private func agentDotColor(
+        for mark: PaneAgentMark, palette: ChipPaneListPalette
+    ) -> CGColor? {
+        switch mark {
+        case .quiet: return nil
+        case .waiting: return palette.waitingDot
+        case .working: return palette.busyDot
+        }
+    }
+
+    /// Paints a chip's state dots, each ringed so it reads against the mark, the
+    /// chip, and the row it overhangs alike. Every dot gets the same diameter
+    /// and the same ring; only hue and corner tell them apart.
+    private func drawStateDots(
+        _ chipModel: TabPaneChip,
         on chip: NSRect,
         in context: CGContext,
         appearance: ChipAppearance
     ) {
-        guard
-            let color = dotColor(for: state, appearance: appearance),
-            let dot = stateDotRect(state, on: chip)
-        else { return }
         let palette = appearance == .light ? ChipArtwork.paneListLight : ChipArtwork.paneListDark
+        if chipModel.hasAlert {
+            fillMark(
+                palette.alertDot, in: markRect(.topTrailing, on: chip),
+                into: context, palette: palette)
+        }
+        if let color = agentDotColor(for: chipModel.agent, palette: palette) {
+            fillMark(
+                color, in: markRect(.bottomTrailing, on: chip),
+                into: context, palette: palette)
+        }
+    }
 
+    private func fillMark(
+        _ color: CGColor, in dot: NSRect, into context: CGContext, palette: ChipPaneListPalette
+    ) {
         context.saveGState()
         let ring = ChipArtwork.stateDotGeometry.ringWidth * (edge / ChipArtwork.paneRowSize)
         // The ring matches the row it sits on, so it reads as a gap around
@@ -213,7 +236,7 @@ final class PaneStripView: NSView {
                 palette: ChipStyle.paneStrip(isActive: chip.isFocused)
                     .palette(for: chip.kind, appearance: appearance),
                 flipped: isFlipped)
-            drawStateDot(chip.state, on: rect, in: context, appearance: appearance)
+            drawStateDots(chip, on: rect, in: context, appearance: appearance)
             x += edge + spacing
         }
 

@@ -184,7 +184,7 @@ func sidebarProjectionRowTests() {
             "precondition: the row should start on the old title")
         try uiExpect(cell.alertBadge.isHidden,
             "precondition: the row should start with no visible alert badge")
-        try uiExpect(cell.paneStrip.chips.map(\.state) == [.quiet, .quiet],
+        try uiExpect(cell.paneStrip.chips.map(\.hasAlert) == [false, false],
             "precondition: neither pane should start marked")
 
         beginRenameThroughModel(
@@ -213,7 +213,7 @@ func sidebarProjectionRowTests() {
             "a reconfigure after a suppressed reload must redraw the old title")
         try uiExpect(cell.alertBadge.isHidden,
             "a reconfigure after a suppressed reload must not paint the newer badge")
-        try uiExpect(cell.paneStrip.chips.map(\.state) == [.quiet, .quiet],
+        try uiExpect(cell.paneStrip.chips.map(\.hasAlert) == [false, false],
             "a reconfigure after a suppressed reload must not paint the newer strip")
 
         _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
@@ -225,8 +225,10 @@ func sidebarProjectionRowTests() {
         try uiExpect(
             converged.alertBadge.isHidden == false && converged.alertBadge.stringValue == "1",
             "the retained projection should re-fire the reload and converge the badge")
-        try uiExpect(converged.paneStrip.chips.map(\.state) == [.quiet, .attention],
+        try uiExpect(converged.paneStrip.chips.map(\.hasAlert) == [false, true],
             "the retained projection should re-fire the reload and converge the strip")
+        try uiExpect(converged.paneStrip.chips.map(\.agent) == [.quiet, .quiet],
+            "a bell says nothing about either pane's agent")
     }
 
     uiTest("a group row draws its caret and both badges from the applied projection") {

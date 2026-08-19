@@ -31,21 +31,30 @@
   "sizes": { "sidebar": 15, "toolbar": 13, "paneRow": 12 },
 
   "_stateDotNote": [
-    "The one state mark a pane chip carries, at its top-right corner. One",
-    "geometry, stated once: attention and busy are the same dot in different",
-    "hues, and nothing here varies by appearance. Only the two colors do, and",
-    "those live under paneList.<mode>.stateDot.",
+    "The two state marks a pane chip can carry. Alert takes the top-right",
+    "corner, the agent mark the bottom-right one. One geometry, stated once:",
+    "every mark is the same dot in a different hue, and nothing here varies by",
+    "appearance. Only the colors do, and those live under",
+    "paneList.<mode>.stateDot.",
     "",
-    "The two were unequal once -- busy smaller and unringed, because busy is",
+    "Two corners because the two facts are independent. A pane can have rung a",
+    "bell and still be mid-turn, and one dot could only report one of them --",
+    "which also made red ambiguous, since an alert and an agent waiting on a",
+    "prompt both claimed it. Now alert owns red at the top, and the agent mark",
+    "owns the bottom: green while it waits for you, amber while it works. The",
+    "waiting green is what keeps the bottom corner from ever being mistaken for",
+    "the alert above it.",
+    "",
+    "The marks were unequal once -- busy smaller and unringed, because busy is",
     "ambient and attention is an interrupt, and a strip where six panes are",
     "working must still let the one that wants you pull the eye first. Ranking",
     "them by weight is what cost busy its ring, and an unringed dot has nothing",
     "between it and what it lands on: on the accent-colored selected row the",
-    "amber sat straight on the blue. Rank by hue alone. If busy ever does",
-    "outshout attention on a full strip, cool the amber; do not shrink it and",
-    "do not take the ring away.",
+    "amber sat straight on the blue. Rank by hue and by corner alone. If busy",
+    "ever does outshout alert on a full strip, cool the amber; do not shrink it",
+    "and do not take the ring away.",
     "",
-    "Both dots are opaque, and there is no alpha to set. Busy was translucent",
+    "Every dot is opaque, and there is no alpha to set. Busy was translucent",
     "once and it did not survive contact: on an inactive chip -- the dim grey",
     "one -- a 60% amber dot was too subtle to find, and a state you cannot see",
     "reports nothing.",
@@ -64,9 +73,10 @@
     "through the sidebar projection, so SidebarRowView pushes that one down to",
     "the strip at draw time.",
     "",
-    "bleed is how far the dot overhangs the chip's top-right corner. It lands",
-    "in margins the strip already has -- 2pt above it, 4pt of trailing gap --",
-    "so it is excluded from the strip's fitting math on purpose."
+    "bleed is how far a dot overhangs its corner of the chip. It lands in",
+    "margins the strip already has -- 2pt above it, roughly 5pt below it, 4pt",
+    "of trailing gap -- so it is excluded from the strip's fitting math on",
+    "purpose."
   ],
 
   "stateDot": { "diameter": 4.5, "ringWidth": 1.0, "bleed": 1.0 },
@@ -123,8 +133,9 @@
     "`accent` feed preview.html's losing candidates only, kept so the choice",
     "can be re-judged by eye rather than re-derived from memory.",
     "",
-    "`stateDot` colors the attention/busy dot the top-level stateDot block",
-    "shapes, and rings it for every row the manifest can speak for."
+    "`stateDot` colors the alert, waiting, and busy dots the top-level",
+    "stateDot block shapes, and rings them for every row the manifest can",
+    "speak for."
   ],
 
   "paneList": {
@@ -135,8 +146,8 @@
       "onAccent": "#FFFFFFFF",
       "fixed": { "bg": "#0000001F", "fg": "#00000073",
                  "onBg": "#1D1D1FFF", "onFg": "#FAFAFAFF" },
-      "stateDot": { "attention": "#FF3B30FF", "busy": "#C77700FF",
-                    "ring": "#FAFAFAFF" }
+      "stateDot": { "alert": "#FF3B30FF", "waiting": "#34C759FF",
+                    "busy": "#C77700FF", "ring": "#FAFAFAFF" }
     },
     "dark": {
       "rest": { "bg": "#FFFFFF24", "fg": "#FFFFFFA6", "dim": "#FFFFFF66" },
@@ -145,8 +156,8 @@
       "onAccent": "#FFFFFFFF",
       "fixed": { "bg": "#FFFFFF24", "fg": "#FFFFFF8C",
                  "onBg": "#F2F2F4FF", "onFg": "#1E1E20FF" },
-      "stateDot": { "attention": "#FF453AFF", "busy": "#FF9F0AFF",
-                    "ring": "#232326FF" }
+      "stateDot": { "alert": "#FF453AFF", "waiting": "#30D158FF",
+                    "busy": "#FF9F0AFF", "ring": "#232326FF" }
     }
   }
 }

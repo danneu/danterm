@@ -34,15 +34,18 @@ public struct ChipPalette: Sendable {
     public let foreground: CGColor
 }
 
-/// The two states of a chip in a tab row's pane strip, plus the two colors
-/// its state dot can take.
+/// The two states of a chip in a tab row's pane strip, plus the three colors
+/// its two state dots can take.
 public struct ChipPaneListPalette: Sendable {
     public let inactive: ChipPalette
     public let active: ChipPalette
-    /// A pane that wants you: an unread alert, or an agent blocked on a prompt.
-    public let attentionDot: CGColor
-    /// A pane whose agent is mid-turn. The same dot as `attentionDot` in a
-    /// different hue -- see the stateDot note in chips.json.
+    /// A pane with an unread alert, marked at the chip's top-trailing corner.
+    public let alertDot: CGColor
+    /// An agent blocked on a prompt, marked at the bottom-trailing corner.
+    /// Green rather than red so it can never be read as the alert above it.
+    public let waitingDot: CGColor
+    /// An agent mid-turn, at the same bottom-trailing corner as `waitingDot`.
+    /// The same dot in a different hue -- see the stateDot note in chips.json.
     public let busyDot: CGColor
     /// Separates a dot from the mark, the chip, and the row it overhangs.
     /// The unselected row, which is every row the manifest can speak for: a
@@ -52,7 +55,7 @@ public struct ChipPaneListPalette: Sendable {
 }
 
 /// How a state dot is drawn, in points at `ChipArtwork.paneRowSize`. One
-/// value for both states, so neither can lose the ring the other keeps.
+/// value for every mark, so none can lose the ring the others keep.
 public struct ChipStateDotGeometry: Sendable {
     public let diameter: CGFloat
     /// Width of the `stateDotRing` band outside the dot.
@@ -156,25 +159,27 @@ public enum ChipArtwork {
     public static let paneListLight = ChipPaneListPalette(
         inactive: ChipPalette(background: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.1216), foreground: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.451)),
         active: ChipPalette(background: CGColor(srgbRed: 0.1137, green: 0.1137, blue: 0.1216, alpha: 1), foreground: CGColor(srgbRed: 0.9804, green: 0.9804, blue: 0.9804, alpha: 1)),
-        attentionDot: CGColor(srgbRed: 1, green: 0.2314, blue: 0.1882, alpha: 1),
+        alertDot: CGColor(srgbRed: 1, green: 0.2314, blue: 0.1882, alpha: 1),
+        waitingDot: CGColor(srgbRed: 0.2039, green: 0.7804, blue: 0.349, alpha: 1),
         busyDot: CGColor(srgbRed: 0.7804, green: 0.4667, blue: 0, alpha: 1),
         stateDotRing: CGColor(srgbRed: 0.9804, green: 0.9804, blue: 0.9804, alpha: 1)
     )
     public static let paneListDark = ChipPaneListPalette(
         inactive: ChipPalette(background: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.1412), foreground: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.549)),
         active: ChipPalette(background: CGColor(srgbRed: 0.949, green: 0.949, blue: 0.9569, alpha: 1), foreground: CGColor(srgbRed: 0.1176, green: 0.1176, blue: 0.1255, alpha: 1)),
-        attentionDot: CGColor(srgbRed: 1, green: 0.2706, blue: 0.2275, alpha: 1),
+        alertDot: CGColor(srgbRed: 1, green: 0.2706, blue: 0.2275, alpha: 1),
+        waitingDot: CGColor(srgbRed: 0.1882, green: 0.8196, blue: 0.3451, alpha: 1),
         busyDot: CGColor(srgbRed: 1, green: 0.6235, blue: 0.0392, alpha: 1),
         stateDotRing: CGColor(srgbRed: 0.1373, green: 0.1373, blue: 0.149, alpha: 1)
     )
 
     /// State-dot geometry, in points at `paneRowSize` and scaled with it.
-    /// Attention and busy share it and differ only in hue, so the ring is a
-    /// property of the dot rather than of one state. See the stateDot note
-    /// in chips.json.
+    /// The alert mark and the agent mark share it and differ only in hue and
+    /// in corner, so the ring is a property of the dot rather than of one
+    /// state. See the stateDot note in chips.json.
     public static let stateDotGeometry = ChipStateDotGeometry(diameter: 4.5, ringWidth: 1)
-    /// How far the dot overhangs its chip's top-right corner. Lands in margins
-    /// the strip already has, so it stays out of the strip's fitting math.
+    /// How far a dot overhangs its corner of the chip. Lands in margins the
+    /// strip already has, so it stays out of the strip's fitting math.
     public static let stateDotBleed: CGFloat = 1
 
     /// Every chip in the manifest, in declaration order.

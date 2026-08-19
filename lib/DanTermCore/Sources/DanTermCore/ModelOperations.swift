@@ -644,32 +644,34 @@ func tabChipKind(_ tab: TabModel) -> ChipKind {
   ChipKind(agent: tab.paneTree.focusedPane.session?.agent ?? .none)
 }
 
-/// What a pane chip's single state dot says, if anything.
+/// What a pane chip's agent mark says, if anything.
 ///
-/// Three values rather than the five facts behind them, because a chip has one
-/// dot and the collapse is a policy decision that belongs where it can be
-/// tested. An unread alert and an agent blocked on a prompt are the same
-/// message to the reader -- go here -- so they share `attention`, and it wins
-/// over `busy` when a pane is both mid-turn and already ringing.
+/// Only the agent's own state: whether a pane also has an unread alert is a
+/// separate fact carried beside this one, because the two are independent and
+/// a chip has a corner for each. Nothing here outranks the alert bit.
 ///
 /// `quiet` covers an idle agent, an attached agent that has reported no
 /// activity, and a plain shell alike. A turn that finished worth knowing about
 /// has already rung a bell, and an unreported activity is a state the hooks
 /// have not claimed: neither earns a mark, and the glyph already separates a
 /// quiet agent pane from a shell.
-enum PaneChipState: Equatable {
-  case attention
-  case busy
+enum PaneAgentMark: Equatable {
+  case waiting
+  case working
   case quiet
 }
 
 /// One entry of the chip row a multi-pane tab shows in place of its cwd
 /// subtitle. Carries the pane id so a later iteration can make a chip clickable.
+///
+/// `hasAlert` and `agent` are separate and neither collapses into the other: a
+/// pane can be both ringing and mid-turn, and the chip says so with two marks.
 struct TabPaneChip: Equatable {
   let paneId: PaneId
   let kind: ChipKind
   let isFocused: Bool
-  let state: PaneChipState
+  let hasAlert: Bool
+  let agent: PaneAgentMark
 }
 
 /// The chips for a tab's panes, in the tree's left-to-right order, with the
@@ -687,17 +689,17 @@ func tabPaneChips(_ tab: TabModel, unreadByPane: [PaneId: Int]) -> [TabPaneChip]
       paneId: pane.id,
       kind: ChipKind(agent: agent),
       isFocused: pane.id == tab.paneTree.focusedPaneId,
-      state: paneChipState(agent: agent, hasUnreadAlert: (unreadByPane[pane.id] ?? 0) > 0))
+      hasAlert: (unreadByPane[pane.id] ?? 0) > 0,
+      agent: paneAgentMark(agent: agent))
   }
 }
 
-/// Collapses a pane's alert and agent facts into the one thing its dot can say.
-func paneChipState(agent: AgentLifecycle, hasUnreadAlert: Bool) -> PaneChipState {
-  if hasUnreadAlert { return .attention }
+/// Maps a pane's agent lifecycle onto the mark its chip draws for the agent.
+func paneAgentMark(agent: AgentLifecycle) -> PaneAgentMark {
   guard case .attached(_, let activity) = agent else { return .quiet }
   switch activity?.reported {
-  case .waiting: return .attention
-  case .working: return .busy
+  case .waiting: return .waiting
+  case .working: return .working
   case .idle, nil: return .quiet
   }
 }
