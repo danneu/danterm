@@ -1157,72 +1157,81 @@ func swiftTerminalSessionViewTests() {
                      "precise wheel motion was quantized in the view")
     }
 
-    uiTest("the pane menu is offered on the press unless the terminal claims the button") {
-        // Intent: a right-button press answers with the pane menu and forwards nothing,
-        //   while a claimed press forwards the gesture and offers no menu. Shift always
-        //   takes the press back from the terminal.
-        // Why it exists: this is the whole gesture split. AppKit pops whatever `menu(for:)`
-        //   returns from inside the press, so returning a menu for a click the terminal
-        //   claimed would eat the report the running program is waiting for.
-        // Scenario: spec-first -- the user right-clicks a plain shell, then the same pane
-        //   under a full-screen program that turned mouse reporting on, then shift-clicks it.
-        let controller = TerminalPaneSessionController()
-        let pane = makeMountedPane(controller: controller)
-        let provided = NSMenu()
-        pane.paneMenuProvider = { provided }
-        let point = NSPoint(x: 17, y: 125)
-        let down = try makeMouseEvent(type: .rightMouseDown, location: point)
+    // DISABLED: this test drives `pane.rightMouseDown` on an unclaimed press, so AppKit's
+    // default implementation asks `menu(for:)` and pops the returned menu for real. macOS
+    // injects a system "AutoFill" item into the empty menu, and the resulting menu-tracking
+    // session grabs the keyboard for seconds at a time -- it steals Dan's typing in whatever
+    // he is working in while `just test-ui` runs. Commented out until the pane menu is
+    // presented by its owner instead of by AppKit, which is the fix that removes this
+    // structurally.
+//  uiTest("the pane menu is offered on the press unless the terminal claims the button") {
+//      // Intent: a right-button press answers with the pane menu and forwards nothing,
+//      //   while a claimed press forwards the gesture and offers no menu. Shift always
+//      //   takes the press back from the terminal.
+//      // Why it exists: this is the whole gesture split. AppKit pops whatever `menu(for:)`
+//      //   returns from inside the press, so returning a menu for a click the terminal
+//      //   claimed would eat the report the running program is waiting for.
+//      // Scenario: spec-first -- the user right-clicks a plain shell, then the same pane
+//      //   under a full-screen program that turned mouse reporting on, then shift-clicks it.
+//      let controller = TerminalPaneSessionController()
+//      let pane = makeMountedPane(controller: controller)
+//      let provided = NSMenu()
+//      pane.paneMenuProvider = { provided }
+//      let point = NSPoint(x: 17, y: 125)
+//      let down = try makeMouseEvent(type: .rightMouseDown, location: point)
+//
+//      try uiExpect(pane.menu(for: down) === provided,
+//                   "an unclaimed right press did not offer the pane menu")
+//      pane.rightMouseDown(with: down)
+//      try uiExpect(controller.pointerEvents.isEmpty,
+//                   "an unclaimed right press reached the engine: \(controller.pointerEvents)")
+//
+//      controller.claimsMouseButtons = true
+//      try uiExpect(pane.menu(for: down) == nil, "a claimed right press offered a menu")
+//      pane.rightMouseDown(with: down)
+//      pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
+//      try uiExpect(controller.pointerEvents == [
+//          .down(.right, column: 2, row: 2, offsetX: 0.125, modifiers: [], clickCount: 1),
+//          .up(.right, column: 2, row: 2, modifiers: []),
+//      ], "a claimed right press did not reach the engine: \(controller.pointerEvents)")
+//
+//      let shiftDown = try makeMouseEvent(
+//          type: .rightMouseDown, location: point, modifiers: [.shift]
+//      )
+//      try uiExpect(pane.menu(for: shiftDown) === provided,
+//                   "shift did not take the press back from the terminal")
+//      pane.rightMouseDown(with: shiftDown)
+//      try uiExpect(controller.pointerEvents.count == 2,
+//                   "a shifted right press reached the engine: \(controller.pointerEvents)")
+//  }
 
-        try uiExpect(pane.menu(for: down) === provided,
-                     "an unclaimed right press did not offer the pane menu")
-        pane.rightMouseDown(with: down)
-        try uiExpect(controller.pointerEvents.isEmpty,
-                     "an unclaimed right press reached the engine: \(controller.pointerEvents)")
-
-        controller.claimsMouseButtons = true
-        try uiExpect(pane.menu(for: down) == nil, "a claimed right press offered a menu")
-        pane.rightMouseDown(with: down)
-        pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
-        try uiExpect(controller.pointerEvents == [
-            .down(.right, column: 2, row: 2, offsetX: 0.125, modifiers: [], clickCount: 1),
-            .up(.right, column: 2, row: 2, modifiers: []),
-        ], "a claimed right press did not reach the engine: \(controller.pointerEvents)")
-
-        let shiftDown = try makeMouseEvent(
-            type: .rightMouseDown, location: point, modifiers: [.shift]
-        )
-        try uiExpect(pane.menu(for: shiftDown) === provided,
-                     "shift did not take the press back from the terminal")
-        pane.rightMouseDown(with: shiftDown)
-        try uiExpect(controller.pointerEvents.count == 2,
-                     "a shifted right press reached the engine: \(controller.pointerEvents)")
-    }
-
-    uiTest("a right release without a forwarded press is never sent on") {
-        // Intent: the engine only ever sees a right release that pairs with a press it saw.
-        // Why it exists: AppKit consumes the release that ends menu tracking, but a stray
-        //   one can still arrive. An unpaired release -- or an unpaired press -- latches the
-        //   engine's button owner, which then swallows the next right-click a program claims.
-        // Scenario: spec-first -- the user right-clicks a plain shell to open the menu, then
-        //   a program turns mouse reporting on and the user right-clicks again.
-        let controller = TerminalPaneSessionController()
-        let pane = makeMountedPane(controller: controller)
-        pane.paneMenuProvider = { NSMenu() }
-        let point = NSPoint(x: 17, y: 125)
-
-        pane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: point))
-        pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
-        try uiExpect(controller.pointerEvents.isEmpty,
-                     "a menu-owned gesture reached the engine: \(controller.pointerEvents)")
-
-        controller.claimsMouseButtons = true
-        pane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: point))
-        pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
-        try uiExpect(controller.pointerEvents == [
-            .down(.right, column: 2, row: 2, offsetX: 0.125, modifiers: [], clickCount: 1),
-            .up(.right, column: 2, row: 2, modifiers: []),
-        ], "the claimed gesture was not delivered whole: \(controller.pointerEvents)")
-    }
+    // DISABLED: same cause as the test above -- the unclaimed press arm pops a real menu
+    // through AppKit, and its tracking session steals Dan's keyboard while the UI suite runs.
+//  uiTest("a right release without a forwarded press is never sent on") {
+//      // Intent: the engine only ever sees a right release that pairs with a press it saw.
+//      // Why it exists: AppKit consumes the release that ends menu tracking, but a stray
+//      //   one can still arrive. An unpaired release -- or an unpaired press -- latches the
+//      //   engine's button owner, which then swallows the next right-click a program claims.
+//      // Scenario: spec-first -- the user right-clicks a plain shell to open the menu, then
+//      //   a program turns mouse reporting on and the user right-clicks again.
+//      let controller = TerminalPaneSessionController()
+//      let pane = makeMountedPane(controller: controller)
+//      pane.paneMenuProvider = { NSMenu() }
+//      let point = NSPoint(x: 17, y: 125)
+//
+//      pane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: point))
+//      pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
+//      try uiExpect(controller.pointerEvents.isEmpty,
+//                   "a menu-owned gesture reached the engine: \(controller.pointerEvents)")
+//
+//      controller.claimsMouseButtons = true
+//      pane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: point))
+//      pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
+//      try uiExpect(controller.pointerEvents == [
+//          .down(.right, column: 2, row: 2, offsetX: 0.125, modifiers: [], clickCount: 1),
+//          .up(.right, column: 2, row: 2, modifiers: []),
+//      ], "the claimed gesture was not delivered whole: \(controller.pointerEvents)")
+//  }
 
     uiTest("an unclaimed control-click both focuses the pane and offers the menu") {
         // Intent: a control-click reports pane focus and returns the menu from the same
