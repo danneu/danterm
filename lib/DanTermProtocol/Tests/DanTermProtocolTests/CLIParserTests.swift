@@ -4,46 +4,36 @@ import Testing
 @testable import DanTermProtocol
 
 struct CLIParserTests {
-    @Test("every targeting command requires an explicit target", arguments: [
-        ["tab", "new"],
-        ["tab", "rename", "work"],
-        ["tab", "close"],
-        ["group", "rename", "notes"],
-        ["group", "close"],
-        ["pane", "info"],
-        ["pane", "split", "-h"],
-        ["pane", "input", "--", "C-c"],
-        ["pane", "zoom", "on"],
-        ["pane", "resize", "80x24"],
-        ["theme", "set", "TokyoNight"],
-        ["agent", "attach", "--kind", "codex", "--id", "thread-1"],
-        ["agent", "activity", "--kind", "codex", "--id", "thread-1", "--state", "working"],
-        ["agent", "detach", "--kind", "codex", "--id", "thread-1"],
-        ["todo", "list"],
-        ["todo", "add", "write", "test"],
-        ["todo", "edit", "11111111-1111-4111-8111-111111111111", "write", "test"],
-        ["todo", "done", "11111111-1111-4111-8111-111111111111"],
-        ["todo", "open", "11111111-1111-4111-8111-111111111111"],
-        ["todo", "delete", "11111111-1111-4111-8111-111111111111"],
-        ["todo", "clear-completed"],
-    ])
-    func everyTargetingCommandRequiresAnExplicitTarget(_ args: [String]) {
-        #expect(throws: CLIParseError.self) {
+    // Each command arrives complete except for its target, so the parser must
+    // refuse it and say which flag is missing. Checking the message is what
+    // makes the case honest: a bare "it threw" passes just as well when the
+    // parser rejected the command for some unrelated reason.
+    @Test("every targeting command requires an explicit target", arguments: targetingCommands)
+    func everyTargetingCommandRequiresAnExplicitTarget(_ command: TargetingCommand) {
+        let args = command.args(nil)
+        let error = #expect(throws: CLIParseError.self) {
             _ = try parseCLI(args)
         }
+        #expect(
+            error?.message.contains(command.usageToken) == true,
+            "\(command.label) should name \(command.usageToken), got: \(error?.message ?? "no error")"
+        )
     }
 
-    @Test("malformed ids fail at parse time for every target kind", arguments: [
-        ["pane", "focus", "not-a-pane"],
-        ["tab", "close", "--tab", "not-a-tab"],
-        ["tab", "new", "--group", "not-a-group"],
-        ["group", "rename", "--group", "not-a-group", "notes"],
-        ["group", "close", "--group", "not-a-group"],
-    ])
-    func malformedTargetIdsFailAtParseTime(_ args: [String]) {
-        #expect(throws: CLIParseError.self) {
+    // The id never reaches the app: three shared helpers in CLIParser turn a
+    // raw string into a PaneId, TabId, or GroupId, and each refuses anything
+    // that is not a UUID. This drives all three from the same list as the
+    // sweep above, so a command cannot be checked on one axis and not the other.
+    @Test("every targeting command refuses a target that is not an id", arguments: targetingCommands)
+    func everyTargetingCommandRefusesAMalformedId(_ command: TargetingCommand) {
+        let args = command.args("not-an-id")
+        let error = #expect(throws: CLIParseError.self) {
             _ = try parseCLI(args)
         }
+        #expect(
+            error?.message == "invalid \(command.entity) id: not-an-id",
+            "\(command.label) got: \(error?.message ?? "no error")"
+        )
     }
 
     @Test("global socket target parses before the command")
@@ -915,3 +905,83 @@ private let groupCloseUsage = "usage: danterm group close --group <group-id> [--
 private let tabNewUsageWithPositionFlags = "usage: danterm tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end]"
 private let paneSplitUsageWithFocusFlags = "usage: danterm pane split --pane <pane-id> -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
 private let paneTapeUsage = "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] [--sync-history-bytes <n>] [--format replay|inspect]"
+
+private let todoId = "44444444-4444-4444-8444-444444444444"
+
+/// One row per command that names an entity, shared by the two target sweeps.
+/// Both axes -- no target at all, and a target that is not an id -- read this
+/// list, so a command can only be unchecked by being missing from it, which is
+/// one visible line rather than a silence.
+struct TargetingCommand: Sendable {
+    let label: String
+    /// pane, tab, or group -- the id helper that must refuse a malformed value.
+    let entity: String
+    /// What the usage line names when the target is absent. Defaults to the
+    /// flag, which every targeting command but `pane focus` uses.
+    let usageToken: String
+    /// The full invocation. `nil` supplies no target at all.
+    let args: @Sendable (String?) -> [String]
+
+    init(
+        _ label: String,
+        entity: String,
+        usageToken: String? = nil,
+        args: @escaping @Sendable (String?) -> [String]
+    ) {
+        self.label = label
+        self.entity = entity
+        self.usageToken = usageToken ?? "--\(entity)"
+        self.args = args
+    }
+}
+
+private func paneFlag(_ target: String?) -> [String] {
+    target.map { ["--pane", $0] } ?? []
+}
+
+private func tabFlag(_ target: String?) -> [String] {
+    target.map { ["--tab", $0] } ?? []
+}
+
+private func groupFlag(_ target: String?) -> [String] {
+    target.map { ["--group", $0] } ?? []
+}
+
+let targetingCommands: [TargetingCommand] = [
+    .init("tab new", entity: "group", args: { ["tab", "new"] + groupFlag($0) }),
+    .init("tab rename", entity: "tab", args: { ["tab", "rename"] + tabFlag($0) + ["work"] }),
+    .init("tab close", entity: "tab", args: { ["tab", "close"] + tabFlag($0) }),
+    .init("group rename", entity: "group", args: { ["group", "rename"] + groupFlag($0) + ["notes"] }),
+    .init("group close", entity: "group", args: { ["group", "close"] + groupFlag($0) }),
+    // `pane focus` is the one targeting command that takes its pane
+    // positionally rather than behind --pane, so its usage line names the
+    // placeholder instead. SKILL.md documents that form.
+    .init("pane focus", entity: "pane", usageToken: "<pane-id>", args: { ["pane", "focus"] + ($0.map { [$0] } ?? []) }),
+    .init("pane info", entity: "pane", args: { ["pane", "info"] + paneFlag($0) }),
+    .init("pane split", entity: "pane", args: { ["pane", "split"] + paneFlag($0) + ["-h"] }),
+    .init("pane close", entity: "pane", args: { ["pane", "close"] + paneFlag($0) }),
+    .init("pane input", entity: "pane", args: { ["pane", "input"] + paneFlag($0) + ["--", "C-c"] }),
+    .init("pane read", entity: "pane", args: { ["pane", "read"] + paneFlag($0) }),
+    .init("pane rows", entity: "pane", args: { ["pane", "rows"] + paneFlag($0) }),
+    .init("pane zoom", entity: "pane", args: { ["pane", "zoom"] + paneFlag($0) + ["on"] }),
+    .init("pane resize", entity: "pane", args: { ["pane", "resize"] + paneFlag($0) + ["80x24"] }),
+    .init("pane tape", entity: "pane", args: { ["pane", "tape"] + paneFlag($0) }),
+    .init("pane snapshot", entity: "pane", args: { ["pane", "snapshot"] + paneFlag($0) }),
+    .init("theme set", entity: "pane", args: { ["theme", "set"] + paneFlag($0) + ["TokyoNight"] }),
+    .init("agent attach", entity: "pane", args: {
+        ["agent", "attach"] + paneFlag($0) + ["--kind", "codex", "--id", "thread-1"]
+    }),
+    .init("agent activity", entity: "pane", args: {
+        ["agent", "activity"] + paneFlag($0) + ["--kind", "codex", "--id", "thread-1", "--state", "working"]
+    }),
+    .init("agent detach", entity: "pane", args: {
+        ["agent", "detach"] + paneFlag($0) + ["--kind", "codex", "--id", "thread-1"]
+    }),
+    .init("todo list", entity: "pane", args: { ["todo", "list"] + paneFlag($0) }),
+    .init("todo add", entity: "pane", args: { ["todo", "add"] + paneFlag($0) + ["write", "test"] }),
+    .init("todo edit", entity: "pane", args: { ["todo", "edit"] + paneFlag($0) + [todoId, "write", "test"] }),
+    .init("todo done", entity: "pane", args: { ["todo", "done"] + paneFlag($0) + [todoId] }),
+    .init("todo open", entity: "pane", args: { ["todo", "open"] + paneFlag($0) + [todoId] }),
+    .init("todo delete", entity: "pane", args: { ["todo", "delete"] + paneFlag($0) + [todoId] }),
+    .init("todo clear-completed", entity: "pane", args: { ["todo", "clear-completed"] + paneFlag($0) }),
+]

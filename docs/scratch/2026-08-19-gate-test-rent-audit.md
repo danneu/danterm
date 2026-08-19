@@ -333,6 +333,55 @@ and the three btop profiling recipes.
       unknown tab owner` (the `tab` key, which the sweep drives through `pane`),
       and `pane.tape`, trimmed to the one param that is its own.
 
+## F. The CLI parser probe -- no rent found, two holes closed
+
+Followed E's lead into `CLIParserTests`, expecting the same shape: one
+production grammar, restated per command in the tests. **It was not there, and
+this section deletes nothing.** Recorded because a probe that comes back empty
+is worth as much as one that does not, and because what it did find is worth
+keeping.
+
+**The sweeps already existed.** The file leads with two parameterized tests over
+the targeting commands rather than one test per command. Whoever wrote it had
+already made E's move. There is no per-command duplication to cut.
+
+**But the lists were hand-maintained, and both had holes.** The grammar has 27
+targeting commands. The absent-target sweep listed 21 -- missing `pane focus`,
+`pane close`, `pane read`, `pane rows`, `pane tape`, and `pane snapshot`. The
+malformed-id sweep listed 5. So 22 of 27 commands were never checked for
+refusing a target that is not an id, including `pane rows`, which is the same
+command the IPC tests had missed in E.
+
+**And both asserted only that something was thrown.** `#expect(throws:
+CLIParseError.self)` with no message check passes just as well when the parser
+rejected the command for an unrelated reason -- exactly how `pane.close` and
+`pane.tape` were passing in E.
+
+**What changed.** One list of 27 commands, each a closure that builds the
+invocation with the target supplied or omitted, drives both sweeps. The absent
+axis asserts the usage line names the missing flag; the malformed axis asserts
+the exact message from the shared id helper, `invalid <entity> id: not-an-id`.
+A command can now only go unchecked by being absent from one visible list, and
+it is then unchecked on both axes at once rather than silently on one.
+
+**Ablated:** breaking the `invalid pane id` message fails 22 commands. Before
+the change it failed none -- the single pane row in the old malformed sweep
+asserted only that it threw.
+
+All 27 already behaved correctly on both axes. Nothing was broken; it was
+unwitnessed.
+
+**One grammar inconsistency surfaced, not changed.** `pane focus <pane-id>`
+takes its target positionally; every other targeting command uses `--pane`.
+`integrations/danterm/SKILL.md:46` documents that form, so the test states the
+exception rather than hiding it. Worth raising as a CLI surface question --
+it is not a test problem.
+
+**Cost:** +104 lines, -34. This section is the audit's one net addition. The
+lesson is that "find rent to cut" and "find what nobody is watching" are the
+same probe run for different reasons, and this time it came back with the
+second.
+
 ## What we checked and found healthy
 
 Recorded so nobody re-runs these probes.
@@ -369,3 +418,4 @@ Append one line per drop: date, what went, what broke or did not.
 | 2026-08-19 | C2: 11 `core-purity-lint.sh` steps became 1 sweep | No check lost, and 27 previously unchecked modules gained the portable floor. Gate step count 101 -> 91. |
 | 2026-08-19 | D: nothing dropped -- proposal withdrawn on evidence | The registry it would parameterize over does not exist, and production documents why it must not. No code changed. |
 | 2026-08-19 | E: 30 `UpdateIpcTests` target-validation tests, replaced by one six-probe sweep | Nothing broke. 146 tests -> 116, 810 lines deleted for 61 added. Four methods gained coverage they never had. Gate step count unchanged at 91: this was maintenance rent, not seconds. |
+| 2026-08-19 | F: nothing dropped -- the CLI parser already swept, but both sweeps had holes | 22 of 27 targeting commands were unchecked for a malformed id, 6 for an absent target, and both sweeps asserted only that something threw. One shared list now drives both axes with exact messages. +104/-34 lines. |
