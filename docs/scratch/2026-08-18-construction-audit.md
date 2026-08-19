@@ -1025,6 +1025,14 @@ Ordered by what blocks what, from the dependency edges the verifiers recorded.
 Work inside a wave in any order; finish a wave before leaning on it. This is the
 list to tick.
 
+When you finish an item, tick its box here and write the short hash of the
+commit that carries it, in the form the WIRE-1 line below shows. Pick the
+commit that adds the item's plan file under `plans/impl/`: that commit holds
+the implementation, its tests, and the plan that explains them, so one hash
+leads a later reader to all three. Check the hash against `git log` at the
+moment you write it -- a rebase gives the same work a new hash, and a stale
+hash here points at nothing.
+
 ### W1. Wave 1 -- settle the shapes everything else is written against
 
 These are the unblocked roots. Each one either heads a dependency chain the
@@ -1045,7 +1053,7 @@ wave.
 
 - [ ] **[MOBILE-1](#mobile-1)** (5x5, medium) Resolve cell metrics where the display scale changes, not on every applied tape record
 - [ ] **[HIST-2](#hist-2)** (4x5, small) Skip the per-cell content-unit walk when the record's hasWideCells bit proves the count
-- [ ] **[WIRE-1](#wire-1)** (4x5, small) Frame IPC lines by scanning for the newline, not by appending one byte at a time
+- [x] **[WIRE-1](#wire-1)** (4x5, small) Frame IPC lines by scanning for the newline, not by appending one byte at a time -- `cea20832`
 - [ ] **[INTERACT-1](#interact-1)** (4x5, medium) Refresh the search index through one history-mutation funnel instead of seven hand-placed calls
 - [ ] **[MOBILE-3](#mobile-3)** (4x5, medium) Decode each tape event once into a typed value instead of re-encoding and re-decoding it per record
 - [ ] **[PANE-1](#pane-1)** (4x5, medium) Resolve the pane drop target from the model layout, not from live wrapper frames
