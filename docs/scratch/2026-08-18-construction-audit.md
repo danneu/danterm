@@ -1128,7 +1128,7 @@ rewrites.
 - [ ] **[WIRE-3](#wire-3)** (4x5, medium) Encode a delivered tape batch as one notification off the main actor, not one per record _(after [PERSIST-6](#persist-6))_
 - [ ] **[FEED-1](#feed-1)** (4x5, large) Represent the viewport as a rotating row ring so a scroll advances a head index instead of moving every row _(after [FEED-2](#feed-2))_
 - [ ] **[MOBILE-2](#mobile-2)** (4x5, large) Feed the drained damage into the frame stores instead of re-rendering the whole grid every tick _(after [MOBILE-1](#mobile-1))_
-- [ ] **[WIRE-2](#wire-2)** (4x5, large) Carry a tape record as its typed event, not as a JSONValue decoded from its own encoding _(after [PERSIST-6](#persist-6))_
+- [x] **[WIRE-2](#wire-2)** (4x5, large) Carry a tape record as its typed event, not as a JSONValue decoded from its own encoding _(after [PERSIST-6](#persist-6))_ -- `c0e4c026..c4d7ef21`
 - [ ] **[MOBILE-6](#mobile-6)** (4x4, small) Store the start record's stated pinnedness in the replica instead of keeping the checkpoint's
 - [ ] **[UNI-2](#uni-2)** (4x4, large) Derive the bulk-print run predicate from the scalar record instead of from a printable-ASCII byte range _(after [UNI-1](#uni-1))_
 - [ ] **[CHROME-2](#chrome-2)** (3x5, small) Make the confirmation projection carry each button's answer instead of inferring it from button visibility _(after [MODEL-2](#model-2))_
