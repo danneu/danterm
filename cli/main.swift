@@ -94,6 +94,9 @@ struct DanTermCLI {
                                       Report explicit root-agent activity
           agent detach --pane <pane-id> --kind <kind> --id <session-id>
                                       Detach the matching root agent session
+          tailnet status              Print this instance's tailnet listener state
+                                      as JSON: disabled, waiting, or listening,
+                                      with the endpoint derived for it.
           quit                        Ask the explicitly targeted instance to quit.
                                       TCP peers are refused by the server.
           skill                       Print DanTerm's agent skill instructions

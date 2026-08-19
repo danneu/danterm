@@ -585,6 +585,14 @@ func update(
         model.resolvedFontFamily = resolvedFontFamily
         return []
 
+    // MARK: - Tailnet listener
+
+    // Deliberately a plain assignment: the listener is launch-frozen, so this value
+    // is the server's report about a decision the model has no part in making.
+    case .tailnetStatusChanged(let status):
+        model.tailnetStatus = status
+        return []
+
     // MARK: - Preferences Panel
 
     case .preferencesOpened(let installedFontFamilies, let availableThemeNames):

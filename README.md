@@ -107,7 +107,7 @@ Every setting has a default, so a new config file holds only
 | `theme.default` | `"Monokai Remastered"` | Theme for local panes. |
 | `theme.remote` | `"Purplepeter"` | Theme for panes in an SSH or other remote session. |
 | `shell.localeFallback` | `true` | Give a local pane a UTF-8 `LANG` when it inherits none. |
-| `tailnet.listen` | absent | Tailnet IPv4 address and TCP port, for example `"100.99.4.1:24863"`. |
+| `tailnet.listen` | absent | Tailnet IPv4 address and base TCP port, for example `"100.99.4.1:24863"`. Each instance adds its own offset to the port. |
 | `tailnet.admittedNodeIds` | absent | Stable Tailscale node ids allowed to use remote IPC. An empty list keeps the listener closed. |
 | `ui.alertClearMode` | `"focus"` | `"focus"` clears pane alerts on focus, `"manual"` keeps them until you dismiss them. |
 | `ui.copyOnSelect` | `true` | Copy a mouse selection to the clipboard when it finishes. |
@@ -118,7 +118,18 @@ The tailnet listener is closed by default and reads its configuration only at
 launch. It opens only on an address assigned to this Mac in 100.64.0.0/10, and
 only when the admitted-node list is non-empty and the private audit log is
 writable. A bad address, a port collision, or an unavailable audit sink leaves
-local IPC and the app running normally.
+local IPC and the app running normally, and the listener keeps retrying the same
+endpoint until it binds -- so a Mac that starts DanTerm before Tailscale is up
+comes online on its own.
+
+The configured port is a base. Every instance on one Mac adds a fixed offset for
+its own identity, so no two of them race for one port: production takes the base
+port, and development slot N takes the base port plus 1 + N. Ask a running
+instance which endpoint it derived, and whether it is bound:
+
+```sh
+danterm tailnet status
+```
 
 Connect with the shipped CLI from an admitted tailnet peer:
 

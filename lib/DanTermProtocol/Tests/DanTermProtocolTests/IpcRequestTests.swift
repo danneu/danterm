@@ -303,6 +303,7 @@ struct IpcRequestTests {
             CLICommand(request: .roster, outputMode: .none),
             try parseCLI(["ls"]),
             try parseCLI(["focus"]),
+            try parseCLI(["tailnet", "status"]),
             try parseCLI(["quit"]),
             try parseCLI(["tab", "new", "--group", group], currentDirectory: "/caller"),
             try parseCLI(["tab", "rename", "--tab", tab, "work"]),

@@ -286,6 +286,61 @@ struct IpcServerRemoteTests {
         #expect(endpoint.text == "100.99.4.1:24863")
     }
 
+    @Test("the runtime model follows the listener from waiting to listening")
+    func runtimeModelFollowsTheListenerStatus() async throws {
+        // Intent: every status the server authors reaches the model, including one a
+        //   retry produces long after launch.
+        // Why it exists: the preferences pane, the `tailnet.status` reply, and a slot
+        //   launch handle all read the model. A model left at the launch value would
+        //   report `waiting` at an instance that has been serving remote peers for hours.
+        // Scenario: the first attempt fails on a missing interface, the second binds.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let gate = BindRetryGate()
+        let resolver = ScriptedBindResolver([.notLocal("100.99.4.1"), nil])
+        let server = try fixture.makeServer(
+            runtimeDispatch: runtime.makeIpcDispatch(),
+            resolveTailnetBindAddress: resolver.resolve,
+            tailnetBindRetryDelay: gate.delay
+        )
+        defer { server.stop() }
+
+        await server.start()
+        guard case .waiting(let waitingEndpoint, _) = runtime.model.tailnetStatus else {
+            Issue.record("expected the model to report a waiting listener")
+            return
+        }
+        #expect(waitingEndpoint.text == "100.99.4.1:24863")
+
+        try await gate.waitsStarted(1)
+        await gate.tick()
+        try await awaitTailnetStatus(of: runtime, reaching: .listening(endpoint: waitingEndpoint))
+    }
+
+    @Test("a closed instance seeds the model with its disabled reason")
+    func closedInstanceSeedsTheDisabledReason() throws {
+        // Intent: an instance that will never open a listener says so in the model from
+        //   the moment the server exists, without the Elm loop having run.
+        // Why it exists: the preferences pane can be opened before any status message is
+        //   dispatched, and a default-looking value there would read as a fact.
+        // Scenario: a launcher pool slot launched without `--tailnet`.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let server = try fixture.makeServer(
+            runtimeDispatch: nil,
+            identity: try #require(DanTermInstanceIdentity(developmentSlot: 3))
+        )
+        defer { server.stop() }
+
+        guard case .disabled(let reason) = server.initialTailnetStatus else {
+            Issue.record("expected a disabled initial tailnet status")
+            return
+        }
+        #expect(reason.contains("--tailnet"))
+    }
+
     @Test("stopping the server while it waits ends the retry")
     func stopDuringWaitingEndsTheRetry() async throws {
         // Intent: a server stopped before its listener came up never opens one.
@@ -1139,6 +1194,22 @@ private func boundPort(of server: IpcServer) async throws -> UInt16 {
     let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
     while ContinuousClock.now < deadline {
         if let port = server.tailnetPort { return port }
+        await Task.yield()
+    }
+    throw POSIXError(.ETIMEDOUT)
+}
+
+/// Waits for a published status to reach the runtime's model, so a test never has to
+/// guess when the server's main-actor hop ran. Expiring is the failure: the awaited
+/// status never arrived. The deadline is a hang guard, not a speed threshold.
+@MainActor
+private func awaitTailnetStatus(
+    of runtime: AppRuntime,
+    reaching state: DanTermTailnetStatus
+) async throws {
+    let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
+    while ContinuousClock.now < deadline {
+        if runtime.model.tailnetStatus == state { return }
         await Task.yield()
     }
     throw POSIXError(.ETIMEDOUT)

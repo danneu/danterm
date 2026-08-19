@@ -35,6 +35,7 @@ state and skips those rows when the app is unavailable.
 
     danterm ls
     danterm focus
+    danterm tailnet status
     danterm quit
     danterm group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm group rename --group <group-id> <name>
@@ -883,6 +884,7 @@ else prints nothing on success and exits 0.
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
 | `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with current `isZoomed`, `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`) |
 | `focus` | JSON: `{focus: {type: "terminal"|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"|"none"}}` |
+| `tailnet status` | JSON: `{state: "disabled", reason}`, `{state: "waiting", base, offset, endpoint, reason}`, or `{state: "listening", base, offset, endpoint}` |
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, isZoomed, cwd, processPhase, command, connection, agent, integration, gridOverride?}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `group new --name <name>` | Same JSON shape as `tab new`, naming the new group and its first tab |
@@ -944,6 +946,13 @@ a stale hook cannot mutate a replacement session.
   of stable Tailscale node ids. Restart DanTerm after changing it. The app never
   falls back to a wildcard or LAN bind, and a bad bind or unavailable audit log
   leaves the local control socket running.
+- The configured port is a base, not the port every instance takes. Each
+  instance adds a fixed offset for its own identity -- production adds 0, and
+  development slot N adds 1 + N -- so several instances on one Mac never race
+  for one port and a client can save each endpoint once. Ask an instance which
+  endpoint it derived, and whether it is bound, with `danterm tailnet status`.
+  A listener that is not up yet reports `waiting` and keeps retrying the same
+  endpoint, so the state is worth re-reading rather than treating as final.
 - Drive an enabled listener with `danterm --tcp <tailnet-ip>:<port> <command>`.
   The TCP target is always explicit. It uses the same handshake, typed refusal
   errors, commands, and output shapes as a Unix-socket target. Remote `quit` is

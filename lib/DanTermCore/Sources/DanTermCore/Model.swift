@@ -544,6 +544,12 @@ struct AppModel: Equatable {
     // why "the configured font is missing" is derived from the pair rather than stored:
     // a second copy of the requested name could drift from `config`.
     var resolvedFontFamily: String? = nil
+    // What this instance's tailnet listener is doing, authored by the IPC server and
+    // republished on every transition. Ephemeral, and never derived here: the core
+    // cannot resolve an address or bind a socket, so it copies the server's verdict
+    // out to the preferences pane and the `tailnet.status` reply unchanged. The
+    // default is the truth for a runtime with no IPC server at all.
+    var tailnetStatus: DanTermTailnetStatus = .disabled(reason: "no tailnet listener was started")
     var preferencesDraft: PreferencesDraft? = nil  // ephemeral — non-nil while prefs panel is open
     // The font families installed on this machine, injected when the preferences
     // panel opens and dropped when it closes. Ephemeral and panel-scoped: the

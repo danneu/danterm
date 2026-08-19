@@ -57,6 +57,72 @@ import DanTermProtocol
         }
     }
 
+    @Test("tailnet.status replies with the listener status the model holds")
+    func tailnetStatusRepliesWithTheModelStatus() throws {
+        // Intent: the reply is the status the app authored, copied out of the model
+        //   verbatim, for a local and an admitted remote caller alike.
+        // Why it exists: the preferences pane, this reply, and a slot launch handle
+        //   must never disagree. They can only stay equal if none of them derives an
+        //   endpoint or invents a state of its own.
+        let endpoint = DanTermTailnetEndpoint(
+            base: "100.99.4.1:24863",
+            offset: 4,
+            address: "100.99.4.1",
+            port: 24867
+        )
+        let statuses: [DanTermTailnetStatus] = [
+            .disabled(reason: "no tailnet endpoint is configured"),
+            .waiting(endpoint: endpoint, reason: "the interface is not up"),
+            .listening(endpoint: endpoint),
+        ]
+        let callers: [IpcCallerIdentity] = [
+            .local,
+            .remote(nodeId: "node-phone", user: "dan@example.com", machineName: "iphone"),
+        ]
+
+        for status in statuses {
+            for caller in callers {
+                var model = makeModel()
+                model.tailnetStatus = status
+                let before = model
+                let commands = sendIpc(
+                    &model,
+                    method: IpcRequestMethod.tailnetStatus.rawValue,
+                    caller: caller
+                )
+
+                #expect(commands.count == 1)
+                guard case .ipcReply(_, let result)? = commands.first else {
+                    Issue.record("tailnet.status produced \(commands) instead of a reply")
+                    return
+                }
+                #expect(result == status.json)
+                #expect(model == before)
+            }
+        }
+    }
+
+    @Test("a published listener status replaces the one the model reports")
+    func publishedTailnetStatusReplacesTheReportedOne() {
+        // Intent: the server's status transition is the only thing that moves the
+        //   model's tailnet status.
+        // Why it exists: the listener binds on a later retry, so a model that kept
+        //   its launch value would report `waiting` at a listening instance forever.
+        var model = makeModel()
+        let endpoint = DanTermTailnetEndpoint(
+            base: "100.99.4.1:24863",
+            offset: 0,
+            address: "100.99.4.1",
+            port: 24863
+        )
+        model.tailnetStatus = .waiting(endpoint: endpoint, reason: "the listener is not open yet")
+
+        let commands = update(&model, .tailnetStatusChanged(.listening(endpoint: endpoint)))
+
+        #expect(commands.isEmpty)
+        #expect(model.tailnetStatus == .listening(endpoint: endpoint))
+    }
+
     @Test("every targeting IPC method rejects an absent target without mutation")
     func everyTargetingMethodRejectsAbsentTarget() throws {
         let todoId = UUID().uuidString

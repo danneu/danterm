@@ -223,7 +223,7 @@ bind recovers on its own; and the listener's state is visible instead of silent.
 
 - [x] 1. Derive per-instance tailnet endpoints and status in DanTermProtocol
 - [x] 2. Gate and retry the tailnet bind on the derived endpoint
-- [ ] 3. Publish listener status through the model and `tailnet.status`
+- [x] 3. Publish listener status through the model and `tailnet.status`
 - [ ] 4. Show the read-only tailnet section in the preferences panel
 - [ ] 5. Launch a pool slot with `--tailnet` and report status in the handle
 
@@ -243,3 +243,21 @@ bind recovers on its own; and the listener's state is visible instead of silent.
   outside the server and its tests. Commit 3 publishes it into the model.
 - Commit 2: the audit log gains a `listenerBound` event carrying the endpoint,
   which is the "success appends one entry" half of the transition rule.
+- Commit 3: the server keeps its own `tailnetStatus` and publishes each change to
+  the model, rather than the model asking the server for it. The model is what
+  the prefs pane, the IPC reply, and (later) the launch handle read, and only a
+  push can reach it from a retry that binds minutes after launch.
+- Commit 3: the publish is awaited on the server's own turn instead of being
+  detached, so two transitions cannot reach the model out of order. It runs
+  after the accept loop starts, because adopting the listener and handing its
+  descriptor to that loop must stay one uninterrupted turn.
+- Commit 3: only a change is published. A bind that keeps failing for one reason
+  would otherwise run a whole update frame per retry to store a value the model
+  already holds.
+- Commit 3: `AppRuntime` seeds the model from the server's `initialTailnetStatus`
+  by assignment, the way it already assigns the launch config, because the Elm
+  loop does not exist yet when the server is built.
+- Commit 3: the README and SKILL.md wording for the base port and the retry lands
+  here rather than with commit 2. The `tailnet status` output names `base`,
+  `offset`, and `endpoint`, and none of those can be documented without the
+  derivation rule they come from.

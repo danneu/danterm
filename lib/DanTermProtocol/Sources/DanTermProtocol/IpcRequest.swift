@@ -27,6 +27,10 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     /// request arrived on. The reply is the current roster; every later roster goes
     /// out as a `roster.event` notification until the connection ends.
     case roster
+    /// Reports what this instance's tailnet listener is doing. Takes no target: the
+    /// answer is about the instance the request reached. Open to remote callers,
+    /// because it reveals only what a peer already proved by arriving.
+    case tailnetStatus = "tailnet.status"
     /// Ends the answering instance the way Cmd-Q does. Takes no target: the
     /// instance the request reached is the instance that exits.
     case quit
@@ -98,8 +102,8 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
         switch self {
         case .quit:
             return true
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .groupNew,
-             .groupRename, .groupClose,
+        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus,
+             .groupNew, .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
              .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
@@ -113,7 +117,8 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     /// Makes target classification exhaustive when a method joins the catalog.
     public var isTargeting: Bool {
         switch self {
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .quit, .groupNew:
+        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus, .quit,
+             .groupNew:
             return false
         case .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
@@ -131,8 +136,8 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
         switch self {
         case .quit:
             return true
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .groupNew,
-             .groupRename, .groupClose,
+        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus,
+             .groupNew, .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
              .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
@@ -153,8 +158,8 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
         switch self {
         case .ping:
             return false
-        case .quit, .doctorPermissions, .ls, .focusInfo, .roster, .groupNew,
-             .groupRename, .groupClose,
+        case .quit, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus,
+             .groupNew, .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
              .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
@@ -274,6 +279,8 @@ public enum IpcRequest: Equatable, Sendable {
     case focusInfo
     /// Subscribes the answering connection to the pane roster, without a target.
     case roster
+    /// Reports this instance's tailnet listener state, without a target.
+    case tailnetStatus
     /// Ends the answering instance without a target. Dispatch refuses it unless
     /// the instance holds a launcher pool slot.
     case quit
@@ -351,6 +358,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .ls: return .ls
         case .focusInfo: return .focusInfo
         case .roster: return .roster
+        case .tailnetStatus: return .tailnetStatus
         case .quit: return .quit
         case .groupNew: return .groupNew
         case .groupRename: return .groupRename
@@ -386,7 +394,8 @@ public enum IpcRequest: Equatable, Sendable {
     /// Names every target key this request can carry.
     public var targetParameterKeys: [String] {
         switch self {
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .quit, .groupNew:
+        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus, .quit,
+             .groupNew:
             return []
         case .groupRename, .groupClose:
             return ["group"]
@@ -410,7 +419,7 @@ public enum IpcRequest: Equatable, Sendable {
     /// Encodes this typed request into its JSON-RPC parameter object.
     public var params: [String: JSONValue] {
         switch self {
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .quit:
+        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus, .quit:
             return [:]
         case .groupNew(let name, let launch, let background):
             var object = launchParams(launch, background: background)
@@ -515,6 +524,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .ls: return .ls
         case .focusInfo: return .focusInfo
         case .roster: return .roster
+        case .tailnetStatus: return .tailnetStatus
         case .quit: return .quit
         case .groupNew:
             guard case .string(let name)? = object?["name"] else { throw invalid("invalid name") }

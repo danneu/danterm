@@ -277,6 +277,10 @@ class AppRuntime {
                     runtimeDispatch: makeIpcDispatch()
                 )
                 self.ipcServer = server
+                // Assigned rather than sent, like the config above: the Elm loop is not
+                // running yet, and a preferences pane opened before the first transition
+                // must not read a default as if it were this instance's verdict.
+                self.model.tailnetStatus = server.initialTailnetStatus
                 self.ipcServerToken = schedulingLifecycle.arm(.ipcServer) {
                     server.stop()
                 }
@@ -611,6 +615,9 @@ class AppRuntime {
             },
             connectionClosed: { [weak self] connectionId in
                 self?.ipcConnectionClosed(connectionId)
+            },
+            tailnetStatusChanged: { [weak self] status in
+                self?.send(.tailnetStatusChanged(status))
             }
         )
     }

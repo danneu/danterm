@@ -81,6 +81,12 @@ private func dispatchIpc(
         // connection and a repeat request only re-answers with the same roster.
         return [.subscribeRoster(reqId: reqId, roster: paneRoster(in: model))]
 
+    case .tailnetStatus:
+        // Copied out, never derived. A remote caller is answered like a local one:
+        // the reply names the endpoint that peer already reached and the state it is
+        // in, which is nothing it could not observe by connecting.
+        return [.ipcReply(reqId: reqId, result: model.tailnetStatus.json)]
+
     case .paneInfo(let paneId):
         try requirePane(paneId, in: model)
         guard let pane = model.pane(paneId),

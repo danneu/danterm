@@ -100,6 +100,29 @@ struct CLIParserTests {
         #expect(error?.message == "usage: danterm quit")
     }
 
+    @Test("tailnet status parses as a target-free JSON command")
+    func tailnetStatusParsesAsTargetFreeCommand() throws {
+        let command = try parseCLI(["tailnet", "status"])
+
+        #expect(command.request == .tailnetStatus)
+        #expect(command.method == IpcRequestMethod.tailnetStatus.rawValue)
+        #expect(command.params.isEmpty)
+        #expect(command.outputMode == .json)
+    }
+
+    @Test("tailnet rejects an unknown or missing subcommand", arguments: [
+        ["tailnet"],
+        ["tailnet", "listen"],
+        ["tailnet", "status", "--json"],
+    ])
+    func tailnetRejectsUnknownSubcommand(_ args: [String]) {
+        let error = #expect(throws: CLIParseError.self) {
+            try parseCLI(args)
+        }
+
+        #expect(error?.message == "usage: danterm tailnet status")
+    }
+
     @Test("global socket target rejects unusable forms", arguments: [
         (["--socket"], "usage: danterm --socket <path> <command> [args]"),
         (["--socket", "", "ls"], "--socket requires a non-empty path"),

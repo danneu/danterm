@@ -144,6 +144,12 @@ enum Msg {
     // the panel deliberately keeps on screen (an invalid font size).
     case fontFamilyResolved(String?)
 
+    // Tailnet listener (launch-frozen, published by the IPC server)
+    // The server authors this value and sends it on every transition, including the
+    // one a retry produces long after launch. The core stores it and never derives
+    // one of its own, so every surface reporting it reports the same thing.
+    case tailnetStatusChanged(DanTermTailnetStatus)
+
     // Preferences panel
     // Machine and bundle catalogs ride in on open because the pure core cannot
     // query CoreText or read packaged theme resources. Each is one snapshot for

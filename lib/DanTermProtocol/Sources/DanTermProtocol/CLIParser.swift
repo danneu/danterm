@@ -162,6 +162,12 @@ public func parseCLI(
         }
         return CLICommand(request: .focusInfo, outputMode: .json)
 
+    case "tailnet":
+        guard args.count == 2, args[1] == "status" else {
+            throw CLIParseError("usage: danterm tailnet status")
+        }
+        return CLICommand(request: .tailnetStatus, outputMode: .json)
+
     // No flags by design: the instance is named by `--socket`, and one verb has
     // one meaning. There is no --force and no --timeout to add later.
     case "quit":

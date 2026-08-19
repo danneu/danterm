@@ -60,6 +60,9 @@ struct AppRuntimeIpcDispatch: Sendable {
     let serve: @MainActor @Sendable (IpcConnection, UUID, IpcRequestAudit?, Msg) -> Void
     /// Retires the runtime state owned by a connection that has gone.
     let connectionClosed: @MainActor @Sendable (UUID) -> Void
+    /// Publishes each tailnet listener transition into the model, so every surface that
+    /// reports the listener reports the value the server authored.
+    let tailnetStatusChanged: @MainActor @Sendable (DanTermTailnetStatus) -> Void
 }
 
 /// Keeps remote-cap accounting synchronous at accept time and independent of actor scheduling.
@@ -155,6 +158,14 @@ actor IpcServer {
     /// What this instance's tailnet listener is doing, authored here and reported everywhere.
     private(set) var tailnetStatus: DanTermTailnetStatus
 
+    /// The status this instance starts at, decided in `init` from the launch-frozen
+    /// activation.
+    ///
+    /// Nonisolated so the runtime can seed the model with it while it is still building
+    /// itself, before the Elm loop exists to receive a message. Every later value arrives
+    /// through `AppRuntimeIpcDispatch.tailnetStatusChanged`.
+    nonisolated let initialTailnetStatus: DanTermTailnetStatus
+
     private let runtimeDispatch: AppRuntimeIpcDispatch?
     private let appVersion: String
     private let livenessBound: IpcLivenessBound
@@ -213,26 +224,30 @@ actor IpcServer {
         self.tailnetActivation = activation
         switch activation {
         case .disabled(let reason):
-            self.tailnetStatus = .disabled(reason: reason)
+            self.initialTailnetStatus = .disabled(reason: reason)
         case .active(let endpoint):
-            self.tailnetStatus = .waiting(endpoint: endpoint, reason: "the listener is not open yet")
+            self.initialTailnetStatus = .waiting(
+                endpoint: endpoint,
+                reason: "the listener is not open yet"
+            )
         }
+        self.tailnetStatus = initialTailnetStatus
     }
 
     /// Opens both surfaces, and returns once the first tailnet bind attempt has been made.
-    func start() {
+    func start() async {
         guard stopState.isStopped == false else { return }
         startLocalAcceptLoop()
-        openTailnetListener()
+        await openTailnetListener()
     }
 
     /// Binds this instance's endpoint, and keeps trying on its own until it does.
     ///
     /// The first attempt runs inline, so a caller that awaited `start()` knows whether the
     /// listener came up at launch. Only a failure schedules the retry loop.
-    private func openTailnetListener() {
+    private func openTailnetListener() async {
         guard case .active(let endpoint) = tailnetActivation else { return }
-        guard attemptTailnetBind(endpoint) == false else { return }
+        guard await attemptTailnetBind(endpoint) == false else { return }
         let delay = tailnetBindRetryDelay
         // Weak between turns on purpose: the loop ends with the server, and a strong
         // reference held across the delay would keep a dead server alive for it.
@@ -245,9 +260,9 @@ actor IpcServer {
     }
 
     /// One retry turn. False keeps the loop going; true means bound, or stopped.
-    private func retryTailnetBind(_ endpoint: DanTermTailnetEndpoint) -> Bool {
+    private func retryTailnetBind(_ endpoint: DanTermTailnetEndpoint) async -> Bool {
         guard stopState.isStopped == false else { return true }
-        return attemptTailnetBind(endpoint)
+        return await attemptTailnetBind(endpoint)
     }
 
     /// Makes one complete bind attempt and records only the transition it caused.
@@ -256,7 +271,7 @@ actor IpcServer {
     /// belongs to is exactly what may still be missing -- that is the case the retry heals,
     /// and re-running it keeps the tailnet-range and local-interface checks in front of
     /// every listener this process opens.
-    private func attemptTailnetBind(_ endpoint: DanTermTailnetEndpoint) -> Bool {
+    private func attemptTailnetBind(_ endpoint: DanTermTailnetEndpoint) async -> Bool {
         do {
             try auditWriter.prepare()
             let bindAddress = try resolveTailnetBindAddress(endpoint.text)
@@ -265,19 +280,35 @@ actor IpcServer {
                 opened.close()
                 return true
             }
-            tailnetStatus = .listening(endpoint: endpoint)
             try? auditWriter.append(.listenerBound(endpoint: endpoint.text))
             startTailnetAcceptLoop(on: opened.fileDescriptor)
+            // Last, because it suspends: adopting the listener and handing its descriptor
+            // to the accept loop has to stay one uninterrupted turn, or a stop between the
+            // two would close that descriptor and leave the loop accepting on a number the
+            // process may already have reused.
+            await publish(.listening(endpoint: endpoint))
             return true
         } catch {
             let reason = String(describing: error)
-            tailnetStatus = .waiting(endpoint: endpoint, reason: reason)
             if reason != recordedBindFailureReason {
                 recordedBindFailureReason = reason
                 try? auditWriter.append(.listenerFailed(reason: reason))
             }
+            await publish(.waiting(endpoint: endpoint, reason: reason))
             return false
         }
+    }
+
+    /// Records one status transition and hands it to the runtime, in that order.
+    ///
+    /// Only a change is published, because a bind that keeps failing for one reason would
+    /// otherwise run a whole update frame per retry to store the value the model already
+    /// holds. The runtime call is awaited rather than detached so two transitions cannot
+    /// reach the model out of order and leave a listening instance reported as waiting.
+    private func publish(_ status: DanTermTailnetStatus) async {
+        guard status != tailnetStatus else { return }
+        tailnetStatus = status
+        await runtimeDispatch?.tailnetStatusChanged(status)
     }
 
     /// Makes both listener surfaces unreachable before returning to synchronous app exit.
