@@ -689,11 +689,10 @@ class AppRuntime {
         DispatchQueue.global(qos: .utility).async {
             do {
                 let opening = try prepareOpening()
-                // Both writes are enqueued from this one utility-queue block, so every record
-                // is encoded here rather than on the main actor -- a dump can carry the whole
-                // retained tape, and the main actor is drawing panes. Order still holds: each
-                // call encodes inline and hands its bytes to the connection's serial write
-                // queue, so the start record reaches the socket ahead of everything after it.
+                // The hop is for `prepareOpening`, which can materialize the whole retained
+                // tape while the main actor is drawing panes. The writes below only enqueue;
+                // the connection's serial write queue does the encoding, and it keeps the
+                // start record ahead of everything enqueued after it.
                 connection.writeSuccess(
                     reqId: reqId,
                     result: PaneTapeOutgoingRecord<JSONValue>.start(opening.start.record)

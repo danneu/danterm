@@ -177,11 +177,12 @@ func makePaneTapeEventRecord<Event>(
 
 /// The single site that puts a tape record on the wire, for dumps, batches, and terminators.
 ///
-/// Each call enqueues straight onto the connection's serial write queue, so records reach the
-/// socket in the order they were handed over. Routing one write kind through a concurrent queue
-/// instead would let a terminator overtake a batch prepared before it, and a stream's last
-/// record would not be its last. The optional completion reports the flush of the final record.
-func writePaneTapeRecords<Event: Encodable>(
+/// Each call enqueues straight onto the connection's serial write queue, which both encodes
+/// and writes, so records reach the socket in the order they were handed over. Routing one
+/// write kind through a concurrent queue instead would let a terminator overtake a batch
+/// prepared before it, and a stream's last record would not be its last. The optional
+/// completion reports the flush of the final record.
+func writePaneTapeRecords<Event: Encodable & Sendable>(
     _ records: [PaneTapeOutgoingRecord<Event>],
     connection: IpcConnection,
     subscriptionId: UUID,

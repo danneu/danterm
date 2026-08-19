@@ -5,7 +5,9 @@
 // for each event before it reads on. What the owner does with an event is its own business;
 // what this file guarantees is that it never learns about two at once.
 //
-// Writes are queued and their completions are delivered on the main queue, always: the app state
+// Writes are queued as values, not as bytes: the connection's serial write queue both encodes
+// the line and pushes it out, so no caller -- least of all the main actor -- pays for a JSON
+// pass it asked for. Completions are delivered on the main queue, always: the app state
 // a completion feeds lives on the main actor, so the completions are typed `@MainActor` and every
 // exit routes through `deliver`. The uniformity is the point -- an early exit that reported
 // inline would hand one callback two delivery contexts, and re-enter its own caller.
@@ -164,7 +166,9 @@ final class IpcConnection: @unchecked Sendable {
     /// Answers one request with a value that encodes itself, whether that is a `JSONValue` tree
     /// or a typed result such as a pane-tape start record. One signature serves both, so a
     /// typed result pays exactly the one JSON pass the envelope around it pays.
-    func writeSuccess<Result: Encodable>(
+    ///
+    /// The value is `Sendable` because it is encoded on the write queue, not here.
+    func writeSuccess<Result: Encodable & Sendable>(
         reqId: UUID,
         result: Result,
         completion: (@MainActor @Sendable (Bool) -> Void)? = nil
@@ -213,7 +217,9 @@ final class IpcConnection: @unchecked Sendable {
     ///
     /// The params encode themselves, so a typed payload -- a pane-tape record and the recorded
     /// event inside it -- reaches the wire in the same single JSON pass as the envelope.
-    func writeNotification<Params: Encodable>(
+    ///
+    /// The params are `Sendable` because they are encoded on the write queue, not here.
+    func writeNotification<Params: Encodable & Sendable>(
         method: String,
         params: Params,
         closeAfterWrite: Bool = false,
@@ -278,7 +284,19 @@ final class IpcConnection: @unchecked Sendable {
         }
     }
 
-    private func writeLine<T: Encodable>(
+    /// Queues one value and turns it into a line on the write queue.
+    ///
+    /// The JSON pass runs inside the queued block, not here, so no caller pays for encoding
+    /// its own payload -- and a followed pane tape, which writes continuously from the main
+    /// actor and opens with multi-megabyte sync chunks, stops charging that cost to the actor
+    /// drawing the panes. Order is unaffected: the queue is serial and values are enqueued in
+    /// call order, so the encode order and the wire order are the call order.
+    ///
+    /// A value that fails to encode still reports through the completion, which is the only
+    /// failure channel a caller has. It does not close the connection: no byte of the failed
+    /// line reached the socket, so the peer's stream is short a record but not corrupt, and
+    /// the connection's other streams are untouched.
+    private func writeLine<T: Encodable & Sendable>(
         _ value: T,
         closeAfterWrite: Bool = false,
         completion: (@MainActor @Sendable (Bool) -> Void)? = nil
@@ -291,31 +309,39 @@ final class IpcConnection: @unchecked Sendable {
             return
         }
 
-        guard let line = try? encodeIpcLine(value) else {
-            if let completion { deliver(completion, false) }
-            return
-        }
-        writeQueue.async { [self, line] in
+        writeQueue.async { [self, value] in
             defer {
                 if closeAfterWrite {
                     close()
                 }
             }
-            let succeeded = line.withUnsafeBytes { rawBuffer -> Bool in
-                guard let baseAddress = rawBuffer.baseAddress else { return false }
-                var written = 0
-                while written < line.count {
-                    let result = Darwin.write(fd, baseAddress.advanced(by: written), line.count - written)
-                    if result < 0 && errno == EINTR { continue }
-                    guard result > 0 else { return false }
-                    written += result
-                }
-                return true
+            guard let line = try? encodeIpcLine(value) else {
+                if let completion { deliver(completion, false) }
+                return
             }
+            let succeeded = write(line: line)
             if let completion { deliver(completion, succeeded) }
             if succeeded == false {
                 close()
             }
+        }
+    }
+
+    /// Pushes one complete line out, looping until the kernel has taken all of it.
+    ///
+    /// Only the write queue calls this: it touches the descriptor directly and blocks the
+    /// caller until the peer has taken the bytes.
+    private func write(line: Data) -> Bool {
+        line.withUnsafeBytes { rawBuffer -> Bool in
+            guard let baseAddress = rawBuffer.baseAddress else { return false }
+            var written = 0
+            while written < line.count {
+                let result = Darwin.write(fd, baseAddress.advanced(by: written), line.count - written)
+                if result < 0 && errno == EINTR { continue }
+                guard result > 0 else { return false }
+                written += result
+            }
+            return true
         }
     }
 

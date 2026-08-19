@@ -335,6 +335,63 @@ struct IpcConnectionWriteTests {
         #expect(try malformed.wait() == "pane.read")
     }
 
+    @Test("an IPC line is encoded on the connection's write queue, not the caller's")
+    @MainActor
+    func writeEncodesOnTheConnectionWriteQueue() throws {
+        // Intent: the JSON pass for a write happens on the connection's serial write queue.
+        // Why it exists: a followed pane tape writes continuously from the main actor, and
+        //   its opening records carry multi-megabyte sync chunks. Encoding inline in the
+        //   write call charged that whole cost to whichever context asked for the write.
+        // Scenario: the main actor queues one notification whose params report, from inside
+        //   `encode(to:)`, which queue and thread ran them.
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        defer { Darwin.close(descriptors.peer) }
+        let probe = EncodingContextProbe()
+
+        connection.writeNotification(
+            method: "probe",
+            params: EncodingContextReporter(probe: probe)
+        )
+
+        _ = try readIpcLine(from: descriptors.peer)
+        let context = try probe.wait()
+        // The call was made on the main actor, so a label naming this connection also rules
+        // out an inline encode: inline would have reported the main queue.
+        #expect(context.queueLabel.contains(connection.id.uuidString))
+        #expect(context.onMainThread == false)
+    }
+
+    @Test("a value that fails to encode reports failure and leaves the connection open")
+    func failedEncodeReportsThroughItsCompletion() async throws {
+        // Intent: an encode that throws reports false through the completion, and the
+        //   connection keeps serving whatever else is on it.
+        // Why it exists: encoding moved onto the write queue, past the point where a caller
+        //   could see a throw. The completion is now the only channel that can carry it, and
+        //   a silent drop would leave a follower waiting on a record that will never come.
+        // Scenario: one notification whose params refuse to encode, then a second that does.
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        defer { Darwin.close(descriptors.peer) }
+
+        let reported: Bool = try await withCheckedThrowingContinuation { continuation in
+            connection.writeNotification(method: "probe", params: UnencodableParams()) {
+                continuation.resume(returning: $0)
+            }
+        }
+        #expect(reported == false)
+
+        connection.writeNotification(
+            method: Methods.paneTapeEvent,
+            params: JSONValue.object(["subscription": .string("S1")])
+        )
+        let survivor = try JSONDecoder().decode(
+            JsonRpcRequest.self,
+            from: readIpcLine(from: descriptors.peer)
+        )
+        #expect(survivor.method == Methods.paneTapeEvent)
+    }
+
     private func socketPair() throws -> (connection: Int32, peer: Int32) {
         var descriptors: [Int32] = [-1, -1]
         guard Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0 else {
@@ -467,6 +524,64 @@ private func eventRecord(sequence: UInt64) -> PaneTapeOutgoingRecord<JSONValue> 
         byteLength: nil,
         event: .object(["type": .string("feed")])
     ))
+}
+
+/// Params that always fail to encode, so a test can reach the write queue's encode failure.
+private struct UnencodableParams: Encodable, Sendable {
+    struct EncodeRefused: Error {}
+
+    func encode(to encoder: any Encoder) throws {
+        throw EncodeRefused()
+    }
+}
+
+/// Where one `encode(to:)` call ran, captured from inside the encode itself.
+///
+/// Naming the execution context is the only way to prove the encode moved off the caller:
+/// the bytes on the socket look the same either way.
+private struct EncodingContext: Sendable {
+    let queueLabel: String
+    let onMainThread: Bool
+}
+
+/// Params whose encoding reports its own execution context instead of carrying data.
+private struct EncodingContextReporter: Encodable, Sendable {
+    let probe: EncodingContextProbe
+
+    func encode(to encoder: any Encoder) throws {
+        probe.record(EncodingContext(
+            queueLabel: String(cString: __dispatch_queue_get_label(nil)),
+            onMainThread: Thread.isMainThread
+        ))
+        var container = encoder.singleValueContainer()
+        try container.encode("probe")
+    }
+}
+
+/// Holds the one context an `EncodingContextReporter` observed until a test can read it.
+private final class EncodingContextProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var context: EncodingContext?
+
+    func record(_ context: EncodingContext) {
+        lock.lock()
+        self.context = context
+        lock.unlock()
+        semaphore.signal()
+    }
+
+    /// Throws rather than returning `nil`, so an encode that never ran is never mistaken for
+    /// one that ran in an unnamed context.
+    func wait() throws -> EncodingContext {
+        guard semaphore.wait(timeout: .now() + hangGuardSeconds) == .success else {
+            throw POSIXError(.ETIMEDOUT)
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        guard let context else { throw POSIXError(.ETIMEDOUT) }
+        return context
+    }
 }
 
 private final class MalformedRequestProbe: @unchecked Sendable {
