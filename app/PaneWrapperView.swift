@@ -5,6 +5,10 @@
 import Cocoa
 
 class PaneWrapperView: NSView {
+    /// Names the zoom button for the view tests. Its tooltip states the direction
+    /// of the next click, so it is not a handle anything can match on.
+    static let zoomButtonIdentifier = NSUserInterfaceItemIdentifier("paneZoomButton")
+
     let paneId: PaneId
     let terminalSession: any TerminalSession
     /// Owns the terminal area's frame math, the focus-ring gutter, and the ring
@@ -13,8 +17,11 @@ class PaneWrapperView: NSView {
     private let toolbar: NSView
     private let toolbarLabel: NonHitTestingLabel
     private let menuButton: NSButton
-    private let unzoomButton: PaneToolbarButton
-    private var unzoomWidthConstraint: NSLayoutConstraint?
+    /// The pane's zoom gesture, both ways: it enters zoom from a split pane and
+    /// leaves it from a zoomed one. Shown from the toolbar projection alone, so a
+    /// pane that can be zoomed always offers the way in beside the way out.
+    private let zoomButton: PaneToolbarButton
+    private var zoomWidthConstraint: NSLayoutConstraint?
     /// The pane's take-back gesture: one click ends a claimed grid. Shown from the
     /// toolbar projection's claim flag alone, so a claim is never left with no way
     /// out at the Mac.
@@ -85,20 +92,19 @@ class PaneWrapperView: NSView {
         mb.setContentHuggingPriority(.required, for: .horizontal)
         self.menuButton = mb
 
-        // The persistent button follows the toolbar projection instead of wrapper lifetime.
-        let ub = PaneToolbarButton()
-        ub.translatesAutoresizingMaskIntoConstraints = false
-        ub.bezelStyle = .inline
-        ub.isBordered = false
-        ub.image = NSImage(systemSymbolName: "arrow.down.right.and.arrow.up.left", accessibilityDescription: "Unzoom pane")
-        ub.imageScaling = .scaleProportionallyDown
-        ub.contentTintColor = NSColor.secondaryLabelColor
-        ub.wantsLayer = true
-        ub.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
-        ub.toolTip = "Unzoom Pane"
-        ub.setContentHuggingPriority(.required, for: .horizontal)
-        ub.isHidden = !isZoomed
-        self.unzoomButton = ub
+        // The persistent button follows the toolbar projection instead of wrapper
+        // lifetime. Its glyph, tooltip, and fill are left to
+        // applyZoomButtonPresentation, which is the one place that decides them.
+        let zb = PaneToolbarButton()
+        zb.translatesAutoresizingMaskIntoConstraints = false
+        zb.identifier = PaneWrapperView.zoomButtonIdentifier
+        zb.bezelStyle = .inline
+        zb.isBordered = false
+        zb.imageScaling = .scaleProportionallyDown
+        zb.contentTintColor = NSColor.secondaryLabelColor
+        zb.wantsLayer = true
+        zb.setContentHuggingPriority(.required, for: .horizontal)
+        self.zoomButton = zb
 
         // The take-back affordance. It names the claim rather than the size: the
         // pane is small because a client asked for that grid, and this ends it.
@@ -133,8 +139,8 @@ class PaneWrapperView: NSView {
         todoButton.target = self
         todoButton.action = #selector(toggleTodoPopover)
 
-        unzoomButton.target = self
-        unzoomButton.action = #selector(zoomPaneAction)
+        zoomButton.target = self
+        zoomButton.action = #selector(zoomPaneAction)
 
         releaseGridClaimButton.target = self
         releaseGridClaimButton.action = #selector(releaseGridClaimAction)
@@ -246,7 +252,7 @@ class PaneWrapperView: NSView {
         // Add buttons to toolbar (on top of drag handle)
         toolbar.addSubview(todoButton)
         toolbar.addSubview(menuButton)
-        toolbar.addSubview(unzoomButton)
+        toolbar.addSubview(zoomButton)
         toolbar.addSubview(releaseGridClaimButton)
 
         scrollWrapper.translatesAutoresizingMaskIntoConstraints = false
@@ -300,18 +306,16 @@ class PaneWrapperView: NSView {
             scrollWrapper.bottomAnchor.constraint(equalTo: bottomAnchor),
         ]
 
-        let unzoomWidthConstraint = unzoomButton.widthAnchor.constraint(
-            equalToConstant: isZoomed ? 16 : 0
-        )
-        self.unzoomWidthConstraint = unzoomWidthConstraint
+        let zoomWidthConstraint = zoomButton.widthAnchor.constraint(equalToConstant: 0)
+        self.zoomWidthConstraint = zoomWidthConstraint
         constraints.append(contentsOf: [
-            unzoomButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            unzoomButton.trailingAnchor.constraint(equalTo: menuButton.leadingAnchor),
-            unzoomWidthConstraint,
-            unzoomButton.heightAnchor.constraint(equalToConstant: 16),
+            zoomButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            zoomButton.trailingAnchor.constraint(equalTo: menuButton.leadingAnchor),
+            zoomWidthConstraint,
+            zoomButton.heightAnchor.constraint(equalToConstant: 16),
         ])
 
-        // Collapsed to zero width while unclaimed, the way the unzoom button is,
+        // Collapsed to zero width while unclaimed, the way the zoom button is,
         // so a pane nobody claimed spends no toolbar width on the affordance.
         let releaseGridClaimWidthConstraint = releaseGridClaimButton.widthAnchor.constraint(
             equalToConstant: 0
@@ -319,12 +323,13 @@ class PaneWrapperView: NSView {
         self.releaseGridClaimWidthConstraint = releaseGridClaimWidthConstraint
         constraints.append(contentsOf: [
             releaseGridClaimButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            releaseGridClaimButton.trailingAnchor.constraint(equalTo: unzoomButton.leadingAnchor),
+            releaseGridClaimButton.trailingAnchor.constraint(equalTo: zoomButton.leadingAnchor),
             releaseGridClaimWidthConstraint,
             releaseGridClaimButton.heightAnchor.constraint(equalToConstant: 16),
         ])
 
         NSLayoutConstraint.activate(constraints)
+        applyZoomButtonPresentation()
     }
 
     required init?(coder: NSCoder) {
@@ -367,16 +372,38 @@ class PaneWrapperView: NSView {
         todoButton.update(totalCount: totalTodoCount, uncompletedCount: uncompletedTodoCount)
         if let isZoomed {
             self.isZoomed = isZoomed
-            unzoomButton.isHidden = !isZoomed
-            unzoomWidthConstraint?.constant = isZoomed ? 16 : 0
         }
         if let hasSplits {
             self.hasSplits = hasSplits
+        }
+        if isZoomed != nil || hasSplits != nil {
+            applyZoomButtonPresentation()
         }
         if let isGridClaimed {
             releaseGridClaimButton.isHidden = !isGridClaimed
             releaseGridClaimWidthConstraint?.constant = isGridClaimed ? 16 : 0
         }
+    }
+
+    /// One button carries both directions, so everything the user reads off it --
+    /// glyph, tooltip, accessibility description, and fill -- has to say which
+    /// way the next click goes. Accent stays reserved for the zoomed state, where
+    /// the button is the exit from a non-default state; on a merely split pane it
+    /// is quiet chrome rather than permanent color on every toolbar.
+    private func applyZoomButtonPresentation() {
+        let visible = isZoomed || hasSplits
+        zoomButton.isHidden = !visible
+        zoomWidthConstraint?.constant = visible ? 16 : 0
+        zoomButton.image = NSImage(
+            systemSymbolName: isZoomed
+                ? "arrow.down.right.and.arrow.up.left"
+                : "arrow.up.left.and.arrow.down.right",
+            accessibilityDescription: isZoomed ? "Unzoom pane" : "Zoom pane"
+        )
+        zoomButton.toolTip = isZoomed ? "Unzoom Pane" : "Zoom Pane"
+        zoomButton.layer?.backgroundColor = isZoomed
+            ? NSColor.controlAccentColor.cgColor
+            : NSColor.clear.cgColor
     }
 
     /// Anchor view for the TODO popover.

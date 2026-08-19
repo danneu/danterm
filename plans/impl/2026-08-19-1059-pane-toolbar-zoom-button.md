@@ -170,7 +170,7 @@ collapse-to-zero-width behavior and the pane menu's zoom item).
 
 ## Commit progress
 - [x] 1. feat(pane): zoom the pane a zoom request names
-- [ ] 2. feat(pane): let the toolbar button enter zoom as well as leave it
+- [x] 2. feat(pane): let the toolbar button enter zoom as well as leave it
 
 ## Implementation notes
 
@@ -191,3 +191,12 @@ collapse-to-zero-width behavior and the pane menu's zoom item).
   zooms the tab's own focused pane. Zoom itself is still transient, but a zoom
   request that has to move focus writes `focusedPaneId`, which is persisted --
   so the old call no longer isolated the facet it names.
+- The view test locates the button by a new
+  `PaneWrapperView.zoomButtonIdentifier` rather than by tooltip text. The
+  tooltip now states the direction of the next click, so it names a state and
+  is not a handle. This was the plan's first discretion point.
+- One private `applyZoomButtonPresentation()` owns the button's visibility,
+  glyph, tooltip, accessibility description, and fill, and both the initializer
+  and `updateToolbar` call it. Visibility now reads two projected flags instead
+  of one, so leaving the decision spread across those two call sites would let
+  a `hasSplits`-only update leave the button showing the wrong direction.

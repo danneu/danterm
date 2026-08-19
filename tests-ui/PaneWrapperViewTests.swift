@@ -180,44 +180,85 @@ func paneWrapperViewTests() {
     }
 
     uiTest("persistent wrapper zoom affordances follow toolbar projection") {
-        // Intent: one wrapper changes its menu and unzoom affordance as the tab
-        //   moves through split, zoom, unzoom, and single-pane states.
+        // Intent: one wrapper changes its menu and its zoom button as the tab
+        //   moves through single-pane, split, zoomed, and single-pane states.
+        //   The button is present exactly while the pane is zoomed or its tab
+        //   has splits.
         // Why it exists: those values were immutable construction inputs before
-        //   wrapper lifetime moved up to the runtime.
+        //   wrapper lifetime moved up to the runtime, and the button used to be
+        //   an exit from zoom only, so a split pane had no toolbar way in.
         // Scenario: the incremental-container reconciliation performance fix.
         let fx = makePaneMenuFixture(isZoomed: false, hasSplits: false)
         fx.wrapper.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
         fx.wrapper.layoutSubtreeIfNeeded()
-        guard let unzoomButton = paneWrapperDescendants(of: fx.wrapper)
-            .compactMap({ $0 as? PaneToolbarButton })
-            .first(where: { $0.toolTip == "Unzoom Pane" }) else {
-            throw UITestFailure(message: "missing persistent unzoom button")
-        }
-        unzoomButton.superview?.needsLayout = true
-        unzoomButton.superview?.layoutSubtreeIfNeeded()
+        let zoomButton = try paneZoomButton(in: fx.wrapper)
         try uiExpect(
-            unzoomButton.frame.width < 1,
-            "unzoomed toolbar should collapse the button below one point, got \(unzoomButton.frame.width)")
+            zoomButtonWidth(zoomButton) < 1,
+            "a lone pane should collapse the button below one point, got \(zoomButton.frame.width)")
+
+        fx.wrapper.updateToolbar(
+            label: "Terminal", isZoomed: false, hasSplits: true)
+        let split = try onlyItem(fx.wrapper.makePaneMenu(), titled: "Zoom Pane")
+        try uiExpect(split.isEnabled, "projected splits should enable Zoom Pane")
+        try uiExpect(
+            zoomButtonWidth(zoomButton) >= 15,
+            "a split pane should show the button at at least 15 points, got \(zoomButton.frame.width)")
 
         fx.wrapper.updateToolbar(
             label: "Terminal", isZoomed: true, hasSplits: true)
-        unzoomButton.superview?.needsLayout = true
-        unzoomButton.superview?.layoutSubtreeIfNeeded()
         let unzoom = try onlyItem(fx.wrapper.makePaneMenu(), titled: "Unzoom Pane")
         try uiExpect(unzoom.isEnabled, "projected zoom should enable Unzoom Pane")
         try uiExpect(
-            unzoomButton.frame.width >= 15,
-            "zoomed toolbar should restore the button to at least 15 points, got \(unzoomButton.frame.width)")
+            zoomButtonWidth(zoomButton) >= 15,
+            "zoomed toolbar should keep the button at at least 15 points, got \(zoomButton.frame.width)")
 
         fx.wrapper.updateToolbar(
             label: "Terminal", isZoomed: false, hasSplits: false)
-        unzoomButton.superview?.needsLayout = true
-        unzoomButton.superview?.layoutSubtreeIfNeeded()
         let zoom = try onlyItem(fx.wrapper.makePaneMenu(), titled: "Zoom Pane")
         try uiExpect(!zoom.isEnabled, "projected single-pane state should disable Zoom Pane")
         try uiExpect(
-            unzoomButton.frame.width < 1,
-            "unzoomed toolbar should collapse the button below one point again")
+            zoomButtonWidth(zoomButton) < 1,
+            "closing back down to one pane should collapse the button again")
+    }
+
+    uiTest("the zoom button states which direction the next click goes") {
+        // Intent: tooltip, accessibility description, and accent fill all flip
+        //   with the projected zoom state, in both directions, on the one
+        //   persistent button.
+        // Why it exists: one button now carries both directions, so its
+        //   appearance is the only thing telling the user whether a click
+        //   enters zoom or leaves it. Spec-first.
+        let fx = makePaneMenuFixture(isZoomed: false, hasSplits: true)
+        fx.wrapper.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
+        fx.wrapper.layoutSubtreeIfNeeded()
+        let zoomButton = try paneZoomButton(in: fx.wrapper)
+        let accent = NSColor.controlAccentColor.cgColor
+
+        try uiExpect(zoomButton.toolTip == "Zoom Pane", "got \(zoomButton.toolTip ?? "nil")")
+        try uiExpect(
+            zoomButton.image?.accessibilityDescription == "Zoom pane",
+            "got \(zoomButton.image?.accessibilityDescription ?? "nil")")
+        try uiExpect(
+            zoomButton.layer?.backgroundColor != accent,
+            "a split pane's button should not wear the accent fill")
+
+        fx.wrapper.updateToolbar(label: "Terminal", isZoomed: true, hasSplits: true)
+        try uiExpect(zoomButton.toolTip == "Unzoom Pane", "got \(zoomButton.toolTip ?? "nil")")
+        try uiExpect(
+            zoomButton.image?.accessibilityDescription == "Unzoom pane",
+            "got \(zoomButton.image?.accessibilityDescription ?? "nil")")
+        try uiExpect(
+            zoomButton.layer?.backgroundColor == accent,
+            "a zoomed pane's button should wear the accent fill")
+
+        fx.wrapper.updateToolbar(label: "Terminal", isZoomed: false, hasSplits: true)
+        try uiExpect(zoomButton.toolTip == "Zoom Pane", "the tooltip should flip back")
+        try uiExpect(
+            zoomButton.image?.accessibilityDescription == "Zoom pane",
+            "the accessibility description should flip back")
+        try uiExpect(
+            zoomButton.layer?.backgroundColor != accent,
+            "the accent fill should come back off")
     }
 
     uiTest("the take-back affordance follows the projected claim and clears it in one click") {
@@ -477,6 +518,27 @@ private func makePaneMenuFixture(
         paneId: paneId, terminalView: terminal,
         isZoomed: isZoomed, hasSplits: hasSplits, runtime: runtime)
     return PaneMenuFixture(wrapper: wrapper, runtime: runtime, terminal: terminal, paneId: paneId)
+}
+
+/// Finds the wrapper's one zoom button by identifier. The tooltip states the
+/// direction of the next click, so it is not a stable handle.
+@MainActor
+private func paneZoomButton(in wrapper: PaneWrapperView) throws -> PaneToolbarButton {
+    guard let button = paneWrapperDescendants(of: wrapper)
+        .compactMap({ $0 as? PaneToolbarButton })
+        .first(where: { $0.identifier == PaneWrapperView.zoomButtonIdentifier }) else {
+        throw UITestFailure(message: "missing persistent zoom button")
+    }
+    return button
+}
+
+/// Lays the toolbar out before reading the button's width, so the assertion
+/// sees the constraint the last `updateToolbar` set rather than the old frame.
+@MainActor
+private func zoomButtonWidth(_ button: PaneToolbarButton) -> CGFloat {
+    button.superview?.needsLayout = true
+    button.superview?.layoutSubtreeIfNeeded()
+    return button.frame.width
 }
 
 private func nonSeparatorItems(_ menu: NSMenu) -> [NSMenuItem] {
