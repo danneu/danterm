@@ -1,20 +1,20 @@
 // Agreement between the three readers of a *retained* row, on content that exercises
-// every exception table a packed row can carry.
+// every side table a stored row can carry.
 //
 // Belongs here: assertions that the browsing render walk
 // (`forEachViewportRow(rows:where:_:)`), the geometry projection (`geometry`), and the
 // public row reader (`scrollbackRow(at:)`) report the same cells for the same
 // retained row. Does not belong here: anything about how the row is stored --
-// stride, table layout, or byte counts are `TerminalPackedRetainedRowTests`'
-// subject, and asserting them here would make this file fail on a representation
-// change that broke nothing observable.
+// table layout and byte counts are `TerminalLogicalLineStoreTests`' subject, and
+// asserting them here would make this file fail on a representation change that
+// broke nothing observable.
 //
 // Its own file because it pins a *cross-reader* contract that no single reader's
 // test owns. `research/28/F17` cut the render walk and the geometry projection over from
-// materializing each retained row (`unpacked()`) to streaming it, and the risk
-// that carries is not "the packed row decodes wrong" -- `PO1`-`PO5` cover that --
-// but "one of three readers drifts from the other two on an exception". These
-// tests fail on that drift and are otherwise indifferent to the representation.
+// materializing each retained row to streaming it, and the risk that carries is not
+// "the stored row decodes wrong" -- the store's own suite covers that -- but "one of
+// three readers drifts from the other two on an exception". These tests fail on that
+// drift and are otherwise indifferent to the representation.
 import Testing
 @testable import TerminalCore
 

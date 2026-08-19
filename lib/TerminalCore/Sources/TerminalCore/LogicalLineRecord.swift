@@ -3,7 +3,7 @@
 //
 // This is `research/31/D2` and `research/31/D3` in bytes: a logical line is one contiguous
 // arena record -- an
-// 8-byte header, then the C1 cell words `PackedRetainedRow` already defines, then the two
+// 8-byte header, then the C1 cell words `CellWord` below defines, then the two
 // column-sorted side tables -- and *nothing* in it depends on the pane's width (`I1`). The
 // fold below is the other half of that bargain: everything a per-display-row store baked in
 // at admission (where rows break, where a spacer sits, which rows are continuations) is
@@ -12,14 +12,14 @@
 // bit for it, while *which columns* that paint covers is width-relative and so is derived at
 // read.
 //
-// What belongs here: the header's bit layout, a record's decoded shape and byte length, and
-// the width-derived row walk. What does not: the arena, the ring, the derived index and the
+// What belongs here: the header's bit layout, the cell word's bit layout and the one-byte
+// codings the two store enums in, a record's decoded shape and byte length, and the
+// width-derived row walk. What does not: the arena, the ring, the derived index and the
 // five mutating operations -- those are `LogicalLineStore`, which owns the bytes this file
 // only describes. Keeping the two apart is what lets the fold be tested as arithmetic.
 //
-// Its own file for the same reason `PackedRetainedRow` has one: the layout is a contract with
-// a diagram, and the one thing a reader needs is the hardest thing to find when it is buried
-// in a store's operational code.
+// Its own file because the layout is a contract with a diagram, and the one thing a reader
+// needs is the hardest thing to find when it is buried in a store's operational code.
 
 extension Terminal {
     /// One logical line's stored shape, as its 8-byte arena header describes it.
@@ -36,12 +36,13 @@ extension Terminal {
         var hyperlinkCount: Int
 
         /// Entries in the record's identity table: runs, or one per originally stored cell
-        /// when `identityPerCell` is set (`research/31/D3` Decision 6 keeps `PackedRetainedRow`'s two
+        /// when `identityPerCell` is set (`research/31/D3` Decision 6 gives identity two
         /// encodings). **Never reduced by a head trim**, because the table stays where it is
         /// and keeps its original keys.
         var identityEntryCount: Int
 
-        /// Selects the identity table's encoding, exactly as `PackedRetainedRow`'s flag does.
+        /// Selects the identity table's encoding: one entry per contiguous identity run when
+        /// clear, one entry per stored cell when set.
         var identityPerCell: Bool
 
         /// The one semantic mark a logical line carries (`research/31/F4` case 16). Continuation rows
@@ -123,12 +124,18 @@ extension Terminal {
             static let trailingFillBit: UInt64 = 1 << 63
         }
 
-        /// Bytes one cell occupies -- the same C1 word `PackedRetainedRow` stores, verbatim,
-        /// which is what makes the two stores' cell decoding one implementation.
-        static let cellBytes = PackedRetainedRow.Header.cellBytes
-        static let hyperlinkEntryBytes = PackedRetainedRow.Header.hyperlinkEntryBytes
-        static let identityRunEntryBytes = PackedRetainedRow.Header.identityRunEntryBytes
-        static let identityCellBytes = PackedRetainedRow.Header.identityCellBytes
+        /// Bytes one cell occupies: the `CellWord` below, which is why the two are edited
+        /// together or not at all.
+        static let cellBytes = 8
+
+        /// column(2) + hyperlinkId(2).
+        static let hyperlinkEntryBytes = 4
+
+        /// start(2) + extent(2) + base(4).
+        static let identityRunEntryBytes = 8
+
+        /// identity(4), in the per-cell identity encoding.
+        static let identityCellBytes = 4
 
         init(
             cellCount: Int = 0,
@@ -225,6 +232,31 @@ extension Terminal {
         static func forcedSplitCellCount(forCapacity capacity: Int) -> Int {
             max(1, min(Header.maximumCount, (capacity / 32) / cellBytes))
         }
+    }
+
+    /// The 8-byte word one stored cell occupies, as bit positions.
+    ///
+    /// Its own namespace beside `LogicalLineRecord.Header`, not inside it: that enum lays out
+    /// the *record* header, a different 8-byte word, and a reader who conflates the two
+    /// misreads both. This is `research/28/C1`, the one part of the per-display-row store the
+    /// arena kept verbatim.
+    ///
+    ///     bits  0..20  scalar value, or a spill index when `spillBit` is set
+    ///     bits 21..23  kind, as `TerminalCellKind.packedCode`
+    ///     bit  24      spill flag
+    ///     bits 25..31  unused
+    ///     bits 32..63  interned `StyleId`, full width
+    ///
+    /// 21 bits is exactly `U+10FFFF`, so **every scalar in Unicode is inline** -- there is no
+    /// exception path for an emoji, and a cell stays a fixed width the store can index without
+    /// a scan. `StyleId` keeps all 32 bits, so no style-table ceiling is introduced. What is
+    /// left over is 7 spare bits, and they are left spare.
+    enum CellWord {
+        static let scalarMask: UInt64 = 0x1F_FFFF
+        static let kindShift: UInt64 = 21
+        static let kindMask: UInt64 = 0x7
+        static let spillBit: UInt64 = 1 << 24
+        static let styleShift: UInt64 = 32
     }
 
     /// The width-derived fold: how one record's cells break into display rows.
@@ -331,6 +363,56 @@ extension Terminal {
             // A 2-cell cluster meeting the last column does not split: the spacer fills the
             // column and the cluster starts the next row.
             return width - 1
+        }
+    }
+}
+
+extension TerminalCellKind {
+    /// A stable one-byte encoding for the cell word's kind field. Written out rather than
+    /// taken from a `RawRepresentable` conformance because the raw value would then be public
+    /// API, and the stored encoding is not something outside `TerminalCore` may depend on.
+    /// Must stay within three bits -- see `CellWord`'s layout diagram.
+    var packedCode: UInt8 {
+        switch self {
+        case .padding: 0
+        case .narrow: 1
+        case .wideHead: 2
+        case .wideTail: 3
+        case .spacerHead: 4
+        }
+    }
+
+    init(packedCode: UInt8) {
+        switch packedCode {
+        case 1: self = .narrow
+        case 2: self = .wideHead
+        case 3: self = .wideTail
+        case 4: self = .spacerHead
+        default: self = .padding
+        }
+    }
+}
+
+extension Terminal.SemanticPromptRow {
+    /// The record header's semantic-mark field, for the same reason as above: three bits of a
+    /// stored word, kept out of the public API.
+    var packedCode: UInt8 {
+        switch self {
+        case .none: 0
+        case .prompt: 1
+        case .continuation: 2
+        case .output: 3
+        case .vacated: 4
+        }
+    }
+
+    init(packedCode: UInt8) {
+        switch packedCode {
+        case 1: self = .prompt
+        case 2: self = .continuation
+        case 3: self = .output
+        case 4: self = .vacated
+        default: self = .none
         }
     }
 }

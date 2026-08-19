@@ -1134,11 +1134,13 @@ size" admits.
   `docs/scratch/2026-08-04-scroll-sample-breakdown.md`.
 - Commands, inputs, or reproduction: the deletion side was enumerated by reading
   `lib/TerminalCore/Sources/TerminalCore/Terminal.swift`,
-  `lib/TerminalCore/Sources/TerminalCore/PackedRetainedRow.swift` and the
-  `lib/TerminalCore/Tests/TerminalCoreTests/` suites named below; the addition
+  `lib/TerminalCore/Sources/TerminalCore/PackedRetainedRow.swift` (since deleted:
+  the arena replaced it, and its cell word moved to `LogicalLineRecord.swift`) and
+  the `lib/TerminalCore/Tests/TerminalCoreTests/` suites named below; the addition
   side was enumerated from this doc's own three probe files, which are the
   candidate's only existing implementation, plus `F4`'s and `F3`'s deferred
   decisions (`DD1`-`DD6`), which are what settle its semantics.
+  <!-- docs-lint: allow-missing lib/TerminalCore/Sources/TerminalCore/PackedRetainedRow.swift -->
 - Artifacts: none durable.
 
 #### What the rule asks, restated before it is answered
