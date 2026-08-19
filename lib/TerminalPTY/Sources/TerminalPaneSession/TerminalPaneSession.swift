@@ -50,6 +50,15 @@ private final class TerminalPaneDeliveryBoundary: Sendable {
         }
     }
 
+    /// Puts one payload where a real signal sits between `scheduleUpdate` and its main hop.
+    /// Only a test uses this: the window is a race in production, and staging it is the one
+    /// way to hold a controller in it deterministically.
+    func stagePendingSignal(_ signal: TerminalPTYUpdateSignal) {
+        state.withLock { state in
+            state.pendingSignal = state.pendingSignal.map { $0.merging(newer: signal) } ?? signal
+        }
+    }
+
     /// Hands a not-yet-delivered payload to a synchronous fence, so a checkpoint
     /// consume cannot overtake urgent work already signaled toward the main hop.
     func takePendingSignal() -> TerminalPTYUpdateSignal? {
@@ -260,7 +269,6 @@ public final class TerminalPaneSessionController {
     private var didEmitSessionEnded = false
     private var didEmitProcessStarted = false
     package var didReportProcessStartedForTesting: Bool { didEmitProcessStarted }
-    private var completedRecordingEvents: [NeutralTerminalRecordingEvent]?
     private var lastEmittedViewportState: TerminalPaneViewportState?
     private var lastEmittedSearchStatus: TerminalSearchStatus?
     private var lastPrimaryHistoryGeneration: UInt64
@@ -367,7 +375,7 @@ public final class TerminalPaneSessionController {
         bootstrapExecutable: String,
         machineHostname: String?,
         theme: RenderTheme,
-        captureTransitions: Bool
+        recordsCompleteTape: Bool
     ) throws -> TerminalPTYHost {
         try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
@@ -376,7 +384,7 @@ public final class TerminalPaneSessionController {
             machineHostname: machineHostname,
             programVersion: configuration.terminalProgramVersion,
             defaultColors: theme.defaultColors,
-            captureTransitions: captureTransitions
+            flightTapeConfiguration: recordsCompleteTape ? .complete : .production
         )
     }
 
@@ -394,7 +402,7 @@ public final class TerminalPaneSessionController {
                 bootstrapExecutable: bootstrapExecutable,
                 machineHostname: machineHostname,
                 theme: theme,
-                captureTransitions: false
+                recordsCompleteTape: false
             ),
             launchInput: configuration.launchInput,
             initialGridPinned: configuration.initialGridPinned,
@@ -403,7 +411,9 @@ public final class TerminalPaneSessionController {
         )
     }
 
-    /// Enables transition capture only for package tests or characterization app builds.
+    /// Selects the complete, never-evicted tape -- interaction intent included -- for package
+    /// tests and characterization app builds only. One boolean rather than the configuration
+    /// itself, because the configuration type is `package` and this seam is public.
     #if DANTERM_TERMINAL_CHARACTERIZATION
     public convenience init(
         configuration: TerminalPaneLaunchConfiguration,
@@ -411,7 +421,7 @@ public final class TerminalPaneSessionController {
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
         theme: RenderTheme = .dark,
-        captureTransitions: Bool
+        recordsCompleteTape: Bool
     ) throws {
         self.init(
             host: try Self.makeHost(
@@ -419,7 +429,7 @@ public final class TerminalPaneSessionController {
                 bootstrapExecutable: bootstrapExecutable,
                 machineHostname: machineHostname,
                 theme: theme,
-                captureTransitions: captureTransitions
+                recordsCompleteTape: recordsCompleteTape
             ),
             launchInput: configuration.launchInput,
             initialGridPinned: configuration.initialGridPinned,
@@ -434,7 +444,7 @@ public final class TerminalPaneSessionController {
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
         theme: RenderTheme = .dark,
-        captureTransitions: Bool
+        recordsCompleteTape: Bool
     ) throws {
         self.init(
             host: try Self.makeHost(
@@ -442,7 +452,7 @@ public final class TerminalPaneSessionController {
                 bootstrapExecutable: bootstrapExecutable,
                 machineHostname: machineHostname,
                 theme: theme,
-                captureTransitions: captureTransitions
+                recordsCompleteTape: recordsCompleteTape
             ),
             launchInput: configuration.launchInput,
             initialGridPinned: configuration.initialGridPinned,
@@ -588,20 +598,22 @@ public final class TerminalPaneSessionController {
         guard isTornDown == false else { return }
         // Drained synchronously: damage handoff and `consume` stay in one
         // main-actor step, so a checkpoint fence cannot strand moved rows.
-        let (frameState, result, transitions) = performAccountedFence(
+        let (frameState, result) = performAccountedFence(
             kind: .delivery,
             operation: .consumptionState
         )
-        consume(
-            frameState: frameState,
-            result: result,
-            transitions: transitions
-        )
+        consume(frameState: frameState, result: result)
     }
 
     /// Test seam for consuming a synchronously injected host update without yielding main.
     package func consumePendingHostUpdateForTesting() {
         consumeHostUpdate(host)
+    }
+
+    /// Test seam that leaves one update signal waiting on the delivery boundary, so the next
+    /// synchronous fence adopts its result the way a real flushed signal is adopted.
+    package func stagePendingUpdateSignalForTesting(_ signal: TerminalPTYUpdateSignal) {
+        deliveryBoundary.stagePendingSignal(signal)
     }
 
     /// Sends committed UTF-8 text through the host's shared ordered submission queue.
@@ -826,7 +838,7 @@ public final class TerminalPaneSessionController {
     /// full-damage prefix, and their own tail; this is only the shape they share.
     private func applyCheckpointFrame() {
         let frameState = performAccountedFence(kind: .checkpoint, operation: .frameState)
-        consume(frameState: frameState, result: nil, transitions: nil)
+        consume(frameState: frameState, result: nil)
     }
 
     /// Fences accepted owner work and freezes the recovery projection before app exit capture.
@@ -983,9 +995,17 @@ public final class TerminalPaneSessionController {
     }
     #endif
 
+    /// Pulls the recording from the tape at read time rather than storing one at the fence
+    /// that happened to observe the exit. A result adopted from a flushed update signal never
+    /// passed through that fence, so a stored recording was silently lost in exactly that
+    /// window; taking the capture here removes the window instead of guarding it. The tape is
+    /// never drained, so a later read is still complete.
     private func makeCapturedRecording(test: String) -> NeutralTerminalRecording? {
-        guard let completedRecordingEvents else { return nil }
-        return makeRecording(test: test, events: completedRecordingEvents)
+        guard didChildExit, host.recordsInteractionIntent else { return nil }
+        return makeRecording(
+            test: test,
+            events: flightRecordingCapture().snapshot.events.map(\.event)
+        )
     }
 
     /// Fences the whole retained tape with its origin, for one finite dump.
@@ -1050,7 +1070,7 @@ public final class TerminalPaneSessionController {
 
     /// Test harness seam that fences live evidence without changing completion eligibility.
     package func diagnosticCapture(test: String) -> TerminalPaneDiagnosticCapture {
-        let (frameState, transitions) = performAccountedFence(
+        let (frameState, capture) = performAccountedFence(
             kind: .diagnostic,
             operation: .diagnosticState
         )
@@ -1061,7 +1081,10 @@ public final class TerminalPaneSessionController {
         pendingDamage.formUnion(frameState.damage)
         return TerminalPaneDiagnosticCapture(
             terminal: frameState.terminal,
-            recording: makeRecording(test: test, events: neutralEvents(transitions)),
+            recording: makeRecording(
+                test: test,
+                events: capture.snapshot.events.map(\.event)
+            ),
             semanticEvents: frameState.semanticEvents
         )
     }
@@ -1078,25 +1101,6 @@ public final class TerminalPaneSessionController {
             ),
             events: events
         )
-    }
-
-    private func neutralEvents(
-        _ transitions: [TerminalPTYAppliedTransition]
-    ) -> [NeutralTerminalRecordingEvent] {
-        transitions.map { transition in
-            switch transition {
-            case .feed(let bytes): .feed(bytes)
-            case .input(let key, let modifiers): .input(key: key, modifiers: modifiers)
-            case .paste(let text): .paste(text)
-            case .focus(let focused): .focus(focused)
-            case .mouse(let event): .mouse(neutralMouseEvent(for: event))
-            case .resize(let grid):
-                .resize(columns: grid.dimensions.columns, rows: grid.dimensions.rows, pinned: grid.pinned)
-            case .scrollByRows(let rows): .viewport(.byRows(rows))
-            case .scrollToTopRow(let row): .viewport(.toTopRow(row))
-            case .scrollToBottom: .viewport(.toBottom)
-            }
-        }
     }
 
     /// Ends callbacks immediately and lets the host queue finish bounded teardown.
@@ -1152,8 +1156,7 @@ public final class TerminalPaneSessionController {
 
     private func consume(
         frameState: TerminalPTYFrameState,
-        result: PaneProcessLifecycleResult?,
-        transitions: [TerminalPTYAppliedTransition]?
+        result: PaneProcessLifecycleResult?
     ) {
         // First, so a synchronous checkpoint fence cannot overtake urgent work
         // already signaled toward the main hop: semantics stay ordered before
@@ -1183,9 +1186,6 @@ public final class TerminalPaneSessionController {
         if isVisible, isRenderingAvailable { planIfNeeded(frameState.terminal) }
         if let result, didEmitSessionEnded == false {
             didEmitSessionEnded = true
-            if let transitions {
-                completedRecordingEvents = neutralEvents(transitions)
-            }
             onSessionEnded?(result)
         }
     }
@@ -1208,40 +1208,6 @@ public final class TerminalPaneSessionController {
         guard status != lastEmittedSearchStatus else { return }
         lastEmittedSearchStatus = status
         onSearchStatus?(status)
-    }
-
-    private func neutralMouseEvent(for event: TerminalPointerEvent) -> NeutralTerminalMouseEvent {
-        switch event {
-        case let .down(button, cell, modifiers, clickCount):
-            NeutralTerminalMouseEvent(
-                action: .down,
-                button: button.rawValue + 1,
-                column: cell.column,
-                row: cell.row,
-                offsetX: cell.offsetX,
-                isInsideGrid: cell.isInsideGrid,
-                modifiers: modifiers,
-                clickCount: clickCount
-            )
-        case let .up(button, cell, modifiers):
-            NeutralTerminalMouseEvent(
-                action: .up,
-                button: button.rawValue + 1,
-                column: cell.column,
-                row: cell.row,
-                isInsideGrid: cell.isInsideGrid,
-                modifiers: modifiers
-            )
-        case let .move(cell, modifiers):
-            NeutralTerminalMouseEvent(
-                action: .move,
-                column: cell.column,
-                row: cell.row,
-                offsetX: cell.offsetX,
-                isInsideGrid: cell.isInsideGrid,
-                modifiers: modifiers
-            )
-        }
     }
 
     /// Test support for whole-value recording equality after a synchronization fence.

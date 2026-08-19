@@ -104,7 +104,7 @@ private enum TerminalWorkflowRunner {
                 terminalProgramVersion: "workflow-test"
             ),
             bootstrapExecutable: bootstrap,
-            captureTransitions: true
+            recordsCompleteTape: true
         )
         var semanticEvents: [TerminalSemanticEvent] = []
         controller.onSemanticEvents = { events in

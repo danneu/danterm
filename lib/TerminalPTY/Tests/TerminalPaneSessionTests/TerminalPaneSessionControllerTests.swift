@@ -871,6 +871,9 @@ struct TerminalPaneSessionControllerTests {
             launchInput: makeLaunchInput(command: "exec sleep 30")
         )
         let query = Array("\u{1B}]10;?\u{07}\u{1B}]11;?\u{1B}\\".utf8)
+        // A reply is written to the tty, and a write submitted before the pane owns its
+        // descriptor has nowhere to go. The launch line crossing is what proves it does.
+        #expect(await pollUntil({ host.inputWrites().isEmpty == false }, within: .seconds(20)))
 
         host.stageFixtureOutput(query)
         controller.setTheme(makeRenderTheme(seed: 20))
@@ -878,14 +881,19 @@ struct TerminalPaneSessionControllerTests {
         controller.setTheme(.dark)
         host.stageFixtureOutput(query)
 
-        let replies = await host.replyWrites().flatMap { $0 }
-        #expect(replies == Array(
+        // The tape records a write when its bytes transmit, not when the terminal produced
+        // them, so the answers have to reach the tty before they can be read back.
+        let expected = Array(
             ("\u{1B}]10;rgb:e5e5/e5e5/e5e5\u{1B}\\"
                 + "\u{1B}]11;rgb:0000/0000/0000\u{1B}\\"
                 + "\u{1B}]10;rgb:1414/0404/0505\u{1B}\\"
                 + "\u{1B}]11;rgb:1414/0606/0707\u{1B}\\"
                 + "\u{1B}]10;rgb:e5e5/e5e5/e5e5\u{1B}\\"
                 + "\u{1B}]11;rgb:0000/0000/0000\u{1B}\\").utf8
+        )
+        #expect(await pollUntil(
+            { host.replyWrites().flatMap { $0 } == expected },
+            within: .seconds(20)
         ))
 
         controller.tearDown()
@@ -1138,7 +1146,7 @@ struct TerminalPaneSessionControllerTests {
         //   processing leaves the child-input route live.
         // Scenario: the controlled probe floods output until it receives one key,
         //   records that the producer was still alive, then emits a final marker.
-        let host = try makeHost(captureTransitions: false)
+        let host = try makeHost(flightTapeConfiguration: .production)
         let controller = TerminalPaneSessionController(
             host: host,
             launchInput: makeLaunchInput(
@@ -1363,12 +1371,12 @@ struct TerminalPaneSessionControllerTests {
         controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: false)
         controller.sendText("d")
 
-        let submitted = await host.submittedTransitions().compactMap { transition in
-            if case .resize(let grid) = transition { grid } else { nil }
+        let submitted = host.tapeEvents().filter {
+            if case .resize = $0 { true } else { false }
         }
         #expect(submitted == [
-            .init(dimensions: .init(columns: 90, rows: 30), pinned: true),
-            .init(dimensions: .init(columns: 90, rows: 30), pinned: false),
+            .resize(columns: 90, rows: 30, pinned: true),
+            .resize(columns: 90, rows: 30, pinned: false),
         ])
 
         controller.tearDown()
@@ -1392,12 +1400,10 @@ struct TerminalPaneSessionControllerTests {
         controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: false)
         controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: false)
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        let resizeCount = await host.submittedTransitions().filter {
+        let resizeCount = host.tapeEvents().filter {
             if case .resize = $0 { true } else { false }
         }.count
-        let inputCount = await host.submittedTransitions().filter {
-            if case .input = $0 { true } else { false }
-        }.count
+        let inputCount = host.userWrites().count
         #expect(resizeCount == 1)
 
         controller.tearDown()
@@ -1408,10 +1414,8 @@ struct TerminalPaneSessionControllerTests {
         controller.tearDown()
         await host.close()
 
-        #expect(await host.submittedTransitions().filter {
-            if case .input = $0 { true } else { false }
-        }.count == inputCount)
-        #expect(await host.submittedTransitions().filter {
+        #expect(host.userWrites().count == inputCount)
+        #expect(host.tapeEvents().filter {
             if case .resize = $0 { true } else { false }
         }.count == 1)
         #expect((await host.resourceSnapshot()).isReleased)
@@ -1543,7 +1547,7 @@ struct TerminalPaneSessionControllerTests {
                 terminalProgramVersion: "dev"
             ),
             bootstrapExecutable: bootstrapExecutable(),
-            captureTransitions: true
+            recordsCompleteTape: true
         )
         let results = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
@@ -1594,7 +1598,7 @@ struct TerminalPaneSessionControllerTests {
                 terminalProgramVersion: "dev"
             ),
             bootstrapExecutable: bootstrapExecutable(),
-            captureTransitions: false
+            recordsCompleteTape: false
         )
         let handle = controller.terminationHandle
 
@@ -1611,7 +1615,7 @@ struct TerminalPaneSessionControllerTests {
         // Why it exists: capture-on-teardown would mislabel killed partial sessions
         //   and still miss the last pane, which is retained through quit confirmation.
         // Scenario: the user closes a pane while its interactive shell is still live.
-        let host = try makeHost(captureTransitions: true)
+        let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
             launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
@@ -1638,7 +1642,7 @@ struct TerminalPaneSessionControllerTests {
                 terminalProgramVersion: "dev"
             ),
             bootstrapExecutable: bootstrapExecutable(),
-            captureTransitions: true
+            recordsCompleteTape: true
         )
         defer { controller.tearDown() }
 
@@ -1787,14 +1791,49 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("a result adopted from a flushed signal still yields a recording", .timeLimit(.minutes(1)))
+    func flushedSignalResultStillYieldsRecording() async throws {
+        // Intent: a session whose exit arrives through a signal a synchronous fence flushed,
+        //   rather than through the fence's own payload, still exposes its recording.
+        // Why it exists: the recording used to be stored by whichever fence observed the exit.
+        //   A checkpoint fence adopts a flushed result but carried no transitions, so a pane
+        //   that ended in that window lost its recording for good -- silently, because the
+        //   session-ended callback still fired.
+        // Scenario: output reaches the pane, the child's exit is waiting on the delivery
+        //   boundary with its main hop not yet run, and a checkpoint fence lands first.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        host.stageFixtureOutput(Array("__FLUSHED__\r\n".utf8))
+        controller.synchronizeState()
+
+        controller.stagePendingUpdateSignalForTesting(TerminalPTYUpdateSignal(
+            processStarted: false,
+            clipboardWrite: nil,
+            semanticEvents: [],
+            primaryHistoryGeneration: 0,
+            result: .exited(.exited(0))
+        ))
+        controller.synchronizeState()
+
+        let recording = try #require(controller.capturedRecording(test: "flushed-signal"))
+        #expect(recording.events.contains(.feed(Array("__FLUSHED__\r\n".utf8))))
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("capture disabled remains behaviorally inert", .timeLimit(.minutes(1)))
     func captureDisabledExposesNoRecording() async throws {
-        // Intent: the default controller path completes a normal session without
-        //   retaining or exposing recording transitions.
-        // Why it exists: capture is characterization-only product surface and must
-        //   not change the default engine's lifetime or output behavior.
+        // Intent: a pane on the production tape configuration completes a normal session
+        //   and exposes no recording, even though its tape retained the session.
+        // Why it exists: a characterization recording is characterization-only product
+        //   surface. The tape is now always on, so eligibility rests on the configuration
+        //   alone, and a production pane must not start handing recordings out.
         // Scenario: a normal non-characterization pane prints a marker and exits.
-        let host = try makeHost(captureTransitions: false)
+        let host = try makeHost(flightTapeConfiguration: .production)
         let controller = TerminalPaneSessionController(
             host: host,
             launchInput: makeLaunchInput(command: "printf '__CAPTURE_OFF__\\n'; exit")
@@ -1970,7 +2009,7 @@ struct TerminalPaneSessionControllerTests {
 
     @Test("text key and encoded input each snap browsing to live output", .timeLimit(.minutes(1)))
     func everyUserInputPathSnapsViewport() async throws {
-        let host = try makeHost(captureTransitions: false)
+        let host = try makeHost(flightTapeConfiguration: .production)
         let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; stty -echo; exec \(try probeExecutable()) hold \"$0\""
         let controller = TerminalPaneSessionController(
             host: host,
@@ -2006,13 +2045,13 @@ struct TerminalPaneSessionControllerTests {
             launchInput: makeLaunchInput(command: command)
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        let baseline = await host.inputWrites().count
+        let baseline = host.inputWrites().count
 
         controller.sendWheel(.init(rowDelta: -2, column: 0, row: 0))
         _ = host.fencedSnapshot()
 
         let up = [UInt8]([0x1B, 0x5B, 0x41])
-        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [up + up])
+        #expect(Array(host.inputWrites().dropFirst(baseline)) == [up + up])
 
         controller.tearDown()
         await host.close()
@@ -2153,7 +2192,7 @@ struct TerminalPaneSessionControllerTests {
                 terminalProgramVersion: "dev"
             ),
             bootstrapExecutable: bootstrapExecutable(),
-            captureTransitions: true
+            recordsCompleteTape: true
         )
         let results = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
@@ -2233,7 +2272,7 @@ struct TerminalPaneSessionControllerTests {
         weak var releasedController: TerminalPaneSessionController?
         weak var releasedHost: TerminalPTYHost?
         do {
-            let host = try makeHost(captureTransitions: false)
+            let host = try makeHost(flightTapeConfiguration: .production)
             releasedHost = host
             let controller = TerminalPaneSessionController(
                 host: host,
@@ -2275,12 +2314,12 @@ private func drainMainQueue() async {
 }
 
 private func makeHost(
-    captureTransitions: Bool = true
+    flightTapeConfiguration: TerminalFlightRecorderConfiguration = .complete
 ) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
         bootstrapExecutable: bootstrapExecutable(),
-        captureTransitions: captureTransitions
+        flightTapeConfiguration: flightTapeConfiguration
     )
 }
 

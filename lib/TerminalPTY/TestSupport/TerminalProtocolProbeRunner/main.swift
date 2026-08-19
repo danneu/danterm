@@ -60,7 +60,7 @@ private enum TerminalProtocolProbeRunner {
                 terminalProgramVersion: "protocol-probe"
             ),
             bootstrapExecutable: bootstrap,
-            captureTransitions: true
+            recordsCompleteTape: true
         )
         let termination = controller.terminationHandle
         let ended = EndSignal()

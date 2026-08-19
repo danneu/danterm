@@ -241,6 +241,50 @@ public struct NeutralTerminalMouseEvent: Equatable, Sendable {
     }
 }
 
+extension NeutralTerminalMouseEvent {
+    /// Lowers the pane's measured pointer event into the recorded vocabulary.
+    ///
+    /// It lives here because this module owns both vocabularies, so the one pane owner that
+    /// records a pointer and every reader that replays one share a single mapping. The shape
+    /// is what a replica can decode: a press and a release always name a one-based button,
+    /// and motion never does. `isInsideGrid` travels with the coordinates rather than being
+    /// reconstructed at replay, because the column and row are already clamped into the grid
+    /// and cannot say whether the raw point was outside it.
+    public init(_ event: TerminalPointerEvent) {
+        switch event {
+        case let .down(button, cell, modifiers, clickCount):
+            self.init(
+                action: .down,
+                button: button.rawValue + 1,
+                column: cell.column,
+                row: cell.row,
+                offsetX: cell.offsetX,
+                isInsideGrid: cell.isInsideGrid,
+                modifiers: modifiers,
+                clickCount: clickCount
+            )
+        case let .up(button, cell, modifiers):
+            self.init(
+                action: .up,
+                button: button.rawValue + 1,
+                column: cell.column,
+                row: cell.row,
+                isInsideGrid: cell.isInsideGrid,
+                modifiers: modifiers
+            )
+        case let .move(cell, modifiers):
+            self.init(
+                action: .move,
+                column: cell.column,
+                row: cell.row,
+                offsetX: cell.offsetX,
+                isInsideGrid: cell.isInsideGrid,
+                modifiers: modifiers
+            )
+        }
+    }
+}
+
 /// One owner-ordered terminal transition; checkpoints retain corpus expectation positions.
 public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
     case feed([UInt8])

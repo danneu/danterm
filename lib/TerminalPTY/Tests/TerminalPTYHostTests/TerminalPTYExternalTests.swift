@@ -29,7 +29,7 @@ struct TerminalPTYExternalTests {
         let command = "exec /usr/bin/ssh -tt -o BatchMode=yes "
             + "-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "
             + "localhost \(shellQuote(remoteCommand))"
-        let host = try externalHost(captureTransitions: false)
+        let host = try externalHost()
 
         await host.start(externalLaunchInput(command: command))
         #expect(await host.waitForOutput(containing: Array("__SSH_READY__".utf8)))
@@ -67,7 +67,7 @@ struct TerminalPTYExternalTests {
         let command = "exec \(shellQuote(tmux)) -L \(token) -f /dev/null "
             + "new-session -s danterm 'printf \"__TMUX_READY__\\n\"; exec /bin/sh' "
             + "\\; set-option -g exit-unattached on"
-        let host = try externalHost(captureTransitions: false)
+        let host = try externalHost()
 
         await host.start(externalLaunchInput(command: command))
         #expect(await host.waitForOutput(containing: Array("__TMUX_READY__".utf8)))
@@ -81,11 +81,10 @@ struct TerminalPTYExternalTests {
     }
 }
 
-private func externalHost(captureTransitions: Bool) throws -> TerminalPTYHost {
+private func externalHost() throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
-        bootstrapExecutable: builtExecutable(named: "PTYSessionBootstrap"),
-        captureTransitions: captureTransitions
+        bootstrapExecutable: builtExecutable(named: "PTYSessionBootstrap")
     )
 }
 

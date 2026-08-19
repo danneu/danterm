@@ -826,7 +826,7 @@ external_recordings=0
 primary_recordings=0
 for recording in "$RECORDING_DIRECTORY"/pane-*.json; do
     jq -e \
-        '.version == 1 and .provenance.source == "danterm" and .provenance.test == "milestone-4-viability" and ([.events[].type] | all(. == "feed" or . == "resize"))' \
+        '.version == 1 and .provenance.source == "danterm" and .provenance.test == "milestone-4-viability" and ([.events[].type] | all(. == "feed" or . == "write" or . == "resize"))' \
         "$recording" >/dev/null
     replay_base="$CAPTURE_DIRECTORY/$(basename "$recording" .json)"
     "$RUN_ROOT/terminal-recording-replay" screen "$recording" >"$replay_base-screen.txt"

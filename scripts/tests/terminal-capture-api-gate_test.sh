@@ -51,7 +51,7 @@ func makeCapturingController(
     _ = try TerminalPaneSessionController(
         configuration: configuration,
         bootstrapExecutable: bootstrapExecutable,
-        captureTransitions: true
+        recordsCompleteTape: true
     )
 }
 EOF

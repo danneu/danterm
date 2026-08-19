@@ -87,19 +87,6 @@ package struct TerminalPTYUpdateSignal: Sendable {
     }
 }
 
-/// Test-support view of owner-ordered terminal, input, and viewport transitions.
-package enum TerminalPTYAppliedTransition: Equatable, Sendable {
-    case feed([UInt8])
-    case input(key: TerminalInputKey, modifiers: TerminalKeyModifiers)
-    case paste(String)
-    case focus(Bool)
-    case mouse(TerminalPointerEvent)
-    case resize(PaneGridSubmission)
-    case scrollByRows(Int)
-    case scrollToTopRow(Int)
-    case scrollToBottom
-}
-
 /// One controller-owned synchronous operation, carrying the payload type its fence returns.
 ///
 /// The payload travels with the operation, so `.frameState` can hand back nothing but a frame
@@ -120,8 +107,7 @@ extension TerminalPTYProductionFenceOperation where Payload == TerminalPTYFrameS
 extension TerminalPTYProductionFenceOperation
 where Payload == (
     frameState: TerminalPTYFrameState,
-    result: PaneProcessLifecycleResult?,
-    transitions: [TerminalPTYAppliedTransition]?
+    result: PaneProcessLifecycleResult?
 ) {
     /// Drains one frame together with the lifecycle evidence a delivery fence consumes.
     package static var consumptionState: Self {
@@ -132,7 +118,7 @@ where Payload == (
 extension TerminalPTYProductionFenceOperation
 where Payload == (
     frameState: TerminalPTYFrameState,
-    transitions: [TerminalPTYAppliedTransition]
+    capture: TerminalFlightRecordingCapture
 ) {
     /// Captures a diagnostic boundary before failure cleanup can discard the evidence.
     package static var diagnosticState: Self {
@@ -160,12 +146,6 @@ extension TerminalPTYProductionFenceOperation where Payload == Void {
 package struct TerminalPTYProductionFenceResult<Payload: Sendable>: Sendable {
     package let payload: Payload
     package let entryCount: UInt64
-}
-
-/// Test-support view of input and resize effects applied on the shared owner queue.
-enum TerminalPTYSubmittedTransition: Equatable, Sendable {
-    case input([UInt8])
-    case resize(PaneGridSubmission)
 }
 
 /// Groups passive lifecycle observations so the resource snapshot separates
@@ -345,7 +325,11 @@ public actor TerminalPTYHost {
     private var reducer = PaneProcessLifecycleReducer()
     private var terminal: Terminal
     private let initialDimensions: TerminalDimensions
-    package nonisolated let captureTransitions: Bool
+    /// Whether this pane's tape keeps the interaction intent behind its boundary events, which
+    /// is also what makes the pane eligible to yield a characterization recording. Copied from
+    /// the recorder's own configuration at construction, so there is no second switch that can
+    /// disagree with what the recorder actually does.
+    package nonisolated let recordsInteractionIntent: Bool
     private let bootstrapExecutable: String
     private let childExitProbe: any TerminalPTYChildExitProbing
     private let resourceLifecycle: any TerminalPTYResourceLifecycling
@@ -403,14 +387,10 @@ public actor TerminalPTYHost {
     private var turnStorage = [UInt8](repeating: 0, count: TerminalPTYHost.readTurnLimit)
 
     private var interactionState = TerminalInteractionState()
-    private var capturedOutput: [UInt8] = []
-    private var appliedTransitions: [TerminalPTYAppliedTransition] = []
-    /// Every pane records from birth: there is no seam that creates or destroys this after
-    /// construction, so "a pane that kept no evidence of itself" is unreachable.
+    /// The pane's one record of what it applied. Every pane records from birth: there is no
+    /// seam that creates or destroys this after construction, so "a pane that kept no evidence
+    /// of itself" is unreachable, and no second capture surface can disagree with it.
     private let flightTape: TerminalFlightRecorder
-    private var capturedSubmittedTransitions: [TerminalPTYSubmittedTransition] = []
-    private var capturedInputWrites: [[UInt8]] = []
-    private var capturedReplyWrites: [[UInt8]] = []
     private var reportedResult: PaneProcessLifecycleResult?
     private var pendingProcessStarted = false
     private var teardownFinished = false
@@ -452,7 +432,7 @@ public actor TerminalPTYHost {
             machineHostname: machineHostname,
             programVersion: programVersion,
             defaultColors: defaultColors,
-            captureTransitions: false
+            flightTapeConfiguration: .production
         )
     }
 
@@ -465,7 +445,6 @@ public actor TerminalPTYHost {
         machineHostname: String? = MachineHostname.posix,
         programVersion: String = "dev",
         defaultColors: TerminalDefaultColors = .baked,
-        captureTransitions: Bool,
         flightTapeConfiguration: TerminalFlightRecorderConfiguration = .production,
         flightTapeClock: @escaping @Sendable () -> UInt64 = {
             DispatchTime.now().uptimeNanoseconds
@@ -488,7 +467,7 @@ public actor TerminalPTYHost {
         self.terminal = terminal
         self.initialDimensions = initialDimensions
         self.bootstrapExecutable = bootstrapExecutable
-        self.captureTransitions = captureTransitions
+        recordsInteractionIntent = flightTapeConfiguration.recordsInteractionIntent
         self.applicationExitBound = applicationExitBound
         self.childExitProbe = childExitProbe
         self.resourceLifecycle = resourceLifecycle
@@ -539,7 +518,7 @@ public actor TerminalPTYHost {
                     onCompletion(.delivered)
                     return
                 }
-                owner.applyViewportNavigation(.scrollToBottom, publishUpdate: false)
+                owner.applyViewportNavigation(.toBottom, publishUpdate: false)
                 owner.submitInput(
                     bytes,
                     origin: origin,
@@ -642,7 +621,7 @@ public actor TerminalPTYHost {
     nonisolated public func scroll(byRows rowDelta: Int) {
         queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in
-                owner.applyViewportNavigation(.scrollByRows(rowDelta), publishUpdate: true)
+                owner.applyViewportNavigation(.byRows(rowDelta), publishUpdate: true)
             }
         }
     }
@@ -651,7 +630,7 @@ public actor TerminalPTYHost {
     nonisolated public func scroll(toTopRow row: Int) {
         queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in
-                owner.applyViewportNavigation(.scrollToTopRow(row), publishUpdate: true)
+                owner.applyViewportNavigation(.toTopRow(row), publishUpdate: true)
             }
         }
     }
@@ -660,7 +639,7 @@ public actor TerminalPTYHost {
     nonisolated public func scrollToBottom() {
         queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in
-                owner.applyViewportNavigation(.scrollToBottom, publishUpdate: true)
+                owner.applyViewportNavigation(.toBottom, publishUpdate: true)
             }
         }
     }
@@ -1136,48 +1115,38 @@ public actor TerminalPTYHost {
     /// Drains test frame effects and lifecycle evidence as one owner transaction.
     package nonisolated func fencedConsumptionState() -> (
         frameState: TerminalPTYFrameState,
-        result: PaneProcessLifecycleResult?,
-        transitions: [TerminalPTYAppliedTransition]?
+        result: PaneProcessLifecycleResult?
     ) {
         fence(countsAsProduction: false) { owner in owner.drainedConsumptionState() }.value
     }
 
     /// The one owner-isolated build of the consumption payload, shared by the production fence
     /// and its test counterpart so `countsAsProduction:` stays the only difference between the
-    /// two paths. Transitions are selected before the drain, which is the ordering the
-    /// hand-over contract above depends on; keeping one copy is what stops the two from
-    /// drifting apart.
+    /// two paths. It carries no recording: a reader that wants one pulls the tape when it asks,
+    /// so which fence happened to observe the child's exit cannot decide whether it gets one.
     fileprivate func drainedConsumptionState() -> (
         frameState: TerminalPTYFrameState,
-        result: PaneProcessLifecycleResult?,
-        transitions: [TerminalPTYAppliedTransition]?
+        result: PaneProcessLifecycleResult?
     ) {
-        let transitions: [TerminalPTYAppliedTransition]?
-        if case .some(.exited) = reportedResult, captureTransitions {
-            transitions = appliedTransitions
-        } else {
-            transitions = nil
-        }
-        return (drainedFrameState(), reportedResult, transitions)
+        (drainedFrameState(), reportedResult)
     }
 
     /// Captures a test-only diagnostic boundary before failure cleanup can discard evidence.
     package nonisolated func fencedDiagnosticState() -> (
         frameState: TerminalPTYFrameState,
-        transitions: [TerminalPTYAppliedTransition]
+        capture: TerminalFlightRecordingCapture
     ) {
         fence(countsAsProduction: false) { owner in owner.drainedDiagnosticState() }.value
     }
 
     /// The one owner-isolated build of the diagnostic payload, shared by the production fence
-    /// and its test counterpart. The drain precedes the transition read, which is the opposite
-    /// of the consumption payload above: a diagnostic capture wants every transition applied up
-    /// to the boundary the drain just established.
+    /// and its test counterpart. The drain precedes the tape read on purpose: a diagnostic
+    /// capture wants every transition applied up to the boundary the drain just established.
     fileprivate func drainedDiagnosticState() -> (
         frameState: TerminalPTYFrameState,
-        transitions: [TerminalPTYAppliedTransition]
+        capture: TerminalFlightRecordingCapture
     ) {
-        (drainedFrameState(), appliedTransitions)
+        (drainedFrameState(), flightTape.capture())
     }
 
     /// Detaches the pane consumer and starts bounded shutdown, returning the terminal the
@@ -1313,7 +1282,7 @@ public actor TerminalPTYHost {
             case .selectAll:
                 owner.applySelectAll()
             case .scrollByRows(let rows):
-                owner.applyViewportNavigation(.scrollByRows(rows), publishUpdate: true)
+                owner.applyViewportNavigation(.byRows(rows), publishUpdate: true)
             case .resize(let grid):
                 owner.process(.resize(grid))
             }
@@ -1323,31 +1292,6 @@ public actor TerminalPTYHost {
     /// Returns the reported child result without waiting for future lifecycle work.
     public func result() -> PaneProcessLifecycleResult? {
         reportedResult
-    }
-
-    /// Returns raw bytes only when explicit test-support capture was enabled.
-    func outputBytes() -> [UInt8] {
-        capturedOutput
-    }
-
-    /// Returns the exact TerminalCore mutation order for neutral recording tests.
-    package func transitions() -> [TerminalPTYAppliedTransition] {
-        appliedTransitions
-    }
-
-    /// Returns the reducer-emitted writes before nonblocking partial IO splits them.
-    func inputWrites() -> [[UInt8]] {
-        capturedInputWrites
-    }
-
-    /// Returns core-generated writes separately from user-originated input evidence.
-    func replyWrites() -> [[UInt8]] {
-        capturedReplyWrites
-    }
-
-    /// Returns the shared-queue order of applied input and resize effects.
-    func submittedTransitions() -> [TerminalPTYSubmittedTransition] {
-        capturedSubmittedTransitions
     }
 
     /// Exposes an ownership census without leaking mutable descriptors or sources.
@@ -1407,7 +1351,7 @@ public actor TerminalPTYHost {
         }
         if decision.localRowDelta != 0 {
             applyViewportNavigation(
-                .scrollByRows(decision.localRowDelta),
+                .byRows(decision.localRowDelta),
                 publishUpdate: true
             )
         }
@@ -1422,7 +1366,7 @@ public actor TerminalPTYHost {
         onSelectionCompleted: (@Sendable (String) -> Void)?
     ) {
         guard teardownFinished == false else { return }
-        if captureTransitions { appliedTransitions.append(.mouse(event)) }
+        flightTape.record(.mouse(.init(event)))
         let decision = decideTerminalPointer(event, terminal: terminal, state: &interactionState)
         if decision.inputBytes.isEmpty == false {
             submitInput(
@@ -1544,13 +1488,13 @@ public actor TerminalPTYHost {
             onCompletion(.rejected(.processEnded))
             return
         }
-        if captureTransitions { appliedTransitions.append(.input(key: key, modifiers: modifiers)) }
+        flightTape.record(.input(key: key, modifiers: modifiers))
         let bytes = encodeTerminalKey(key, modifiers: modifiers, modes: terminal.inputModes)
         guard bytes.isEmpty == false else {
             onCompletion(.delivered)
             return
         }
-        applyViewportNavigation(.scrollToBottom, publishUpdate: false)
+        applyViewportNavigation(.toBottom, publishUpdate: false)
         submitInput(
             bytes,
             origin: origin,
@@ -1569,13 +1513,13 @@ public actor TerminalPTYHost {
             onCompletion(.rejected(.processEnded))
             return
         }
-        if captureTransitions { appliedTransitions.append(.paste(text)) }
+        flightTape.record(.paste(text))
         let bytes = encodeTerminalPaste(text, modes: terminal.inputModes)
         guard bytes.isEmpty == false else {
             onCompletion(.delivered)
             return
         }
-        applyViewportNavigation(.scrollToBottom, publishUpdate: false)
+        applyViewportNavigation(.toBottom, publishUpdate: false)
         submitInput(
             bytes,
             origin: origin,
@@ -1586,30 +1530,30 @@ public actor TerminalPTYHost {
 
     private func applyFocus(_ focused: Bool, origin: UInt64?) {
         guard teardownFinished == false else { return }
-        if captureTransitions { appliedTransitions.append(.focus(focused)) }
+        flightTape.record(.focus(focused))
         let bytes = encodeTerminalFocus(focused: focused, modes: terminal.inputModes)
         guard bytes.isEmpty == false else { return }
         // The pane's own report of a focus change the user never aimed at the child.
         submitInput(bytes, origin: origin, attribution: .pane)
     }
 
+    /// Takes the three-case navigation vocabulary the tape already speaks, so "a navigation
+    /// that is not a navigation" has no representation to reject at runtime.
     private func applyViewportNavigation(
-        _ navigation: TerminalPTYAppliedTransition,
+        _ navigation: NeutralTerminalViewportNavigation,
         publishUpdate: Bool
     ) {
         guard teardownFinished == false else { return }
         let previousViewport = terminal.scrollProjection
         switch navigation {
-        case .scrollByRows(let rows): terminal.scroll(byRows: rows)
-        case .scrollToTopRow(let row): terminal.scroll(toTopRow: row)
-        case .scrollToBottom: terminal.scrollToBottom()
-        case .feed, .input, .paste, .focus, .mouse, .resize:
-            preconditionFailure(
-                "applyViewportNavigation takes only .scrollByRows, .scrollToTopRow, .scrollToBottom"
-            )
+        case .byRows(let rows): terminal.scroll(byRows: rows)
+        case .toTopRow(let row): terminal.scroll(toTopRow: row)
+        case .toBottom: terminal.scrollToBottom()
         }
+        // Only an effective move is recorded: a navigation the viewport did not follow is a
+        // request, not a transition, and replaying it would move a replica the pane never moved.
         if terminal.scrollProjection != previousViewport {
-            if captureTransitions { appliedTransitions.append(navigation) }
+            flightTape.record(.viewport(navigation))
         }
         markFrameUpdatePendingIfNeeded()
         if publishUpdate { publishPendingUpdate() }
@@ -1628,10 +1572,6 @@ public actor TerminalPTYHost {
             pendingProcessStarted = true
             markUpdatePending()
         case .writeInput(let bytes, let origin, let submissionId):
-            if captureTransitions {
-                capturedInputWrites.append(bytes)
-                capturedSubmittedTransitions.append(.input(bytes))
-            }
             enqueueInput(
                 bytes,
                 origin: origin,
@@ -2175,13 +2115,13 @@ public actor TerminalPTYHost {
             remaining -= turn.byteCount
             if turn.byteCount == 0 || turn.reachedEndOfOutput { break }
         }
-        // Nested in the caller's reduction, so its bytes, its tape record, and its captures
-        // are all in place before the outer reduction reports the child's result.
+        // Nested in the caller's reduction, so its bytes and its tape record are both in
+        // place before the outer reduction reports the child's result.
         process(.outputEOF)
     }
 
     /// The turn's one pass over everything downstream of the parse: the tape event, the
-    /// reply flush, the update-pending check, and the capture surfaces.
+    /// reply flush, and the update-pending check.
     ///
     /// Turn-scoped rather than read-scoped because a read boundary on a pty master is a
     /// kernel buffer artifact and means nothing to any of them. Order is load-bearing: the
@@ -2195,9 +2135,6 @@ public actor TerminalPTYHost {
         guard bytes.isEmpty == false else { return }
         flightTape.record(.feed(bytes))
         if replies.isEmpty == false {
-            if captureTransitions {
-                capturedReplyWrites.append(replies)
-            }
             enqueueInput(replies, origin: nil, submissionId: nil, attribution: .reply)
         }
         if terminal.hasPendingConsumerWork,
@@ -2205,10 +2142,6 @@ public actor TerminalPTYHost {
             || terminal.pendingConsumerWorkGeneration != previousConsumerWorkGeneration
         {
             markUpdatePending()
-        }
-        if captureTransitions {
-            capturedOutput.append(contentsOf: bytes)
-            appliedTransitions.append(.feed(bytes))
         }
     }
 
@@ -2235,10 +2168,6 @@ public actor TerminalPTYHost {
         )
         terminal.resize(columns: dimensions.columns, rows: dimensions.rows)
         markFrameUpdatePendingIfNeeded()
-        if captureTransitions {
-            appliedTransitions.append(.resize(grid))
-            capturedSubmittedTransitions.append(.resize(grid))
-        }
     }
 
     private func reapLeader() {

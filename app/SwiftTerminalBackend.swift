@@ -67,7 +67,7 @@ final class SwiftTerminalBackend {
                 configuration: configuration,
                 bootstrapExecutable: bootstrapExecutable,
                 theme: theme,
-                captureTransitions: recordingDirectory != nil
+                recordsCompleteTape: recordingDirectory != nil
             )
             #else
             controller = try TerminalPaneSessionController(

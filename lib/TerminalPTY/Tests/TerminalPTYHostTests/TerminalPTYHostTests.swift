@@ -39,13 +39,13 @@ struct TerminalPTYHostTests {
         // Scenario: Ctrl-Space, Ctrl-backslash, and Insert reach one waiting child.
         let pane = try await startChildlessHost()
         let host = pane.host
-        let baseline = await host.inputWrites().count
+        let baseline = host.inputWrites().count
 
         host.sendKey(.character(" "), modifiers: [.control])
         host.sendKey(.character("\\"), modifiers: [.control])
         host.sendKey(.insert, modifiers: [])
         _ = host.fencedSnapshot()
-        let writes = Array((await host.inputWrites()).dropFirst(baseline))
+        let writes = Array((host.inputWrites()).dropFirst(baseline))
 
         #expect(writes == [
             [0x00],
@@ -198,13 +198,13 @@ struct TerminalPTYHostTests {
         let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("\u{1B}[?1004h"))
-        let writeBaseline = await host.inputWrites().count
+        let writeBaseline = host.inputWrites().count
 
         host.sendFocus(true)
         #expect(await pane.writeFromChild("\u{1B}[6n"))
 
-        #expect(await host.inputWrites().count > writeBaseline)
-        #expect(await host.replyWrites().isEmpty == false)
+        #expect(host.inputWrites().count > writeBaseline)
+        #expect(host.replyWrites().isEmpty == false)
         #expect(host.drainedUserInputEvents().isEmpty)
         await host.close()
     }
@@ -378,7 +378,7 @@ struct TerminalPTYHostTests {
             row: snapshot.scrollProjection.topRow + row,
             column: column + 2
         )))
-        let baseline = await host.inputWrites().count
+        let baseline = host.inputWrites().count
         let opened = AsyncStream<TerminalHyperlink>.makeStream()
         var iterator = opened.stream.makeAsyncIterator()
 
@@ -394,7 +394,7 @@ struct TerminalPTYHostTests {
         )
 
         #expect(await iterator.next()?.uri == "https://a.co")
-        #expect(await host.inputWrites().count == baseline)
+        #expect(host.inputWrites().count == baseline)
         host.cancelLinkInteraction()
         #expect(host.fencedSnapshot().hoveredLink == nil)
         await host.close()
@@ -419,7 +419,7 @@ struct TerminalPTYHostTests {
         // Why it exists: signaling every mutation lets pointer backlogs wake the same future drain
         //   repeatedly even though that drain reads the terminal's final state.
         // Scenario: full damage is signaled, then Select All lands before the consumer drains it.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("alpha"))
         let afterOutput = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
@@ -440,7 +440,7 @@ struct TerminalPTYHostTests {
         // Why it exists: signal coalescing is safe only if the eventual drain carries all damage,
         //   rather than only the rows present when the wake was emitted.
         // Scenario: two line selections land on different rows before one frame drain.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("alpha\r\nbeta\r\ngamma"))
         _ = host.fencedFrameState()
@@ -468,7 +468,7 @@ struct TerminalPTYHostTests {
         // Intent: click reservation stays owner-internal and creates no consumer wakeup.
         // Why it exists: whole-Terminal inequality treated invisible armed-link state as a frame.
         // Scenario: Cmd-hover drains, then Cmd-down arms the same URL without changing hover.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("https://a.co"))
         _ = host.fencedFrameState()
@@ -491,7 +491,7 @@ struct TerminalPTYHostTests {
         // Why it exists: the 2026-08-15 pointer freeze came from whole-Terminal equality on the
         //   owner queue, and removing only that one call would leave the same failure elsewhere.
         // Scenario: each interaction class mutates a live host after it has built deep history.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild(scrollbackLines))
         _ = host.fencedFrameState()
@@ -515,7 +515,7 @@ struct TerminalPTYHostTests {
         // Intent: publication follows recorded damage even when the visible value is unchanged.
         // Why it exists: an inequality-based shortcut would strand deliberate repaint records.
         // Scenario: the same URL is hovered twice and the same successful search is begun twice.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("https://a.co hit"))
         _ = host.fencedFrameState()
@@ -548,17 +548,17 @@ struct TerminalPTYHostTests {
         // Intent: transition capture classifies viewport movement from viewport state itself.
         // Why it exists: pending full damage cannot say whether a later navigation actually moved.
         // Scenario: output schedules full damage, then a scroll lands before that frame drains.
-        let pane = try await startChildlessHost()
+        let pane = try await startChildlessHost(flightTapeConfiguration: .complete)
         let host = pane.host
         #expect(await pane.writeFromChild(scrollbackLines))
         _ = host.fencedFrameState()
-        let baseline = await host.transitions().count
+        let baseline = host.tapeEvents().count
 
         #expect(await pane.writeFromChild("\u{1B}[2J"))
         host.scroll(byRows: -1)
         _ = host.fencedSnapshot()
 
-        #expect(Array((await host.transitions()).dropFirst(baseline)).contains(.scrollByRows(-1)))
+        #expect(Array(host.tapeEvents().dropFirst(baseline)).contains(.viewport(.byRows(-1))))
         await host.close()
     }
 
@@ -583,7 +583,7 @@ struct TerminalPTYHostTests {
 
         #expect(clipboardWrite == "hello")
         #expect(host.fencedFrameState().clipboardWrite == nil)
-        #expect(await host.replyWrites() == [])
+        #expect(host.replyWrites() == [])
         await host.close()
     }
 
@@ -592,7 +592,7 @@ struct TerminalPTYHostTests {
         // Intent: retained OSC bytes alone produce neither a host wakeup nor a drained effect.
         // Why it exists: whole-Terminal inequality includes parser state and is too broad for work.
         // Scenario: the child splits one clipboard write across two separate writes.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         _ = host.fencedFrameState()
         let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
@@ -626,7 +626,7 @@ struct TerminalPTYHostTests {
         //   promises geometry that a run-wide skip would break.
         // Scenario: a drag interrupted by a click, with the click's viewport
         //   row 0 resolving against the taller grid submitted just before it.
-        let pane = try await startChildlessHost()
+        let pane = try await startChildlessHost(flightTapeConfiguration: .complete)
         let host = pane.host
         #expect(await pane.writeFromChild(scrollbackLines))
 
@@ -636,7 +636,7 @@ struct TerminalPTYHostTests {
         let shortTopLine = topViewportLine(host.fencedSnapshot())
         try #require(tallTopLine.isEmpty == false)
         try #require(tallTopLine != shortTopLine)
-        let baseline = await host.transitions().count
+        let baseline = host.tapeEvents().count
 
         let owner = OwnerHold()
         try owner.hold(host)
@@ -646,17 +646,17 @@ struct TerminalPTYHostTests {
         owner.release()
 
         let snapshot = host.fencedSnapshot()
-        let ordered = (await host.transitions()).dropFirst(baseline).filter { transition in
-            switch transition {
+        let ordered = host.tapeEvents().dropFirst(baseline).filter { event in
+            switch event {
             case .resize: true
-            case .mouse(.down(.left, _, _, _)): true
+            case .mouse(let mouse): mouse.action == .down
             default: false
             }
         }
         #expect(ordered == [
-            .resize(unpinned(columns: 80, rows: 30)),
-            .mouse(.down(.left, cell: .init(column: 2, row: 0), clickCount: 3)),
-            .resize(unpinned(columns: 80, rows: 10)),
+            .resize(columns: 80, rows: 30, pinned: false),
+            .mouse(.init(action: .down, button: 1, column: 2, row: 0, clickCount: 3)),
+            .resize(columns: 80, rows: 10, pinned: false),
         ])
         #expect(
             snapshot.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines) == tallTopLine
@@ -684,7 +684,7 @@ struct TerminalPTYHostTests {
 
     @Test("an unchanged terminal emits no update work", .timeLimit(.minutes(1)))
     func unchangedTerminalEmitsNoUpdate() async throws {
-        let host = try await startChildlessHost(captureTransitions: false).host
+        let host = try await startChildlessHost().host
         let signalsBefore = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
         host.resize(unpinned(columns: 80, rows: 24))
@@ -704,7 +704,7 @@ struct TerminalPTYHostTests {
     // Scenario: a pane whose child printed far more history than the budget allows.
     @Test("resolving a fenced state observes the budget it was given", .timeLimit(.minutes(1)))
     func streamFenceHonorsHistoryBudget() async throws {
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         for line in 0..<400 {
             #expect(await pane.writeFromChild("history line \(line)\r\n"))
@@ -738,7 +738,7 @@ struct TerminalPTYHostTests {
         // Why it exists: separate terminal and recorder reads can drop or double-apply output between them.
         // Scenario: the child prints history, a stream fence pairs state with a cursor, and
         //   later output replays from that cursor onto the replayed state.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("one\r\n"))
 
@@ -778,7 +778,7 @@ struct TerminalPTYHostTests {
         // Intent: one owner turn returns remote cursor placement, retained events, and state.
         // Why it exists: separate fences can splice a cursor onto state from another moment.
         // Scenario: a live pane rejects a foreign cursor while its exact state stays replayable.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("pane-state"))
         let foreign = TerminalFlightRecordingCursor(
@@ -812,7 +812,7 @@ struct TerminalPTYHostTests {
         // Intent: a followed suffix and its replacement state end at the same recorder cursor.
         // Why it exists: eviction during delivery must repair state without losing later output.
         // Scenario: the child waits between two writes while a follower arms at the first one.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("one"))
         let origin = host.fencedFlightRecordingOriginFromNow()
@@ -854,7 +854,7 @@ struct TerminalPTYHostTests {
     //   stream ask for bytes.
     @Test("a fenced state serialized later still states the fence's moment", .timeLimit(.minutes(1)))
     func deferredSerializationStatesTheFencedMoment() async throws {
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("fenced\r\n"))
 
@@ -901,7 +901,7 @@ struct TerminalPTYHostTests {
         // Why it exists: an event written when bytes are queued charges the app's own
         //   backpressure to the child, which is the attribution this facility exists to make.
         // Scenario: megabytes are submitted to a channel whose child end nobody reads.
-        let host = try await startChildlessHost(captureTransitions: false).host
+        let host = try await startChildlessHost().host
 
         let submission = host.fencedFlightRecordingOriginFromNow().cursor
         let payload = [UInt8](repeating: UInt8(ascii: "A"), count: 4 * 1024 * 1024)
@@ -950,7 +950,7 @@ struct TerminalPTYHostTests {
         // Why it exists: I3. An origin defaulted to the transfer time, or to zero, would read
         //   as a measurement rather than as the absence of one.
         // Scenario: the child asks for the cursor position and the user types straight after.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
 
         let submission = host.fencedFlightRecordingOriginFromNow().cursor
@@ -985,14 +985,14 @@ struct TerminalPTYHostTests {
         let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild(scrollbackLines))
-        let writeBaseline = await host.inputWrites().count
+        let writeBaseline = host.inputWrites().count
 
         host.sendWheel(.init(rowDelta: -3, column: 0, row: 0))
         let snapshot = host.fencedSnapshot()
 
         #expect(snapshot.scrollProjection.isFollowing == false)
         #expect(snapshot.scrollProjection.topRow == snapshot.scrollbackRowCount - 3)
-        #expect(await host.inputWrites().count == writeBaseline)
+        #expect(host.inputWrites().count == writeBaseline)
 
         await host.close()
         host.scrollToBottom()
@@ -1008,12 +1008,12 @@ struct TerminalPTYHostTests {
         let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("\u{1B}[?1h\u{1B}[?1049h"))
-        let writeBaseline = await host.inputWrites().count
+        let writeBaseline = host.inputWrites().count
         let up = [UInt8]([0x1B, 0x4F, 0x41])
 
         host.sendWheel(.init(rowDelta: -3, column: 0, row: 0))
         let snapshot = host.fencedSnapshot()
-        let writes = await host.inputWrites()
+        let writes = host.inputWrites()
 
         #expect(snapshot.isAlternateScreenActive)
         #expect(snapshot.scrollProjection.isFollowing)
@@ -1030,7 +1030,7 @@ struct TerminalPTYHostTests {
         let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("\u{1B}[?1h\u{1B}[?2004h\u{1B}[?1004h"))
-        let baseline = await host.inputWrites().count
+        let baseline = host.inputWrites().count
         let snapshotBeforeFocus = await host.snapshot()
 
         host.sendKey(.up, modifiers: [])
@@ -1038,7 +1038,7 @@ struct TerminalPTYHostTests {
         host.sendFocus(true)
         _ = host.fencedSnapshot()
 
-        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
+        #expect(Array((host.inputWrites()).dropFirst(baseline)) == [
             Array("\u{1B}OA".utf8),
             Array("\u{1B}[200~one\ntwo\u{1B}[201~".utf8),
             Array("\u{1B}[I".utf8),
@@ -1054,13 +1054,13 @@ struct TerminalPTYHostTests {
         #expect(await pane.writeFromChild(scrollbackLines))
         host.scroll(byRows: -3)
         let browsing = host.fencedSnapshot()
-        let baseline = await host.inputWrites().count
+        let baseline = host.inputWrites().count
 
         host.sendPaste("\u{1B}\u{7F}\u{0080}")
         host.sendFocus(true)
         _ = host.fencedSnapshot()
 
-        #expect(await host.inputWrites().count == baseline)
+        #expect(host.inputWrites().count == baseline)
         #expect((await host.snapshot()).scrollProjection == browsing.scrollProjection)
 
         host.sendPaste("safe")
@@ -1070,14 +1070,14 @@ struct TerminalPTYHostTests {
 
     @Test("semantic input capture records normalized events in owner order", .timeLimit(.minutes(1)))
     func semanticInputCaptureOrder() async throws {
-        let host = try await startChildlessHost().host
+        let host = try await startChildlessHost(flightTapeConfiguration: .complete).host
 
         host.sendKey(.f5, modifiers: [.shift])
         host.sendPaste("paste")
         host.sendFocus(false)
         _ = host.fencedSnapshot()
 
-        let events = (await host.transitions()).map(\.recordingEvent)
+        let events = host.tapeEvents()
         #expect(events.contains(.input(key: .f5, modifiers: [.shift])))
         #expect(events.contains(.paste("paste")))
         #expect(events.contains(.focus(false)))
@@ -1090,27 +1090,27 @@ struct TerminalPTYHostTests {
         // Why it exists: a primary-to-alt race can leak arrows, while alt-to-primary can swallow them.
         // Scenario: wheel intent is queued immediately after the commands that make the
         //   child enter and leave alt screen, and before the child's answer arrives.
-        let pane = try await startChildlessHost()
+        let pane = try await startChildlessHost(flightTapeConfiguration: .complete)
         let host = pane.host
         #expect(await pane.writeFromChild(scrollbackLines))
         let down = [UInt8]([0x1B, 0x5B, 0x42])
 
         let enter = Array("enter-alt-screen\n".utf8)
-        let enterWriteBaseline = await host.inputWrites().count
+        let enterWriteBaseline = host.inputWrites().count
         host.send(enter)
         host.sendWheel(.init(rowDelta: -1, column: 0, row: 0))
         _ = host.fencedSnapshot()
-        #expect(Array((await host.inputWrites()).dropFirst(enterWriteBaseline)) == [enter])
-        #expect((await host.transitions()).contains(.scrollByRows(-1)))
+        #expect(Array((host.inputWrites()).dropFirst(enterWriteBaseline)) == [enter])
+        #expect(host.tapeEvents().contains(.viewport(.byRows(-1))))
         #expect(await pane.writeFromChild("\u{1B}[?1049h"))
         #expect(host.fencedSnapshot().isAlternateScreenActive)
 
         let exit = Array("leave-alt-screen\n".utf8)
-        let exitWriteBaseline = await host.inputWrites().count
+        let exitWriteBaseline = host.inputWrites().count
         host.send(exit)
         host.sendWheel(.init(rowDelta: 2, column: 0, row: 0))
         _ = host.fencedSnapshot()
-        #expect(Array((await host.inputWrites()).dropFirst(exitWriteBaseline)) == [
+        #expect(Array((host.inputWrites()).dropFirst(exitWriteBaseline)) == [
             exit,
             down + down,
         ])
@@ -1128,13 +1128,13 @@ struct TerminalPTYHostTests {
         let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("\u{1B}[?1000;1006h"))
-        let baseline = await host.inputWrites().count
+        let baseline = host.inputWrites().count
 
         host.sendPointer(.down(.left, cell: .init(column: 4, row: 2)))
         host.sendPointer(.up(.left, cell: .init(column: 4, row: 2)))
         _ = host.fencedSnapshot()
 
-        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
+        #expect(Array((host.inputWrites()).dropFirst(baseline)) == [
             Array("\u{1B}[<0;5;3M".utf8),
             Array("\u{1B}[<0;5;3m".utf8),
         ])
@@ -1143,10 +1143,10 @@ struct TerminalPTYHostTests {
 
     @Test("Shift extension stays local while captured and replays exactly", .timeLimit(.minutes(1)))
     func capturedShiftSelectionReplays() async throws {
-        let pane = try await startChildlessHost()
+        let pane = try await startChildlessHost(flightTapeConfiguration: .complete)
         let host = pane.host
         #expect(await pane.writeFromChild("\u{1B}[2J\u{1B}[H\u{1B}[?1000halpha beta"))
-        let baseline = await host.inputWrites().count
+        let baseline = host.inputWrites().count
         let lines = host.fencedSnapshot().viewportText
             .split(separator: "\n", omittingEmptySubsequences: false)
         let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
@@ -1167,12 +1167,12 @@ struct TerminalPTYHostTests {
         let recording = NeutralTerminalRecording(
             provenance: .danTerm(test: "captured-shift-selection"),
             initial: .init(columns: 80, rows: 24),
-            events: (await host.transitions()).map(\.recordingEvent)
+            events: host.tapeEvents()
         )
 
         #expect(snapshot.selectedText == "alpha beta")
         #expect(snapshot.selectionGranularity == .terminalToken)
-        #expect(await host.inputWrites().count == baseline)
+        #expect(host.inputWrites().count == baseline)
         #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
         await host.close()
     }
@@ -1184,19 +1184,19 @@ struct TerminalPTYHostTests {
         #expect(await pane.writeFromChild(scrollbackLines + "\u{1B}[?1000;1006h"))
         host.scroll(byRows: -3)
         let browsing = host.fencedSnapshot().scrollProjection
-        let baseline = await host.inputWrites().count
+        let baseline = host.inputWrites().count
 
         host.sendWheel(.init(rowDelta: -1, column: 2, row: 3))
         _ = host.fencedSnapshot()
-        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
+        #expect(Array((host.inputWrites()).dropFirst(baseline)) == [
             Array("\u{1B}[<64;3;4M".utf8),
         ])
         #expect(host.fencedSnapshot().scrollProjection == browsing)
 
-        let reportCount = await host.inputWrites().count
+        let reportCount = host.inputWrites().count
         host.sendWheel(.init(rowDelta: -1, column: 2, row: 3, modifiers: [.shift]))
         let shifted = host.fencedSnapshot().scrollProjection
-        #expect(await host.inputWrites().count == reportCount)
+        #expect(host.inputWrites().count == reportCount)
         #expect(shifted.topRow == browsing.topRow - 1)
         #expect(shifted.isFollowing == false)
         await host.close()
@@ -1211,14 +1211,14 @@ struct TerminalPTYHostTests {
         //   report here would land as input in whatever program is running.
         // Scenario: spec-first -- the user right-clicks a pane running a plain shell.
         let host = try await startChildlessHost().host
-        let before = await host.inputWrites().count
+        let before = host.inputWrites().count
 
         host.sendPointer(.down(.right, cell: .init(column: 9, row: 4)))
         _ = host.fencedSnapshot()
         host.sendPointer(.up(.right, cell: .init(column: 9, row: 4)))
         _ = host.fencedSnapshot()
 
-        #expect(await host.inputWrites().count == before)
+        #expect(host.inputWrites().count == before)
         await host.close()
     }
 
@@ -1227,23 +1227,23 @@ struct TerminalPTYHostTests {
         // Intent: record the local snap before the user write without classifying replies as input.
         // Why it exists: a non-echoing child cannot reconstruct this viewport mutation from output.
         // Scenario: the user scrolls up, types into a waiting process, and captures the pane.
-        let pane = try await startChildlessHost()
+        let pane = try await startChildlessHost(flightTapeConfiguration: .complete)
         let host = pane.host
         #expect(await pane.writeFromChild(scrollbackLines))
         host.scroll(byRows: -4)
         #expect(host.fencedSnapshot().scrollProjection.isFollowing == false)
 
         host.send(Array("typed".utf8))
-        let transitions = await host.transitions()
+        let events = host.tapeEvents()
         let snapshot = host.fencedSnapshot()
         let recording = NeutralTerminalRecording(
             provenance: .danTerm(test: "input-snap"),
             initial: .init(columns: 80, rows: 24),
-            events: transitions.map(\.recordingEvent)
+            events: events
         )
 
         #expect(snapshot.scrollProjection.isFollowing)
-        #expect(transitions.contains(.scrollToBottom))
+        #expect(events.contains(.viewport(.toBottom)))
         #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
 
         await host.close()
@@ -1251,12 +1251,12 @@ struct TerminalPTYHostTests {
 
     @Test("scrollbar commands clamp on the owner queue and emit updates only for changes", .timeLimit(.minutes(1)))
     func ownerScrollbarCommandsClampAndDedupe() async throws {
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild(scrollbackLines))
         _ = host.fencedFrameState()
         let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
-        let writeBaseline = await host.inputWrites().count
+        let writeBaseline = host.inputWrites().count
 
         host.scroll(toTopRow: -100)
         let top = host.fencedSnapshot()
@@ -1268,7 +1268,7 @@ struct TerminalPTYHostTests {
         #expect(top.scrollProjection.isFollowing == false)
         #expect(afterChange == baseline + 1)
         #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterChange)
-        #expect(await host.inputWrites().count == writeBaseline)
+        #expect(host.inputWrites().count == writeBaseline)
 
         host.scrollToBottom()
         #expect(host.fencedSnapshot().scrollProjection.isFollowing)
@@ -1283,7 +1283,7 @@ struct TerminalPTYHostTests {
         //   mutation that never publishes leaves the previous match painted on screen.
         // Scenario: a pane holding two occurrences of a needle is searched, walked to the
         //   older match, then cleared.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("hit\r\nmiss\r\nhit\r\n"))
         _ = host.fencedFrameState()
@@ -1325,7 +1325,7 @@ struct TerminalPTYHostTests {
         //   to be told that the search found nothing or cannot move.
         // Scenario: typing a needle with no matches, then re-typing it; and pressing
         //   Cmd-G on the only match.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("hit\r\n"))
         let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
@@ -1359,7 +1359,7 @@ struct TerminalPTYHostTests {
         //   whole suite sat idle forever holding the PTY.
         // Scenario: the 2026-07-22 stress run where launchRecipeAndDuplexIO hit
         //   its 60s time limit yet the run had to be killed by hand.
-        let host = try await startChildlessHost(captureTransitions: false).host
+        let host = try await startChildlessHost().host
 
         let resultTask = Task { await host.waitForResult() }
         let outputTask = Task { await host.waitForOutput(containing: Array("__NEVER__".utf8)) }
@@ -1426,7 +1426,6 @@ struct TerminalPTYHostTests {
         // The tape retains nothing at all, so the loss is a property of the host this test
         // built rather than of how fast a flood raced the machine it runs on.
         let pane = try await startChildlessHost(
-            captureTransitions: false,
             flightTapeConfiguration: .retainingNothing
         )
         let host = pane.host
@@ -1460,7 +1459,6 @@ struct TerminalPTYHostTests {
         // Scenario: the wait is armed in time and still cannot answer, which is the failure a
         //   test author has no other way to tell apart from "the child never printed it".
         let pane = try await startChildlessHost(
-            captureTransitions: false,
             flightTapeConfiguration: .retainingNothing
         )
         let host = pane.host
@@ -1487,7 +1485,6 @@ struct TerminalPTYHostTests {
         // Scenario: the tape holds one event, so the head of the needle is evicted by the tail
         //   of the needle.
         let pane = try await startChildlessHost(
-            captureTransitions: false,
             flightTapeConfiguration: .retainingOneEvent
         )
         let host = pane.host
@@ -1520,7 +1517,7 @@ struct TerminalPTYHostTests {
         //   a program echoed something would then pass without the program running at all.
         // Scenario: the child end is raw, so nothing the host writes comes back as output --
         //   the only way this wait can be satisfied is by a real write from the child.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         let echoed = host.expectOutput(containing: Array("__PING__".utf8))
 
@@ -1549,7 +1546,7 @@ struct TerminalPTYHostTests {
         //   output unnecessary in the first place.
         // Scenario: the shape a chatty pane forces -- the interesting marker arrives after
         //   noise that no bounded window could have held.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         let expectation = host.expectOutput(containing: Array("__LATE__".utf8))
         // Armed here for the same reason as the match under test: after the flood,
@@ -1579,7 +1576,7 @@ struct TerminalPTYHostTests {
         //   below asserts on stack depth, and the byte count is the whole point of the test.
         // Scenario: a wait for a marker that never comes stays armed across the entire flood,
         //   which is what every `expectOutput` before a chatty child looks like.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         // Never satisfied, so every chunk of the flood is read and matched against it.
         let never = host.expectOutput(containing: Array("__NEVER__".utf8))
@@ -1608,7 +1605,7 @@ struct TerminalPTYHostTests {
         //   join is the only assertion that cannot pass while such a byte is missing.
         // Scenario: the child printed before anything asked about it, then keeps printing --
         //   the shape a pane that is already running when a test arrives always has.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("ALPHA"))
 
@@ -1633,7 +1630,7 @@ struct TerminalPTYHostTests {
         //   itself would hold a whole test's fixtures past the test. The notice also fires on
         //   the host queue, where fencing the host to detach would deadlock the very teardown
         //   the wait is watching for.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
 
         let cancelled = host.expectOutput(containing: Array("__CANCELLED__".utf8))
@@ -1753,7 +1750,7 @@ struct TerminalPTYHostTests {
         //   cut by a read boundary is the case that would lose or duplicate bytes.
         // Scenario: a saturating writer floods sequences whose lengths sweep every offset
         //   relative to the 1024-byte kernel buffer, so some copy of each one is cut.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
 
         let applied = host.expectOutput(containing: straddleCompletionMarker)
@@ -1780,7 +1777,7 @@ struct TerminalPTYHostTests {
         // Why it exists: the cap is what bounds the longest contiguous slice the owner queue
         //   runs without yielding, and the tape is where a turn that outgrew it would show.
         // Scenario: the same saturated flood, read back as recorded feed sizes.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
 
         let applied = host.expectOutput(containing: straddleCompletionMarker)
@@ -1802,7 +1799,7 @@ struct TerminalPTYHostTests {
         //   record would put the answer on the tape ahead of the question, and a replay of
         //   the tape would then read as a terminal answering something nobody asked.
         // Scenario: the child prints text ending in a cursor-position report request.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         let query = Array("\u{1B}[6n".utf8)
 
@@ -1837,7 +1834,7 @@ struct TerminalPTYHostTests {
         //   a wait for the user's input would end on an answer nobody typed.
         // Scenario: focus reporting is on, the user presses a key, focus arrives, and then
         //   the child asks for the cursor position.
-        let pane = try await startChildlessHost(captureTransitions: false)
+        let pane = try await startChildlessHost()
         let host = pane.host
         #expect(await pane.writeFromChild("\u{1B}[?1004h"))
         let submission = host.fencedFlightRecordingOriginFromNow().cursor
@@ -1878,14 +1875,15 @@ struct TerminalPTYHostTests {
 struct TerminalPTYHostChildProcessTests {
     @Test("consumption fence pairs final frame damage with exit metadata", .timeLimit(.minutes(1)))
     func consumptionFencePairsFrameAndExitMetadata() async throws {
-        // Intent: one synchronous consumer read returns terminal damage, lifecycle
-        //   result, and captured transitions from the same owner-queue boundary.
+        // Intent: one synchronous consumer read returns terminal damage and the lifecycle
+        //   result from the same owner-queue boundary, while the pane's tape independently
+        //   carries the output that produced that frame.
         // Why it exists: reading lifecycle metadata and frame state through separate
         //   fences both undercounted benchmark stall time and allowed intervening owner
         //   work to make the values describe different moments.
         // Scenario: a child prints its final frame and exits; the pane consumes the
         //   redraw and exit evidence together before publishing the session end.
-        let host = try makeHost(captureTransitions: true)
+        let host = try makeHost(flightTapeConfiguration: .complete)
         _ = host.fencedFrameState()
         await host.start(makeLaunchInput(command: "printf '__FINAL_FRAME__'; exit 7"))
         #expect(await host.waitForResult() == .exited(.exited(7)))
@@ -1895,12 +1893,12 @@ struct TerminalPTYHostChildProcessTests {
         #expect(consumption.frameState.damage != .none)
         #expect(consumption.frameState.terminal.screenText.contains("__FINAL_FRAME__"))
         #expect(consumption.result == .exited(.exited(7)))
-        #expect(consumption.transitions?.contains {
+        #expect(host.tapeEvents().contains {
             if case let .feed(bytes) = $0 {
                 return String(decoding: bytes, as: UTF8.self).contains("__FINAL_FRAME__")
             }
             return false
-        } == true)
+        })
         await host.close()
     }
 
@@ -1909,7 +1907,7 @@ struct TerminalPTYHostChildProcessTests {
         let host = try TerminalPTYHost(
             initialDimensions: .init(columns: 80, rows: 24),
             bootstrapExecutable: try bootstrapExecutable(),
-            captureTransitions: true
+            flightTapeConfiguration: .complete
         )
         let command = "exec \(try probeExecutable()) ownership \"$0\""
 
@@ -1917,7 +1915,7 @@ struct TerminalPTYHostChildProcessTests {
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         host.send(Array("ordered-input\n".utf8))
         let result = await host.waitForResult()
-        let output = String(decoding: await host.outputBytes(), as: UTF8.self)
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
 
         #expect(result == .exited(.exited(7)))
         #expect(await host.waitForResult() == result)
@@ -1952,7 +1950,7 @@ struct TerminalPTYHostChildProcessTests {
         host.send(Array("fallback\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(7)))
 
-        let output = String(decoding: await host.outputBytes(), as: UTF8.self)
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
         #expect(output.contains("__CWD__=/"))
         #expect(output.contains("__INPUT__=fallback"))
     }
@@ -1962,7 +1960,7 @@ struct TerminalPTYHostChildProcessTests {
         let host = try TerminalPTYHost(
             initialDimensions: .init(columns: 80, rows: 24),
             bootstrapExecutable: try bootstrapExecutable(),
-            captureTransitions: true
+            flightTapeConfiguration: .complete
         )
         let command = "exec \(try probeExecutable()) resize \"$0\""
 
@@ -1972,7 +1970,7 @@ struct TerminalPTYHostChildProcessTests {
         let snapshot = await host.snapshot()
         host.send(Array("done\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(0)))
-        let output = String(decoding: await host.outputBytes(), as: UTF8.self)
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
 
         #expect(snapshot.geometry.columns == 100)
         #expect(snapshot.geometry.rows.count == 31)
@@ -1993,22 +1991,22 @@ struct TerminalPTYHostChildProcessTests {
             command: "exec \(try probeExecutable()) recording \"$0\""
         ))
         #expect(await host.waitForOutput(containing: Array("__BEFORE_RESIZE__".utf8)))
-        let submissionBaseline = await host.submittedTransitions().count
+        let submissionBaseline = host.tapeSubmissions().count
 
         host.send(Array("prefix-".utf8))
         host.resize(unpinned(columns: 96, rows: 28))
         host.send(Array("continue\n".utf8))
 
         #expect(await host.waitForResult() == .exited(.exited(0)))
-        #expect(Array((await host.submittedTransitions()).dropFirst(submissionBaseline)) == [
-            .input(Array("prefix-".utf8)),
-            .resize(unpinned(columns: 96, rows: 28)),
-            .input(Array("continue\n".utf8)),
+        #expect(Array(host.tapeSubmissions().dropFirst(submissionBaseline)) == [
+            .write(Array("prefix-".utf8)),
+            .resize(columns: 96, rows: 28, pinned: false),
+            .write(Array("continue\n".utf8)),
         ])
 
         host.send(Array("after-teardown".utf8))
         host.resize(unpinned(columns: 120, rows: 40))
-        #expect(await host.submittedTransitions().count == submissionBaseline + 3)
+        #expect(host.tapeSubmissions().count == submissionBaseline + 3)
     }
 
     @Test(
@@ -2115,7 +2113,7 @@ struct TerminalPTYHostChildProcessTests {
             command: "exec \(try probeExecutable()) resize \"$0\""
         ))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        let baseline = await host.transitions().count
+        let baseline = host.tapeEvents().count
 
         let owner = OwnerHold()
         try owner.hold(host)
@@ -2125,10 +2123,10 @@ struct TerminalPTYHostChildProcessTests {
         host.resize(unpinned(columns: 100, rows: 31))
         owner.release()
 
-        let applied = (await host.transitions()).dropFirst(baseline).filter {
+        let applied = host.tapeEvents().dropFirst(baseline).filter {
             if case .resize = $0 { true } else { false }
         }
-        #expect(applied == [.resize(unpinned(columns: 100, rows: 31))])
+        #expect(applied == [.resize(columns: 100, rows: 31, pinned: false)])
         #expect(await host.waitForOutput(containing: Array("__WINCH__=31 100".utf8)))
         let snapshot = await host.snapshot()
         #expect(snapshot.geometry.columns == 100)
@@ -2194,7 +2192,7 @@ struct TerminalPTYHostChildProcessTests {
         while await updates.next() != nil {
             if (await host.snapshot()).screenText.contains("__QUERY_READY__") { break }
         }
-        let inputBaseline = await host.inputWrites().count
+        let inputBaseline = host.inputWrites().count
         let delivered = InputCompletionRecorder(expecting: 1)
 
         host.send(Array("query\n".utf8)) { delivered.signal($0) }
@@ -2207,9 +2205,9 @@ struct TerminalPTYHostChildProcessTests {
         host.send(Array("USER".utf8))
 
         let result = await host.waitForResult()
-        let output = String(decoding: await host.outputBytes(), as: UTF8.self)
-        let replies = await host.replyWrites()
-        let inputs = await host.inputWrites()
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
+        let replies = host.replyWrites()
+        let inputs = host.inputWrites()
         #expect(result == .exited(.exited(0)), "result: \(String(describing: result))")
         #expect(output.contains("__QUERY_OK__"), "output: \(output.debugDescription)")
         #expect(replies == [Array("\u{1B}[1;1R".utf8)], "replies: \(replies)")
@@ -2233,10 +2231,10 @@ struct TerminalPTYHostChildProcessTests {
         ))
 
         let result = await host.waitForResult()
-        let output = String(decoding: await host.outputBytes(), as: UTF8.self)
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
         #expect(result == .exited(.exited(0)), "result: \(String(describing: result))")
         #expect(output.contains("__COLOR_QUERY_OK__"), "output: \(output.debugDescription)")
-        let replies = await host.replyWrites()
+        let replies = host.replyWrites()
         #expect(replies.flatMap { $0 } == Array(
             ("\u{1B}]10;rgb:e5e5/e5e5/e5e5\u{1B}\\"
                 + "\u{1B}]11;rgb:0000/0000/0000\u{1B}\\").utf8
@@ -2258,7 +2256,7 @@ struct TerminalPTYHostChildProcessTests {
         let recording = NeutralTerminalRecording(
             provenance: .danTerm(test: "pty-query-replay"),
             initial: .init(columns: 80, rows: 24),
-            events: (await host.transitions()).map(\.recordingEvent)
+            events: host.tapeEvents()
         )
 
         #expect(try recording.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
@@ -2288,7 +2286,7 @@ struct TerminalPTYHostChildProcessTests {
 
     @Test("a result-only drain emits its final update token", .timeLimit(.minutes(1)))
     func resultOnlyDrainEmitsFinalUpdate() async throws {
-        let host = try makeHost(captureTransitions: false)
+        let host = try makeHost()
         var input = makeLaunchInput(command: "")
         input.initialDimensions = .init(columns: 0, rows: 0)
 
@@ -2310,7 +2308,7 @@ struct TerminalPTYHostChildProcessTests {
         // Scenario: a user closes a pane while its shell is still running.
         weak var releasedHost: TerminalPTYHost?
         do {
-            let host = try makeHost(captureTransitions: false)
+            let host = try makeHost()
             releasedHost = host
             await host.start(makeLaunchInput(
                 command: "exec \(try probeExecutable()) hold \"$0\""
@@ -2335,7 +2333,7 @@ struct TerminalPTYHostChildProcessTests {
         ))
 
         #expect(await host.waitForResult() == .exited(.exited(0)))
-        let output = Data(await host.outputBytes())
+        let output = Data(host.outputBytes())
         let expected = Data((0..<(256 * 1024)).map { UInt8(65 + ($0 % 26)) })
 
         #expect(output.range(of: expected) != nil)
@@ -2351,7 +2349,7 @@ struct TerminalPTYHostChildProcessTests {
         #expect(await host.waitForOutput(containing: Array("__CLOSING_PTY__".utf8)))
         let pid = try taggedInt(
             "__PID__",
-            in: String(decoding: await host.outputBytes(), as: UTF8.self)
+            in: String(decoding: host.outputBytes(), as: UTF8.self)
         )
 
         #expect(kill(pid_t(pid), SIGUSR1) == 0)
@@ -2383,7 +2381,7 @@ struct TerminalPTYHostChildProcessTests {
 
         let pid = try taggedInt(
             "__PID__",
-            in: String(decoding: await host.outputBytes(), as: UTF8.self)
+            in: String(decoding: host.outputBytes(), as: UTF8.self)
         )
         #expect(kill(pid_t(pid), SIGUSR1) == 0)
         #expect(await host.waitForResult() == .exited(.exited(6)))
@@ -2397,7 +2395,7 @@ struct TerminalPTYHostChildProcessTests {
         ))
 
         #expect(await host.waitForResult() == .exited(.exited(9)))
-        let output = String(decoding: await host.outputBytes(), as: UTF8.self)
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
         let descendant = try taggedInt("__DESCENDANT__", in: output)
 
         #expect(output.contains("__FINAL_MARKER__"))
@@ -2418,11 +2416,11 @@ struct TerminalPTYHostChildProcessTests {
         host.send(Array("continue\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(0)))
 
-        let transitions = await host.transitions()
+        let events = host.tapeEvents()
         let recording = NeutralTerminalRecording(
             provenance: .danTerm(test: "pty-output-resize-output"),
             initial: .init(columns: 80, rows: 24),
-            events: transitions.map(\.recordingEvent)
+            events: events
         )
         let recorder = PTYRecordingRecorder(recording: recording)
         let encoded = try recorder.encoded()
@@ -2430,13 +2428,13 @@ struct TerminalPTYHostChildProcessTests {
         let decoded = try JSONDecoder().decode(NeutralTerminalRecording.self, from: encoded)
 
         #expect(try decoded.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
-        let resizeIndex = try #require(transitions.firstIndex {
+        let resizeIndex = try #require(events.firstIndex {
             if case .resize = $0 { true } else { false }
         })
-        #expect(transitions[..<resizeIndex].contains {
+        #expect(events[..<resizeIndex].contains {
             if case .feed = $0 { true } else { false }
         })
-        #expect(transitions[(resizeIndex + 1)...].contains {
+        #expect(events[(resizeIndex + 1)...].contains {
             if case .feed = $0 { true } else { false }
         })
     }
@@ -2502,7 +2500,7 @@ struct TerminalPTYHostChildProcessTests {
         //   an origin equal to the transfer time and hide exactly the delay worth seeing.
         // Scenario: a megabyte is submitted well after its originating event occurred, to a
         //   child that drains it over many owner turns.
-        let host = try makeHost(captureTransitions: false)
+        let host = try makeHost()
         await host.start(makeLaunchInput(command: drainingCommand))
         #expect(await host.waitForOutput(containing: drainingMarker))
 
@@ -2547,7 +2545,7 @@ struct TerminalPTYHostChildProcessTests {
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         #expect(await sibling.waitForOutput(containing: Array("__READY__".utf8)))
 
-        let output = String(decoding: await host.outputBytes(), as: UTF8.self)
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
         let ownedPIDs = try [
             taggedInt("__LEADER__", in: output),
             taggedInt("__FOREGROUND__", in: output),
@@ -2557,7 +2555,7 @@ struct TerminalPTYHostChildProcessTests {
         ]
         let siblingPID = try taggedInt(
             "__PID__",
-            in: String(decoding: await sibling.outputBytes(), as: UTF8.self)
+            in: String(decoding: sibling.outputBytes(), as: UTF8.self)
         )
 
         await host.close()
@@ -2586,7 +2584,7 @@ struct TerminalPTYHostChildProcessTests {
         //   source, master descriptor, child owner, or callback after teardown.
         // Scenario: panes are opened and immediately discarded as a user rapidly
         //   creates, resizes, and closes terminal splits.
-        let warmup = try makeHost(captureTransitions: false)
+        let warmup = try makeHost()
         await warmup.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
@@ -2599,7 +2597,7 @@ struct TerminalPTYHostChildProcessTests {
         for iteration in 0..<16 {
             weak var releasedHost: TerminalPTYHost?
             do {
-                let host = try makeHost(captureTransitions: false)
+                let host = try makeHost()
                 releasedHost = host
                 await host.start(makeLaunchInput(
                     command: "exec \(try probeExecutable()) hold \"$0\""
@@ -2645,7 +2643,7 @@ struct TerminalPTYHostChildProcessTests {
         // Scenario: a user opens a pane and immediately closes it while the
         //   launch worker is handing its successful spawn back to the owner.
         let spawner = ControlledTerminalPTYSpawner(holdLaunchReport: true)
-        let host = try makeHost(captureTransitions: false, spawner: spawner)
+        let host = try makeHost(spawner: spawner)
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
@@ -2680,9 +2678,9 @@ struct TerminalPTYHostChildProcessTests {
         //   owner's grace timers and make application shutdown unbounded.
         // Scenario: one pane has a multi-megabyte write queued to a child that
         //   never reads, one writes forever, and a third is an ordinary live pane.
-        let stalled = try makeHost(captureTransitions: false)
-        let chatty = try makeHost(captureTransitions: false)
-        let ordinary = try makeHost(captureTransitions: false)
+        let stalled = try makeHost()
+        let chatty = try makeHost()
+        let ordinary = try makeHost()
         await stalled.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) stalled \"$0\""
         ))
@@ -2754,7 +2752,7 @@ struct TerminalPTYHostChildProcessTests {
             #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
             childPIDs.append(try taggedInt(
                 "__PID__",
-                in: String(decoding: await host.outputBytes(), as: UTF8.self)
+                in: String(decoding: host.outputBytes(), as: UTF8.self)
             ))
         }
 
@@ -2790,7 +2788,7 @@ struct TerminalPTYHostChildProcessTests {
             command: "exec \(try probeExecutable()) teardown \"$0\""
         ))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        let output = String(decoding: await host.outputBytes(), as: UTF8.self)
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
         let ownedPIDs = try [
             taggedInt("__LEADER__", in: output),
             taggedInt("__FOREGROUND__", in: output),
@@ -2829,7 +2827,7 @@ struct TerminalPTYHostChildProcessTests {
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let pid = try taggedInt(
             "__PID__",
-            in: String(decoding: await host.outputBytes(), as: UTF8.self)
+            in: String(decoding: host.outputBytes(), as: UTF8.self)
         )
         let cancellationReached = ExitCompletionRecorder(expecting: 1)
         lifecycle.holdSourceCancellationAcknowledgements {
@@ -2871,7 +2869,7 @@ struct TerminalPTYHostChildProcessTests {
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let pid = try taggedInt(
             "__PID__",
-            in: String(decoding: await host.outputBytes(), as: UTF8.self)
+            in: String(decoding: host.outputBytes(), as: UTF8.self)
         )
         let cancellationReached = ExitCompletionRecorder(expecting: 1)
         lifecycle.holdSourceCancellationAcknowledgements {
@@ -2982,7 +2980,6 @@ struct TerminalPTYHostChildProcessTests {
             sourcesInstalled.signal()
         }
         let host = try makeHost(
-            captureTransitions: false,
             resourceLifecycle: lifecycle
         )
         await host.start(makeLaunchInput(
@@ -3027,7 +3024,6 @@ struct TerminalPTYHostChildProcessTests {
         let lifecycle = ControlledTerminalPTYResourceLifecycle()
         lifecycle.installDescriptorReuseProbe(replacementFD: pipeFDs[0])
         let host = try makeHost(
-            captureTransitions: false,
             resourceLifecycle: lifecycle
         )
         await host.start(makeLaunchInput(
@@ -3064,7 +3060,7 @@ struct TerminalPTYHostChildProcessTests {
         // Scenario: a pane was closed moments before the user quit.
         // The bound is long on purpose: if this waited on the ladder at all, it
         //   would wait thirty seconds, so the elapsed assertion cannot pass by luck.
-        let host = try makeHost(captureTransitions: false, applicationExitBound: .seconds(30))
+        let host = try makeHost(applicationExitBound: .seconds(30))
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
@@ -3096,7 +3092,7 @@ struct TerminalPTYHostChildProcessTests {
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let pid = try taggedInt(
             "__PID__",
-            in: String(decoding: await host.outputBytes(), as: UTF8.self)
+            in: String(decoding: host.outputBytes(), as: UTF8.self)
         )
         let recorder = ExitCompletionRecorder(expecting: 1)
 
@@ -3115,7 +3111,7 @@ struct TerminalPTYHostChildProcessTests {
 
     @Test("an observer registered after quiescence runs once on the owner queue", .timeLimit(.minutes(1)))
     func lateQuiescenceObserverRunsImmediately() async throws {
-        let host = try makeHost(captureTransitions: false)
+        let host = try makeHost()
         await host.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
@@ -3146,7 +3142,6 @@ struct TerminalPTYHostChildProcessTests {
         //   launching, and the launch is slow enough to outlast the bound.
         let spawner = ControlledTerminalPTYSpawner(holdLaunchReport: true)
         let host = try makeHost(
-            captureTransitions: false,
             applicationExitBound: .milliseconds(50),
             spawner: spawner
         )
@@ -3199,7 +3194,6 @@ struct TerminalPTYHostChildProcessTests {
         //   but the owner has not adopted the returned PTY yet.
         let spawner = ControlledTerminalPTYSpawner(holdDelivery: true)
         let host = try makeHost(
-            captureTransitions: false,
             applicationExitBound: .milliseconds(50),
             spawner: spawner
         )
@@ -3272,9 +3266,9 @@ struct TerminalPTYHostChildProcessTests {
 
             await host.start(input)
             #expect(await host.waitForResult() == .exited(.exited(0)))
-            #expect(await host.inputWrites() == [Array(testCase.expectedWrite.utf8)])
+            #expect(host.inputWrites() == [Array(testCase.expectedWrite.utf8)])
 
-            let output = String(decoding: await host.outputBytes(), as: UTF8.self)
+            let output = String(decoding: host.outputBytes(), as: UTF8.self)
             #expect(output.components(separatedBy: "__INITIAL_EXECUTED__=").count - 1 == 1)
             #expect(output.contains("__INITIAL_EXECUTED__=\(testCase.name)"))
 
@@ -3300,7 +3294,6 @@ struct TerminalPTYHostChildProcessTests {
         //   showed "processSourceFired" then "waitid rc=0 errno=0 si_pid=0" and
         //   no further child events.
         let host = try makeHost(
-            captureTransitions: false,
             childExitProbe: TransientChildExitProbe(notYetWaitableCount: 3)
         )
         await host.start(makeLaunchInput(command: "\(printMarker("READY")); exit 7"))
@@ -3344,63 +3337,6 @@ private func value<T: Sendable>(
         }
         defer { group.cancelAll() }
         return await group.next() ?? nil
-    }
-}
-
-private extension TerminalPTYAppliedTransition {
-    var recordingEvent: NeutralTerminalRecordingEvent {
-        switch self {
-        case .feed(let bytes): .feed(bytes)
-        case .input(let key, let modifiers): .input(key: key, modifiers: modifiers)
-        case .paste(let text): .paste(text)
-        case .focus(let focused): .focus(focused)
-        case .mouse(let event): .mouse(event.neutralEvent)
-        case .resize(let grid):
-            .resize(
-                columns: grid.dimensions.columns,
-                rows: grid.dimensions.rows,
-                pinned: grid.pinned
-            )
-        case .scrollByRows(let rows): .viewport(.byRows(rows))
-        case .scrollToTopRow(let row): .viewport(.toTopRow(row))
-        case .scrollToBottom: .viewport(.toBottom)
-        }
-    }
-}
-
-private extension TerminalPointerEvent {
-    var neutralEvent: NeutralTerminalMouseEvent {
-        switch self {
-        case let .down(button, cell, modifiers, clickCount):
-            .init(
-                action: .down,
-                button: button.rawValue + 1,
-                column: cell.column,
-                row: cell.row,
-                offsetX: cell.offsetX,
-                isInsideGrid: cell.isInsideGrid,
-                modifiers: modifiers,
-                clickCount: clickCount
-            )
-        case let .up(button, cell, modifiers):
-            .init(
-                action: .up,
-                button: button.rawValue + 1,
-                column: cell.column,
-                row: cell.row,
-                isInsideGrid: cell.isInsideGrid,
-                modifiers: modifiers
-            )
-        case let .move(cell, modifiers):
-            .init(
-                action: .move,
-                column: cell.column,
-                row: cell.row,
-                offsetX: cell.offsetX,
-                isInsideGrid: cell.isInsideGrid,
-                modifiers: modifiers
-            )
-        }
     }
 }
 
@@ -3696,13 +3632,11 @@ private extension TerminalFlightRecorderConfiguration {
 /// thing indirectly -- a shell can only print it after reading the line -- and a test that
 /// counts input writes needs the same anchor before it takes a baseline.
 private func startChildlessHost(
-    captureTransitions: Bool = true,
     flightTapeConfiguration: TerminalFlightRecorderConfiguration = .production,
     sourceLocation: SourceLocation = #_sourceLocation
 ) async throws -> ChildlessHost {
     let channel = try ChildlessPTYChannel()
     let host = try makeHost(
-        captureTransitions: captureTransitions,
         flightTapeConfiguration: flightTapeConfiguration,
         spawner: channel
     )
@@ -3722,7 +3656,6 @@ private func startChildlessHost(
 }
 
 private func makeHost(
-    captureTransitions: Bool = true,
     flightTapeConfiguration: TerminalFlightRecorderConfiguration = .production,
     applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound,
     childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe(),
@@ -3732,7 +3665,6 @@ private func makeHost(
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
         bootstrapExecutable: bootstrapExecutable(),
-        captureTransitions: captureTransitions,
         flightTapeConfiguration: flightTapeConfiguration,
         applicationExitBound: applicationExitBound,
         childExitProbe: childExitProbe,

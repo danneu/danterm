@@ -320,7 +320,7 @@ private func makeHost() throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
         bootstrapExecutable: bootstrapExecutable(),
-        captureTransitions: true
+        flightTapeConfiguration: .complete
     )
 }
 

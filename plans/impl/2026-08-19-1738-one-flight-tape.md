@@ -236,7 +236,7 @@ attribution, and grouping-sensitive shapes assert tape `.write` spans.
 ## Commit progress
 - [x] 1. Gate interaction-intent kinds on the flight recorder's configuration
 - [x] 2. Carry write attribution from the submitting path onto the tape
-- [ ] 3. Source characterization recordings from the tape and delete the five capture buffers
+- [x] 3. Source characterization recordings from the tape and delete the five capture buffers
 
 ## Implementation notes
 
@@ -252,3 +252,34 @@ attribution, and grouping-sensitive shapes assert tape `.write` spans.
   its own. That line is attributed `.pane`: nobody typed it, and it is the same
   kind of fact as a focus report. So an absent submission means the pane, not an
   unknown chooser.
+
+- Commit 3 kept the four accessor names the ~40 assertions used (`inputWrites`,
+  `replyWrites`, `outputBytes`, plus `tapeEvents`/`tapeSubmissions`) rather than
+  inlining a tape filter at each site, and moved them into
+  `TerminalPTYTestSupport` so both test targets read the tape through one
+  projection. They are filters over the one log, not a second record: nothing
+  stores anything, and each one names which attribution or kind it selects.
+- `capturedRecording` gates on `didChildExit` plus the host's
+  `recordsInteractionIntent`, which the host copies off its recorder
+  configuration at construction. That is one switch, not two: there is no
+  separate capture flag left that could disagree with what the recorder does.
+- Two host tests changed meaning where the tape observes later than the deleted
+  buffers did, both accepted as AR1. `liveThemeDefaultsPreserveQueryOrdering`
+  now waits for the launch line to cross before staging its queries, because a
+  reply submitted before the pane owns its descriptor is dropped and never
+  reaches the tape -- the old buffer recorded it at emission and so asserted on
+  bytes the child never received. `consumptionFencePairsFrameAndExitMetadata`
+  reads the final frame's feed off the tape instead of the fence payload.
+- `scripts/terminal-viability.sh` could not be run here: it refuses to start
+  without a zsh account shell, and this machine's is fish. The full `just test`
+  gate, which includes the characterization-build capture API gate, is green.
+
+## Follow Up
+
+- `lib/TerminalPTY/Tests/TerminalPTYHostTests/TerminalPTYHostTests.swift:2029`
+  has a pre-existing `await` on the non-async `fencedFlightRecordingCapture()`,
+  which the compiler warns about on every build of the suite.
+- Run `scripts/terminal-viability.sh` once on a machine with a zsh account
+  shell, to confirm the widened event-kind allow-list accepts the recordings the
+  characterization build now writes from the tape.
+
