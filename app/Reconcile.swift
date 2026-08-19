@@ -384,7 +384,7 @@ extension AppRuntime {
             guard let wrapper = findPaneWrapper(for: pane.paneId) else {
                 preconditionFailure("eligible pane TODO anchor is missing")
             }
-            let viewController = TodoPopoverViewController(paneId: pane.paneId, runtime: self)
+            let viewController = TodoPopoverController(scope: PaneTodoPopoverScope(paneId: pane.paneId), runtime: self)
             viewController.loadViewIfNeeded()
             viewController.apply(pane)
             todoPopover = presentTransientPopover(
@@ -396,7 +396,7 @@ extension AppRuntime {
             guard let anchor = chromeView?.tabTodoButton else {
                 preconditionFailure("eligible tab TODO anchor is missing")
             }
-            let viewController = TabTodoPopoverViewController(tabId: tab.tabId, runtime: self)
+            let viewController = TodoPopoverController(scope: TabTodoPopoverScope(tabId: tab.tabId), runtime: self)
             viewController.loadViewIfNeeded()
             viewController.apply(tab)
             todoPopover = presentTransientPopover(viewController, delegate: delegate, from: anchor)
@@ -405,13 +405,9 @@ extension AppRuntime {
     }
 
     /// Applies changed content without disturbing an open popover's local edit state.
+    /// The open controller ignores a projection that is not its own scope's.
     private func applyTodoPopover(_ projection: TodoPopoverProjection) {
-        switch projection {
-        case .pane(let pane):
-            (todoPopover?.contentViewController as? TodoPopoverViewController)?.apply(pane)
-        case .tab(let tab):
-            (todoPopover?.contentViewController as? TabTodoPopoverViewController)?.apply(tab)
-        }
+        (todoPopover?.contentViewController as? TodoPopoverApplying)?.apply(projection)
     }
 
     /// Push the focused pane's user theme into the open theme browser. The browser's

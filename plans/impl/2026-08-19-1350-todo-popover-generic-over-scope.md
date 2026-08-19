@@ -206,7 +206,7 @@ Stop the slot when done.
 ## Commit progress
 - [x] 1. refactor(app): close todo shortcut help through the controller base
 - [x] 2. test(ui): pin the todo popover behaviors the scope boundary will own
-- [ ] 3. refactor(app): one TODO popover controller generic over its scope
+- [x] 3. refactor(app): one TODO popover controller generic over its scope
 
 ## Implementation notes
 
@@ -228,3 +228,38 @@ Stop the slot when done.
   parallel load with 30-second socket timeouts in the IPC and CLI suites, and
   passes standalone. This commit compiles no product code, so the failure is
   environmental.
+- Commit 3 file layout: the base class file is gone, replaced by
+  `app/TodoPopoverScope.swift` (the protocol and its small value types) and
+  `app/TodoPopoverController.swift` (the shared views, key helpers, and the one
+  controller). The two concrete files were renamed to `app/PaneTodoPopoverScope.swift`
+  and `app/TabTodoPopoverScope.swift`, since neither holds a view controller any
+  more. `test-ui.sh` lists all four.
+- Two scope requirements from the pressure-test collapsed into declarative
+  statics, so the scope holds no AppKit views and stays a plain struct: extra
+  header buttons became `headerComposeButtonTitles` (the controller builds them,
+  wires them to the compose shortcut, and hides them in edit mode), and the pane
+  empty state became `emptyListMessage` (the controller builds the label, and its
+  presence is also what decides whether an empty list hides the scroll view).
+- `TodoPopoverScope` is not `@MainActor`; only `cellView` is, because it is the
+  one requirement that touches AppKit. Marking the whole protocol main-actor made
+  the nonisolated test fixture builders fail to compile in Swift 6 mode, and
+  binding a pure value type to an actor for one method was the wrong trade.
+- Selection after a mutation is two distinct helpers on purpose, matching what
+  each old controller did: restore paths (checkbox, delete button, clear
+  completed, Space toggle, save, cancel) resolve the previous target through the
+  scope, while computed paths (reorder, bucket move, drop, post-add) select the
+  target the scope named. Collapsing them into one would have changed tab
+  behavior on the computed paths.
+- Three unreachable divergences were unified toward the tab shape, as the plan
+  allows: `cancelEditAndReturnToList` keeps the tab's `focusListFromInput`
+  fallback, `shouldSelectRow` answers from row selectability instead of the
+  pane's unconditional `true`, and the drop handler now requires a live runtime
+  for both scopes. The 351-test UI suite passes with no assertion edited.
+- The plan's supplementary GUI walk was only partly done. The CLI has no command
+  that opens a TODO popover, and driving the menu through System Events kept
+  losing the foreground to the user's own DanTerm instance, so the walk was
+  stopped rather than risk sending keys into that session. What did run: a dev
+  slot with a split pane, todos seeded on both a pane and the tab, the pane TODO
+  popover toggled through its menu item, no crash in the slot log, and the app
+  still answering IPC afterwards. PO6 is what the plan says must catch a broken
+  scope, and it passes.

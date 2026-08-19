@@ -1,6 +1,6 @@
-// UI-harness tests for TodoPopoverView's pane-scoped row rendering, message
-// routing, compose/edit modes, keyboard paths, pasteboard payloads, and focus
-// restoration across model re-apply.
+// UI-harness tests for the pane TODO popover's row rendering, message routing,
+// compose/edit modes, keyboard paths, pasteboard payloads, drop handling, and
+// focus restoration across model re-apply.
 import Cocoa
 
 /// Runs pane-scoped todo popover coverage in the AppKit UI harness.
@@ -609,7 +609,7 @@ func todoPopoverViewTests() {
 private let paneTodoRowDragType = NSPasteboard.PasteboardType("com.danneu.danterm.todo-row")
 
 private struct PaneTodoFixture {
-    let vc: TodoPopoverViewController
+    let vc: TodoPopoverController<PaneTodoPopoverScope>
     let runtime: AppRuntime
     let window: NSWindow
     let model: AppModel
@@ -641,7 +641,7 @@ private func makePaneTodoFixture(todos: [TodoItem]? = nil) -> PaneTodoFixture {
     model.selectedTabId = tabId
 
     let runtime = AppRuntime(model: model)
-    let vc = TodoPopoverViewController(paneId: paneId, runtime: runtime)
+    let vc = TodoPopoverController(scope: PaneTodoPopoverScope(paneId: paneId), runtime: runtime)
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 320, height: 400),
         styleMask: [.titled],

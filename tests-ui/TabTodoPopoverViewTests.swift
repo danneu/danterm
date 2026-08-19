@@ -1,5 +1,6 @@
-// UI-harness tests for TabTodoPopoverView's rendered row model, message
-// routing, edit/compose modes, reconcile preservation, and pasteboard payloads.
+// UI-harness tests for the tab TODO popover's rendered row model, message
+// routing, edit/compose modes, reconcile preservation, bucket moves, and
+// pasteboard payloads.
 import Cocoa
 
 @MainActor
@@ -716,7 +717,7 @@ func tabTodoPopoverViewTests() {
 }
 
 private struct TabTodoFixture {
-    let vc: TabTodoPopoverViewController
+    let vc: TodoPopoverController<TabTodoPopoverScope>
     let runtime: AppRuntime
     let window: NSWindow
     let model: AppModel
@@ -768,7 +769,7 @@ private func makeTabTodoFixture(
     model.selectedTabId = tabId
 
     let runtime = AppRuntime(model: model)
-    let vc = TabTodoPopoverViewController(tabId: tabId, runtime: runtime)
+    let vc = TodoPopoverController(scope: TabTodoPopoverScope(tabId: tabId), runtime: runtime)
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 320, height: 400),
         styleMask: [.titled],

@@ -129,9 +129,10 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/TodoInputView.swift" \
         "$SCRIPT_DIR/app/TodoRowView.swift" \
         "$SCRIPT_DIR/app/TodoShortcutHelpView.swift" \
-        "$SCRIPT_DIR/app/TodoPopoverControllerBase.swift" \
-        "$SCRIPT_DIR/app/TabTodoPopoverView.swift" \
-        "$SCRIPT_DIR/app/TodoPopoverView.swift" \
+        "$SCRIPT_DIR/app/TodoPopoverScope.swift" \
+        "$SCRIPT_DIR/app/TodoPopoverController.swift" \
+        "$SCRIPT_DIR/app/TabTodoPopoverScope.swift" \
+        "$SCRIPT_DIR/app/PaneTodoPopoverScope.swift" \
         "$SCRIPT_DIR/app/AlertsPopoverView.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/SidebarItemStore.swift" \
         "$SCRIPT_DIR/tests-ui/TypedIdTestInit.swift" \
