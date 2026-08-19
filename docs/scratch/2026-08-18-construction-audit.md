@@ -1141,7 +1141,7 @@ rewrites.
 - [ ] **[ROW-4](#row-4)** (3x5, small) Write each printed cell once: clearCellAndPair's store at the target column is immediately overwritten
 - [ ] **[WIRE-6](#wire-6)** (3x5, small) Chunk and base64 the sync payload from slices, without copying the bytes three times first _(after [PERSIST-6](#persist-6))_
 - [ ] **[IPC-4](#ipc-4)** (3x5, medium) Return one traits value from a single exhaustive switch instead of six parallel per-method enumerations _(after [IPC-3](#ipc-3))_
-- [ ] **[STORE-2](#store-2)** (3x5, medium) Delete PackedRetainedRow's dead body and move the cell-word constants to the store that uses them _(after [STORE-1](#store-1))_
+- [x] **[STORE-2](#store-2)** (3x5, medium) Delete PackedRetainedRow's dead body and move the cell-word constants to the store that uses them _(after [STORE-1](#store-1))_ -- `863a81f4`
 - [ ] **[PTY-3](#pty-3)** (3x5, large) Record every applied transition on the flight tape and delete the five parallel capture buffers _(after [XPORT-1](#xport-1))_
 - [ ] **[HIST-3](#hist-3)** (3x4, medium) Carry the fold's result in DisplayRowCursor so a row is folded once, not three times _(after [STORE-5](#store-5))_
 - [ ] **[HIST-1](#hist-1)** (3x4, large) Give the open tail record one home: move its header and spills into the open scratch _(after [STORE-4](#store-4))_
