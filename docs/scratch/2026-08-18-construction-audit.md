@@ -1134,7 +1134,7 @@ rewrites.
 - [ ] **[CHROME-2](#chrome-2)** (3x5, small) Make the confirmation projection carry each button's answer instead of inferring it from button visibility _(after [MODEL-2](#model-2))_
 - [ ] **[IOS-1](#ios-1)** (3x5, small) Let the replica report pinnedness instead of re-decoding tape JSON in the session model
 - [ ] **[PERSIST-1](#persist-1)** (3x5, small) Decide crash recovery from the lock file's existence, not from decoding it
-- [ ] **[PTY-4](#pty-4)** (3x5, small) Read the PTY through one loop instead of one per drain reason _(after [XPORT-1](#xport-1))_
+- [x] **[PTY-4](#pty-4)** (3x5, small) Read the PTY through one loop instead of one per drain reason _(after [XPORT-1](#xport-1))_ -- `7448dd16`
 - [ ] **[RECON-1](#recon-1)** (3x5, small) Make container visibility a diffed field of ContainerShape instead of an unconditional per-tab op _(after [MODEL-3](#model-3))_
 - [ ] **[REDUCE-2](#reduce-2)** (3x5, small) Let .startSearch open the pane's search state directly instead of round-tripping through the view
 - [ ] **[REDUCE-5](#reduce-5)** (3x5, small) Raise every pane alert through one function instead of duplicating the ritual in .sessionBell
