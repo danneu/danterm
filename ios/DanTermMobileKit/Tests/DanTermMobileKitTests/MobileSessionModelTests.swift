@@ -169,6 +169,64 @@ func backspaceReachesThePane() throws {
     ])
 }
 
+@Test("An armed Ctrl latch chords the next input, clears, and redraws the projection")
+func armedControlLatchIsConsumedByEveryInputCategory() throws {
+    // Intent: with the latch armed, each latch-consuming event category sends the intent
+    //   the latch implies (a Ctrl chord, or unchanged text for a commit that cannot be
+    //   chorded), clears the projection's latch, and redraws so the bar's highlight
+    //   follows without a Ctrl tap.
+    // Why it exists: the button's highlight is rendered from the projection on the redraw
+    //   path, so a consuming input that did not redraw would leave a lit Ctrl key over a
+    //   latch that is already gone.
+    var session = Session()
+    try session.reachServingStream()
+
+    let cases: [(MobileSessionEvent, IpcPaneInput)] = [
+        (.textEntered("f"), .events([.key(.character("f"), .ctrl)])),
+        (.textEntered("hello"), .events([.text("hello")])),
+        (.pasted("hello"), .text("hello")),
+        (.deleteBackwardPressed, .events([.key(.named(.bspace), .ctrl)])),
+        (.accessoryKeyPressed(.tab), .events([.key(.named(.tab), .ctrl)])),
+        (.hardwareKeyPressed(.enter, [.shift]), .events([.key(.named(.enter), [.shift, .ctrl])])),
+        (.hardwareCharacterPressed("c", []), .events([.key(.character("c"), .ctrl)])),
+    ]
+    for (event, input) in cases {
+        let armed = session.handle(.accessoryKeyPressed(.control))
+        #expect(armed == [.redraw])
+        #expect(session.model.projection(at: session.now).isControlLatched)
+
+        let effects = session.handle(event)
+        #expect(requests(effects) == [.paneInput(pane: session.pane, input: input)])
+        #expect(effects.contains(.redraw))
+        #expect(session.model.projection(at: session.now).isControlLatched == false)
+    }
+}
+
+@Test("With the latch off every input category keeps today's intent and redraw behavior")
+func unarmedInputCategoriesAreUnchanged() throws {
+    // Intent: without the latch, each event category sends what it always sent, and only
+    //   the accessory row -- whose taps have always redrawn -- emits a redraw.
+    // Why it exists: the one-shot latch touches every input path, so each unarmed path
+    //   needs its unchanged behavior pinned down beside the armed one.
+    var session = Session()
+    try session.reachServingStream()
+
+    let cases: [(MobileSessionEvent, IpcPaneInput, Bool)] = [
+        (.textEntered("f"), .events([.text("f")]), false),
+        (.pasted("hello"), .text("hello"), false),
+        (.deleteBackwardPressed, .events([.key(.named(.bspace), [])]), false),
+        (.accessoryKeyPressed(.tab), .events([.key(.named(.tab), [])]), true),
+        (.hardwareKeyPressed(.enter, [.shift]), .events([.key(.named(.enter), .shift)]), false),
+        (.hardwareCharacterPressed("c", []), .events([.text("c")]), false),
+    ]
+    for (event, input, redraws) in cases {
+        let effects = session.handle(event)
+        #expect(requests(effects) == [.paneInput(pane: session.pane, input: input)])
+        #expect(effects.contains(.redraw) == redraws)
+        #expect(session.model.projection(at: session.now).isControlLatched == false)
+    }
+}
+
 @Test("Smoke input is driven into the responder rather than sent from the model")
 func smokeInputEntersThroughTheResponder() throws {
     // Intent: a launch carrying smoke input answers the attached pane with the probe for

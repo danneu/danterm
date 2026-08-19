@@ -22,7 +22,7 @@ public struct MobileSessionProjection: Equatable, Sendable {
     public let panes: [PaneRosterItem]
     public let selectedPaneId: PaneId?
     public let claim: MobileClaimControl
-    /// Whether the accessory row's Ctrl key is latched.
+    /// Whether the one-shot Ctrl latch is armed; the bar's Ctrl key renders it from here.
     public let isControlLatched: Bool
 }
 
@@ -217,16 +217,13 @@ public struct MobileSessionModel: Equatable, Sendable {
             return [.redraw]
 
         case .textEntered(let text):
-            let action = inputMapper.text(text)
-            return send(action, env: env)
+            return mapKeyInput({ $0.text(text) }, env: env)
 
         case .deleteBackwardPressed:
-            let action = inputMapper.deleteBackward()
-            return send(action, env: env)
+            return mapKeyInput({ $0.deleteBackward() }, env: env)
 
         case .pasted(let text):
-            let action = inputMapper.paste(text)
-            return send(action, env: env)
+            return mapKeyInput({ $0.paste(text) }, env: env)
 
         case .accessoryKeyPressed(let key):
             // The Ctrl key produces no traffic and only moves the latch, which the row
@@ -235,12 +232,10 @@ public struct MobileSessionModel: Equatable, Sendable {
             return send(action, env: env) + [.redraw]
 
         case .hardwareKeyPressed(let key, let modifiers):
-            let action = inputMapper.hardwareKey(key, modifiers: modifiers)
-            return send(action, env: env)
+            return mapKeyInput({ $0.hardwareKey(key, modifiers: modifiers) }, env: env)
 
         case .hardwareCharacterPressed(let character, let modifiers):
-            let action = inputMapper.hardwareCharacter(character, modifiers: modifiers)
-            return send(action, env: env)
+            return mapKeyInput({ $0.hardwareCharacter(character, modifiers: modifiers) }, env: env)
 
         case .scrolledToTopRow(let topRow):
             let action = inputMapper.scroll(
@@ -414,6 +409,20 @@ public struct MobileSessionModel: Equatable, Sendable {
             else { return [] }
             return [.applyRecord(record)]
         }
+    }
+
+    /// Runs one key-shaped input through the mapper and adds a redraw when it spent the
+    /// one-shot Ctrl latch, so the bar's highlight follows the projection without a Ctrl
+    /// tap of its own.
+    private mutating func mapKeyInput(
+        _ map: (inout MobileInputMapper) -> MobileInputAction?,
+        env: MobileSessionEnv
+    ) -> [MobileSessionEffect] {
+        let wasLatched = inputMapper.isControlLatched
+        let action = map(&inputMapper)
+        let effects = send(action, env: env)
+        guard inputMapper.isControlLatched != wasLatched else { return effects }
+        return effects + [.redraw]
     }
 
     /// Turns one mapped input into the effect it implies, or into nothing when there is no

@@ -33,38 +33,48 @@ public enum MobileAccessoryKey: Equatable, Sendable {
     case slash
 }
 
-/// Converts normalized UIKit input into the two D8 wire forms while owning Ctrl latch state.
+/// Converts normalized UIKit input into the two D8 wire forms while owning the one-shot
+/// Ctrl latch: the latch chords the next key-shaped input from any source, and that input
+/// consumes it.
 public struct MobileInputMapper: Equatable, Sendable {
     public private(set) var isControlLatched = false
 
     /// Creates a mapper with no active modifier latch.
     public init() {}
 
-    /// Keeps ordinary committed text on the raw event-token path.
+    /// Keeps ordinary committed text on the raw event-token path -- unless the latch is
+    /// armed and the commit is a single character, which is the chord the latch was armed
+    /// for. A longer commit (autocorrect, dictation, IME) cannot be chorded, so it goes
+    /// unchanged; either way the latch is spent.
     public mutating func text(_ text: String) -> MobileInputAction {
-        .send(.events([.text(text)]))
+        let modifiers = takeLatch()
+        guard let character = text.first, text.count == 1 else {
+            return .send(.events([.text(text)]))
+        }
+        return inputCharacter(character, modifiers: modifiers)
     }
 
-    /// Keeps a paste gesture on the top-level safe-paste path.
+    /// Keeps a paste gesture on the top-level safe-paste path. The latch cannot chord a
+    /// paste, but the paste still consumes it so it cannot chord a later keystroke.
     public mutating func paste(_ text: String) -> MobileInputAction {
-        .send(.text(text))
+        _ = takeLatch()
+        return .send(.text(text))
     }
 
-    /// Sends the keyboard's backspace as the named key the owner already encodes.
-    ///
-    /// The Ctrl latch is deliberately not read: it belongs to the accessory row alone, as
-    /// it does for typed text.
+    /// Sends the keyboard's backspace as the named key the owner already encodes, with
+    /// the latch's Ctrl when one is armed.
     public mutating func deleteBackward() -> MobileInputAction {
-        named(.bspace, modifiers: [])
+        named(.bspace, modifiers: takeLatch())
     }
 
-    /// Applies one accessory-row key, toggling Ctrl without producing traffic itself.
+    /// Applies one accessory-row key: the Ctrl key moves the latch without producing
+    /// traffic, and every other key spends it.
     public mutating func accessory(_ key: MobileAccessoryKey) -> MobileInputAction? {
         if key == .control {
             isControlLatched.toggle()
             return nil
         }
-        let modifiers: KeyMods = isControlLatched ? .ctrl : []
+        let modifiers = takeLatch()
         switch key {
         case .escape: return named(.escape, modifiers: modifiers)
         case .tab: return named(.tab, modifiers: modifiers)
@@ -84,7 +94,7 @@ public struct MobileInputMapper: Equatable, Sendable {
         _ character: Character,
         modifiers: KeyMods
     ) -> MobileInputAction {
-        inputCharacter(character, modifiers: modifiers)
+        inputCharacter(character, modifiers: modifiers.union(takeLatch()))
     }
 
     /// Maps a hardware-keyboard named key for owner-side mode-aware encoding.
@@ -92,7 +102,7 @@ public struct MobileInputMapper: Equatable, Sendable {
         _ key: NamedKey,
         modifiers: KeyMods
     ) -> MobileInputAction {
-        named(key, modifiers: modifiers)
+        named(key, modifiers: modifiers.union(takeLatch()))
     }
 
     /// Routes an absolute top row, which only the primary screen can hold: the alternate
@@ -120,6 +130,13 @@ public struct MobileInputMapper: Equatable, Sendable {
         let direction: InputWheelDirection = rows < 0 ? .up : .down
         let wheel = InputEvent.wheel(direction, column: column, row: row)
         return .send(.events(Array(repeating: wheel, count: count)))
+    }
+
+    /// Reads the latch as the modifier it stands for, and spends it in the same step so
+    /// one armed Ctrl can never chord two inputs.
+    private mutating func takeLatch() -> KeyMods {
+        defer { isControlLatched = false }
+        return isControlLatched ? .ctrl : []
     }
 
     private func named(_ key: NamedKey, modifiers: KeyMods) -> MobileInputAction {

@@ -21,7 +21,7 @@ func softwareBackspaceSendsNamedKey() {
     #expect(mapper.deleteBackward() == .send(.events([.key(.named(.bspace), [])])))
 }
 
-@Test("The accessory row maps named keys and a latching Ctrl modifier")
+@Test("The accessory row maps named keys and a one-shot Ctrl modifier")
 func accessoryRowMapping() {
     let cases: [(MobileAccessoryKey, MobileInputAction, MobileInputAction)] = [
         (.escape, .send(.events([.key(.named(.escape), [])])), .send(.events([.key(.named(.escape), .ctrl)]))),
@@ -37,14 +37,61 @@ func accessoryRowMapping() {
     for (key, plain, controlled) in cases {
         var plainMapper = MobileInputMapper()
         #expect(plainMapper.accessory(key) == plain)
+        #expect(plainMapper.isControlLatched == false)
 
         var controlledMapper = MobileInputMapper()
         #expect(controlledMapper.accessory(.control) == nil)
         #expect(controlledMapper.isControlLatched)
         #expect(controlledMapper.accessory(key) == controlled)
-        #expect(controlledMapper.accessory(.control) == nil)
         #expect(controlledMapper.isControlLatched == false)
     }
+}
+
+@Test("An armed Ctrl latch chords the next key from any source and is consumed by it")
+func controlLatchIsOneShotAcrossSources() {
+    // Intent: the latch applies to the next key-shaped input whatever produced it -- a
+    //   keyboard commit, backspace, or a hardware key -- and that input clears it.
+    // Why it exists: the latch used to be read only by the accessory row, so Ctrl-F from
+    //   the software keyboard was unreachable.
+    var mapper = MobileInputMapper()
+
+    _ = mapper.accessory(.control)
+    #expect(mapper.text("f") == .send(.events([.key(.character("f"), .ctrl)])))
+    #expect(mapper.isControlLatched == false)
+    #expect(mapper.text("f") == .send(.events([.text("f")])))
+
+    _ = mapper.accessory(.control)
+    #expect(mapper.deleteBackward() == .send(.events([.key(.named(.bspace), .ctrl)])))
+    #expect(mapper.isControlLatched == false)
+
+    _ = mapper.accessory(.control)
+    #expect(mapper.hardwareKey(.enter, modifiers: [.shift]) == .send(.events([
+        .key(.named(.enter), [.shift, .ctrl]),
+    ])))
+    #expect(mapper.isControlLatched == false)
+
+    _ = mapper.accessory(.control)
+    #expect(mapper.hardwareCharacter("c", modifiers: []) == .send(.events([
+        .key(.character("c"), .ctrl),
+    ])))
+    #expect(mapper.isControlLatched == false)
+}
+
+@Test("A multi-character commit and a paste send their text unchanged and clear the latch")
+func multiCharacterCommitAndPasteClearTheLatch() {
+    // Intent: input that is not a single key -- an autocorrect or IME commit, a paste --
+    //   goes to the wire untouched, and still consumes the latch.
+    // Why it exists: a latch that survived a commit it could not chord would chord some
+    //   later keystroke the user never aimed it at.
+    var mapper = MobileInputMapper()
+
+    _ = mapper.accessory(.control)
+    #expect(mapper.text("hello") == .send(.events([.text("hello")])))
+    #expect(mapper.isControlLatched == false)
+
+    _ = mapper.accessory(.control)
+    #expect(mapper.paste("hello") == .send(.text("hello")))
+    #expect(mapper.isControlLatched == false)
 }
 
 @Test("Hardware character chords carry modifiers while plain characters stay text")

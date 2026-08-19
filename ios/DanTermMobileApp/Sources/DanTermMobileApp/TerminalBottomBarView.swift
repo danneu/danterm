@@ -27,8 +27,9 @@ struct TerminalBarMenuItem {
 @MainActor
 final class TerminalBottomBarView: UIView {
     var onPaneList: (() -> Void)?
-    /// Reports an accessory key and is answered with the Ctrl latch as it stands after it.
-    var onAccessoryKey: ((MobileAccessoryKey) -> Bool)?
+    /// Reports an accessory key. The Ctrl key's highlight is not decided here: it is
+    /// rendered from the session projection on the redraw path, like every other fact.
+    var onAccessoryKey: ((MobileAccessoryKey) -> Void)?
     var onDismissKeyboard: (() -> Void)?
     /// Asked every time the overflow menu opens, so the menu shows what is offered now
     /// rather than what was offered when the bar last drew.
@@ -176,15 +177,19 @@ final class TerminalBottomBarView: UIView {
         onPaneList?()
     }
 
+    /// Renders the Ctrl key's highlight from the projection's latch state. Written only
+    /// on a change, for the same layout-loop reason as `setMenuOffered`.
+    func setControlLatched(_ latched: Bool) {
+        guard let controlButton, controlButton.isSelected != latched else { return }
+        controlButton.isSelected = latched
+        var configuration = controlButton.configuration
+        configuration?.baseForegroundColor = latched ? .systemOrange : tintColor
+        controlButton.configuration = configuration
+    }
+
     @objc private func accessoryTapped(_ sender: UIButton) {
         guard let key = MobileAccessoryKey(tag: sender.tag) else { return }
-        let isControlLatched = onAccessoryKey?(key) ?? false
-        if key == .control, let controlButton {
-            controlButton.isSelected = isControlLatched
-            var configuration = controlButton.configuration
-            configuration?.baseForegroundColor = isControlLatched ? .systemOrange : tintColor
-            controlButton.configuration = configuration
-        }
+        onAccessoryKey?(key)
     }
 
     @objc private func dismissKeyboard() {

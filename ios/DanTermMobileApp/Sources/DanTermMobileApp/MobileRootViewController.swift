@@ -73,12 +73,11 @@ final class MobileRootViewController: UIViewController {
         statusPill.addTarget(self, action: #selector(statusPillTapped), for: .touchUpInside)
         bottomBar.onPaneList = { [weak self] in self?.presentPaneSheet() }
         bottomBar.onAccessoryKey = { [weak self] key in
-            guard let self else { return false }
+            guard let self else { return }
             session.dispatch(.accessoryKeyPressed(key))
             // The key was aimed at the terminal, so the terminal keeps the focus a tap on
             // the bar would otherwise have taken.
             terminalInput.becomeFirstResponder()
-            return session.projection.isControlLatched
         }
         bottomBar.onDismissKeyboard = { [weak self] in self?.terminalInput.resignFirstResponder() }
         bottomBar.menuItems = { [weak self] in self?.geometryMenuItems() ?? [] }
@@ -190,6 +189,9 @@ final class MobileRootViewController: UIViewController {
         // move when an action appears or goes away. What the menu contains is asked for
         // again when it opens.
         bottomBar.setMenuOffered(projection.claim.claim != nil || projection.claim.release != nil)
+        // The latch is a session fact like any other: the highlight follows the
+        // projection, so an input that spent the latch unlights the key with no Ctrl tap.
+        bottomBar.setControlLatched(projection.isControlLatched)
     }
 
     /// Opens the form that names a server. The sheet is built for this one presentation
