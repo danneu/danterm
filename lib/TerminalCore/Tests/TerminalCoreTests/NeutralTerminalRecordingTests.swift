@@ -433,6 +433,83 @@ struct NeutralTerminalRecordingTests {
         #expect(try older.replay().selectionRange == nil)
     }
 
+    @Test("a recorded off-grid pointer replays off-grid while an older tape replays as inside")
+    func offGridMouseRoundTrip() throws {
+        // Intent: the neutral record carries the insideness the view measured, so a replica
+        //   replaying at the same geometry reaches the same link decision as the pane. A tape
+        //   written before the field decodes as inside.
+        // Why it exists: the record carried column and row alone, and replay minted an
+        //   insideness nobody measured. An off-grid Cmd-press that armed nothing on the Mac
+        //   then replayed on a replica as an on-grid press that armed a link.
+        // Scenario: the same Cmd-press over a link is recorded twice at one address, once
+        //   measured inside the grid and once measured outside it.
+        func recording(isInsideGrid: Bool) -> NeutralTerminalRecording {
+            NeutralTerminalRecording(
+                provenance: .danTerm(test: "off-grid-mouse"),
+                initial: NeutralTerminalDimensions(columns: 16, rows: 2),
+                events: [
+                    .feed(Array("https://a.co".utf8)),
+                    .mouse(.init(
+                        action: .move,
+                        column: 2,
+                        row: 0,
+                        isInsideGrid: isInsideGrid,
+                        modifiers: [.command]
+                    )),
+                    .mouse(.init(
+                        action: .down,
+                        button: 1,
+                        column: 2,
+                        row: 0,
+                        isInsideGrid: isInsideGrid,
+                        modifiers: [.command]
+                    )),
+                ]
+            )
+        }
+
+        func decode(_ value: NeutralTerminalRecording) throws -> NeutralTerminalRecording {
+            try JSONDecoder().decode(
+                NeutralTerminalRecording.self,
+                from: try JSONEncoder().encode(value)
+            )
+        }
+
+        let inside = try decode(recording(isInsideGrid: true))
+        #expect(inside == recording(isInsideGrid: true))
+        let insideReplay = try inside.replay()
+        #expect(insideReplay.hoveredLink?.hyperlink.uri == "https://a.co")
+        #expect(insideReplay.armedLink?.hyperlink.uri == "https://a.co")
+
+        let outside = try decode(recording(isInsideGrid: false))
+        #expect(outside == recording(isInsideGrid: false))
+        let outsideReplay = try outside.replay()
+        #expect(outsideReplay.hoveredLink == nil)
+        #expect(outsideReplay.armedLink == nil)
+
+        // A document written before the field existed: the key is absent, not false, so the
+        // pointer replays as the on-grid one its clamped coordinates describe.
+        let older = try JSONDecoder().decode(NeutralTerminalRecording.self, from: Data(#"""
+        {
+          "version": 1,
+          "provenance": {
+            "source":"danterm",
+            "author":"DanTerm",
+            "test":"off-grid-mouse-untracked"
+          },
+          "initial": {"columns": 16, "rows": 2},
+          "events": [
+            {"type":"feed", "text":"https://a.co"},
+            {"type":"mouse", "action":"move", "column":2, "row":0, "modifiers":["command"]},
+            {"type":"mouse", "action":"down", "button":1, "column":2, "row":0,
+             "modifiers":["command"]}
+          ]
+        }
+        """#.utf8))
+
+        #expect(try older.replay().armedLink?.hyperlink.uri == "https://a.co")
+    }
+
     @Test("captured mouse reports are discarded without mutating replayed terminal state")
     func capturedMouseReplayIsTransparent() throws {
         let recording = NeutralTerminalRecording(

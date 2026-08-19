@@ -2141,9 +2141,11 @@ struct TerminalPaneSessionControllerTests {
 
     @Test("captured controller navigation and semantic input replay exactly", .timeLimit(.minutes(1)))
     func controllerNavigationCaptureEquality() async throws {
-        // Intent: preserve owner-ordered viewport and normalized input events through capture.
+        // Intent: preserve owner-ordered viewport and normalized input events through capture,
+        //   including the insideness the view measured for each pointer.
         // Why it exists: input snaps and semantic events cannot be reconstructed from child output.
-        // Scenario: a pane scrolls away, receives key/paste/focus input, then exits normally.
+        // Scenario: a pane scrolls away, receives key/paste/focus input and a pointer measured
+        //   outside the grid, then exits normally.
         let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; printf '\\033[?1000;1006h'; read ignored; exit"
         let controller = try TerminalPaneSessionController(
             configuration: .init(
@@ -2178,6 +2180,10 @@ struct TerminalPaneSessionControllerTests {
             modifiers: [.shift],
             clickCount: 3))
         controller.sendPointer(.up(.left, cell: .init(column: 1, row: selectionRow), modifiers: [.shift]))
+        controller.sendPointer(.move(
+            cell: .init(column: 7, row: selectionRow, isInsideGrid: false),
+            modifiers: [.shift]
+        ))
         controller.sendKey(.f5, modifiers: [.shift])
         controller.sendPaste("paste")
         controller.sendFocus(true)
@@ -2201,6 +2207,14 @@ struct TerminalPaneSessionControllerTests {
         #expect(shiftDownClickCounts.contains(1))
         #expect(shiftDownClickCounts.contains(2))
         #expect(shiftDownClickCounts.contains(3))
+        // Capture records the insideness the view measured, not a default: a replica that
+        // rebuilt the cell from column and row alone would arm links the pane never armed.
+        #expect(mouseEvents.contains(.init(
+            action: .move, column: 3, row: selectionRow, modifiers: [.shift]
+        )))
+        #expect(mouseEvents.contains(.init(
+            action: .move, column: 7, row: selectionRow, isInsideGrid: false, modifiers: [.shift]
+        )))
         var replayed = try recording.replay(machineHostname: MachineHostname.posix)
         _ = replayed.drainDamage()
         var consumed = controller.terminalSnapshot()

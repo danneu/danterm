@@ -209,6 +209,11 @@ public struct NeutralTerminalMouseEvent: Equatable, Sendable {
     /// character-granularity selection resolves a boundary from. Recordings captured before
     /// this was carried decode to `0`, the cell's leading edge.
     public let offsetX: Double
+    /// Whether the capturing view measured the raw point inside its grid, before the column
+    /// and row above were clamped into range. Link work needs the measurement, because clamped
+    /// coordinates always address the grid. Recordings captured before this was carried decode
+    /// to `true`, the pointer the clamped coordinates describe.
+    public let isInsideGrid: Bool
     /// Modifier snapshot forwarded with the transition.
     public let modifiers: TerminalKeyModifiers
     /// Native click count retained for local selection granularity.
@@ -221,6 +226,7 @@ public struct NeutralTerminalMouseEvent: Equatable, Sendable {
         column: Int,
         row: Int,
         offsetX: Double = 0,
+        isInsideGrid: Bool = true,
         modifiers: TerminalKeyModifiers = [],
         clickCount: Int = 1
     ) {
@@ -229,6 +235,7 @@ public struct NeutralTerminalMouseEvent: Equatable, Sendable {
         self.column = column
         self.row = row
         self.offsetX = offsetX
+        self.isInsideGrid = isInsideGrid
         self.modifiers = modifiers
         self.clickCount = clickCount
     }
@@ -257,7 +264,7 @@ public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
 extension NeutralTerminalRecordingEvent: Codable {
     private enum CodingKeys: String, CodingKey {
         case type, text, base64, columns, rows, pinned, action, key, scalar, modifiers, focused
-        case button, column, row, offsetX, clickCount, expect, elapsedNanoseconds
+        case button, column, row, offsetX, isInsideGrid, clickCount, expect, elapsedNanoseconds
         case originElapsedNanoseconds
     }
 
@@ -342,7 +349,10 @@ extension NeutralTerminalRecordingEvent: Codable {
             try Self.validateKeys(
                 keys,
                 required: ["type", "action", "column", "row"],
-                optional: ["button", "offsetX", "modifiers", "clickCount", "elapsedNanoseconds"],
+                optional: [
+                    "button", "offsetX", "isInsideGrid", "modifiers", "clickCount",
+                    "elapsedNanoseconds",
+                ],
                 type: type
             )
             guard let action = NeutralTerminalMouseAction(
@@ -360,6 +370,7 @@ extension NeutralTerminalRecordingEvent: Codable {
                 column: try values.decode(Int.self, forKey: .column),
                 row: try values.decode(Int.self, forKey: .row),
                 offsetX: try values.decodeIfPresent(Double.self, forKey: .offsetX) ?? 0,
+                isInsideGrid: try values.decodeIfPresent(Bool.self, forKey: .isInsideGrid) ?? true,
                 modifiers: try Self.decodeModifiers(
                     try values.decodeIfPresent([String].self, forKey: .modifiers) ?? []
                 ),
@@ -436,6 +447,7 @@ extension NeutralTerminalRecordingEvent: Codable {
             try values.encode(mouse.column, forKey: .column)
             try values.encode(mouse.row, forKey: .row)
             try values.encode(mouse.offsetX, forKey: .offsetX)
+            try values.encode(mouse.isInsideGrid, forKey: .isInsideGrid)
             try values.encode(Self.encodeModifiers(mouse.modifiers), forKey: .modifiers)
             try values.encode(mouse.clickCount, forKey: .clickCount)
         case .resize(let columns, let rows, let pinned):
@@ -626,7 +638,8 @@ private func neutralPointerEvent(for mouse: NeutralTerminalMouseEvent) -> Termin
     let cell = TerminalViewportCell(
         column: mouse.column,
         row: mouse.row,
-        offsetX: mouse.offsetX
+        offsetX: mouse.offsetX,
+        isInsideGrid: mouse.isInsideGrid
     )
     switch mouse.action {
     case .down:

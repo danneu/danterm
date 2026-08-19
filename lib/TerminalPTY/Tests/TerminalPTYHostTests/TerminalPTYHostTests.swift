@@ -3338,6 +3338,7 @@ private extension TerminalPointerEvent {
                 column: cell.column,
                 row: cell.row,
                 offsetX: cell.offsetX,
+                isInsideGrid: cell.isInsideGrid,
                 modifiers: modifiers,
                 clickCount: clickCount
             )
@@ -3347,6 +3348,7 @@ private extension TerminalPointerEvent {
                 button: button.rawValue + 1,
                 column: cell.column,
                 row: cell.row,
+                isInsideGrid: cell.isInsideGrid,
                 modifiers: modifiers
             )
         case let .move(cell, modifiers):
@@ -3355,6 +3357,7 @@ private extension TerminalPointerEvent {
                 column: cell.column,
                 row: cell.row,
                 offsetX: cell.offsetX,
+                isInsideGrid: cell.isInsideGrid,
                 modifiers: modifiers
             )
         }

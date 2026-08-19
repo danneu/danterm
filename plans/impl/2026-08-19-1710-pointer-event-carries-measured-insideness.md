@@ -196,7 +196,7 @@ WezTerm-adapted drag tests.
 
 ## Commit progress
 - [x] 1. Carry the measured cell in every pointer event and decide off-grid links once
-- [ ] 2. Record measured insideness on the neutral mouse tape
+- [x] 2. Record measured insideness on the neutral mouse tape
 
 ## Implementation notes
 
@@ -217,3 +217,8 @@ WezTerm-adapted drag tests.
   inside its own decision. The view's separate cancel already did this in
   production, so the old policy-level expectation described a state the app
   never reached.
+- PO5's capture proof rides on the existing controller capture-equality test rather
+  than a new test of its own. `capturedRecording` only answers after the child
+  session ends, so a dedicated proof would have to spawn and exit a shell to assert
+  one recorded bit; that test already spawns one and already sends pointers, so it
+  gains one measured-off-grid move and the assertion that the tape kept the bit.
