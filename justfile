@@ -65,10 +65,6 @@ test-terminal-viability:
 test-terminal-benchmark-gui:
     python3 ./scripts/terminal-benchmark-gui-contract.py
 
-# Run the opt-in live btop-scroll diagnostic proof (requires GUI + Accessibility + btop)
-test-terminal-btop-gui *phases:
-    python3 ./scripts/terminal-btop-gui-proof.py {{phases}}
-
 # Compare one workload between a named baseline revision and the working tree.
 benchmark-quick baseline workload:
     python3 ./scripts/terminal-benchmark-compare.py quick \

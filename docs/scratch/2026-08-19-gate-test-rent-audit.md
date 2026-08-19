@@ -7,6 +7,10 @@ machine: **107 steps, all passed, 360s wall.** Sum of step run-time 610s; sum of
 queue-wait 825s. Raw log: `.build/gate-timing.log` (not committed; re-create with
 `just test > .build/gate-timing.log 2>&1`).
 
+The cuts in sections A and B took the gate from 107 steps to 102: four in
+section A, two more in section B (the two Swift-test drops are tests inside
+existing steps, so they do not change the count).
+
 This is a working document. Each candidate below is a checkbox. Tick one, drop
 that thing, move on -- nothing here depends on anything else here.
 
@@ -91,7 +95,7 @@ Wrong: **neither test guards a compat shim, because no compat shim exists.**
       name is stale.
       **Action:** drop "legacy" from the test name. Do not delete.
 
-- [ ] **`lib/DanTermCore/Tests/DanTermCoreTests/CustomTitleTests.swift:332`** --
+- [x] **`lib/DanTermCore/Tests/DanTermCoreTests/CustomTitleTests.swift:332`** --
       **Drop, but it is not a policy question.** `subtitle` appears nowhere in
       the snapshot codec. The test feeds JSON carrying tab-level `title` and
       `subtitle` keys and asserts they are ignored -- which is Swift's default
@@ -134,7 +138,7 @@ The audit's "museum piece" claim was wrong for the three btop workload modules.
 
 **Genuinely prunable (2 steps, 34 tests):**
 
-- [ ] **`scripts/tests/terminal_btop_gui_proof_test.py`** (33 tests, 1s)
+- [x] **`scripts/tests/terminal_btop_gui_proof_test.py`** (33 tests, 1s)
       The one real instrument-for-an-instrument. `terminal-btop-gui-proof.py` has
       a single opt-in recipe and **nothing imports it** -- unlike the three btop
       workload modules, which the profiling path depends on. Its own docstring:
@@ -143,12 +147,21 @@ The audit's "museum piece" claim was wrong for the three btop workload modules.
       a broken rule. If we never run `just test-terminal-btop-gui` again, both
       the proof and its 33 tests go together. Keeping the proof while dropping
       its judges is the one combination to avoid.
+      **Decided 2026-08-19:** the user chose to retire the proof and its judges
+      together. Gone: `scripts/terminal-btop-gui-proof.py`, its test, the gate
+      step, and the `test-terminal-btop-gui` recipe. The three btop workload
+      modules (`terminal_btop_workload.py`, `terminal_btop_stimulus.py`,
+      `terminal_btop_artifacts.py`) and their gate steps stayed -- they back the
+      live `just benchmark-sample/trace/loop btop-scroll` recipes.
 
-- [ ] **`scripts/tests/terminal_fixed_cost_probe_test.py`** (1 test, 1s)
+- [x] **`scripts/tests/terminal_fixed_cost_probe_test.py`** (1 test, 1s)
       `terminal-fixed-cost-probe.py` has zero justfile recipes, zero doc
       references, and zero callers outside itself. Written to motivate arena
       work that has since landed. The only truly orphaned item in the cluster --
       though at 1 test, dropping it is bookkeeping, not a win.
+      **Done 2026-08-19:** the test and its gate step went. The probe script
+      itself stayed -- it is orphaned but still directly runnable as a
+      diagnostic.
 
 **Correction:** the cluster was never a 249-test prune. Nine of twelve are load-
 bearing dependencies of the live benchmarking path that simply stopped needing
@@ -213,3 +226,6 @@ Append one line per drop: date, what went, what broke or did not.
 | 2026-08-19 | `terminal-benchmark-commands_test.sh` (gate step + file) | Nothing broke. |
 | 2026-08-19 | `watch-release-workflow_test.sh` (gate step + file) | Nothing broke. |
 | 2026-08-19 | `CLIParserTests` "removed legacy commands are unknown" | Nothing broke; suite still 61 tests, green. |
+| 2026-08-19 | `terminal_btop_gui_proof_test.py` plus `scripts/terminal-btop-gui-proof.py` and the `test-terminal-btop-gui` recipe | Nothing broke. The proof and its judges went together, by the user's call. The three btop workload modules and their gate steps stayed. Prose in `agent-docs/terminal-performance.md` lost the two paragraphs describing the retired proof. |
+| 2026-08-19 | `terminal_fixed_cost_probe_test.py` (gate step + file) | Nothing broke. `scripts/terminal-fixed-cost-probe.py` stayed as a directly-runnable diagnostic. |
+| 2026-08-19 | `CustomTitleTests` "testLegacySnapshotWithTitleSubtitleDecodesSuccessfully" | Nothing broke. It only re-confirmed Swift's default `Codable` handling of unknown keys. |

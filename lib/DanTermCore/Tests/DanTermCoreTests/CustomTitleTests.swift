@@ -4,7 +4,7 @@
 // trim / empty-clear / non-selected scope), session title reports + pane-focus
 // non-override, windowChrome + close-confirm using displayTitle,
 // snapshot round-trip (preserve customTitle, derive title/subtitle
-// from the focused session on import including legacy fields), the
+// from the focused session on import), the
 // renameCompletionMessages dispatcher (Enter vs Esc, group skip),
 // sidebarRenameEnded restoring focus, and the clearCustomTitles batch
 // (dedup, stale-filter, no-op on all-stale, reverts displayTitle).
@@ -327,38 +327,6 @@ import Testing
         let model = validateAndBuild(initFile.model)
         #expect(model != nil, "should build model")
         #expect(tabSubtitle(model!.groups[0].tabs[0]) == nil, "subtitle should be nil when pane has no cwd")
-    }
-
-    @Test("testLegacySnapshotWithTitleSubtitleDecodesSuccessfully")
-    func testLegacySnapshotWithTitleSubtitleDecodesSuccessfully() throws {
-        // Intent: v3 snapshots that include tab-level title +
-        //   subtitle decode (the fields are ignored; title/subtitle
-        //   derive from pane).
-        // Why it exists: pins backward compat for old snapshots.
-        // Scenario: spec-first legacy snapshot.
-        let json = """
-        {
-          "version": 3,
-          "model": {
-            "groups": [{
-              "name": "General",
-              "tabs": [{
-                "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "title": "vim",
-                "subtitle": "~/world",
-                "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "Terminal", "cwd": "~/world" } }
-              }]
-            }]
-          }
-        }
-        """
-        let data = json.data(using: .utf8)!
-        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
-        let model = validateAndBuild(initFile.model)
-        #expect(model != nil, "legacy snapshot with title/subtitle should still decode")
-        #expect(tabTitle(model!.groups[0].tabs[0]) == "Terminal")
-        #expect(tabSubtitle(model!.groups[0].tabs[0]) == "~/world")
     }
 
     @Test("testDeriveTabChromeMatchesRuntimeBehavior")

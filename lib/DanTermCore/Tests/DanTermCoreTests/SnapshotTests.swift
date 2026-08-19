@@ -789,8 +789,8 @@ import DanTermProtocol
 
     // MARK: - TODO Snapshot
 
-    @Test("legacy checkpoint restores bare-string pane and tab todo ids")
-    func legacyCheckpointRestoresBareStringTodoIds() throws {
+    @Test("checkpoint decodes pane and tab todo ids from bare strings")
+    func checkpointDecodesTodoIdsFromBareStrings() throws {
         let tabTodoId = "11111111-1111-4111-8111-111111111111"
         let paneTodoId = "22222222-2222-4222-8222-222222222222"
         let json = """

@@ -1024,19 +1024,3 @@ reset and damage evidence, process-scoped activation, and ownership limited to
 the apps the run launched. It needs a logged-in GUI session with Accessibility
 access and takes several minutes, so it stays out of `just test` alongside
 `just test-terminal-viability`.
-
-`just test-terminal-btop-gui` is the matching opt-in proof for the live btop
-diagnostic above. It runs a bounded `sample` and a `Time Profiler` `trace` and
-requires each to come back with parsed samples, positive damage topology, a
-contained overlap, and a live 179x66 PTY; it then steals the foreground
-mid-capture and requires that run to be rejected, by exit status and by a
-preserved reason naming the lapse; it watches `loop` turn a leg around; and it
-checks that teardown left no stimulus arm running and did not signal an
-unrelated btop it started alongside. It additionally needs `btop` on PATH and
-Accessibility permission, and it drives four real profiling runs, so it is
-slower still. Name phases to run one: `just test-terminal-btop-gui loop`.
-
-Its judgments are pure functions graded against fixtures in
-`scripts/tests/terminal_btop_gui_proof_test.py`, which does run in `just test` --
-an opt-in proof whose rules are only exercised live would go green exactly when
-the diagnostic breaks.
