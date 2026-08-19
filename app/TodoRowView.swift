@@ -1,6 +1,6 @@
-/// Reusable todo row view: [checkbox | label | delete button]. Extracted from
-/// TodoPopoverView so the tab-level popover can reuse it without depending on
-/// the pane-level popover.
+/// Reusable todo row view: [checkbox | label | delete button]. It lives apart
+/// from the TODO popover scopes so the pane list and the tab list can both
+/// build it without either depending on the other.
 
 import Cocoa
 

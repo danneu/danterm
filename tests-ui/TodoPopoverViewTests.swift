@@ -1,6 +1,6 @@
-// UI-harness tests for TodoPopoverView's pane-scoped row rendering, message
-// routing, compose/edit modes, keyboard paths, pasteboard payloads, and focus
-// restoration across model re-apply.
+// UI-harness tests for the pane TODO popover's row rendering, message routing,
+// compose/edit modes, keyboard paths, pasteboard payloads, drop handling, and
+// focus restoration across model re-apply.
 import Cocoa
 
 /// Runs pane-scoped todo popover coverage in the AppKit UI harness.
@@ -500,10 +500,116 @@ func todoPopoverViewTests() {
 
         try uiExpect(!fx.vc.hasShortcutHelpPopover, "shortcut help should close before the pane parent disappears")
     }
+
+    uiTest("accepted drop reorders the pane list and restores the prior selection") {
+        // Intent: dropping a pane todo accepts the drop, dispatches the pane
+        //   reorder message carrying the drop index, and leaves the row that
+        //   was selected before the drop still selected.
+        // Why it exists: the drop path is the pane popover's last untested
+        //   mutating surface, and its selection restore has to survive the
+        //   re-entrant apply production runs inside send. Spec-first.
+        // Scenario: with "Pane beta" selected, the user drags "Pane alpha" and
+        //   drops it past the last row.
+        let fx = makePaneTodoFixture()
+        defer { fx.window.close() }
+        installPaneTodoReapplyHook(fx)
+        let selected = try rowIndex(titled: "Pane beta", in: fx)
+        fx.table.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
+
+        let info = todoDraggingInfo(type: paneTodoRowDragType, string: fx.openId.uuidString)
+        let accepted = fx.vc.tableView(fx.table, acceptDrop: info, row: 3, dropOperation: .above)
+        settlePaneTodoFixture(fx)
+
+        try uiExpect(accepted, "pane row drop should be accepted")
+        try expectSingleMessage(fx.runtime, "pane drop reorder") { msg in
+            if case .reorderTodo(.pane(let paneId), let todoId, let toIndex) = msg {
+                return paneId == fx.paneId && todoId.rawValue == fx.openId && toIndex == 3
+            }
+            return false
+        }
+        try uiExpect(rowTitles(in: fx) == ["Pane beta", "Pane done", "Pane alpha"],
+                     "dropped row should land last, got \(rowTitles(in: fx))")
+        try uiExpect(try selectedRowTitle(in: fx) == "Pane beta",
+                     "selection should stay on the row selected before the drop")
+    }
+
+    uiTest("Shift-H and Shift-L are unhandled in the pane list") {
+        // Intent: the pane list ignores the bucket-move keys entirely.
+        // Why it exists: bucket moves are a tab-only behavior, so the pane must
+        //   report the key as unhandled rather than silently swallowing it.
+        //   Spec-first.
+        // Scenario: the user selects a pane task and presses Shift-H, then
+        //   Shift-L.
+        let fx = makePaneTodoFixture()
+        defer { fx.window.close() }
+        let row = try rowIndex(titled: "Pane alpha", in: fx)
+        fx.table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+
+        let left = fx.vc.handleListKeyDown(
+            keyDownEvent(characters: "H", modifiers: [.shift], keyCode: 4, window: fx.window))
+        let right = fx.vc.handleListKeyDown(
+            keyDownEvent(characters: "L", modifiers: [.shift], keyCode: 37, window: fx.window))
+
+        try uiExpect(!left, "Shift-H should be unhandled in the pane list")
+        try uiExpect(!right, "Shift-L should be unhandled in the pane list")
+        try uiExpect(fx.runtime.sentMessages.isEmpty, "pane bucket keys should send nothing")
+    }
+
+    uiTest("Cmd-Shift-H and Cmd-Shift-L bubble out of the pane popover") {
+        // Intent: the pane popover does not claim the Cmd-Shift bucket keys, so
+        //   AppKit keeps routing them to the surrounding app.
+        // Why it exists: the tab popover deliberately swallows these keys and
+        //   the pane one deliberately does not; only the returned handled flag
+        //   tells the two apart. Spec-first.
+        // Scenario: the user presses Cmd-Shift-H and Cmd-Shift-L with a pane
+        //   TODO popover open.
+        let fx = makePaneTodoFixture()
+        defer { fx.window.close() }
+
+        let left = fx.vc.view.performKeyEquivalent(
+            with: keyDownEvent(characters: "h", modifiers: [.command, .shift], keyCode: 4, window: fx.window))
+        let right = fx.vc.view.performKeyEquivalent(
+            with: keyDownEvent(characters: "l", modifiers: [.command, .shift], keyCode: 37, window: fx.window))
+
+        try uiExpect(!left, "Cmd-Shift-H should bubble past the pane popover")
+        try uiExpect(!right, "Cmd-Shift-L should bubble past the pane popover")
+        try uiExpect(fx.runtime.sentMessages.isEmpty, "pane Cmd-Shift bucket keys should send nothing")
+    }
+
+    uiTest("compose submit leaves the pane selection where it was") {
+        // Intent: adding a pane task does not move selection onto the new row.
+        // Why it exists: the tab popover selects the task it just added and the
+        //   pane one does not; the difference only shows through the re-entrant
+        //   apply that runs inside send. Spec-first.
+        // Scenario: with "Pane beta" selected, the user types a new task in
+        //   compose and presses Return.
+        let fx = makePaneTodoFixture()
+        defer { fx.window.close() }
+        installPaneTodoReapplyHook(fx)
+        let row = try rowIndex(titled: "Pane beta", in: fx)
+        fx.table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        let compose = try visibleTodoInput(in: fx)
+        compose.string = "Pane gamma"
+
+        _ = fx.vc.textView(compose.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
+        settlePaneTodoFixture(fx)
+
+        try expectSingleMessage(fx.runtime, "add pane todo") { msg in
+            if case .addTodo(.pane(let paneId), let text) = msg {
+                return paneId == fx.paneId && text == "Pane gamma"
+            }
+            return false
+        }
+        try uiExpect(rowTitles(in: fx).contains("Pane gamma"), "new task should appear in the list")
+        try uiExpect(try selectedRowTitle(in: fx) == "Pane beta",
+                     "pane compose submit should not select the new task")
+    }
 }
 
+private let paneTodoRowDragType = NSPasteboard.PasteboardType("com.danneu.danterm.todo-row")
+
 private struct PaneTodoFixture {
-    let vc: TodoPopoverViewController
+    let vc: TodoPopoverController<PaneTodoPopoverScope>
     let runtime: AppRuntime
     let window: NSWindow
     let model: AppModel
@@ -535,7 +641,7 @@ private func makePaneTodoFixture(todos: [TodoItem]? = nil) -> PaneTodoFixture {
     model.selectedTabId = tabId
 
     let runtime = AppRuntime(model: model)
-    let vc = TodoPopoverViewController(paneId: paneId, runtime: runtime)
+    let vc = TodoPopoverController(scope: PaneTodoPopoverScope(paneId: paneId), runtime: runtime)
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 320, height: 400),
         styleMask: [.titled],
@@ -687,6 +793,10 @@ private func selectedRowTitle(in fx: PaneTodoFixture) throws -> String {
     try rowTitle(at: fx.table.selectedRow, in: fx)
 }
 
+private func rowTitles(in fx: PaneTodoFixture) -> [String] {
+    rowTextValues(materializedTodoRows(fx))
+}
+
 private func enterEdit(rowTitle: String, in fx: PaneTodoFixture) throws {
     let row = try rowIndex(titled: rowTitle, in: fx)
     fx.table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
@@ -748,6 +858,8 @@ private func installPaneTodoReapplyHook(_ fx: PaneTodoFixture) {
 
 private func applyPaneTodoMessage(_ msg: Msg, paneId: PaneId, pane: inout PaneModel) {
     switch msg {
+    case .addTodo(.pane(let targetPaneId), let text) where targetPaneId == paneId:
+        pane.todos.append(TodoItem(id: UUID(), text: text, isDone: false))
     case .toggleTodoDone(.pane(let targetPaneId), let todoId) where targetPaneId == paneId:
         guard let index = pane.todos.firstIndex(where: { $0.id == todoId }) else { return }
         pane.todos[index].isDone.toggle()
