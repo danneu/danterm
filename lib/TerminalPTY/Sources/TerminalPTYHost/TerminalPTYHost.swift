@@ -321,6 +321,10 @@ public actor TerminalPTYHost {
 
     private static let forcedCensusRetryInterval: UInt32 = 1000
 
+    /// The most bytes one read turn takes before it returns to the queue. See `readReady`
+    /// for what the constant buys and why 16 KiB is where it sits.
+    private static let readTurnLimit = 16 * 1024
+
     private let queue: DispatchSerialQueue
     /// Read on the owner queue, written from whatever thread submits, so it is not
     /// actor state: every `nonisolated` submission below either enters a resize into
@@ -380,6 +384,11 @@ public actor TerminalPTYHost {
     private var pendingOwnerSemanticEvents: [PaneSemanticEvent] = []
     private var pendingEvents: [PaneProcessLifecycleEvent] = []
     private var isReducing = false
+
+    /// The one buffer every read turn fills, allocated and zero-filled once per host.
+    /// Successive `read()` returns land at successive offsets of it, so a turn costs one
+    /// syscall per read and no allocation at all until the turn ends.
+    private var turnStorage = [UInt8](repeating: 0, count: TerminalPTYHost.readTurnLimit)
 
     private var interactionState = TerminalInteractionState()
     private var capturedOutput: [UInt8] = []
@@ -1244,9 +1253,21 @@ public actor TerminalPTYHost {
     package nonisolated func stageFixtureOutput(_ bytes: [UInt8]) {
         guard bytes.isEmpty == false else { return }
         _ = fence(countsAsProduction: false) { owner in
-            owner.applyOutput(bytes)
+            owner.applyFixtureTurn(bytes)
             owner.publishPendingUpdate()
         }
+    }
+
+    /// One whole read turn applied from bytes the caller already holds, so the seam above
+    /// reaches the terminal through the same turn-end bookkeeping the read path uses.
+    private func applyFixtureTurn(_ bytes: [UInt8]) {
+        let previousConsumerWorkGeneration = terminal.pendingConsumerWorkGeneration
+        terminal.feed(bytes)
+        finishOutputTurn(
+            bytes,
+            replies: terminal.drainReplyBytes(),
+            previousConsumerWorkGeneration: previousConsumerWorkGeneration
+        )
     }
     #endif
 
@@ -1604,8 +1625,6 @@ public actor TerminalPTYHost {
             completeInput(submissionId, with: result)
         case .resize(let grid):
             applyResize(grid)
-        case .deliverOutput(let bytes):
-            applyOutput(bytes)
         case .drainOutput:
             drainCommittedOutput()
         case .closeMaster:
@@ -1959,7 +1978,7 @@ public actor TerminalPTYHost {
         childExited()
     }
 
-    /// Reads at most `turnLimit` bytes, then returns and lets the level-triggered read
+    /// Reads at most `readTurnLimit` bytes, then returns and lets the level-triggered read
     /// source re-fire for the remainder.
     ///
     /// The cap sizes the longest contiguous slice anything else can wait behind on this
@@ -1973,8 +1992,16 @@ public actor TerminalPTYHost {
     /// 16 KiB is where that stops being free. Shrinking a turn multiplies turns, and 8 KiB
     /// took the flood workload's draw metric to a `slower` verdict (+5.1%, three of three
     /// runs) for 0.86ms of further latency; 16 KiB holds `inconclusive` (+3.69% against the
-    /// uncapped tree). Lowering it further also stops working on the constant alone -- the
-    /// chunk buffer below is 16 KiB, so a turn is already a single `read`.
+    /// uncapped tree).
+    ///
+    /// A turn is many reads, never one. A read on a pty master returns at most one kernel
+    /// clist buffer -- 1024 bytes on xnu -- so the cap is reached only by chaining sixteen
+    /// of them, and chaining is not automatic either. Probed on macOS 25.5.0 against a
+    /// blocked writer: a loop that does no work between reads never chains at all, because
+    /// the next read returns `EAGAIN` in nanoseconds while the writer's kernel wakeup takes
+    /// microseconds, and about 5us of work between reads is enough for every turn to reach
+    /// the cap. That work is the parse, which is why `takeOutputTurn` feeds the terminal
+    /// inside its read loop and defers everything else to the end of the turn.
     ///
     /// Turn size and delivery rate are separate levers, and the cost above is the second
     /// one: fences arriving more often, each paying a fixed ~0.15ms floor, not the shorter
@@ -1983,26 +2010,68 @@ public actor TerminalPTYHost {
     /// smaller cap's worst block at the old delivery count.
     private func readReady() {
         guard masterFD >= 0 else { return }
-        var bytesReadThisTurn = 0
-        let turnLimit = 16 * 1024
-        var buffer = [UInt8](repeating: 0, count: 16 * 1024)
-        while bytesReadThisTurn < turnLimit {
-            let result = buffer.withUnsafeMutableBytes {
-                Darwin.read(masterFD, $0.baseAddress, min($0.count, turnLimit - bytesReadThisTurn))
-            }
-            if result > 0 {
-                bytesReadThisTurn += result
-                process(.output(Array(buffer.prefix(result))))
-                continue
-            }
-            if result == 0 || (result < 0 && errno == EIO) {
-                cancelReadSource()
-                process(.outputEOF)
-                return
-            }
-            if result < 0, errno == EINTR { continue }
+        guard takeOutputTurn(limit: Self.readTurnLimit).reachedEndOfOutput else {
+            publishPendingUpdate()
             return
         }
+        cancelReadSource()
+        // The reduction below publishes, so the turn's last bytes reach the consumer at the
+        // EOF edge instead of waiting on a child exit that may be indefinitely later.
+        process(.outputEOF)
+    }
+
+    /// How a read turn ended, and how much of the descriptor it took.
+    private struct OutputTurn {
+        let byteCount: Int
+        /// The read side reported end of output inside this turn. Whoever asked for the
+        /// turn owns the EOF edge, because the two callers close it differently.
+        let reachedEndOfOutput: Bool
+    }
+
+    /// Reads into the host's one turn buffer until the turn ends, feeding the terminal from
+    /// each newly filled slice, then runs the turn's single pass of downstream bookkeeping.
+    ///
+    /// Feeding stays inside the read loop deliberately: the parse is the only gap between
+    /// two reads, and it is what lets a blocked writer refill the kernel's buffer, so a loop
+    /// that deferred it would take exactly one 1024-byte read per turn. Everything that is
+    /// not the syscall or the parse belongs to `finishOutputTurn` instead.
+    ///
+    /// The turn ends at `limit`, at `EAGAIN`, at end of output, or at a feed that produced
+    /// terminal reply bytes -- a reply must not wait on reads that may never come.
+    private func takeOutputTurn(limit: Int) -> OutputTurn {
+        let previousConsumerWorkGeneration = terminal.pendingConsumerWorkGeneration
+        var replies: [UInt8] = []
+        var reachedEndOfOutput = false
+        let turnBytes = turnStorage.withUnsafeMutableBufferPointer { storage -> [UInt8] in
+            guard let base = storage.baseAddress else { return [] }
+            let cap = min(storage.count, limit)
+            var filled = 0
+            while filled < cap {
+                let result = Darwin.read(masterFD, base + filled, cap - filled)
+                if result > 0 {
+                    // Safe to feed a buffer a later read overwrites: every piece of
+                    // unfinished stream state accumulates by value inside the terminal.
+                    terminal.feed(UnsafeBufferPointer(start: base + filled, count: result))
+                    filled += result
+                    replies = terminal.drainReplyBytes()
+                    if replies.isEmpty == false { break }
+                    continue
+                }
+                if result == 0 || (result < 0 && errno == EIO) {
+                    reachedEndOfOutput = true
+                    break
+                }
+                if result < 0, errno == EINTR { continue }
+                break
+            }
+            return Array(UnsafeBufferPointer(start: base, count: filled))
+        }
+        finishOutputTurn(
+            turnBytes,
+            replies: replies,
+            previousConsumerWorkGeneration: previousConsumerWorkGeneration
+        )
+        return OutputTurn(byteCount: turnBytes.count, reachedEndOfOutput: reachedEndOfOutput)
     }
 
     private func childExited() {
@@ -2061,29 +2130,33 @@ public actor TerminalPTYHost {
             process(.outputEOF)
             return
         }
+        // Turn-by-turn for the same reason the read source is: the drain runs inside a
+        // reduction, and the committed byte count is whatever the child left behind.
         var remaining = Int(committed)
-        var buffer = [UInt8](repeating: 0, count: 16 * 1024)
         while remaining > 0 {
-            let result = buffer.withUnsafeMutableBytes {
-                Darwin.read(masterFD, $0.baseAddress, min($0.count, remaining))
-            }
-            if result > 0 {
-                remaining -= result
-                process(.output(Array(buffer.prefix(result))))
-            } else if result < 0, errno == EINTR {
-                continue
-            } else {
-                break
-            }
+            let turn = takeOutputTurn(limit: remaining)
+            remaining -= turn.byteCount
+            if turn.byteCount == 0 || turn.reachedEndOfOutput { break }
         }
+        // Nested in the caller's reduction, so its bytes, its tape record, and its captures
+        // are all in place before the outer reduction reports the child's result.
         process(.outputEOF)
     }
 
-    private func applyOutput(_ bytes: [UInt8]) {
-        let previousConsumerWorkGeneration = terminal.pendingConsumerWorkGeneration
+    /// The turn's one pass over everything downstream of the parse: the tape event, the
+    /// reply flush, the update-pending check, and the capture surfaces.
+    ///
+    /// Turn-scoped rather than read-scoped because a read boundary on a pty master is a
+    /// kernel buffer artifact and means nothing to any of them. Order is load-bearing: the
+    /// `.feed` is recorded before the reply's `.write`, so a tape always carries a query
+    /// ahead of the answer it produced.
+    private func finishOutputTurn(
+        _ bytes: [UInt8],
+        replies: [UInt8],
+        previousConsumerWorkGeneration: UInt64
+    ) {
+        guard bytes.isEmpty == false else { return }
         flightTape.record(.feed(bytes))
-        terminal.feed(bytes)
-        let replies = terminal.drainReplyBytes()
         if replies.isEmpty == false {
             if captureTransitions {
                 capturedReplyWrites.append(replies)

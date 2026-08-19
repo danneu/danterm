@@ -1752,6 +1752,89 @@ struct TerminalPTYHostTests {
         #expect(resized.ws_row == 31)
         await host.close()
     }
+
+    @Test("output cut by read boundaries replays from the tape to the live screen", .timeLimit(.minutes(1)))
+    func boundaryStraddlingOutputReplaysFromTheTape() async throws {
+        // Intent: the byte stream the terminal parses, and the one the tape records, are
+        //   the stream the kernel delivered -- whatever offsets the reads landed on.
+        // Why it exists: a read turn now feeds the terminal from successive offsets of one
+        //   reused buffer and records a single tape event for the whole turn, so a sequence
+        //   cut by a read boundary is the case that would lose or duplicate bytes.
+        // Scenario: a saturating writer floods sequences whose lengths sweep every offset
+        //   relative to the 1024-byte kernel buffer, so some copy of each one is cut.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+
+        let applied = host.expectOutput(containing: straddleCompletionMarker)
+        #expect(pane.channel.writeFromChild(boundaryStraddlingPayload(), pace: .saturating))
+        #expect(await applied.satisfied())
+
+        let capture = host.fencedFlightRecordingCapture()
+        let recording = NeutralTerminalRecording(
+            provenance: .liveCapture(),
+            initial: .init(
+                columns: capture.origin.initial.columns,
+                rows: capture.origin.initial.rows
+            ),
+            events: capture.snapshot.events.map(\.event)
+        )
+
+        #expect(try recording.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
+        await host.close()
+    }
+
+    @Test("no recorded feed event exceeds one read turn", .timeLimit(.minutes(1)))
+    func recordedFeedEventsStayWithinTheTurnCap() async throws {
+        // Intent: a `.feed` boundary on the tape is a turn boundary, and a turn is capped.
+        // Why it exists: the cap is what bounds the longest contiguous slice the owner queue
+        //   runs without yielding, and the tape is where a turn that outgrew it would show.
+        // Scenario: the same saturated flood, read back as recorded feed sizes.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+
+        let applied = host.expectOutput(containing: straddleCompletionMarker)
+        #expect(pane.channel.writeFromChild(boundaryStraddlingPayload(), pace: .saturating))
+        #expect(await applied.satisfied())
+
+        let feeds = host.fencedFlightRecordingCapture().snapshot.events.compactMap(fedBytes)
+
+        #expect(feeds.isEmpty == false)
+        #expect(feeds.allSatisfy { $0.count <= readTurnLimit }, "largest feed: \(feeds.map(\.count).max() ?? 0)")
+        await host.close()
+    }
+
+    @Test("a query is on the tape before the reply it produced", .timeLimit(.minutes(1)))
+    func queryIsRecordedBeforeItsReply() async throws {
+        // Intent: the feed carrying a query is recorded ahead of the write carrying its
+        //   answer, and the answer still crosses the descriptor.
+        // Why it exists: a turn records one feed at its end, so a reply flushed before that
+        //   record would put the answer on the tape ahead of the question, and a replay of
+        //   the tape would then read as a terminal answering something nobody asked.
+        // Scenario: the child prints text ending in a cursor-position report request.
+        let pane = try await startChildlessHost(captureTransitions: false)
+        let host = pane.host
+        let query = Array("\u{1B}[6n".utf8)
+
+        let submission = host.fencedFlightRecordingOriginFromNow().cursor
+        #expect(await pane.writeFromChild(Array("hello".utf8) + query))
+        #expect(await host.settledPendingInputByteCount() == 0)
+
+        let events = host.fencedFlightRecording(from: submission).events
+        let queryIndex = try #require(events.firstIndex {
+            fedBytes($0).map { $0.suffix(query.count) == query[...] } == true
+        })
+        let replyIndex = try #require(events.firstIndex {
+            guard let bytes = writtenBytes($0) else { return false }
+            return bytes.starts(with: [0x1B, UInt8(ascii: "[")]) && bytes.last == UInt8(ascii: "R")
+        })
+        let reply = try #require(writtenBytes(events[replyIndex]))
+
+        #expect(queryIndex < replyIndex)
+        #expect(await pollUntil({
+            pane.channel.bytesReceivedFromHost().suffix(reply.count) == reply[...]
+        }, within: .seconds(20)))
+        await host.close()
+    }
 }
 
 /// Exercises the owner against a real child process: launch ownership, signals, and exit.
@@ -2240,6 +2323,37 @@ struct TerminalPTYHostChildProcessTests {
             in: String(decoding: await host.outputBytes(), as: UTF8.self)
         )
 
+        #expect(kill(pid_t(pid), SIGUSR1) == 0)
+        #expect(await host.waitForResult() == .exited(.exited(6)))
+    }
+
+    @Test("final output before EOF wakes the consumer without waiting for the exit", .timeLimit(.minutes(1)))
+    func eofBeforeExitPublishesBeforeTheResult() async throws {
+        // Intent: the last bytes a child prints reach the consumer at the EOF edge, while
+        //   the child is still alive and its result still unreported.
+        // Why it exists: publishing is now once per read turn instead of once per read, so
+        //   the question of when the last turn publishes became load-bearing. `eofBeforeExit`
+        //   below waits on the flight tape, which records before publishing and so cannot
+        //   tell a published screen from a merely applied one.
+        // Scenario: the child prints its markers, closes the PTY, and then waits for a
+        //   signal the test only sends after it has seen the consumer woken.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) eof-first \"$0\""
+        ))
+
+        // Draining the frame is what a real consumer does on every signal, and the host only
+        // re-signals redraw work once the last frame has been taken.
+        let published = await host.waitForUpdate {
+            $0.fencedFrameState().terminal.screenText.contains("__CLOSING_PTY__")
+        }
+        guard published else { throw POSIXError(.ETIMEDOUT) }
+        #expect(await host.result() == nil)
+
+        let pid = try taggedInt(
+            "__PID__",
+            in: String(decoding: await host.outputBytes(), as: UTF8.self)
+        )
         #expect(kill(pid_t(pid), SIGUSR1) == 0)
         #expect(await host.waitForResult() == .exited(.exited(6)))
     }
@@ -3373,6 +3487,35 @@ private func occupiedScreenText(_ host: TerminalPTYHost) -> String {
 private func writtenBytes(_ recorded: TerminalFlightRecordingEvent) -> [UInt8]? {
     guard case .write(let bytes) = recorded.event else { return nil }
     return bytes
+}
+
+/// The applied payload of one recorded read turn; nil for every other event.
+private func fedBytes(_ recorded: TerminalFlightRecordingEvent) -> [UInt8]? {
+    guard case .feed(let bytes) = recorded.event else { return nil }
+    return bytes
+}
+
+/// The host's own read-turn cap, restated here because it bounds a recorded feed event and
+/// the host does not publish the constant.
+private let readTurnLimit = 16 * 1024
+
+private let straddleCompletionMarker = Array("__STRADDLE_DONE__".utf8)
+
+/// Output several kernel buffers long whose escape sequences land at every offset relative
+/// to the 1024-byte pty read boundary, so some copy of each one is certainly cut in two.
+///
+/// The padding length steps by a value coprime with 1024, which is what sweeps the offsets;
+/// an SGR run and an OSC 8 hyperlink are the two sequence shapes whose state a lost or
+/// duplicated fragment would visibly corrupt on the screen.
+private func boundaryStraddlingPayload() -> [UInt8] {
+    var text = ""
+    for index in 0..<400 {
+        text += "\u{1B}[1;38;2;\(index % 256);\(index % 251);\(index % 241)m"
+        text += "\u{1B}]8;;https://example.test/\(index)\u{7}link\u{1B}]8;;\u{7}"
+        text += String(repeating: "x", count: index % 97)
+        text += "\u{1B}[0m row \(index)\r\n"
+    }
+    return Array(text.utf8) + straddleCompletionMarker
 }
 
 private extension TerminalPTYHost {

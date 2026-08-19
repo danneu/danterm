@@ -9,14 +9,13 @@ import Testing
         //   when the convergence helper supplies only session-drain evidence.
         // Why it exists: the old helper always injected a best-effort child-exit
         //   event, masking teardown states that the real host could not resolve.
-        // Scenario: close, spawn, output, EOF, and grace events race while the
+        // Scenario: close, spawn, EOF, and grace events race while the
         //   host-owned session poll remains the only guaranteed final witness.
         checkSpawnRace(with: .spawnSucceeded)
         checkSpawnRace(with: .spawnFailed(.workingDirectoryUnavailable))
 
         for event in [
-            PaneProcessLifecycleEvent.output([0x78]),
-            .outputEOF,
+            PaneProcessLifecycleEvent.outputEOF,
             .childExited(.exited(4)),
             .resize(PaneGridSubmission(dimensions: .init(columns: 90, rows: 30), pinned: false)),
         ] {
@@ -59,20 +58,14 @@ import Testing
         for events in permutations(.requestClose, racingEvent) {
             var reducer = runningReducer()
             var commands: [PaneProcessLifecycleCommand] = []
-            var closeSeen = false
             var masterClosedSeen = false
 
             for event in events {
-                let emitted = reduce(
+                commands += reduce(
                     event,
                     with: &reducer,
                     masterClosedSeen: &masterClosedSeen
                 )
-                if closeSeen {
-                    #expect(!emitted.contains { if case .deliverOutput = $0 { true } else { false } })
-                }
-                commands += emitted
-                closeSeen = closeSeen || event == .requestClose
             }
             commands += converge(&reducer, masterClosedSeen: &masterClosedSeen)
             assertInvariants(commands, reducer: reducer)
@@ -181,7 +174,7 @@ import Testing
         }
         #expect(zip(stages, stages.dropFirst()).allSatisfy { $0.rawValue <= $1.rawValue })
 
-        for event in [PaneProcessLifecycleEvent.requestClose, .output([1]), .childExited(.exited(0)), .sessionDrained] {
+        for event in [PaneProcessLifecycleEvent.requestClose, .childExited(.exited(0)), .sessionDrained] {
             #expect(reducer.handle(event).isEmpty)
         }
     }

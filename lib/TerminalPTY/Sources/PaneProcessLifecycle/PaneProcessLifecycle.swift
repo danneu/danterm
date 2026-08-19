@@ -87,7 +87,6 @@ public enum PaneProcessLifecycleEvent: Equatable, Sendable {
     /// bytes the pane owner produced itself, such as a terminal reply.
     case sendInput([UInt8], origin: UInt64?, submissionId: PaneInputSubmissionId)
     case resize(PaneGridSubmission)
-    case output([UInt8])
     case outputEOF
     case childExited(ChildExitStatus)
     case requestClose
@@ -105,7 +104,6 @@ public enum PaneProcessLifecycleCommand: Equatable, Sendable {
     /// Resolves a submission rejected by lifecycle policy before it reaches descriptor IO.
     case completeInput(PaneInputSubmissionId, PaneInputSubmissionResult)
     case resize(PaneGridSubmission)
-    case deliverOutput([UInt8])
     case drainOutput
     case closeMaster
     case reapLeader
@@ -313,8 +311,6 @@ public struct PaneProcessLifecycleReducer: Sendable {
             return [.writeInput(bytes, origin: origin, submissionId: submissionId)]
         case .resize(let grid) where grid.isValid:
             return [.resize(grid)]
-        case .output(let bytes) where !outputEOF:
-            return [.deliverOutput(bytes)]
         case .outputEOF:
             storage = .running(outputEOF: true)
             return []
@@ -336,8 +332,6 @@ public struct PaneProcessLifecycleReducer: Sendable {
         status: ChildExitStatus
     ) -> [PaneProcessLifecycleCommand] {
         switch event {
-        case .output(let bytes):
-            return [.deliverOutput(bytes)]
         case .outputEOF:
             return beginTeardown(result: .exited(status), leaderStatus: status, reapLeader: true)
         case .requestClose:

@@ -1842,6 +1842,16 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Reduces bytes the caller already holds contiguously, so a reader that fills its own
+    /// buffer does not have to copy each chunk into an `Array` first.
+    ///
+    /// The buffer is borrowed for the duration of the call only: every piece of unfinished
+    /// stream state -- the UTF-8 decoder, the escape absorber, the synchronization prefix --
+    /// accumulates by value, so the caller may overwrite these bytes as soon as this returns.
+    public mutating func feed(_ bytes: UnsafeBufferPointer<UInt8>) {
+        feedBuffer(bytes)
+    }
+
     /// Pulls one action at a time and applies it before the next is recognized, so the token
     /// stream is never materialized as an array (`research/33/F9` sized the one this replaced at
     /// 60-80x the corpus's own byte count in allocator traffic). The first action is pulled before

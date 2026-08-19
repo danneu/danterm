@@ -30,7 +30,6 @@ import Testing
         #expect(reducer.handle(.resize(PaneGridSubmission(dimensions: .init(columns: 120, rows: 50), pinned: false))) == [
             .resize(PaneGridSubmission(dimensions: .init(columns: 120, rows: 50), pinned: false)),
         ])
-        #expect(reducer.handle(.output([0x63, 0x64])) == [.deliverOutput([0x63, 0x64])])
         #expect(reducer.phase == .running)
     }
 
@@ -167,21 +166,17 @@ import Testing
         let status = ChildExitStatus.exited(9)
 
         #expect(reducer.handle(.childExited(status)) == [.drainOutput])
-        #expect(reducer.handle(.output([0x66, 0x69, 0x6e, 0x61, 0x6c])) == [
-            .deliverOutput([0x66, 0x69, 0x6e, 0x61, 0x6c]),
-        ])
         #expect(reducer.handle(.outputEOF) == beginSelfExitCommands)
         #expect(reducer.handle(.masterClosed) == masterClosedCommands)
         #expect(reducer.handle(.sessionDrained) == finishCommands(for: .exited(status)))
     }
 
-    @Test("user close drops later output and completes through the bounded ladder")
+    @Test("user close completes through the bounded ladder")
     func userClose() {
         var reducer = runningReducer()
 
         #expect(reducer.handle(.requestClose) == beginCloseCommands)
         #expect(reducer.handle(.masterClosed) == masterClosedCommands)
-        #expect(reducer.handle(.output([0x6c, 0x61, 0x74, 0x65])).isEmpty)
         #expect(reducer.handle(.graceElapsed(.hangup)) == [
             .signalSession(.terminate),
             .scheduleGrace(.terminate),
@@ -343,7 +338,7 @@ import Testing
         let events: [PaneProcessLifecycleEvent] = [
             .start(lifecycleInput()), .spawnSucceeded,
             .spawnFailed(.systemError(1)),
-            .resize(PaneGridSubmission(dimensions: .init(columns: 1, rows: 1), pinned: false)), .output([2]),
+            .resize(PaneGridSubmission(dimensions: .init(columns: 1, rows: 1), pinned: false)),
             .outputEOF, .childExited(.exited(0)), .requestClose,
             .masterClosed, .graceElapsed(.hangup), .sessionDrained,
         ]

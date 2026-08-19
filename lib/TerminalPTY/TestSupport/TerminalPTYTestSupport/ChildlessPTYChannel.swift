@@ -106,10 +106,28 @@ package final class ChildlessPTYChannel: TerminalPTYSpawning {
     // TerminalPTYSpawning: nothing here delays owner delivery.
     package func waitForDeliveryPermission() {}
 
+    /// How hard the child end pushes when the host has not drained the master yet.
+    ///
+    /// The choice decides how many reads one host turn chains. A pty master read returns at
+    /// most one kernel buffer, and the host's next read finds the descriptor empty unless
+    /// the writer refilled it in the microseconds the host spent parsing the last one.
+    package enum WritePace: Sendable {
+        /// Sleeps a millisecond between attempts, which leaves the descriptor empty between
+        /// the host's reads. The ordinary choice for a test writing a marker.
+        case relaxed
+        /// Retries as fast as the scheduler allows, so the kernel buffer refills while the
+        /// host is still parsing. This is what makes a turn take many reads.
+        case saturating
+    }
+
     /// Writes the bytes a child would print, for the host to take through its own read
     /// source. Reports whether every byte reached the descriptor before the bound.
     @discardableResult
-    package func writeFromChild(_ bytes: [UInt8], within limit: Duration = .seconds(20)) -> Bool {
+    package func writeFromChild(
+        _ bytes: [UInt8],
+        pace: WritePace = .relaxed,
+        within limit: Duration = .seconds(20)
+    ) -> Bool {
         let child = ends.withLock { $0.child }
         guard child >= 0 else { return false }
         let deadline = ContinuousClock.now + limit
@@ -127,7 +145,10 @@ package final class ChildlessPTYChannel: TerminalPTYSpawning {
             // The host has not drained its end yet. That is ordinary backpressure on a
             // real PTY, so wait it out rather than reporting a write failure.
             guard written < 0, code == EAGAIN, ContinuousClock.now < deadline else { return false }
-            usleep(1000)
+            switch pace {
+            case .relaxed: usleep(1000)
+            case .saturating: sched_yield()
+            }
         }
         return true
     }

@@ -73,6 +73,36 @@ public extension TerminalPTYHost {
         await pollUntil({ predicate(self) }, within: limit)
     }
 
+    /// Waits for an update signal at which `predicate` already holds, and reports whether
+    /// one arrived within `limit`.
+    ///
+    /// Different in kind from `waitForSnapshot`: a fence drains the host whether or not the
+    /// host ever woke its consumer, so polling fences cannot tell a published state from a
+    /// merely applied one. Only this witnesses the wake itself happening while the state was
+    /// already true, which is what a test of publish timing has to see.
+    ///
+    /// `false` means the deadline passed. The signal stream itself ends only at host
+    /// quiescence, so a test that has not asked its host to shut down has no second reading.
+    nonisolated func waitForUpdate(
+        within limit: Duration = .seconds(30),
+        where predicate: @escaping @Sendable (TerminalPTYHost) -> Bool
+    ) async -> Bool {
+        let signals = updates
+        return await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                for await _ in signals where predicate(self) { return true }
+                return false
+            }
+            group.addTask {
+                try? await Task.sleep(for: limit)
+                return false
+            }
+            let answer = await group.next() ?? false
+            group.cancelAll()
+            return answer
+        }
+    }
+
     /// Requests shutdown and suspends only test code until the host reports quiescence.
     ///
     /// Names its own failure. The host arms an exit bound of its own, so a shutdown
