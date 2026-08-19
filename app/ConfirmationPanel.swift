@@ -269,6 +269,52 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
         return true
     }
 
+    // MARK: - Key handling
+
+    /// The two answers the panel reserves for itself, whatever holds focus.
+    private enum ReservedKey {
+        case confirm
+        case cancel
+    }
+
+    // NSWindow: the panel answers Return and Escape itself, before AppKit
+    // routes the press anywhere else. Return reaches the default button only
+    // through the responder chain, and the command list is a selectable
+    // NSTextView that holds first responder and swallows it, so the confirm
+    // button's key equivalent is not enough on its own. The panel holds no
+    // editable text, so those two keys can only mean "the default answer" and
+    // "cancel", and this claims them for any focus-taking subview added later.
+    override func sendEvent(_ event: NSEvent) {
+        switch reservedKey(for: event) {
+        case .confirm:
+            confirm(nil)
+        case .cancel:
+            cancel(nil)
+        case nil:
+            super.sendEvent(event)
+        }
+    }
+
+    /// Classifies an unmodified Return or Escape press. Command, Option,
+    /// Control, and Shift leave the event alone so it travels its ordinary
+    /// path, the way a native default button behaves. Caps lock, the function
+    /// flag, and the keypad flag are not choices the user made about this
+    /// press, so they do not disqualify it -- which also makes keypad Enter
+    /// count as Return.
+    private func reservedKey(for event: NSEvent) -> ReservedKey? {
+        guard event.type == .keyDown else { return nil }
+        let incidental: NSEvent.ModifierFlags = [.capsLock, .function, .numericPad]
+        let chosen = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting(incidental)
+        guard chosen.isEmpty else { return nil }
+        switch event.charactersIgnoringModifiers {
+        case "\r", "\u{3}": return .confirm
+        case "\u{1b}": return .cancel
+        default: return nil
+        }
+    }
+
     // MARK: - Actions
 
     @objc private func confirm(_ sender: Any?) {
