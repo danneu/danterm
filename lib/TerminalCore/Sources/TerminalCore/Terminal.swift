@@ -666,7 +666,10 @@ public struct Terminal: Equatable, Sendable {
     ///
     /// Assigned in `init` rather than defaulted: the store owns the width its derived index is
     /// meaningful at, and there is no width until the terminal has one.
-    private var history: LogicalLineStore
+    ///
+    /// Wrapped rather than stored bare so a mutation cannot leave the retained search index
+    /// behind; `mutateHistory` is this terminal's only route to a door. See RetainedHistory.swift.
+    private var history: RetainedHistory
 
     /// The store's monotone eviction counter as this terminal last saw it.
     ///
@@ -851,18 +854,18 @@ public struct Terminal: Equatable, Sendable {
     ///
     /// The one bound history has since doc 31: the cell and row caps priced a width reflow of
     /// retained rows, and history is no longer reflowed (`research/31/D2` Decision 4).
-    var scrollbackBudgetBytes: Int { history.budgetBytes }
+    var scrollbackBudgetBytes: Int { history.store.budgetBytes }
 
     /// The store's own accounting, with budget, capacity and bytes-in-use reported separately so
     /// a proof can hold each against the others (`31/PO3`, `research/31/DD11`).
-    var scrollbackCensus: LogicalLineStore.Census { history.census }
+    var scrollbackCensus: LogicalLineStore.Census { history.store.census }
 
     /// Display rows retained history currently folds to at this width.
     ///
     /// Derived rather than counted since doc 31 -- it is the index's maintained grand total, not
     /// an array length -- which is why `research/31/D3` Decision 1 insists it stay O(1): the tree reads it
     /// around every `feed` and roughly 200 times per planned frame.
-    private var historyRowCount: Int { history.grandDisplayRowTotal }
+    private var historyRowCount: Int { history.store.grandDisplayRowTotal }
 
     /// Exposes the semantic SGR pen without allowing callers to mutate terminal state.
     ///
@@ -942,7 +945,7 @@ public struct Terminal: Equatable, Sendable {
         var primaryRows: [GridRow] = []
         primaryRows.reserveCapacity(historyRowCount - historyStart + rowCount)
         for index in historyStart..<historyRowCount {
-            guard let row = history.paintedDisplayRow(at: index) else {
+            guard let row = history.store.paintedDisplayRow(at: index) else {
                 preconditionFailure("retained history count must address every retained row")
             }
             primaryRows.append(row.materialized(to: columnCount))
@@ -995,7 +998,7 @@ public struct Terminal: Equatable, Sendable {
         var start = historyRowCount
         while start > 0 {
             let candidate = start - 1
-            guard let row = history.paintedDisplayRow(at: candidate) else {
+            guard let row = history.store.paintedDisplayRow(at: candidate) else {
                 preconditionFailure("retained history count must address every retained row")
             }
             var writer = StateSynchronizationWriter()
@@ -1015,7 +1018,7 @@ public struct Terminal: Equatable, Sendable {
     private func alignedHistoryStart(_ start: Int) -> Int {
         var aligned = start
         while aligned > 0, aligned < historyRowCount {
-            guard let previous = history.paintedDisplayRow(at: aligned - 1) else {
+            guard let previous = history.store.paintedDisplayRow(at: aligned - 1) else {
                 preconditionFailure("retained history count must address every retained row")
             }
             guard previous.logicallyContinues else { break }
@@ -1739,7 +1742,7 @@ public struct Terminal: Equatable, Sendable {
                 for cell in row.cells { live.insert(cell.styleId) }
             }
         }
-        history.forEachStyleId { live.insert($0) }
+        history.store.forEachStyleId { live.insert($0) }
         collect(screen.rows, into: &live)
         if let inactiveScreen { collect(inactiveScreen.rows, into: &live) }
         return live
@@ -1797,10 +1800,10 @@ public struct Terminal: Equatable, Sendable {
         }
         columnCount = columns
         rowCount = rows
-        history = LogicalLineStore(
+        history = RetainedHistory(store: LogicalLineStore(
             budgetBytes: scrollbackBudgetBytes & ~7,
             width: columns
-        )
+        ))
         self.machineHostname = machineHostname
         self.programVersion = programVersion
         self.defaultColors = defaultColors
@@ -2577,7 +2580,7 @@ public struct Terminal: Equatable, Sendable {
                 }
             }
         }
-        history.forEachHyperlinkId { live.insert($0) }
+        history.store.forEachHyperlinkId { live.insert($0) }
         collect(screen.rows, into: &live)
         if let inactiveScreen { collect(inactiveScreen.rows, into: &live) }
         if let hyperlinkPen { live.insert(hyperlinkPen) }
@@ -2829,11 +2832,11 @@ public struct Terminal: Equatable, Sendable {
 
     /// Exposes one retained row without allowing callers to mutate terminal storage.
     public func scrollbackRow(at index: Int) -> TerminalScrollbackRow? {
-        guard var folded = history.paintedDisplayRow(at: index) else { return nil }
+        guard var folded = history.store.paintedDisplayRow(at: index) else { return nil }
         if index == historyRowCount - 1,
            isAlternateScreenActive == false,
            let spacer = Self.seamSpacer(
-               inHistory: history,
+               inHistory: history.store,
                row: folded,
                live: screen.rows,
                columns: columnCount
@@ -2855,8 +2858,8 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    /// Logical lines retained in history. The denominator of the record-scoped readers below.
-    public var scrollbackRecordCount: Int { history.recordCount }
+    /// Logical lines retained in history.store. The denominator of the record-scoped readers below.
+    public var scrollbackRecordCount: Int { history.store.recordCount }
 
     /// Reports one retained **logical line**'s content-identity run shape.
     ///
@@ -2875,7 +2878,7 @@ public struct Terminal: Equatable, Sendable {
     public func scrollbackRecordContentIdentityShape(
         at index: Int
     ) -> TerminalContentIdentityShape? {
-        guard let cells = history.recordCells(at: index) else { return nil }
+        guard let cells = history.store.recordCells(at: index) else { return nil }
         var runCount = 0
         var strictRunCount = 0
         var identified = 0
@@ -2926,11 +2929,11 @@ public struct Terminal: Equatable, Sendable {
         // always intern to the same one), so this is the same number `research/12/F3` reported, reached
         // without re-deriving a hash for a type the table already hashes.
         let stride = MemoryLayout<GridCell>.stride
-        let arena = history.census
+        let arena = history.store.census
         var census = TerminalMemoryCensus(
             screenRowCount: 0,
             scrollbackRowCount: historyRowCount,
-            scrollbackRecordCount: history.recordCount,
+            scrollbackRecordCount: history.store.recordCount,
             cellCount: 0,
             cellStrideBytes: stride,
             cellStorageBytes: 0,
@@ -2965,11 +2968,11 @@ public struct Terminal: Equatable, Sendable {
         census.cellStorageBytes = arena.arenaBytesInUse
             + screens.flatMap({ $0 }).reduce(0) { $0 + $1.cells.count * stride }
 
-        for index in 0..<history.recordCount {
-            census.retainedStoredCellCount += history.recordSummary(at: index)?.cellCount ?? 0
+        for index in 0..<history.store.recordCount {
+            census.retainedStoredCellCount += history.store.recordSummary(at: index)?.cellCount ?? 0
         }
 
-        for row in history.allPaintedDisplayRows() + screens.flatMap({ $0 }) {
+        for row in history.store.allPaintedDisplayRows() + screens.flatMap({ $0 }) {
             census.cellCount += row.cells.count
             for cell in row.cells {
                 if cell.styleId != Self.defaultStyleId { census.styledCellCount += 1 }
@@ -2996,11 +2999,11 @@ public struct Terminal: Equatable, Sendable {
     /// The independent oracle `31/I9` is stated against: the maintained grand total must equal
     /// this after each of the six trigger points, and nothing else catches a missed invalidation
     /// (`31/AR4`).
-    var independentScrollbackRowRecount: Int { history.independentDisplayRowRecount() }
+    var independentScrollbackRowRecount: Int { history.store.independentDisplayRowRecount() }
 
     /// Hands a test the folded display row as the *renderer* sees it, fill included.
     func retainedRowForTesting(at index: Int) -> GridRow? {
-        history.paintedDisplayRow(at: index)
+        history.store.paintedDisplayRow(at: index)
     }
 
     /// Hands a test one live-grid row without exposing mutable storage.
@@ -3011,7 +3014,7 @@ public struct Terminal: Equatable, Sendable {
     /// Exposes one retained line's record-level shape -- open, split, trimmed, filled -- so the
     /// store's contracts are assertable through the terminal that drives it.
     func retainedRecordSummaryForTesting(at index: Int) -> LogicalLineStore.RecordSummary? {
-        history.recordSummary(at: index)
+        history.store.recordSummary(at: index)
     }
 
     mutating func restoreWrapClaimBeforeCursorForTesting() {
@@ -3020,11 +3023,12 @@ public struct Terminal: Equatable, Sendable {
 
     /// Forces retained-row eviction so resize-anchor clamping can be proved without output.
     mutating func evictScrollbackRowsForTesting(_ count: Int) {
-        for _ in 0..<max(0, count) {
-            if history.evictOneDisplayRow() == false { break }
+        mutateHistory { store in
+            for _ in 0..<max(0, count) {
+                if store.evictOneDisplayRow() == false { break }
+            }
         }
         syncHistoryEvictions()
-        synchronizeSearchIndexPrefix()
     }
 
     /// Runs both metadata reclamation passes so their retained-row cost can be measured directly.
@@ -3084,8 +3088,8 @@ public struct Terminal: Equatable, Sendable {
         budgetBytes: Int = Terminal.scrollbackByteLimit
     ) -> Self {
         var copy = self
-        copy.history = history.rebased(toBudgetBytes: budgetBytes)
-        copy.historyEvictionsObserved = copy.history.evictedRowCount
+        copy.replaceHistory(with: history.store.rebased(toBudgetBytes: budgetBytes))
+        copy.historyEvictionsObserved = copy.history.store.evictedRowCount
         return copy
     }
 
@@ -3116,7 +3120,7 @@ public struct Terminal: Equatable, Sendable {
     /// Projects retained history and the viewport as logical text without a final newline.
     public var fullHistoryText: String {
         guard isAlternateScreenActive else { return primaryHistoryText }
-        var stream = history.allPaintedDisplayRows()
+        var stream = history.store.allPaintedDisplayRows()
         if let last = stream.indices.last {
             stream[last].isSoftWrapped = false
         }
@@ -3130,16 +3134,16 @@ public struct Terminal: Equatable, Sendable {
     /// expose (`TerminalRowStructure`) is introduced when a row is admitted or reflowed, which
     /// is exactly when the row is leaving the window a viewport projection would show.
     public var rowStructure: [TerminalRowStructure] {
-        var retained = history.allPaintedDisplayRows()
+        var retained = history.store.allPaintedDisplayRows()
         let liveRows = screen.rows
         // The projection's seam rules, so the dump reports what a reader would see: the open
         // tail's final display row gets back the `.spacerHead` admission dropped, and an
-        // active alternate screen severs the wrap into the rows appended after history.
+        // active alternate screen severs the wrap into the rows appended after history.store.
         if let last = retained.indices.last {
             if isAlternateScreenActive {
                 retained[last].isSoftWrapped = false
             } else if let spacer = Self.seamSpacer(
-                inHistory: history,
+                inHistory: history.store,
                 row: retained[last],
                 live: screen.rows,
                 columns: columnCount
@@ -3166,7 +3170,7 @@ public struct Terminal: Equatable, Sendable {
     /// Projects retained primary-screen history for recovery and export consumers.
     public var primaryHistoryText: String {
         let primaryRows = primaryScreenRows.map(\.withGatedContinuation)
-        return projectedHistoryText(from: history.allPaintedDisplayRows() + primaryRows)
+        return projectedHistoryText(from: history.store.allPaintedDisplayRows() + primaryRows)
     }
 
     /// Projects the tail of `primaryHistoryText` -- enough of it that a truncation keeping only
@@ -3181,7 +3185,7 @@ public struct Terminal: Equatable, Sendable {
     /// Exists because the recovery checkpoint reads every pane's history on each window and
     /// then discards all but its own tail. Projecting the whole retained scrollback to keep a
     /// few hundred KB of it made a checkpoint cost the scrollback *capacity* rather than the
-    /// budget it stores, which is tens of seconds per pane at a full 16 MiB history.
+    /// budget it stores, which is tens of seconds per pane at a full 16 MiB history.store.
     public func primaryHistoryTailText(maxLines: Int, maxChars: Int) -> String {
         let primaryRows = primaryScreenRows
         let totalRows = historyRowCount + primaryRows.count
@@ -3241,7 +3245,7 @@ public struct Terminal: Equatable, Sendable {
         primary rawPrimaryRows: [GridRow]
     ) -> [GridRow] {
         let primaryRows = rawPrimaryRows.map(\.withGatedContinuation)
-        guard start > 0 else { return history.allPaintedDisplayRows() + primaryRows }
+        guard start > 0 else { return history.store.allPaintedDisplayRows() + primaryRows }
         guard start < historyRowCount else {
             return Array(primaryRows[min(start - historyRowCount, primaryRows.count)...])
         }
@@ -3249,10 +3253,10 @@ public struct Terminal: Equatable, Sendable {
         stream.reserveCapacity(historyRowCount - start + primaryRows.count)
         // One `locate` for the start row and `advance` for the rest, which is the traversal
         // rule retained-history readers follow (`research/31/D3` Decision 1 rule 2).
-        var cursor = history.locate(displayRow: start)
+        var cursor = history.store.locate(displayRow: start)
         while let at = cursor {
-            stream.append(history.paintedRow(at: at))
-            cursor = history.advance(at)
+            stream.append(history.store.paintedRow(at: at))
+            cursor = history.store.advance(at)
         }
         stream.append(contentsOf: primaryRows)
         return stream
@@ -3769,7 +3773,7 @@ public struct Terminal: Equatable, Sendable {
         var newSearch = Search(
             query: query,
             position: TextAnchor(row: streamRows.upperBound, column: 0),
-            history: history
+            history: history.store
         )
         let newestMatch = newSearch.selectNewest(in: searchContext)
         search = newSearch
@@ -3874,17 +3878,17 @@ public struct Terminal: Equatable, Sendable {
             )
             if let at = cursor {
                 var stored = 0
-                history.forEachKind(at: at) { column, kind in
+                history.store.forEachKind(at: at) { column, kind in
                     guard column < columnCount else { return }
                     kinds[column] = TerminalCellGeometry(kind: kind)
                     stored = column + 1
                 }
-                let wrapped = history.isSoftWrapped(at: at)
-                cursor = history.advance(at)
+                let wrapped = history.store.isSoftWrapped(at: at)
+                cursor = history.store.advance(at)
                 // The seam's re-derived spacer, so geometry and the cell readers agree about
                 // what the last retained row's final column is.
                 if cursor == nil, stored == columnCount - 1,
-                   history.hasOpenTailRecord, screen.rows.first?.cells.first?.kind == .wideHead
+                   history.store.hasOpenTailRecord, screen.rows.first?.cells.first?.kind == .wideHead
                 {
                     kinds[stored] = TerminalCellGeometry(kind: .spacerHead)
                 }
@@ -3910,7 +3914,7 @@ public struct Terminal: Equatable, Sendable {
         guard isAlternateScreenActive == false, index >= 0, index < historyRowCount else {
             return nil
         }
-        return history.locate(displayRow: index)
+        return history.store.locate(displayRow: index)
     }
 
     private func viewportStreamRow(at index: Int) -> GridRow? {
@@ -3918,10 +3922,10 @@ public struct Terminal: Equatable, Sendable {
         if isAlternateScreenActive {
             return screen.rows.indices.contains(index) ? screen.rows[index] : nil
         }
-        if var row = history.paintedDisplayRow(at: index) {
+        if var row = history.store.paintedDisplayRow(at: index) {
             if index == historyRowCount - 1,
                let spacer = Self.seamSpacer(
-                   inHistory: history,
+                   inHistory: history.store,
                    row: row,
                    live: screen.rows,
                    columns: columnCount
@@ -3941,8 +3945,8 @@ public struct Terminal: Equatable, Sendable {
     /// spacer is a function of the live grid's first cell, so overwriting it changes what the
     /// row above displays.
     private var seamRowIsShortOfItsSpacer: Bool {
-        guard historyRowCount > 0, history.hasOpenTailRecord else { return false }
-        return history.paintedDisplayRow(at: historyRowCount - 1)?.cells.count == columnCount - 1
+        guard historyRowCount > 0, history.store.hasOpenTailRecord else { return false }
+        return history.store.paintedDisplayRow(at: historyRowCount - 1)?.cells.count == columnCount - 1
     }
 
     /// The `.spacerHead` the open tail's final display row is missing, when it is missing one.
@@ -4005,7 +4009,7 @@ public struct Terminal: Equatable, Sendable {
     /// Builds the non-retained grid view one search operation reads.
     private var searchContext: Search.Context {
         Search.Context(
-            history: history,
+            history: history.store,
             projection: activeProjection(),
             evictedRowCount: evictedRowCount,
             columnCount: columnCount
@@ -4017,7 +4021,7 @@ public struct Terminal: Equatable, Sendable {
     /// independent of how much history is retained.
     private func activeProjection() -> ProjectionRows {
         ProjectionRows(
-            history: history,
+            history: history.store,
             live: screen.rows,
             columns: columnCount,
             isAlternateScreenActive: isAlternateScreenActive
@@ -4030,15 +4034,15 @@ public struct Terminal: Equatable, Sendable {
     ///
     /// Walks history's records once rather than subscripting the facade per row: the facade
     /// locates a display row per access, which is right for a point query and quadratic-ish for
-    /// all of history.
+    /// all of history.store.
     private func activeProjectionRows() -> [GridRow] {
         Instrument.wholeProjection.record()
-        var stream = history.allPaintedDisplayRows()
+        var stream = history.store.allPaintedDisplayRows()
         if let last = stream.indices.last {
             if isAlternateScreenActive {
                 stream[last].isSoftWrapped = false
             } else if let spacer = Self.seamSpacer(
-                inHistory: history,
+                inHistory: history.store,
                 row: stream[last],
                 live: screen.rows,
                 columns: columnCount
@@ -4459,11 +4463,41 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    /// Keeps the retained match index synchronized without building a projection when inactive.
-    private mutating func synchronizeSearchIndexPrefix() {
-        guard search != nil else { return }
-        let retainedHistory = history
-        search?.synchronizeIndex(with: retainedHistory)
+    /// Runs one history mutation through the door with this terminal's search slot.
+    ///
+    /// Every history mutation goes through here, so this is the single place a later change to
+    /// how the slot is held -- or to who owns search state -- has to edit.
+    private mutating func mutateHistory<Result>(
+        _ body: (inout LogicalLineStore) -> Result
+    ) -> Result {
+        withHistoryDoor { history, slot in history.mutate(search: &slot, body) }
+    }
+
+    /// Replaces retained history wholesale, which rebuilds the retained index rather than
+    /// advancing it. See `RetainedHistory.replace(with:search:)` for why the two differ.
+    private mutating func replaceHistory(with replacement: LogicalLineStore) {
+        withHistoryDoor { history, slot in history.replace(with: replacement, search: &slot) }
+    }
+
+    /// Supplies this terminal's search slot to one door call.
+    ///
+    /// The slot is moved into a local rather than passed as `&search` for two reasons. `search`
+    /// is an observed property, so an `inout` on it is a formal access to the whole terminal and
+    /// would overlap the door's access to `history`. And when no search exists the door gets a
+    /// slot minted inactive on purpose, which keeps `search`'s inspection-cache `didSet` off the
+    /// hottest path in the engine: that path reads the slot and writes nothing.
+    private mutating func withHistoryDoor<Result>(
+        _ body: (inout RetainedHistory, inout Search?) -> Result
+    ) -> Result {
+        guard search != nil else {
+            var inactive: Search?
+            return body(&history, &inactive)
+        }
+        var slot: Search?
+        swap(&slot, &search)
+        let result = body(&history, &slot)
+        search = slot
+        return result
     }
 
     private mutating func refreshHasContentInspectionState() {
@@ -4596,7 +4630,7 @@ public struct Terminal: Equatable, Sendable {
     /// `MemoryLayout`, which describes the elements rather than the buffer holding them.
     static let arrayStorageHeaderBytes = 32
 
-    /// Admits scrolled-off display rows into the open tail of retained history.
+    /// Admits scrolled-off display rows into the open tail of retained history.store.
     ///
     /// One `admit` per display row, which appends its content to the logical line still being
     /// printed and closes that line when the row ends it (`research/31/D2` operation 1). Admission enforces
@@ -4604,8 +4638,10 @@ public struct Terminal: Equatable, Sendable {
     /// `syncHistoryEvictions` rather than counted here.
     private mutating func appendToScrollback<S: Sequence>(_ newRows: S)
     where S.Element == GridRow {
-        for sourceRow in newRows {
-            history.admit(sourceRow)
+        mutateHistory { store in
+            for sourceRow in newRows {
+                store.admit(sourceRow)
+            }
         }
     }
 
@@ -4614,9 +4650,8 @@ public struct Terminal: Equatable, Sendable {
     /// One bound, not three: the cell and row caps existed to bound the two terms of a width
     /// reflow's cost, and there is no reflow of history left to bound (`research/31/D2` Decision 4).
     private mutating func enforceScrollbackBudget() {
-        history.evictToBudget()
+        _ = mutateHistory { $0.evictToBudget() }
         syncHistoryEvictions()
-        synchronizeSearchIndexPrefix()
     }
 
     /// Reports whatever history has evicted since this terminal last looked, exactly once.
@@ -4625,9 +4660,9 @@ public struct Terminal: Equatable, Sendable {
     /// would miss the rows a `feed` dropped. Reading the store's monotone counter instead of a
     /// per-call return is what makes the accounting independent of where the eviction happened.
     private mutating func syncHistoryEvictions() {
-        let evictedCount = history.evictedRowCount - historyEvictionsObserved
+        let evictedCount = history.store.evictedRowCount - historyEvictionsObserved
         guard evictedCount > 0 else { return }
-        historyEvictionsObserved = history.evictedRowCount
+        historyEvictionsObserved = history.store.evictedRowCount
         primaryHistoryObservation.value &+= 1
         handleEviction(of: evictedCount)
     }
@@ -4818,11 +4853,11 @@ public struct Terminal: Equatable, Sendable {
             // A row the caller does not want still has to be stepped over, or the cursor stops
             // naming the row it is asked for next. Stepping is O(1); folding is not.
             guard includesRow(row) else {
-                cursor = cursor.flatMap { history.advance($0) }
+                cursor = cursor.flatMap { history.store.advance($0) }
                 continue
             }
             let at = cursor
-            cursor = at.flatMap { history.advance($0) }
+            cursor = at.flatMap { history.store.advance($0) }
             if at == nil, viewportStreamRow(at: streamRow) == nil { continue }
 
             body(row) { styleRunBody in
@@ -4834,14 +4869,14 @@ public struct Terminal: Equatable, Sendable {
                 // funnelled through a nested function: a local function called from inside the
                 // fold's own closure is one more indirect call per cell, on the frame path.
                 if let at {
-                    history.withPaintedCells(at: at) { storedCount, storedStyleId, storedCell in
+                    history.store.withPaintedCells(at: at) { storedCount, storedStyleId, storedCell in
                         // The segment visitor hands the borrowed packed-cell accessor down one
                         // more non-escaping level; nothing here outlives this row traversal.
                         withoutActuallyEscaping(storedCell) { forwardStoredCell in
                             let head = screen.rows.first?.cells.first
                             let hasOpenTailSpacer = cursor == nil
                                 && storedCount == columnCount - 1
-                                && history.hasOpenTailRecord
+                                && history.store.hasOpenTailRecord
                                 && head?.kind == .wideHead
                             let padding = GridCell()
                             var start = 0
@@ -5099,8 +5134,7 @@ public struct Terminal: Equatable, Sendable {
                     // The rows keep their absolute stream positions and merely change which side
                     // of the history/live seam they sit on, so no anchor moves and
                     // `evictedRowCount` does not advance.
-                    var pulled = history.truncateTail(displayRows: pulledCount)
-                    synchronizeSearchIndexPrefix()
+                    var pulled = mutateHistory { $0.truncateTail(displayRows: pulledCount) }
                     pulledCount = pulled.count
                     restoreSeamSpacer(in: &pulled)
                     screen.rows.insert(
@@ -5145,10 +5179,10 @@ public struct Terminal: Equatable, Sendable {
 
         // A line still being printed keeps its prompt mark on its record -- unless the pull-back
         // consumes the whole record, in which case the live refold inherits it.
-        let seamPrompt = history.hasOpenTailRecord
-            ? history.recordSummary(at: history.recordCount - 1)?.semanticPrompt ?? SemanticPromptRow.none
+        let seamPrompt = history.store.hasOpenTailRecord
+            ? history.store.recordSummary(at: history.store.recordCount - 1)?.semanticPrompt ?? SemanticPromptRow.none
             : SemanticPromptRow.none
-        let seamPrefix = history.setWidth(newColumnCount)
+        let seamPrefix = mutateHistory { $0.setWidth(newColumnCount) }
         let historyRowsAfter = historyRowCount
         let captured = rebasedAcrossSeam(capturedBeforeSeam, seamPrefixLength: seamPrefix.count)
 
@@ -5255,8 +5289,8 @@ public struct Terminal: Equatable, Sendable {
         // ordering makes the deficit equal the rows that a prior narrowing displaced.
         let deficit = rowCount - rebuiltRows.count
         if deficit > 0, historyRowCount > 0 {
-            var pulled = history.truncateTail(displayRows: min(deficit, historyRowCount))
-            synchronizeSearchIndexPrefix()
+            let pullCount = min(deficit, historyRowCount)
+            var pulled = mutateHistory { $0.truncateTail(displayRows: pullCount) }
             columnCount = newColumnCount
             restoreSeamSpacer(in: &pulled, before: rebuiltRows.first)
             columnCount = oldColumnCount
@@ -5343,10 +5377,10 @@ public struct Terminal: Equatable, Sendable {
         captured.map { slot, address in
             switch address {
             case let .history(recordIndex, cellOffset):
-                guard history.position(ofRecord: recordIndex, cellOffset: cellOffset) == nil else {
+                guard history.store.position(ofRecord: recordIndex, cellOffset: cellOffset) == nil else {
                     return (slot, address)
                 }
-                let kept = history.recordSummary(at: recordIndex)?.cellCount ?? 0
+                let kept = history.store.recordSummary(at: recordIndex)?.cellCount ?? 0
                 return (slot, .live(line: 0, offset: max(0, cellOffset - kept)))
             case let .live(line, offset):
                 guard line == 0 else { return (slot, address) }
@@ -5382,7 +5416,7 @@ public struct Terminal: Equatable, Sendable {
         let streamRow = anchor.row - evictedRowCount
         guard streamRow >= 0 else { return nil }
         if streamRow < historyRows {
-            guard let address = history.address(
+            guard let address = history.store.address(
                 ofDisplayRow: streamRow,
                 column: anchor.column
             ) else { return nil }
@@ -5410,7 +5444,7 @@ public struct Terminal: Equatable, Sendable {
         for (slot, address) in captured {
             switch address {
             case let .history(recordIndex, cellOffset):
-                if let position = history.position(
+                if let position = history.store.position(
                     ofRecord: recordIndex,
                     cellOffset: cellOffset
                 ) {
@@ -6343,9 +6377,8 @@ public struct Terminal: Equatable, Sendable {
             }
             clearPendingMotionState()
         case 3:
-            history.removeAll()
+            mutateHistory { $0.removeAll() }
             syncHistoryEvictions()
-            synchronizeSearchIndexPrefix()
             clearPendingMotionState()
         default:
             return
@@ -7704,11 +7737,13 @@ public struct Terminal: Equatable, Sendable {
     /// the renderer paints, so it is materialized into the open record before the line closes
     /// rather than lost to a record measured at its content end.
     private mutating func severScrollbackWrapClaim(replacementStyleId: StyleId) {
-        guard history.hasOpenTailRecord else { return }
+        guard history.store.hasOpenTailRecord else { return }
         invalidateInspection(inScrollbackRow: historyRowCount - 1)
-        history.repairClearedSpacer(styleId: replacementStyleId)
-        history.closeOpenRecord()
-        synchronizeSearchIndexPrefix()
+        // One door body, not two: the sever's two store calls move the closed seam once.
+        mutateHistory { store in
+            store.repairClearedSpacer(styleId: replacementStyleId)
+            store.closeOpenRecord()
+        }
     }
 
     private mutating func restoreWrapClaimBeforeCursor() {
@@ -7717,10 +7752,9 @@ public struct Terminal: Equatable, Sendable {
             invalidateInspection(inViewportRows: (screen.cursor.row - 1)..<screen.cursor.row)
             screen.rows[screen.cursor.row - 1].isSoftWrapped = true
         } else if isAlternateScreenActive == false, historyRowCount > 0 {
-            guard history.hasOpenTailRecord == false else { return }
+            guard history.store.hasOpenTailRecord == false else { return }
             invalidateInspection(inScrollbackRow: historyRowCount - 1)
-            history.reopenTailRecord()
-            synchronizeSearchIndexPrefix()
+            mutateHistory { $0.reopenTailRecord() }
         }
     }
 
@@ -7804,7 +7838,7 @@ public struct Terminal: Equatable, Sendable {
             // `31/I1` forbids storing -- so the column the clear vacated shows up as the open
             // tail's short final display row, and the repair fills it (`research/31/D3` Decision 3, which
             // measured this against the real engine and found `research/31/F6` `X9`'s "no-op" wrong).
-            let repaired = history.repairClearedSpacer(styleId: replacementStyleId)
+            let repaired = mutateHistory { $0.repairClearedSpacer(styleId: replacementStyleId) }
             // Even when nothing was stored, the seam's spacer is *derived* from the live cell
             // this clear just overwrote, so the last retained row displays differently now.
             if repaired || seamRowIsShortOfItsSpacer {

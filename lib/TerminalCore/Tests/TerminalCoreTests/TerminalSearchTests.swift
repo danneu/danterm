@@ -1046,6 +1046,35 @@ struct TerminalSearchTests {
         assertSearchIndexMatchesOracle(splitting, needle: splitNeedle)
     }
 
+    @Test("a whole-store replacement leaves search agreeing with the oracle")
+    func retainedIndexSurvivesWholeStoreReplacement() throws {
+        // Intent: replacing retained history wholesale keeps search reporting exactly the
+        //   occurrences the replacement store holds.
+        // Why it exists: a replacement store mints record identities from one again, so match
+        //   coordinates minted while the old store was evicting name different content in the
+        //   replacement. Advancing the index over the difference keeps those coordinates; only
+        //   re-deriving the index from the replacement retires them.
+        // Scenario: a bounded pane evicts retained lines while a search matches in history, then
+        //   the eviction oracle rebases that history onto a larger arena.
+        let needle = "hit"
+        var evicting = try #require(Terminal(
+            columns: 8,
+            rows: 2,
+            scrollbackBudgetBytes: historyBudget(lines: 8, cells: 3, paneColumns: 8)
+        ))
+        for _ in 0..<24 {
+            evicting.feed(Array("hit\r\n".utf8))
+        }
+        _ = evicting.beginSearch(needle)
+        #expect(evicting.scrollbackRecordCount < 24)
+        assertSearchIndexMatchesOracle(evicting, needle: needle)
+
+        let replaced = evicting.withUnlimitedScrollbackForTesting()
+
+        assertSearchIndexMatchesOracle(replaced, needle: needle)
+        #expect(replaced.searchStatus == evicting.searchStatus)
+    }
+
     @Test("blank rows contribute boundaries only when later content exists")
     func blankRowBoundariesFollowTheFullProjection() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))
