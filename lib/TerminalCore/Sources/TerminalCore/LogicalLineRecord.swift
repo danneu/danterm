@@ -234,14 +234,14 @@ extension Terminal {
         }
     }
 
-    /// The 8-byte word one stored cell occupies, as bit positions.
+    /// The 8-byte word one stored cell occupies.
     ///
-    /// Its own namespace beside `LogicalLineRecord.Header`, not inside it: that enum lays out
+    /// Its own type beside `LogicalLineRecord.Header`, not inside it: that enum lays out
     /// the *record* header, a different 8-byte word, and a reader who conflates the two
     /// misreads both. This is `research/28/C1`, the one part of the per-display-row store the
     /// arena kept verbatim.
     ///
-    ///     bits  0..20  scalar value, or a spill index when `spillBit` is set
+    ///     bits  0..20  scalar value, or a spill index when the spill bit is set
     ///     bits 21..23  kind, as `TerminalCellKind.packedCode`
     ///     bit  24      spill flag
     ///     bits 25..31  unused
@@ -251,12 +251,85 @@ extension Terminal {
     /// exception path for an emoji, and a cell stays a fixed width the store can index without
     /// a scan. `StyleId` keeps all 32 bits, so no style-table ceiling is introduced. What is
     /// left over is 7 spare bits, and they are left spare.
-    enum CellWord {
-        static let scalarMask: UInt64 = 0x1F_FFFF
-        static let kindShift: UInt64 = 21
-        static let kindMask: UInt64 = 0x7
-        static let spillBit: UInt64 = 1 << 24
-        static let styleShift: UInt64 = 32
+    ///
+    /// The shifts and masks above live here and nowhere else. `LogicalLineStore` writes and
+    /// reads cells only through this type, so a layout change is one edit rather than a sweep
+    /// over a dozen hand-inlined sites, each of which could decode plausible garbage instead
+    /// of failing to compile.
+    struct CellWord {
+        private static let scalarMask: UInt64 = 0x1F_FFFF
+        private static let kindShift: UInt64 = 21
+        private static let kindMask: UInt64 = 0x7
+        private static let spillBit: UInt64 = 1 << 24
+        private static let styleShift: UInt64 = 32
+
+        /// The word exactly as the arena holds it. The store's chunks are `UInt64`, so this is
+        /// what a write stores and what a borrowed-pointer read loop loads back.
+        let raw: UInt64
+
+        /// Wraps a word read out of the arena.
+        @inline(__always) init(raw: UInt64) {
+            self.raw = raw
+        }
+
+        /// A cell with no scalar payload: a padding cell, a wide cell's tail, or a spacer.
+        @inline(__always) init(kind: TerminalCellKind, styleId: Terminal.StyleId) {
+            raw = Self.head(kind: kind, styleId: styleId)
+        }
+
+        /// A cell whose whole content is one scalar, which is every cell that is not a
+        /// multi-scalar grapheme.
+        @inline(__always) init(
+            kind: TerminalCellKind,
+            styleId: Terminal.StyleId,
+            scalar: Unicode.Scalar
+        ) {
+            raw = Self.head(kind: kind, styleId: styleId) | UInt64(scalar.value)
+        }
+
+        /// A cell whose scalars live in the record's spill table at `spillIndex`.
+        @inline(__always) init(
+            kind: TerminalCellKind,
+            styleId: Terminal.StyleId,
+            spillIndex: Int
+        ) {
+            raw = Self.head(kind: kind, styleId: styleId) | Self.spillBit | UInt64(spillIndex)
+        }
+
+        @inline(__always) private static func head(
+            kind: TerminalCellKind,
+            styleId: Terminal.StyleId
+        ) -> UInt64 {
+            UInt64(kind.packedCode) << kindShift | UInt64(styleId) << styleShift
+        }
+
+        @inline(__always) var kind: TerminalCellKind {
+            TerminalCellKind(packedCode: UInt8((raw >> Self.kindShift) & Self.kindMask))
+        }
+
+        @inline(__always) var styleId: Terminal.StyleId {
+            Terminal.StyleId(truncatingIfNeeded: raw >> Self.styleShift)
+        }
+
+        /// Whether the payload field names an entry in the record's spill table rather than
+        /// holding a scalar inline.
+        @inline(__always) var isSpilled: Bool {
+            raw & Self.spillBit != 0
+        }
+
+        /// The spill table index, meaningful only when `isSpilled`.
+        @inline(__always) var spillIndex: Int {
+            Int(raw & Self.scalarMask)
+        }
+
+        /// The cell's single inline scalar, or nil when it has none -- a spilled cell, an empty
+        /// payload, or a field no longer in the Unicode range.
+        @inline(__always) var inlineScalar: Unicode.Scalar? {
+            guard isSpilled == false else { return nil }
+            let field = UInt32(raw & Self.scalarMask)
+            guard field != 0 else { return nil }
+            return Unicode.Scalar(field)
+        }
     }
 
     /// The width-derived fold: how one record's cells break into display rows.

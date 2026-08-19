@@ -1160,7 +1160,7 @@ extension Terminal {
             addContentUnitsToTail(-removedContent)
             var removedSpills = 0
             for index in newCellCount..<oldCellCount
-                where cellWord(recordAt: offset, cell: index) & CellWord.spillBit != 0
+                where cellWord(recordAt: offset, cell: index).isSpilled
             {
                 removedSpills += 1
             }
@@ -1627,14 +1627,11 @@ extension Terminal {
             let spills = sideTables.spills(at: firstRecordSequence + recordIndex)
             chunk.withUnsafeBufferPointer { words in
                 for cellOffset in 0..<scan.cellCount {
-                    let word = words[cellsBase + cellOffset]
-                    let kind = TerminalCellKind(
-                        packedCode: UInt8((word >> CellWord.kindShift) & CellWord.kindMask)
-                    )
-                    let field = UInt32(word & CellWord.scalarMask)
-                    if word & CellWord.spillBit != 0 {
-                        body(cellOffset, kind, TerminalScalars(spills?[Int(field)] ?? []))
-                    } else if field != 0, let scalar = Unicode.Scalar(field) {
+                    let word = CellWord(raw: words[cellsBase + cellOffset])
+                    let kind = word.kind
+                    if word.isSpilled {
+                        body(cellOffset, kind, TerminalScalars(spills?[word.spillIndex] ?? []))
+                    } else if let scalar = word.inlineScalar {
                         body(cellOffset, kind, TerminalScalars(scalar))
                     } else {
                         body(cellOffset, kind, .empty)
@@ -1826,12 +1823,7 @@ extension Terminal {
                 let cellsBase = chunkWordIndex(of: offset) + 1
                 chunk.withUnsafeBufferPointer { words in
                     for cell in 0..<record.cellCount {
-                        body(
-                            Terminal.StyleId(
-                                truncatingIfNeeded:
-                                    words[cellsBase + cell] >> CellWord.styleShift
-                            )
-                        )
+                        body(CellWord(raw: words[cellsBase + cell]).styleId)
                     }
                 }
                 if let fill = trailingFillStyle(at: index) { body(fill) }
@@ -1913,15 +1905,10 @@ extension Terminal {
                     count,
                     { column in
                         if column < storedCount {
-                            return Terminal.StyleId(
-                                truncatingIfNeeded:
-                                    words[cellsBase + shape.start + column] >> CellWord.styleShift
-                            )
+                            return CellWord(raw: words[cellsBase + shape.start + column]).styleId
                         }
                         if column == storedCount, let spacerWord {
-                            return Terminal.StyleId(
-                                truncatingIfNeeded: spacerWord >> CellWord.styleShift
-                            )
+                            return spacerWord.styleId
                         }
                         return shape.fillStyle ?? Terminal.defaultStyleId
                     },
@@ -1930,20 +1917,17 @@ extension Terminal {
                             return (.spacerHead, .empty)
                         }
                         guard column < storedCount else { return (.padding, .empty) }
-                        let word = words[cellsBase + shape.start + column]
-                        let kind = TerminalCellKind(
-                            packedCode: UInt8((word >> CellWord.kindShift) & CellWord.kindMask)
-                        )
-                        let field = UInt32(word & CellWord.scalarMask)
-                        if word & CellWord.spillBit != 0 {
+                        let word = CellWord(raw: words[cellsBase + shape.start + column])
+                        let kind = word.kind
+                        if word.isSpilled {
                             return (
                                 kind,
                                 TerminalScalars(
-                                    sideTables.spills(at: sequence)?[Int(field)] ?? []
+                                    sideTables.spills(at: sequence)?[word.spillIndex] ?? []
                                 )
                             )
                         }
-                        if field != 0, let scalar = Unicode.Scalar(field) {
+                        if let scalar = word.inlineScalar {
                             return (kind, TerminalScalars(scalar))
                         }
                         return (kind, .empty)
@@ -1982,10 +1966,7 @@ extension Terminal {
             var column = 0
             chunk.withUnsafeBufferPointer { words in
                 for cellOffset in shape.start..<shape.end {
-                    let word = words[cellsBase + cellOffset]
-                    body(column, TerminalCellKind(
-                        packedCode: UInt8((word >> CellWord.kindShift) & CellWord.kindMask)
-                    ))
+                    body(column, CellWord(raw: words[cellsBase + cellOffset]).kind)
                     column += 1
                 }
             }
@@ -2372,16 +2353,13 @@ extension Terminal {
             let keyOffset = cellOffset + (recordIndex == 0 ? headTrimmedCells : 0)
 
             var cell = Terminal.GridCell()
-            cell.kind = TerminalCellKind(
-                packedCode: UInt8((word >> CellWord.kindShift) & CellWord.kindMask)
-            )
-            cell.styleId = Terminal.StyleId(
-                truncatingIfNeeded: word >> CellWord.styleShift
-            )
-            let field = UInt32(word & CellWord.scalarMask)
-            if word & CellWord.spillBit != 0 {
-                cell.scalars = TerminalScalars(sideTables.spills(at: sequence)?[Int(field)] ?? [])
-            } else if field != 0, let scalar = Unicode.Scalar(field) {
+            cell.kind = word.kind
+            cell.styleId = word.styleId
+            if word.isSpilled {
+                cell.scalars = TerminalScalars(
+                    sideTables.spills(at: sequence)?[word.spillIndex] ?? []
+                )
+            } else if let scalar = word.inlineScalar {
                 cell.scalars = TerminalScalars(scalar)
             }
             cell.hyperlinkId = hyperlinkId(record: record, at: offset, keyOffset: keyOffset)
@@ -2529,8 +2507,7 @@ extension Terminal {
             guard count > 0 else { return }
             let offset = offsets[offsets.count - 1]
             var record = self.record(at: offset)
-            let blank = UInt64(TerminalCellKind.padding.packedCode) << CellWord.kindShift
-                | UInt64(Terminal.defaultStyleId) << CellWord.styleShift
+            let blank = CellWord(kind: .padding, styleId: Terminal.defaultStyleId).raw
             let chunkAt = chunkIndex(of: offset)
             let base = chunkWordIndex(of: offset) + 1 + record.cellCount
             var chunk = ContiguousArray<UInt64>()
@@ -2580,16 +2557,22 @@ extension Terminal {
                 case .wideTail, .spacerHead:
                     break
                 }
-                var word = UInt64(kind.packedCode) << CellWord.kindShift
-                word |= UInt64(cells[index].styleId) << CellWord.styleShift
+                let styleId = cells[index].styleId
                 let scalarCount = cells[index].scalars.count
+                let word: CellWord
                 if scalarCount == 1 {
-                    word |= UInt64(cells[index].scalars[0].value)
+                    word = CellWord(
+                        kind: kind,
+                        styleId: styleId,
+                        scalar: cells[index].scalars[0]
+                    )
                 } else if scalarCount > 1 {
-                    word |= CellWord.spillBit | UInt64(spills.count)
+                    word = CellWord(kind: kind, styleId: styleId, spillIndex: spills.count)
                     spills.append(Array(cells[index].scalars))
+                } else {
+                    word = CellWord(kind: kind, styleId: styleId)
                 }
-                chunk[cellsBase + index] = word
+                chunk[cellsBase + index] = word.raw
 
                 if let id = cells[index].hyperlinkId {
                     openHyperlinks.append(HyperlinkEntry(offset: cellOffset, id: id))
@@ -3059,13 +3042,11 @@ extension Terminal {
         }
 
         private func cellKind(recordAt offset: Int, cell index: Int) -> TerminalCellKind {
-            let word = cellWord(recordAt: offset, cell: index)
-            let kind = (word >> CellWord.kindShift) & CellWord.kindMask
-            return TerminalCellKind(packedCode: UInt8(kind))
+            cellWord(recordAt: offset, cell: index).kind
         }
 
-        private func cellWord(recordAt offset: Int, cell index: Int) -> UInt64 {
-            word(at: offset + LogicalLineRecord.headerAndCells(index))
+        private func cellWord(recordAt offset: Int, cell index: Int) -> CellWord {
+            CellWord(raw: word(at: offset + LogicalLineRecord.headerAndCells(index)))
         }
 
         // The arena is words, and every access below is one word-sized load or store plus a shift.
