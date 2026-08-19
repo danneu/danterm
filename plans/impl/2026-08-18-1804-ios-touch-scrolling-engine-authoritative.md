@@ -277,8 +277,14 @@ indicator.
 
 ## Follow Up
 
-- The plan's end-to-end run is still owed: launch a Mac slot, run the app in the simulator
-  against it, fill scrollback, and confirm by hand that a flick scrolls proportionally with
-  momentum and an indicator, that output while at the bottom stays pinned, that output while
-  browsing does not yank, and that a swipe in `less` moves proportionally with no indicator.
-  It needs a real finger, so no agent run can stand in for it.
+- Done 2026-08-18. The end-to-end run of `## Proof obligations` ran on the
+  physical iPhone against dev slot 1 built from `06f3954d`, rather than the
+  simulator the plan named. A pane holding `seq 1 3000` of numbered scrollback
+  carried the checks. A flick in the scrollback scrolled with momentum; output
+  arriving while the phone sat at the bottom stayed pinned; output arriving
+  while the phone was parked in the middle of the scrollback held that position
+  instead of yanking to the bottom; and in `less` over a 5000-line file a swipe
+  moved proportionally with no indicator and left the status line fixed. The one
+  part not reported on separately is the scrollback indicator's own appearance, so
+  I6's visible-and-proportional half rests on the `MobileScrollMode` tests
+  rather than on the rig.
