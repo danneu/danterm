@@ -35,6 +35,7 @@ struct UITestRunner {
         alertsPopoverViewTests()
         preferencesPanelTests()
         confirmationPanelTests()
+        dialogActionRowTests()
         singleLineLabelTests()
 
         print("\n\(uiTotal - uiFailures)/\(uiTotal) passed")

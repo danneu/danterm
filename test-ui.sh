@@ -162,6 +162,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/ThemeBrowserView.swift" \
         "$SCRIPT_DIR/app/RemoteThemePickerSheet.swift" \
         "$SCRIPT_DIR/app/PreferencesPanel.swift" \
+        "$SCRIPT_DIR/app/DialogActionRow.swift" \
         "$SCRIPT_DIR/app/ConfirmationCommandItemView.swift" \
         "$SCRIPT_DIR/app/ConfirmationPanel.swift" \
         "$SCRIPT_DIR/tests-ui/ChipViewTests.swift" \
@@ -192,6 +193,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/AlertsPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PreferencesPanelTests.swift" \
         "$SCRIPT_DIR/tests-ui/ConfirmationPanelTests.swift" \
+        "$SCRIPT_DIR/tests-ui/DialogActionRowTests.swift" \
         "$SCRIPT_DIR/tests-ui/SingleLineLabelTests.swift" \
         -framework Cocoa
 )
