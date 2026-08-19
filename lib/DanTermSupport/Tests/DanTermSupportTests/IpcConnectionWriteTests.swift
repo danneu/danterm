@@ -63,7 +63,7 @@ struct IpcConnectionWriteTests {
                 connection.rememberRequest(reqId: requestId, rpcId: request.id)
                 connection.writeSuccess(
                     reqId: requestId,
-                    result: .object(["kind": .string("start")])
+                    result: JSONValue.object(["kind": .string("start")])
                 ) { succeeded in
                     guard succeeded else { return }
                     for record in [
@@ -72,7 +72,7 @@ struct IpcConnectionWriteTests {
                     ] {
                         connection.writeNotification(
                             method: Methods.paneTapeEvent,
-                            params: .object([
+                            params: JSONValue.object([
                                 "subscription": .string("S1"),
                                 "record": record,
                             ])
@@ -80,7 +80,7 @@ struct IpcConnectionWriteTests {
                     }
                     connection.writeNotification(
                         method: Methods.paneTapeEvent,
-                        params: .object([
+                        params: JSONValue.object([
                             "subscription": .string("S1"),
                             "record": .object([
                                 "kind": .string("end"),
@@ -159,7 +159,7 @@ struct IpcConnectionWriteTests {
         let succeeded: Bool = await withCheckedContinuation { continuation in
             connection.writeNotification(
                 method: Methods.paneTapeEvent,
-                params: .object(["subscription": .string("S1")]),
+                params: JSONValue.object(["subscription": .string("S1")]),
                 completion: { continuation.resume(returning: $0) }
             )
         }
@@ -182,7 +182,7 @@ struct IpcConnectionWriteTests {
         let succeeded: Bool = await withCheckedContinuation { continuation in
             connection.writeNotification(
                 method: Methods.paneTapeEvent,
-                params: .object([:]),
+                params: JSONValue.object([:]),
                 completion: { continuation.resume(returning: $0) }
             )
         }
@@ -215,7 +215,7 @@ struct IpcConnectionWriteTests {
         let onMainThread: Bool = await withCheckedContinuation { continuation in
             connection.writeNotification(
                 method: Methods.paneTapeEvent,
-                params: .object([:]),
+                params: JSONValue.object([:]),
                 completion: { _ in
                     order.record(.completed)
                     continuation.resume(returning: Thread.isMainThread)
@@ -248,22 +248,19 @@ struct IpcConnectionWriteTests {
         }
 
         writePaneTapeRecords(
-            [
-                .object(["kind": .string("event"), "sequence": .number(0)]),
-                .object(["kind": .string("event"), "sequence": .number(1)]),
-            ],
+            [eventRecord(sequence: 0), eventRecord(sequence: 1)],
             connection: connection,
             subscriptionId: subscriptionId
         )
         writePaneTapeRecords(
-            [makePaneTapeEndRecord(reason: .paneClosed)],
+            [PaneTapeOutgoingRecord<JSONValue>.end(reason: .paneClosed)],
             connection: connection,
             subscriptionId: subscriptionId
         )
         // A sibling stream on the same socket must still be served after the `end`.
         let siblingId = UUID()
         writePaneTapeRecords(
-            [.object(["kind": .string("event"), "sequence": .number(7)])],
+            [eventRecord(sequence: 7)],
             connection: connection,
             subscriptionId: siblingId
         )
@@ -458,6 +455,18 @@ private final class ConnectionCloseProbe: @unchecked Sendable {
         defer { lock.unlock() }
         return connectionId
     }
+}
+
+/// One tape record whose only interesting fact is its order on the socket.
+private func eventRecord(sequence: UInt64) -> PaneTapeOutgoingRecord<JSONValue> {
+    .event(PaneTapeEventRecord(
+        sequence: sequence,
+        elapsedNanoseconds: sequence,
+        originElapsedNanoseconds: nil,
+        byteOffset: nil,
+        byteLength: nil,
+        event: .object(["type": .string("feed")])
+    ))
 }
 
 private final class MalformedRequestProbe: @unchecked Sendable {

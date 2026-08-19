@@ -32,9 +32,9 @@ struct IpcRequestTransport: Sendable {
         connection.close()
     }
 
-    func writeSuccess(
+    func writeSuccess<Result: Encodable>(
         reqId: UUID,
-        result: JSONValue,
+        result: Result,
         completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         audit?.complete(outcome: "success")

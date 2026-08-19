@@ -19,10 +19,13 @@ struct PaneTapeOrigin: Equatable, Sendable {
 }
 
 /// Separates a cursor the recorder placed from remote coordinates it rejected.
-enum PaneTapeCursorPlacement: Equatable, Sendable {
-    case placed(PaneTapeSnapshot)
+enum PaneTapeCursorPlacement<Event> {
+    case placed(PaneTapeSnapshot<Event>)
     case unplaceable
 }
+
+extension PaneTapeCursorPlacement: Equatable where Event: Equatable {}
+extension PaneTapeCursorPlacement: Sendable where Event: Sendable {}
 
 /// Carries terminal-protocol state bytes with their geometry and continuation position.
 ///
@@ -42,14 +45,17 @@ struct PaneTapeStateSynchronization: Equatable, Sendable {
 ///
 /// The fenced terminal itself is deliberately absent: it stays an opaque handle in the app,
 /// which resolves it only for a decision that asked for a synchronization.
-struct PaneTapeStreamFence: Equatable, Sendable {
+struct PaneTapeStreamFence<Event> {
     let origin: PaneTapeOrigin
     /// Live geometry with the cursor past every event recorded before the fence, which is
     /// what an opening at the fenced moment publishes instead of replaying up to it.
     let live: PaneTapeOrigin
-    let retained: PaneTapeSnapshot
-    let requested: PaneTapeCursorPlacement
+    let retained: PaneTapeSnapshot<Event>
+    let requested: PaneTapeCursorPlacement<Event>
 }
+
+extension PaneTapeStreamFence: Equatable where Event: Equatable {}
+extension PaneTapeStreamFence: Sendable where Event: Sendable {}
 
 /// What a selected synchronization needs before it can become records: the exact-loss record
 /// that precedes it, and the bound its retained history obeys.
@@ -58,7 +64,7 @@ struct PaneTapeStreamFence: Equatable, Sendable {
 /// events has no place to carry one. `nil` means every retained row, which is what an exact
 /// consumer such as `pane.snapshot` asks for.
 struct PaneTapeSynchronizationRequirement: Equatable, Sendable {
-    let loss: JSONValue?
+    let loss: PaneTapeGapRecord?
     let historyBudgetBytes: Int?
 }
 
@@ -66,42 +72,55 @@ struct PaneTapeSynchronizationRequirement: Equatable, Sendable {
 ///
 /// Openings and continuations decide the same question against the same fence facts, so they
 /// decide it in one type; only the metadata around an events answer differs between them.
-enum PaneTapePayloadDecision<Events: Equatable & Sendable>: Equatable, Sendable {
+enum PaneTapePayloadDecision<Events> {
     case events(Events)
     case synchronize(PaneTapeSynchronizationRequirement)
 }
 
+extension PaneTapePayloadDecision: Equatable where Events: Equatable {}
+extension PaneTapePayloadDecision: Sendable where Events: Sendable {}
+
 /// Everything an opening that ships recorder events publishes, decided without terminal state.
-struct PaneTapeEventOpening: Equatable, Sendable {
+struct PaneTapeEventOpening<Event> {
     let initial: PaneTapeDimensions
     let publishedCursor: PaneTapeCursor
-    let records: [JSONValue]
+    let records: [PaneTapeOutgoingRecord<Event>]
     let nextCursor: PaneTapeCursor
     let replicaHistoryIsComplete: Bool
 }
 
+extension PaneTapeEventOpening: Equatable where Event: Equatable {}
+extension PaneTapeEventOpening: Sendable where Event: Sendable {}
+
 /// One opening's answer, plus the start-record facts that hold either way.
-struct PaneTapeOpeningDecision: Equatable, Sendable {
+struct PaneTapeOpeningDecision<Event> {
     let capture: PaneTapeCaptureMode
     let reconstructible: Bool
-    let payload: PaneTapePayloadDecision<PaneTapeEventOpening>
+    let payload: PaneTapePayloadDecision<PaneTapeEventOpening<Event>>
 }
+
+extension PaneTapeOpeningDecision: Equatable where Event: Equatable {}
+extension PaneTapeOpeningDecision: Sendable where Event: Sendable {}
 
 /// One followed suffix that ships as the recorder events it is, with the history standing it
 /// leaves the replica holding.
-struct PaneTapeEventContinuation: Equatable, Sendable {
-    let snapshot: PaneTapeSnapshot
+struct PaneTapeEventContinuation<Event> {
+    let snapshot: PaneTapeSnapshot<Event>
     let replicaHistoryIsComplete: Bool
 }
 
+extension PaneTapeEventContinuation: Equatable where Event: Equatable {}
+extension PaneTapeEventContinuation: Sendable where Event: Sendable {}
+
 /// One continuation's answer. It needs no surrounding metadata: a followed suffix publishes no
 /// start record.
-typealias PaneTapeContinuationDecision = PaneTapePayloadDecision<PaneTapeEventContinuation>
+typealias PaneTapeContinuationDecision<Event> =
+    PaneTapePayloadDecision<PaneTapeEventContinuation<Event>>
 
 /// Describes the complete prefix that must be delivered before live follow batches can begin.
-struct PaneTapeOpening: Equatable, Sendable {
+struct PaneTapeOpening<Event> {
     let start: PaneTapeStart
-    let records: [JSONValue]
+    let records: [PaneTapeOutgoingRecord<Event>]
     let nextCursor: PaneTapeCursor
     /// Whether this prefix leaves the replica holding the source's whole retained history.
     /// Only this stream can establish it: it replayed the recorder from its beginning with
@@ -110,12 +129,18 @@ struct PaneTapeOpening: Equatable, Sendable {
     let replicaHistoryIsComplete: Bool
 }
 
+extension PaneTapeOpening: Equatable where Event: Equatable {}
+extension PaneTapeOpening: Sendable where Event: Sendable {}
+
 /// Keeps one followed suffix inseparable from what it leaves the replica knowing about its
 /// own history, so the next fetch cannot decide the resize question from a stale standing.
-struct PaneTapeContinuation: Equatable, Sendable {
-    let batch: PaneTapeBatch
+struct PaneTapeContinuation<Event> {
+    let batch: PaneTapeBatch<Event>
     let replicaHistoryIsComplete: Bool
 }
+
+extension PaneTapeContinuation: Equatable where Event: Equatable {}
+extension PaneTapeContinuation: Sendable where Event: Sendable {}
 
 /// Chooses what one followed suffix ships, replacing lost events with state in reconstructible
 /// mode.
@@ -124,11 +149,11 @@ struct PaneTapeContinuation: Equatable, Sendable {
 /// replica whose history the stream truncated, so that suffix is replaced whole by a fresh
 /// bounded sync at its ending cursor. No replaced event is also delivered, which is what keeps
 /// the replica's grid exact instead of an argument about how far a reflow can reach.
-func decidePaneTapeContinuation(
+func decidePaneTapeContinuation<Event>(
     policy: PaneTapeSyncPolicy,
     replicaHistoryIsComplete: Bool,
-    snapshot: PaneTapeSnapshot
-) -> PaneTapeContinuationDecision {
+    snapshot: PaneTapeSnapshot<Event>
+) -> PaneTapeContinuationDecision<Event> {
     if case .reconstructible(let historyBudgetBytes) = policy {
         if snapshot.droppedEventCount > 0 {
             return .synchronize(PaneTapeSynchronizationRequirement(
@@ -152,7 +177,9 @@ func decidePaneTapeContinuation(
 }
 
 /// Builds the suffix a continuation decided to ship as recorder events.
-func makePaneTapeContinuation(events: PaneTapeEventContinuation) -> PaneTapeContinuation {
+func makePaneTapeContinuation<Event>(
+    events: PaneTapeEventContinuation<Event>
+) -> PaneTapeContinuation<Event> {
     PaneTapeContinuation(
         batch: makePaneTapeBatch(from: events.snapshot),
         replicaHistoryIsComplete: events.replicaHistoryIsComplete
@@ -161,13 +188,13 @@ func makePaneTapeContinuation(events: PaneTapeEventContinuation) -> PaneTapeCont
 
 /// Builds the suffix a continuation decided to replace with state, from the synchronization
 /// serialized for that requirement.
-func makePaneTapeContinuation(
+func makePaneTapeContinuation<Event>(
     requirement: PaneTapeSynchronizationRequirement,
     synchronization: PaneTapeStateSynchronization
-) -> PaneTapeContinuation {
+) -> PaneTapeContinuation<Event> {
     PaneTapeContinuation(
         batch: PaneTapeBatch(
-            records: (requirement.loss.map { [$0] } ?? [])
+            records: (requirement.loss.map { [PaneTapeOutgoingRecord<Event>.gap($0)] } ?? [])
                 + makePaneTapeSynchronizationRecords(synchronization),
             nextCursor: synchronization.cursor
         ),
@@ -178,10 +205,10 @@ func makePaneTapeContinuation(
 }
 
 /// Applies the reconstructibility rule to one opening without IO or terminal state.
-func decidePaneTapeOpening(
+func decidePaneTapeOpening<Event>(
     request: PaneTapeStreamRequest,
-    fence: PaneTapeStreamFence
-) -> PaneTapeOpeningDecision {
+    fence: PaneTapeStreamFence<Event>
+) -> PaneTapeOpeningDecision<Event> {
     PaneTapeOpeningDecision(
         capture: request.capture,
         reconstructible: request.policy.mode == .reconstructible,
@@ -190,11 +217,11 @@ func decidePaneTapeOpening(
 }
 
 /// Builds the opening an events decision selected.
-func makePaneTapeOpening(
-    _ decision: PaneTapeOpeningDecision,
-    events: PaneTapeEventOpening,
+func makePaneTapeOpening<Event>(
+    _ decision: PaneTapeOpeningDecision<Event>,
+    events: PaneTapeEventOpening<Event>,
     provenance: JSONValue = defaultPaneTapeProvenance
-) -> PaneTapeOpening {
+) -> PaneTapeOpening<Event> {
     PaneTapeOpening(
         start: makePaneTapeStart(
             capture: decision.capture,
@@ -212,12 +239,12 @@ func makePaneTapeOpening(
 
 /// Builds the opening a synchronization decision selected, from the state serialized for that
 /// requirement.
-func makePaneTapeOpening(
-    _ decision: PaneTapeOpeningDecision,
+func makePaneTapeOpening<Event>(
+    _ decision: PaneTapeOpeningDecision<Event>,
     requirement: PaneTapeSynchronizationRequirement,
     synchronization: PaneTapeStateSynchronization,
     provenance: JSONValue = defaultPaneTapeProvenance
-) -> PaneTapeOpening {
+) -> PaneTapeOpening<Event> {
     PaneTapeOpening(
         start: makePaneTapeStart(
             capture: decision.capture,
@@ -229,7 +256,7 @@ func makePaneTapeOpening(
             publishesCursor: false,
             reconstructible: decision.reconstructible
         ),
-        records: (requirement.loss.map { [$0] } ?? [])
+        records: (requirement.loss.map { [PaneTapeOutgoingRecord<Event>.gap($0)] } ?? [])
             + makePaneTapeSynchronizationRecords(synchronization),
         nextCursor: synchronization.cursor,
         replicaHistoryIsComplete: synchronization.droppedHistoryRows == 0
@@ -241,10 +268,10 @@ let defaultPaneTapeProvenance = JSONValue.object(["source": .string("danterm-liv
 
 /// Splits the opening decision by policy case, so a raw stream never has a history budget in
 /// scope and never has a branch that could ask for a synchronization.
-private func selectPaneTapeOpeningPayload(
+private func selectPaneTapeOpeningPayload<Event>(
     request: PaneTapeStreamRequest,
-    fence: PaneTapeStreamFence
-) -> PaneTapePayloadDecision<PaneTapeEventOpening> {
+    fence: PaneTapeStreamFence<Event>
+) -> PaneTapePayloadDecision<PaneTapeEventOpening<Event>> {
     switch request.policy {
     case .raw:
         return .events(rawOpening(position: request.position, fence: fence))
@@ -259,10 +286,10 @@ private func selectPaneTapeOpeningPayload(
 
 /// A raw stream preserves recorder evidence and synthesizes nothing, so every start position
 /// answers with records the fence already holds. Its return type says so.
-private func rawOpening(
+private func rawOpening<Event>(
     position: PaneTapeStartPosition,
-    fence: PaneTapeStreamFence
-) -> PaneTapeEventOpening {
+    fence: PaneTapeStreamFence<Event>
+) -> PaneTapeEventOpening<Event> {
     switch position {
     case .now:
         return PaneTapeEventOpening(
@@ -301,7 +328,7 @@ private func rawOpening(
                     origin: fence.origin.cursor,
                     snapshot: fence.retained
                 ),
-                records: [makePaneTapeTotalGapRecord()]
+                records: [.gap(.total)]
                     + fence.retained.events.map(makePaneTapeEventRecord),
                 nextCursor: fence.retained.nextCursor,
                 replicaHistoryIsComplete: false
@@ -312,12 +339,14 @@ private func rawOpening(
 
 /// A reconstructible stream may replace evidence it cannot deliver with terminal state, so
 /// this is the only place a synchronization requirement -- and a budget -- is minted.
-private func reconstructibleOpening(
+private func reconstructibleOpening<Event>(
     position: PaneTapeStartPosition,
-    fence: PaneTapeStreamFence,
+    fence: PaneTapeStreamFence<Event>,
     historyBudgetBytes: Int?
-) -> PaneTapePayloadDecision<PaneTapeEventOpening> {
-    func synchronize(loss: JSONValue?) -> PaneTapePayloadDecision<PaneTapeEventOpening> {
+) -> PaneTapePayloadDecision<PaneTapeEventOpening<Event>> {
+    func synchronize(
+        loss: PaneTapeGapRecord?
+    ) -> PaneTapePayloadDecision<PaneTapeEventOpening<Event>> {
         .synchronize(PaneTapeSynchronizationRequirement(
             loss: loss,
             historyBudgetBytes: historyBudgetBytes
@@ -356,17 +385,17 @@ private func reconstructibleOpening(
                 replicaHistoryIsComplete: false
             ))
         case .unplaceable:
-            return synchronize(loss: makePaneTapeTotalGapRecord())
+            return synchronize(loss: .total)
         }
     }
 }
 
-private func eventOpening(
+private func eventOpening<Event>(
     initial: PaneTapeDimensions,
     cursor: PaneTapeCursor,
-    snapshot: PaneTapeSnapshot,
+    snapshot: PaneTapeSnapshot<Event>,
     replicaHistoryIsComplete: Bool
-) -> PaneTapeEventOpening {
+) -> PaneTapeEventOpening<Event> {
     PaneTapeEventOpening(
         initial: initial,
         publishedCursor: cursor,
@@ -376,13 +405,9 @@ private func eventOpening(
     )
 }
 
-private func makePaneTapeTotalGapRecord() -> JSONValue {
-    encodePaneTapeRecord(.gap(.total))
-}
-
-private func retainedHeadCursor(
+private func retainedHeadCursor<Event>(
     origin: PaneTapeCursor,
-    snapshot: PaneTapeSnapshot
+    snapshot: PaneTapeSnapshot<Event>
 ) -> PaneTapeCursor {
     PaneTapeCursor(
         recorderLifetimeId: origin.recorderLifetimeId,
@@ -394,9 +419,9 @@ private func retainedHeadCursor(
     )
 }
 
-private func makePaneTapeSynchronizationRecords(
+private func makePaneTapeSynchronizationRecords<Event>(
     _ synchronization: PaneTapeStateSynchronization
-) -> [JSONValue] {
+) -> [PaneTapeOutgoingRecord<Event>] {
     let maximumPayloadBytes = IpcLineFramer.maxLineBytes / 4
     let chunks = synchronization.bytes.isEmpty
         ? [[]]
@@ -408,7 +433,7 @@ private func makePaneTapeSynchronizationRecords(
         // reader at rides the last, so a single-part transfer carries both.
         let isFirst = index == chunks.startIndex
         let isLast = index == chunks.index(before: chunks.endIndex)
-        return encodePaneTapeRecord(.sync(PaneTapeSyncRecord(
+        return .sync(PaneTapeSyncRecord(
             part: index + 1,
             parts: chunks.count,
             bytes: bytes,
@@ -421,6 +446,6 @@ private func makePaneTapeSynchronizationRecords(
                 )
                 : nil,
             cursor: isLast ? synchronization.cursor : nil
-        )))
+        ))
     }
 }

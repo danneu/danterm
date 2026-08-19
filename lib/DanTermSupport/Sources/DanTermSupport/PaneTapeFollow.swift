@@ -20,9 +20,12 @@ struct PaneTapeFollowFetch: Equatable, Sendable {
 /// Names the one stream a terminal record belongs to. It carries no transport coordinate:
 /// the runtime holds each stream's transport under this same subscription id, so routing an
 /// `end` by anything coarser is what let one stream's teardown swallow a sibling's.
+///
+/// It states the reason rather than a record, because an end record is a reason and nothing
+/// else: the record it becomes is built where it is written.
 struct PaneTapeFollowEnd: Equatable, Sendable {
     let subscriptionId: UUID
-    let record: JSONValue
+    let reason: PaneTapeEndReason
 }
 
 /// Enforces one fetch-and-delivery batch in flight per stream and drops dead owners eagerly.
@@ -69,10 +72,10 @@ struct PaneTapeFollowSubscriptions {
 
     /// Advances a claimed stream through the exact suffix that will be handed to its socket,
     /// and restates what that suffix leaves the replica holding.
-    mutating func finishFetch(
+    mutating func finishFetch<Event>(
         subscriptionId: UUID,
-        continuation: PaneTapeContinuation
-    ) -> PaneTapeBatch? {
+        continuation: PaneTapeContinuation<Event>
+    ) -> PaneTapeBatch<Event>? {
         guard var subscription = subscriptions[subscriptionId], subscription.isInFlight else {
             return nil
         }
@@ -101,10 +104,7 @@ struct PaneTapeFollowSubscriptions {
     /// terminator that stream is owed under `reason`.
     mutating func end(_ subscriptionId: UUID, reason: PaneTapeEndReason) -> PaneTapeFollowEnd? {
         guard subscriptions.removeValue(forKey: subscriptionId) != nil else { return nil }
-        return PaneTapeFollowEnd(
-            subscriptionId: subscriptionId,
-            record: makePaneTapeEndRecord(reason: reason)
-        )
+        return PaneTapeFollowEnd(subscriptionId: subscriptionId, reason: reason)
     }
 
     /// Removes all streams for a vanished pane and returns their one promised terminator.
@@ -116,10 +116,7 @@ struct PaneTapeFollowSubscriptions {
             subscriptions.removeValue(forKey: id)
         }
         return ids.map { id in
-            PaneTapeFollowEnd(
-                subscriptionId: id,
-                record: makePaneTapeEndRecord(reason: .paneClosed)
-            )
+            PaneTapeFollowEnd(subscriptionId: id, reason: .paneClosed)
         }
     }
 

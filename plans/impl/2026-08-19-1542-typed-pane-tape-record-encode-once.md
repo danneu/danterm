@@ -224,7 +224,7 @@ reader sees an unchanged stream, then `just stop-slot <n>`.
 ## Commit progress
 - [x] 1. protocol: make the JSON-RPC envelopes generic over their payload
 - [x] 2. protocol: give the outgoing pane-tape record its own Encodable conformance
-- [ ] 3. support+app: carry pane-tape records typed to the wire and encode once
+- [x] 3. support+app: carry pane-tape records typed to the wire and encode once
 
 ## Implementation notes
 
@@ -244,4 +244,28 @@ reader sees an unchanged stream, then `just stop-slot <n>`.
   `client-tests/PaneTapeRoundTripTests.swift`: at this slice the producer still builds
   JSON trees, so no client-tests case can exercise the typed encode. Migrating the
   existing producer-driven cases to the typed path stays with commit 3.
+- D2 resolved as a per-build `PaneTapeSessionEvent` typealias, but it lives in
+  `app/SwiftTerminalSessionView.swift`, not beside the `TerminalSession` requirements it
+  serves: `scripts/terminal-backend-boundary-lint.sh` allows an engine import only in the
+  adapter files, and naming `NeutralTerminalRecordingEvent` needs one. The session protocol
+  keeps its four tape requirements in both builds.
+- D1 resolved as one generic declaration for `writeSuccess` and `writeNotification` rather
+  than typed overloads beside the `JSONValue` ones. Overloads would have left two ways to
+  write the same line; the cost is that the four call sites passing a case literal now spell
+  `JSONValue.object(...)`, which an unbound generic cannot infer.
+- The migrated stream-policy suites assert typed records -- record kinds, gap counts, sync
+  parts -- instead of the JSON they used to build. The wire keys those assertions used to
+  pin now have one home each: the protocol package's encode/decode round trip, and the
+  producer-to-reader round trip in `client-tests`.
+- PO4's second half had no test to keep: nothing pinned that a synchronization serializing
+  to no bytes still ships one part. That test is new here, beside the chunk-bound one.
+
+## Follow Up
+
+- The `pane.tape.event` params keys are declared twice: `PaneTapeEventNotification` in
+  `lib/DanTermSupport/Sources/DanTermSupport/PaneTapeRecords.swift` writes `subscription`
+  and `record`, and `lib/DanTermClient/Sources/DanTermClient/PaneTapeRecordReader.swift`
+  reads them back as string literals. The duplication predates this change, and the record
+  shape it wraps now has one declaration, so the envelope around it is the only spelling
+  left that two sides maintain by hand.
 

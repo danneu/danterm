@@ -1,6 +1,6 @@
 // The pane-tape record shape, checked end to end: every record the Mac host's producer
-// builds is fed straight to the client's reader and must come back as the value it was
-// built from.
+// builds goes out through the real wire encoder and must come back through the client's
+// reader as the value it was built from.
 //
 // This is the only test target that links both ends, and that is the point. The producer
 // lives in the host layer and the reader in the client module, so nothing else can catch
@@ -29,7 +29,7 @@ struct PaneTapeRoundTripTests {
                 cursor: cursor
             )
 
-            guard case .start(let decoded)? = decodePaneTapeRecord(start.record) else {
+            guard case .start(let decoded)? = try decodedFromWire(.start(start.record)) else {
                 Issue.record("start record did not decode as a start")
                 continue
             }
@@ -67,13 +67,13 @@ struct PaneTapeRoundTripTests {
             cursor: .beginning
         )
 
-        guard case .start(let decoded)? = decodePaneTapeRecord(start.record) else {
+        guard case .start(let decoded)? = try decodedFromWire(.start(start.record)) else {
             Issue.record("start record did not decode as a start")
             return
         }
         #expect(decoded.provenance == provenance)
 
-        var withoutProvenance = try #require(start.record.asObject)
+        var withoutProvenance = try #require(try encodedFromWire(.start(start.record)).asObject)
         withoutProvenance["provenance"] = nil
         guard case .start(let bare)? = decodePaneTapeRecord(.object(withoutProvenance)) else {
             Issue.record("a start record stating no provenance must still decode as a start")
@@ -84,7 +84,7 @@ struct PaneTapeRoundTripTests {
 
     @Test("the gap record round-trips every eviction count the producer states")
     func gapRecordRoundTrips() throws {
-        let batch = makePaneTapeBatch(from: PaneTapeSnapshot(
+        let batch = makePaneTapeBatch(from: PaneTapeSnapshot<JSONValue>(
             events: [],
             droppedEventCount: 7,
             droppedFeedBytes: 900,
@@ -93,7 +93,7 @@ struct PaneTapeRoundTripTests {
         ))
         let record = try #require(batch.records.first)
 
-        #expect(decodePaneTapeRecord(record) == .gap(PaneTapeGapRecord(
+        #expect(try decodedFromWire(record) == .gap(PaneTapeGapRecord(
             droppedEventCount: 7,
             droppedFeedBytes: 900,
             droppedWriteBytes: 11
@@ -118,7 +118,7 @@ struct PaneTapeRoundTripTests {
         let opening = try #require(rawOpening(startingFrom: .cursor(stranded)))
         let record = try #require(opening.records.first)
 
-        #expect(decodePaneTapeRecord(record) == .gap(.total))
+        #expect(try decodedFromWire(record) == .gap(.total))
     }
 
     @Test("a start record that withholds its cursor round-trips with no cursor")
@@ -139,7 +139,7 @@ struct PaneTapeRoundTripTests {
             reconstructible: true
         )
 
-        guard case .start(let decoded)? = decodePaneTapeRecord(start.record) else {
+        guard case .start(let decoded)? = try decodedFromWire(.start(start.record)) else {
             Issue.record("a start record withholding its cursor must still decode as a start")
             return
         }
@@ -164,7 +164,7 @@ struct PaneTapeRoundTripTests {
         let origins: [UInt64?] = [nil, 4_000]
         for span in spans {
             for origin in origins {
-                let event = PaneTapeEvent(
+                let event = PaneTapeEvent<JSONValue>(
                     sequence: 3,
                     elapsedNanoseconds: 9_000,
                     originElapsedNanoseconds: origin,
@@ -173,7 +173,7 @@ struct PaneTapeRoundTripTests {
                     needsCompleteHistory: false
                 )
 
-                #expect(decodePaneTapeRecord(makePaneTapeEventRecord(event)) == .event(
+                #expect(try decodedFromWire(makePaneTapeEventRecord(event)) == .event(
                     PaneTapeEventRecord(
                         sequence: 3,
                         elapsedNanoseconds: 9_000,
@@ -188,20 +188,20 @@ struct PaneTapeRoundTripTests {
     }
 
     @Test("every end reason the producer can state round-trips as that reason")
-    func endRecordRoundTripsEveryReason() {
+    func endRecordRoundTripsEveryReason() throws {
         // Intent: no reason spelling is readable by the producer alone.
         // Why it exists: the reasons are raw strings on the wire, so a rename on one side
         //   is invisible until a reader silently reports "ended for no stated reason".
         for reason in [
             PaneTapeEndReason.dumpComplete, .snapshotComplete, .paneClosed, .streamFailed,
         ] {
-            #expect(decodePaneTapeRecord(makePaneTapeEndRecord(reason: reason)) == .end(reason: reason))
+            #expect(try decodedFromWire(.end(reason: reason)) == .end(reason: reason))
         }
     }
 
     @Test("a whole finite dump decodes in order, gap first and terminator last")
     func dumpRecordsDecodeInOrder() throws {
-        let dump = PaneTapeDump(
+        let dump = PaneTapeDump<JSONValue>(
             start: makePaneTapeStart(
                 capture: .dump,
                 provenance: .null,
@@ -226,7 +226,7 @@ struct PaneTapeRoundTripTests {
             )
         )
 
-        let decoded = makePaneTapeDumpRecords(after: dump).map(decodePaneTapeRecord)
+        let decoded = try makePaneTapeDumpRecords(after: dump).map(decodedFromWire)
 
         #expect(decoded.count == 3)
         if case .gap? = decoded.first ?? nil {} else { Issue.record("a dump leads with its gap") }
@@ -235,14 +235,14 @@ struct PaneTapeRoundTripTests {
     }
 
     @Test("a state sync round-trips the pane's pinnedness with its grid")
-    func syncRoundTripsPinnedness() {
+    func syncRoundTripsPinnedness() throws {
         // Intent: the pinnedness the producer puts on a sync's first part is the pinnedness
         //   the reader's assembler publishes when the transfer completes.
         // Why it exists: a sync replaces a replica's state outright, so it is the only
         //   record that can restate geometry after a gap. Dropping the bit here would leave
         //   a repaired replica reporting the pane's claim wrongly until its next resize.
         // Scenario: a followed stream loses events on a claimed pane and is repaired.
-        let evicted = PaneTapeSnapshot(
+        let evicted = PaneTapeSnapshot<JSONValue>(
             events: [],
             droppedEventCount: 2,
             droppedFeedBytes: 3,
@@ -268,7 +268,7 @@ struct PaneTapeRoundTripTests {
             var assembler = PaneTapeSyncAssembler()
             var assembled: DanTermClient.PaneTapeStateSynchronization?
             for record in batch.records {
-                guard case .sync(let part)? = decodePaneTapeRecord(record) else { continue }
+                guard case .sync(let part)? = try decodedFromWire(record) else { continue }
                 assembled = assembler.ingest(part) ?? assembled
             }
 
@@ -304,8 +304,8 @@ struct PaneTapeRoundTripTests {
     // Scenario: a followed stream repairs a gap with a sync bounded well below the pane's
     //   retained history.
     @Test("a bounded sync round-trips its dropped history count to the reader")
-    func syncRoundTripsDroppedHistoryRows() {
-        let evicted = PaneTapeSnapshot(
+    func syncRoundTripsDroppedHistoryRows() throws {
+        let evicted = PaneTapeSnapshot<JSONValue>(
             events: [],
             droppedEventCount: 2,
             droppedFeedBytes: 3,
@@ -333,7 +333,7 @@ struct PaneTapeRoundTripTests {
         var assembled: DanTermClient.PaneTapeStateSynchronization?
         var parts = 0
         for record in batch.records {
-            guard case .sync(let part)? = decodePaneTapeRecord(record) else { continue }
+            guard case .sync(let part)? = try decodedFromWire(record) else { continue }
             parts += 1
             assembled = assembler.ingest(part) ?? assembled
         }
@@ -358,7 +358,9 @@ struct PaneTapeRoundTripTests {
     /// Builds the prefix a raw follow ships from one start position, over a fence whose
     /// retained events are empty and whose requested cursor cannot be placed, so the records
     /// are exactly the ones the stream states about loss.
-    private func rawOpening(startingFrom position: PaneTapeStartPosition) -> PaneTapeOpening? {
+    private func rawOpening(
+        startingFrom position: PaneTapeStartPosition
+    ) -> PaneTapeOpening<JSONValue>? {
         let origin = PaneTapeOrigin(
             initial: PaneTapeDimensions(columns: 80, rows: 24, pinned: false),
             cursor: .beginning
@@ -368,7 +370,7 @@ struct PaneTapeRoundTripTests {
             fence: PaneTapeStreamFence(
                 origin: origin,
                 live: origin,
-                retained: PaneTapeSnapshot(
+                retained: PaneTapeSnapshot<JSONValue>(
                     events: [],
                     droppedEventCount: 0,
                     droppedFeedBytes: 0,
@@ -389,9 +391,9 @@ struct PaneTapeRoundTripTests {
     /// events with state, taking the decide and materialize halves in one step so these
     /// reader-side tests stay about what reaches the wire.
     private func repairedContinuation(
-        snapshot: PaneTapeSnapshot,
+        snapshot: PaneTapeSnapshot<JSONValue>,
         synchronization: DanTermSupport.PaneTapeStateSynchronization
-    ) -> PaneTapeContinuation {
+    ) -> PaneTapeContinuation<JSONValue> {
         let decision = decidePaneTapeContinuation(
             policy: .reconstructible(historyBudgetBytes: 4096),
             replicaHistoryIsComplete: true,
@@ -409,4 +411,19 @@ struct PaneTapeRoundTripTests {
             synchronization: synchronization
         )
     }
+}
+
+/// Puts one producer record through the real wire encoder and the client's decode. Encoding
+/// here rather than comparing values is the point of this file: the two ends only meet on the
+/// bytes.
+private func decodedFromWire(
+    _ record: PaneTapeOutgoingRecord<JSONValue>
+) throws -> PaneTapeRecord<JSONValue>? {
+    decodePaneTapeRecord(try encodedFromWire(record))
+}
+
+private func encodedFromWire(
+    _ record: PaneTapeOutgoingRecord<JSONValue>
+) throws -> JSONValue {
+    try JSONDecoder().decode(JSONValue.self, from: try encodeIpcLine(record))
 }

@@ -6,26 +6,28 @@ import TerminalCoreRecording
 @testable import DanTerm
 
 struct PaneTapeFollowEncodingTests {
-    @Test("stream event payloads equal neutral feed and resize encodings")
+    @Test("stream event payloads equal neutral feed, write, resize, and checkpoint encodings")
     func streamPayloadsUseNeutralEncoding() throws {
-        // Intent: stream event objects are byte-semantically identical to neutral events.
-        // Why it exists: a second hand-written event dialect could drift from replay tapes.
-        // Scenario: one followed pane emits output bytes and then changes character geometry.
+        // Intent: the `event` object a record puts on the wire is byte-for-byte the encoding
+        //   the neutral recording event writes for itself.
+        // Why it exists: the producer carries the engine's event through to the wire encoder
+        //   rather than restating it. A second dialect anywhere on that path -- a hand-built
+        //   object, a re-keyed copy -- would drift from the replay tapes readers expect.
+        // Scenario: one followed pane emits non-ASCII output bytes, input bytes, a geometry
+        //   change, and a checkpoint marker.
         for event in [
-            NeutralTerminalRecordingEvent.feed(Array("Hi".utf8)),
+            NeutralTerminalRecordingEvent.feed(Array("Hi \u{1F602}".utf8)),
             .write(Array("ls".utf8)),
             .resize(columns: 100, rows: 30, pinned: true),
+            .checkpoint,
         ] {
-            let directData = try JSONEncoder().encode(event)
-            let direct = try JSONDecoder().decode(JSONValue.self, from: directData)
-            let adapted = try paneTapeFollowEventJSON(event)
-            let batch = makePaneTapeBatch(from: .init(
+            let batch = makePaneTapeBatch(from: PaneTapeSnapshot(
                 events: [.init(
                     sequence: 1,
                     elapsedNanoseconds: 2,
                     originElapsedNanoseconds: nil,
                     payload: .init(byteOffset: 0, byteLength: 2),
-                    event: adapted,
+                    event: event,
                     needsCompleteHistory: paneTapeEventNeedsCompleteHistory(event)
                 )],
                 droppedEventCount: 0,
@@ -39,7 +41,16 @@ struct PaneTapeFollowEncodingTests {
                 )
             ))
 
-            #expect(batch.records.first?["event"] == direct)
+            let record = try #require(batch.records.first)
+            let written = try JSONDecoder().decode(
+                JSONValue.self,
+                from: try encodeIpcLine(record)
+            )
+            let alone = try JSONDecoder().decode(
+                JSONValue.self,
+                from: try JSONEncoder().encode(event)
+            )
+            #expect(written[PaneTapeRecordKey.event] == alone)
         }
     }
 

@@ -15,45 +15,37 @@ struct PaneTapeStreamStateTests {
             pane: pane(retainedSequences: [0, 1])
         )
 
-        #expect(opening.start.record["reconstructible"] == .bool(true))
-        #expect(opening.start.record["cursor"] != nil)
+        #expect(opening.start.record.reconstructible)
+        #expect(opening.start.record.cursor != nil)
         #expect(opening.records.compactMap(sequence) == [0, 1])
-        #expect(opening.records.contains { $0["kind"] == .string("sync") } == false)
+        #expect(opening.records.contains { kind($0) == .sync } == false)
         #expect(opening.nextCursor.nextSequence == 2)
     }
 
     @Test("reconstructible eviction states exact loss and replaces the suffix with a sync")
-    func evictedBeginningUsesSync() throws {
+    func evictedBeginningUsesSync() {
         let opening = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .beginning),
             pane: pane(retainedSequences: [4, 5], droppedEventCount: 4)
         )
 
-        #expect(opening.start.record["cursor"] == nil)
-        #expect(opening.records.first == .object([
-            "kind": .string("gap"),
-            "droppedEventCount": .number(4),
-            "droppedFeedBytes": .number(4),
-            "droppedWriteBytes": .number(0),
-        ]))
+        #expect(opening.start.record.cursor == nil)
+        #expect(opening.records.first == .gap(PaneTapeGapRecord(
+            droppedEventCount: 4,
+            droppedFeedBytes: 4,
+            droppedWriteBytes: 0
+        )))
         #expect(opening.records.compactMap(sequence).isEmpty)
-        let sync = opening.records.filter { $0["kind"] == .string("sync") }
+        let sync = opening.records.filter { kind($0) == .sync }
         // Whole-record value, not a shape: this assembly now crosses the decide/materialize
-        // boundary, so every field the wire carries is stated here rather than sampled.
-        #expect(sync == [.object([
-            "kind": .string("sync"),
-            "part": .number(1),
-            "parts": .number(1),
-            "base64": .string("c3RhdGU="),
-            "initial": .object([
-                "columns": .number(100),
-                "rows": .number(30),
-                "pinned": .bool(false),
-            ]),
-            "droppedHistoryRows": .number(0),
-            "cursor": cursorJSON(sequence: 6, feed: 6),
-        ])])
-        #expect(try synchronizationBytes(sync) == Array("state".utf8))
+        // boundary, so every field the record carries is stated here rather than sampled.
+        #expect(sync == [.sync(PaneTapeSyncRecord(
+            part: 1,
+            parts: 1,
+            bytes: Array("state".utf8),
+            transfer: .init(columns: 100, rows: 30, pinned: false, droppedHistoryRows: 0),
+            cursor: cursor(sequence: 6, feed: 6)
+        ))])
         #expect(opening.nextCursor.nextSequence == 6)
     }
 
@@ -69,24 +61,21 @@ struct PaneTapeStreamStateTests {
             pane: fenced
         )
 
-        #expect(reconstructible.start.record["cursor"] == nil)
-        #expect(reconstructible.records.map { $0["kind"] } == [.string("sync")])
+        #expect(reconstructible.start.record.cursor == nil)
+        #expect(reconstructible.records.map(kind) == [.sync])
         // Whole start record: a raw from-now opening is the one path that reports live
         // geometry and the live cursor without any state being serialized to read them off.
-        #expect(raw.start.record == .object([
-            "kind": .string("start"),
-            "version": .number(Double(paneTapeStreamVersion)),
-            "capture": .string("follow"),
-            "format": .string(PaneTapeFormat.replay.rawValue),
-            "provenance": defaultPaneTapeProvenance,
-            "initial": .object([
-                "columns": .number(100),
-                "rows": .number(30),
-                "pinned": .bool(false),
-            ]),
-            "cursor": cursorJSON(sequence: 2, feed: 2),
-            "reconstructible": .bool(false),
-        ]))
+        #expect(raw.start.record == PaneTapeStartRecord(
+            version: paneTapeStreamVersion,
+            capture: .follow,
+            format: .replay,
+            provenance: defaultPaneTapeProvenance,
+            columns: 100,
+            rows: 30,
+            pinned: false,
+            cursor: cursor(sequence: 2, feed: 2),
+            reconstructible: false
+        ))
         #expect(raw.records.isEmpty)
     }
 
@@ -131,12 +120,12 @@ struct PaneTapeStreamStateTests {
             )
         )
 
-        #expect(contiguous.start.record["cursor"] == cursorJSON(sequence: 1, feed: 1))
+        #expect(contiguous.start.record.cursor == cursor(sequence: 1, feed: 1))
         #expect(contiguous.records.compactMap(sequence) == [1, 2])
-        #expect(evicted.records.first?["kind"] == .string("gap"))
+        #expect(evicted.records.first.map(kind) == .gap)
         #expect(evicted.records.compactMap(sequence).isEmpty)
-        #expect(evicted.records.last?["kind"] == .string("sync"))
-        #expect(rawEvicted.records.first?["droppedEventCount"] == .number(1))
+        #expect(evicted.records.last.map(kind) == .sync)
+        #expect(gap(rawEvicted.records.first)?.droppedEventCount == 1)
         #expect(rawEvicted.records.dropFirst().compactMap(sequence) == [2, 3])
     }
 
@@ -162,13 +151,12 @@ struct PaneTapeStreamStateTests {
             pane: fenced
         )
 
-        let totalGap: JSONValue = .object(["kind": .string("gap"), "loss": .string("total")])
-        #expect(reconstructible.records.first == totalGap)
+        #expect(reconstructible.records.first == .gap(.total))
         #expect(reconstructible.records.compactMap(sequence).isEmpty)
-        #expect(reconstructible.records.last?["kind"] == .string("sync"))
-        #expect(raw.records.first == totalGap)
+        #expect(reconstructible.records.last.map(kind) == .sync)
+        #expect(raw.records.first == .gap(.total))
         #expect(raw.records.dropFirst().compactMap(sequence) == [4, 5])
-        #expect(raw.start.record["cursor"] == cursorJSON(sequence: 4, feed: 4))
+        #expect(raw.start.record.cursor == cursor(sequence: 4, feed: 4))
     }
 
     @Test("sync chunks fit the IPC line bound and publish the cursor only on completion")
@@ -185,26 +173,46 @@ struct PaneTapeStreamStateTests {
         let records = opening.records
 
         #expect(records.count > 1)
-        #expect(records.dropLast().allSatisfy { $0["cursor"] == nil })
-        #expect(records.last?["cursor"] != nil)
-        #expect(records.first?["initial"] == .object([
-            "columns": .number(179),
-            "rows": .number(66),
-            "pinned": .bool(false),
-        ]))
-        #expect(try synchronizationBytes(records) == bytes)
+        #expect(records.dropLast().allSatisfy { part($0)?.cursor == nil })
+        #expect(records.last.flatMap(part)?.cursor != nil)
+        #expect(part(records.first)?.transfer?.columns == 179)
+        #expect(part(records.first)?.transfer?.rows == 66)
+        #expect(part(records.first)?.transfer?.pinned == false)
+        #expect(synchronizationBytes(records) == bytes)
         for record in records {
-            var encoded = try JSONEncoder().encode(JsonRpcRequest(
+            // The real notification line, so the bound is measured on the bytes the socket
+            // carries rather than on the record alone.
+            let encoded = try encodeIpcLine(JsonRpcRequestEnvelope(
                 method: Methods.paneTapeEvent,
-                params: .object([
-                    "subscription": .string(UUID().uuidString),
-                    "record": record,
-                ])
+                params: PaneTapeEventNotification(
+                    subscription: UUID().uuidString,
+                    record: record
+                )
             ))
-            encoded.append(0x0A)
             var framer = IpcLineFramer()
             #expect(framer.append(encoded) == [.line(encoded.dropLast())])
         }
+    }
+
+    // Intent: a synchronization that serialized to no bytes still ships exactly one part,
+    //   carrying the transfer's facts and its continuation cursor.
+    // Why it exists: a reader assembles a transfer by counting parts, so an empty state that
+    //   shipped none would leave the reader waiting for a transfer that never arrives, and
+    //   the geometry and cursor that ride the first and last part would never be published.
+    // Scenario: a pane synchronized before its terminal has written anything.
+    @Test("a synchronization with no bytes still ships one part")
+    func emptySynchronizationShipsOnePart() {
+        let opening = openStream(
+            request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
+            pane: pane(retainedSequences: [], syncBytes: [])
+        )
+
+        #expect(opening.records.count == 1)
+        #expect(part(opening.records.first)?.part == 1)
+        #expect(part(opening.records.first)?.parts == 1)
+        #expect(part(opening.records.first)?.bytes.isEmpty == true)
+        #expect(part(opening.records.first)?.transfer != nil)
+        #expect(part(opening.records.first)?.cursor != nil)
     }
 
     @Test("both geometry-bearing opening shapes state the pane's pinnedness")
@@ -227,26 +235,19 @@ struct PaneTapeStreamStateTests {
             request: .init(capture: .dump, policy: .raw, position: .beginning),
             pane: pinned
         )
-        #expect(fromBeginning.start.record["initial"] == .object([
-            "columns": .number(80),
-            "rows": .number(24),
-            "pinned": .bool(true),
-        ]))
+        #expect(fromBeginning.start.record.columns == 80)
+        #expect(fromBeginning.start.record.rows == 24)
+        #expect(fromBeginning.start.record.pinned)
 
         let fromNow = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
             pane: pinned
         )
-        #expect(fromNow.start.record["initial"] == .object([
-            "columns": .number(100),
-            "rows": .number(30),
-            "pinned": .bool(true),
-        ]))
-        #expect(fromNow.records.first?["initial"] == .object([
-            "columns": .number(100),
-            "rows": .number(30),
-            "pinned": .bool(true),
-        ]))
+        #expect(fromNow.start.record.columns == 100)
+        #expect(fromNow.start.record.rows == 30)
+        #expect(fromNow.start.record.pinned)
+        #expect(part(fromNow.records.first)?.transfer
+                == .init(columns: 100, rows: 30, pinned: true, droppedHistoryRows: 0))
     }
 
     @Test("a reconstructible continuation repairs eviction while a raw continuation reports it")
@@ -272,24 +273,18 @@ struct PaneTapeStreamStateTests {
             synchronization: synchronization
         ).batch
 
-        #expect(reconstructible.records.first?["kind"] == .string("gap"))
+        #expect(reconstructible.records.first.map(kind) == .gap)
         #expect(reconstructible.records.dropFirst().compactMap(sequence).isEmpty)
         // Whole-record value: this assembly crosses the decide/materialize boundary too.
-        #expect(Array(reconstructible.records.dropFirst()) == [.object([
-            "kind": .string("sync"),
-            "part": .number(1),
-            "parts": .number(1),
-            "base64": .string("c3RhdGU="),
-            "initial": .object([
-                "columns": .number(100),
-                "rows": .number(30),
-                "pinned": .bool(false),
-            ]),
-            "droppedHistoryRows": .number(0),
-            "cursor": cursorJSON(sequence: 6, feed: 6),
-        ])])
+        #expect(Array(reconstructible.records.dropFirst()) == [.sync(PaneTapeSyncRecord(
+            part: 1,
+            parts: 1,
+            bytes: Array("state".utf8),
+            transfer: .init(columns: 100, rows: 30, pinned: false, droppedHistoryRows: 0),
+            cursor: cursor(sequence: 6, feed: 6)
+        ))])
         #expect(reconstructible.nextCursor == synchronization.cursor)
-        #expect(raw.records.first?["kind"] == .string("gap"))
+        #expect(raw.records.first.map(kind) == .gap)
         #expect(raw.records.dropFirst().compactMap(sequence) == [4, 5])
     }
 
@@ -409,7 +404,7 @@ struct PaneTapeStreamStateTests {
             synchronization: synchronization
         )
 
-        #expect(truncated.batch.records.allSatisfy { $0["kind"] == .string("sync") })
+        #expect(truncated.batch.records.allSatisfy { kind($0) == .sync })
         #expect(truncated.batch.records.compactMap(sequence).isEmpty)
         #expect(truncated.batch.nextCursor == synchronization.cursor)
         #expect(truncated.replicaHistoryIsComplete == false)
@@ -455,7 +450,7 @@ struct PaneTapeStreamStateTests {
             snapshot: snapshot(sequences: [6], nextSequence: 7, resizeSequences: [6]),
             synchronization: wholeSync
         )
-        #expect(restored.batch.records.allSatisfy { $0["kind"] == .string("sync") })
+        #expect(restored.batch.records.allSatisfy { kind($0) == .sync })
         #expect(restored.replicaHistoryIsComplete)
 
         let afterRestore = continueStream(
@@ -485,14 +480,14 @@ struct PaneTapeStreamStateTests {
         ).records
 
         #expect(records.count > 1)
-        #expect(records.first?["droppedHistoryRows"] == .number(512))
-        #expect(records.dropFirst().allSatisfy { $0["droppedHistoryRows"] == nil })
+        #expect(part(records.first)?.transfer?.droppedHistoryRows == 512)
+        #expect(records.dropFirst().allSatisfy { part($0)?.transfer == nil })
 
         let whole = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
             pane: pane(retainedSequences: [])
         ).records
-        #expect(whole.first?["droppedHistoryRows"] == .number(0))
+        #expect(part(whole.first)?.transfer?.droppedHistoryRows == 0)
     }
 
     // Intent: a budget changes what a sync carries, never whether one is sent -- a request
@@ -513,7 +508,7 @@ struct PaneTapeStreamStateTests {
             )
 
             #expect(opening.records.compactMap(sequence) == [0, 1])
-            #expect(opening.records.contains { $0["kind"] == .string("sync") } == false)
+            #expect(opening.records.contains { kind($0) == .sync } == false)
         }
     }
 
@@ -594,7 +589,7 @@ struct PaneTapeStreamStateTests {
                 synchronization: resizeSync
             )
 
-            #expect(continuation.batch.records.allSatisfy { $0["kind"] == .string("sync") })
+            #expect(continuation.batch.records.allSatisfy { kind($0) == .sync })
             #expect(continuation.batch.nextCursor == resizeSync.cursor)
         }
     }
@@ -602,7 +597,7 @@ struct PaneTapeStreamStateTests {
     /// One fenced moment: the cheap facts stream policy decides from, beside the state the
     /// fenced terminal would serialize into if -- and only if -- the decision asks for one.
     private struct FencedPane {
-        let facts: PaneTapeStreamFence
+        let facts: PaneTapeStreamFence<JSONValue>
         let synchronization: PaneTapeStateSynchronization
     }
 
@@ -611,7 +606,7 @@ struct PaneTapeStreamStateTests {
     private func openStream(
         request: PaneTapeStreamRequest,
         pane fenced: FencedPane
-    ) -> PaneTapeOpening {
+    ) -> PaneTapeOpening<JSONValue> {
         let decision = decidePaneTapeOpening(request: request, fence: fenced.facts)
         switch decision.payload {
         case .events(let events):
@@ -629,9 +624,9 @@ struct PaneTapeStreamStateTests {
     private func continueStream(
         policy: PaneTapeSyncPolicy,
         replicaHistoryIsComplete: Bool,
-        snapshot: PaneTapeSnapshot,
+        snapshot: PaneTapeSnapshot<JSONValue>,
         synchronization: PaneTapeStateSynchronization
-    ) -> PaneTapeContinuation {
+    ) -> PaneTapeContinuation<JSONValue> {
         let decision = decidePaneTapeContinuation(
             policy: policy,
             replicaHistoryIsComplete: replicaHistoryIsComplete,
@@ -656,7 +651,7 @@ struct PaneTapeStreamStateTests {
         retainedSequences: [UInt64],
         droppedEventCount: UInt64 = 0,
         droppedHistoryRows: Int = 0,
-        requested: PaneTapeCursorPlacement? = nil,
+        requested: PaneTapeCursorPlacement<JSONValue>? = nil,
         initial: PaneTapeDimensions = .init(columns: 80, rows: 24, pinned: false),
         syncBytes: [UInt8] = Array("state".utf8),
         syncDimensions: PaneTapeDimensions = .init(columns: 100, rows: 30, pinned: false)
@@ -690,7 +685,7 @@ struct PaneTapeStreamStateTests {
         nextSequence: UInt64,
         droppedEventCount: UInt64 = 0,
         resizeSequences: Set<UInt64> = []
-    ) -> PaneTapeSnapshot {
+    ) -> PaneTapeSnapshot<JSONValue> {
         PaneTapeSnapshot(
             events: sequences.map { sequence in
                 let isResize = resizeSequences.contains(sequence)
@@ -732,23 +727,32 @@ struct PaneTapeStreamStateTests {
         historyBudgetBytes: PaneTapeSyncPolicy.defaultHistoryBudgetBytes
     )
 
-    private func cursorJSON(sequence: UInt64, feed: Int) -> JSONValue {
-        .object([
-            "recorderLifetimeId": .string(Self.lifetimeId.uuidString),
-            "sequence": .number(Double(sequence)),
-            "feedByteOffset": .number(Double(feed)),
-            "writeByteOffset": .number(0),
-        ])
-    }
-
-    private func sequence(_ record: JSONValue) -> UInt64? {
-        record["sequence"]?.asNumber.map(UInt64.init)
-    }
-
-    private func synchronizationBytes(_ records: [JSONValue]) throws -> [UInt8] {
-        try records.flatMap { record in
-            let encoded = try #require(record["base64"]?.asString)
-            return try #require(Data(base64Encoded: encoded)).map { $0 }
+    private func kind(_ record: PaneTapeOutgoingRecord<JSONValue>) -> PaneTapeRecordKind {
+        switch record {
+        case .start: .start
+        case .gap: .gap
+        case .event: .event
+        case .sync: .sync
+        case .end: .end
         }
+    }
+
+    private func gap(_ record: PaneTapeOutgoingRecord<JSONValue>?) -> PaneTapeGapRecord? {
+        guard case .gap(let gap)? = record else { return nil }
+        return gap
+    }
+
+    private func part(_ record: PaneTapeOutgoingRecord<JSONValue>?) -> PaneTapeSyncRecord? {
+        guard case .sync(let part)? = record else { return nil }
+        return part
+    }
+
+    private func sequence(_ record: PaneTapeOutgoingRecord<JSONValue>) -> UInt64? {
+        guard case .event(let event) = record else { return nil }
+        return event.sequence
+    }
+
+    private func synchronizationBytes(_ records: [PaneTapeOutgoingRecord<JSONValue>]) -> [UInt8] {
+        records.flatMap { part($0)?.bytes ?? [] }
     }
 }

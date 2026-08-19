@@ -137,7 +137,7 @@ struct IpcConnectionLivenessTests {
         // Far past any socket buffer, so the writer is certainly parked in `write`.
         connection.writeNotification(
             method: Methods.paneTapeEvent,
-            params: .object(["record": .string(String(repeating: "x", count: 4_000_000))])
+            params: JSONValue.object(["record": .string(String(repeating: "x", count: 4_000_000))])
         )
 
         #expect(try await closed.wait() == .peerSilent)

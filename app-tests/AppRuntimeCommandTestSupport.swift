@@ -86,7 +86,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var paneTapeOpenings: [(PaneTapeCaptureMode, PaneTapeStartPosition, PaneTapeSyncPolicy)] = []
     /// The opening this session hands a tape reader. `nil` reports "no terminal to read",
     /// so a test that wants a live follow stream on this pane assigns one.
-    var tapeOpening: PaneTapeOpening?
+    var tapeOpening: PaneTapeOpening<PaneTapeSessionEvent>?
     /// Counts follow notices the runtime retired, which is how a stream ending shows up on
     /// the session side.
     var cancelledTapeNotices = 0
@@ -162,7 +162,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,
         policy: PaneTapeSyncPolicy
-    ) -> (@Sendable () throws -> PaneTapeOpening)? {
+    ) -> (@Sendable () throws -> PaneTapeOpening<PaneTapeSessionEvent>)? {
         paneTapeOpenings.append((capture, start, policy))
         guard let tapeOpening else { return nil }
         return { tapeOpening }
@@ -292,7 +292,7 @@ private func waitUntilCommandReadable(_ descriptor: Int32) -> Bool {
 
 /// An opening that carries no prefix records, so a test can hold a real follow stream open
 /// against a recording session with no terminal engine behind it.
-func makeEmptyPaneTapeOpening() -> PaneTapeOpening {
+func makeEmptyPaneTapeOpening() -> PaneTapeOpening<PaneTapeSessionEvent> {
     let cursor = PaneTapeCursor(
         recorderLifetimeId: UUID(),
         nextSequence: 0,
@@ -300,9 +300,54 @@ func makeEmptyPaneTapeOpening() -> PaneTapeOpening {
         writeBytesBeforeNextSequence: 0
     )
     return PaneTapeOpening(
-        start: PaneTapeStart(record: .object(["type": .string("start")]), cursor: cursor),
+        start: PaneTapeStart(
+            record: PaneTapeStartRecord(
+                version: paneTapeStreamVersion,
+                capture: .follow,
+                format: .replay,
+                columns: 80,
+                rows: 24,
+                pinned: false,
+                cursor: cursor,
+                reconstructible: false
+            ),
+            cursor: cursor
+        ),
         records: [],
         nextCursor: cursor,
+        replicaHistoryIsComplete: false
+    )
+}
+
+/// A dump whose prefix is one retained event, so a test can watch a whole finite capture --
+/// start record, event record, terminator -- reach a real socket.
+func makeSingleEventPaneTapeDump(
+    of event: PaneTapeSessionEvent
+) -> PaneTapeOpening<PaneTapeSessionEvent> {
+    let empty = makeEmptyPaneTapeOpening()
+    return PaneTapeOpening(
+        start: PaneTapeStart(
+            record: PaneTapeStartRecord(
+                version: paneTapeStreamVersion,
+                capture: .dump,
+                format: .replay,
+                columns: 80,
+                rows: 24,
+                pinned: false,
+                cursor: empty.nextCursor,
+                reconstructible: false
+            ),
+            cursor: empty.nextCursor
+        ),
+        records: [makePaneTapeEventRecord(PaneTapeEvent(
+            sequence: 4,
+            elapsedNanoseconds: 11,
+            originElapsedNanoseconds: nil,
+            payload: .init(byteOffset: 0, byteLength: 2),
+            event: event,
+            needsCompleteHistory: false
+        ))],
+        nextCursor: empty.nextCursor,
         replicaHistoryIsComplete: false
     )
 }

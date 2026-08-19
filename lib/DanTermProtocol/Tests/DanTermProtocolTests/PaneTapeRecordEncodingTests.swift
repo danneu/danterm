@@ -68,24 +68,9 @@ struct PaneTapeRecordEncodingTests {
         let alone = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(event))
         #expect(fields[PaneTapeRecordKey.event] == alone)
     }
-
-    // Intent: the record's `Encodable` conformance writes the same object the JSONValue
-    //   builder does.
-    // Why it exists: the producer still builds records as JSON trees while it is moved over to
-    //   the typed record, so for now the shape has two writers. This pin holds the wire steady
-    //   across that move; it goes away with the builder it compares against.
-    // Scenario: spec-first, guarding the producer's migration to typed records.
-    @Test("the typed encode writes what the JSONValue builder writes")
-    func typedEncodeMatchesTheJSONValueBuilder() throws {
-        for (outgoing, _) in roundTripCases {
-            #expect(try encodedValue(outgoing) == encodePaneTapeRecord(outgoing))
-        }
-    }
 }
 
-/// The records the wire must carry, each beside the record a reader must get back. They are
-/// declared once because the round trip and the builder-equivalence pin must not disagree
-/// about which shapes count.
+/// The records the wire must carry, each beside the record a reader must get back.
 private let roundTripCases: [(PaneTapeOutgoingRecord<JSONValue>, PaneTapeRecord<JSONValue>)] = {
     let cursor = PaneTapeCursor(
         recorderLifetimeId: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,

@@ -17,13 +17,20 @@ import TerminalRenderExecution
 import TerminalRenderPlanning
 #endif
 
-#if !DANTERM_UI_TEST
-/// Preserves TerminalCoreRecording's single event dialect when wrapping live tape events for IPC.
-func paneTapeFollowEventJSON(_ event: NeutralTerminalRecordingEvent) throws -> JSONValue {
-    let data = try JSONEncoder().encode(event)
-    return try JSONDecoder().decode(JSONValue.self, from: data)
-}
+/// The event payload every pane-tape value at the `TerminalSession` boundary carries.
+///
+/// A per-build alias rather than an associated type: the session protocol is used
+/// existentially all over the app, and the UI-test harness compiles it without the engine at
+/// all. It lives in this file because this is the adapter that may name engine types; the
+/// harness has no recorder to serve a tape from, so its alias only has to be a value the
+/// generic stream types can be named with.
+#if DANTERM_UI_TEST
+typealias PaneTapeSessionEvent = JSONValue
+#else
+typealias PaneTapeSessionEvent = NeutralTerminalRecordingEvent
+#endif
 
+#if !DANTERM_UI_TEST
 /// Restates the engine's live-capture provenance in the protocol's JSON vocabulary.
 func paneTapeProvenanceJSON() throws -> JSONValue {
     let data = try JSONEncoder().encode(NeutralTerminalProvenance.liveCapture())
@@ -71,9 +78,9 @@ func paneTapeEventNeedsCompleteHistory(_ event: NeutralTerminalRecordingEvent) -
 /// and follow batches both come through here, so neither can adapt an event differently.
 func paneTapeSnapshot(
     _ snapshot: TerminalFlightRecordingCursorSnapshot
-) throws -> PaneTapeSnapshot {
+) -> PaneTapeSnapshot<PaneTapeSessionEvent> {
     PaneTapeSnapshot(
-        events: try snapshot.events.map { recorded in
+        events: snapshot.events.map { recorded in
             PaneTapeEvent(
                 sequence: recorded.sequence,
                 elapsedNanoseconds: recorded.elapsedNanoseconds,
@@ -81,7 +88,7 @@ func paneTapeSnapshot(
                 payload: recorded.payload.map {
                     .init(byteOffset: $0.byteOffset, byteLength: $0.byteLength)
                 },
-                event: try paneTapeFollowEventJSON(recorded.event),
+                event: recorded.event,
                 needsCompleteHistory: paneTapeEventNeedsCompleteHistory(recorded.event)
             )
         },
@@ -105,18 +112,18 @@ func paneTapeOrigin(_ origin: TerminalFlightRecordingOrigin) -> PaneTapeOrigin {
 /// that selects a synchronization ever serializes it.
 func paneTapeStreamFence(
     _ fence: TerminalFlightRecordingStreamFence
-) throws -> PaneTapeStreamFence {
-    let requested: PaneTapeCursorPlacement
+) -> PaneTapeStreamFence<PaneTapeSessionEvent> {
+    let requested: PaneTapeCursorPlacement<PaneTapeSessionEvent>
     switch fence.requested {
     case .placed(let snapshot):
-        requested = .placed(try paneTapeSnapshot(snapshot))
+        requested = .placed(paneTapeSnapshot(snapshot))
     case .unplaceable:
         requested = .unplaceable
     }
     return PaneTapeStreamFence(
         origin: paneTapeOrigin(fence.origin),
         live: paneTapeOrigin(fence.live),
-        retained: try paneTapeSnapshot(fence.retained),
+        retained: paneTapeSnapshot(fence.retained),
         requested: requested
     )
 }
@@ -1292,7 +1299,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,
         policy: PaneTapeSyncPolicy
-    ) -> (@Sendable () throws -> PaneTapeOpening)? {
+    ) -> (@Sendable () throws -> PaneTapeOpening<PaneTapeSessionEvent>)? {
         let requestedCursor: PaneTapeCursor
         switch start {
         case .cursor(let cursor): requestedCursor = cursor
@@ -1302,7 +1309,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         return {
             let decision = decidePaneTapeOpening(
                 request: PaneTapeStreamRequest(capture: capture, policy: policy, position: start),
-                fence: try paneTapeStreamFence(fence)
+                fence: paneTapeStreamFence(fence)
             )
             let provenance = try paneTapeProvenanceJSON()
             switch decision.payload {
@@ -1324,7 +1331,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         from cursor: PaneTapeCursor,
         policy: PaneTapeSyncPolicy,
         replicaHistoryIsComplete: Bool
-    ) -> (@Sendable () throws -> PaneTapeContinuation)? {
+    ) -> (@Sendable () -> PaneTapeContinuation<PaneTapeSessionEvent>)? {
         guard let fence = controller.flightRecordingFollowStreamFence(
             subscriptionId: subscriptionId,
             from: recorderCursor(cursor)
@@ -1335,7 +1342,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             let decision = decidePaneTapeContinuation(
                 policy: policy,
                 replicaHistoryIsComplete: replicaHistoryIsComplete,
-                snapshot: try paneTapeSnapshot(fence.snapshot)
+                snapshot: paneTapeSnapshot(fence.snapshot)
             )
             switch decision {
             case .events(let events):

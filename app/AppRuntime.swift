@@ -694,12 +694,15 @@ class AppRuntime {
                 // retained tape, and the main actor is drawing panes. Order still holds: each
                 // call encodes inline and hands its bytes to the connection's serial write
                 // queue, so the start record reaches the socket ahead of everything after it.
-                connection.writeSuccess(reqId: reqId, result: opening.start.record)
+                connection.writeSuccess(
+                    reqId: reqId,
+                    result: PaneTapeOutgoingRecord<JSONValue>.start(opening.start.record)
+                )
                 let endReason: PaneTapeEndReason = capture == .snapshot
                     ? .snapshotComplete
                     : .dumpComplete
                 writePaneTapeRecords(
-                    opening.records + [makePaneTapeEndRecord(reason: endReason)],
+                    opening.records + [.end(reason: endReason)],
                     connection: connection.connection,
                     subscriptionId: captureId
                 )
@@ -745,7 +748,10 @@ class AppRuntime {
         DispatchQueue.global(qos: .utility).async {
             do {
                 let opening = try prepareOpening()
-                connection.writeSuccess(reqId: reqId, result: opening.start.record) { [weak self] succeeded in
+                connection.writeSuccess(
+                    reqId: reqId,
+                    result: PaneTapeOutgoingRecord<JSONValue>.start(opening.start.record)
+                ) { [weak self] succeeded in
                     guard let self else { return }
                     self.schedulingLifecycle.run(callbackToken) {
                         self.finishPaneTapeFollowStart(
@@ -777,7 +783,7 @@ class AppRuntime {
         subscriptionId: UUID,
         paneId: PaneId,
         connection: IpcConnection,
-        opening: PaneTapeOpening,
+        opening: PaneTapeOpening<PaneTapeSessionEvent>,
         policy: PaneTapeSyncPolicy
     ) {
         guard schedulingLifecycle.isActive else { return }
@@ -786,7 +792,7 @@ class AppRuntime {
         // same terminator a pane close writes; its socket stays open for its other work.
         guard let session = paneSession(for: paneId) else {
             writePaneTapeRecords(
-                [makePaneTapeEndRecord(reason: .paneClosed)],
+                [PaneTapeOutgoingRecord<PaneTapeSessionEvent>.end(reason: .paneClosed)],
                 connection: connection,
                 subscriptionId: subscriptionId
             )
@@ -884,25 +890,16 @@ class AppRuntime {
             .deferredCallback,
             cancel: {}
         ) else { return }
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            do {
-                let continuation = try prepareBatch()
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.schedulingLifecycle.run(callbackToken) {
-                        self.deliverPaneTapeFollowBatch(
-                            subscriptionId: fetch.subscriptionId,
-                            connection: connection,
-                            continuation: continuation
-                        )
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.schedulingLifecycle.run(callbackToken) {
-                        self.failPaneTapeFollow(fetch.subscriptionId)
-                    }
+        DispatchQueue.global(qos: .utility).async {
+            let continuation = prepareBatch()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.schedulingLifecycle.run(callbackToken) {
+                    self.deliverPaneTapeFollowBatch(
+                        subscriptionId: fetch.subscriptionId,
+                        connection: connection,
+                        continuation: continuation
+                    )
                 }
             }
         }
@@ -911,7 +908,7 @@ class AppRuntime {
     private func deliverPaneTapeFollowBatch(
         subscriptionId: UUID,
         connection: IpcConnection,
-        continuation: PaneTapeContinuation
+        continuation: PaneTapeContinuation<PaneTapeSessionEvent>
     ) {
         guard schedulingLifecycle.isActive else { return }
         guard let accepted = paneTapeFollowSubscriptions.finishFetch(
@@ -980,7 +977,7 @@ class AppRuntime {
     private func writePaneTapeFollowEnd(_ end: PaneTapeFollowEnd) {
         guard let connection = retirePaneTapeFollowTransport(end.subscriptionId) else { return }
         writePaneTapeRecords(
-            [end.record],
+            [PaneTapeOutgoingRecord<PaneTapeSessionEvent>.end(reason: end.reason)],
             connection: connection,
             subscriptionId: end.subscriptionId
         )
@@ -1262,7 +1259,7 @@ class AppRuntime {
                 break
             }
             let text = lineLimit.map { tailLines(raw, n: $0) } ?? raw
-            connection.writeSuccess(reqId: reqId, result: .object(["text": .string(text)]))
+            connection.writeSuccess(reqId: reqId, result: JSONValue.object(["text": .string(text)]))
 
         case .readPaneRowStructure(let reqId, let paneId):
             guard let connection = takeIpcConnection(for: reqId) else { break }
@@ -1285,7 +1282,7 @@ class AppRuntime {
                     "staleWrapClaim": .bool(row.staleWrapClaim),
                 ])
             }
-            connection.writeSuccess(reqId: reqId, result: .object(["rows": .array(rows)]))
+            connection.writeSuccess(reqId: reqId, result: JSONValue.object(["rows": .array(rows)]))
 
         case .streamPaneTape(let reqId, let paneId, let capture, let start, let policy):
             guard let connection = takeIpcConnection(for: reqId) else { break }

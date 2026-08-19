@@ -3,6 +3,7 @@ import Darwin
 import DanTermProtocol
 import Foundation
 import Testing
+import TerminalCoreRecording
 @testable import DanTerm
 
 /// Proves every IPC Command arm against a real socketpair and locks down re-entry order.
@@ -177,6 +178,63 @@ struct AppRuntimeIpcCommandTests {
         #expect(ports.session.paneTapeOpenings[1].0 == .follow)
         #expect(ports.session.paneTapeOpenings[1].1 == .now)
         #expect(ports.session.paneTapeOpenings[1].2 == .reconstructible(historyBudgetBytes: 4096))
+    }
+
+    // Intent: a real dump over the runtime's socket puts a decodable start record at the
+    //   response's `result` and each following record at its notification's `params.record`,
+    //   with the recorded event carried as the engine wrote it.
+    // Why it exists: the producer hands typed records to the wire encoder now, and the start
+    //   record leaves by a different door from every other record -- an RPC result rather than
+    //   a notification. Nothing below this seam would notice one of the two doors encoding a
+    //   record differently, or double-encoding it into a string.
+    // Scenario: an agent runs `danterm pane tape` against a pane with one retained event.
+    @Test("a dump answers with a start record and streams its events as records")
+    func paneTapeDumpPutsDecodableRecordsOnTheWire() throws {
+        let ports = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        runtime.installTerminalSession(ports.session, paneId: paneId)
+        let event = NeutralTerminalRecordingEvent.feed(Array("Hi \u{1F602}".utf8))
+        ports.session.tapeOpening = makeSingleEventPaneTapeDump(of: event)
+        let wire = try CommandIpcConnectionFixture()
+        defer {
+            wire.connection.close()
+            wire.closePeer()
+        }
+        let reqId = UUID()
+        register(wire, requestId: reqId, rpcId: .number(1), runtime: runtime)
+
+        runtime.perform(.streamPaneTape(
+            reqId: reqId,
+            paneId: paneId,
+            capture: .dump,
+            start: .beginning,
+            policy: .raw
+        ))
+
+        let result = try #require(try wire.readResponse().result)
+        guard case .start(let start)? = decodePaneTapeRecord(result) else {
+            Issue.record("the dump's reply must decode as a start record")
+            return
+        }
+        #expect(start.version == paneTapeStreamVersion)
+        #expect(start.capture == .dump)
+
+        let records = try (0..<2).map { _ in
+            try #require(wire.readNotification().params?["record"])
+        }
+        guard case .event(let delivered)? = decodePaneTapeRecord(records[0]) else {
+            Issue.record("the dump's first notification must carry an event record")
+            return
+        }
+        let alone = try JSONDecoder().decode(
+            JSONValue.self,
+            from: try JSONEncoder().encode(event)
+        )
+        #expect(delivered.sequence == 4)
+        #expect(delivered.event == alone)
+        #expect(decodePaneTapeRecord(records[1]) == .end(reason: .dumpComplete))
     }
 
     @Test("config save failure alerts and completes font resolution before return")
@@ -376,7 +434,7 @@ struct AppRuntimeIpcCommandTests {
             selectedTabId: selectedTabId
         )
         ports.onNotification = {
-            wire.connection.writeNotification(method: "test.notification", params: .null)
+            wire.connection.writeNotification(method: "test.notification", params: JSONValue.null)
         }
 
         runtime.send(.ipcRequest(

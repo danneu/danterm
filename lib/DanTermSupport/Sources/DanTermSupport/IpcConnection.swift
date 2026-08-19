@@ -161,16 +161,22 @@ final class IpcConnection: @unchecked Sendable {
         writeLine(reason.notification(livenessBound: livenessBound), closeAfterWrite: true)
     }
 
-    func writeSuccess(
+    /// Answers one request with a value that encodes itself, whether that is a `JSONValue` tree
+    /// or a typed result such as a pane-tape start record. One signature serves both, so a
+    /// typed result pays exactly the one JSON pass the envelope around it pays.
+    func writeSuccess<Result: Encodable>(
         reqId: UUID,
-        result: JSONValue,
+        result: Result,
         completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         guard let rpcId = takeResponseId(reqId) else {
             if let completion { deliver(completion, false) }
             return
         }
-        writeLine(JsonRpcResponse(id: rpcId, result: result), completion: completion)
+        writeLine(
+            JsonRpcResponseEnvelope(id: rpcId, result: result),
+            completion: completion
+        )
     }
 
     func writeError(reqId: UUID, code: Int, message: String) {
@@ -204,14 +210,17 @@ final class IpcConnection: @unchecked Sendable {
     }
 
     /// Queues one server-initiated JSON-RPC notification after earlier writes on this socket.
-    func writeNotification(
+    ///
+    /// The params encode themselves, so a typed payload -- a pane-tape record and the recorded
+    /// event inside it -- reaches the wire in the same single JSON pass as the envelope.
+    func writeNotification<Params: Encodable>(
         method: String,
-        params: JSONValue,
+        params: Params,
         closeAfterWrite: Bool = false,
         completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         writeLine(
-            JsonRpcRequest(method: method, params: params),
+            JsonRpcRequestEnvelope(method: method, params: params),
             closeAfterWrite: closeAfterWrite,
             completion: completion
         )
