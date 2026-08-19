@@ -1462,6 +1462,110 @@ struct TerminalLogicalLineStoreTests {
         #expect(identities == expectedIdentities)
     }
 
+    // MARK: - A tail truncation across a wrap seam gives the pad's bytes back
+
+    /// Runs `cycles` truncate-and-readmit rounds of `displayRows` rows each, handing every
+    /// truncated row straight back.
+    ///
+    /// One round is a no-op on a store that charges what it holds: the rows leave and the same
+    /// rows return, so the arena ends where it started. Repeating it is what turns a per-round
+    /// leak into a charge big enough to move the eviction boundary.
+    private static func truncateAndReadmit(
+        _ store: inout Terminal.LogicalLineStore,
+        displayRows: Int,
+        cycles: Int
+    ) {
+        for _ in 0..<cycles {
+            let handedBack = store.truncateTail(displayRows: displayRows)
+            for row in handedBack { store.admit(row) }
+        }
+    }
+
+    @Test("Dropping the tail record across a seam pad gives the pad's bytes back")
+    func droppingTheTailAcrossASeamPadReclaimsIt() {
+        // Intent: a truncation that rewinds the write cursor past a wrap seam's pad reclaims
+        //   the pad, so a store that truncates and readmits the same rows retains exactly what
+        //   a store that never truncated retains.
+        // Why it exists: the arena charge used to be a maintained field, and `dropTailRecord`
+        //   subtracted only the dropped record's own bytes. When that record was the one
+        //   *before* a pad, the pad the rewind skipped stayed charged forever, and the next
+        //   wrap charged a fresh pad over the same region -- so resize and reflow, which both
+        //   truncate the tail, made history charge more than it held and evict early.
+        // Scenario: hard-ended eight-cell lines at width 16 in a budget the arena wraps inside,
+        //   truncated two display rows at a time with the rows handed straight back.
+        //
+        // The line count places the tail one record past the wrap seam, so removing two display
+        // rows drops the record after the pad and then the record before it -- the rewind that
+        // skips the pad. The 40 rounds are what push the leaked pads past an eviction boundary:
+        // one round's over-charge is smaller than one record and changes nothing observable.
+        let budget = 1 << 14
+        let cellsPerLine = 8
+        var control = Terminal.LogicalLineStore(budgetBytes: budget, width: 16)
+        for line in 0..<213 {
+            control.admit(Self.shortRow(width: 16, count: cellsPerLine, seed: line))
+        }
+
+        // The ring has wrapped here, so this pins the charge on the wrapped branch, which no
+        // other exact-byte test reaches: every retained record costs an 8-byte header plus
+        // eight 8-byte cells, and the one seam pad this fixture's geometry leaves is 96 bytes.
+        let recordBytes = 8 + cellsPerLine * 8
+        let seamPadBytes = 96
+        #expect(
+            control.census.arenaBytesInUse == recordBytes * control.recordCount + seamPadBytes
+        )
+
+        // A value type, so this is the same store rather than a rebuilt one: the two copies
+        // share their physical placement exactly, which is what makes their charges comparable.
+        var subject = control
+        Self.truncateAndReadmit(&subject, displayRows: 2, cycles: 40)
+
+        #expect(subject.census.arenaBytesInUse == control.census.arenaBytesInUse)
+
+        for line in 213..<253 {
+            let row = Self.shortRow(width: 16, count: cellsPerLine, seed: line)
+            subject.admit(row)
+            control.admit(row)
+        }
+
+        #expect(subject.grandDisplayRowTotal == control.grandDisplayRowTotal)
+        #expect(Self.foldedScalars(subject) == Self.foldedScalars(control))
+    }
+
+    @Test("Reopening a forced-split tail across a seam pad gives the pad's bytes back")
+    func reopeningAForcedSplitTailAcrossASeamPadReclaimsIt() {
+        // Intent: the other rewind that crosses a pad -- reopening a closed forced-split record
+        //   so its last display row can be cut -- reclaims the pad too.
+        // Why it exists: `reopenTailRecordForTruncation` rewinds the cursor to the reopened
+        //   record's end, which is before the pad the seam wrote after it. The maintained
+        //   charge subtracted only the record's flushed side tables, so the pad leaked on every
+        //   truncation that landed here, exactly as it did on the drop path.
+        // Scenario: one never-terminated soft-wrapped line at width 12, force-split at the
+        //   record cap and again at the wrap seam, truncated three display rows at a time.
+        //
+        // The line count and the row count together land the third removal inside the record
+        // that precedes the pad, so it is reopened and cut rather than dropped, and the 40
+        // rounds accumulate the leak the way the drop-path test's do.
+        let budget = 1 << 14
+        var control = Terminal.LogicalLineStore(budgetBytes: budget, width: 12)
+        for line in 0..<157 {
+            control.admit(Self.filledRow(width: 12, seed: line, softWrapped: true))
+        }
+
+        var subject = control
+        Self.truncateAndReadmit(&subject, displayRows: 3, cycles: 40)
+
+        #expect(subject.census.arenaBytesInUse == control.census.arenaBytesInUse)
+
+        for line in 157..<197 {
+            let row = Self.filledRow(width: 12, seed: line, softWrapped: true)
+            subject.admit(row)
+            control.admit(row)
+        }
+
+        #expect(subject.grandDisplayRowTotal == control.grandDisplayRowTotal)
+        #expect(Self.foldedScalars(subject) == Self.foldedScalars(control))
+    }
+
     @Test("Tail truncation folds every handed-back row before cutting any of them")
     func truncatingTheTailHandsBackTheDerivedSpacers() {
         // Intent: a handed-back display row that ends in a derived `.spacerHead` still carries

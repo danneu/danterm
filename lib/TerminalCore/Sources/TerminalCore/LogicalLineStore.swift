@@ -180,7 +180,24 @@ extension Terminal {
         /// Byte offset where the next bytes are written. Wraps to 0 at the physical end.
         private var writeCursor = 0
 
-        private var bytesInUse = 0
+        /// Arena bytes the retained records occupy, which is the ring span `[head, writeCursor)`.
+        ///
+        /// Derived rather than stored, for the reason `grandDisplayRowTotal` is: every mutator
+        /// already moves the two cursors, and every seam between them is covered by a pad, so the
+        /// span *is* the charge. Maintained by hand it was a second copy of that fact spread over
+        /// twelve functions, and a rewind that skipped a pad -- a tail truncation crossing a wrap
+        /// seam -- subtracted only the record it named and left the pad charged for the rest of
+        /// history. A byte the cursor skips can no longer stay charged, because the charge is the
+        /// cursor distance.
+        ///
+        /// The record count is what tells an empty ring from a full one: both hold
+        /// `writeCursor == head`, and only an empty store has no records.
+        private var bytesInUse: Int {
+            guard offsets.count > 0 else { return 0 }
+            return writeCursor > head
+                ? writeCursor - head
+                : arenaCapacity - head + writeCursor
+        }
 
         /// One packed arena offset and stable identity per live record, oldest first. The pair
         /// stays one word, so the capacity charge that bounds the degenerate blank-line regime
@@ -572,8 +589,8 @@ extension Terminal {
         /// The single quantity `31/I2` bounds, in O(1).
         ///
         /// Read on the write path -- once per admission and once per eviction step -- which is why
-        /// every term is either capacity arithmetic or a total its owner maintains, rather than
-        /// the walk over payloads a `Census` does.
+        /// every term is either capacity arithmetic, the arena's ring span, or a total its owner
+        /// maintains, rather than the walk over payloads a `Census` does.
         var chargedBytes: Int {
             bytesInUse + indexChargeBytes + openScratchBytes + sideTables.chargedBytes
         }
@@ -581,7 +598,8 @@ extension Terminal {
         var census: Census {
             // The maintained side-table charge against a full recount: a mutation that moves a
             // table without moving its bytes fails here rather than loosening the bound in
-            // production. The other terms are read off live capacities, so they cannot drift.
+            // production. Every other term is derived -- live capacities, or the arena's ring
+            // span -- so none of them can drift.
             let recountedSideTables = sideTables.recountedChargedBytes
             assert(
                 sideTables.chargedBytes == recountedSideTables,
@@ -812,8 +830,6 @@ extension Terminal {
             flushOpenTables(into: &record, at: offset)
             record.isOpen = false
             writeHeader(record, at: offset)
-            bytesInUse += record.byteLength
-                - LogicalLineRecord.headerAndCells(record.cellCount)
             writeCursor = recordOffset(in: offset) + record.byteLength
             clearOpenScratch()
         }
@@ -827,11 +843,11 @@ extension Terminal {
             guard offsets.count > 0 else { return }
             let offset = offsets[offsets.count - 1]
             let record = self.record(at: offset)
-            // A forced split was made for a *physical* reason -- a region boundary -- and the pad
-            // `wrapWriteCursorAtSeam` wrote after it is already charged. Rewinding the write
-            // cursor to before that pad would make the next wrap re-pad and double-charge, so
-            // resuming a print never reopens one. Truncation, which is a rewind by construction,
-            // goes through `reopenTailRecordForTruncation` instead.
+            // A forced split was made for a *physical* reason -- a region boundary -- and its
+            // marker already reads as a line that continues, so a resumed print has no wrap
+            // claim left to restore and clearing the bit would only lose that reading.
+            // Truncation does need the record reopened, because it has dropped whatever followed
+            // the split, and goes through `reopenTailRecordForTruncation` instead.
             guard record.isOpen == false, record.isForcedSplit == false else { return }
             reopenClosedTail(record, at: offset)
         }
@@ -859,7 +875,6 @@ extension Terminal {
                 record.hasTrailingFill = false
                 sideTables.setFillStyle(nil, at: firstRecordSequence + offsets.count - 1)
             }
-            let closedLength = record.byteLength
             record.isOpen = true
             // An open record continues into the live grid, which is what the split bit meant
             // while its follower existed; keeping both set would leave a reopened record marked
@@ -869,7 +884,6 @@ extension Terminal {
             record.identityEntryCount = 0
             record.identityPerCell = false
             writeHeader(record, at: offset)
-            bytesInUse -= closedLength - record.byteLength
             writeCursor = recordOffset(in: offset) + record.byteLength
         }
 
@@ -901,8 +915,6 @@ extension Terminal {
             record.isOpen = false
             record.isForcedSplit = true
             writeHeader(record, at: offset)
-            bytesInUse += record.byteLength
-                - LogicalLineRecord.headerAndCells(record.cellCount)
             writeCursor = recordOffset(in: offset) + record.byteLength
             clearOpenScratch()
         }
@@ -939,7 +951,7 @@ extension Terminal {
             }
 
             if cut >= record.cellCount {
-                dropHeadRecord(record, at: offset)
+                dropHeadRecord(record)
             } else {
                 trimHeadRecord(record, at: offset, by: cut)
             }
@@ -982,11 +994,10 @@ extension Terminal {
                 identity: recordIdentity(in: offset)
             )
             head = newOffset
-            bytesInUse -= cut * LogicalLineRecord.cellBytes
             headTrimmedCells += cut
         }
 
-        private mutating func dropHeadRecord(_ record: LogicalLineRecord, at offset: Int) {
+        private mutating func dropHeadRecord(_ record: LogicalLineRecord) {
             removeContentUnitsFromHead(contentContribution(recordIndex: 0))
             // `research/31/D2` Decision 2 step 2 as amended: a dropped piece whose logical line continues
             // must stamp what follows it, or the follower reads as a fresh logical line -- the
@@ -1023,17 +1034,10 @@ extension Terminal {
                 return
             }
 
-            // The head lands on the next record, and everything between the two is what this step
-            // reclaims: the dropped record, plus any pad the ring left before the wrap. Reading
-            // the span off the index rather than re-deriving the record's length and then walking
-            // the pads (`research/31/DD14`) charges the same bytes with one subtraction and no decode.
-            let next = offsets[0]
-            let nextOffset = recordOffset(in: next)
-            let oldOffset = recordOffset(in: offset)
-            bytesInUse -= nextOffset > oldOffset
-                ? nextOffset - oldOffset
-                : (arenaCapacity - oldOffset) + nextOffset
-            head = nextOffset
+            // The head lands on the next record, and everything between the two -- the dropped
+            // record plus any pad the ring left before the wrap (`research/31/DD14`) -- leaves the
+            // charged span by that move alone.
+            head = recordOffset(in: offsets[0])
         }
 
         private mutating func retireEmptyTailBlocks() {
@@ -1047,7 +1051,6 @@ extension Terminal {
         private mutating func resetToEmptyArena() {
             head = 0
             writeCursor = 0
-            bytesInUse = 0
             headTrimmedCells = 0
             blocks.removeAll()
             sideTables.removeAll()
@@ -1098,7 +1101,7 @@ extension Terminal {
             }
 
             if last.rowCount == 1 {
-                dropTailRecord(record, at: offset)
+                dropTailRecord(at: offset)
             } else {
                 reopenTailRecordForTruncation()
                 cutTail(to: last.start, from: last.end, at: offset)
@@ -1130,14 +1133,13 @@ extension Terminal {
             return (start, end, rowCount)
         }
 
-        private mutating func dropTailRecord(_ record: LogicalLineRecord, at offset: Int) {
+        private mutating func dropTailRecord(at offset: Int) {
             addContentUnitsToTail(-contentContribution(recordIndex: offsets.count - 1))
             removeBoundaryBeforeTailIfNeeded()
             let sequence = firstRecordSequence + offsets.count - 1
             sideTables.removeEntries(at: sequence)
             clearOpenScratch()
             offsets.removeLast()
-            bytesInUse -= record.byteLength
             writeCursor = recordOffset(in: offset)
             if offsets.count == 0 {
                 resetToEmptyArena()
@@ -1182,7 +1184,6 @@ extension Terminal {
             var record = self.record(at: offset)
             record.cellCount = newCellCount
             writeHeader(record, at: offset)
-            bytesInUse -= (oldCellCount - newCellCount) * LogicalLineRecord.cellBytes
             writeCursor = recordOffset(in: offset) + record.byteLength
         }
 
@@ -1230,7 +1231,7 @@ extension Terminal {
             let index = offsets.count - 1
             let suffix = (last.start..<last.end).map { cell(recordIndex: index, cellOffset: $0) }
             if last.start == 0 {
-                dropTailRecord(record, at: offset)
+                dropTailRecord(at: offset)
             } else {
                 cutTail(to: last.start, from: last.end, at: offset)
             }
@@ -2502,10 +2503,13 @@ extension Terminal {
                 record.startsMidLine = true
                 record.semanticPrompt = .none
             }
-            writeHeader(record, at: writeCursor)
-            appendRecordOffset(writeCursor)
+            // The cursor moves past the header before the index names the record, so the ring
+            // span never reads a store with one record and a cursor still at `head` -- which is
+            // the full-arena reading `bytesInUse` gives that pair.
+            let openedAt = writeCursor
+            writeHeader(record, at: openedAt)
             writeCursor += LogicalLineRecord.Header.byteCount
-            bytesInUse += LogicalLineRecord.Header.byteCount
+            appendRecordOffset(openedAt)
             clearOpenScratch()
         }
 
@@ -2552,7 +2556,6 @@ extension Terminal {
             record.cellCount += count
             writeHeader(record, at: offset)
             writeCursor += count * LogicalLineRecord.cellBytes
-            bytesInUse += count * LogicalLineRecord.cellBytes
             addContentUnitsToTail(count)
         }
 
@@ -2635,7 +2638,6 @@ extension Terminal {
             record.cellCount += cells.count
             writeHeader(record, at: offset)
             writeCursor += cells.count * LogicalLineRecord.cellBytes
-            bytesInUse += cells.count * LogicalLineRecord.cellBytes
             addContentUnitsToTail(contentUnits)
         }
 
@@ -2838,7 +2840,7 @@ extension Terminal {
         /// True when the in-use region has wrapped, so the tail's room is bounded by the head
         /// rather than by the physical end.
         private var writeCursorPrecedesHead: Bool {
-            bytesInUse > 0 && writeCursor <= head
+            offsets.count > 0 && writeCursor <= head
         }
 
         private var contiguousRoomAtCursor: Int {
@@ -2873,7 +2875,6 @@ extension Terminal {
                     if blocks.count > 0 { blocks[blocks.count - 1].rowCount -= 1 }
                     removeBoundaryBeforeTailIfNeeded()
                     offsets.removeLast()
-                    bytesInUse -= LogicalLineRecord.Header.byteCount
                     writeCursor = recordOffset(in: offset)
                     clearOpenScratch()
                     // Every other mutator keeps `head == offsets[0]`; discarding the store's only
@@ -2894,9 +2895,6 @@ extension Terminal {
                     / LogicalLineRecord.cellBytes
                 let pad = LogicalLineRecord(cellCount: units, isPad: true)
                 writeHeader(pad, at: writeCursor)
-                // Charged at the pad's own length, which is what the head subtracts when it
-                // skips it, so the two can never drift.
-                bytesInUse += pad.byteLength
             }
             writeCursor = boundary == arenaCapacity ? 0 : boundary
         }
