@@ -126,7 +126,7 @@ final class TerminalSurfaceView: UIView {
     }
 
     /// Applies one exact stream record and schedules only the presentation work it creates.
-    func apply(_ record: PaneTapeRecord) throws {
+    func apply(_ record: MobilePaneTapeRecord) throws {
         let previousCursor = replica.cursor
         let previousSlack = anchorSlackPixels
         defer { invalidateLayoutOnAnchorMove(from: previousSlack) }

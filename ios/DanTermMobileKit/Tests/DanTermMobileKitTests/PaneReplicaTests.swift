@@ -506,7 +506,7 @@ func replicaMarksItsOwnFindingsAsDetected() throws {
     #expect(producerReported.state == .gap(.declared(.total)))
 }
 
-private func startRecord(cursor: PaneTapeCursor) -> PaneTapeRecord {
+private func startRecord(cursor: PaneTapeCursor) -> MobilePaneTapeRecord {
     .start(PaneTapeStartRecord(
         version: 1,
         capture: .follow,
@@ -547,16 +547,14 @@ private func eventRecord(
     byteOffset: Int? = nil,
     byteLength: Int? = nil,
     event: NeutralTerminalRecordingEvent
-) throws -> PaneTapeRecord {
-    let data = try JSONEncoder().encode(event)
-    let json = try JSONDecoder().decode(JSONValue.self, from: data)
-    return .event(PaneTapeEventRecord(
+) -> MobilePaneTapeRecord {
+    .event(PaneTapeEventRecord(
         sequence: sequence,
         elapsedNanoseconds: sequence,
         originElapsedNanoseconds: nil,
         byteOffset: byteOffset,
         byteLength: byteLength,
-        event: json
+        event: event
     ))
 }
 

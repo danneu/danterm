@@ -315,6 +315,61 @@ func claimConfirmationAndExternalReleaseFollowTheFrameOrder() throws {
     )))).isEmpty)
 }
 
+@Test("A tape event this build cannot read ends the connection and reaches no surface")
+func undecodableTapeEventEndsTheConnection() throws {
+    // Intent: a well-formed record whose inner event does not decode produces no
+    //   applyRecord effect and ends the connection exactly as a replica refusal does.
+    // Why it exists: the event is decoded once, at the model's edge, so the refusal that
+    //   used to come back from the surface has to be decided here instead -- and it must
+    //   still end the connection rather than let a record the phone cannot read pass by.
+    var refusing = Session()
+    try refusing.reachServingStream()
+    let refusal = refusing.handle(.replicaRejectedRecord)
+
+    var session = Session()
+    try session.reachServingStream()
+    // A feed event with neither byte encoding: the record shape is valid, the event is not.
+    let effects = session.handle(tapeEventNotification(.object(["type": .string("feed")])))
+
+    #expect(!effects.contains { effect in
+        if case .applyRecord = effect { return true }
+        return false
+    })
+    #expect(effects == refusal)
+}
+
+@Test("A resize event with no pinned key states the pane unpinned")
+func resizeWithoutPinnedKeyStatesUnpinned() throws {
+    // Intent: a resize event that omits `pinned` entirely ends a confirmed standing claim,
+    //   which is what reading it as unpinned means.
+    // Why it exists: recordings made before pinnedness existed omit the key, and the one
+    //   place that default is now stated is the event's own decode -- a bridge that turned
+    //   the missing key into a decode failure, or into pinned, would silently strand the
+    //   phone's claim.
+    var session = Session()
+    try session.reachServingStream()
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: true
+    )))
+    let claimId = try #require(resizeRequestIds(session.handle(.claimRequested)).first)
+    _ = session.handle(.frameReceived(.response(JsonRpcResponse(
+        id: claimId,
+        result: .object(["ok": .bool(true)])
+    ))))
+
+    _ = session.handle(tapeEventNotification(.object([
+        "type": .string("resize"),
+        "columns": .number(80),
+        "rows": .number(24),
+    ])))
+
+    #expect(resizes(session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 40, rows: 60),
+        pinned: false
+    )))).isEmpty)
+}
+
 @Test("Typing reaches the pane the model holds, and nothing before it holds one")
 func typingRoutesToTheSelectedPane() throws {
     // Intent: text goes to the selected pane, and text handled before a pane is selected
@@ -611,6 +666,17 @@ private func tapeResizeNotification(
     rows: Int,
     pinned: Bool
 ) -> MobileSessionEvent {
+    tapeEventNotification(.object([
+        "type": .string("resize"),
+        "columns": .number(Double(columns)),
+        "rows": .number(Double(rows)),
+        "pinned": .bool(pinned),
+    ]))
+}
+
+/// One streamed tape record carrying the given event object verbatim, so a test can state
+/// the exact JSON the model's decode edge is handed.
+private func tapeEventNotification(_ event: JSONValue) -> MobileSessionEvent {
     .frameReceived(.notification(
         method: Methods.paneTapeEvent,
         params: .object([
@@ -619,12 +685,7 @@ private func tapeResizeNotification(
                 "kind": .string("event"),
                 "sequence": .number(1),
                 "elapsedNanoseconds": .number(0),
-                "event": .object([
-                    "type": .string("resize"),
-                    "columns": .number(Double(columns)),
-                    "rows": .number(Double(rows)),
-                    "pinned": .bool(pinned),
-                ]),
+                "event": event,
             ]),
         ])
     ))

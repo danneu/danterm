@@ -12,6 +12,7 @@
 import DanTermClient
 import DanTermProtocol
 import Foundation
+import TerminalCoreRecording
 
 /// Everything a surface renders, recomputed from the model rather than remembered by a view.
 public struct MobileSessionProjection: Equatable, Sendable {
@@ -446,8 +447,7 @@ public struct MobileSessionModel: Equatable, Sendable {
             guard let value = response.result, let record = decodePaneTapeRecord(value) else {
                 return []
             }
-            noteRecordPinnedness(record)
-            return [.applyRecord(record)]
+            return take(record, env: env)
         case .notification(let method, let params):
             // A roster replaces the list and nothing else. The streamed pane leaving the
             // roster is not this notification's news to act on: the tape stream reports
@@ -459,9 +459,28 @@ public struct MobileSessionModel: Equatable, Sendable {
             guard let notification = PaneTapeStreamNotification(method: method, params: params),
                   let record = decodePaneTapeRecord(notification.record)
             else { return [] }
-            noteRecordPinnedness(record)
-            return [.applyRecord(record)]
+            return take(record, env: env)
         }
+    }
+
+    /// Lifts one decoded record's JSON event into the engine's own event type and hands the
+    /// result on. This is the only place a tape event is parsed: past it the record carries
+    /// the typed event, so no consumer can read the JSON a second time.
+    ///
+    /// An event this build cannot read ends the connection rather than being skipped. The
+    /// phone would otherwise render across a recorder event it does not understand and go
+    /// on claiming the replica is exact.
+    private mutating func take(
+        _ record: PaneTapeRecord<JSONValue>,
+        env: MobileSessionEnv
+    ) -> [MobileSessionEffect] {
+        guard let typed = try? record.mapEvent({ event in
+            try JSONValueDecoder().decode(NeutralTerminalRecordingEvent.self, from: event)
+        }) else {
+            return end(with: .deviceSetup, detail: "Stream carried an unreadable event", env: env)
+        }
+        noteRecordPinnedness(typed)
+        return [.applyRecord(typed)]
     }
 
     /// Ends a confirmed standing claim when the tape states the pane unpinned.
@@ -471,7 +490,7 @@ public struct MobileSessionModel: Equatable, Sendable {
     /// response states post-claim truth (the server replies before it reconciles), while
     /// one decoded before it is pre-claim truth and ends nothing. Surface facts lawfully
     /// lag the response, so they never end a claim; no record confirms one either.
-    private mutating func noteRecordPinnedness(_ record: PaneTapeRecord) {
+    private mutating func noteRecordPinnedness(_ record: MobilePaneTapeRecord) {
         guard let claim = standingClaim, claim.pendingRequestId == nil else { return }
         guard pinnedStatement(in: record) == false else { return }
         standingClaim = nil
@@ -480,18 +499,17 @@ public struct MobileSessionModel: Equatable, Sendable {
     /// The pinnedness one tape record states, or nil for a record that says nothing
     /// about it. Three kinds state it: the opening contract, a sync transfer's first
     /// part, and the recorder's resize event.
-    private func pinnedStatement(in record: PaneTapeRecord) -> Bool? {
+    private func pinnedStatement(in record: MobilePaneTapeRecord) -> Bool? {
         switch record {
         case .start(let start):
             return start.pinned
         case .sync(let sync):
             return sync.transfer?.pinned
         case .event(let event):
-            guard event.event["type"]?.asString == "resize" else { return nil }
-            // The producer always writes the bit; absent means a pre-pinnedness
-            // recording, whose grids are all derived rather than overridden.
-            if case .bool(let pinned)? = event.event["pinned"] { return pinned }
-            return false
+            // A pre-pinnedness recording omits the bit, and the event's own decode is where
+            // that absence became "unpinned" -- it is not restated here.
+            guard case .resize(_, _, let pinned) = event.event else { return nil }
+            return pinned
         case .gap, .end, .unknown:
             return nil
         }
