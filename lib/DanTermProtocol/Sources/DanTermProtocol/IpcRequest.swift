@@ -341,10 +341,10 @@ public enum IpcRequest: Equatable, Sendable {
     case todoAdd(owner: TodoOwner, text: String)
     /// Edits a named todo in a structurally required owner.
     case todoEdit(owner: TodoOwner, todoId: TodoId, text: String)
-    /// Completes a named todo in a structurally required owner.
-    case todoDone(owner: TodoOwner, todoId: TodoId)
-    /// Reopens a named todo in a structurally required owner.
-    case todoOpen(owner: TodoOwner, todoId: TodoId)
+    /// Sets the completion state of a named todo in a structurally required owner.
+    /// The state is a value here, not a case: `todo.done` and `todo.open` differ by
+    /// nothing else, so branches read `isDone` instead of recovering it from a tag.
+    case todoSetDone(owner: TodoOwner, todoId: TodoId, isDone: Bool)
     /// Deletes a named todo from a structurally required owner.
     case todoDelete(owner: TodoOwner, todoId: TodoId)
     /// Clears completed todos from a structurally required owner.
@@ -384,8 +384,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .todoList: return .todoList
         case .todoAdd: return .todoAdd
         case .todoEdit: return .todoEdit
-        case .todoDone: return .todoDone
-        case .todoOpen: return .todoOpen
+        case .todoSetDone(_, _, let isDone): return isDone ? .todoDone : .todoOpen
         case .todoDelete: return .todoDelete
         case .todoClearCompleted: return .todoClearCompleted
         }
@@ -410,7 +409,7 @@ public enum IpcRequest: Equatable, Sendable {
              .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
              .agentAttach, .agentActivity, .agentDetach:
             return ["pane"]
-        case .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
+        case .todoList, .todoAdd, .todoEdit, .todoSetDone,
              .todoDelete, .todoClearCompleted:
             return ["pane", "tab"]
         }
@@ -505,8 +504,8 @@ public enum IpcRequest: Equatable, Sendable {
             return ownerParams(owner).merging([
                 "todoId": idValue(todoId), "text": .string(text),
             ]) { _, new in new }
-        case .todoDone(let owner, let todoId), .todoOpen(let owner, let todoId),
-             .todoDelete(let owner, let todoId):
+        // `isDone` stays out of params on purpose: the wire method carries it.
+        case .todoSetDone(let owner, let todoId, _), .todoDelete(let owner, let todoId):
             return ownerParams(owner).merging(["todoId": idValue(todoId)]) { _, new in new }
         }
     }
@@ -652,17 +651,15 @@ public enum IpcRequest: Equatable, Sendable {
                   text.trimmingCharacters(in: .whitespaces).isEmpty == false
             else { throw invalid("invalid todo") }
             return .todoEdit(owner: owner, todoId: TodoId(rawValue: todoId), text: text)
-        case .todoDone, .todoOpen, .todoDelete:
-            let owner = try todoOwner(object)
-            guard case .string(let rawTodoId)? = object?["todoId"], let todoId = UUID(uuidString: rawTodoId) else {
-                throw invalid("invalid todo")
-            }
-            switch method {
-            case .todoDone: return .todoDone(owner: owner, todoId: TodoId(rawValue: todoId))
-            case .todoOpen: return .todoOpen(owner: owner, todoId: TodoId(rawValue: todoId))
-            case .todoDelete: return .todoDelete(owner: owner, todoId: TodoId(rawValue: todoId))
-            default: preconditionFailure("exhaustive todo method switch")
-            }
+        case .todoDone:
+            let (owner, todoId) = try todoOwnerAndId(object)
+            return .todoSetDone(owner: owner, todoId: todoId, isDone: true)
+        case .todoOpen:
+            let (owner, todoId) = try todoOwnerAndId(object)
+            return .todoSetDone(owner: owner, todoId: todoId, isDone: false)
+        case .todoDelete:
+            let (owner, todoId) = try todoOwnerAndId(object)
+            return .todoDelete(owner: owner, todoId: todoId)
         case .todoClearCompleted:
             return .todoClearCompleted(owner: try todoOwner(object))
         }
@@ -701,6 +698,16 @@ private func todoOwner(_ object: [String: JSONValue]?) throws -> TodoOwner {
     }
     let tab: TabId = try target("tab", object: object)
     return .tab(tab)
+}
+
+/// Shares the owner-plus-id extraction across the todo methods that name one todo,
+/// so each of them can decode in its own case arm without a grouped re-switch.
+private func todoOwnerAndId(_ object: [String: JSONValue]?) throws -> (TodoOwner, TodoId) {
+    let owner = try todoOwner(object)
+    guard case .string(let rawTodoId)? = object?["todoId"], let todoId = UUID(uuidString: rawTodoId) else {
+        throw invalid("invalid todo")
+    }
+    return (owner, TodoId(rawValue: todoId))
 }
 
 private func ownerParams(_ owner: TodoOwner) -> [String: JSONValue] {

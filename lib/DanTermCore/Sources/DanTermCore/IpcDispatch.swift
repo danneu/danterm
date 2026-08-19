@@ -486,18 +486,12 @@ private func dispatchIpc(
             .ipcReply(reqId: reqId, result: todoResult(updated)),
         ]
 
-    case .todoDone(let owner, let todoId), .todoOpen(let owner, let todoId):
+    case .todoSetDone(let owner, let todoId, let isDone):
         try requireTodoOwner(owner, in: model)
         guard todoExists(todoId, owner: owner, in: model) else {
             throw IpcParamsError("invalid todo")
         }
-        let shouldBeDone: Bool
-        switch request {
-        case .todoDone: shouldBeDone = true
-        case .todoOpen: shouldBeDone = false
-        default: preconditionFailure("exhaustive todo state request")
-        }
-        let commands = update(&model, .setTodoDone(owner: owner, todoId: todoId, isDone: shouldBeDone), env: env)
+        let commands = update(&model, .setTodoDone(owner: owner, todoId: todoId, isDone: isDone), env: env)
         let updated = model.todos(for: owner)?.first(where: { $0.id == todoId })
         return commands + [
             .ipcReply(reqId: reqId, result: todoResult(updated)),

@@ -113,4 +113,34 @@ struct IpcAuditDescriptorTests {
             #expect(descriptor.input == nil)
         }
     }
+
+    @Test("a todo state change audits its state as the method and its owner as the target")
+    func todoStateChangeIsAuditedByStateAndOwner() {
+        // Intent: the audit record says which state the caller asked for, through the
+        //   method, and names the owner plus the todo, and nothing else.
+        // Why it exists: the state is carried by the wire method alone, so a request
+        //   that loses it audits as the opposite action with no other trace.
+        // Scenario: spec-first; the same todo completed and reopened, once under a
+        //   pane owner and once under a tab owner.
+        let todoId = TodoId(rawValue: UUID(uuidString: "33333333-3333-4333-8333-333333333333")!)
+        let tab = TabId(rawValue: UUID(uuidString: "44444444-4444-4444-8444-444444444444")!)
+        let owners: [(TodoOwner, [String: String])] = [
+            (.pane(pane), ["pane": pane.rawValue.uuidString.lowercased()]),
+            (.tab(tab), ["tab": tab.rawValue.uuidString.lowercased()]),
+        ]
+
+        for (owner, ownerTarget) in owners {
+            let expectedTarget = ownerTarget.merging(
+                ["todoId": todoId.rawValue.uuidString.lowercased()]
+            ) { _, new in new }
+
+            let done = IpcRequest.todoSetDone(owner: owner, todoId: todoId, isDone: true).auditDescriptor
+            #expect(done.method == "todo.done")
+            #expect(done.target == expectedTarget)
+
+            let open = IpcRequest.todoSetDone(owner: owner, todoId: todoId, isDone: false).auditDescriptor
+            #expect(open.method == "todo.open")
+            #expect(open.target == expectedTarget)
+        }
+    }
 }

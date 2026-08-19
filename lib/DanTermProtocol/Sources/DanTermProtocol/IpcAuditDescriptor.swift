@@ -115,8 +115,8 @@ public extension IpcRequest {
         case .todoList(let owner), .todoAdd(let owner, _),
              .todoClearCompleted(let owner):
             return auditOwner(owner)
-        case .todoEdit(let owner, let todoId, _), .todoDone(let owner, let todoId),
-             .todoOpen(let owner, let todoId), .todoDelete(let owner, let todoId):
+        case .todoEdit(let owner, let todoId, _), .todoSetDone(let owner, let todoId, _),
+             .todoDelete(let owner, let todoId):
             return auditOwner(owner).merging(["todoId": auditId(todoId)]) { _, new in new }
         }
     }

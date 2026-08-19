@@ -812,11 +812,23 @@ private func parseTodo(_ args: [String]) throws -> CLICommand {
             outputMode: .none
         )
     case "done":
-        return try parseTodoIdCommand(method: .todoDone, args: Array(args.dropFirst()), usage: "usage: danterm todo done \(ownerUsage) <todo-id>")
+        return try parseTodoIdCommand(
+            { .todoSetDone(owner: $0, todoId: $1, isDone: true) },
+            args: Array(args.dropFirst()),
+            usage: "usage: danterm todo done \(ownerUsage) <todo-id>"
+        )
     case "open":
-        return try parseTodoIdCommand(method: .todoOpen, args: Array(args.dropFirst()), usage: "usage: danterm todo open \(ownerUsage) <todo-id>")
+        return try parseTodoIdCommand(
+            { .todoSetDone(owner: $0, todoId: $1, isDone: false) },
+            args: Array(args.dropFirst()),
+            usage: "usage: danterm todo open \(ownerUsage) <todo-id>"
+        )
     case "delete":
-        return try parseTodoIdCommand(method: .todoDelete, args: Array(args.dropFirst()), usage: "usage: danterm todo delete \(ownerUsage) <todo-id>")
+        return try parseTodoIdCommand(
+            { .todoDelete(owner: $0, todoId: $1) },
+            args: Array(args.dropFirst()),
+            usage: "usage: danterm todo delete \(ownerUsage) <todo-id>"
+        )
     case "clear-completed":
         let usage = "usage: danterm todo clear-completed \(ownerUsage)"
         let (owner, rest) = try parseTodoOwnerPrefix(Array(args.dropFirst()), usage: usage)
@@ -840,18 +852,17 @@ private func parseTodoOwnerPrefix(_ args: [String], usage: String) throws -> (To
     return (owner, rest)
 }
 
-private func parseTodoIdCommand(method: IpcRequestMethod, args: [String], usage: String) throws -> CLICommand {
+/// Parses the argument grammar shared by every todo verb that names one todo. The
+/// caller supplies the constructor, so the request it wants is a value here rather
+/// than a tag this function has to switch back into a case.
+private func parseTodoIdCommand(
+    _ makeRequest: (TodoOwner, TodoId) -> IpcRequest,
+    args: [String],
+    usage: String
+) throws -> CLICommand {
     let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
     guard rest.count == 1, let rawTodoId = UUID(uuidString: rest[0]) else { throw CLIParseError(usage) }
-    let todoId = TodoId(rawValue: rawTodoId)
-    let request: IpcRequest
-    switch method {
-    case .todoDone: request = .todoDone(owner: owner, todoId: todoId)
-    case .todoOpen: request = .todoOpen(owner: owner, todoId: todoId)
-    case .todoDelete: request = .todoDelete(owner: owner, todoId: todoId)
-    default: preconditionFailure("todo id parser requires a todo mutation method")
-    }
-    return CLICommand(request: request, outputMode: .none)
+    return CLICommand(request: makeRequest(owner, TodoId(rawValue: rawTodoId)), outputMode: .none)
 }
 
 private func paneId(_ raw: String) throws -> PaneId {
