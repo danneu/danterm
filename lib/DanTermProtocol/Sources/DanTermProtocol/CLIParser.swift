@@ -280,29 +280,12 @@ public func parseCLI(
 }
 
 private func parseTabNewCommand(_ args: [String], currentDirectory: String) throws -> CLICommand {
-    let usage = "usage: danterm tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end]"
-    let parsed: ParsedTabNew
-    do {
-        parsed = try parseTabNewArgs(args)
-    } catch let error as NewCommandParseError {
-        switch error {
-        case .missingValue, .missingDirection:
-            throw CLIParseError(usage)
-        case .unknownFlag(let flag):
-            throw CLIParseError("unknown flag: \(flag)")
-        case .unexpectedArgument(let argument):
-            throw CLIParseError("unexpected argument: \(argument)")
-        case .conflictingPositionFlags:
-            throw CLIParseError("--after-selected, --at-group-end, and --after-tab are mutually exclusive\n\(usage)")
-        case .conflictingFocusFlags:
-            throw CLIParseError("--background and --foreground are mutually exclusive\n\(usage)")
-        }
-    }
+    let parsed = try parseTabNewArgs(args)
 
     let afterTab: String?
     if case .afterTab(let id) = parsed.position { afterTab = id } else { afterTab = nil }
     guard (parsed.group == nil) != (afterTab == nil) else {
-        throw CLIParseError(usage)
+        throw CLIParseError(tabNewUsage)
     }
 
     let launch = LaunchSpec(
@@ -313,13 +296,13 @@ private func parseTabNewCommand(_ args: [String], currentDirectory: String) thro
     let target: IpcTabTarget
     switch parsed.position {
     case .none:
-        guard let group = parsed.group else { throw CLIParseError(usage) }
+        guard let group = parsed.group else { throw CLIParseError(tabNewUsage) }
         target = .group(try groupId(group), position: .atGroupEnd)
     case .afterSelected:
-        guard let group = parsed.group else { throw CLIParseError(usage) }
+        guard let group = parsed.group else { throw CLIParseError(tabNewUsage) }
         target = .group(try groupId(group), position: .afterSelected)
     case .atGroupEnd:
-        guard let group = parsed.group else { throw CLIParseError(usage) }
+        guard let group = parsed.group else { throw CLIParseError(tabNewUsage) }
         target = .group(try groupId(group), position: .atGroupEnd)
     case .afterTab(let id):
         target = .afterTab(try tabId(id))
@@ -334,24 +317,8 @@ private func parseTabNewCommand(_ args: [String], currentDirectory: String) thro
 // move the user's selection. `Msg.createGroup` selects the new tab on its own, so
 // the CLI has to ask for the background explicitly.
 private func parseGroupNewCommand(_ args: [String], currentDirectory: String) throws -> CLICommand {
-    let usage = "usage: danterm group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
-    let parsed: ParsedGroupNew
-    do {
-        parsed = try parseGroupNewArgs(args)
-    } catch let error as NewCommandParseError {
-        switch error {
-        case .missingValue, .missingDirection, .conflictingPositionFlags:
-            throw CLIParseError(usage)
-        case .unknownFlag(let flag):
-            throw CLIParseError("unknown flag: \(flag)")
-        case .unexpectedArgument(let argument):
-            throw CLIParseError("unexpected argument: \(argument)")
-        case .conflictingFocusFlags:
-            throw CLIParseError("--background and --foreground are mutually exclusive\n\(usage)")
-        }
-    }
-
-    guard let name = parsed.name, name.isEmpty == false else { throw CLIParseError(usage) }
+    let parsed = try parseGroupNewArgs(args)
+    guard let name = parsed.name, name.isEmpty == false else { throw CLIParseError(groupNewUsage) }
     let launch = LaunchSpec(
         cmd: parsed.launch?.cmd,
         cwd: parsed.launch?.cwd ?? currentDirectory,
@@ -444,24 +411,8 @@ private func parsePaneInfoCommand(_ args: [String]) throws -> CLICommand {
 }
 
 private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm pane split --pane <pane-id> -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
-    let parsed: ParsedPaneSplit
-    do {
-        parsed = try parsePaneSplitArgs(args)
-    } catch let error as NewCommandParseError {
-        switch error {
-        case .missingDirection, .missingValue, .conflictingPositionFlags:
-            throw CLIParseError(usage)
-        case .unknownFlag(let flag):
-            throw CLIParseError("unknown flag: \(flag)")
-        case .unexpectedArgument(let argument):
-            throw CLIParseError("unexpected argument: \(argument)")
-        case .conflictingFocusFlags:
-            throw CLIParseError("--background and --foreground are mutually exclusive\n\(usage)")
-        }
-    }
-
-    guard let pane = parsed.pane else { throw CLIParseError(usage) }
+    let parsed = try parsePaneSplitArgs(args)
+    guard let pane = parsed.pane else { throw CLIParseError(paneSplitUsage) }
     return CLICommand(
         request: .paneSplit(
             pane: try paneId(pane),

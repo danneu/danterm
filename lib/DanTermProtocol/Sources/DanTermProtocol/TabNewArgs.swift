@@ -1,7 +1,12 @@
 // CLI argument parser for `danterm tab new`. Holds only the flags unique to this
 // command -- `--group` and the position flags; the launch and focus flags come
-// from `NewCommandFlags`.
+// from `NewCommandFlags`. The usage line lives here too, next to the flags it
+// documents.
 import Foundation
+
+/// The one `tab new` usage line, read both by this parser, which renders its
+/// errors with it, and by `CLIParser`, whose post-parse guards report it.
+let tabNewUsage = "usage: danterm tab new (--group <group-id> | --after-tab <tab-id>) \(newCommandFlagsUsage) [--after-selected | --at-group-end]"
 
 public enum ParsedTabPosition: Equatable {
     case afterSelected
@@ -34,7 +39,7 @@ public struct ParsedTabNew: Equatable {
 }
 
 public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
-    var flags = NewCommandFlags()
+    var flags = NewCommandFlags(usage: tabNewUsage)
     var group: String?
     var position: ParsedTabPosition?
     var i = 0
@@ -43,7 +48,7 @@ public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
         let arg = args[i]
         switch arg {
         case "--group":
-            group = try newCommandFlagValue(after: arg, in: args, at: i)
+            group = try flags.value(in: args, at: i)
             i += 2
         case "--after-selected":
             try setPosition(.afterSelected, into: &position)
@@ -53,8 +58,9 @@ public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
             i += 1
         case "--after-tab":
             // Read the id before the conflict check, so a bare trailing
-            // `--after-tab` names the value it is missing.
-            let id = try newCommandFlagValue(after: arg, in: args, at: i)
+            // `--after-tab` reports the usage line rather than accusing the user
+            // of a position conflict they can only fix by supplying a value.
+            let id = try flags.value(in: args, at: i)
             try setPosition(.afterTab(id), into: &position)
             i += 2
         default:
@@ -75,7 +81,7 @@ public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
 /// repeats the first. Unlike the focus flags, position tolerates no repetition.
 private func setPosition(_ newPosition: ParsedTabPosition, into position: inout ParsedTabPosition?) throws {
     guard position == nil else {
-        throw NewCommandParseError.conflictingPositionFlags
+        throw CLIParseError("--after-selected, --at-group-end, and --after-tab are mutually exclusive\n\(tabNewUsage)")
     }
     position = newPosition
 }

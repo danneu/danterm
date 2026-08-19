@@ -1,192 +1,79 @@
-// Tests for the CLI argument parser shared with `danterm pane split`.
+// Tests for what is unique to the `danterm pane split` argument parser: `--pane`,
+// the required `-h`/`-v` direction, and the background it reports. The flag
+// grammar it shares with `tab new` and `group new` is asserted once, in
+// `NewCommandFlagsTests`.
 import Foundation
 import Testing
 @testable import DanTermProtocol
 
 struct PaneSplitArgsTests {
-    @Test("horizontal direction parses")
-    func horizontalDirectionParses() throws {
-        let parsed = try parsePaneSplitArgs(["-h"])
-        #expect(parsed == ParsedPaneSplit(pane: nil, direction: .horizontal))
-    }
-
-    @Test("vertical direction parses")
-    func verticalDirectionParses() throws {
-        let parsed = try parsePaneSplitArgs(["-v"])
-        #expect(parsed == ParsedPaneSplit(pane: nil, direction: .vertical))
+    @Test("direction flags parse")
+    func directionFlagsParse() throws {
+        #expect(try parsePaneSplitArgs(["-h"]) == ParsedPaneSplit(pane: nil, direction: .horizontal))
+        #expect(try parsePaneSplitArgs(["-v"]) == ParsedPaneSplit(pane: nil, direction: .vertical))
     }
 
     @Test("explicit pane parses")
     func explicitPaneParses() throws {
-        let parsed = try parsePaneSplitArgs(["--pane", "P1", "-h"])
-        #expect(parsed == ParsedPaneSplit(pane: "P1", direction: .horizontal))
+        #expect(try parsePaneSplitArgs(["--pane", "P1", "-h"]) == ParsedPaneSplit(pane: "P1", direction: .horizontal))
     }
 
-    @Test("background flag parses")
-    func backgroundFlagParses() throws {
-        // Intent: `--background` records only the background flag.
-        // Why it exists: preserves back-compat for existing split recipes while
-        //   the CLI layer flips the default to background.
-        // Scenario: an existing agent recipe still includes `--background`.
-        let parsed = try parsePaneSplitArgs(["-h", "--background"])
-        #expect(parsed == ParsedPaneSplit(pane: nil, direction: .horizontal, background: true, foreground: false))
+    @Test("a repeated pane overwrites silently")
+    func aRepeatedPaneOverwritesSilently() throws {
+        #expect(try parsePaneSplitArgs(["--pane", "P1", "--pane", "P2", "-h"]) == ParsedPaneSplit(pane: "P2", direction: .horizontal))
     }
 
-    @Test("foreground flag parses")
-    func foregroundFlagParses() throws {
-        // Intent: `--foreground` records a request to focus the new split pane
-        //   within its tab.
-        // Why it exists: keeps focus policy explicit without making the arg
-        //   parser infer command defaults.
-        // Scenario: the user asks an agent to split and focus the new pane.
-        let parsed = try parsePaneSplitArgs(["-h", "--foreground"])
-        #expect(parsed == ParsedPaneSplit(pane: nil, direction: .horizontal, background: false, foreground: true))
-    }
-
-    @Test("launch flags parse")
-    func launchFlagsParse() throws {
-        let parsed = try parsePaneSplitArgs(["-h", "--cmd", "vim foo", "--cwd", "/tmp", "--title", "edit"])
-        #expect(parsed == ParsedPaneSplit(
-                pane: nil,
-                direction: .horizontal,
-                launch: LaunchSpec(cmd: "vim foo", cwd: "/tmp", title: "edit")
-            ))
-    }
-
-    @Test("background combines with other flags")
-    func backgroundCombinesWithOtherFlags() throws {
-        let parsed = try parsePaneSplitArgs([
-            "--pane", "P1", "-h", "--background",
-            "--cmd", "just test", "--cwd", "/tmp", "--title", "tests",
-        ])
-        #expect(parsed == ParsedPaneSplit(
-                pane: "P1",
-                direction: .horizontal,
-                launch: LaunchSpec(cmd: "just test", cwd: "/tmp", title: "tests"),
-                background: true,
-                foreground: false
-            ))
-    }
-
-    @Test("conflicting focus flags throw")
-    func conflictingFocusFlagsThrow() {
-        // Intent: `--background --foreground` is rejected for pane splits.
-        // Why it exists: prevents ambiguous focus policy before the command is
-        //   serialized for IPC.
-        // Scenario: a composed split command accidentally includes both flags.
-        #expect(throws: NewCommandParseError.conflictingFocusFlags) {
-            try parsePaneSplitArgs(["-h", "--background", "--foreground"])
-        }
-    }
-
-    @Test("empty command is omitted from launch")
-    func emptyCommandIsOmittedFromLaunch() throws {
-        let parsed = try parsePaneSplitArgs(["-v", "--cmd", "", "--cwd", "/tmp"])
-        #expect(parsed == ParsedPaneSplit(
-                pane: nil,
-                direction: .vertical,
-                launch: LaunchSpec(cmd: nil, cwd: "/tmp", title: nil)
-            ))
-    }
-
-    @Test("missing pane value throws")
-    func missingPaneValueThrows() {
-        #expect(throws: NewCommandParseError.missingValue("--pane")) {
+    @Test("a missing pane value reports the usage line")
+    func aMissingPaneValueReportsTheUsageLine() {
+        let error = #expect(throws: CLIParseError.self) {
             try parsePaneSplitArgs(["--pane"])
         }
+        #expect(error?.message == paneSplitUsage)
     }
 
-    @Test("missing launch flag value throws")
-    func missingLaunchFlagValueThrows() {
-        #expect(throws: NewCommandParseError.missingValue("--cmd")) {
-            try parsePaneSplitArgs(["-h", "--cmd"])
-        }
+    @Test("both focus flags are reported")
+    func bothFocusFlagsAreReported() throws {
+        // Intent: `pane split` reports the background as well as the foreground.
+        // Why it exists: `group new` reports only the foreground, so which flags
+        //   reach a result is a per-command fact and belongs in this file.
+        // Scenario: an agent recipe still passes the now-redundant `--background`.
+        #expect(try parsePaneSplitArgs(["-h", "--background"]) == ParsedPaneSplit(pane: nil, direction: .horizontal, background: true, foreground: false))
+        #expect(try parsePaneSplitArgs(["-h", "--foreground"]) == ParsedPaneSplit(pane: nil, direction: .horizontal, background: false, foreground: true))
     }
 
-    @Test("no direction throws")
-    func noDirectionThrows() {
-        #expect(throws: NewCommandParseError.missingDirection) {
+    @Test("no direction reports the usage line")
+    func noDirectionReportsTheUsageLine() {
+        let error = #expect(throws: CLIParseError.self) {
             try parsePaneSplitArgs([])
         }
+        #expect(error?.message == paneSplitUsage)
     }
 
-    @Test("unknown flag throws")
-    func unknownFlagThrows() {
-        #expect(throws: NewCommandParseError.unknownFlag("--bogus")) {
-            try parsePaneSplitArgs(["--bogus"])
-        }
-    }
-
-    @Test("trailing argument throws")
-    func trailingArgumentThrows() {
-        #expect(throws: NewCommandParseError.unexpectedArgument("extra")) {
-            try parsePaneSplitArgs(["-h", "extra"])
-        }
-    }
-
-    @Test("first bad token wins over a later conflict")
-    func firstBadTokenWinsOverALaterConflict() {
-        // Intent: parsing stops at the first token it cannot accept, and every
-        //   in-loop error outranks the missing direction checked after the loop.
-        // Why it exists: the focus conflict needs both flags and the direction
-        //   check runs last, so a left-to-right parser must report the typo.
-        // Scenario: a malformed split carries a typo and both focus flags, and
-        //   never names a direction.
-        #expect(throws: NewCommandParseError.unknownFlag("--bogus")) {
-            try parsePaneSplitArgs(["--bogus", "--background", "--foreground"])
-        }
-    }
-
-    @Test("conflicting focus flags throw in either order")
-    func conflictingFocusFlagsThrowInEitherOrder() {
-        #expect(throws: NewCommandParseError.conflictingFocusFlags) {
-            try parsePaneSplitArgs(["-h", "--foreground", "--background"])
-        }
-    }
-
-    @Test("repeating the same focus flag is accepted")
-    func repeatingTheSameFocusFlagIsAccepted() throws {
-        let parsed = try parsePaneSplitArgs(["-h", "--background", "--background"])
-        #expect(parsed == ParsedPaneSplit(pane: nil, direction: .horizontal, background: true))
-    }
-
-    @Test("repeated value flags overwrite silently")
-    func repeatedValueFlagsOverwriteSilently() throws {
-        let parsed = try parsePaneSplitArgs(["--pane", "P1", "--pane", "P2", "-h", "--cmd", "one", "--cmd", "two"])
-        #expect(parsed == ParsedPaneSplit(
-            pane: "P2",
-            direction: .horizontal,
-            launch: LaunchSpec(cmd: "two", cwd: nil, title: nil)
-        ))
-    }
-
-    @Test("empty cwd still produces a launch")
-    func emptyCwdStillProducesALaunch() throws {
-        // Intent: `--cwd ""` yields a launch holding an empty cwd.
-        // Why it exists: `LaunchSpec.init` normalizes an empty cmd to nil but
-        //   leaves cwd alone, which `emptyCommandIsOmittedFromLaunch` pins from
-        //   the other side.
-        // Scenario: a caller interpolates an empty variable into `--cwd`.
-        let parsed = try parsePaneSplitArgs(["-v", "--cwd", ""])
-        #expect(parsed == ParsedPaneSplit(
-            pane: nil,
-            direction: .vertical,
-            launch: LaunchSpec(cmd: nil, cwd: "", title: nil)
-        ))
-    }
-
-    @Test("repeated direction flag throws")
-    func repeatedDirectionFlagThrows() {
+    @Test("a repeated direction flag is rejected")
+    func aRepeatedDirectionFlagIsRejected() {
         // Intent: a second direction flag is rejected, even when it repeats the
         //   first one.
-        // Why it exists: direction is a single slot filled once. The error is
-        //   `unexpectedArgument`, so the CLI names the offending token.
+        // Why it exists: direction is a single slot filled once, unlike the focus
+        //   flags. The message names the offending token so the user can drop it.
         // Scenario: a generated split appends `-h` to a command that has it.
-        #expect(throws: NewCommandParseError.unexpectedArgument("-h")) {
-            try parsePaneSplitArgs(["-h", "-h"])
+        for flag in ["-h", "-v"] {
+            let error = #expect(throws: CLIParseError.self) {
+                try parsePaneSplitArgs(["-h", flag])
+            }
+            #expect(error?.message == "unexpected argument: \(flag)")
         }
-        #expect(throws: NewCommandParseError.unexpectedArgument("-v")) {
-            try parsePaneSplitArgs(["-h", "-v"])
+    }
+
+    @Test("a bad token outranks the missing direction checked after the scan")
+    func aBadTokenOutranksTheMissingDirectionCheckedAfterTheScan() {
+        // Intent: an error raised while scanning tokens beats the direction check
+        //   that runs once the scan is over.
+        // Why it exists: the direction check is the one guard placed after the
+        //   loop, so it is the one that could wrongly pre-empt a real token error.
+        // Scenario: a malformed split carries a typo and never names a direction.
+        let error = #expect(throws: CLIParseError.self) {
+            try parsePaneSplitArgs(["--bogus"])
         }
+        #expect(error?.message == "unknown flag: --bogus")
     }
 }

@@ -1,7 +1,12 @@
 // CLI argument parser for `danterm group new`. Holds only the flag unique to this
 // command -- `--name`; the launch and focus flags come from `NewCommandFlags`.
 // The background default and the cwd fallback are CLI policy and live in CLIParser.
+// The usage line lives here too, next to the flags it documents.
 import Foundation
+
+/// The one `group new` usage line, read both by this parser, which renders its
+/// errors with it, and by `CLIParser`, whose post-parse guards report it.
+let groupNewUsage = "usage: danterm group new --name <name> \(newCommandFlagsUsage)"
 
 /// Carries the parsed flags of `group new`. Separate from `ParsedTabNew` because
 /// `group new` has no target and no position: a group anchors to nothing.
@@ -20,7 +25,7 @@ public struct ParsedGroupNew: Equatable {
 }
 
 public func parseGroupNewArgs(_ args: [String]) throws -> ParsedGroupNew {
-    var flags = NewCommandFlags()
+    var flags = NewCommandFlags(usage: groupNewUsage)
     var name: String?
     var index = 0
 
@@ -28,7 +33,7 @@ public func parseGroupNewArgs(_ args: [String]) throws -> ParsedGroupNew {
         let arg = args[index]
         switch arg {
         case "--name":
-            name = try newCommandFlagValue(after: arg, in: args, at: index)
+            name = try flags.value(in: args, at: index)
             index += 2
         default:
             index = try flags.consume(args, at: index)

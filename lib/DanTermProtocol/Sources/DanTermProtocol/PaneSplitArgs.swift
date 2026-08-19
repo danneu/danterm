@@ -1,7 +1,12 @@
 // CLI argument parser for `danterm pane split`. Holds only the flags unique to
 // this command -- `--pane` and the `-h`/`-v` direction; the launch and focus
-// flags come from `NewCommandFlags`.
+// flags come from `NewCommandFlags`. The usage line lives here too, next to the
+// flags it documents.
 import Foundation
+
+/// The one `pane split` usage line, read both by this parser, which renders its
+/// errors with it, and by `CLIParser`, whose post-parse guard reports it.
+let paneSplitUsage = "usage: danterm pane split --pane <pane-id> -h|-v \(newCommandFlagsUsage)"
 
 public enum PaneSplitDirection: Equatable, Sendable {
     case horizontal
@@ -33,7 +38,7 @@ public struct ParsedPaneSplit: Equatable {
 }
 
 public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
-    var flags = NewCommandFlags()
+    var flags = NewCommandFlags(usage: paneSplitUsage)
     var pane: String?
     var direction: PaneSplitDirection?
     var i = 0
@@ -42,11 +47,11 @@ public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
         let arg = args[i]
         switch arg {
         case "--pane":
-            pane = try newCommandFlagValue(after: arg, in: args, at: i)
+            pane = try flags.value(in: args, at: i)
             i += 2
         case "-h", "-v":
             guard direction == nil else {
-                throw NewCommandParseError.unexpectedArgument(arg)
+                throw CLIParseError("unexpected argument: \(arg)")
             }
             direction = arg == "-h" ? .horizontal : .vertical
             i += 1
@@ -57,7 +62,7 @@ public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
 
     // Checked after the loop, so every flag error in the loop outranks it.
     guard let direction else {
-        throw NewCommandParseError.missingDirection
+        throw CLIParseError(paneSplitUsage)
     }
     return ParsedPaneSplit(
         pane: pane,
