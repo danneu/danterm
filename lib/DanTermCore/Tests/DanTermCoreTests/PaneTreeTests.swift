@@ -20,7 +20,7 @@ import Testing
     func shapeNeutralMutationsPreserveFocusAndZoom() throws {
         let (first, second, splitId) = paneIdsAndSplit()
         var tree = splitTree(first: first, second: second, splitId: splitId, focused: second)
-        _ = tree.toggleZoom()
+        _ = tree.zoom(second)
 
         let updated = tree.updatePane(first) { $0.theme = "Dracula" }
         tree.updateRatio(splitId: splitId, ratio: 0.25)
@@ -42,7 +42,7 @@ import Testing
         let first = PaneId(), second = PaneId(), third = PaneId()
         var tree = splitTree(
             first: first, second: second, splitId: SplitId(), focused: first)
-        _ = tree.toggleZoom()
+        _ = tree.zoom(first)
 
         let backgroundSplit = tree.split(
             paneId: second, direction: .vertical, newPane: PaneModel(id: third),
@@ -98,7 +98,7 @@ import Testing
         let first = PaneId(), second = PaneId()
         var swapped = splitTree(
             first: first, second: second, splitId: SplitId(), focused: second)
-        _ = swapped.toggleZoom()
+        _ = swapped.zoom(second)
 
         let didSwap = swapped.swap(source: first, target: second)
         #expect(didSwap)
@@ -124,7 +124,7 @@ import Testing
         let first = PaneId(), second = PaneId()
         var tree = splitTree(
             first: first, second: second, splitId: SplitId(), focused: first)
-        _ = tree.toggleZoom()
+        _ = tree.zoom(first)
 
         let didFocus = tree.focus(second)
         #expect(didFocus)
@@ -136,23 +136,36 @@ import Testing
         #expect(tree.focusedPaneId == second)
     }
 
-    @Test("zoom toggles only for split trees and unzoom preserves focus")
-    func zoomRequiresSplit() {
+    @Test("zoom needs a split tree, focuses the pane it names, and unzoom keeps that focus")
+    func zoomRequiresSplitAndFocusesItsTarget() {
+        // Intent: `zoom` refuses a lone leaf and a pane outside the tree, and
+        //   on a split tree it makes the named pane both the zoomed and the
+        //   focused pane; `unzoom` then leaves focus where the zoom put it.
+        // Why it exists: zoom hides every sibling, so a zoomed pane that did
+        //   not hold focus would send keystrokes to a hidden pane. Binding the
+        //   focus move into the mutator is what keeps the two facts together.
         let pane = PaneId()
         var single = PaneTree(root: .leaf(PaneModel(id: pane)))
-        let didToggleSingle = single.toggleZoom()
-        #expect(didToggleSingle == false)
+        let zoomedLoneLeaf = single.zoom(pane)
+        #expect(zoomedLoneLeaf == false)
         #expect(single.isZoomed == false)
+        #expect(single.zoomedPaneId == nil)
 
         let second = PaneId()
         var split = splitTree(
             first: pane, second: second, splitId: SplitId(), focused: second)
-        let didToggleSplit = split.toggleZoom()
-        #expect(didToggleSplit)
-        #expect(split.isZoomed)
-        split.unzoom()
+        let zoomedForeignPane = split.zoom(PaneId())
+        #expect(zoomedForeignPane == false, "a pane outside the tree cannot be zoomed")
         #expect(split.isZoomed == false)
-        #expect(split.focusedPane.id == second)
+
+        let zoomedTarget = split.zoom(pane)
+        #expect(zoomedTarget)
+        #expect(split.zoomedPaneId == pane)
+        #expect(split.focusedPane.id == pane, "the zoomed pane must hold focus")
+
+        split.unzoom()
+        #expect(split.zoomedPaneId == nil)
+        #expect(split.focusedPane.id == pane)
     }
 }
 

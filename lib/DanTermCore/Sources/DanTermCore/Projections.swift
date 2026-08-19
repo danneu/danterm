@@ -379,7 +379,7 @@ func desiredPaneToolbar(
           unreadAlertCount: tally.byPane[pane.id] ?? 0,
           totalTodoCount: pane.todos.count,
           uncompletedTodoCount: pane.todos.count { !$0.isDone },
-          isZoomed: tab.paneTree.isZoomed && tab.paneTree.focusedPaneId == pane.id,
+          isZoomed: tab.paneTree.zoomedPaneId == pane.id,
           hasSplits: hasSplits,
           isGridClaimed: pane.gridOverride != nil
         )

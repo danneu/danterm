@@ -50,7 +50,10 @@ struct IpcEntityEncoder {
         var object: [String: JSONValue] = [
             "id": .string(tab.id.rawValue.uuidString),
             "focusedPaneId": .string(tab.paneTree.focusedPaneId.rawValue.uuidString),
-            "rootNode": splitNode(tab.paneTree.root, includeLifecycles: includeLifecycles),
+            "rootNode": splitNode(
+                tab.paneTree.root,
+                zoomedPaneId: tab.paneTree.zoomedPaneId,
+                includeLifecycles: includeLifecycles),
         ]
         if let customTitle = tab.customTitle {
             object["customTitle"] = .string(customTitle)
@@ -64,12 +67,17 @@ struct IpcEntityEncoder {
         return .object(object)
     }
 
-    private func pane(_ pane: PaneModel, includeLifecycles: Bool) -> JSONValue {
+    private func pane(
+        _ pane: PaneModel,
+        zoomedPaneId: PaneId?,
+        includeLifecycles: Bool
+    ) -> JSONValue {
         var object = paneFields(
             pane,
             cwd: pane.session?.cwd.map { abbreviateHome($0, home: home) },
             includeNullCwd: false,
-            includeLifecycles: includeLifecycles
+            includeLifecycles: includeLifecycles,
+            isZoomed: zoomedPaneId == pane.id
         )
         if let theme = pane.theme {
             object["theme"] = .string(theme)
@@ -94,7 +102,8 @@ struct IpcEntityEncoder {
                 pane,
                 cwd: pane.session?.cwd,
                 includeNullCwd: true,
-                includeLifecycles: true
+                includeLifecycles: true,
+                isZoomed: tab.paneTree.zoomedPaneId == pane.id
             )),
             "tab": .object([
                 "id": .string(tab.id.rawValue.uuidString),
@@ -146,34 +155,45 @@ struct IpcEntityEncoder {
         ])
     }
 
-    private func splitNode(_ node: SplitNodeModel, includeLifecycles: Bool) -> JSONValue {
+    private func splitNode(
+        _ node: SplitNodeModel,
+        zoomedPaneId: PaneId?,
+        includeLifecycles: Bool
+    ) -> JSONValue {
         switch node {
         case .leaf(let pane):
             return .object([
                 "type": .string("leaf"),
-                "pane": self.pane(pane, includeLifecycles: includeLifecycles),
+                "pane": self.pane(
+                    pane, zoomedPaneId: zoomedPaneId, includeLifecycles: includeLifecycles),
             ])
         case .split(let id, let direction, let first, let second, let ratio):
             return .object([
                 "type": .string("split"),
                 "id": .string(id.rawValue.uuidString),
                 "direction": .string(direction == .horizontal ? "horizontal" : "vertical"),
-                "first": splitNode(first, includeLifecycles: includeLifecycles),
-                "second": splitNode(second, includeLifecycles: includeLifecycles),
+                "first": splitNode(
+                    first, zoomedPaneId: zoomedPaneId, includeLifecycles: includeLifecycles),
+                "second": splitNode(
+                    second, zoomedPaneId: zoomedPaneId, includeLifecycles: includeLifecycles),
                 "ratio": .number(Double(ratio)),
             ])
         }
     }
 
+    /// `isZoomed` is a per-pane fact rather than the owning tab's flag, so one
+    /// reply says where a zoom landed instead of only that the tab has one.
     private func paneFields(
         _ pane: PaneModel,
         cwd: String?,
         includeNullCwd: Bool,
-        includeLifecycles: Bool
+        includeLifecycles: Bool,
+        isZoomed: Bool
     ) -> [String: JSONValue] {
         var object: [String: JSONValue] = [
             "id": .string(pane.id.rawValue.uuidString),
             "title": .string(pane.session?.title ?? "Terminal"),
+            "isZoomed": .bool(isZoomed),
         ]
         if includeLifecycles {
             let lifecycleFields = paneLifecycleInspectionFields(pane.session)

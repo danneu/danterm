@@ -222,7 +222,7 @@ func effectivePaneVisibility(in model: AppModel, windowVisible: Bool) -> [PaneId
       for paneId in allPaneIds(tab.paneTree.root) {
         let visible = windowVisible
           && tabIsSelected
-          && !(tab.paneTree.isZoomed && paneId != tab.paneTree.focusedPaneId)
+          && !(tab.paneTree.isZoomed && tab.paneTree.zoomedPaneId != paneId)
         result[paneId] = visible
       }
     }
@@ -1065,7 +1065,7 @@ func containerShape(of tab: TabModel) -> ContainerShape {
     tree: containerShapeNode(tab.paneTree.root),
     layout: containerLayoutNode(tab.paneTree.root),
     isZoomed: tab.paneTree.isZoomed,
-    zoomedLeaf: tab.paneTree.isZoomed ? tab.paneTree.focusedPaneId : nil
+    zoomedLeaf: tab.paneTree.zoomedPaneId
   )
 }
 

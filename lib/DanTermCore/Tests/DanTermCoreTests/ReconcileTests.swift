@@ -774,9 +774,9 @@ import Testing
         let splitMoved = TabModel(id: TabId(), paneTree: PaneTree(root: splitNode(sid, p1, p3, ratio: 0.5), focusedPaneId: p1))
         #expect(containerShape(of: split) != containerShape(of: splitMoved),
             "swapping a leaf id changes the shape")
-        var zoomed = split; _ = zoomed.paneTree.toggleZoom()
+        var zoomed = split; _ = zoomed.paneTree.zoom(p1)
         #expect(containerShape(of: split) != containerShape(of: zoomed),
-            "toggling zoom changes the shape")
+            "zooming changes the shape")
     }
 
     // MARK: - sessionsToTearDown (migrated sessionCreationFailed net)

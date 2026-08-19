@@ -156,7 +156,10 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         let searchPane = model.groups[0].tabs[1].paneTree.focusedPaneId
         let baseline = lightProjection(model)
 
-        update(&model, .toggleZoomPane(paneId: selectedPane))
+        // The tab's own focused pane, so the request is zoom and nothing else:
+        // zooming a pane that does not hold focus also moves focus, which is a
+        // persisted fact and legitimately changes the projection.
+        update(&model, .toggleZoomPane(paneId: searchPane))
         #expect(lightProjection(model) == baseline, "zoom")
 
         update(&model, .sessionReport(sessionId: sessionId(for: selectedPane, in: model), report: .progress(.set(percent: 50))))

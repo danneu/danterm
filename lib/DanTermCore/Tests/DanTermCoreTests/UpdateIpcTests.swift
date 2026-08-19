@@ -237,8 +237,12 @@ import DanTermProtocol
             "connection": .object(["state": .string("local")]),
             "agent": .object(["state": .string("none")]),
         ]
+        // No tab in this fixture is zoomed, so every encoded pane carries the
+        // same `isZoomed: false`.
         func pane(_ fields: [String: JSONValue], lifecycles: [String: JSONValue]) -> JSONValue {
-            .object(fields.merging(lifecycles) { _, lifecycle in lifecycle })
+            .object(fields
+                .merging(["isZoomed": .bool(false)]) { field, _ in field }
+                .merging(lifecycles) { _, lifecycle in lifecycle })
         }
         let expected: JSONValue = .object([
             "groups": .array([
@@ -479,6 +483,7 @@ import DanTermProtocol
             "pane": .object([
                 "id": .string(paneId.rawValue.uuidString),
                 "title": .string("Terminal"),
+                "isZoomed": .bool(false),
                 "cwd": .null,
                 "integration": .object(["state": .string("neverReported")]),
                 "command": .object(["state": .string("idle")]),
@@ -1991,6 +1996,7 @@ import DanTermProtocol
                     "pane": .object([
                         "id": .string(paneId.rawValue.uuidString),
                         "title": .string("tests"),
+                        "isZoomed": .bool(false),
                     ]),
                 ]),
             ]),
@@ -4319,6 +4325,83 @@ private func paneObject(_ paneId: PaneId, in listing: JSONValue) -> JSONValue? {
             ])
         ))
         #expect(reply["tab"]?["isZoomed"]?.asBool == false)
+    }
+
+    @Test("pane.zoom resolves on/off/toggle against the pane it names")
+    func paneZoomResolvesAgainstTheNamedPane() throws {
+        // Intent: `on`, `off`, and `toggle` each read and write the named
+        //   pane's own zoom state -- including `on` for a pane whose tab is
+        //   already zoomed on a sibling -- and the reply's pane-level
+        //   `isZoomed` says where the zoom landed.
+        // Why it exists: the request used to compare against the tab flag, so
+        //   `on` for an unzoomed pane in an already-zoomed tab was read as
+        //   "nothing to do" and left the zoom on the wrong pane. A caller then
+        //   had no field that could tell it so. Spec-first.
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitFocusedPane(direction: .horizontal))
+        let tree = selectedTab(in: model)!.paneTree
+        let focused = tree.focusedPaneId
+        let sibling = allPaneIds(tree.root).first { $0 != focused }!
+
+        func zoom(_ pane: PaneId, _ state: String) throws -> JSONValue {
+            try requireIpcReply(sendIpc(
+                &model,
+                method: IpcRequestMethod.paneZoom.rawValue,
+                params: .object([
+                    "pane": .string(pane.rawValue.uuidString),
+                    "state": .string(state),
+                ])
+            ))
+        }
+
+        let zoomedFocused = try zoom(focused, "on")
+        #expect(zoomedFocused["pane"]?["isZoomed"]?.asBool == true)
+
+        let movedToSibling = try zoom(sibling, "on")
+        #expect(
+            movedToSibling["pane"]?["isZoomed"]?.asBool == true,
+            "`on` must move the zoom onto the named pane, not read the tab as already done")
+        #expect(selectedTab(in: model)!.paneTree.zoomedPaneId == sibling)
+
+        let toggledOff = try zoom(sibling, "toggle")
+        #expect(toggledOff["pane"]?["isZoomed"]?.asBool == false)
+        #expect(selectedTab(in: model)!.paneTree.zoomedPaneId == nil)
+
+        let offOnUnzoomed = try zoom(focused, "off")
+        #expect(offOnUnzoomed["pane"]?["isZoomed"]?.asBool == false, "`off` is idempotent")
+    }
+
+    @Test("ls and pane.info report zoom on the pane that holds it")
+    func paneLevelZoomIsReportedByLsAndPaneInfo() throws {
+        // Intent: with one pane of a split tab zoomed, that pane's encoded
+        //   `isZoomed` is true and its sibling's is false -- in the `ls`
+        //   listing and in each pane's own `pane.info` reply.
+        // Why it exists: the tab-level flag alone cannot say which pane the
+        //   zoom is on, so a caller that zoomed a pane had no field to read
+        //   back to confirm where the zoom landed. Spec-first.
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitFocusedPane(direction: .horizontal))
+        let tree = selectedTab(in: model)!.paneTree
+        let zoomedPane = tree.focusedPaneId
+        let sibling = allPaneIds(tree.root).first { $0 != zoomedPane }!
+        _ = update(&model, .toggleZoomPane(paneId: zoomedPane))
+
+        let listing = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.ls.rawValue))
+        #expect(paneObject(zoomedPane, in: listing)?["isZoomed"]?.asBool == true)
+        #expect(paneObject(sibling, in: listing)?["isZoomed"]?.asBool == false)
+
+        let zoomedInfo = try requireIpcReply(sendIpc(
+            &model, method: IpcRequestMethod.paneInfo.rawValue, pane: zoomedPane))
+        #expect(zoomedInfo["pane"]?["isZoomed"]?.asBool == true)
+
+        let siblingInfo = try requireIpcReply(sendIpc(
+            &model, method: IpcRequestMethod.paneInfo.rawValue, pane: sibling))
+        #expect(siblingInfo["pane"]?["isZoomed"]?.asBool == false)
+        #expect(
+            siblingInfo["tab"]?["isZoomed"]?.asBool == true,
+            "the tab-level fact stays what it was: this tab is zoomed on some pane")
     }
 
     @Test("pane.zoom rejects an unknown state and an unknown pane")

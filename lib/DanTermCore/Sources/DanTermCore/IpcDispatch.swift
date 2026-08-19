@@ -400,18 +400,21 @@ private func dispatchIpc(
         guard let tab = tabForPane(paneId, in: model) else {
             throw IpcParamsError("pane not found")
         }
+        // Resolve against the named pane rather than the tab flag, so `on` for a
+        // pane whose tab is already zoomed on a sibling still moves the zoom.
+        let isPaneZoomed = tab.paneTree.zoomedPaneId == paneId
         let target: Bool
         switch requested {
         case .on: target = true
         case .off: target = false
-        case .toggle: target = tab.paneTree.isZoomed == false
+        case .toggle: target = isPaneZoomed == false
         }
-        // Route through `.toggleZoomPane` rather than writing `isZoomed` here, so the
+        // Route through `.toggleZoomPane` rather than writing zoom here, so the
         // scripted path and the menubar/context-menu paths cannot drift: the guard that
         // only a split tab may zoom lives there and is the reason a request can be
         // honoured and still report `isZoomed: false`.
         var commands: [Command] = []
-        if tab.paneTree.isZoomed != target {
+        if isPaneZoomed != target {
             commands = update(&model, .toggleZoomPane(paneId: paneId), env: env)
         }
         guard let pane = model.pane(paneId),

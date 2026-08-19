@@ -2134,7 +2134,7 @@ class AppRuntime {
             contentArea.addSubview(container)
         }
         container.rebuild()
-        container.setZoomedPane(tab.paneTree.isZoomed ? tab.paneTree.focusedPaneId : nil)
+        container.setZoomedPane(tab.paneTree.zoomedPaneId)
         tabContainers[tab.id] = container
         return container
     }

@@ -745,6 +745,87 @@ import Testing
         #expect(tabBAfterNil.paneTree.isZoomed == false, "nil paneId should keep toggling the selected tab")
     }
 
+    @Test("a zoom request zooms and focuses the pane it names")
+    func toggleZoomPaneZoomsTheNamedPane() {
+        // Intent: naming a pane that does not hold its tab's focus zooms that
+        //   pane and moves focus to it; naming a second pane in an
+        //   already-zoomed tab moves the zoom rather than leaving the tab; a
+        //   request naming the zoomed pane clears the zoom.
+        // Why it exists: `paneId` used to select only the tab, so the zoom
+        //   landed on whichever pane already held focus. Once every pane's
+        //   toolbar offers a zoom button, clicking pane B while pane A holds
+        //   focus would have zoomed A. Spec-first.
+        var fx = makeTwoTabFixture()
+        let a2 = fx.a2!
+
+        update(&fx.model, .toggleZoomPane(paneId: a2))
+
+        var tabA = fx.model.groups[0].tabs.first { $0.id == fx.tabA }!
+        #expect(tabA.paneTree.zoomedPaneId == a2, "the named pane should be the zoomed one")
+        #expect(tabA.paneTree.focusedPaneId == a2, "a zoomed pane must hold its tab's focus")
+
+        update(&fx.model, .toggleZoomPane(paneId: fx.a1))
+
+        tabA = fx.model.groups[0].tabs.first { $0.id == fx.tabA }!
+        #expect(
+            tabA.paneTree.zoomedPaneId == fx.a1,
+            "zooming a sibling of the zoomed pane should move the zoom, not leave the tab")
+
+        update(&fx.model, .toggleZoomPane(paneId: fx.a1))
+
+        tabA = fx.model.groups[0].tabs.first { $0.id == fx.tabA }!
+        #expect(tabA.paneTree.zoomedPaneId == nil, "naming the zoomed pane should clear the zoom")
+        #expect(tabA.paneTree.focusedPaneId == fx.a1, "unzoom leaves focus where the zoom put it")
+    }
+
+    @Test("a zoom request naming a single-pane tab's pane is refused")
+    func toggleZoomPaneRefusesSinglePaneByName() {
+        // Intent: the single-pane guard holds on the pane-scoped path too.
+        // Why it exists: the reducer now writes focus before zoom, so a tab
+        //   with nothing to hide must still come out unzoomed. Spec-first.
+        var fx = makeTwoTabFixture(tabAIsSplit: false)
+
+        let commands = update(&fx.model, .toggleZoomPane(paneId: fx.a1))
+
+        let tabA = fx.model.groups[0].tabs.first { $0.id == fx.tabA }!
+        #expect(tabA.paneTree.isZoomed == false, "a lone pane has nothing to hide")
+        #expect(commands.isEmpty, "a refused zoom asks for no side effects")
+    }
+
+    @Test("a zoom request's focus move clears alerts only in the selected tab")
+    func toggleZoomPaneFocusMoveClearsAlertsInSelectedTabOnly() {
+        // Intent: under the focus alert-clear mode, zooming a pane in the
+        //   selected tab marks that pane's alerts read; the same request aimed
+        //   at a background tab leaves them unread.
+        // Why it exists: the zoom's focus move is a real focus change on the
+        //   selected tab, but a background tab's pane never becomes visible, so
+        //   its alerts must survive until the user opens that tab. Spec-first.
+        var fx = makeTwoTabFixture()
+        fx.model.config.alertClearMode = .focus
+        let a2 = fx.a2!
+        let b2 = allPaneIds(
+            fx.model.groups[0].tabs.first { $0.id == fx.tabB }!.paneTree.root
+        ).first { $0 != fx.b1 }!
+
+        for paneId in [a2, b2] {
+            fx.model.alerts.insert(
+                AlertModel(
+                    id: AlertId(), kind: .bell, paneId: paneId,
+                    title: "DanTerm", body: "alert", createdAt: Date(), isUnread: true),
+                at: 0)
+        }
+
+        update(&fx.model, .toggleZoomPane(paneId: a2))
+        update(&fx.model, .toggleZoomPane(paneId: b2))
+
+        #expect(
+            fx.model.alerts.first { $0.paneId == b2 }?.isUnread == false,
+            "the selected tab's newly focused pane should have its alerts cleared")
+        #expect(
+            fx.model.alerts.first { $0.paneId == a2 }?.isUnread == true,
+            "a background tab's pane gains no visible focus, so its alerts stay unread")
+    }
+
     @Test("closing a background-tab pane preserves the successor's unread alert")
     func closePaneBackgroundTabPreservesSuccessorAlert() {
         // Intent: in focus alert-clear mode, closing a pane in a non-selected

@@ -1046,25 +1046,38 @@ func update(
         return []
 
     case .toggleZoomPane(let paneId):
-        // nil = selected tab (menubar path); non-nil = the pane's own tab
-        // (mirrors .splitPane), so a stale context menu still zooms the tab
-        // it was built for after a selection change.
+        // nil = the selected tab's focused pane (menubar path); non-nil = that
+        // pane in its own tab (mirrors .splitPane), so a stale context menu
+        // still zooms the tab it was built for after a selection change. Tab
+        // selection itself never moves.
         let tab: TabModel
+        let target: PaneId
         if let paneId {
             guard let found = tabForPane(paneId, in: model) else { return [] }
             tab = found
+            target = paneId
         } else {
             guard let found = selectedTab(in: model) else { return [] }
             tab = found
+            target = found.paneTree.focusedPaneId
         }
-        if tab.paneTree.isZoomed {
+        // Resolve against the named pane, not the tab flag: a request for a
+        // pane whose tab is zoomed on a sibling moves the zoom rather than
+        // leaving it.
+        if tab.paneTree.zoomedPaneId == target {
             updateTab(tab.id, in: &model) { $0.paneTree.unzoom() }
             return []
         }
-        if case .split = tab.paneTree.root {
-            updateTab(tab.id, in: &model) { $0.paneTree.toggleZoom() }
-            return []
+        guard case .split = tab.paneTree.root else { return [] }
+        // The zoom moves focus, so it clears alerts on the same terms a focus
+        // move does -- and only in the selected tab, where the pane actually
+        // becomes visible.
+        if tab.id == model.selectedTabId,
+           target != tab.paneTree.focusedPaneId,
+           model.config.alertClearMode == .focus {
+            markAlertsReadForPane(target, in: &model)
         }
+        updateTab(tab.id, in: &model) { $0.paneTree.zoom(target) }
         return []
 
     // MARK: - View

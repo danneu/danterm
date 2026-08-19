@@ -449,21 +449,32 @@ visible viewport. With `--lines N`, it returns the last N lines of scrollback.
 ### Zoom a pane
 
 `pane zoom` drives the same zoom the Pane menu and the pane toolbar button
-drive: the tab renders only the target pane, so the pane's width and height
+drive: the tab renders only the pane you name, so that pane's width and height
 change without the window resizing. This is the scripted form of the
 resize stimulus, which is otherwise only reachable by a keyboard shortcut.
 
     danterm pane zoom --pane "$PANE_ID" on
     danterm pane zoom --pane "$PANE_ID" off
 
-Prefer `on` and `off` over `toggle`: they are idempotent, so a script reaches a
-known state without having to observe the current one first. The reply carries
-`tab.isZoomed`, which is the state after the request. A tab holding a single
-pane has nothing to zoom and reports `isZoomed: false` rather than failing --
-check the field, not the exit status.
+A zoomed pane hides its siblings, so zoom also moves key focus onto the pane it
+names. If that pane is in the tab the user is looking at, the caret moves with
+it -- so a script that zooms a pane just to inspect it takes typing away from
+wherever the user was. Zoom a pane in a background tab and nothing about the
+user's focus changes; `pane zoom` never changes which tab is selected either.
 
-Zoom is deliberately transient and is not part of the persisted snapshot, so
-`ls` does not report it. `pane info` does.
+Prefer `on` and `off` over `toggle`: they are idempotent, so a script reaches a
+known state without having to observe the current one first. Each state is read
+and written per pane: `on` for a pane whose tab is already zoomed on a sibling
+moves the zoom onto the pane you named.
+
+The reply's `pane.isZoomed` is the state of the pane you named after the
+request, so one reply says where the zoom landed. A tab holding a single pane
+has nothing to zoom and reports `isZoomed: false` rather than failing -- check
+the field, not the exit status. `tab.isZoomed` is the coarser fact that the
+tab is zoomed on some pane.
+
+Zoom is deliberately transient and is not part of the persisted snapshot, but
+every reply that describes a pane carries the pane's `isZoomed`, `ls` included.
 
 ### Run a pane at an exact grid
 
@@ -870,16 +881,16 @@ else prints nothing on success and exits 0.
 | Command | Stdout |
 |---|---|
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
-| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with current `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`) |
+| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with current `isZoomed`, `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`) |
 | `focus` | JSON: `{focus: {type: "terminal"|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"|"none"}}` |
-| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, processPhase, command, connection, agent, integration, gridOverride?}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
+| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, isZoomed, cwd, processPhase, command, connection, agent, integration, gridOverride?}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `group new --name <name>` | Same JSON shape as `tab new`, naming the new group and its first tab |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |
 | `todo list (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
-| `pane zoom --pane <pane-id> on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `tab.isZoomed` and current session-reported fields |
+| `pane zoom --pane <pane-id> on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `pane.isZoomed` and current session-reported fields |
 | `pane resize --pane <pane-id> <columns>x<rows>\|--fit` | Same JSON shape as `pane info`, with the resulting `pane.gridOverride` (absent when the pane follows its rectangle) |
 | `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
 | `pane tape --pane <pane-id>` | Raw JSON Lines: `start`, retained events or loss, then `dump-complete` |

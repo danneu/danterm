@@ -364,16 +364,27 @@ struct PaneTree: Equatable {
         return changed
     }
 
+    /// The one definition of which pane a tab's zoom is on. Every path that
+    /// asks "is this pane zoomed" -- the reducer, the toolbar projection, the
+    /// container reconcile, and the scripted replies -- resolves against this,
+    /// so they cannot disagree about where a zoom landed.
+    var zoomedPaneId: PaneId? {
+        isZoomed ? focusedPaneId : nil
+    }
+
     /// Clears zoom without changing focus.
     mutating func unzoom() {
         isZoomed = false
     }
 
-    /// Toggles zoom only for a split tree and leaves focus unchanged.
+    /// Zooms one named pane of a split tree. Zoom hides every sibling, so the
+    /// zoomed pane has to hold the tab's focus; moving focus is part of the
+    /// zoom rather than a separate step a caller could forget.
     @discardableResult
-    mutating func toggleZoom() -> Bool {
-        guard case .split = root else { return false }
-        isZoomed.toggle()
+    mutating func zoom(_ paneId: PaneId) -> Bool {
+        guard case .split = root, paneInNode(root, id: paneId) != nil else { return false }
+        focusedPaneId = paneId
+        isZoomed = true
         return true
     }
 
