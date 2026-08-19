@@ -2708,9 +2708,12 @@ public struct Terminal: Equatable, Sendable {
     /// Vacates one row on the shell's repaint promise, including its obsolete wrap claim.
     private mutating func clearPromptCells(in row: Int) {
         invalidateInspection(inViewportRows: row..<(row + 1))
-        let styleId = backgroundEraseStyleId()
-        for column in 0..<columnCount {
-            screen.rows[row].cells[column] = GridCell(styleId: styleId)
+        let blank = GridCell(styleId: backgroundEraseStyleId())
+        let columns = columnCount
+        withRowCells(row) { cells in
+            for column in 0..<columns {
+                cells[column] = blank
+            }
         }
         screen.rows[row].semanticPrompt = .vacated
         screen.rows[row].isSoftWrapped = false
@@ -4947,11 +4950,9 @@ public struct Terminal: Equatable, Sendable {
         // The expansion above pulls every intersected wide pair wholly inside the
         // range, so no cell in it has a partner outside it. That is what lets the
         // interior be filled directly instead of through a per-cell
-        // `clearCellAndPair`, whose two nested array subscripts cost a COW
-        // uniqueness check on the row array and another on the cell array for
-        // every single cell erased.
+        // `clearCellAndPair`.
         let blank = GridCell(styleId: styleId)
-        screen.rows[row].cells.withUnsafeMutableBufferPointer { cells in
+        withRowCells(row) { cells in
             for column in lower..<upper {
                 cells[column] = blank
             }
@@ -6787,6 +6788,36 @@ public struct Terminal: Equatable, Sendable {
         print(charsets.activeCharset.translate(byte))
     }
 
+    /// Resolves one row's cell storage once and lends it to `body` for writing.
+    ///
+    /// Every loop that writes a row's cells goes through here. A two-level
+    /// `screen.rows[row].cells[column]` store costs a copy-on-write uniqueness check on the row
+    /// array and another on the cell array for every single cell touched; resolving the row once
+    /// pays both checks once for the whole loop.
+    ///
+    /// It sits on `Terminal` rather than on `ScreenState` on purpose: `self` is exclusively
+    /// borrowed for the duration, so the compiler rejects a `body` that reads or writes any part
+    /// of the terminal while the buffer is alive. The caller owns the row bound; `row` must be a
+    /// valid row index.
+    private mutating func withRowCells<R>(
+        _ row: Int,
+        _ body: (UnsafeMutableBufferPointer<GridCell>) -> R
+    ) -> R {
+        screen.rows[row].cells.withUnsafeMutableBufferPointer { body($0) }
+    }
+
+    /// The reading counterpart of `withRowCells`, for loops that only scan a row.
+    ///
+    /// A scan must not go through the mutating form: that would prove the row storage unique and
+    /// so copy it whenever it is shared -- a cost a scan that writes nothing should never pay.
+    /// Being non-mutating is what makes that a compile error rather than a review miss.
+    private func readingRowCells<R>(
+        _ row: Int,
+        _ body: (UnsafeBufferPointer<GridCell>) -> R
+    ) -> R {
+        screen.rows[row].cells.withUnsafeBufferPointer { body($0) }
+    }
+
     /// Writes a prefix of the run into one row in a single pass, or returns 0 to decline it.
     ///
     /// Everything `print`/`printNarrow` pay per character -- the Unicode classification, the
@@ -6824,12 +6855,15 @@ public struct Terminal: Equatable, Sendable {
         // Cut at the right margin, then before the first cell an overwrite cannot simply replace:
         // a wide pair blanks its other half and a wrap spacer retires the wrap it stands for,
         // which is `clearCellAndPair`'s job and not this one's.
-        var count = 0
         let available = min(limit - start, columnCount - column)
-        while count < available {
-            let kind = screen.rows[row].cells[column + count].kind
-            guard kind == .narrow || kind == .padding else { break }
-            count += 1
+        let count = readingRowCells(row) { cells -> Int in
+            var count = 0
+            while count < available {
+                let kind = cells[column + count].kind
+                guard kind == .narrow || kind == .padding else { break }
+                count += 1
+            }
+            return count
         }
         guard count > 0 else { return 0 }
 
@@ -6902,14 +6936,18 @@ public struct Terminal: Equatable, Sendable {
     ) {
         let styleId = currentStyleId()
         let hyperlinkId = hyperlinkPen
-        for offset in 0..<count {
-            screen.rows[row].cells[column + offset] = GridCell(
-                scalars: .single(scalar(offset)),
-                kind: .narrow,
-                styleId: styleId,
-                hyperlinkId: hyperlinkId,
-                contentIdentity: baseIdentity + ContentIdentity(offset)
-            )
+        // The supplier runs inside the borrow, which is what lets it read scalars straight from
+        // the fed chunk instead of materializing them into an array first.
+        withRowCells(row) { cells in
+            for offset in 0..<count {
+                cells[column + offset] = GridCell(
+                    scalars: .single(scalar(offset)),
+                    kind: .narrow,
+                    styleId: styleId,
+                    hyperlinkId: hyperlinkId,
+                    contentIdentity: baseIdentity + ContentIdentity(offset)
+                )
+            }
         }
 
         clusterContext = ClusterContext(
@@ -7576,12 +7614,14 @@ public struct Terminal: Equatable, Sendable {
         let amount = min(abs(delta), range.count)
         let styleId = backgroundEraseStyleId()
 
-        Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
-            if let source {
-                let moved = screen.rows[row].cells[source]
-                screen.rows[row].cells[destination] = moved
-            } else {
-                screen.rows[row].cells[destination] = GridCell(styleId: styleId)
+        let blank = GridCell(styleId: styleId)
+        withRowCells(row) { cells in
+            Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
+                if let source {
+                    cells[destination] = cells[source]
+                } else {
+                    cells[destination] = blank
+                }
             }
         }
 
@@ -7598,27 +7638,35 @@ public struct Terminal: Equatable, Sendable {
         in row: Int,
         replacementStyleId: StyleId
     ) {
-        let cells = screen.rows[row].cells
+        let columns = columnCount
+        // The scan borrows rather than binding the row's cells to a `let`: a binding would still
+        // be alive at the repair loop below, so the first repair write would copy the whole row.
         var invalidColumns: [Int] = []
-        for column in cells.indices {
-            switch cells[column].kind {
-            case .wideHead:
-                if column + 1 >= columnCount || cells[column + 1].kind != .wideTail {
+        readingRowCells(row) { cells in
+            for column in cells.indices {
+                switch cells[column].kind {
+                case .wideHead:
+                    if column + 1 >= columns || cells[column + 1].kind != .wideTail {
+                        invalidColumns.append(column)
+                    }
+                case .wideTail:
+                    if column == 0 || cells[column - 1].kind != .wideHead {
+                        invalidColumns.append(column)
+                    }
+                case .spacerHead:
                     invalidColumns.append(column)
+                case .padding, .narrow:
+                    break
                 }
-            case .wideTail:
-                if column == 0 || cells[column - 1].kind != .wideHead {
-                    invalidColumns.append(column)
-                }
-            case .spacerHead:
-                invalidColumns.append(column)
-            case .padding, .narrow:
-                break
             }
         }
 
-        for column in invalidColumns {
-            screen.rows[row].cells[column] = GridCell(styleId: replacementStyleId)
+        guard invalidColumns.isEmpty == false else { return }
+        let blank = GridCell(styleId: replacementStyleId)
+        withRowCells(row) { cells in
+            for column in invalidColumns {
+                cells[column] = blank
+            }
         }
     }
 
