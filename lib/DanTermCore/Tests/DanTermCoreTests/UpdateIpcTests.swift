@@ -123,8 +123,18 @@ import DanTermProtocol
         #expect(model.tailnetStatus == .listening(endpoint: endpoint))
     }
 
-    @Test("every targeting IPC method rejects an absent target without mutation")
-    func everyTargetingMethodRejectsAbsentTarget() throws {
+    @Test("every targeting IPC method refuses an absent, non-string, or unresolvable target")
+    func everyTargetingMethodRefusesBadTarget() throws {
+        // Intent: for every method that names an entity, all four bad-target
+        //   shapes return -32602 with the shared vocabulary, and none of them
+        //   changes the model.
+        // Why it exists: production resolves every target through one decoder
+        //   (`target(_:object:)` in DanTermProtocol), so the test for it is one
+        //   table, not one test per method. The table also owns its own
+        //   coverage: a new targeting method that nobody lists here is a method
+        //   nobody checks, which is how pane.rows and the three agent methods
+        //   went unchecked on every axis but "absent".
+        // Scenario: spec-first sweep of every targeting method.
         let todoId = UUID().uuidString
         let cases: [(method: String, params: [String: JSONValue], entity: String)] = [
             (IpcRequestMethod.tabNew.rawValue, [:], "group"),
@@ -141,7 +151,13 @@ import DanTermProtocol
             (IpcRequestMethod.paneRows.rawValue, [:], "pane"),
             (IpcRequestMethod.paneZoom.rawValue, ["state": .string("on")], "pane"),
             (IpcRequestMethod.paneResize.rawValue, ["fit": .bool(true)], "pane"),
-            (IpcRequestMethod.paneTape.rawValue, [:], "pane"),
+            // start/mode are required, and pane.tape validates them once the
+            // pane resolves -- without them the unresolvable probes would fail
+            // on the wrong param.
+            (IpcRequestMethod.paneTape.rawValue, [
+                "start": .string("beginning"),
+                "mode": .string("raw"),
+            ], "pane"),
             (IpcRequestMethod.themeSet.rawValue, ["themeName": .null], "pane"),
             (IpcRequestMethod.agentAttach.rawValue, ["kind": .string("codex"), "id": .string("thread")], "pane"),
             (IpcRequestMethod.agentActivity.rawValue, [
@@ -160,20 +176,46 @@ import DanTermProtocol
         ]
 
         for testCase in cases {
-            var model = makeModel()
-            createTab(&model)
-            let before = model
-            let commands = sendIpc(
-                &model,
-                method: testCase.method,
-                params: .object(testCase.params)
-            )
-
-            let expected = testCase.method.hasPrefix("todo.")
+            let absentMessage = testCase.method.hasPrefix("todo.")
                 ? "pane or tab required"
                 : "\(testCase.entity) required"
-            #expect(try requireIpcError(commands).message == expected)
-            #expect(model == before)
+            let probes: [(label: String, value: JSONValue?, message: String)] = [
+                ("absent", nil, absentMessage),
+                ("number", .number(7), "\(testCase.entity) must be a string"),
+                ("array", .array([]), "\(testCase.entity) must be a string"),
+                ("object", .object([:]), "\(testCase.entity) must be a string"),
+                ("malformed", .string("not-a-uuid"), "\(testCase.entity) not found"),
+                ("unknown", .string(UUID().uuidString), "\(testCase.entity) not found"),
+            ]
+
+            for probe in probes {
+                var model = makeModel()
+                createTab(&model)
+                var params = testCase.params
+                if let value = probe.value {
+                    params[testCase.entity] = value
+                    // A tab or group target could still be inferred from the
+                    // caller's pane, so supply one: a resolver that fell back
+                    // would answer instead of failing. A pane target has no
+                    // second source, since the target key is the context key.
+                    if testCase.entity != "pane" {
+                        params["pane"] = .string(selectedPaneId(in: model).rawValue.uuidString)
+                    }
+                }
+                let before = model
+
+                let commands = sendIpc(&model, method: testCase.method, params: .object(params))
+
+                let error = try requireIpcError(commands)
+                let where_ = "\(testCase.method) with a \(probe.label) target"
+                #expect(error.code == -32602, "\(where_) should be invalid params")
+                #expect(error.message == probe.message, "\(where_) got: \(error.message)")
+                #expect(model == before, "\(where_) changed the model")
+                // The reply is the whole answer: a refused target must not also
+                // emit a side effect, which model equality alone cannot show
+                // for the methods whose work is a Command rather than a change.
+                #expect(commands.count == 1, "\(where_) emitted \(commands.count) commands")
+            }
         }
     }
 
@@ -704,36 +746,6 @@ import DanTermProtocol
         #expect(reply["tab"]?["id"]?.asString == tabId.rawValue.uuidString)
     }
 
-    @Test("pane.info missing or invalid target fails without falling back")
-    func paneInfoMissingOrInvalidTargetFails() throws {
-        // Intent: pane.info with missing / non-UUID / unknown pane
-        //   returns -32602 (no fallback to context).
-        // Why it exists: pins the no-fallback rule.
-        // Scenario: spec-first missing/invalid/unknown.
-        var model = makeModel()
-        createTab(&model)
-        let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-
-        let missing = sendIpc(&model, method: IpcRequestMethod.paneInfo.rawValue, pane: nil)
-        #expect(try requireIpcError(missing).code == -32602)
-
-        let invalid = sendIpc(
-            &model,
-            method: IpcRequestMethod.paneInfo.rawValue,
-            params: .object(["pane": .string("not-a-uuid")]),
-            pane: contextPaneId
-        )
-        #expect(try requireIpcError(invalid).code == -32602)
-
-        let unknown = sendIpc(
-            &model,
-            method: IpcRequestMethod.paneInfo.rawValue,
-            params: .object(["pane": .string(UUID().uuidString)]),
-            pane: contextPaneId
-        )
-        #expect(try requireIpcError(unknown).code == -32602)
-    }
-
     @Test("tab.rename sets and clears custom title")
     func tabRenameSetsAndClearsCustomTitle() throws {
         // Intent: tab.rename sets customTitle (and returns it in reply)
@@ -821,55 +833,6 @@ import DanTermProtocol
         #expect(tabById(backgroundTabId, in: model)?.customTitle == "build")
         #expect(tabById(foregroundTabId, in: model)?.customTitle == nil)
         #expect(tabForPane(backgroundPaneId, in: model)?.id == backgroundTabId)
-    }
-
-    @Test("tab.rename malformed or unknown explicit tab does not fall back to context")
-    func tabRenameMalformedOrUnknownExplicitTabNoFallback() throws {
-        // Intent: explicit tab values that are malformed/unknown/non-
-        //   string return -32602; the context tab is not affected.
-        // Why it exists: pins the no-fallback guard for explicit tab.
-        // Scenario: spec-first malformed/unknown/non-string explicit.
-        for tabValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
-            var model = makeModel()
-            createTab(&model)
-            let contextTabId = selectedTab(in: model)!.id
-            let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-
-            let commands = sendIpc(
-                &model,
-                method: IpcRequestMethod.tabRename.rawValue,
-                params: .object([
-                    "tab": tabValue,
-                    "title": .string("should-not-apply"),
-                ]),
-                pane: contextPaneId
-            )
-
-            let error = try requireIpcError(commands)
-            #expect(error.code == -32602)
-            #expect(tabById(contextTabId, in: model)?.customTitle == nil)
-        }
-    }
-
-    @Test("tab.rename without explicit tab and without pane context fails before mutation")
-    func tabRenameWithoutTabAndWithoutContextFails() throws {
-        // Intent: with neither an explicit tab nor a pane context,
-        //   tab.rename errors out before any mutation.
-        // Why it exists: pins the "need a target" rule.
-        // Scenario: spec-first no-target.
-        var model = makeModel()
-        createTab(&model)
-        let tabId = selectedTab(in: model)!.id
-        let commands = sendIpc(
-            &model,
-            method: IpcRequestMethod.tabRename.rawValue,
-            params: .object(["title": .string("missing-context")]),
-            pane: nil
-        )
-
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(tabById(tabId, in: model)?.customTitle == nil)
     }
 
     @Test("group.new creates a group holding one tab and replies with both ids")
@@ -1131,26 +1094,6 @@ import DanTermProtocol
         #expect(model.pendingConfirmation == nil)
     }
 
-    @Test("group.close of an absent group is refused")
-    func groupCloseAbsentGroupIsRefused() throws {
-        // Intent: an unknown group id fails with `group not found`.
-        // Why it exists: pins the existence check ahead of both refusals.
-        // Scenario: spec-first unknown id.
-        var model = makeModel()
-        createTab(&model)
-        _ = update(&model, .createGroup(name: "Builds"))
-        let before = model
-
-        let commands = sendIpc(&model, method: IpcRequestMethod.groupClose.rawValue, params: .object([
-            "group": .string(UUID().uuidString),
-        ]))
-
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(error.message == "group not found")
-        #expect(model == before)
-    }
-
     @Test("group.rename sets the group name and replies with it")
     func groupRenameSetsGroupName() throws {
         // Intent: group.rename renames the named group and returns the
@@ -1171,27 +1114,6 @@ import DanTermProtocol
         #expect(reply["group"]?["id"]?.asString == groupId.rawValue.uuidString)
         #expect(reply["group"]?["name"]?.asString == "Notes")
         #expect(model.groups[1].name == "Notes")
-    }
-
-    @Test("group.rename of an absent group is refused")
-    func groupRenameAbsentGroupIsRefused() throws {
-        // Intent: an unknown group id fails with `group not found`.
-        // Why it exists: pins the existence check to the same error
-        //   vocabulary `tab new --group` already uses.
-        // Scenario: spec-first unknown id.
-        var model = makeModel()
-        createTab(&model)
-        let before = model
-
-        let commands = sendIpc(&model, method: IpcRequestMethod.groupRename.rawValue, params: .object([
-            "group": .string(UUID().uuidString),
-            "name": .string("Notes"),
-        ]))
-
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(error.message == "group not found")
-        #expect(model == before)
     }
 
     // Without the dispatch guard this would exit 0 for a rename that never
@@ -1443,50 +1365,6 @@ import DanTermProtocol
         #expect(model.pendingConfirmation == nil)
     }
 
-    @Test("tab.close malformed or unknown explicit tab does not fall back to context")
-    func tabCloseMalformedOrUnknownExplicitTab() throws {
-        // Intent: explicit tab values that are malformed/unknown/non-
-        //   string return -32602; the context tab is not closed.
-        // Why it exists: pins the no-fallback guard for explicit tab.
-        // Scenario: spec-first malformed/unknown/non-string explicit.
-        for tabValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
-            var model = makeModel()
-            createTab(&model)
-            let contextTabId = selectedTab(in: model)!.id
-            let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-            let countBefore = totalTabCount(model)
-
-            let commands = sendIpc(
-                &model,
-                method: IpcRequestMethod.tabClose.rawValue,
-                params: .object(["tab": tabValue]),
-                pane: contextPaneId
-            )
-
-            let error = try requireIpcError(commands)
-            #expect(error.code == -32602)
-            #expect(tabById(contextTabId, in: model) != nil)
-            #expect(totalTabCount(model) == countBefore)
-        }
-    }
-
-    @Test("tab.close without explicit tab and without pane context fails before mutation")
-    func tabCloseWithoutTabAndWithoutContextFails() throws {
-        // Intent: with neither an explicit tab nor a pane context,
-        //   tab.close errors out before any mutation.
-        // Why it exists: pins the "need a target" rule.
-        // Scenario: spec-first no-target.
-        var model = makeModel()
-        createTab(&model)
-        let tabId = selectedTab(in: model)!.id
-
-        let commands = sendIpc(&model, method: IpcRequestMethod.tabClose.rawValue, pane: nil)
-
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(tabById(tabId, in: model) != nil)
-    }
-
     @Test("pane.close removes an explicit pane and reports its id")
     func paneCloseRemovesExplicitPaneAndReportsId() throws {
         // Intent: pane.close routes through the existing pane-close mutation,
@@ -1613,38 +1491,6 @@ import DanTermProtocol
         #expect(tabModel.pendingConfirmation == nil)
     }
 
-    @Test("pane.close requires a valid explicit pane and never falls back to context")
-    func paneCloseRejectsMissingMalformedUnknownAndNonStringPane() throws {
-        // Intent: every absent or invalid explicit pane is rejected without
-        //   using the caller pane context or mutating the model.
-        // Why it exists: closing is destructive, so its target must always be
-        //   the pane id the caller named.
-        // Scenario: spec-first missing, malformed, unknown, and wrong-type ids.
-        var model = makeModel()
-        createTab(&model)
-        let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        let context = contextPaneId
-        let before = model
-        let cases: [JSONValue] = [
-            .object([:]),
-            .object(["pane": .string("not-a-uuid")]),
-            .object(["pane": .string(UUID().uuidString)]),
-            .object(["pane": .number(7)]),
-        ]
-
-        for params in cases {
-            let commands = sendIpc(
-                &model,
-                method: IpcRequestMethod.paneClose.rawValue,
-                params: params,
-                pane: context
-            )
-
-            #expect(try requireIpcError(commands).code == -32602)
-            #expect(model == before)
-        }
-    }
-
     @Test("pane.split targets the named pane even when another tab is selected")
     func paneSplitTargetsNamedPaneEvenWhenAnotherTabSelected() throws {
         var model = makeModel()
@@ -1708,132 +1554,6 @@ import DanTermProtocol
         #expect(first.id == callerPaneId)
         #expect(second.id == siblingPaneId)
         #expect(third.id == returnedPaneId)
-    }
-
-    @Test("pane.split malformed explicit pane does not fall back to context")
-    func paneSplitMalformedExplicitPaneNoFallback() throws {
-        // Intent: a malformed explicit pane returns -32602; the model
-        //   is unchanged.
-        // Why it exists: pins the no-fallback rule.
-        // Scenario: spec-first malformed explicit.
-        var model = makeModel()
-        createTab(&model)
-        let callerPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        let beforePaneIds = Set(model.allPaneIds)
-
-        let commands = sendIpc(
-            &model,
-            method: IpcRequestMethod.paneSplit.rawValue,
-            params: .object([
-                "pane": .string("not-a-uuid"),
-                "direction": .string("horizontal"),
-            ]),
-            pane: callerPaneId
-        )
-
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(Set(model.allPaneIds) == beforePaneIds)
-    }
-
-    @Test("pane.split non-string explicit pane does not fall back to context")
-    func paneSplitNonStringExplicitPaneNoFallback() throws {
-        // Intent: a non-string explicit pane returns -32602 with a
-        //   "pane must be a string" message.
-        // Why it exists: pins the type-check message.
-        // Scenario: spec-first non-string explicit.
-        var model = makeModel()
-        createTab(&model)
-        let callerPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        let beforePaneIds = Set(model.allPaneIds)
-
-        let commands = sendIpc(
-            &model,
-            method: IpcRequestMethod.paneSplit.rawValue,
-            params: .object([
-                "pane": .number(42),
-                "direction": .string("horizontal"),
-            ]),
-            pane: callerPaneId
-        )
-
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(error.message.contains("pane must be a string"),
-            "message should describe non-string pane, got: \(error.message)")
-        #expect(Set(model.allPaneIds) == beforePaneIds)
-    }
-
-    @Test("pane.split unknown explicit pane does not fall back to context")
-    func paneSplitUnknownExplicitPaneNoFallback() throws {
-        // Intent: an unknown UUID explicit pane returns -32602; the
-        //   model is unchanged.
-        // Why it exists: pins the unknown-id no-fallback rule.
-        // Scenario: spec-first unknown explicit.
-        var model = makeModel()
-        createTab(&model)
-        let callerPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        let beforePaneIds = Set(model.allPaneIds)
-
-        let commands = sendIpc(
-            &model,
-            method: IpcRequestMethod.paneSplit.rawValue,
-            params: .object([
-                "pane": .string(UUID().uuidString),
-                "direction": .string("horizontal"),
-            ]),
-            pane: callerPaneId
-        )
-
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(Set(model.allPaneIds) == beforePaneIds)
-    }
-
-    @Test("pane.split without explicit pane and without pane context fails before mutation")
-    func paneSplitNoExplicitAndNoContextFails() throws {
-        // Intent: with no explicit pane and no pane context,
-        //   pane.split errors out.
-        // Why it exists: pins the "need a target" rule.
-        // Scenario: spec-first no-target.
-        var model = makeModel()
-        createTab(&model)
-        let beforePaneIds = Set(model.allPaneIds)
-
-        let commands = sendIpc(
-            &model,
-            method: IpcRequestMethod.paneSplit.rawValue,
-            params: .object(["direction": .string("horizontal")]),
-            pane: nil
-        )
-
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(Set(model.allPaneIds) == beforePaneIds)
-    }
-
-    @Test("pane.split on a pane id absent from every tree is rejected without mutation")
-    func paneSplitOnPaneAbsentFromAllTreesRejected() throws {
-        // Intent: a context pane id absent from every tree is rejected;
-        //   no mutation.
-        // Why it exists: pins the orphan-pane fail-closed (with tree-
-        //   owns-panes, the drift hole is structurally closed).
-        // Scenario: spec-first orphan pane.
-        var model = makeModel()
-        createTab(&model)
-        let unknownPaneId = PaneId()
-        let beforePaneIds = Set(model.allPaneIds)
-
-        let commands = sendIpc(
-            &model,
-            method: IpcRequestMethod.paneSplit.rawValue,
-            params: .object(["direction": .string("horizontal")]),
-            pane: unknownPaneId
-        )
-
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(Set(model.allPaneIds) == beforePaneIds)
     }
 
     @Test("pane.focus selects target tab and projects its responder")
@@ -1945,67 +1665,6 @@ import DanTermProtocol
         #expect(model.alerts[0].isUnread == false, "focusing pane should mark its alerts read")
     }
 
-    @Test("pane.focus requires an explicit pane")
-    func paneFocusRequiresExplicitPane() throws {
-        // Intent: pane.focus does not fall back to IPC pane context.
-        // Why it exists: pins the explicit-required policy while the
-        //   implementation moves through the generic resolver.
-        // Scenario: spec-first no explicit focus target.
-        var model = makeModel()
-        createTab(&model)
-        let commands = sendIpc(&model, method: IpcRequestMethod.paneFocus.rawValue)
-
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(error.message == "pane required")
-    }
-
-    @Test("pane.focus rejects non-string pane")
-    func paneFocusRejectsNonStringPane() throws {
-        // Intent: pane.focus rejects non-string explicit panes with the
-        //   shared pane-target vocabulary.
-        // Why it exists: pins the generic resolver's type error for an
-        //   explicit-required command.
-        // Scenario: spec-first malformed explicit focus target.
-        for paneValue in [JSONValue.number(5), .array([]), .object([:])] {
-            var model = makeModel()
-            createTab(&model)
-
-            let commands = sendIpc(
-                &model,
-                method: IpcRequestMethod.paneFocus.rawValue,
-                params: .object(["pane": paneValue])
-            )
-
-            let error = try requireIpcError(commands)
-            #expect(error.code == -32602)
-            #expect(error.message == "pane must be a string")
-        }
-    }
-
-    @Test("pane.focus rejects unknown pane")
-    func paneFocusRejectsUnknownPane() throws {
-        // Intent: pane.focus rejects malformed or stale explicit pane
-        //   strings with "pane not found".
-        // Why it exists: replaces the older catch-all "invalid pane id"
-        //   branch with the shared resolver vocabulary.
-        // Scenario: spec-first unknown explicit focus target.
-        for rawPane in ["bogus", UUID().uuidString] {
-            var model = makeModel()
-            createTab(&model)
-
-            let commands = sendIpc(
-                &model,
-                method: IpcRequestMethod.paneFocus.rawValue,
-                params: .object(["pane": .string(rawPane)])
-            )
-
-            let error = try requireIpcError(commands)
-            #expect(error.code == -32602)
-            #expect(error.message == "pane not found")
-        }
-    }
-
     @Test("tab.new explicit group id creates tab in that group")
     func tabNewExplicitGroupIdCreatesTab() throws {
         // Intent: tab.new with an explicit group id creates a tab
@@ -2098,33 +1757,6 @@ import DanTermProtocol
         #expect(try requireIpcReply(commands)["group"]?["id"]?.asString == explicitGroupId.rawValue.uuidString)
     }
 
-    @Test("tab.new malformed or unknown explicit group does not fall back or create")
-    func tabNewMalformedOrUnknownExplicitGroupNoFallback() throws {
-        // Intent: malformed/unknown/non-string explicit group returns
-        //   -32602; no group or tab is created.
-        // Why it exists: pins the no-fallback rule for explicit group.
-        // Scenario: spec-first malformed/unknown/non-string explicit.
-        for groupValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
-            var model = makeModel()
-            createTab(&model)
-            let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-            let groupsBefore = model.groups.count
-            let tabsBefore = model.groups.flatMap(\.tabs).count
-
-            let commands = sendIpc(
-                &model,
-                method: IpcRequestMethod.tabNew.rawValue,
-                params: .object(["group": groupValue]),
-                pane: contextPaneId
-            )
-
-            let error = try requireIpcError(commands)
-            #expect(error.code == -32602)
-            #expect(model.groups.count == groupsBefore)
-            #expect(model.groups.flatMap(\.tabs).count == tabsBefore)
-        }
-    }
-
     @Test("tab.new does not infer a group from a supplied pane")
     func tabNewDoesNotInferGroupFromPane() throws {
         var model = makeModel()
@@ -2142,90 +1774,6 @@ import DanTermProtocol
 
         #expect(try requireIpcError(commands).message == "group required")
         #expect(model.groups.flatMap(\.tabs).count == tabsBefore)
-    }
-
-    @Test("tab.new without explicit group and without pane context fails before mutation")
-    func tabNewWithoutGroupAndContextFails() throws {
-        // Intent: tab.new with neither explicit group nor pane context
-        //   errors out.
-        // Why it exists: pins the "need a group" rule.
-        // Scenario: spec-first no group.
-        var model = makeModel()
-        createTab(&model)
-        let tabsBefore = model.groups.flatMap(\.tabs).count
-        let commands = sendIpc(&model, method: IpcRequestMethod.tabNew.rawValue, params: .object([:]), pane: nil)
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(model.groups.flatMap(\.tabs).count == tabsBefore)
-    }
-
-    @Test("tab and group explicit target errors use uniform vocabulary")
-    func tabAndGroupExplicitTargetErrorsUseUniformVocabulary() throws {
-        // Intent: tab and group resolvers use the same explicit-target
-        //   vocabulary as panes.
-        // Why it exists: locks the message contract before the call
-        //   sites move behind a generic resolver.
-        // Scenario: spec-first explicit target errors for tab.rename
-        //   and tab.new group routing.
-        struct TargetCase {
-            let entity: String
-            let method: String
-            let explicitParams: (JSONValue) -> JSONValue
-            let absentParams: JSONValue
-        }
-
-        let targetCases = [
-            TargetCase(
-                entity: "tab",
-                method: IpcRequestMethod.tabRename.rawValue,
-                explicitParams: { .object(["tab": $0, "title": .string("build")]) },
-                absentParams: .object(["title": .string("build")])
-            ),
-            TargetCase(
-                entity: "group",
-                method: IpcRequestMethod.tabNew.rawValue,
-                explicitParams: { .object(["group": $0]) },
-                absentParams: .object([:])
-            ),
-        ]
-
-        for targetCase in targetCases {
-            var nonStringModel = makeModel()
-            createTab(&nonStringModel)
-            let nonStringCommands = sendIpc(
-                &nonStringModel,
-                method: targetCase.method,
-                params: targetCase.explicitParams(.number(7)),
-                pane: selectedPaneId(in: nonStringModel)
-            )
-            let nonStringError = try requireIpcError(nonStringCommands)
-            #expect(nonStringError.code == -32602)
-            #expect(nonStringError.message == "\(targetCase.entity) must be a string")
-
-            var unknownModel = makeModel()
-            createTab(&unknownModel)
-            let unknownCommands = sendIpc(
-                &unknownModel,
-                method: targetCase.method,
-                params: targetCase.explicitParams(.string(UUID().uuidString)),
-                pane: selectedPaneId(in: unknownModel)
-            )
-            let unknownError = try requireIpcError(unknownCommands)
-            #expect(unknownError.code == -32602)
-            #expect(unknownError.message == "\(targetCase.entity) not found")
-
-            var absentModel = makeModel()
-            createTab(&absentModel)
-            let absentCommands = sendIpc(
-                &absentModel,
-                method: targetCase.method,
-                params: targetCase.absentParams,
-                pane: nil
-            )
-            let absentError = try requireIpcError(absentCommands)
-            #expect(absentError.code == -32602)
-            #expect(absentError.message == "\(targetCase.entity) required")
-        }
     }
 
     @Test("tab.new background does not steal selection")
@@ -2754,54 +2302,6 @@ import DanTermProtocol
         #expect(try requireIpcReply(commands)["pane"]?["id"]?.asString == targetPaneId.rawValue.uuidString)
     }
 
-    @Test("theme.set malformed or unknown explicit pane does not fall back to context")
-    func themeSetMalformedOrUnknownExplicitPaneNoFallback() throws {
-        // Intent: malformed/unknown/non-string explicit pane returns
-        //   -32602; context pane is not affected.
-        // Why it exists: pins no-fallback for theme.set.
-        // Scenario: spec-first malformed/unknown explicit.
-        for paneValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
-            var model = makeModel()
-            createTab(&model)
-            let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-
-            let commands = sendIpc(
-                &model,
-                method: IpcRequestMethod.themeSet.rawValue,
-                params: .object([
-                    "pane": paneValue,
-                    "themeName": .string("Tokyo Night"),
-                ]),
-                pane: contextPaneId
-            )
-
-            let error = try requireIpcError(commands)
-            #expect(error.code == -32602)
-            #expect(model.pane(contextPaneId)?.theme == nil)
-        }
-    }
-
-    @Test("theme.set without explicit pane and without pane context fails before mutation")
-    func themeSetWithoutPaneAndContextFails() throws {
-        // Intent: theme.set without an explicit pane and no context
-        //   errors before mutation.
-        // Why it exists: pins the "need a pane" rule.
-        // Scenario: spec-first no-pane.
-        var model = makeModel()
-        createTab(&model)
-        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        let commands = sendIpc(
-            &model,
-            method: IpcRequestMethod.themeSet.rawValue,
-            params: .object(["themeName": .string("Tokyo Night")]),
-            pane: nil
-        )
-
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(model.pane(paneId)?.theme == nil)
-    }
-
     @Test("todo list add edit done open delete clear-completed use context pane")
     func todoCommandFamilyUsesContextPane() throws {
         // Intent: the full todo command surface (list/add/edit/done/
@@ -3032,90 +2532,6 @@ import DanTermProtocol
 
         #expect(try requireIpcError(commands) == .init(code: -32602, message: "tab not found"))
         #expect(model == before)
-    }
-
-    @Test("todo commands malformed or unknown explicit pane do not fall back to context")
-    func todoCommandsMalformedOrUnknownExplicitPaneNoFallback() throws {
-        // Intent: malformed / unknown / non-string explicit pane on
-        //   every todo method returns -32602; context pane stays
-        //   untouched.
-        // Why it exists: pins no-fallback for every todo command.
-        // Scenario: spec-first todo no-fallback sweep.
-        for paneValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
-            let commands: [(String, [String: JSONValue])] = [
-                (IpcRequestMethod.todoList.rawValue, [:]),
-                (IpcRequestMethod.todoAdd.rawValue, ["text": .string("should-not-apply")]),
-                (IpcRequestMethod.todoEdit.rawValue, ["todoId": .string("TODO_ID"), "text": .string("changed")]),
-                (IpcRequestMethod.todoDone.rawValue, ["todoId": .string("TODO_ID")]),
-                (IpcRequestMethod.todoOpen.rawValue, ["todoId": .string("TODO_ID")]),
-                (IpcRequestMethod.todoDelete.rawValue, ["todoId": .string("TODO_ID")]),
-                (IpcRequestMethod.todoClearCompleted.rawValue, [:]),
-            ]
-
-            for (method, baseParams) in commands {
-                var model = makeModel()
-                createTab(&model)
-                let contextPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-                let item = appendTodoForTest(&model, paneId: contextPaneId, text: "context")
-                if method == IpcRequestMethod.todoClearCompleted.rawValue || method == IpcRequestMethod.todoOpen.rawValue {
-                    model.updatePane(contextPaneId) { $0.todos[0].isDone = true }
-                }
-
-                var params = baseParams
-                params["pane"] = paneValue
-                if params["todoId"] != nil {
-                    params["todoId"] = .string(item.id.rawValue.uuidString)
-                }
-
-                let sent = sendIpc(
-                    &model,
-                    method: method,
-                    params: .object(params),
-                    pane: contextPaneId
-                )
-
-                let error = try requireIpcError(sent)
-                #expect(error.code == -32602)
-                #expect(model.pane(contextPaneId)?.todos.count == 1)
-                #expect(model.pane(contextPaneId)?.todos[0].text == "context")
-            }
-        }
-    }
-
-    @Test("todo commands without explicit pane and without pane context fail before mutation")
-    func todoCommandsWithoutPaneAndContextFail() throws {
-        // Intent: every todo command requires a pane (explicit or
-        //   context); without either it returns -32602.
-        // Why it exists: pins the "need a pane" rule for the full
-        //   command surface.
-        // Scenario: spec-first todo no-pane sweep.
-        let commands: [(String, [String: JSONValue])] = [
-            (IpcRequestMethod.todoList.rawValue, [:]),
-            (IpcRequestMethod.todoAdd.rawValue, ["text": .string("should-not-apply")]),
-            (IpcRequestMethod.todoEdit.rawValue, ["todoId": .string(UUID().uuidString), "text": .string("changed")]),
-            (IpcRequestMethod.todoDone.rawValue, ["todoId": .string(UUID().uuidString)]),
-            (IpcRequestMethod.todoOpen.rawValue, ["todoId": .string(UUID().uuidString)]),
-            (IpcRequestMethod.todoDelete.rawValue, ["todoId": .string(UUID().uuidString)]),
-            (IpcRequestMethod.todoClearCompleted.rawValue, [:]),
-        ]
-
-        for (method, params) in commands {
-            var model = makeModel()
-            createTab(&model)
-            let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-            _ = appendTodoForTest(&model, paneId: paneId, text: "context")
-
-            let sent = sendIpc(
-                &model,
-                method: method,
-                params: .object(params),
-                pane: nil
-            )
-
-            let error = try requireIpcError(sent)
-            #expect(error.code == -32602)
-            #expect(model.pane(paneId)?.todos.count == 1)
-        }
     }
 
     @Test("todo delete rejects unknown id")
@@ -3614,77 +3030,6 @@ import DanTermProtocol
         }, "expected command targeting explicit pane")
     }
 
-    @Test("pane.input explicit pane that doesn't exist returns pane not found")
-    func paneInputExplicitPaneNotFoundError() throws {
-        // Intent: an unknown explicit pane returns "pane not found"
-        //   (no fallback to context).
-        // Why it exists: pins the no-fallback rule and the message.
-        // Scenario: spec-first unknown explicit pane.
-        var model = makeModel()
-        createTab(&model)
-        let realPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        let commands = sendIpc(
-            &model,
-            method: IpcRequestMethod.paneInput.rawValue,
-            params: .object([
-                "pane": .string(UUID().uuidString),
-                "input": .array([.object(["text": .string("hi")])]),
-            ]),
-            pane: realPaneId
-        )
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(error.message.contains("pane not found"),
-            "expected 'pane not found', got: \(error.message)")
-        #expect(!hasEffect(commands) {
-            if case .sendInputText = $0 { return true }
-            return false
-        }, "no input command should be emitted")
-    }
-
-    @Test("pane.input non-string pane is invalid params and does not fall back")
-    func paneInputNonStringPaneIsInvalidParams() throws {
-        // Intent: non-string pane returns -32602 with a "pane must be
-        //   a string" message.
-        // Why it exists: pins the type-check message.
-        // Scenario: spec-first non-string pane.
-        var model = makeModel()
-        createTab(&model)
-        let realPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        let commands = sendIpc(
-            &model,
-            method: IpcRequestMethod.paneInput.rawValue,
-            params: .object([
-                "pane": .number(5),
-                "input": .array([.object(["text": .string("hi")])]),
-            ]),
-            pane: realPaneId
-        )
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(error.message.contains("pane must be a string"),
-            "expected 'pane must be a string', got: \(error.message)")
-    }
-
-    @Test("pane.input without an explicit pane errors")
-    func paneInputNoPaneInContextOrExplicitErrors() throws {
-        // Intent: an absent explicit pane returns -32602 with the shared
-        //   required-target message.
-        // Why it exists: pins the missing-pane error message.
-        // Scenario: spec-first no pane.
-        var model = makeModel()
-        createTab(&model)
-        let commands = sendIpc(
-            &model,
-            method: IpcRequestMethod.paneInput.rawValue,
-            params: .object(["input": .array([.object(["text": .string("hi")])])]),
-            pane: nil
-        )
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(error.message == "pane required")
-    }
-
     @Test("pane.read emits viewport read command without immediate reply")
     func paneReadEmitsViewportReadNoImmediateReply() {
         // Intent: pane.read emits a single readPaneText command and no
@@ -3738,59 +3083,6 @@ import DanTermProtocol
         }
         #expect(effectPaneId == paneId)
         #expect(lineLimit == 200)
-    }
-
-    @Test("pane.read missing pane param errors")
-    func paneReadMissingPaneParamErrors() throws {
-        // Intent: missing pane param returns -32602 with "pane
-        //   required".
-        // Why it exists: pins the missing-pane error message.
-        // Scenario: spec-first missing pane.
-        var model = makeModel()
-        createTab(&model)
-        let commands = sendIpc(&model, method: IpcRequestMethod.paneRead.rawValue, params: .object([:]))
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(error.message == "pane required")
-    }
-
-    @Test("pane.read non-string pane param errors")
-    func paneReadNonStringPaneParamErrors() throws {
-        // Intent: non-string pane param returns -32602 with "pane
-        //   must be a string".
-        // Why it exists: pins the type check.
-        // Scenario: spec-first non-string pane.
-        for paneValue in [JSONValue.number(5), .array([]), .object([:])] {
-            var model = makeModel()
-            createTab(&model)
-            let commands = sendIpc(
-                &model,
-                method: IpcRequestMethod.paneRead.rawValue,
-                params: .object(["pane": paneValue])
-            )
-            let error = try requireIpcError(commands)
-            #expect(error.code == -32602)
-            #expect(error.message == "pane must be a string")
-        }
-    }
-
-    @Test("pane.read unknown pane errors")
-    func paneReadUnknownPaneErrors() throws {
-        // Intent: unknown pane id returns -32602 with "pane not found".
-        // Why it exists: pins the unknown-pane error message.
-        // Scenario: spec-first unknown pane.
-        for rawPane in ["bogus", UUID().uuidString] {
-            var model = makeModel()
-            createTab(&model)
-            let commands = sendIpc(
-                &model,
-                method: IpcRequestMethod.paneRead.rawValue,
-                params: .object(["pane": .string(rawPane)])
-            )
-            let error = try requireIpcError(commands)
-            #expect(error.code == -32602)
-            #expect(error.message == "pane not found")
-        }
     }
 
     @Test("pane.read invalid line limits error")
@@ -3943,31 +3235,10 @@ import DanTermProtocol
         )
     }
 
-    @Test("pane.tape rejects missing and unknown panes")
-    func paneTapeRejectsMissingAndUnknownPanes() throws {
-        var missingModel = makeModel()
-        createTab(&missingModel)
-        let missing = sendIpc(
-            &missingModel,
-            method: IpcRequestMethod.paneTape.rawValue,
-            params: .object([:]),
-            pane: nil
-        )
-        #expect(try requireIpcError(missing) == .init(code: -32602, message: "pane required"))
-
-        var unknownModel = makeModel()
-        createTab(&unknownModel)
-        let unknown = sendIpc(
-            &unknownModel,
-            method: IpcRequestMethod.paneTape.rawValue,
-            params: .object([
-                "pane": .string(UUID().uuidString),
-                "start": .string("beginning"),
-                "mode": .string("raw"),
-            ])
-        )
-        #expect(try requireIpcError(unknown) == .init(code: -32602, message: "pane not found"))
-
+    // The pane target itself is swept with every other targeting method; this
+    // covers the one param that is pane.tape's own.
+    @Test("pane.tape rejects a start it cannot interpret")
+    func paneTapeRejectsInvalidStart() throws {
         var invalidModel = makeModel()
         createTab(&invalidModel)
         let paneId = selectedTab(in: invalidModel)!.paneTree.focusedPaneId
@@ -4244,26 +3515,6 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
             #expect(error.message == "columns must be 2-1024 and rows must be 1-1024")
             #expect(model.pane(paneId)?.gridOverride == nil)
         }
-    }
-
-    @Test("pane.resize refuses an unknown pane without touching the model")
-    func paneResizeRefusesUnknownPane() throws {
-        var model = makeModel()
-        createTab(&model)
-        let before = model
-
-        let commands = sendIpc(
-            &model,
-            method: IpcRequestMethod.paneResize.rawValue,
-            params: .object([
-                "pane": .string(UUID().uuidString),
-                "columns": .number(60),
-                "rows": .number(20),
-            ])
-        )
-
-        #expect(try requireIpcError(commands).code == -32602)
-        #expect(model == before)
     }
 
     @Test("ls reports a claimed grid on the pane it belongs to")

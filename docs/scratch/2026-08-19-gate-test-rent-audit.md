@@ -273,6 +273,66 @@ and the three btop profiling recipes.
       last-touch date) and the "legacy format tests" (grouped by the word
       "legacy" in a name).
 
+## E. The IPC target tests -- done 2026-08-19
+
+- [x] **E1/E2. `UpdateIpcTests` restated one resolver's contract thirty times.**
+
+      This is the first item found by reading bodies rather than names, and it
+      is the largest single cut in the audit: **146 tests to 116, 810 lines
+      deleted for 61 added**, with more checking afterwards than before.
+
+      **Rent, honestly stated: not one second of gate time.** `swift test
+      --package-path lib/DanTermCore` runs the whole package -- 1295 tests -- in
+      4s of a 91-step gate whose top step is 46s. The 30 tests cut here cost
+      microseconds. What they cost was maintenance surface: 810 lines that had
+      to be read, moved, and kept true every time the IPC surface changed.
+
+      **What production does.** Every IPC method that names an entity resolves
+      it through one function, `target(_:object:)` in
+      `lib/DanTermProtocol/Sources/DanTermProtocol/IpcRequest.swift`. It is
+      three lines and three messages: `<entity> required`, `<entity> must be a
+      string`, `<entity> not found`.
+
+      **What the tests did.** One table swept all 26 targeting methods, but only
+      for the absent branch. A second table swept two methods for all three
+      branches. Around it sat 21 hand-written per-method tests restating the
+      same contract more weakly -- most asserted only the -32602 code, not the
+      message; most checked one field rather than the whole model.
+
+      **The coverage hole this hid.** `pane.rows`, `agent.attach`,
+      `agent.activity`, and `agent.detach` had no non-string and no unknown-id
+      coverage at all. Nobody had written those four tests, and nothing said so
+      -- the same failure mode as the purity lint in C2, where the gate named
+      its targets by hand and a module nobody remembered was a module nobody
+      checked.
+
+      **The fix.** Extend the one table to all six probes (absent, number,
+      array, object, malformed string, unknown UUID) across all 26 methods, and
+      assert the full contract each time: exact message, `model == before`, and
+      `commands.count == 1` so a refused target cannot emit a side effect
+      either. Then delete every hand-written test it subsumes. Coverage becomes
+      the table's own responsibility: a targeting method nobody adds to the list
+      is the only way to be unchecked, and that is one visible line rather than
+      a silence.
+
+      **Ablated, not assumed.** Breaking the `not found` branch of
+      `target(_:object:)` fails the table on all 26 methods. Before the change
+      the same break was caught by roughly 13 hand-written tests and passed
+      silently for the four methods above.
+
+      **Two tests were passing for the wrong reason**, found only because the
+      sweep re-ran their stimulus honestly. `pane.tape`'s unknown-pane case was
+      answering "invalid tape start", because the table's row omitted the
+      required `start` param and decoding failed before the pane resolved.
+      `pane.close`'s missing-pane case injected the caller's pane through the
+      test helper and then failed on "refuses the only pane of the only tab" --
+      a different rule entirely.
+
+      **Kept deliberately.** `pane.zoom rejects an unknown state and an unknown
+      pane` (the state axis is its own contract), `todo command rejects an
+      unknown tab owner` (the `tab` key, which the sweep drives through `pane`),
+      and `pane.tape`, trimmed to the one param that is its own.
+
 ## What we checked and found healthy
 
 Recorded so nobody re-runs these probes.
@@ -308,3 +368,4 @@ Append one line per drop: date, what went, what broke or did not.
 | 2026-08-19 | C1: four bundle gate steps merged into `bundle-contract-suite.sh` | No test lost. 57.0s and 7 tool builds became 21.2s and 1. Gate step count 104 -> 101. |
 | 2026-08-19 | C2: 11 `core-purity-lint.sh` steps became 1 sweep | No check lost, and 27 previously unchecked modules gained the portable floor. Gate step count 101 -> 91. |
 | 2026-08-19 | D: nothing dropped -- proposal withdrawn on evidence | The registry it would parameterize over does not exist, and production documents why it must not. No code changed. |
+| 2026-08-19 | E: 30 `UpdateIpcTests` target-validation tests, replaced by one six-probe sweep | Nothing broke. 146 tests -> 116, 810 lines deleted for 61 added. Four methods gained coverage they never had. Gate step count unchanged at 91: this was maintenance rent, not seconds. |
