@@ -2,13 +2,13 @@
 import Cocoa
 
 /// The width the confirmation panel gives its text column. This is the only
-/// width the panel states: the heading, the body sentence, and the command
-/// document all wrap to it, and the window's width is that plus its padding.
+/// width the panel states: the heading, the body sentence, and the command list
+/// all wrap to it, and the window's width is that plus its padding.
 let confirmationTextColumnWidth: CGFloat = 460
 
-/// The tallest the command document may grow before it scrolls instead of
-/// pushing the buttons off screen. Chosen so the whole panel stays well inside
-/// the shortest display DanTerm supports, whatever the command list holds.
+/// The tallest the command list may grow before it scrolls instead of pushing
+/// the buttons off screen. Chosen so the whole panel stays well inside the
+/// shortest display DanTerm supports, whatever the command list holds.
 let confirmationCommandAreaMaxHeight: CGFloat = 220
 
 /// Keeps confirmations non-modal while naming every answer with its transaction id.
@@ -20,49 +20,30 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
     private let secondaryButton = NSButton(title: "", target: nil, action: nil)
     private let confirmButton = NSButton(title: "", target: nil, action: nil)
 
-    /// The commands this confirmation would end, exactly as projected. The copy
-    /// action writes these, not what is drawn or selected, so a scrolled or
-    /// partly selected document still yields the whole list.
-    private var commands: [DisplayLine] = []
-
-    // MARK: - Command document
+    // MARK: - Command list
     //
-    // An explicit TextKit 1 stack, because the panel measures the laid-out text
-    // to size itself and `NSLayoutManager.usedRect` is the exact answer. An
-    // NSTextView built with `init()` would start on TextKit 2 and fall back the
-    // moment `layoutManager` is touched.
-    //
-    // `NSLayoutManager` does not own its text storage, so the storage is held
-    // here for the panel's lifetime; dropping it would leave the text view
-    // laying out freed text.
-    private let commandStorage = NSTextStorage()
-    private let commandContainer = NSTextContainer()
-    private let commandLayoutManager = NSLayoutManager()
-    // The UI harness reads these four to prove the projected commands reach the
-    // document, that it scrolls instead of growing past the bound, and that an
-    // empty command list leaves no command area at all.
-    let commandTextView: NSTextView
+    // The commands are a list of items, not one text document: each item owns
+    // its command and its own copy action, so no affordance here can reach the
+    // whole list. The UI harness reads these three to prove that every projected
+    // command becomes an item, that the list scrolls instead of growing past the
+    // bound, and that an empty command list leaves no command area at all.
     let commandScrollView = NSScrollView()
-    let copyButton = NSButton(title: "Copy", target: nil, action: nil)
-    let commandArea = NSStackView()
-    private var commandHeight: NSLayoutConstraint!
+    let commandList = NSStackView()
 
-    /// Clipboard seam for the copy affordance. Production uses the general
-    /// pasteboard; the UI harness injects a recorder.
-    var pasteboard: TextPasteboard = NSPasteboard.general
+    /// The item per running command, in projection order.
+    var commandItems: [ConfirmationCommandItemView] {
+        commandList.arrangedSubviews.compactMap { $0 as? ConfirmationCommandItemView }
+    }
 
-    /// The command font, also the font the panel measures the document with.
-    private static let commandFont = NSFont.monospacedSystemFont(
-        ofSize: NSFont.smallSystemFontSize,
-        weight: .regular
-    )
+    /// Clipboard seam for the per-item copy actions. Production uses the general
+    /// pasteboard; the UI harness injects a recorder. Pushing it down on every
+    /// change frees callers from having to set it before the first configure.
+    var pasteboard: TextPasteboard = NSPasteboard.general {
+        didSet { for item in commandItems { item.pasteboard = pasteboard } }
+    }
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
-        commandStorage.addLayoutManager(commandLayoutManager)
-        commandLayoutManager.addTextContainer(commandContainer)
-        commandContainer.lineFragmentPadding = 0
-        commandTextView = NSTextView(frame: .zero, textContainer: commandContainer)
         // A placeholder rect. The panel's real size comes from its content, so
         // no dimension is stated here.
         super.init(
@@ -99,7 +80,7 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
         cancelButton.bezelStyle = .push
         cancelButton.keyEquivalent = "\u{1b}"
 
-        buildCommandArea()
+        buildCommandList()
 
         confirmButton.target = self
         confirmButton.action = #selector(confirm(_:))
@@ -114,14 +95,15 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
         buttonStack.orientation = .horizontal
         buttonStack.spacing = 8
 
-        // One vertical stack, so hiding the command area collapses the space it
-        // used instead of leaving a gap (I5's "no command area at all").
-        let column = NSStackView(views: [headingLabel, bodyLabel, commandArea, buttonStack])
+        // One vertical stack, so hiding the command list collapses the space it
+        // used instead of leaving a gap: a confirmation with no running command
+        // must show no command area at all.
+        let column = NSStackView(views: [headingLabel, bodyLabel, commandScrollView, buttonStack])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 8
         column.translatesAutoresizingMaskIntoConstraints = false
-        column.setCustomSpacing(16, after: commandArea)
+        column.setCustomSpacing(16, after: commandScrollView)
         contentView.addSubview(column)
 
         let padding: CGFloat = 20
@@ -135,51 +117,43 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
             // width and sit at its trailing edge.
             headingLabel.widthAnchor.constraint(equalTo: column.widthAnchor),
             bodyLabel.widthAnchor.constraint(equalTo: column.widthAnchor),
-            commandArea.widthAnchor.constraint(equalTo: column.widthAnchor),
+            commandScrollView.widthAnchor.constraint(equalTo: column.widthAnchor),
             buttonStack.trailingAnchor.constraint(equalTo: column.trailingAnchor),
             cancelButton.heightAnchor.constraint(equalTo: confirmButton.heightAnchor),
         ])
     }
 
-    private func buildCommandArea() {
-        commandTextView.isEditable = false
-        commandTextView.isSelectable = true
-        commandTextView.drawsBackground = false
-        commandTextView.font = Self.commandFont
-        commandTextView.textColor = .labelColor
-        commandTextView.textContainerInset = .zero
-        commandTextView.isVerticallyResizable = true
-        commandTextView.isHorizontallyResizable = false
-        commandTextView.autoresizingMask = [.width]
+    private func buildCommandList() {
+        commandList.orientation = .vertical
+        commandList.alignment = .leading
+        commandList.spacing = 10
+        commandList.translatesAutoresizingMaskIntoConstraints = false
 
-        commandScrollView.documentView = commandTextView
+        commandScrollView.documentView = commandList
         commandScrollView.hasVerticalScroller = true
         commandScrollView.autohidesScrollers = true
         commandScrollView.drawsBackground = false
-        // No border, so the clip view's width is exactly the column width the
-        // panel measures the document against.
         commandScrollView.borderType = .noBorder
-        commandHeight = commandScrollView.heightAnchor.constraint(equalToConstant: 0)
 
-        copyButton.target = self
-        copyButton.action = #selector(copyCommands(_:))
-        copyButton.bezelStyle = .push
-        copyButton.controlSize = .small
-
-        // Gravity areas, not alignment: the button keeps its natural width and
-        // still sits at the trailing edge of the full-width row.
-        let header = NSStackView()
-        header.orientation = .horizontal
-        header.addView(copyButton, in: .trailing)
-
-        commandArea.orientation = .vertical
-        commandArea.alignment = .leading
-        commandArea.spacing = 4
-        commandArea.setViews([header, commandScrollView], in: .leading)
+        // The list is pinned to the top of the clip view and takes the clip
+        // view's real width -- narrowed by a visible scroller -- so each item
+        // wraps to the width it is actually drawn at. Its height is free, which
+        // is what makes the list scroll.
+        let clip = commandScrollView.contentView
+        // Optional, so the required bound below can break it: together the two
+        // give the visible list the smaller of its content height and the bound.
+        let fitsContent = commandScrollView.heightAnchor.constraint(
+            equalTo: commandList.heightAnchor
+        )
+        fitsContent.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            commandHeight,
-            header.widthAnchor.constraint(equalTo: commandArea.widthAnchor),
-            commandScrollView.widthAnchor.constraint(equalTo: commandArea.widthAnchor),
+            commandList.topAnchor.constraint(equalTo: clip.topAnchor),
+            commandList.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+            commandList.widthAnchor.constraint(equalTo: clip.widthAnchor),
+            commandScrollView.heightAnchor.constraint(
+                lessThanOrEqualToConstant: confirmationCommandAreaMaxHeight
+            ),
+            fitsContent,
         ])
     }
 
@@ -193,41 +167,21 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
         secondaryButton.title = projection.secondaryTitle?.text ?? ""
         secondaryButton.isHidden = projection.secondaryTitle == nil
 
-        commands = projection.commands
-        commandArea.isHidden = commands.isEmpty
-        commandTextView.string = commandText
-        // Replacing the string resets the run's attributes to the typing
-        // defaults, so both are re-applied here rather than only at build time.
-        commandTextView.font = Self.commandFont
-        commandTextView.textColor = .labelColor
-        // Size the document from the measured text rather than waiting for a
-        // display pass: the visible height below is a cap, so a document left at
-        // its old size would clip its own text instead of scrolling.
-        let document = commandDocumentHeight()
-        commandTextView.frame = NSRect(
-            x: 0, y: 0, width: confirmationTextColumnWidth, height: document
-        )
-        commandHeight.constant = min(document, confirmationCommandAreaMaxHeight)
+        // Fresh items every time, so an item at a position can only ever hold
+        // the command that position now shows.
+        commandScrollView.isHidden = projection.commands.isEmpty
+        commandList.setViews(projection.commands.map { line in
+            let item = ConfirmationCommandItemView(command: line.text)
+            item.pasteboard = pasteboard
+            return item
+        }, in: .leading)
+        // Leading alignment alone would give each item its natural width, and a
+        // wrapping label has none worth having. Every item takes the list's full
+        // width instead, which is the width its text must wrap to.
+        NSLayoutConstraint.activate(commandItems.map {
+            $0.widthAnchor.constraint(equalTo: commandList.widthAnchor)
+        })
         sizeToContent()
-    }
-
-    /// The commands as one document: one per line, in projection order. Both the
-    /// drawn text and the clipboard write use this, so they cannot disagree.
-    private var commandText: String {
-        commands.map(\.text).joined(separator: "\n")
-    }
-
-    /// The height the wrapped command text occupies at the column width.
-    /// Measured through the layout manager rather than estimated, so the frame
-    /// the panel asks for is the height the text actually needs.
-    private func commandDocumentHeight() -> CGFloat {
-        guard !commands.isEmpty else { return 0 }
-        commandContainer.size = NSSize(
-            width: confirmationTextColumnWidth,
-            height: .greatestFiniteMagnitude
-        )
-        commandLayoutManager.ensureLayout(for: commandContainer)
-        return ceil(commandLayoutManager.usedRect(for: commandContainer).height)
     }
 
     /// Resizes the panel to fit its content while holding the title bar still.
@@ -235,13 +189,31 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
     /// out from under the pointer, so the top edge is the fixed point.
     private func sizeToContent() {
         guard let contentView else { return }
-        contentView.layoutSubtreeIfNeeded()
-        let wanted = frameRect(forContentRect: NSRect(origin: .zero, size: contentView.fittingSize))
         let top = frame.maxY
-        setFrame(
-            NSRect(x: frame.minX, y: top - wanted.height, width: wanted.width, height: wanted.height),
-            display: true
-        )
+        // Repeat until the size settles. An item wraps to the width it is given,
+        // so its height is only known after the panel has been laid out at that
+        // width -- and that height is what the next size has to fit. A visible
+        // scroller narrowing the list is the same story one step further on.
+        for _ in 0..<4 {
+            // Twice: the first pass is what gives each item its width, and
+            // learning that width invalidates the item's height, so the size is
+            // only readable after the second.
+            contentView.layoutSubtreeIfNeeded()
+            contentView.layoutSubtreeIfNeeded()
+            let wanted = frameRect(
+                forContentRect: NSRect(origin: .zero, size: contentView.fittingSize)
+            )
+            if abs(wanted.height - frame.height) < 0.5, abs(wanted.width - frame.width) < 0.5 {
+                break
+            }
+            setFrame(
+                NSRect(
+                    x: frame.minX, y: top - wanted.height,
+                    width: wanted.width, height: wanted.height
+                ),
+                display: true
+            )
+        }
     }
 
     /// Position the panel centered over the main app window when possible.
@@ -279,11 +251,11 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
 
     // NSWindow: the panel answers Return and Escape itself, before AppKit
     // routes the press anywhere else. Return reaches the default button only
-    // through the responder chain, and the command list is a selectable
-    // NSTextView that holds first responder and swallows it, so the confirm
-    // button's key equivalent is not enough on its own. The panel holds no
-    // editable text, so those two keys can only mean "the default answer" and
-    // "cancel", and this claims them for any focus-taking subview added later.
+    // through the responder chain, and a command item's selectable text holds
+    // first responder and swallows it, so the confirm button's key equivalent is
+    // not enough on its own. The panel holds no editable text, so those two keys
+    // can only mean "the default answer" and "cancel", and this claims them for
+    // any focus-taking subview added later.
     override func sendEvent(_ event: NSEvent) {
         switch reservedKey(for: event) {
         case .confirm:
@@ -334,11 +306,5 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
     @objc private func cancel(_ sender: Any?) {
         guard let transactionId else { return }
         runtime?.send(.cancelConfirmation(id: transactionId))
-    }
-
-    @objc private func copyCommands(_ sender: Any?) {
-        guard !commands.isEmpty else { return }
-        pasteboard.clearContents()
-        pasteboard.setString(commandText, forType: .string)
     }
 }

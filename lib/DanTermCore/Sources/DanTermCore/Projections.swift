@@ -1069,8 +1069,8 @@ struct ConfirmationProjection: Equatable {
   let title: DisplayLine
   let informativeText: String
   /// Every running command the confirmed action would end, in pane order. The
-  /// panel presents as many as fit and scrolls the rest; nothing here is
-  /// shortened, so the copy affordance can hand over the whole list.
+  /// panel presents each as its own item and scrolls the ones that do not fit;
+  /// nothing here is shortened, so an item's copy hands over its whole command.
   let commands: [DisplayLine]
   let confirmTitle: DisplayLine
   let secondaryTitle: DisplayLine?

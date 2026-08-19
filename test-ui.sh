@@ -160,6 +160,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/ThemeBrowserView.swift" \
         "$SCRIPT_DIR/app/RemoteThemePickerSheet.swift" \
         "$SCRIPT_DIR/app/PreferencesPanel.swift" \
+        "$SCRIPT_DIR/app/ConfirmationCommandItemView.swift" \
         "$SCRIPT_DIR/app/ConfirmationPanel.swift" \
         "$SCRIPT_DIR/tests-ui/ChipViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneStripViewTests.swift" \
