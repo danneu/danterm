@@ -2,6 +2,10 @@
 // Owned exclusively by AppRuntime — never nils itself out of the runtime.
 // Manages the overlay view for pane drop zones. Sidebar drops are handled
 // natively by NSOutlineView via the NSDraggingSession started in ToolbarDragHandleView.
+//
+// This holds no geometry of its own: the drop decision is the pure
+// `resolvePaneDrop` over the container's current layout, and every coordinate
+// change goes through `NSView.convert`.
 
 import Cocoa
 
@@ -10,16 +14,18 @@ class PaneDragCoordinator {
     let sourcePaneId: PaneId
     let overlayView: PaneDragOverlayView
 
-    private(set) var currentTarget: PaneId?
-    private(set) var currentIntent: PaneDropIntent?
+    // Private: `currentDrop()` is the only reader, so the resolved value cannot be
+    // observed half-updated.
+    private var resolvedDrop: PaneDrop?
 
-    private let paneFrameProvider: (PaneId) -> NSRect?
-    private let allTargetPaneIds: [PaneId]
+    // Weak: the container belongs to the tab, which can outlive or predecease a
+    // drag. Reconcile cancels the drag on any visible-tab tree or zoom edit, so a
+    // nil container here means the drag is already over.
+    private weak var container: SplitContainerView?
 
-    init(sourcePaneId: PaneId, contentView: NSView, paneFrameProvider: @escaping (PaneId) -> NSRect?, targetPaneIds: [PaneId]) {
+    init(sourcePaneId: PaneId, contentView: NSView, container: SplitContainerView) {
         self.sourcePaneId = sourcePaneId
-        self.paneFrameProvider = paneFrameProvider
-        self.allTargetPaneIds = targetPaneIds
+        self.container = container
 
         // Create overlay covering the entire content area
         overlayView = PaneDragOverlayView(frame: contentView.bounds)
@@ -29,49 +35,40 @@ class PaneDragCoordinator {
 
     /// Update drag state from cursor position (in window coordinates).
     func updateDrag(locationInWindow: NSPoint) {
-        var hitTarget: PaneId?
-        var hitIntent: PaneDropIntent?
-
-        for paneId in allTargetPaneIds {
-            guard let frame = paneFrameProvider(paneId) else { continue }
-            if frame.contains(locationInWindow) {
-                let localPoint = DropZonePoint(
-                    x: locationInWindow.x - frame.origin.x,
-                    y: locationInWindow.y - frame.origin.y
-                )
-                let size = DropZoneSize(width: frame.width, height: frame.height)
-                if let intent = resolveDropZone(cursorInPane: localPoint, paneSize: size) {
-                    hitTarget = paneId
-                    hitIntent = intent
-                }
-                break
-            }
-        }
-
-        currentTarget = hitTarget
-        currentIntent = hitIntent
-
-        if let target = hitTarget, let intent = hitIntent, let frame = paneFrameProvider(target) {
-            // Convert frame from window coords to overlay (content view) coords
-            let overlayFrame = overlayView.convert(frame, from: nil)
-            let zoneRect = highlightRect(for: intent, in: overlayFrame)
-            overlayView.update(rect: zoneRect, intent: intent)
-        } else {
+        guard let container else {
+            resolvedDrop = nil
             overlayView.clear()
+            return
         }
+
+        let layout = container.currentPaneLayout()
+        let pointInContainer = container.convert(locationInWindow, from: nil)
+        let drop = resolvePaneDrop(
+            at: DropZonePoint(x: pointInContainer.x, y: pointInContainer.y),
+            in: layout,
+            source: sourcePaneId
+        )
+        resolvedDrop = drop
+
+        guard let drop, let rect = layout.paneFrames[drop.target] else {
+            overlayView.clear()
+            return
+        }
+        let frameInContainer = NSRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
+        let overlayFrame = overlayView.convert(frameInContainer, from: container)
+        overlayView.update(rect: highlightRect(for: drop.intent, in: overlayFrame), intent: drop.intent)
     }
 
     /// Return current drop parameters if valid, else nil.
     func currentDrop() -> (source: PaneId, target: PaneId, intent: PaneDropIntent)? {
-        guard let target = currentTarget, let intent = currentIntent else { return nil }
-        return (sourcePaneId, target, intent)
+        guard let resolvedDrop else { return nil }
+        return (sourcePaneId, resolvedDrop.target, resolvedDrop.intent)
     }
 
     /// Remove overlay. Does NOT nil out AppRuntime's reference.
     func teardown() {
         overlayView.removeFromSuperview()
-        currentTarget = nil
-        currentIntent = nil
+        resolvedDrop = nil
     }
 
     // MARK: - Highlight Geometry

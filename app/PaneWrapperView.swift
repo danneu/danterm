@@ -702,8 +702,9 @@ class ToolbarDragHandleView: NSView, NSDraggingSource {
 
             // Allow the drag unless there's nowhere to drop: a single pane in the only tab.
             // A zoomed pane always has splits, so hasSplits is true and the drag starts; the
-            // sidebar can then move it to another tab. In-tab split/swap targets aren't mounted
-            // while zoomed, so those drops stay inert (PaneDragCoordinator skips nil frames).
+            // sidebar can then move it to another tab. In-tab split/swap targets resolve from
+            // the pure layout, which frames only the panes the model displays, so a zoomed
+            // tab's hidden siblings offer no drop.
             guard let tab = selectedTab(in: runtime.model) else { return }
             let hasSplits: Bool
             if case .split = tab.paneTree.root { hasSplits = true } else { hasSplits = false }
