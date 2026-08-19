@@ -230,7 +230,8 @@ class AppRuntime {
     init(
         ports: AppRuntimePorts,
         configStore: DanTermConfigStore = DanTermConfigStore(),
-        startsApplicationServices: Bool = true
+        startsApplicationServices: Bool = true,
+        tailnetOptIn: Bool = false
     ) {
         self.ports = ports
         self.configStore = configStore
@@ -274,6 +275,7 @@ class AppRuntime {
                 let server = try IpcServer(
                     socketPath: controlSocketPath(),
                     tailnetConfig: launchConfig.tailnet,
+                    tailnetOptIn: tailnetOptIn,
                     runtimeDispatch: makeIpcDispatch()
                 )
                 self.ipcServer = server

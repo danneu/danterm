@@ -124,8 +124,10 @@ comes online on its own.
 
 The configured port is a base. Every instance on one Mac adds a fixed offset for
 its own identity, so no two of them race for one port: production takes the base
-port, and development slot N takes the base port plus 1 + N. Ask a running
-instance which endpoint it derived, and whether it is bound:
+port, and development slot N takes the base port plus 1 + N. Development slots 1
+through 8 belong to the throwaway apps agents launch, so they stay closed unless
+one is launched with `--tailnet`. Ask a running instance which endpoint it
+derived, and whether it is bound:
 
 ```sh
 danterm tailnet status

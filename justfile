@@ -277,12 +277,12 @@ replace-dev-optimized:
     ./dev-build-run.sh --release
 
 # Launch an isolated unattended development slot, leaving the canonical app alone
-launch-slot:
-    ./scripts/dev-slot-launcher.py
+launch-slot *args:
+    ./scripts/dev-slot-launcher.py {{args}}
 
 # Launch an isolated unattended optimized development slot
-launch-slot-optimized:
-    ./scripts/dev-slot-launcher.py --release
+launch-slot-optimized *args:
+    ./scripts/dev-slot-launcher.py --release {{args}}
 
 # Launch an isolated slot that activates, to grant notification authorization once
 launch-slot-prime:

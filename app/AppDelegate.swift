@@ -47,7 +47,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             ports: .live(
                 terminalBackend: terminalBackend,
                 notificationAuthorizationPolicy: launchPolicy.notificationAuthorization
-            )
+            ),
+            tailnetOptIn: launchPolicy.tailnetOptIn
         )
         installWorkspaceLifecycleObserver()
 

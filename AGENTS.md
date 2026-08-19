@@ -266,7 +266,9 @@ prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
   a release-configuration build, `-prime` only when a human is granting a slot
   notification permission (it launches the same way and activates the app).
   Drive the slot with an explicit `danterm --socket` argument every time; do not
-  rely on ambient `DANTERM_SOCK`.
+  rely on ambient `DANTERM_SOCK`. Pass `--tailnet` only when you need the slot to
+  open the configured tailnet listener on its own derived port; the handle then
+  carries a `tailnet` object saying what that listener is doing.
 - `just stop-slot <n>` -- **run this when you are done with your slot.** The pool
   holds eight slots and every checkout on the machine shares them, so a slot you
   abandon is one another agent cannot have. `just slots` prints the pool as JSON,

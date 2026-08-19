@@ -329,12 +329,20 @@ def launch_handle(identity: Mapping[str, object], pid: int) -> dict[str, object]
     }
 
 
-def app_arguments(executable: Path, lock_descriptor: int, *, foreground: bool) -> list[str]:
-    """Keeps activation as the only difference between the two launch requests.
+def app_arguments(
+    executable: Path,
+    lock_descriptor: int,
+    *,
+    foreground: bool,
+    tailnet: bool = False,
+) -> list[str]:
+    """Keeps activation and the tailnet opt-in as the only launch-request differences.
 
     Every slot app starts the same way: detached, on an inherited lock descriptor,
     with no recovery prompt. `--background` withholds activation and the one-time
-    notification prompt, so leaving it off is all `--foreground` means.
+    notification prompt, so leaving it off is all `--foreground` means. `--tailnet`
+    is what lets a pool slot open a listener at all; every other slot ignores the
+    shared config's tailnet block.
     """
 
     arguments = [
@@ -344,6 +352,8 @@ def app_arguments(executable: Path, lock_descriptor: int, *, foreground: bool) -
     ]
     if not foreground:
         arguments.append("--background")
+    if tailnet:
+        arguments.append("--tailnet")
     return arguments
 
 
@@ -431,6 +441,51 @@ def await_control_socket(socket_path: Path, pid: int, timeout: float = 30.0) -> 
     raise LaunchFailedError(
         f"the app did not answer on {socket_path} within {timeout:g}s, so it was killed"
     )
+
+
+def fetch_tailnet_status(socket_path: Path, pid: int, timeout: float = 10.0) -> dict[str, object]:
+    """Asks the running app what its tailnet listener is doing, and reports it verbatim.
+
+    The app is the sole deriver of endpoints and the sole author of this status, so
+    the launcher only relays it. A `--tailnet` launch that cannot get an answer did
+    not deliver what was asked for, so it kills the app the way an unreachable launch
+    does rather than printing a handle that hides the question.
+    """
+
+    request = json.dumps(
+        {"jsonrpc": "2.0", "id": 1, "method": "tailnet.status"}, separators=(",", ":")
+    )
+    connection = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    deadline = time.monotonic() + timeout
+    line = b""
+    try:
+        connection.settimeout(timeout)
+        connection.connect(str(socket_path))
+        connection.sendall(request.encode("utf-8") + b"\n")
+        while b"\n" not in line:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            connection.settimeout(remaining)
+            received = connection.recv(65536)
+            if not received:
+                raise ConnectionError
+            line += received
+    except OSError:
+        terminate_session(pid)
+        raise LaunchFailedError(
+            f"the app did not answer tailnet.status within {timeout:g}s, so it was killed"
+        ) from None
+    finally:
+        connection.close()
+    try:
+        status = json.loads(line.split(b"\n", 1)[0])["result"]
+    except (ValueError, KeyError, TypeError):
+        status = None
+    if not isinstance(status, dict) or "state" not in status:
+        terminate_session(pid)
+        raise LaunchFailedError("the app answered tailnet.status with no status, so it was killed")
+    return status
 
 
 def terminate_session(pid: int) -> None:
@@ -526,6 +581,11 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
         help="activate the fresh instance and allow its one-time notification prompt",
     )
     parser.add_argument(
+        "--tailnet",
+        action="store_true",
+        help="let this slot open the configured tailnet listener on its derived port",
+    )
+    parser.add_argument(
         "--pass-env",
         action="append",
         choices=PASSTHROUGH_ENVIRONMENT_VARIABLES,
@@ -563,24 +623,41 @@ def launch_slot_app(
     slot_root: Path,
     checkout: Path,
     foreground: bool,
+    tailnet: bool = False,
 ) -> dict[str, object]:
     """Turns a staged bundle into a running slot, and is where the handle earns its meaning.
 
     Holds every step between the build and the caller's handle -- spawn, record,
-    hand off the claim, wait for the control socket -- so both launch requests
-    provably take one path and the returned handle always names a reachable app.
+    hand off the claim, wait for the control socket, ask a --tailnet launch what its
+    listener is doing -- so every launch request provably takes one path and the
+    returned handle always names a reachable app.
     """
 
     pid = spawn_detached(
         executable,
-        app_arguments(executable, claim.descriptor, foreground=foreground),
+        app_arguments(executable, claim.descriptor, foreground=foreground, tailnet=tailnet),
         environment,
         slot_log_path(slot_root, int(identity["slot"])),
     )
-    handle = launch_handle(identity, pid)
-    describe_occupant(claim, {"state": "running", "checkout": str(checkout), **handle})
-    claim.close()
-    await_control_socket(Path(str(identity["socketPath"])), pid)
+    try:
+        handle = launch_handle(identity, pid)
+        record = {"state": "running", "checkout": str(checkout), **handle}
+        describe_occupant(claim, record)
+        socket_path = Path(str(identity["socketPath"]))
+        await_control_socket(socket_path, pid)
+        if tailnet:
+            handle["tailnet"] = fetch_tailnet_status(socket_path, pid)
+            try:
+                describe_occupant(claim, {**record, "tailnet": handle["tailnet"]})
+            except ValueError:
+                # A bind failure's reason text has no length the launcher controls, and
+                # the row is only a courtesy to whoever finds the slot busy. The record
+                # written above stands, and the caller's handle carries the status whole.
+                pass
+    finally:
+        # The claim outlives every failure path above only as this process's own
+        # copy; the app inherited the descriptor that actually holds the lock.
+        claim.close()
     return handle
 
 
@@ -679,6 +756,7 @@ def main(arguments: list[str]) -> int:
             slot_root=slot_root,
             checkout=repository_root,
             foreground=options.foreground,
+            tailnet=options.tailnet,
         )
     except LaunchFailedError as error:
         print(f"dev-slot-launcher: {error}", file=sys.stderr)

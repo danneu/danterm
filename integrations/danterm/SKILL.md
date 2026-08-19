@@ -193,6 +193,14 @@ and only lets the app activate and prompt. Use
 `just launch-slot-optimized` for an optimized build. Pool exhaustion exits with
 status 75 and starts no process.
 
+A pool slot ignores the shared config's tailnet block unless you ask for it. Add
+`--tailnet` -- `just launch-slot --tailnet` -- and the slot opens the listener on
+the port its own identity derives, and the handle gains a `tailnet` object holding
+the same reply `danterm tailnet status` prints. A slot that is still `waiting` on
+its bind reports that and keeps retrying, so the handle is a starting point rather
+than a final answer. Without the flag no status is asked for and the handle has no
+`tailnet` field.
+
 The eight slots are shared by every checkout on the machine, so agents in
 separate worktrees launch beside each other and must give their slots back. Run
 `just stop-slot <n>` on the slot from your handle when you are done with it:
@@ -953,6 +961,8 @@ a stale hook cannot mutate a replacement session.
   endpoint it derived, and whether it is bound, with `danterm tailnet status`.
   A listener that is not up yet reports `waiting` and keeps retrying the same
   endpoint, so the state is worth re-reading rather than treating as final.
+  A launcher pool slot is the one instance that also has to be asked: it opens
+  no listener unless it was launched with `just launch-slot --tailnet`.
 - Drive an enabled listener with `danterm --tcp <tailnet-ip>:<port> <command>`.
   The TCP target is always explicit. It uses the same handshake, typed refusal
   errors, commands, and output shapes as a Unix-socket target. Remote `quit` is

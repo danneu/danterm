@@ -27,13 +27,20 @@ enum LaunchActivationPolicy: Equatable {
 struct AppLaunchPolicy: Equatable {
     static let freshArgument = "--fresh"
     static let backgroundArgument = "--background"
+    static let tailnetArgument = "--tailnet"
 
     let startup: StartupPolicy
     let activation: LaunchActivationPolicy
     let notificationAuthorization: NotificationAuthorizationPolicy
+    /// Whether a launcher pool slot may open the configured tailnet listener.
+    ///
+    /// Every instance reads one shared config, so a pool slot stays closed unless the
+    /// launch asked for a listener. Production and the canonical dev app ignore this.
+    let tailnetOptIn: Bool
 
     init(arguments: [String]) {
         startup = arguments.contains(Self.freshArgument) ? .fresh : .promptForRecovery
+        tailnetOptIn = arguments.contains(Self.tailnetArgument)
         if arguments.contains(Self.backgroundArgument) {
             activation = .background
             notificationAuthorization = .neverRequest

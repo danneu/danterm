@@ -225,7 +225,7 @@ bind recovers on its own; and the listener's state is visible instead of silent.
 - [x] 2. Gate and retry the tailnet bind on the derived endpoint
 - [x] 3. Publish listener status through the model and `tailnet.status`
 - [x] 4. Show the read-only tailnet section in the preferences panel
-- [ ] 5. Launch a pool slot with `--tailnet` and report status in the handle
+- [x] 5. Launch a pool slot with `--tailnet` and report status in the handle
 
 ## Implementation notes
 
@@ -272,3 +272,15 @@ bind recovers on its own; and the listener's state is visible instead of silent.
 - Commit 4: the config row reads the committed config while the endpoint row
   reads the launch-frozen status, which is what makes a post-launch config edit
   legible as "next launch" instead of looking like the current endpoint.
+- Commit 5: the launcher asks the app for the status over the control socket and
+  relays the object it gets. It never derives a port or builds a status of its
+  own, so the handle cannot disagree with `danterm tailnet status` or the
+  preferences pane.
+- Commit 5: the launcher's copy of the slot claim now closes in a `finally` at
+  the end of the launch rather than before the socket wait. The occupancy row has
+  to be rewritten with the status, and that can only happen once the app is
+  reachable. The row written before the wait still names the pid, so a slot found
+  busy in between is described exactly as before.
+- Commit 5: an occupancy record that will not fit keeps the record written before
+  the status query instead of failing the launch, so the row loses only the
+  `tailnet` object. The caller's handle carries the status whole either way.
