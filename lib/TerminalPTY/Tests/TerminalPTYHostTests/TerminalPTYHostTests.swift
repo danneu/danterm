@@ -2026,7 +2026,7 @@ struct TerminalPTYHostChildProcessTests {
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        let baseline = await host.fencedFlightRecordingCapture().snapshot.events.count
+        let baseline = host.fencedFlightRecordingCapture().snapshot.events.count
 
         // A zero-row scroll between submissions closes the coalescing run, so nothing here
         // is superseded and every fact below reaches the applied boundary in order.
