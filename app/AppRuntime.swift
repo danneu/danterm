@@ -1709,23 +1709,13 @@ class AppRuntime {
         cancelPaneDrag()
         guard let contentArea = contentArea else { return }
         guard let tab = selectedTab(in: model) else { return }
+        guard let container = tabContainers[tab.id] else { return }
 
-        let targetIds = allPaneIds(tab.paneTree.root).filter { $0 != paneId }
-
-        // Build pane frame provider: converts PaneWrapperView frames to window coordinates
-        let provider: (PaneId) -> NSRect? = { [weak self] targetPaneId in
-            guard let self = self else { return nil }
-            guard let wrapper = self.findPaneWrapper(for: targetPaneId) else { return nil }
-            return wrapper.convert(wrapper.bounds, to: nil)
-        }
-
-        let coordinator = PaneDragCoordinator(
+        dragCoordinator = PaneDragCoordinator(
             sourcePaneId: paneId,
             contentView: contentArea,
-            paneFrameProvider: provider,
-            targetPaneIds: targetIds
+            container: container
         )
-        dragCoordinator = coordinator
     }
 
     /// Convert a screen point to window coordinates and update the drag overlay.

@@ -55,12 +55,15 @@ class SplitContainerView: NSView {
         applyModelLayout()
     }
 
+    /// Answers geometry questions (pane drop targeting) from the layout this view
+    /// presents, derived from the bounds at the moment of the call -- so a caller
+    /// cannot read pane rectangles that a pending AppKit layout pass has stranded.
+    func currentPaneLayout() -> PaneLayout {
+        paneLayout(in: PaneLayoutRect(bounds), tree: rootNode, zoomedPaneId: zoomedPaneId)
+    }
+
     private func applyModelLayout() {
-        let layout = paneLayout(
-            in: PaneLayoutRect(bounds),
-            tree: rootNode,
-            zoomedPaneId: zoomedPaneId
-        )
+        let layout = currentPaneLayout()
         reconcilePanes(with: layout)
         reconcileDividers(with: layout)
     }
@@ -123,17 +126,5 @@ class SplitContainerView: NSView {
     private func setFrameIfNeeded(_ frame: NSRect, on view: NSView) {
         guard view.frame != frame else { return }
         view.frame = frame
-    }
-}
-
-private extension PaneLayoutRect {
-    init(_ rect: NSRect) {
-        self.init(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)
-    }
-}
-
-private extension NSRect {
-    init(_ rect: PaneLayoutRect) {
-        self.init(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
     }
 }
