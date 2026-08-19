@@ -1376,26 +1376,35 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller.tearDown()
     }
 
-    private func publish(_ events: [TerminalSemanticEvent]) {
+    private func publish(_ events: [PaneSemanticEvent]) {
         for event in events {
-            #if DANTERM_TERMINAL_BENCHMARK
-            if case .title(let title) = event {
-                TerminalBenchmarkObserver.shared?.observeTitle(title)
-            }
-            #endif
-            if let report = sessionReport(for: event) {
-                callbackGate.emit(.report(report))
-                continue
-            }
             switch event {
-            case .title, .workingDirectory, .progress, .integrationReady, .commandStarted,
-                 .commandEnded, .connectionDeclared:
+            case .terminal(let terminalEvent):
+                publish(terminalEvent)
+            case .userInputDelivered:
                 continue
-            case .bell:
-                callbackGate.emit(.bell)
-            case let .desktopNotification(title, body):
-                callbackGate.emit(.desktopNotification(title: title, body: body))
             }
+        }
+    }
+
+    private func publish(_ event: TerminalSemanticEvent) {
+        #if DANTERM_TERMINAL_BENCHMARK
+        if case .title(let title) = event {
+            TerminalBenchmarkObserver.shared?.observeTitle(title)
+        }
+        #endif
+        if let report = sessionReport(for: event) {
+            callbackGate.emit(.report(report))
+            return
+        }
+        switch event {
+        case .title, .workingDirectory, .progress, .integrationReady, .commandStarted,
+             .commandEnded, .connectionDeclared:
+            return
+        case .bell:
+            callbackGate.emit(.bell)
+        case let .desktopNotification(title, body):
+            callbackGate.emit(.desktopNotification(title: title, body: body))
         }
     }
 

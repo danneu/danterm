@@ -21,15 +21,15 @@ public struct TerminalPTYFrameState: Equatable, Sendable {
     public let damage: TerminalDamage
     /// The newest completed OSC 52 write drained in the same owner transaction.
     public let clipboardWrite: String?
-    /// Ordered semantic output drained independently of render damage.
-    public let semanticEvents: [TerminalSemanticEvent]
+    /// Ordered pane semantics drained independently of render damage.
+    public let semanticEvents: [PaneSemanticEvent]
 
     /// Keeps the drained accumulator separate so terminal equality remains presentation-based.
     public init(
         terminal: Terminal,
         damage: TerminalDamage,
         clipboardWrite: String?,
-        semanticEvents: [TerminalSemanticEvent]
+        semanticEvents: [PaneSemanticEvent]
     ) {
         self.terminal = terminal
         self.damage = damage
@@ -48,8 +48,8 @@ package struct TerminalPTYUpdateSignal: Sendable {
     package let processStarted: Bool
     /// The newest completed OSC 52 write drained in the signaling owner turn.
     package let clipboardWrite: String?
-    /// Ordered semantic output drained in the signaling owner turn.
-    package let semanticEvents: [TerminalSemanticEvent]
+    /// Ordered pane semantics drained in the signaling owner turn.
+    package let semanticEvents: [PaneSemanticEvent]
     /// Monotonic primary-history generation at signal time, for payload-free
     /// mutation classification at the consumer.
     package let primaryHistoryGeneration: UInt64
@@ -60,7 +60,7 @@ package struct TerminalPTYUpdateSignal: Sendable {
     package init(
         processStarted: Bool,
         clipboardWrite: String?,
-        semanticEvents: [TerminalSemanticEvent],
+        semanticEvents: [PaneSemanticEvent],
         primaryHistoryGeneration: UInt64,
         result: PaneProcessLifecycleResult?
     ) {
@@ -280,6 +280,25 @@ public actor TerminalPTYHost {
         let submissionId: PaneInputSubmissionId?
     }
 
+    /// Says whether one submission is the user acting on this pane, and if so which
+    /// wait the caller held when it submitted.
+    ///
+    /// The distinction lives here because this is the layer that knows it: the owner
+    /// chose the bytes, so it also knows whether they answer a person or settle the
+    /// pane's own business with the child. `.pane` covers focus reports and the
+    /// terminal's replies, which arrive without anyone touching the pane.
+    private enum PaneInputAttribution {
+        case user(waitGeneration: PaneInputWaitGeneration?)
+        case pane
+    }
+
+    /// One submission still owed a result, holding what to call and what the delivery
+    /// means, so a completed write reports its occurrence in the same step it replies.
+    private struct PendingInputSubmission {
+        let attribution: PaneInputAttribution
+        let completion: @Sendable (PaneInputSubmissionResult) -> Void
+    }
+
     // Swift cannot import FIONREAD because its C macro encodes sizeof(int).
     // Rebuild the SDK's _IOR('f', 127, int) value from sys/ioccom.h.
     private static let bytesAvailableRequest = UInt(
@@ -354,9 +373,11 @@ public actor TerminalPTYHost {
     /// backpressure holds them, so the write that finally transmits them can be attributed.
     private var pendingInputSpans: Deque<PendingInputSpan> = []
     private var nextInputSubmissionRawValue: UInt64 = 1
-    private var inputCompletions: [
-        PaneInputSubmissionId: @Sendable (PaneInputSubmissionResult) -> Void
-    ] = [:]
+    private var inputSubmissions: [PaneInputSubmissionId: PendingInputSubmission] = [:]
+    /// Semantics the owner itself produced, waiting for the drain that carries the
+    /// terminal's. Held rather than pushed so a consumer that has not attached yet,
+    /// or a fence that arrives first, still receives them exactly once.
+    private var pendingOwnerSemanticEvents: [PaneSemanticEvent] = []
     private var pendingEvents: [PaneProcessLifecycleEvent] = []
     private var isReducing = false
 
@@ -484,6 +505,7 @@ public actor TerminalPTYHost {
     nonisolated public func send(
         _ bytes: [UInt8],
         origin: UInt64? = nil,
+        waitGeneration: PaneInputWaitGeneration? = nil,
         onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
         queueClosingResizeRun().async { [weak self] in
@@ -497,7 +519,12 @@ public actor TerminalPTYHost {
                     return
                 }
                 owner.applyViewportNavigation(.scrollToBottom, publishUpdate: false)
-                owner.submitInput(bytes, origin: origin, onCompletion: onCompletion)
+                owner.submitInput(
+                    bytes,
+                    origin: origin,
+                    attribution: .user(waitGeneration: waitGeneration),
+                    onCompletion: onCompletion
+                )
             }
         }
     }
@@ -516,6 +543,7 @@ public actor TerminalPTYHost {
         _ key: TerminalInputKey,
         modifiers: TerminalKeyModifiers,
         origin: UInt64? = nil,
+        waitGeneration: PaneInputWaitGeneration? = nil,
         onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
         queueClosingResizeRun().async { [weak self] in
@@ -528,6 +556,7 @@ public actor TerminalPTYHost {
                     key,
                     modifiers: modifiers,
                     origin: origin,
+                    waitGeneration: waitGeneration,
                     onCompletion: onCompletion
                 )
             }
@@ -538,6 +567,7 @@ public actor TerminalPTYHost {
     nonisolated public func sendPaste(
         _ text: String,
         origin: UInt64? = nil,
+        waitGeneration: PaneInputWaitGeneration? = nil,
         onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
         queueClosingResizeRun().async { [weak self] in
@@ -546,7 +576,12 @@ public actor TerminalPTYHost {
                 return
             }
             self.assumeIsolated { owner in
-                owner.applyPaste(text, origin: origin, onCompletion: onCompletion)
+                owner.applyPaste(
+                    text,
+                    origin: origin,
+                    waitGeneration: waitGeneration,
+                    onCompletion: onCompletion
+                )
             }
         }
     }
@@ -667,6 +702,7 @@ public actor TerminalPTYHost {
     nonisolated public func sendWheel(
         _ event: TerminalWheelEvent,
         origin: UInt64? = nil,
+        waitGeneration: PaneInputWaitGeneration? = nil,
         onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
         queueClosingResizeRun().async { [weak self] in
@@ -675,7 +711,12 @@ public actor TerminalPTYHost {
                 return
             }
             self.assumeIsolated { owner in
-                owner.applyWheel(event, origin: origin, onCompletion: onCompletion)
+                owner.applyWheel(
+                    event,
+                    origin: origin,
+                    waitGeneration: waitGeneration,
+                    onCompletion: onCompletion
+                )
             }
         }
     }
@@ -688,6 +729,7 @@ public actor TerminalPTYHost {
     nonisolated public func sendPointer(
         _ event: TerminalPointerEvent,
         origin: UInt64? = nil,
+        waitGeneration: PaneInputWaitGeneration? = nil,
         onOpenLink: @escaping @Sendable (TerminalHyperlink) -> Void = { _ in },
         onSelectionCompleted: (@Sendable (String) -> Void)? = nil
     ) {
@@ -696,6 +738,7 @@ public actor TerminalPTYHost {
                 owner.applyPointer(
                     event,
                     origin: origin,
+                    waitGeneration: waitGeneration,
                     onOpenLink: onOpenLink,
                     onSelectionCompleted: onSelectionCompleted
                 )
@@ -1160,7 +1203,7 @@ public actor TerminalPTYHost {
     fileprivate func drainedFrameState() -> TerminalPTYFrameState {
         let damage = terminal.drainDamage()
         let clipboardWrite = terminal.drainPendingClipboardWrite()
-        let semanticEvents = terminal.drainSemanticEvents()
+        let semanticEvents = drainSemanticEvents()
         consumerWorkWasSignaled = false
         return TerminalPTYFrameState(
             terminal: terminal,
@@ -1224,6 +1267,7 @@ public actor TerminalPTYHost {
                 owner.applyPointer(
                     event,
                     origin: nil,
+                    waitGeneration: nil,
                     onOpenLink: { _ in },
                     onSelectionCompleted: nil
                 )
@@ -1311,6 +1355,7 @@ public actor TerminalPTYHost {
     private func applyWheel(
         _ event: TerminalWheelEvent,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration?,
         onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void
     ) {
         guard teardownFinished == false else {
@@ -1319,7 +1364,12 @@ public actor TerminalPTYHost {
         }
         let decision = decideTerminalWheel(event, terminal: terminal, state: &interactionState)
         if decision.inputBytes.isEmpty == false {
-            submitInput(decision.inputBytes, origin: origin, onCompletion: onCompletion)
+            submitInput(
+                decision.inputBytes,
+                origin: origin,
+                attribution: .user(waitGeneration: waitGeneration),
+                onCompletion: onCompletion
+            )
             return
         }
         if decision.localRowDelta != 0 {
@@ -1334,6 +1384,7 @@ public actor TerminalPTYHost {
     private func applyPointer(
         _ event: TerminalPointerEvent,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration?,
         onOpenLink: @Sendable (TerminalHyperlink) -> Void,
         onSelectionCompleted: (@Sendable (String) -> Void)?
     ) {
@@ -1341,7 +1392,11 @@ public actor TerminalPTYHost {
         if captureTransitions { appliedTransitions.append(.mouse(event)) }
         let decision = decideTerminalPointer(event, terminal: terminal, state: &interactionState)
         if decision.inputBytes.isEmpty == false {
-            submitInput(decision.inputBytes, origin: origin)
+            submitInput(
+                decision.inputBytes,
+                origin: origin,
+                attribution: .user(waitGeneration: waitGeneration)
+            )
         }
         switch decision.selectionMutation {
         case .clear:
@@ -1449,6 +1504,7 @@ public actor TerminalPTYHost {
         _ key: TerminalInputKey,
         modifiers: TerminalKeyModifiers,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration?,
         onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void
     ) {
         guard teardownFinished == false else {
@@ -1462,12 +1518,18 @@ public actor TerminalPTYHost {
             return
         }
         applyViewportNavigation(.scrollToBottom, publishUpdate: false)
-        submitInput(bytes, origin: origin, onCompletion: onCompletion)
+        submitInput(
+            bytes,
+            origin: origin,
+            attribution: .user(waitGeneration: waitGeneration),
+            onCompletion: onCompletion
+        )
     }
 
     private func applyPaste(
         _ text: String,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration?,
         onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void
     ) {
         guard teardownFinished == false else {
@@ -1481,7 +1543,12 @@ public actor TerminalPTYHost {
             return
         }
         applyViewportNavigation(.scrollToBottom, publishUpdate: false)
-        submitInput(bytes, origin: origin, onCompletion: onCompletion)
+        submitInput(
+            bytes,
+            origin: origin,
+            attribution: .user(waitGeneration: waitGeneration),
+            onCompletion: onCompletion
+        )
     }
 
     private func applyFocus(_ focused: Bool, origin: UInt64?) {
@@ -1489,7 +1556,8 @@ public actor TerminalPTYHost {
         if captureTransitions { appliedTransitions.append(.focus(focused)) }
         let bytes = encodeTerminalFocus(focused: focused, modes: terminal.inputModes)
         guard bytes.isEmpty == false else { return }
-        submitInput(bytes, origin: origin)
+        // The pane's own report of a focus change the user never aimed at the child.
+        submitInput(bytes, origin: origin, attribution: .pane)
     }
 
     private func applyViewportNavigation(
@@ -1703,12 +1771,16 @@ public actor TerminalPTYHost {
     private func submitInput(
         _ bytes: [UInt8],
         origin: UInt64?,
+        attribution: PaneInputAttribution,
         onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
         let submissionId = PaneInputSubmissionId(rawValue: nextInputSubmissionRawValue)
         nextInputSubmissionRawValue &+= 1
-        precondition(inputCompletions[submissionId] == nil, "input submission identity wrapped")
-        inputCompletions[submissionId] = onCompletion
+        precondition(inputSubmissions[submissionId] == nil, "input submission identity wrapped")
+        inputSubmissions[submissionId] = PendingInputSubmission(
+            attribution: attribution,
+            completion: onCompletion
+        )
         process(.sendInput(bytes, origin: origin, submissionId: submissionId))
     }
 
@@ -1837,8 +1909,17 @@ public actor TerminalPTYHost {
         _ submissionId: PaneInputSubmissionId,
         with result: PaneInputSubmissionResult
     ) {
-        guard let completion = inputCompletions.removeValue(forKey: submissionId) else { return }
-        completion(result)
+        guard let submission = inputSubmissions.removeValue(forKey: submissionId) else { return }
+        // Delivery is the whole claim: the occurrence says these bytes reached the
+        // child, so a rejection -- before the write or partway through it -- reports
+        // nothing at all.
+        if case .delivered = result, case .user(let waitGeneration) = submission.attribution {
+            pendingOwnerSemanticEvents.append(
+                .userInputDelivered(waitGeneration: waitGeneration)
+            )
+            markUpdatePending()
+        }
+        submission.completion(result)
     }
 
     private func installWriteSourceIfNeeded() {
@@ -1868,6 +1949,9 @@ public actor TerminalPTYHost {
     private func writeSourceFired() {
         guard recordSystemCallback(), descriptorOwnershipSealed == false else { return }
         flushInput()
+        // A submission that backpressure held finishes on this path and no other, so
+        // without this a quiet pane would sit on the occurrence until its next output.
+        if pendingOwnerSemanticEvents.isEmpty == false { publishPendingUpdate() }
     }
 
     private func processSourceFired() {
@@ -2265,6 +2349,18 @@ public actor TerminalPTYHost {
         publishPendingUpdate()
     }
 
+    /// Takes every pane semantic the owner has accumulated, in one ordered batch.
+    ///
+    /// The owner's own semantics come first: they were recorded before this drain, and
+    /// the terminal's are only now being read out of the accumulator. Order between the
+    /// two halves carries no meaning beyond that -- an input occurrence names the wait
+    /// it ended, so nothing downstream reasons about which side of it a title landed on.
+    private func drainSemanticEvents() -> [PaneSemanticEvent] {
+        let ownerEvents = pendingOwnerSemanticEvents
+        pendingOwnerSemanticEvents.removeAll(keepingCapacity: false)
+        return ownerEvents + terminal.drainSemanticEvents().map(PaneSemanticEvent.terminal)
+    }
+
     private func markUpdatePending() {
         guard updateSignalFinished == false else {
             updateSignalsAfterTermination += 1
@@ -2294,7 +2390,7 @@ public actor TerminalPTYHost {
                 updateHandler(TerminalPTYUpdateSignal(
                     processStarted: pendingProcessStarted,
                     clipboardWrite: terminal.drainPendingClipboardWrite(),
-                    semanticEvents: terminal.drainSemanticEvents(),
+                    semanticEvents: drainSemanticEvents(),
                     primaryHistoryGeneration: terminal.primaryHistoryGeneration,
                     result: reportedResult
                 ))

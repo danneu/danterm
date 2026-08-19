@@ -261,16 +261,16 @@ struct TerminalPaneSessionControllerTests {
                 host: host,
                 launchInput: makeLaunchInput(command: invocation + "; exit")
             )
-            var received: [TerminalSemanticEvent] = []
+            var received: [PaneSemanticEvent] = []
             controller.onSemanticEvents = { events in
                 received.append(contentsOf: events)
             }
 
             #expect(await host.waitForResult() == .exited(.exited(0)))
             controller.synchronizeState()
-            #expect(received.contains(.integrationReady))
-            #expect(received.contains(.commandStarted(command)))
-            #expect(received.contains(.commandEnded(exitStatus: 0)))
+            #expect(received.contains(.terminal(.integrationReady)))
+            #expect(received.contains(.terminal(.commandStarted(command))))
+            #expect(received.contains(.terminal(.commandEnded(exitStatus: 0))))
 
             controller.tearDown()
             await host.close()
@@ -291,17 +291,17 @@ struct TerminalPaneSessionControllerTests {
             launchInput: makeLaunchInput(command: command),
             isVisible: false
         )
-        let batches = AsyncStream<[TerminalSemanticEvent]>.makeStream(
+        let batches = AsyncStream<[PaneSemanticEvent]>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         var iterator = batches.stream.makeAsyncIterator()
         controller.onSemanticEvents = { batches.continuation.yield($0) }
 
         #expect(await iterator.next() == [
-            .title("hidden-title"),
-            .workingDirectory("/tmp/pane"),
-            .commandEnded(exitStatus: 7),
-            .bell,
+            .terminal(.title("hidden-title")),
+            .terminal(.workingDirectory("/tmp/pane")),
+            .terminal(.commandEnded(exitStatus: 7)),
+            .terminal(.bell),
         ])
         #expect(controller.currentPlan == nil)
 
@@ -325,13 +325,13 @@ struct TerminalPaneSessionControllerTests {
             host: host,
             launchInput: makeLaunchInput(command: command)
         )
-        let batches = AsyncStream<[TerminalSemanticEvent]>.makeStream(
+        let batches = AsyncStream<[PaneSemanticEvent]>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         var iterator = batches.stream.makeAsyncIterator()
         controller.onSemanticEvents = { batches.continuation.yield($0) }
 
-        #expect(await iterator.next() == [.workingDirectory("/tmp/pane")])
+        #expect(await iterator.next() == [.terminal(.workingDirectory("/tmp/pane"))])
 
         controller.tearDown()
         await host.close()
@@ -350,7 +350,9 @@ struct TerminalPaneSessionControllerTests {
         let callbacks = AsyncStream<String>.makeStream()
         var iterator = callbacks.stream.makeAsyncIterator()
         controller.onSemanticEvents = { events in
-            if events == [.title("final-title")] { callbacks.continuation.yield("semantic") }
+            if events == [.terminal(.title("final-title"))] {
+                callbacks.continuation.yield("semantic")
+            }
         }
         controller.onSessionEnded = { _ in callbacks.continuation.yield("ended") }
 
@@ -371,7 +373,7 @@ struct TerminalPaneSessionControllerTests {
             host: host,
             launchInput: makeLaunchInput(command: "exec sleep 30")
         )
-        var events: [TerminalSemanticEvent] = []
+        var events: [PaneSemanticEvent] = []
         controller.onSemanticEvents = { events.append(contentsOf: $0) }
 
         controller.tearDown()
@@ -401,10 +403,10 @@ struct TerminalPaneSessionControllerTests {
                 command: "printf '\\033]9;second\\007\\033]9;4;4;75\\007'; exec sleep 30"
             )
         )
-        let firstEvents = AsyncStream<[TerminalSemanticEvent]>.makeStream(
+        let firstEvents = AsyncStream<[PaneSemanticEvent]>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
-        let secondEvents = AsyncStream<[TerminalSemanticEvent]>.makeStream(
+        let secondEvents = AsyncStream<[PaneSemanticEvent]>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         var firstIterator = firstEvents.stream.makeAsyncIterator()
@@ -413,12 +415,12 @@ struct TerminalPaneSessionControllerTests {
         second.onSemanticEvents = { secondEvents.continuation.yield($0) }
 
         #expect(await firstIterator.next() == [
-            .desktopNotification(title: "First", body: "done"),
-            .progress(.set(percent: 25)),
+            .terminal(.desktopNotification(title: "First", body: "done")),
+            .terminal(.progress(.set(percent: 25))),
         ])
         #expect(await secondIterator.next() == [
-            .desktopNotification(title: "", body: "second"),
-            .progress(.pause(percent: 75)),
+            .terminal(.desktopNotification(title: "", body: "second")),
+            .terminal(.progress(.pause(percent: 75))),
         ])
 
         first.tearDown()
@@ -1269,7 +1271,7 @@ struct TerminalPaneSessionControllerTests {
             )
         )
         var frames: [TerminalPaneFrame] = []
-        var semantics: [TerminalSemanticEvent] = []
+        var semantics: [PaneSemanticEvent] = []
         var recoveryMutationCount = 0
         controller.onFrame = { frames.append($0) }
         controller.onSemanticEvents = { semantics.append(contentsOf: $0) }
@@ -1286,7 +1288,7 @@ struct TerminalPaneSessionControllerTests {
 
         #expect(frames.isEmpty)
         #expect(controller.readViewportText().contains("sleeping"))
-        #expect(semantics == [.title("sleep-title")])
+        #expect(semantics == [.terminal(.title("sleep-title"))])
         #expect(recoveryMutationCount == 1)
 
         host.stageFixtureOutput(Array("wake-edge".utf8))

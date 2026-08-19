@@ -84,6 +84,131 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
+    @Test("every user-directed operation reports its delivery once", .timeLimit(.minutes(1)))
+    func userDirectedOperationsReportDeliveryOnce() async throws {
+        // Intent: each user-directed input operation reports one occurrence, carrying the
+        //   wait generation its caller submitted, once all of its bytes cross the PTY.
+        // Why it exists: only this owner knows what an operation encodes to and whether the
+        //   write finished, so it is the one place that can state the fact without guessing.
+        // Scenario: a key, raw bytes, and a paste are submitted against three distinct waits.
+        let host = try await startChildlessHost().host
+        let completions = InputCompletionRecorder(expecting: 3)
+
+        host.sendKey(.returnKey, modifiers: [], waitGeneration: .init(rawValue: 1)) {
+            completions.signal($0)
+        }
+        host.send(Array("typed".utf8), waitGeneration: nil) { completions.signal($0) }
+        host.sendPaste("pasted", waitGeneration: .init(rawValue: 2)) { completions.signal($0) }
+
+        #expect(completions.waitForAll(within: .seconds(20)))
+        #expect(completions.results == [.delivered, .delivered, .delivered])
+        #expect(host.drainedUserInputEvents() == [
+            .userInputDelivered(waitGeneration: .init(rawValue: 1)),
+            .userInputDelivered(waitGeneration: nil),
+            .userInputDelivered(waitGeneration: .init(rawValue: 2)),
+        ])
+        await host.close()
+    }
+
+    @Test("pointer and wheel bytes report delivery under a mouse mode", .timeLimit(.minutes(1)))
+    func mouseReportingOperationsReportDelivery() async throws {
+        // Intent: pointer and wheel input reports its delivery like any other input, but
+        //   only while a mouse mode makes the child the recipient of it.
+        // Why it exists: under a mouse mode these operations are the user reaching the
+        //   child, and off it they move the local viewport and reach nobody.
+        // Scenario: the child turns on SGR mouse tracking, then a press and a wheel turn.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[?1000;1006h"))
+        let completion = InputCompletionRecorder(expecting: 1)
+
+        host.sendPointer(
+            .down(.left, column: 2, row: 3),
+            waitGeneration: .init(rawValue: 8)
+        )
+        host.sendWheel(
+            .init(rowDelta: -1, column: 2, row: 3),
+            waitGeneration: .init(rawValue: 9)
+        ) { completion.signal($0) }
+
+        #expect(completion.waitForAll(within: .seconds(20)))
+        #expect(host.drainedUserInputEvents() == [
+            .userInputDelivered(waitGeneration: .init(rawValue: 8)),
+            .userInputDelivered(waitGeneration: .init(rawValue: 9)),
+        ])
+        await host.close()
+    }
+
+    @Test("an operation that encodes to no bytes reports nothing", .timeLimit(.minutes(1)))
+    func emptyOperationsReportNoDelivery() async throws {
+        // Intent: an operation whose encoding is empty reports no delivery, even though it
+        //   still completes as delivered.
+        // Why it exists: the occurrence has to mean the child received the user's bytes. A
+        //   completion alone would also fire for a wheel turn the pane scrolled by itself.
+        // Scenario: an empty request, an empty paste, and a wheel turn under no mouse mode.
+        let host = try await startChildlessHost().host
+        let completions = InputCompletionRecorder(expecting: 3)
+
+        host.send([], waitGeneration: .init(rawValue: 1)) { completions.signal($0) }
+        host.sendPaste("", waitGeneration: .init(rawValue: 1)) { completions.signal($0) }
+        host.sendWheel(
+            .init(rowDelta: -1, column: 2, row: 3),
+            waitGeneration: .init(rawValue: 1)
+        ) { completions.signal($0) }
+
+        #expect(completions.waitForAll(within: .seconds(20)))
+        #expect(completions.results == [.delivered, .delivered, .delivered])
+        #expect(host.drainedUserInputEvents().isEmpty)
+        await host.close()
+    }
+
+    @Test("a rejected submission reports no delivery", .timeLimit(.minutes(1)))
+    func rejectedSubmissionReportsNoDelivery() async throws {
+        // Intent: a submission the lifecycle rejects reports no occurrence at all.
+        // Why it exists: an occurrence means the user's bytes reached the child, so bytes
+        //   that never crossed must not end a wait the agent is still holding.
+        // Scenario: the child end is closed, then one whole payload is submitted.
+        let channel = try ChildlessPTYChannel()
+        let host = try makeHost(spawner: channel)
+        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        channel.writeFromChild(Array("__READY__".utf8))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        channel.closeChildEnd()
+        #expect(await host.drainedDescriptorSourceCount() == 0)
+        let completion = InputCompletionRecorder(expecting: 1)
+
+        host.send(Array("cannot-write".utf8), waitGeneration: .init(rawValue: 4)) {
+            completion.signal($0)
+        }
+
+        #expect(completion.waitForAll(within: .seconds(20)))
+        #expect(completion.results == [.rejected(.writeFailed(EIO))])
+        #expect(host.drainedUserInputEvents().isEmpty)
+        await host.close()
+    }
+
+    @Test("focus reports and terminal replies report no user input", .timeLimit(.minutes(1)))
+    func paneOwnedWritesReportNoUserInput() async throws {
+        // Intent: bytes the pane owes the child on its own account report no occurrence,
+        //   even though they cross the same PTY as the user's.
+        // Why it exists: the pane reports focus and answers queries without anybody typing,
+        //   so counting those would end a wait while the question is still on screen.
+        // Scenario: focus reporting is enabled and the pane reports focus, then the child
+        //   asks for the cursor position and the terminal answers it.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("\u{1B}[?1004h"))
+        let writeBaseline = await host.inputWrites().count
+
+        host.sendFocus(true)
+        #expect(await pane.writeFromChild("\u{1B}[6n"))
+
+        #expect(await host.inputWrites().count > writeBaseline)
+        #expect(await host.replyWrites().isEmpty == false)
+        #expect(host.drainedUserInputEvents().isEmpty)
+        await host.close()
+    }
+
     @Test("input submitted before spawn completes after crossing the PTY", .timeLimit(.minutes(1)))
     func preSpawnInputCompletesAfterDelivery() async throws {
         // Intent: pre-spawn input stays pending, then completes only after its last byte writes.
@@ -1955,10 +2080,14 @@ struct TerminalPTYHostChildProcessTests {
         while await updates.next() != nil {
             if (await host.snapshot()).screenText.contains("__QUERY_READY__") { break }
         }
-        let signalsBeforeQuery = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         let inputBaseline = await host.inputWrites().count
+        let delivered = InputCompletionRecorder(expecting: 1)
 
-        host.send(Array("query\n".utf8))
+        host.send(Array("query\n".utf8)) { delivered.signal($0) }
+        // Baselined after the user's own input has landed, because delivering it reports an
+        // occurrence of its own. What this test rules out is a wake caused by the query.
+        #expect(delivered.waitForAll(within: .seconds(20)))
+        let signalsBeforeQuery = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         #expect(await host.waitForOutput(containing: Array("\u{1B}[6n".utf8)))
         #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == signalsBeforeQuery)
         host.send(Array("USER".utf8))
@@ -3349,6 +3478,15 @@ private struct ChildlessHost {
 }
 
 private extension TerminalPTYHost {
+    /// The delivered-input occurrences the owner has queued, taken through the same drain
+    /// a pane consumer uses, with the terminal's own semantics left out.
+    nonisolated func drainedUserInputEvents() -> [PaneSemanticEvent] {
+        fencedFrameState().semanticEvents.filter {
+            if case .userInputDelivered = $0 { return true }
+            return false
+        }
+    }
+
     /// Whether the pane's recorder still holds this wait's append notice, which is the host's
     /// only reference to the wait and to everything the wait captured. A nil follow snapshot is
     /// the recorder saying the subscription is not registered.

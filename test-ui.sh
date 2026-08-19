@@ -83,6 +83,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/ActivatableWebURI.swift" \
         "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/TerminalInteractionVocabulary.swift" \
         "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/TerminalSemanticEvent.swift" \
+        "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPTYHost/PaneSemanticEvent.swift" \
         "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/TerminalSearchStatus.swift" \
         "$SCRIPT_DIR/app/PaneInputOrigin.swift" \
         "$SCRIPT_DIR/app/TerminalLinkURL.swift" \

@@ -107,7 +107,9 @@ private enum TerminalWorkflowRunner {
             captureTransitions: true
         )
         var semanticEvents: [TerminalSemanticEvent] = []
-        controller.onSemanticEvents = { semanticEvents.append(contentsOf: $0) }
+        controller.onSemanticEvents = { events in
+            for case .terminal(let event) in events { semanticEvents.append(event) }
+        }
         let terminationHandle = controller.terminationHandle
 
         var snapshots: [String] = []
@@ -142,7 +144,7 @@ private enum TerminalWorkflowRunner {
         }
 
         let capture = controller.diagnosticCapture(test: "workflow-\(workflow.name)")
-        semanticEvents.append(contentsOf: capture.semanticEvents)
+        for case .terminal(let event) in capture.semanticEvents { semanticEvents.append(event) }
         if failure == nil {
             do { try validateSemantics(workflow.name, events: semanticEvents) }
             catch { failure = error }

@@ -307,7 +307,7 @@ final class TerminalPaneSessionController {
     var onFrame: ((TerminalPaneFrame) -> Void)?
     var onClipboardWrite: ((String) -> Void)?
     var onSelectionCopy: ((String) -> Void)?
-    var onSemanticEvents: (([TerminalSemanticEvent]) -> Void)?
+    var onSemanticEvents: (([PaneSemanticEvent]) -> Void)?
     var onProcessStarted: (() -> Void)?
     var onSessionEnded: ((PaneProcessLifecycleResult) -> Void)?
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
@@ -563,8 +563,10 @@ final class TerminalPaneSessionController {
         onSelectionCopy?(text)
     }
 
+    /// Takes the terminal's half of the vocabulary, because every test here drives the
+    /// pane from the child's side; input occurrences come from the pane's own input path.
     func emitSemanticEvents(_ events: [TerminalSemanticEvent]) {
-        onSemanticEvents?(events)
+        onSemanticEvents?(events.map(PaneSemanticEvent.terminal))
     }
 
     func emitSearchStatus(_ status: TerminalSearchStatus?) {

@@ -263,7 +263,7 @@ Scripted input also uses the existing completion-aware commands in `IpcDispatch.
 
 ## Commit progress
 - [x] 1. core: retract an agent wait on delivered pane input
-- [ ] 2. pty: report each delivered user-input operation with its wait generation
+- [x] 2. pty: report each delivered user-input operation with its wait generation
 - [ ] 3. app: wire delivered pane input and scripted input to wait retraction
 
 ## Implementation notes
@@ -286,3 +286,25 @@ Scripted input also uses the existing completion-aware commands in `IpcDispatch.
 - `SessionReport.userInputDelivered` carries an optional generation, so an
   occurrence with no wait behind it is representable and inert. That is what
   lets commit 3's pre-`update()` fast path be deleted without changing behavior.
+- The occurrence rides the pane's ordered semantic channel by widening that
+  channel's element type to a new `PaneSemanticEvent` in `lib/TerminalPTY`,
+  which wraps `TerminalSemanticEvent` and adds `userInputDelivered`. Adding the
+  case to `TerminalCore.TerminalSemanticEvent` was the smaller edit, but it
+  would make the parser's own vocabulary declare a meaning the parser never
+  produces.
+- Which submissions count is decided by the entry point that encodes them, not
+  by a flag every caller passes: user-directed operations submit as `.user`,
+  focus reports submit as `.pane`, and the terminal's replies to the child never
+  reach `submitInput` at all.
+- The `waitGeneration` parameter defaults to nil through this commit so the
+  layer lands on its own. Commit 3 supplies the real values at the app call
+  sites and can drop the default there.
+- Widening the channel promoted `PaneSemanticEvent.swift` into the UI harness's
+  compile list, so its `import TerminalCore` is guarded the way the view's
+  engine imports already are. The harness's `emitSemanticEvents` still takes
+  terminal events and wraps them, because every UI test drives the pane from the
+  child's side.
+- A delivered submission now wakes one update signal, so a keystroke on a silent
+  pane does not hold its occurrence until the next output. That is why
+  `queryReplyOrderingAndCapture` now takes its signal baseline after its own
+  input has landed: the wake it rules out is the query's, not the user's.

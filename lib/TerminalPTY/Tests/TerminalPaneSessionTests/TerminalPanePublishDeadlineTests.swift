@@ -210,7 +210,7 @@ struct TerminalPanePublishDeadlineTests {
         controller.displayRefreshIntervalNanoseconds = { 1_000 }
         var frames: [TerminalPaneFrame] = []
         var clipboardWrites: [String] = []
-        var semanticEvents: [TerminalSemanticEvent] = []
+        var semanticEvents: [PaneSemanticEvent] = []
         var historyMutations = 0
         controller.onFrame = { frames.append($0) }
         controller.onClipboardWrite = { clipboardWrites.append($0) }
@@ -233,7 +233,7 @@ struct TerminalPanePublishDeadlineTests {
         await drainMainQueue()
         #expect(frames.count == 1)
         #expect(clipboardWrites == ["hello"])
-        #expect(semanticEvents.contains(.bell))
+        #expect(semanticEvents.contains(.terminal(.bell)))
         #expect(historyMutations > mutationsAfterSeed)
         #expect(timer.scheduled.count == settleTimers + 1)
 
@@ -262,7 +262,7 @@ struct TerminalPanePublishDeadlineTests {
         )
         var order: [String] = []
         controller.onSemanticEvents = { events in
-            if events.contains(.bell) { order.append("bell") }
+            if events.contains(.terminal(.bell)) { order.append("bell") }
         }
         controller.onFrame = { _ in order.append("frame") }
 

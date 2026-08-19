@@ -111,7 +111,7 @@ public struct TerminalPaneFrame: Equatable, Sendable {
 package struct TerminalPaneDiagnosticCapture: Sendable {
     package let terminal: Terminal
     package let recording: NeutralTerminalRecording
-    package let semanticEvents: [TerminalSemanticEvent]
+    package let semanticEvents: [PaneSemanticEvent]
 }
 
 /// Pairs one cumulative fence wait with the number of entries that produced it.
@@ -299,8 +299,8 @@ public final class TerminalPaneSessionController {
     /// Delivers completed clipboard writes before any visibility or render-planning gate.
     public var onClipboardWrite: ((String) -> Void)?
 
-    /// Delivers ordered terminal semantics before visibility, rendering, or exit callbacks.
-    public var onSemanticEvents: (([TerminalSemanticEvent]) -> Void)?
+    /// Delivers ordered pane semantics before visibility, rendering, or exit callbacks.
+    public var onSemanticEvents: (([PaneSemanticEvent]) -> Void)?
 
     /// Receives the first child-originated lifecycle result on the main actor.
     public var onSessionEnded: ((PaneProcessLifecycleResult) -> Void)?
@@ -615,25 +615,37 @@ public final class TerminalPaneSessionController {
     /// otherwise assert that claim silently -- and a tape would under-report the app-owned
     /// span between the event and the completed write, which is the one thing it exists to
     /// measure. Stating `origin: nil` is how a caller says it genuinely has no earlier moment.
+    ///
+    /// Every user-directed submission also takes a `waitGeneration`: the agent wait the
+    /// caller held when it submitted, or nil when it held none. The pane reports it back
+    /// as `PaneSemanticEvent.userInputDelivered` once every byte has crossed the PTY, so
+    /// the caller can end exactly the wait this input answered and no later one.
     public func sendText(
         _ text: String,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration? = nil,
         onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
-        send(Array(text.utf8), origin: origin, onCompletion: onCompletion)
+        send(
+            Array(text.utf8),
+            origin: origin,
+            waitGeneration: waitGeneration,
+            onCompletion: onCompletion
+        )
     }
 
     /// Sends already encoded terminal bytes without introducing an ordering-opaque Task.
     public func send(
         _ bytes: [UInt8],
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration? = nil,
         onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
         guard isTornDown == false else {
             Self.deliverInputCompletion(onCompletion, .rejected(.processEnded))
             return
         }
-        host.send(bytes, origin: origin) { result in
+        host.send(bytes, origin: origin, waitGeneration: waitGeneration) { result in
             Self.deliverInputCompletion(onCompletion, result)
         }
     }
@@ -643,13 +655,19 @@ public final class TerminalPaneSessionController {
         _ key: TerminalInputKey,
         modifiers: TerminalKeyModifiers,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration? = nil,
         onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
         guard isTornDown == false else {
             Self.deliverInputCompletion(onCompletion, .rejected(.processEnded))
             return
         }
-        host.sendKey(key, modifiers: modifiers, origin: origin) { result in
+        host.sendKey(
+            key,
+            modifiers: modifiers,
+            origin: origin,
+            waitGeneration: waitGeneration
+        ) { result in
             Self.deliverInputCompletion(onCompletion, result)
         }
     }
@@ -658,13 +676,14 @@ public final class TerminalPaneSessionController {
     public func sendPaste(
         _ text: String,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration? = nil,
         onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
         guard isTornDown == false else {
             Self.deliverInputCompletion(onCompletion, .rejected(.processEnded))
             return
         }
-        host.sendPaste(text, origin: origin) { result in
+        host.sendPaste(text, origin: origin, waitGeneration: waitGeneration) { result in
             Self.deliverInputCompletion(onCompletion, result)
         }
     }
@@ -685,7 +704,11 @@ public final class TerminalPaneSessionController {
     }
 
     /// Forwards normalized pointer input without mirroring child modes on the main actor.
-    public func sendPointer(_ event: TerminalPointerEvent, origin: UInt64?) {
+    public func sendPointer(
+        _ event: TerminalPointerEvent,
+        origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration? = nil
+    ) {
         guard isTornDown == false else { return }
         let deliveryBoundary = deliveryBoundary
         // Resolved at submission rather than at delivery, so the owner is handed no
@@ -702,6 +725,7 @@ public final class TerminalPaneSessionController {
         host.sendPointer(
             event,
             origin: origin,
+            waitGeneration: waitGeneration,
             onOpenLink: { [weak self] link in
                 deliveryBoundary.enqueue { [weak self] in
                     guard let self, self.isTornDown == false else { return }
@@ -740,13 +764,14 @@ public final class TerminalPaneSessionController {
     public func sendWheel(
         _ event: TerminalWheelEvent,
         origin: UInt64?,
+        waitGeneration: PaneInputWaitGeneration? = nil,
         onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
         guard isTornDown == false else {
             Self.deliverInputCompletion(onCompletion, .rejected(.processEnded))
             return
         }
-        host.sendWheel(event, origin: origin) { result in
+        host.sendWheel(event, origin: origin, waitGeneration: waitGeneration) { result in
             Self.deliverInputCompletion(onCompletion, result)
         }
     }
