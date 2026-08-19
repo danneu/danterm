@@ -1064,7 +1064,7 @@ wave.
 - [ ] **[INTERACT-1](#interact-1)** (4x5, medium) Refresh the search index through one history-mutation funnel instead of seven hand-placed calls
 - [ ] **[MOBILE-3](#mobile-3)** (4x5, medium) Decode each tape event once into a typed value instead of re-encoding and re-decoding it per record
 - [ ] **[PANE-1](#pane-1)** (4x5, medium) Resolve the pane drop target from the model layout, not from live wrapper frames
-- [ ] **[STORE-1](#store-1)** (4x5, medium) Derive arena bytes-in-use from the ring cursors instead of maintaining it at twelve sites
+- [x] **[STORE-1](#store-1)** (4x5, medium) Derive arena bytes-in-use from the ring cursors instead of maintaining it at twelve sites -- `3354fd46`
 - [ ] **[XPORT-1](#xport-1)** (4x5, medium) Make the read turn, not the read() syscall, the unit that is fed and published
 - [ ] **[CHROME-1](#chrome-1)** (4x5, large) Replace the fatalError-based TODO popover base class with one controller parameterized by a scope value
 - [ ] **[FEED-2](#feed-2)** (3x5, small) Reach a row's cells once per run, not once per cell, on the bulk ASCII write and scan loops
