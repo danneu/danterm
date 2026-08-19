@@ -738,7 +738,6 @@ func update(
                 allPaneIds($0.paneTree.root).contains(paneId)
             }) {
                 let tab = model.groups[gi].tabs[ti]
-                let tabId = tab.id
                 let groupId = model.groups[gi].id
                 var commands: [Command] = []
                 for pid in allPaneIds(tab.paneTree.root) {
