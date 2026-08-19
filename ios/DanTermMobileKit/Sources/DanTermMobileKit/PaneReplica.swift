@@ -1,7 +1,6 @@
 // Owns exact-or-gap application of pane-tape records to a headless terminal replica.
 import DanTermClient
 import DanTermProtocol
-import Foundation
 import TerminalCore
 import TerminalCoreRecording
 
@@ -24,11 +23,17 @@ public enum PaneReplicaState: Equatable, Sendable {
     case gap(PaneReplicaGap)
 }
 
-/// Rejects malformed stream events before they can weaken the replica's exactness claim.
+/// Rejects malformed stream geometry before it can weaken the replica's exactness claim.
+///
+/// A tape event this build cannot read is not here: the event is decoded once at the
+/// model's edge, so an undecodable one never reaches a replica to be rejected.
 public enum PaneReplicaError: Error, Equatable, Sendable {
-    case invalidEvent
     case invalidGeometry(columns: Int, rows: Int)
 }
+
+/// The record family as the phone carries it: every tape event already lifted, once, into
+/// the engine's own event type, so nothing downstream of the decode edge can parse it again.
+public typealias MobilePaneTapeRecord = PaneTapeRecord<NeutralTerminalRecordingEvent>
 
 /// Applies one pane's recorder stream without ever producing authoritative terminal output.
 public struct PaneReplica: Sendable {
@@ -99,7 +104,7 @@ public struct PaneReplica: Sendable {
     }
 
     /// Applies one decoded record while keeping incomplete synchronization invisible.
-    public mutating func apply(_ record: PaneTapeRecord) throws {
+    public mutating func apply(_ record: MobilePaneTapeRecord) throws {
         switch record {
         case .start(let start):
             try applyStart(start)
@@ -110,7 +115,7 @@ public struct PaneReplica: Sendable {
             guard let synchronization = syncAssembler.ingest(part) else { return }
             try replace(with: synchronization)
         case .event(let record):
-            try applyEvent(record)
+            applyEvent(record)
         case .end, .unknown:
             break
         }
@@ -180,19 +185,16 @@ public struct PaneReplica: Sendable {
         interactionState = TerminalInteractionState()
     }
 
-    private mutating func applyEvent(_ record: PaneTapeEventRecord) throws {
+    private mutating func applyEvent(
+        _ record: PaneTapeEventRecord<NeutralTerminalRecordingEvent>
+    ) {
         guard state == .exact, var terminal, let cursor else { return }
         guard record.sequence == cursor.nextSequence else {
             state = .gap(.detected)
             syncAssembler = PaneTapeSyncAssembler()
             return
         }
-        let data = try JSONEncoder().encode(record.event)
-        guard let event = try? JSONDecoder().decode(
-            NeutralTerminalRecordingEvent.self,
-            from: data
-        ) else { throw PaneReplicaError.invalidEvent }
-
+        let event = record.event
         var appliedPinned = heldPinned
         switch event {
         case .feed(let bytes):
@@ -226,7 +228,7 @@ public struct PaneReplica: Sendable {
             break
         }
 
-        guard let nextCursor = advancedCursor(from: cursor, record: record, event: event) else {
+        guard let nextCursor = advancedCursor(from: cursor, record: record) else {
             state = .gap(.detected)
             syncAssembler = PaneTapeSyncAssembler()
             return
@@ -238,12 +240,11 @@ public struct PaneReplica: Sendable {
 
     private func advancedCursor(
         from cursor: PaneTapeCursor,
-        record: PaneTapeEventRecord,
-        event: NeutralTerminalRecordingEvent
+        record: PaneTapeEventRecord<NeutralTerminalRecordingEvent>
     ) -> PaneTapeCursor? {
         var feed = cursor.feedBytesBeforeNextSequence
         var write = cursor.writeBytesBeforeNextSequence
-        switch event {
+        switch record.event {
         case .feed(let bytes):
             guard let offset = record.byteOffset,
                   let length = record.byteLength,

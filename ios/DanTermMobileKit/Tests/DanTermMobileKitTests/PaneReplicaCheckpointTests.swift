@@ -17,7 +17,7 @@ struct PaneReplicaCheckpointTests {
         // Why it exists: an event suffix grows with the path taken to the current state.
         // Scenario: one replica receives "AB" in one event while another receives it in two.
         var short = try checkpointReplica(bytes: [], cursor: checkpointCursor(sequence: 1))
-        try short.apply(try checkpointEvent(
+        try short.apply(checkpointEvent(
             sequence: 1,
             byteOffset: 0,
             byteLength: 2,
@@ -25,13 +25,13 @@ struct PaneReplicaCheckpointTests {
         ))
 
         var long = try checkpointReplica(bytes: [], cursor: checkpointCursor(sequence: 0))
-        try long.apply(try checkpointEvent(
+        try long.apply(checkpointEvent(
             sequence: 0,
             byteOffset: 0,
             byteLength: 1,
             event: .feed(Array("A".utf8))
         ))
-        try long.apply(try checkpointEvent(
+        try long.apply(checkpointEvent(
             sequence: 1,
             byteOffset: 1,
             byteLength: 1,
@@ -90,7 +90,7 @@ struct PaneReplicaCheckpointTests {
         let atLimit = try #require(replica.checkpoint(for: paneId))
 
         let overflow = Array(String(repeating: mark, count: 4_096).utf8)
-        try replica.apply(try checkpointEvent(
+        try replica.apply(checkpointEvent(
             sequence: 1,
             byteOffset: Terminal.graphemeClusterByteLimit,
             byteLength: overflow.count,
@@ -120,7 +120,7 @@ struct PaneReplicaCheckpointTests {
         let saturated = try #require(replica.checkpoint(for: paneId))
 
         let churn = Array(String(repeating: line, count: 128).utf8)
-        try replica.apply(try checkpointEvent(
+        try replica.apply(checkpointEvent(
             sequence: 1,
             byteOffset: baseline.count,
             byteLength: churn.count,
@@ -149,7 +149,7 @@ struct PaneReplicaCheckpointTests {
         var restored = try PaneReplica(checkpoint: persisted, for: paneId)
 
         let continuation = Array("31mZ".utf8)
-        let event = try checkpointEvent(
+        let event = checkpointEvent(
             sequence: 4,
             byteOffset: prefix.count,
             byteLength: continuation.count,
@@ -182,7 +182,7 @@ struct PaneReplicaCheckpointTests {
             checkpoint: #require(original.checkpoint(for: paneId)),
             for: paneId
         )
-        let continuation = try checkpointEvent(
+        let continuation = checkpointEvent(
             sequence: 1,
             byteOffset: prefix.count,
             byteLength: 1,
@@ -207,7 +207,7 @@ struct PaneReplicaCheckpointTests {
             columns: 8,
             rows: 2
         )
-        try original.apply(try checkpointEvent(
+        try original.apply(checkpointEvent(
             sequence: 1,
             event: .mouse(.init(action: .down, button: 1, column: 0, row: 0))
         ))
@@ -226,7 +226,7 @@ struct PaneReplicaCheckpointTests {
             (3, NeutralTerminalMouseEvent(action: .move, column: 3, row: 0)),
             (4, NeutralTerminalMouseEvent(action: .up, button: 1, column: 3, row: 0)),
         ] {
-            let event = try checkpointEvent(sequence: UInt64(sequence), event: .mouse(mouse))
+            let event = checkpointEvent(sequence: UInt64(sequence), event: .mouse(mouse))
             try restored.apply(event)
             try syncFresh.apply(event)
         }
@@ -278,7 +278,7 @@ struct PaneReplicaCheckpointTests {
         var restored = try PaneReplica(checkpoint: persisted, for: paneId)
         #expect(restored.pinned == true)
 
-        let release = try checkpointEvent(
+        let release = checkpointEvent(
             sequence: 1,
             event: .resize(columns: 8, rows: 2, pinned: false)
         )
@@ -483,15 +483,14 @@ private func checkpointEvent(
     byteOffset: Int? = nil,
     byteLength: Int? = nil,
     event: NeutralTerminalRecordingEvent
-) throws -> PaneTapeRecord {
-    let data = try JSONEncoder().encode(event)
-    return .event(.init(
+) -> MobilePaneTapeRecord {
+    .event(.init(
         sequence: sequence,
         elapsedNanoseconds: sequence,
         originElapsedNanoseconds: nil,
         byteOffset: byteOffset,
         byteLength: byteLength,
-        event: try JSONDecoder().decode(JSONValue.self, from: data)
+        event: event
     ))
 }
 

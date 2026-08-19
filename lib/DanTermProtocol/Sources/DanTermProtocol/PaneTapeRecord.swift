@@ -66,18 +66,42 @@ public enum PaneTapeLoss: String, Sendable {
 /// a client built before that kind must be able to say "I read a record I do not handle"
 /// and keep going. Collapsing it into a decode failure would make every future record kind
 /// a breaking change.
-public enum PaneTapeRecord: Equatable, Sendable {
+/// The event payload is a type parameter rather than always JSON so a reader that owns the
+/// engine's event vocabulary can carry the decoded event in the record itself. This module
+/// must name no engine type -- every layer depends on it -- and a type parameter names
+/// none, so one record family serves both sides without a second enum kept in sync by hand.
+public enum PaneTapeRecord<Event> {
     /// Declares the stream contract and its initial cursor or pending synchronization.
     case start(PaneTapeStartRecord)
     /// Reports recorder evidence that is unavailable before the following records.
     case gap(PaneTapeGapRecord)
     /// Carries one retained recorder event.
-    case event(PaneTapeEventRecord)
+    case event(PaneTapeEventRecord<Event>)
     /// Carries one ordered part of exact terminal state.
     case sync(PaneTapeSyncRecord)
     /// A clean end, carrying the producer's reason when this build knows the spelling.
     case end(reason: PaneTapeEndReason?)
     case unknown(kind: String)
+}
+
+extension PaneTapeRecord: Equatable where Event: Equatable {}
+extension PaneTapeRecord: Sendable where Event: Sendable {}
+
+extension PaneTapeRecord {
+    /// Replaces the event payload and leaves every other record kind untouched, which is
+    /// how a reader lifts the wire's JSON event into its own typed event exactly once.
+    public func mapEvent<Mapped>(
+        _ transform: (Event) throws -> Mapped
+    ) rethrows -> PaneTapeRecord<Mapped> {
+        switch self {
+        case .start(let start): .start(start)
+        case .gap(let gap): .gap(gap)
+        case .event(let record): .event(try record.mapEvent(transform))
+        case .sync(let sync): .sync(sync)
+        case .end(let reason): .end(reason: reason)
+        case .unknown(let kind): .unknown(kind: kind)
+        }
+    }
 }
 
 /// The stream's opening record: what it carries, and the cursor later offsets read against.
@@ -237,15 +261,15 @@ public struct PaneTapeSyncRecord: Equatable, Sendable {
 
 /// One tape event, with its timing and byte position hoisted out of the event object the
 /// same way the producer hoists them.
-public struct PaneTapeEventRecord: Equatable, Sendable {
+public struct PaneTapeEventRecord<Event> {
     public let sequence: UInt64
     public let elapsedNanoseconds: UInt64
     public let originElapsedNanoseconds: UInt64?
     public let byteOffset: Int?
     public let byteLength: Int?
-    /// The recording event itself, left as JSON so this module does not depend on the
-    /// terminal engine. A client that links the recording types decodes it further.
-    public let event: JSONValue
+    /// The recording event itself. It is JSON on the wire, because this module names no
+    /// engine type; a reader that links the recording types lifts it to that type once.
+    public let event: Event
 
     public init(
         sequence: UInt64,
@@ -253,7 +277,7 @@ public struct PaneTapeEventRecord: Equatable, Sendable {
         originElapsedNanoseconds: UInt64?,
         byteOffset: Int?,
         byteLength: Int?,
-        event: JSONValue
+        event: Event
     ) {
         self.sequence = sequence
         self.elapsedNanoseconds = elapsedNanoseconds
@@ -262,7 +286,25 @@ public struct PaneTapeEventRecord: Equatable, Sendable {
         self.byteLength = byteLength
         self.event = event
     }
+
+    /// Replaces the event payload while preserving every position and timing fact, so the
+    /// lift cannot quietly restate one of them.
+    public func mapEvent<Mapped>(
+        _ transform: (Event) throws -> Mapped
+    ) rethrows -> PaneTapeEventRecord<Mapped> {
+        PaneTapeEventRecord<Mapped>(
+            sequence: sequence,
+            elapsedNanoseconds: elapsedNanoseconds,
+            originElapsedNanoseconds: originElapsedNanoseconds,
+            byteOffset: byteOffset,
+            byteLength: byteLength,
+            event: try transform(event)
+        )
+    }
 }
+
+extension PaneTapeEventRecord: Equatable where Event: Equatable {}
+extension PaneTapeEventRecord: Sendable where Event: Sendable {}
 
 /// One record a producer can put on the wire.
 ///
@@ -274,7 +316,7 @@ public struct PaneTapeEventRecord: Equatable, Sendable {
 public enum PaneTapeOutgoingRecord: Equatable, Sendable {
     case start(PaneTapeStartRecord)
     case gap(PaneTapeGapRecord)
-    case event(PaneTapeEventRecord)
+    case event(PaneTapeEventRecord<JSONValue>)
     case sync(PaneTapeSyncRecord)
     case end(reason: PaneTapeEndReason)
 }
@@ -383,7 +425,10 @@ private func encodePaneTapeGeometry(columns: Int, rows: Int, pinned: Bool) -> JS
 /// record whose own required fields are missing.
 ///
 /// A record kind this build does not know is not a failure: it decodes to `.unknown`.
-public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord? {
+///
+/// The event payload stays JSON here, because this module names no engine type. A reader
+/// that owns the event vocabulary lifts it with `mapEvent` at its own edge.
+public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord<JSONValue>? {
     guard let kind = value[PaneTapeRecordKey.kind]?.asString else { return nil }
     switch PaneTapeRecordKind(rawValue: kind) {
     case .start:
