@@ -312,9 +312,10 @@ extension Terminal {
         /// asserts the two agree -- so a term that moves without its charge fails a test rather
         /// than silently loosening `31/I2`'s bound (`31/AR4`'s failure mode, applied to the charge).
         private struct SequenceKeyedSideTables {
-            /// Multi-scalar payloads, keyed by absolute record sequence. Outside the arena for the
-            /// same reason `PackedRetainedRow` holds them outside its blob: inlining them would
-            /// make a cell variable-width, and 99.88% of rows have none (`research/28/F11`).
+            /// Multi-scalar payloads, keyed by absolute record sequence. Outside the arena
+            /// because inlining them would make a cell variable-width -- giving up the indexed
+            /// read for the rarest cell in the corpus, since 99.88% of rows have none
+            /// (`research/28/F11`).
             private var spillsBySequence: [Int: [[Unicode.Scalar]]] = [:]
 
             /// The trailing background-erase fill style, keyed by absolute record sequence.
@@ -724,20 +725,20 @@ extension Terminal {
         /// naming them twice.
         ///
         /// `reconstructLogicalLines`' own rule (`research/31/F4` case 17): a soft-wrapped row is measured
-        /// to full width, a hard-ended row to its **content** end. It is deliberately not
-        /// `PackedRetainedRow.pack`'s canonical extent, which keeps the trailing
-        /// background-erase-styled blanks past the content as *cells*: as a display row those
-        /// are painted columns, but as line content they are cells the fold would re-wrap, so a
-        /// painted tail on a hard-ended line would grow into whole extra display rows at a
-        /// narrower width. There is no floor of one either -- a record's cell count is a content
-        /// property and zero is representable (`research/31/DD15`).
+        /// to full width, a hard-ended row to its **content** end. It is deliberately not the
+        /// per-display-row canonical extent -- the last non-default cell plus one -- which keeps
+        /// the trailing background-erase-styled blanks past the content as *cells*: as a display
+        /// row those are painted columns, but as line content they are cells the fold would
+        /// re-wrap, so a painted tail on a hard-ended line would grow into whole extra display
+        /// rows at a narrower width. There is no floor of one either -- a record's cell count is
+        /// a content property and zero is representable (`research/31/DD15`).
         ///
-        /// What `pack` sees and this splits use the same predicate: a blank cell carrying a
-        /// non-default style -- identifies the fill. The maximal run of such blanks reaching the
-        /// right margin is the **trailing fill**, recorded as one style on the record and
-        /// re-derived at read against whatever width is in force. Blanks that do *not* reach the
-        /// margin stay cells: they sit between content and the fill, so their columns are
-        /// positionally real and re-wrap with the rest of the line.
+        /// One predicate -- a blank cell carrying a non-default style -- identifies the fill.
+        /// The maximal run of such blanks reaching the right margin is the **trailing fill**,
+        /// recorded as one style on the record and re-derived at read against whatever width is
+        /// in force. Blanks that do *not* reach the margin stay cells: they sit between content
+        /// and the fill, so their columns are positionally real and re-wrap with the rest of the
+        /// line.
         private func admissionExtent(
             _ row: Terminal.GridRow
         ) -> (contentEnd: Int, fillStyle: Terminal.StyleId?) {
@@ -1158,8 +1159,8 @@ extension Terminal {
             )
             addContentUnitsToTail(-removedContent)
             var removedSpills = 0
-            for index in newCellCount..<oldCellCount where cellWord(recordAt: offset, cell: index)
-                & PackedRetainedRow.Header.cellSpillBit != 0
+            for index in newCellCount..<oldCellCount
+                where cellWord(recordAt: offset, cell: index) & CellWord.spillBit != 0
             {
                 removedSpills += 1
             }
@@ -1628,13 +1629,10 @@ extension Terminal {
                 for cellOffset in 0..<scan.cellCount {
                     let word = words[cellsBase + cellOffset]
                     let kind = TerminalCellKind(
-                        packedCode: UInt8(
-                            (word >> PackedRetainedRow.Header.cellKindShift)
-                                & PackedRetainedRow.Header.cellKindMask
-                        )
+                        packedCode: UInt8((word >> CellWord.kindShift) & CellWord.kindMask)
                     )
-                    let field = UInt32(word & PackedRetainedRow.Header.cellScalarMask)
-                    if word & PackedRetainedRow.Header.cellSpillBit != 0 {
+                    let field = UInt32(word & CellWord.scalarMask)
+                    if word & CellWord.spillBit != 0 {
                         body(cellOffset, kind, TerminalScalars(spills?[Int(field)] ?? []))
                     } else if field != 0, let scalar = Unicode.Scalar(field) {
                         body(cellOffset, kind, TerminalScalars(scalar))
@@ -1831,8 +1829,7 @@ extension Terminal {
                         body(
                             Terminal.StyleId(
                                 truncatingIfNeeded:
-                                    words[cellsBase + cell]
-                                        >> PackedRetainedRow.Header.cellStyleShift
+                                    words[cellsBase + cell] >> CellWord.styleShift
                             )
                         )
                     }
@@ -1918,14 +1915,12 @@ extension Terminal {
                         if column < storedCount {
                             return Terminal.StyleId(
                                 truncatingIfNeeded:
-                                    words[cellsBase + shape.start + column]
-                                        >> PackedRetainedRow.Header.cellStyleShift
+                                    words[cellsBase + shape.start + column] >> CellWord.styleShift
                             )
                         }
                         if column == storedCount, let spacerWord {
                             return Terminal.StyleId(
-                                truncatingIfNeeded:
-                                    spacerWord >> PackedRetainedRow.Header.cellStyleShift
+                                truncatingIfNeeded: spacerWord >> CellWord.styleShift
                             )
                         }
                         return shape.fillStyle ?? Terminal.defaultStyleId
@@ -1937,13 +1932,10 @@ extension Terminal {
                         guard column < storedCount else { return (.padding, .empty) }
                         let word = words[cellsBase + shape.start + column]
                         let kind = TerminalCellKind(
-                            packedCode: UInt8(
-                                (word >> PackedRetainedRow.Header.cellKindShift)
-                                    & PackedRetainedRow.Header.cellKindMask
-                            )
+                            packedCode: UInt8((word >> CellWord.kindShift) & CellWord.kindMask)
                         )
-                        let field = UInt32(word & PackedRetainedRow.Header.cellScalarMask)
-                        if word & PackedRetainedRow.Header.cellSpillBit != 0 {
+                        let field = UInt32(word & CellWord.scalarMask)
+                        if word & CellWord.spillBit != 0 {
                             return (
                                 kind,
                                 TerminalScalars(
@@ -1992,10 +1984,7 @@ extension Terminal {
                 for cellOffset in shape.start..<shape.end {
                     let word = words[cellsBase + cellOffset]
                     body(column, TerminalCellKind(
-                        packedCode: UInt8(
-                            (word >> PackedRetainedRow.Header.cellKindShift)
-                                & PackedRetainedRow.Header.cellKindMask
-                        )
+                        packedCode: UInt8((word >> CellWord.kindShift) & CellWord.kindMask)
                     ))
                     column += 1
                 }
@@ -2384,16 +2373,13 @@ extension Terminal {
 
             var cell = Terminal.GridCell()
             cell.kind = TerminalCellKind(
-                packedCode: UInt8(
-                    (word >> PackedRetainedRow.Header.cellKindShift)
-                        & PackedRetainedRow.Header.cellKindMask
-                )
+                packedCode: UInt8((word >> CellWord.kindShift) & CellWord.kindMask)
             )
             cell.styleId = Terminal.StyleId(
-                truncatingIfNeeded: word >> PackedRetainedRow.Header.cellStyleShift
+                truncatingIfNeeded: word >> CellWord.styleShift
             )
-            let field = UInt32(word & PackedRetainedRow.Header.cellScalarMask)
-            if word & PackedRetainedRow.Header.cellSpillBit != 0 {
+            let field = UInt32(word & CellWord.scalarMask)
+            if word & CellWord.spillBit != 0 {
                 cell.scalars = TerminalScalars(sideTables.spills(at: sequence)?[Int(field)] ?? [])
             } else if field != 0, let scalar = Unicode.Scalar(field) {
                 cell.scalars = TerminalScalars(scalar)
@@ -2543,9 +2529,8 @@ extension Terminal {
             guard count > 0 else { return }
             let offset = offsets[offsets.count - 1]
             var record = self.record(at: offset)
-            let blank = UInt64(TerminalCellKind.padding.packedCode)
-                << PackedRetainedRow.Header.cellKindShift
-                | UInt64(Terminal.defaultStyleId) << PackedRetainedRow.Header.cellStyleShift
+            let blank = UInt64(TerminalCellKind.padding.packedCode) << CellWord.kindShift
+                | UInt64(Terminal.defaultStyleId) << CellWord.styleShift
             let chunkAt = chunkIndex(of: offset)
             let base = chunkWordIndex(of: offset) + 1 + record.cellCount
             var chunk = ContiguousArray<UInt64>()
@@ -2564,8 +2549,7 @@ extension Terminal {
         ///
         /// Both halves of that are `research/31/F8` Observation 3's: materializing a `[GridCell]` per
         /// admitted row cost an allocation and a copy of every cell, and *binding* each element
-        /// costs a copy and a release of a `TerminalScalars` on every one. `PackedRetainedRow.pack`
-        /// walks a row the same way for the same reason, so the two stores read a row alike.
+        /// costs a copy and a release of a `TerminalScalars` on every one.
         private mutating func appendCells(_ cells: UnsafeBufferPointer<Terminal.GridCell>) {
             guard cells.isEmpty == false else { return }
             let offset = offsets[offsets.count - 1]
@@ -2596,13 +2580,13 @@ extension Terminal {
                 case .wideTail, .spacerHead:
                     break
                 }
-                var word = UInt64(kind.packedCode) << PackedRetainedRow.Header.cellKindShift
-                word |= UInt64(cells[index].styleId) << PackedRetainedRow.Header.cellStyleShift
+                var word = UInt64(kind.packedCode) << CellWord.kindShift
+                word |= UInt64(cells[index].styleId) << CellWord.styleShift
                 let scalarCount = cells[index].scalars.count
                 if scalarCount == 1 {
                     word |= UInt64(cells[index].scalars[0].value)
                 } else if scalarCount > 1 {
-                    word |= PackedRetainedRow.Header.cellSpillBit | UInt64(spills.count)
+                    word |= CellWord.spillBit | UInt64(spills.count)
                     spills.append(Array(cells[index].scalars))
                 }
                 chunk[cellsBase + index] = word
@@ -2611,8 +2595,9 @@ extension Terminal {
                     openHyperlinks.append(HyperlinkEntry(offset: cellOffset, id: id))
                 }
                 if let identity = cells[index].contentIdentity {
-                    // A run is a strict step of one, matching `PackedRetainedRow.pack` -- the
-                    // only shape a (base, start, extent) triple reconstructs exactly.
+                    // A run is a strict step of one: the only shape a (base, start, extent)
+                    // triple reconstructs exactly. A repeat -- a wide cell's two columns share
+                    // one identity -- breaks the run like a gap does.
                     if let previous = openPreviousIdentity, identity == previous &+ 1,
                        let open = openIdentityRuns.last, open.start + open.extent == cellOffset
                     {
@@ -3075,8 +3060,7 @@ extension Terminal {
 
         private func cellKind(recordAt offset: Int, cell index: Int) -> TerminalCellKind {
             let word = cellWord(recordAt: offset, cell: index)
-            let kind = (word >> PackedRetainedRow.Header.cellKindShift)
-                & PackedRetainedRow.Header.cellKindMask
+            let kind = (word >> CellWord.kindShift) & CellWord.kindMask
             return TerminalCellKind(packedCode: UInt8(kind))
         }
 

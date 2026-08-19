@@ -16,9 +16,9 @@
 // What deliberately lives elsewhere: pure OSC payload decoding (`OSCPayload`), search state,
 // matching, and retained-index maintenance (`Terminal.Search`), retained-history storage and its
 // arena/eviction policy (`LogicalLineStore`),
-// the retained record and its row folding (`LogicalLineRecord`,
-// `LogicalLineFold`), the packed row representation (`PackedRetainedRow`), escape-sequence
-// recognition into actions (`TerminalInputStream`, `EscapeAbsorber`), Unicode width and
+// the retained record, its cell word and its row folding (`LogicalLineRecord`, `CellWord`,
+// `LogicalLineFold`), escape-sequence recognition into actions (`TerminalInputStream`,
+// `EscapeAbsorber`), Unicode width and
 // grapheme tables (generated), key/mouse encoding (`TerminalInputEncoding`), and the
 // pointer-gesture policy (`TerminalInteractionPolicy`). The rule for what belongs here: if it
 // mutates or interprets the live screen, or anchors something to a live coordinate, it is in
@@ -284,21 +284,6 @@ public struct Terminal: Equatable, Sendable {
             guard cells.count < columns else { return self }
             var row = self
             row.cells.append(contentsOf: repeatElement(GridCell(), count: columns - cells.count))
-            return row
-        }
-
-        /// Returns the canonical retained representation without default trailing padding.
-        ///
-        /// The independent statement of `I2`. `PackedRetainedRow.pack` applies the same trim
-        /// as it encodes -- so nothing on the admission path calls this -- and the tests hold
-        /// the two spellings equal. Keeping it is what makes that a comparison against a
-        /// definition rather than against the encoder's own arithmetic.
-        func compacted() -> GridRow {
-            let lastStoredColumn = cells.lastIndex(where: { $0 != GridCell() }) ?? 0
-            let storedCount = lastStoredColumn + 1
-            guard storedCount < cells.count else { return self }
-            var row = self
-            row.cells = Array(cells.prefix(storedCount))
             return row
         }
     }

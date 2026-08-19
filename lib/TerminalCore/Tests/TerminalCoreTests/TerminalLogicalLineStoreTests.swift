@@ -104,7 +104,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: a blank logical line occupies exactly one display row however narrow the
         //   pane gets.
         // Why it exists: `research/31/DD15` stores a blank line as a *zero-cell* record, dropping the
-        //   one-cell canonical floor `PackedRetainedRow.pack` applies. Without `31/I9`'s
+        //   one-cell canonical floor a per-display-row store applies. Without `31/I9`'s
         //   `max(1, ...)` floor in the fold, a blank history would fold to nothing and
         //   `research/31/D2` Decision 1's 1,048,576-records-to-rows reading would break.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
@@ -1310,8 +1310,8 @@ struct TerminalLogicalLineStoreTests {
     func fragmentedIdentityFallsBackPerCellWithoutLoss() {
         // Intent: alternating identified and unidentified cells -- the shape whose run table
         //   costs more than four bytes per stored cell -- reads back every value.
-        // Why it exists: `research/31/D3` Decision 6 keeps `PackedRetainedRow`'s two-encoding scheme,
-        //   and both encodings must preserve every stored value because
+        // Why it exists: `research/31/D3` Decision 6 gives identity two encodings -- a run
+        //   table and a per-cell table -- and both must preserve every stored value because
         //   `activationIdentity` reads this out of history.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 16)
         var cells: [Terminal.GridCell] = []
@@ -1334,6 +1334,37 @@ struct TerminalLogicalLineStoreTests {
                     == (column % 2 == 0 ? Terminal.ContentIdentity(1_000 + column * 13) : nil)
             )
         }
+    }
+
+    @Test("A wide cell's two columns share one identity and both read it back")
+    func wideCellIdentityRepeatSurvivesTheRunEncoding() {
+        // Intent: a wide head and its tail carry the same identity inside an otherwise
+        //   ascending row, and every column -- the pair included -- reads its value back.
+        // Why it exists: the run encoding stores (start, extent, base) and reconstructs a
+        //   run as base + step, so it holds only a strict step of one. A wide pair repeats a
+        //   value instead of stepping, which is the one shape a run cannot express, so the
+        //   writer has to break the run there. A writer that folded the repeat into the open
+        //   run would hand back base + 1 on the tail -- a neighbouring cell's identity, which
+        //   `activationIdentity` would then read as part of the wrong span.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 6)
+        let cells: [Terminal.GridCell] = [
+            Self.narrow("a", contentIdentity: 500),
+            Self.narrow("b", contentIdentity: 501),
+            Terminal.GridCell(
+                scalars: TerminalScalars("界"),
+                kind: .wideHead,
+                contentIdentity: 502
+            ),
+            Terminal.GridCell(kind: .wideTail, contentIdentity: 502),
+            Self.narrow("c", contentIdentity: 503),
+            Self.narrow("d", contentIdentity: 504),
+        ]
+        var row = Terminal.GridRow(cells: cells)
+        row.isSoftWrapped = false
+        store.admit(row)
+
+        let read = store.recordCells(at: 0)!
+        #expect(read.map(\.contentIdentity) == [500, 501, 502, 502, 503, 504])
     }
 
     // MARK: - Operations 2 and 4
