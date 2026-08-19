@@ -74,33 +74,34 @@ grep -q '2 of 3 steps FAILED' "$TEST_ROOT/output" \
 # machine, which saturates the desktop and makes the OS UI lag. These cases pin the two
 # halves of the bound -- the arithmetic, and the shim that carries it to every child.
 
-# With defaults the runner leaves the machine some headroom: workers x per-worker
-# compile jobs must not exceed the cores it says it is budgeting for.
+# With defaults the runner leaves the machine some headroom: the firm tokens workers can
+# hold at once must not exceed the cores it says it is budgeting for.
 rc="$(run_with_default_jobs 'true')"
 [[ "$rc" == "0" ]] || fail "default-jobs run exited $rc; expected 0"
 header="$(grep '^run-test-suite: .*workers' "$TEST_ROOT/output")"
 workers="$(sed -E 's/.*, ([0-9]+) parallel workers.*/\1/' <<<"$header")"
-per_worker="$(sed -E 's/.*swift -j ([0-9]+).*/\1/' <<<"$header")"
-budget="$(sed -E 's/.*<= ([0-9]+) of [0-9]+ cores.*/\1/' <<<"$header")"
+ask="$(sed -E 's/.*\(ask ([0-9]+)\).*/\1/' <<<"$header")"
+budget="$(sed -E 's/.*, ([0-9]+) cpu tokens of [0-9]+ cores.*/\1/' <<<"$header")"
 ncpu="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 [[ "$workers" =~ ^[0-9]+$ ]] || fail "header did not report a worker count: $header"
-[[ "$per_worker" =~ ^[0-9]+$ ]] || fail "header did not report a per-worker swift job cap: $header"
-[[ "$budget" =~ ^[0-9]+$ ]] || fail "header did not report a core budget: $header"
-(( per_worker >= 1 )) || fail "per-worker swift job cap was $per_worker; expected at least 1"
-(( workers * per_worker <= budget )) \
-    || fail "budget overshot: $workers workers x $per_worker jobs > $budget"
+[[ "$ask" =~ ^[0-9]+$ ]] || fail "header did not report a per-worker token ask: $header"
+[[ "$budget" =~ ^[0-9]+$ ]] || fail "header did not report a token budget: $header"
+(( ask >= 1 )) || fail "per-worker token ask was $ask; expected at least 1"
+(( workers <= budget )) \
+    || fail "budget overshot: $workers workers can hold more firm tokens than the $budget budget"
 (( budget < ncpu )) || fail "budget $budget left no headroom on a $ncpu-core machine"
 
-# A larger worker count must shrink the per-worker cap rather than multiply through it.
+# A larger worker count must shrink the per-worker ask rather than multiply through it.
 # This is the case that actually bites: `just test 8` on an uncapped pool is 8 x ncpu.
-# The step string stays single-quoted so the worker, not this test, expands it.
+# The step string stays single-quoted so the worker, not this test, expands it, and the
+# token supervisor is what sets DANTERM_SWIFT_JOBS to the tokens the step really holds.
 # shellcheck disable=SC2016
 rc="$(run_with_steps 'test "$DANTERM_SWIFT_JOBS" -ge 1')"
-[[ "$rc" == "0" ]] || fail "workers did not inherit a per-worker swift job cap"
+[[ "$rc" == "0" ]] || fail "steps were not told how many tokens they hold"
 header="$(grep '^run-test-suite: .*workers' "$TEST_ROOT/output")"
-explicit_per_worker="$(sed -E 's/.*swift -j ([0-9]+).*/\1/' <<<"$header")"
-(( explicit_per_worker * 4 <= budget || explicit_per_worker == 1 )) \
-    || fail "8-worker-style override kept a per-worker cap of $explicit_per_worker"
+explicit_ask="$(sed -E 's/.*\(ask ([0-9]+)\).*/\1/' <<<"$header")"
+(( explicit_ask * 4 <= budget || explicit_ask == 1 )) \
+    || fail "4-worker override kept a per-worker ask of $explicit_ask"
 
 # The cap has to reach every descendant, not just the `swift` calls written in the step
 # list: steps call scripts, and those scripts call SwiftPM too. A shim first on PATH is
@@ -159,9 +160,9 @@ for run in a b; do
     done
 done
 
-RUN_TEST_SUITE_STEPS_FILE="$TEST_ROOT/steps-a" "$RUNNER" 4 >"$TEST_ROOT/shared-a" 2>&1 &
+RUN_TEST_SUITE_STEPS_FILE="$TEST_ROOT/steps-a" "$RUNNER" 8 >"$TEST_ROOT/shared-a" 2>&1 &
 run_a=$!
-RUN_TEST_SUITE_STEPS_FILE="$TEST_ROOT/steps-b" "$RUNNER" 4 >"$TEST_ROOT/shared-b" 2>&1 &
+RUN_TEST_SUITE_STEPS_FILE="$TEST_ROOT/steps-b" "$RUNNER" 8 >"$TEST_ROOT/shared-b" 2>&1 &
 run_b=$!
 
 # A hang guard, not a measurement: 16 sleeps of 0.4s finish in seconds even on a packed
@@ -180,10 +181,11 @@ done
 wait $run_a || fail "first concurrent run failed: $(cat "$TEST_ROOT/shared-a")"
 wait $run_b || fail "second concurrent run failed: $(cat "$TEST_ROOT/shared-b")"
 
+# Every step holds at least one firm token, so the peak number of overlapping steps
+# across both runs is bounded by the pool size itself.
 header="$(grep -h '^run-test-suite: .*workers' "$TEST_ROOT/shared-a")"
-per_worker="$(sed -E 's/.*swift -j ([0-9]+).*/\1/' <<<"$header")"
-budget="$(sed -E 's/.*<= ([0-9]+) of [0-9]+ cores.*/\1/' <<<"$header")"
-allowed=$(( budget / per_worker ))
+budget="$(sed -E 's/.*, ([0-9]+) cpu tokens of [0-9]+ cores.*/\1/' <<<"$header")"
+allowed=$budget
 observed="$(python3 -c 'import pathlib, sys
 events = []
 for record in pathlib.Path(sys.argv[1]).iterdir():

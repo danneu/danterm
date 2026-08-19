@@ -36,16 +36,19 @@ build-icons:
 
 # Run all tests. Steps run as a bounded parallel pool; the step list lives in
 # scripts/run-test-suite.sh. The pool leaves two cores and normal scheduling priority
-# to the desktop, so the machine stays usable during a run. Pass a job count to
-# override the worker count; the per-worker SwiftPM cap shrinks to match.
+# to the desktop, so the machine stays usable during a run. Each step holds one CPU
+# token from a machine-wide pool, and SwiftPM parallelism follows the tokens a step
+# holds. Pass a job count to run fewer, wider workers.
 #
-# The core budget is shared with every other gate running on this machine, so a run
+# The token budget is shared with every other gate running on this machine, so a run
 # started beside other agents' runs queues instead of oversubscribing the host. A
 # queued step says so in its own line.
 test jobs="":
     ./scripts/run-test-suite.sh {{jobs}}
 
 # Run all tests one at a time, for when parallel output or scheduling is in the way.
+# The single step may build as wide as the whole token budget when the machine is
+# quiet; beside other gates it narrows instead of waiting.
 test-serial:
     JOBS=1 ./scripts/run-test-suite.sh
 
