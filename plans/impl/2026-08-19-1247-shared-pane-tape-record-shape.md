@@ -131,7 +131,7 @@ the moved types from DanTermProtocol; all already import it.
 ## Commit progress
 - [x] 1. test(tape): pin the total-gap and withheld-cursor records end to end
 - [x] 2. refactor(tape): publish the typed record family from DanTermProtocol
-- [ ] 3. refactor(tape): encode pane-tape records from the shared declaration
+- [x] 3. refactor(tape): encode pane-tape records from the shared declaration
 
 ## Implementation notes
 
@@ -148,3 +148,24 @@ the moved types from DanTermProtocol; all already import it.
 - The start record's `provenance` is decoded as an optional `JSONValue`, and its
   initializer defaults it to nil so a test that builds a start record by hand
   states only the fields it cares about.
+- I1's refusal is a separate enum, `PaneTapeOutgoingRecord`: the read family
+  minus `.unknown` and minus an end whose reason this build cannot name, with
+  `end` carrying a non-optional reason. The encode takes only that enum, so the
+  two lossy states cannot be handed to it at all -- no runtime check, and no
+  encoder branch that has to decide what to emit for them.
+- The sync record's four first-part-only fields stay four independent optionals
+  on `PaneTapeSyncRecord`, matching the decode. The encoder emits the geometry
+  object only when columns, rows, and pinned are all present. Grouping them into
+  one optional struct would make the together-or-nothing rule structural, but it
+  changes the decoded type every reader already consumes, which is wider than
+  this entry's slice.
+
+## Follow Up
+
+- `PaneTapeSyncRecord` in
+  `lib/DanTermProtocol/Sources/DanTermProtocol/PaneTapeRecord.swift` holds its
+  four first-part-only fields (`columns`, `rows`, `pinned`,
+  `droppedHistoryRows`) as independent optionals, so both the decode and the
+  encode enforce "all four or none" by hand. Folding them into one optional
+  struct would make the rule structural; it touches every reader of the decoded
+  sync record (`PaneTapeSyncAssembler`, the CLI, `ios/DanTermMobileKit`).

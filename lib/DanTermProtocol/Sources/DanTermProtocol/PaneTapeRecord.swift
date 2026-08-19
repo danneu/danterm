@@ -1,5 +1,6 @@
 // The pane-tape record shape: one declaration of every key spelling, the typed record family
-// those keys describe, and the decode that reads them back. It sits at the protocol boundary
+// those keys describe, the encode that writes them, and the decode that reads them back. It
+// sits at the protocol boundary
 // because the producer in DanTermSupport, every reading client, and the inspect view in
 // PaneTapeInspect.swift must agree on the shape down to the last key -- a spelling declared
 // on one side alone compiles clean everywhere and fails mid-stream.
@@ -250,6 +251,124 @@ public struct PaneTapeEventRecord: Equatable, Sendable {
         self.byteLength = byteLength
         self.event = event
     }
+}
+
+/// One record a producer can put on the wire.
+///
+/// It is the read family minus the two states only a reader can hold: `.unknown`, which has
+/// already discarded every field but the kind, and an end whose reason this build could not
+/// name. Both would encode to a lossy object, so the encoder does not accept them -- and it
+/// refuses them by construction rather than at runtime, which is why this is a separate
+/// enum instead of a precondition inside the encode.
+public enum PaneTapeOutgoingRecord: Equatable, Sendable {
+    case start(PaneTapeStartRecord)
+    case gap(PaneTapeGapRecord)
+    case event(PaneTapeEventRecord)
+    case sync(PaneTapeSyncRecord)
+    case end(reason: PaneTapeEndReason)
+}
+
+/// Encodes one record to the JSON object the wire carries.
+///
+/// A field the record does not hold is omitted rather than stated as null: a reader treats a
+/// present key as a measurement the producer made, so a null origin stamp or byte span would
+/// report a measurement of something that had none.
+public func encodePaneTapeRecord(_ record: PaneTapeOutgoingRecord) -> JSONValue {
+    switch record {
+    case .start(let start):
+        var fields: [String: JSONValue] = [
+            PaneTapeRecordKey.kind: .string(PaneTapeRecordKind.start.rawValue),
+            PaneTapeRecordKey.version: .number(Double(start.version)),
+            PaneTapeRecordKey.capture: .string(start.capture.rawValue),
+            PaneTapeRecordKey.format: .string(start.format.rawValue),
+            PaneTapeRecordKey.initial: encodePaneTapeGeometry(
+                columns: start.columns,
+                rows: start.rows,
+                pinned: start.pinned
+            ),
+            PaneTapeRecordKey.reconstructible: .bool(start.reconstructible),
+        ]
+        if let provenance = start.provenance {
+            fields[PaneTapeRecordKey.provenance] = provenance
+        }
+        // The baseline every later offset is read against. A stream withholds it only when
+        // another record publishes the same position, because a stream that starts past the
+        // beginning otherwise reports offsets a reader has no origin for.
+        if let cursor = start.cursor {
+            fields[PaneTapeRecordKey.cursor] = paneTapeCursorJSON(cursor)
+        }
+        return .object(fields)
+    case .gap(let gap):
+        switch gap.loss {
+        case .total:
+            return .object([
+                PaneTapeRecordKey.kind: .string(PaneTapeRecordKind.gap.rawValue),
+                PaneTapeRecordKey.loss: .string(PaneTapeLoss.total.rawValue),
+            ])
+        case .exact(let events, let feedBytes, let writeBytes):
+            return .object([
+                PaneTapeRecordKey.kind: .string(PaneTapeRecordKind.gap.rawValue),
+                PaneTapeRecordKey.droppedEventCount: .number(Double(events)),
+                PaneTapeRecordKey.droppedFeedBytes: .number(Double(feedBytes)),
+                PaneTapeRecordKey.droppedWriteBytes: .number(Double(writeBytes)),
+            ])
+        }
+    case .event(let event):
+        var fields: [String: JSONValue] = [
+            PaneTapeRecordKey.kind: .string(PaneTapeRecordKind.event.rawValue),
+            PaneTapeRecordKey.sequence: .number(Double(event.sequence)),
+            PaneTapeRecordKey.elapsedNanoseconds: .number(Double(event.elapsedNanoseconds)),
+            PaneTapeRecordKey.event: event.event,
+        ]
+        if let origin = event.originElapsedNanoseconds {
+            fields[PaneTapeRecordKey.originElapsedNanoseconds] = .number(Double(origin))
+        }
+        if let byteOffset = event.byteOffset {
+            fields[PaneTapeRecordKey.byteOffset] = .number(Double(byteOffset))
+        }
+        if let byteLength = event.byteLength {
+            fields[PaneTapeRecordKey.byteLength] = .number(Double(byteLength))
+        }
+        return .object(fields)
+    case .sync(let sync):
+        var fields: [String: JSONValue] = [
+            PaneTapeRecordKey.kind: .string(PaneTapeRecordKind.sync.rawValue),
+            PaneTapeRecordKey.part: .number(Double(sync.part)),
+            PaneTapeRecordKey.parts: .number(Double(sync.parts)),
+            PaneTapeRecordKey.base64: .string(Data(sync.bytes).base64EncodedString()),
+        ]
+        // The whole-transfer facts ride the first part alone, and the decode requires them
+        // together, so a record that holds part of the group states none of it.
+        if let columns = sync.columns, let rows = sync.rows, let pinned = sync.pinned {
+            fields[PaneTapeRecordKey.initial] = encodePaneTapeGeometry(
+                columns: columns,
+                rows: rows,
+                pinned: pinned
+            )
+        }
+        if let droppedHistoryRows = sync.droppedHistoryRows {
+            fields[PaneTapeRecordKey.droppedHistoryRows] = .number(Double(droppedHistoryRows))
+        }
+        if let cursor = sync.cursor {
+            fields[PaneTapeRecordKey.cursor] = paneTapeCursorJSON(cursor)
+        }
+        return .object(fields)
+    case .end(let reason):
+        return .object([
+            PaneTapeRecordKey.kind: .string(PaneTapeRecordKind.end.rawValue),
+            PaneTapeRecordKey.reason: .string(reason.rawValue),
+        ])
+    }
+}
+
+/// States one pane's geometry whole, so the start record and a sync's first part cannot
+/// disagree about the shape they publish it in.
+private func encodePaneTapeGeometry(columns: Int, rows: Int, pinned: Bool) -> JSONValue {
+    .object([
+        PaneTapeRecordKey.columns: .number(Double(columns)),
+        PaneTapeRecordKey.rows: .number(Double(rows)),
+        PaneTapeRecordKey.pinned: .bool(pinned),
+    ])
 }
 
 /// Decodes one tape record, or returns nil when the value is not a record at all or a
