@@ -1125,7 +1125,7 @@ rewrites.
 - [ ] **[FIND-2](#find-2)** (4x5, medium) Build the per-frame match snapshot once and pass it to all three search reads
 - [ ] **[IPC-1](#ipc-1)** (4x5, medium) Derive the IPC audit descriptor from the request's encoded params, not a third hand-written switch _(after [IPC-3](#ipc-3); with [IPC-4](#ipc-4))_
 - [ ] **[RUNTIME-1](#runtime-1)** (4x5, medium) Make the restore commit a Msg so `update()` is the only writer of `model` _(after [RUNTIME-3](#runtime-3))_
-- [ ] **[WIRE-3](#wire-3)** (4x5, medium) Encode a delivered tape batch as one notification off the main actor, not one per record _(after [PERSIST-6](#persist-6))_
+- [x] **[WIRE-3](#wire-3)** (4x5, medium) Encode a delivered tape batch as one notification off the main actor, not one per record _(after [PERSIST-6](#persist-6))_ -- `d95481da..9b467dd1`
 - [ ] **[FEED-1](#feed-1)** (4x5, large) Represent the viewport as a rotating row ring so a scroll advances a head index instead of moving every row _(after [FEED-2](#feed-2))_
 - [ ] **[MOBILE-2](#mobile-2)** (4x5, large) Feed the drained damage into the frame stores instead of re-rendering the whole grid every tick _(after [MOBILE-1](#mobile-1))_
 - [x] **[WIRE-2](#wire-2)** (4x5, large) Carry a tape record as its typed event, not as a JSONValue decoded from its own encoding _(after [PERSIST-6](#persist-6))_ -- `c0e4c026..c4d7ef21`
