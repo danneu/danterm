@@ -60,6 +60,53 @@ struct PaneTapeStreamTests {
         #expect(try completion.wait() == .init(termination: .end, capture: .follow))
     }
 
+    @Test("a batched notification renders one stdout line per record and still stops at end")
+    func rendererWritesEveryRecordOfABatchedNotification() throws {
+        // Intent: a notification carrying several records writes one JSON Lines record per
+        //   record, in wire order, and a terminator inside such a notification still ends
+        //   the stream.
+        // Why it exists: the producer delivers a whole batch in one notification now. The
+        //   CLI's output contract did not move with it: every consumer downstream of
+        //   `danterm pane tape` still reads one record per line.
+        // Scenario: a busy pane's records are grouped, and the pane then closes.
+        let socket = try descriptorPair()
+        let output = try descriptorPipe()
+        let completion = StreamCompletionProbe()
+        defer {
+            Darwin.close(socket.peer)
+            Darwin.close(output.read)
+        }
+
+        runOnItsOwnThread {
+            do {
+                completion.finish(try renderPaneTapeStream(
+                    session: tapeSession(socket.connection),
+                    output: output.write,
+                    requestId: "R1"
+                ))
+            } catch {
+                completion.fail(error)
+            }
+            Darwin.close(socket.connection)
+            Darwin.close(output.write)
+        }
+
+        try writeFrame(
+            JsonRpcResponse(id: .string("R1"), result: startRecord(capture: "follow")),
+            to: socket.peer
+        )
+        #expect(try readDescriptorRecord(output.read) == startRecord(capture: "follow"))
+
+        try writeFrame(
+            notification(record("gap"), record("event"), record("end")),
+            to: socket.peer
+        )
+        #expect(try readDescriptorRecord(output.read) == record("gap"))
+        #expect(try readDescriptorRecord(output.read) == record("event"))
+        #expect(try readDescriptorRecord(output.read) == record("end"))
+        #expect(try completion.wait() == .init(termination: .end, capture: .follow))
+    }
+
     @Test("the renderer treats EOF after start as clean termination")
     func rendererStopsCleanlyOnEOF() throws {
         let socket = try descriptorPair()
@@ -289,12 +336,12 @@ struct PaneTapeStreamTests {
         ])
     }
 
-    private func notification(_ record: JSONValue) -> JsonRpcRequest {
+    private func notification(_ records: JSONValue...) -> JsonRpcRequest {
         JsonRpcRequest(
             method: Methods.paneTapeEvent,
             params: .object([
                 "subscription": .string("S1"),
-                "record": record,
+                "records": .array(records),
             ])
         )
     }

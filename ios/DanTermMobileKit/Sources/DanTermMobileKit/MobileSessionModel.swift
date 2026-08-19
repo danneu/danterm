@@ -457,12 +457,18 @@ public struct MobileSessionModel: Equatable, Sendable {
                 return [.redraw]
             }
             guard let notification = PaneTapeEventNotification<JSONValue>(
-                      method: method,
-                      params: params
-                  ),
-                  let record = decodePaneTapeRecord(notification.record)
-            else { return [] }
-            return take(record, env: env)
+                method: method,
+                params: params
+            ) else { return [] }
+            // One notification can carry a whole delivered batch. Each record is taken in
+            // wire order, exactly as it would have been had the producer sent them one at a
+            // time, and a record that will not decode is skipped rather than ending the rest.
+            var effects: [MobileSessionEffect] = []
+            for record in notification.records {
+                guard let decoded = decodePaneTapeRecord(record) else { continue }
+                effects += take(decoded, env: env)
+            }
+            return effects
         }
     }
 

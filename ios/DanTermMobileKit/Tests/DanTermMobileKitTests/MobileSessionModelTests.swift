@@ -338,6 +338,44 @@ func undecodableTapeEventEndsTheConnection() throws {
     #expect(effects == refusal)
 }
 
+@Test("Every record of a batched notification is applied, in wire order")
+func batchedTapeNotificationAppliesEveryRecordInOrder() throws {
+    // Intent: a notification carrying several records applies all of them, in the order
+    //   they arrived, exactly as the same records would have been applied one at a time.
+    // Why it exists: the producer now delivers a whole batch in one notification. A reader
+    //   that took only the first record would drop most of a busy pane's output, and one
+    //   that reordered them would render bytes the pane never produced in that order.
+    // Scenario: a busy pane delivers three feed records in one delivery.
+    var session = Session()
+    try session.reachServingStream()
+
+    let effects = session.handle(.frameReceived(.notification(
+        method: Methods.paneTapeEvent,
+        params: .object([
+            "subscription": .string("subscription-1"),
+            "records": .array((1...3).map { sequence in
+                .object([
+                    "kind": .string("event"),
+                    "sequence": .number(Double(sequence)),
+                    "elapsedNanoseconds": .number(0),
+                    "event": .object([
+                        "type": .string("feed"),
+                        "base64": .string(Data([UInt8(sequence)]).base64EncodedString()),
+                    ]),
+                ])
+            }),
+        ])
+    )))
+
+    let applied = effects.compactMap { effect -> UInt64? in
+        guard case .applyRecord(let record) = effect, case .event(let event) = record else {
+            return nil
+        }
+        return event.sequence
+    }
+    #expect(applied == [1, 2, 3])
+}
+
 @Test("A resize event with no pinned key states the pane unpinned")
 func resizeWithoutPinnedKeyStatesUnpinned() throws {
     // Intent: a resize event that omits `pinned` entirely ends a confirmed standing claim,
@@ -681,12 +719,12 @@ private func tapeEventNotification(_ event: JSONValue) -> MobileSessionEvent {
         method: Methods.paneTapeEvent,
         params: .object([
             "subscription": .string("subscription-1"),
-            "record": .object([
+            "records": .array([.object([
                 "kind": .string("event"),
                 "sequence": .number(1),
                 "elapsedNanoseconds": .number(0),
                 "event": event,
-            ]),
+            ])]),
         ])
     ))
 }

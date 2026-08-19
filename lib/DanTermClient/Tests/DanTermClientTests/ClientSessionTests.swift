@@ -358,7 +358,7 @@ struct ClientSessionTests {
                 method: next.method,
                 params: next.params
             ))
-            records.append(try #require(carried.record["kind"]?.asString))
+            records += carried.records.compactMap { $0["kind"]?.asString }
         }
         #expect(records == ["first", "second", "third"])
     }
@@ -393,7 +393,7 @@ struct ClientSessionTests {
             method: Methods.paneTapeEvent,
             params: .object([
                 "subscription": .string("s1"),
-                "record": .object(["kind": .string("first")]),
+                "records": .array([.object(["kind": .string("first")])]),
             ])
         ))
         #expect(try session.nextFrame() == .response(
@@ -567,7 +567,7 @@ struct ClientSessionTests {
             method: Methods.paneTapeEvent,
             params: .object([
                 "subscription": .string("s1"),
-                "record": .object(["kind": .string(kind)]),
+                "records": .array([.object(["kind": .string(kind)])]),
             ])
         ))
     }

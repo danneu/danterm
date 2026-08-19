@@ -232,6 +232,75 @@ final class IpcConnection: @unchecked Sendable {
         )
     }
 
+    /// Queues one notification carrying an ordered batch, splitting it only when the encoded
+    /// line would pass the framing bound the reader enforces.
+    ///
+    /// The split runs on the write queue because the encode does: how large a line is cannot
+    /// be known until it is encoded, and measuring it at the call site would put the JSON pass
+    /// back on the actor that handed the batch over. Groups leave in order, so the elements
+    /// reach the peer in the order they were handed over whether they travel as one
+    /// notification or several.
+    ///
+    /// `params` wraps one group of elements in the notification's own params shape, so this
+    /// method never spells any part of that shape. The completion reports the whole batch: it
+    /// is false if any group fails to encode or to write.
+    func writeBatchedNotification<Element: Encodable & Sendable, Params: Encodable & Sendable>(
+        method: String,
+        batch: [Element],
+        params: @escaping @Sendable (ArraySlice<Element>) -> Params,
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
+    ) {
+        lock.lock()
+        let shouldWrite = !closed
+        lock.unlock()
+        guard shouldWrite else {
+            if let completion { deliver(completion, false) }
+            return
+        }
+
+        writeQueue.async { [self, batch] in
+            let outcome = writeGroup(method: method, group: batch[...], params: params)
+            if let completion { deliver(completion, outcome == .flushed) }
+            // Only a failed write leaves the peer's stream mid-line; a failed encode reached
+            // the socket with no byte at all, so it takes down nothing else on the connection.
+            if outcome == .writeFailed {
+                close()
+            }
+        }
+    }
+
+    /// Writes one group as a single line, or halves it and writes each half, until every line
+    /// is inside the framing bound.
+    ///
+    /// Only the write queue calls this. Halving is what keeps the split at an element
+    /// boundary: a group of one that still does not fit has no boundary left to split at, so
+    /// it goes out whole and the reader states the refusal, exactly as it would have before
+    /// any batching existed.
+    private func writeGroup<Element: Encodable, Params: Encodable>(
+        method: String,
+        group: ArraySlice<Element>,
+        params: (ArraySlice<Element>) -> Params
+    ) -> IpcBatchWriteOutcome {
+        guard let line = try? encodeIpcLine(
+            JsonRpcRequestEnvelope(method: method, params: params(group))
+        ) else {
+            return .encodeFailed
+        }
+        // The encoded line carries its terminating newline, which the reader's bound does not
+        // count, so the payload is one byte shorter than what is measured here.
+        if line.count - 1 > IpcLineFramer.maxLineBytes, group.count > 1 {
+            let middle = group.startIndex + group.count / 2
+            let first = writeGroup(
+                method: method,
+                group: group[group.startIndex..<middle],
+                params: params
+            )
+            guard first == .flushed else { return first }
+            return writeGroup(method: method, group: group[middle...], params: params)
+        }
+        return write(line: line) ? .flushed : .writeFailed
+    }
+
     /// Releases the descriptor once the writes already queued on it have gone out.
     ///
     /// The release rides the write queue, so the answer to the peer's last request still
@@ -364,6 +433,15 @@ final class IpcConnection: @unchecked Sendable {
         var value: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &value, socklen_t(MemoryLayout<Int32>.size))
     }
+}
+
+/// How a batched write ended, kept apart from a plain success flag because the two failures
+/// are answered differently: a failed write has left a partial line on the socket and ends the
+/// connection, while a failed encode put nothing on it and ends only that batch.
+private enum IpcBatchWriteOutcome {
+    case flushed
+    case encodeFailed
+    case writeFailed
 }
 
 /// Recovers a method string from an otherwise malformed JSON-RPC envelope for audit.

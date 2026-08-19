@@ -186,7 +186,7 @@ struct PaneTapeStreamStateTests {
                 method: Methods.paneTapeEvent,
                 params: PaneTapeEventNotification(
                     subscription: UUID().uuidString,
-                    record: record
+                    records: [record]
                 )
             ))
             var framer = IpcLineFramer()

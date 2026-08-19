@@ -14,11 +14,11 @@ struct PaneTapeEventNotificationTests {
     //   drift on a key name, on nesting, or on optionality compiled clean on both sides and
     //   showed up only as a stream that silently stopped producing records.
     // Scenario: spec-first contract for the pane-tape notification envelope.
-    @Test("a written notification is recognised, and carries its record verbatim")
+    @Test("a written notification is recognised, and carries its records verbatim")
     func writtenNotificationIsRecognised() throws {
         let outgoing = PaneTapeEventNotification(
             subscription: "s7",
-            record: PaneTapeOutgoingRecord<JSONValue>.end(reason: .paneClosed)
+            records: [PaneTapeOutgoingRecord<JSONValue>.end(reason: .paneClosed)]
         )
         let params = try parsed(outgoing)
 
@@ -28,8 +28,38 @@ struct PaneTapeEventNotificationTests {
         ))
 
         #expect(carried.subscription == "s7")
-        #expect(carried.record == params["record"])
-        #expect(decodePaneTapeRecord(carried.record) == .end(reason: .paneClosed))
+        #expect(carried.records == params["records"]?.asArray)
+        #expect(carried.records.map(decodePaneTapeRecord) == [.end(reason: .paneClosed)])
+    }
+
+    // Intent: a batch of records travels in one notification, in the order it was written.
+    // Why it exists: the wire unit is the delivered batch, so an envelope that reordered or
+    //   dropped part of it would hand a replica a stream that never happened -- and the
+    //   defect would be invisible until a busy pane delivered more than one record at once.
+    // Scenario: spec-first contract for a batch carrying a gap and two events.
+    @Test("a batch of records rides one notification in order")
+    func batchOfRecordsRidesOneNotification() throws {
+        let records: [PaneTapeOutgoingRecord<JSONValue>] = [
+            .gap(PaneTapeGapRecord(
+                droppedEventCount: 3,
+                droppedFeedBytes: 4,
+                droppedWriteBytes: 5
+            )),
+            .event(eventRecord(sequence: 8)),
+            .event(eventRecord(sequence: 9)),
+        ]
+        let params = try parsed(
+            PaneTapeEventNotification(subscription: "s2", records: records)
+        )
+
+        let carried = try #require(PaneTapeEventNotification<JSONValue>(
+            method: Methods.paneTapeEvent,
+            params: params
+        ))
+
+        #expect(carried.subscription == "s2")
+        #expect(carried.records.map { $0["kind"]?.asString } == ["gap", "event", "event"])
+        #expect(carried.records.compactMap { $0["sequence"]?.asNumber } == [8, 9])
     }
 
     // Intent: a record kind this build does not know reaches the consumer unchanged.
@@ -45,11 +75,11 @@ struct PaneTapeEventNotificationTests {
 
         let carried = try #require(PaneTapeEventNotification<JSONValue>(
             method: Methods.paneTapeEvent,
-            params: .object(["subscription": .string("s1"), "record": record])
+            params: .object(["subscription": .string("s1"), "records": .array([record])])
         ))
 
-        #expect(carried.record == record)
-        #expect(decodePaneTapeRecord(carried.record) == .unknown(kind: "teleport"))
+        #expect(carried.records == [record])
+        #expect(carried.records.map(decodePaneTapeRecord) == [.unknown(kind: "teleport")])
     }
 
     // Intent: pulling the carried tree out of the params is value-identity.
@@ -74,30 +104,34 @@ struct PaneTapeEventNotificationTests {
 
         let carried = try #require(PaneTapeEventNotification<JSONValue>(
             method: Methods.paneTapeEvent,
-            params: .object(["subscription": .string("s1"), "record": record])
+            params: .object(["subscription": .string("s1"), "records": .array([record])])
         ))
 
-        #expect(carried.record == record)
+        #expect(carried.records == [record])
     }
 
     // Intent: anything that is not this envelope yields no value at all.
     // Why it exists: there is no partial notification. A reader holding half of one would
-    //   route a record to no subscription, or forward a record that was never there.
+    //   route records to no subscription, or forward records that were never there.
     // Scenario: spec-first; one case per way the shape can fail to match.
     @Test("a notification that is not this envelope is refused outright")
     func mismatchedNotificationIsRefused() {
         let record = JSONValue.object(["kind": .string("end")])
+        let records = JSONValue.array([record])
         let rejected: [(String, String, JSONValue?)] = [
             ("wrong method", "roster.event", .object([
-                "subscription": .string("s1"), "record": record,
+                "subscription": .string("s1"), "records": records,
             ])),
             ("absent params", Methods.paneTapeEvent, nil),
             ("params are not an object", Methods.paneTapeEvent, .array([])),
-            ("subscription missing", Methods.paneTapeEvent, .object(["record": record])),
+            ("subscription missing", Methods.paneTapeEvent, .object(["records": records])),
             ("subscription is not a string", Methods.paneTapeEvent, .object([
-                "subscription": .number(1), "record": record,
+                "subscription": .number(1), "records": records,
             ])),
-            ("record missing", Methods.paneTapeEvent, .object(["subscription": .string("s1")])),
+            ("records missing", Methods.paneTapeEvent, .object(["subscription": .string("s1")])),
+            ("records are not a list", Methods.paneTapeEvent, .object([
+                "subscription": .string("s1"), "records": record,
+            ])),
         ]
 
         for (label, method, params) in rejected {
@@ -106,6 +140,18 @@ struct PaneTapeEventNotificationTests {
                 "\(label) must yield no notification"
             )
         }
+    }
+
+    /// One event record whose only interesting fact is which sequence it states.
+    private func eventRecord(sequence: UInt64) -> PaneTapeEventRecord<JSONValue> {
+        PaneTapeEventRecord(
+            sequence: sequence,
+            elapsedNanoseconds: sequence,
+            originElapsedNanoseconds: nil,
+            byteOffset: nil,
+            byteLength: nil,
+            event: .object(["type": .string("feed")])
+        )
     }
 
     /// Puts a notification through a real JSON encode so the test reads what the wire carries,

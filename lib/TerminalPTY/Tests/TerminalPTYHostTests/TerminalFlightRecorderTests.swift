@@ -795,6 +795,10 @@ struct TerminalFlightRecorderTests {
 /// Wraps one recorded event in the notification the producer sends it in, so the size this
 /// file measures is the size that actually has to cross the socket. The record shape mirrors
 /// the producer's in DanTermSupport, which this package cannot import.
+///
+/// The producer may put several records in one such notification and splits that line when it
+/// would pass the framing bound. A group of one record has no boundary left to split at, so
+/// the per-record bound this file measures is what the split rule rests on.
 private func paneTapeEventNotification(
     _ event: TerminalFlightRecordingEvent
 ) throws -> JsonRpcRequest {
@@ -818,7 +822,7 @@ private func paneTapeEventNotification(
         method: Methods.paneTapeEvent,
         params: .object([
             "subscription": .string(UUID().uuidString),
-            "record": .object(record),
+            "records": .array([.object(record)]),
         ])
     )
 }

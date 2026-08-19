@@ -221,8 +221,12 @@ struct AppRuntimeIpcCommandTests {
         #expect(start.version == paneTapeStreamVersion)
         #expect(start.capture == .dump)
 
-        let records = try (0..<2).map { _ in
-            try #require(wire.readNotification().params?["record"])
+        // One notification carries the whole delivery, so the dump's event and its
+        // terminator arrive together rather than one notification each.
+        let records = try #require(wire.readNotification().params?["records"]?.asArray)
+        guard records.count == 2 else {
+            Issue.record("the dump owes one notification carrying its event and its end")
+            return
         }
         guard case .event(let delivered)? = decodePaneTapeRecord(records[0]) else {
             Issue.record("the dump's first notification must carry an event record")

@@ -146,7 +146,7 @@ from the main thread is diagnostic evidence, not an acceptance test.
 
 ## Commit progress
 - [x] 1. Encode every IPC line on the connection's write queue
-- [ ] 2. Deliver a tape batch as one `pane.tape.event` notification
+- [x] 2. Deliver a tape batch as one `pane.tape.event` notification
 
 ## Implementation notes
 
@@ -160,3 +160,17 @@ from the main thread is diagnostic evidence, not an acceptance test.
   line reached the socket, so the peer's stream is short a record rather than
   corrupt, and closing would take out the connection's other streams. This
   keeps AR2's promise that nothing observable changes.
+- Slice 2 (D1): the split is encode-then-halve, and it runs on the write queue.
+  Measuring a group's size means encoding it, and encoding at the call site
+  would put the JSON pass back on the actor slice 1 took it off, so
+  `IpcConnection` gained `writeBatchedNotification`: it takes the elements plus
+  a closure that wraps one group in the notification's params, encodes on the
+  write queue, and halves a group whose line passes the bound. A group of one
+  that still does not fit goes out whole -- there is no boundary left to split
+  at, which is the same line the producer would have written before batching
+  existed, and `TerminalFlightRecorderTests` is what holds a single record
+  inside the bound.
+- Slice 2: `docs/research/35-ios-remote-client`'s spikes still read the
+  one-record envelope. They are historical measurement artifacts, no gate step
+  builds them, and they speak protocol 3, so an upgraded app refuses them at
+  hello before any record shape matters.

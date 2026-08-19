@@ -94,11 +94,16 @@ func renderPaneTapeStream(
             method: notification.method,
             params: notification.params
         ) else { continue }
-        guard try writePaneTapeRecord(transform(carried.record), to: output) else {
-            return .init(termination: .brokenPipe, capture: capture)
-        }
-        if case .end? = decodePaneTapeRecord(carried.record) {
-            return .init(termination: .end, capture: capture)
+        // One stdout line per record, whatever the producer grouped into this notification:
+        // the grouping is a wire economy, and nothing downstream of this renderer knows it
+        // happened.
+        for record in carried.records {
+            guard try writePaneTapeRecord(transform(record), to: output) else {
+                return .init(termination: .brokenPipe, capture: capture)
+            }
+            if case .end? = decodePaneTapeRecord(record) {
+                return .init(termination: .end, capture: capture)
+            }
         }
     }
     return .init(termination: .eof, capture: capture)

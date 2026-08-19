@@ -265,8 +265,8 @@ struct IpcConnectionWriteTests {
             subscriptionId: siblingId
         )
 
-        var received: [(subscription: String, kind: String)] = []
-        for _ in 0..<4 {
+        var received: [(subscription: String, kinds: [String])] = []
+        for _ in 0..<3 {
             let notification = try JSONDecoder().decode(
                 JsonRpcRequest.self,
                 from: readIpcLine(from: descriptors.peer)
@@ -274,17 +274,148 @@ struct IpcConnectionWriteTests {
             #expect(notification.method == Methods.paneTapeEvent)
             received.append((
                 notification.params?["subscription"]?.asString ?? "",
-                notification.params?["record"]?["kind"]?.asString ?? ""
+                recordKinds(of: notification)
             ))
         }
 
-        #expect(received.map(\.kind) == ["event", "event", "end", "event"])
+        #expect(received.map(\.kinds) == [["event", "event"], ["end"], ["event"]])
         #expect(received.map(\.subscription) == [
-            subscriptionId.uuidString,
             subscriptionId.uuidString,
             subscriptionId.uuidString,
             siblingId.uuidString,
         ])
+    }
+
+    @Test("a delivered batch reaches the wire as one notification carrying its records in order")
+    func batchTravelsAsOneNotification() throws {
+        // Intent: however many records a batch holds, it costs one notification, and the
+        //   records inside it keep the order they were handed over in.
+        // Why it exists: a batch used to be written one notification per record, restating
+        //   the subscription and queueing a write each time. The count of records and the
+        //   count of envelopes could then differ, which is exactly what one envelope per
+        //   batch removes.
+        // Scenario: a busy pane delivers a gap followed by three events in one batch.
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        let subscriptionId = UUID()
+        defer {
+            connection.close()
+            Darwin.close(descriptors.peer)
+        }
+
+        writePaneTapeRecords(
+            [
+                .gap(PaneTapeGapRecord(
+                    droppedEventCount: 2,
+                    droppedFeedBytes: 3,
+                    droppedWriteBytes: 4
+                )),
+                eventRecord(sequence: 5),
+                eventRecord(sequence: 6),
+                eventRecord(sequence: 7),
+            ],
+            connection: connection,
+            subscriptionId: subscriptionId
+        )
+
+        let notification = try JSONDecoder().decode(
+            JsonRpcRequest.self,
+            from: readIpcLine(from: descriptors.peer)
+        )
+        #expect(notification.method == Methods.paneTapeEvent)
+        #expect(notification.params?["subscription"]?.asString == subscriptionId.uuidString)
+        #expect(recordKinds(of: notification) == ["gap", "event", "event", "event"])
+        #expect(recordSequences(of: notification) == [5, 6, 7])
+    }
+
+    @Test("a batch too large for one line splits at record boundaries and keeps its order")
+    func oversizedBatchSplitsWithinTheLineBound() throws {
+        // Intent: a batch whose line would pass the reader's framing bound arrives as more
+        //   than one notification, each of them a line the reader accepts, and together they
+        //   carry every record once and in order.
+        // Why it exists: sync records are chunked at a quarter of the bound, so a batch of
+        //   several of them exceeds it. Without a split the reader would refuse the line and
+        //   the whole batch would vanish from the stream.
+        // Scenario: a reconstructible follow opens with a multi-megabyte state transfer.
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        let subscriptionId = UUID()
+        let chunkBytes = IpcLineFramer.maxLineBytes / 4
+        defer {
+            connection.close()
+            Darwin.close(descriptors.peer)
+        }
+
+        // The write is queued, not performed here, so the reads below drain the socket while
+        // the write queue is still filling it.
+        writePaneTapeRecords(
+            (0..<6).map { chunkyEventRecord(sequence: UInt64($0), payloadBytes: chunkBytes) },
+            connection: connection,
+            subscriptionId: subscriptionId
+        )
+
+        // Chunked reads, unlike the byte-at-a-time reader the small fixtures use: this batch
+        // is tens of megabytes, and one syscall per byte is what makes a test slow enough to
+        // approach its own hang guard.
+        let reader = BufferedLineReader(descriptor: descriptors.peer)
+        var notificationCount = 0
+        var sequences: [Double] = []
+        while sequences.count < 6 {
+            let line = try reader.next()
+            let notification = try JSONDecoder().decode(JsonRpcRequest.self, from: line)
+            notificationCount += 1
+            // The line the reader measures is the one without its newline, which the framer
+            // strips, so the bound applies to what this decode was handed.
+            #expect(line.count <= IpcLineFramer.maxLineBytes)
+            #expect(notification.params?["subscription"]?.asString == subscriptionId.uuidString)
+            #expect(recordKinds(of: notification).allSatisfy { $0 == "event" })
+            sequences += recordSequences(of: notification)
+        }
+
+        #expect(notificationCount > 1, "a batch over the line bound must split")
+        #expect(sequences == [0, 1, 2, 3, 4, 5])
+    }
+
+    @Test("a batch reports its flush, and a record that will not encode fails the whole batch")
+    func batchCompletionReportsEveryRecord() async throws {
+        // Intent: the completion handed to a batch answers for the batch: true once every
+        //   record is out, false when any record in it failed to encode.
+        // Why it exists: only the last record of a batch used to carry a completion, so a
+        //   failure on any earlier record was invisible and the caller advanced its cursor
+        //   past records the peer never received.
+        // Scenario: a recorded event whose payload cannot be encoded sits in the middle of
+        //   an otherwise ordinary batch.
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        defer {
+            connection.close()
+            Darwin.close(descriptors.peer)
+        }
+
+        let flushed: Bool = await withCheckedContinuation { continuation in
+            writePaneTapeRecords(
+                [eventRecord(sequence: 1), eventRecord(sequence: 2)],
+                connection: connection,
+                subscriptionId: UUID(),
+                completion: { continuation.resume(returning: $0) }
+            )
+        }
+        #expect(flushed)
+        _ = try readIpcLine(from: descriptors.peer)
+
+        let failed: Bool = await withCheckedContinuation { continuation in
+            writePaneTapeRecords(
+                [
+                    probeEventRecord(sequence: 3, event: .encodable),
+                    probeEventRecord(sequence: 4, event: .refusesToEncode),
+                    probeEventRecord(sequence: 5, event: .encodable),
+                ],
+                connection: connection,
+                subscriptionId: UUID(),
+                completion: { continuation.resume(returning: $0) }
+            )
+        }
+        #expect(failed == false)
     }
 
     @Test("a peer that never answers fails the read instead of parking it")
@@ -390,6 +521,16 @@ struct IpcConnectionWriteTests {
             from: readIpcLine(from: descriptors.peer)
         )
         #expect(survivor.method == Methods.paneTapeEvent)
+    }
+
+    /// The `kind` of every record one notification carries, in wire order.
+    private func recordKinds(of notification: JsonRpcRequest) -> [String] {
+        (notification.params?["records"]?.asArray ?? []).map { $0["kind"]?.asString ?? "" }
+    }
+
+    /// The sequence stated by every record that states one, in wire order.
+    private func recordSequences(of notification: JsonRpcRequest) -> [Double] {
+        (notification.params?["records"]?.asArray ?? []).compactMap { $0["sequence"]?.asNumber }
     }
 
     private func socketPair() throws -> (connection: Int32, peer: Int32) {
@@ -523,6 +664,92 @@ private func eventRecord(sequence: UInt64) -> PaneTapeOutgoingRecord<JSONValue> 
         byteOffset: nil,
         byteLength: nil,
         event: .object(["type": .string("feed")])
+    ))
+}
+
+/// Reads whole lines off a descriptor in chunks, through the production framer.
+///
+/// The suite's own reader takes one byte per syscall, which is fine for a short fixture and
+/// far too slow for a multi-megabyte one. Every read waits on the same hang guard, so a
+/// connection that stops writing names this reader rather than parking the lane.
+private final class BufferedLineReader {
+    private let descriptor: Int32
+    private var framer = IpcLineFramer()
+    private var pending: [Data] = []
+
+    init(descriptor: Int32) {
+        self.descriptor = descriptor
+    }
+
+    func next() throws -> Data {
+        while pending.isEmpty {
+            var readiness = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            let ready = Darwin.poll(&readiness, 1, hangGuardMilliseconds)
+            if ready < 0 && errno == EINTR { continue }
+            guard ready > 0 else { throw POSIXError(.ETIMEDOUT) }
+
+            var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+            let count = Darwin.read(descriptor, &buffer, buffer.count)
+            if count < 0 && errno == EINTR { continue }
+            guard count > 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            for event in framer.append(Data(buffer.prefix(count))) {
+                guard case .line(let line) = event else {
+                    throw POSIXError(.EMSGSIZE)
+                }
+                pending.append(line)
+            }
+        }
+        return pending.removeFirst()
+    }
+}
+
+/// One tape record big enough that a few of them pass the reader's line bound together.
+private func chunkyEventRecord(
+    sequence: UInt64,
+    payloadBytes: Int
+) -> PaneTapeOutgoingRecord<JSONValue> {
+    .event(PaneTapeEventRecord(
+        sequence: sequence,
+        elapsedNanoseconds: sequence,
+        originElapsedNanoseconds: nil,
+        byteOffset: nil,
+        byteLength: payloadBytes,
+        event: .object([
+            "type": .string("feed"),
+            "base64": .string(String(repeating: "A", count: payloadBytes)),
+        ])
+    ))
+}
+
+/// A recorded event that either encodes or refuses to, so one batch can hold both.
+private enum ProbeEvent: Encodable, Sendable {
+    struct EncodeRefused: Error {}
+
+    case encodable
+    case refusesToEncode
+
+    func encode(to encoder: any Encoder) throws {
+        guard case .encodable = self else { throw EncodeRefused() }
+        var container = encoder.singleValueContainer()
+        try container.encode("probe")
+    }
+}
+
+/// One tape record carrying a probe event, so a test can put a record that will not encode
+/// beside records that will.
+private func probeEventRecord(
+    sequence: UInt64,
+    event: ProbeEvent
+) -> PaneTapeOutgoingRecord<ProbeEvent> {
+    .event(PaneTapeEventRecord(
+        sequence: sequence,
+        elapsedNanoseconds: sequence,
+        originElapsedNanoseconds: nil,
+        byteOffset: nil,
+        byteLength: nil,
+        event: event
     ))
 }
 

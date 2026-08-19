@@ -26,7 +26,7 @@ struct PaneRosterNotificationTests {
         //   so every decoder on it must be able to say "not mine" and let the next one look.
         #expect(PaneRosterNotification(
             method: Methods.paneTapeEvent,
-            params: .object(["subscription": .string("s1"), "record": .object([:])])
+            params: .object(["subscription": .string("s1"), "records": .array([])])
         ) == nil)
         #expect(PaneRosterNotification(method: Methods.rosterEvent, params: nil) == nil)
         #expect(PaneRosterNotification(
@@ -55,7 +55,9 @@ struct PaneRosterNotificationTests {
                 method: next.method,
                 params: next.params
             ) {
-                arrivals.append("tape:" + (try #require(tape.record["kind"]?.asString)))
+                arrivals.append(
+                    "tape:" + (try #require(tape.records.first?["kind"]?.asString))
+                )
             } else if let carried = PaneRosterNotification(
                 method: next.method,
                 params: next.params
@@ -93,7 +95,7 @@ struct PaneRosterNotificationTests {
             method: Methods.paneTapeEvent,
             params: .object([
                 "subscription": .string("s1"),
-                "record": .object(["kind": .string(kind)]),
+                "records": .array([.object(["kind": .string(kind)])]),
             ])
         ))
     }

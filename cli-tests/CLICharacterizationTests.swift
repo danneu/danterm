@@ -552,7 +552,7 @@ private func tapeNotificationLine(record: JSONValue) -> String {
         method: Methods.paneTapeEvent,
         params: .object([
             "subscription": .string("s1"),
-            "record": record,
+            "records": .array([record]),
         ])
     ))
 }
