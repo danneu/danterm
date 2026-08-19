@@ -17,8 +17,10 @@ fail() {
     exit 1
 }
 
-swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/layout-tool-build" \
-    DanTermBundleLayoutTool release > "$TEST_ROOT/release.json"
+# shellcheck source=../lib/bundle-layout-tool.sh
+source "$ROOT_DIR/scripts/lib/bundle-layout-tool.sh"
+bundle_layout_tool_init "$ROOT_DIR" "$TEST_ROOT/layout-tool-build"
+bundle_layout_tool release > "$TEST_ROOT/release.json"
 
 # Distinct exit codes give each product distinct bytes, which the layout verifier
 # requires of the GUI and CLI pair.

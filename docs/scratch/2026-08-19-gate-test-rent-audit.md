@@ -7,9 +7,11 @@ machine: **107 steps, all passed, 360s wall.** Sum of step run-time 610s; sum of
 queue-wait 825s. Raw log: `.build/gate-timing.log` (not committed; re-create with
 `just test > .build/gate-timing.log 2>&1`).
 
-The cuts in sections A and B took the gate from 107 steps to 102: four in
-section A, two more in section B (the two Swift-test drops are tests inside
-existing steps, so they do not change the count).
+Step count since then: 107 at the start; **102** after sections A and B (four
+cuts in A, two in B -- the two Swift-test drops are tests inside existing steps,
+so they do not change the count); **104** when separate work on the CLI flag
+grammar added a lint and its self-test; **101** after C1 merged the four bundle
+steps into one.
 
 This is a working document. Each candidate below is a checkbox. Tick one, drop
 that thing, move on -- nothing here depends on anything else here.
@@ -33,7 +35,7 @@ These are two separate jobs and the numbers say so.
 
 | | run | queued |
 |---|---|---|
-| The 4 bundle steps, each rebuilding `DanTermBundleLayoutTool` | 74s | 105s |
+| The 4 bundle steps, each rebuilding `DanTermBundleLayoutTool` (**done, C1**) | 74s | 105s |
 | The 86 steps that take <= 5s | 122s | 559s |
 | `core-purity-lint.sh` x 11 | 7s | 10s |
 | Frozen perf-instrument cluster x 12 | 14s | 35s |
@@ -170,15 +172,26 @@ and the three btop profiling recipes.
 
 ## C. Consolidations -- the actual wall-clock wins
 
-- [ ] **Merge the four bundle steps into one.** `verify-bundle-layout_test.sh`
-      (23s), `dev-build-configuration-contract_test.sh` (19s),
-      `build-app-helpers-contract_test.sh` (16s), and
-      `bundle-transformations_test.sh` (16s) each run
-      `swift run DanTermBundleLayoutTool` into their own private scratch path --
-      the same Swift tool built four times. One `&&`-joined step sharing one
-      scratch is roughly a 50s saving, larger than every deletion above put
-      together. `scripts/run-test-suite.sh`'s own header already sanctions the
-      `&&` form for steps that must share state.
+- [x] **Merge the four bundle steps into one -- done 2026-08-19.**
+      `verify-bundle-layout_test.sh`, `dev-build-configuration-contract_test.sh`,
+      `build-app-helpers-contract_test.sh`, and `bundle-transformations_test.sh`
+      each ran `swift run DanTermBundleLayoutTool` into a private scratch path --
+      seven invocations of one tool, four of them cold builds.
+
+      **Measured, quiet machine:** the four in sequence took **57.0s** and built
+      the tool **7 times** (4 cold at ~5.4s, 3 warm inside `verify-bundle-layout`).
+      After: **21.2s**, **1 build**. That beats the 50s the audit guessed for a
+      reason worth recording -- even a warm `swift run` re-resolves the manifest
+      on every call, and invoking the built binary directly skips that too.
+
+      **How, and why not just `&&`:** joining the four step strings with `&&`
+      saves nothing on its own, because each script makes its own `mktemp` scratch
+      and would still build its own tool. The build product has to be shared, not
+      just the worker. So `scripts/lib/bundle-layout-tool.sh` now holds the one
+      resolver, `scripts/tests/bundle-contract-suite.sh` builds the tool once and
+      exports `DANTERM_BUNDLE_LAYOUT_TOOL`, and the four scripts consume it. Each
+      still runs standalone: with the variable unset, a script builds its own copy
+      (verified -- 19.5s, 1 build).
 
 - [ ] **Collapse `core-purity-lint.sh` from 11 steps to 1.** Eleven separate
       steps, each paying a CPU-token queue wait to do 0-2s of work.
@@ -229,3 +242,4 @@ Append one line per drop: date, what went, what broke or did not.
 | 2026-08-19 | `terminal_btop_gui_proof_test.py` plus `scripts/terminal-btop-gui-proof.py` and the `test-terminal-btop-gui` recipe | Nothing broke. The proof and its judges went together, by the user's call. The three btop workload modules and their gate steps stayed. Prose in `agent-docs/terminal-performance.md` lost the two paragraphs describing the retired proof. |
 | 2026-08-19 | `terminal_fixed_cost_probe_test.py` (gate step + file) | Nothing broke. `scripts/terminal-fixed-cost-probe.py` stayed as a directly-runnable diagnostic. |
 | 2026-08-19 | `CustomTitleTests` "testLegacySnapshotWithTitleSubtitleDecodesSuccessfully" | Nothing broke. It only re-confirmed Swift's default `Codable` handling of unknown keys. |
+| 2026-08-19 | C1: four bundle gate steps merged into `bundle-contract-suite.sh` | No test lost. 57.0s and 7 tool builds became 21.2s and 1. Gate step count 104 -> 101. |

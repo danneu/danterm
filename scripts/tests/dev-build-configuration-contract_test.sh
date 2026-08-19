@@ -7,8 +7,10 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
-swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/layout-tool-build" \
-    DanTermBundleLayoutTool development > "$TEST_ROOT/development-layout.json"
+# shellcheck source=../lib/bundle-layout-tool.sh
+source "$ROOT_DIR/scripts/lib/bundle-layout-tool.sh"
+bundle_layout_tool_init "$ROOT_DIR" "$TEST_ROOT/layout-tool-build"
+bundle_layout_tool development > "$TEST_ROOT/development-layout.json"
 
 fail() {
     echo "dev-build-configuration-contract_test: $*" >&2

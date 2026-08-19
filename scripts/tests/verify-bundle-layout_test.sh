@@ -12,14 +12,14 @@ fail() {
     exit 1
 }
 
-swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/swift-build" \
-    DanTermBundleLayoutTool release > "$TEST_ROOT/release.json"
-swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/swift-build" \
-    DanTermBundleLayoutTool development > "$TEST_ROOT/development.json"
-swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/swift-build" \
-    DanTermBundleLayoutTool benchmark .a > "$TEST_ROOT/benchmark.json"
-swift run --package-path "$ROOT_DIR" --scratch-path "$TEST_ROOT/swift-build" \
-    DanTermBundleLayoutTool viability > "$TEST_ROOT/viability.json"
+# shellcheck source=../lib/bundle-layout-tool.sh
+source "$ROOT_DIR/scripts/lib/bundle-layout-tool.sh"
+bundle_layout_tool_init "$ROOT_DIR" "$TEST_ROOT/swift-build"
+
+bundle_layout_tool release > "$TEST_ROOT/release.json"
+bundle_layout_tool development > "$TEST_ROOT/development.json"
+bundle_layout_tool benchmark .a > "$TEST_ROOT/benchmark.json"
+bundle_layout_tool viability > "$TEST_ROOT/viability.json"
 
 mkdir -p "$TEST_ROOT/products"
 for product in DanTerm DanTermCLI DanTermInstanceIdentityTool PTYSessionBootstrap; do
