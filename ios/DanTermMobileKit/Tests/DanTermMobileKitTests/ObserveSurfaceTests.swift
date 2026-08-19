@@ -13,8 +13,7 @@ func observeSurfaceStaysInsideTheView() throws {
     let surface = try #require(MobileObserveSurface(
         columns: 179,
         rows: 50,
-        contentBox: try box(widthPixels: 1170, heightPixels: 1600, displayScale: 3),
-        fontSize: 11
+        cellMetrics: try cellMetrics(widthPixels: 1170, heightPixels: 1600, displayScale: 3)
     ))
     #expect(surface.pixelWidth <= 1170)
     #expect(surface.pixelHeight <= 1600)
@@ -26,8 +25,7 @@ func observeSurfaceKeepsNativeScaleWhenItFits() throws {
     let surface = try #require(MobileObserveSurface(
         columns: 20,
         rows: 10,
-        contentBox: try box(widthPixels: 1170, heightPixels: 1600, displayScale: 3),
-        fontSize: 11
+        cellMetrics: try cellMetrics(widthPixels: 1170, heightPixels: 1600, displayScale: 3)
     ))
     #expect(surface.metrics.displayScale == 3)
     #expect(surface.pixelWidth == surface.metrics.cellWidthPixels * 20)
@@ -39,19 +37,18 @@ func observeSurfaceRefusesUndrawableGrids() throws {
     #expect(MobileObserveSurface(
         columns: 1024,
         rows: 1024,
-        contentBox: try box(widthPixels: 400, heightPixels: 400, displayScale: 3),
-        fontSize: 11
+        cellMetrics: try cellMetrics(widthPixels: 400, heightPixels: 400, displayScale: 3)
     ) == nil)
 }
 
-/// Builds a content box with the exact pixel extent a case names, so these tests stay
+/// Pairs a content box with the exact pixel extent a case names, so these tests stay
 /// about the fit rather than about how points and insets become pixels.
-private func box(
+private func cellMetrics(
     widthPixels: Int,
     heightPixels: Int,
     displayScale: CGFloat
-) throws -> MobileContentBox {
-    try #require(MobileContentBox(
+) throws -> MobileCellMetrics {
+    let box = try #require(MobileContentBox(
         width: CGFloat(widthPixels) / displayScale,
         height: CGFloat(heightPixels) / displayScale,
         insetTop: 0,
@@ -60,4 +57,5 @@ private func box(
         insetBottom: 0,
         displayScale: displayScale
     ))
+    return try #require(MobileCellMetrics(contentBox: box, fontSize: 11))
 }

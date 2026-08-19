@@ -14,8 +14,7 @@ func placementSlidesTheDrawnRectangleOnly() throws {
     let surface = try #require(MobileObserveSurface(
         columns: 20,
         rows: 10,
-        contentBox: box,
-        fontSize: 11
+        cellMetrics: try cells(for: box)
     ))
     let rest = MobileSurfacePlacement(contentBox: box, obscuredHeight: 0)
     let raised = MobileSurfacePlacement(contentBox: box, obscuredHeight: 300)
@@ -62,8 +61,7 @@ func placementMovesTheCellMappingWithTheDrawnRectangle() throws {
     let surface = try #require(MobileObserveSurface(
         columns: 20,
         rows: 10,
-        contentBox: box,
-        fontSize: 11
+        cellMetrics: try cells(for: box)
     ))
     let rest = MobileSurfacePlacement(contentBox: box, obscuredHeight: 0)
     let raised = MobileSurfacePlacement(contentBox: box, obscuredHeight: 300)
@@ -95,8 +93,7 @@ func placementLiftsOnlyAsFarAsTheAnchorNeeds() throws {
     let surface = try #require(MobileObserveSurface(
         columns: 20,
         rows: 40,
-        contentBox: box,
-        fontSize: 11
+        cellMetrics: try cells(for: box)
     ))
     let obscuredHeight: CGFloat = 100
     let obscuredPixels = Int(obscuredHeight * box.displayScale)
@@ -161,8 +158,7 @@ func placementMovesTheCellMappingAtAPartialLift() throws {
     let surface = try #require(MobileObserveSurface(
         columns: 20,
         rows: 40,
-        contentBox: box,
-        fontSize: 11
+        cellMetrics: try cells(for: box)
     ))
     let rest = MobileSurfacePlacement(contentBox: box, obscuredHeight: 0)
     let partial = MobileSurfacePlacement(
@@ -186,6 +182,12 @@ func placementMovesTheCellMappingAtAPartialLift() throws {
     let mapped = surface.cell(at: partialPoint, in: partial)
     #expect(mapped.column == 3)
     #expect(mapped.row == 2)
+}
+
+/// Resolves the cell metrics a box implies; these tests are about the offset, not about
+/// which font size the phone renders at.
+private func cells(for box: MobileContentBox) throws -> MobileCellMetrics {
+    try #require(MobileCellMetrics(contentBox: box, fontSize: 11))
 }
 
 /// A phone-shaped content box; these tests are about the offset, not inset arithmetic.

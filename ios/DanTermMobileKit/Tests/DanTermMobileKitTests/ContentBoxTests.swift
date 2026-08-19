@@ -22,12 +22,12 @@ func contentBoxClaimAndDrawAgree() throws {
             insetBottom: 0,
             displayScale: scale
         ))
-        let grid = try #require(box.nativeGrid(fontSize: 11))
+        let resolved = try cells(for: box)
+        let grid = try #require(resolved.nativeGrid)
         let drawn = try #require(MobileObserveSurface(
             columns: grid.columns,
             rows: grid.rows,
-            contentBox: box,
-            fontSize: 11
+            cellMetrics: resolved
         ))
         #expect(drawn.metrics.displayScale == scale)
         #expect(drawn.pixelWidth <= box.widthPixels)
@@ -46,7 +46,8 @@ func contentBoxWithoutAWholeCellHasNoGrid() throws {
         insetBottom: 0,
         displayScale: 3
     ))
-    #expect(box.nativeGrid(fontSize: 11) == nil)
+    let resolved = try cells(for: box)
+    #expect(resolved.nativeGrid == nil)
 }
 
 @Test("Insets that consume the whole extent leave no content box")
@@ -164,8 +165,7 @@ func observeSurfaceDrawsFromTheBottomOfTheBox() throws {
     let surface = try #require(MobileObserveSurface(
         columns: 200,
         rows: 20,
-        contentBox: box,
-        fontSize: 11
+        cellMetrics: try cells(for: box)
     ))
     let frame = surface.drawnFrame(in: MobileSurfacePlacement(contentBox: box, obscuredHeight: 0))
     #expect(abs(frame.maxY - box.maxY) < 0.001)
@@ -192,8 +192,7 @@ func observeSurfaceMapsPointsToCells() throws {
     let surface = try #require(MobileObserveSurface(
         columns: 200,
         rows: 50,
-        contentBox: box,
-        fontSize: 11
+        cellMetrics: try cells(for: box)
     ))
     #expect(surface.columns == 200)
     #expect(surface.rows == 50)
@@ -221,4 +220,10 @@ func observeSurfaceMapsPointsToCells() throws {
     let after = surface.cell(at: CGPoint(x: 10_000, y: 10_000), in: placement)
     #expect(after.column == 199)
     #expect(after.row == 49)
+}
+
+/// Resolves the cell metrics a box implies, so these cases stay about the box rather
+/// than about which font size the phone renders at.
+private func cells(for box: MobileContentBox) throws -> MobileCellMetrics {
+    try #require(MobileCellMetrics(contentBox: box, fontSize: 11))
 }

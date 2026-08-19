@@ -6,7 +6,6 @@
 // drift apart, so both readings, and the position of the layer that shows the result,
 // come from one value of this type.
 import CoreGraphics
-import TerminalRenderExecution
 
 /// The usable region of one phone terminal view, quantized to whole backing pixels.
 ///
@@ -64,18 +63,4 @@ public struct MobileContentBox: Equatable, Sendable {
     /// The box's bottom edge in point space. The replica draws from the bottom, so this
     /// is the edge the drawn pixels are pinned to.
     public var maxY: CGFloat { CGFloat(originYPixels + heightPixels) / displayScale }
-
-    /// The whole-cell grid this box shows at native cell metrics, which is the grid the
-    /// claim gesture asks the pane to run at. Nil when the box has no room for a whole
-    /// cell, or when the metrics layer refuses the font size.
-    public func nativeGrid(fontSize: CGFloat) -> MobileSurfaceGrid? {
-        guard let metrics = TerminalRenderMetrics(displayScale: displayScale, fontSize: fontSize)
-        else { return nil }
-        return MobileSurfaceGrid(
-            widthPixels: widthPixels,
-            heightPixels: heightPixels,
-            cellWidthPixels: metrics.cellWidthPixels,
-            cellHeightPixels: metrics.cellHeightPixels
-        )
-    }
 }

@@ -44,7 +44,18 @@ final class TerminalSurfaceView: UIView {
     private let surfaceView = UIView()
     private var displayLink: CADisplayLink?
     private var displayLinkTarget: DisplayLinkTarget?
+    /// The grid the replica currently runs at, remembered so a layout pass can refit it.
+    /// It is the grid asked for, not the one the stores hold: a request that arrives
+    /// before this view has an extent has to be refitted at the first layout pass, or a
+    /// checkpoint-restored quiet pane would stay blank waiting for a record.
     private var geometry: (columns: Int, rows: Int)?
+    /// What the current frame stores were fitted for. Compared before anything is built,
+    /// because constructing a surface is what resolves a font set at the fitted scale.
+    private var fittedFor: (columns: Int, rows: Int, contentBox: MobileContentBox)?
+    /// The extent this view answers for, paired with the metrics its display scale
+    /// resolves to. Replaced only in `refreshCellMetrics`, so the CoreText work it costs
+    /// happens where its inputs move rather than once per applied record.
+    private var cellMetrics: MobileCellMetrics?
 
     /// How far the keyboard-riding bar has risen above this view's bottom, in points,
     /// measured by the placing controller. It is a presentation offset only: the grid,
@@ -73,6 +84,13 @@ final class TerminalSurfaceView: UIView {
         link.isPaused = true
         displayLinkTarget = target
         displayLink = link
+        // A display-scale change resolves different cell pixel dimensions for the same
+        // point extent, so the held pairing has to be re-resolved for one. Moving between
+        // displays is the reachable case; iOS 26 delivers it here rather than through the
+        // deprecated trait override.
+        registerForTraitChanges([UITraitDisplayScale.self]) { (view: Self, _) in
+            view.setNeedsLayout()
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -95,6 +113,7 @@ final class TerminalSurfaceView: UIView {
         stores = []
         policy = nil
         geometry = nil
+        fittedFor = nil
         surface = nil
         surfaceView.layer.contents = nil
         displayLink?.isPaused = true
@@ -165,10 +184,10 @@ final class TerminalSurfaceView: UIView {
     var pinned: Bool? { replica.pinned }
 
     /// The grid this surface shows at native cell metrics, which is the grid the claim
-    /// gesture asks the pane to run at. It is derived from the current extent rather
+    /// gesture asks the pane to run at. It is derived from this view's own extent rather
     /// than from the replica, so it answers for the phone even before a stream arrives.
     var nativeGrid: MobileSurfaceGrid? {
-        contentBox?.nativeGrid(fontSize: Self.fontSize)
+        cellMetrics?.nativeGrid
     }
 
     /// Copies one exact value snapshot so checkpoint synthesis can run off the main actor.
@@ -180,9 +199,10 @@ final class TerminalSurfaceView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         // The extent decides the metrics, so a rotation has to be able to change them.
-        // Re-running the fit here is what makes the surfaces follow the view. The
-        // keyboard is not such a change: this view's bounds are keyboard-absent, so a
-        // show or hide reaches only the placement below, never the fit.
+        // Re-resolving the pairing and re-running the fit here is what makes the surfaces
+        // follow the view. The keyboard is not such a change: this view's bounds are
+        // keyboard-absent, so a show or hide reaches only the placement below.
+        refreshCellMetrics()
         if let geometry { ensureSurfaces(columns: geometry.columns, rows: geometry.rows) }
         if let surface, let placement {
             let scale = placement.contentBox.displayScale
@@ -207,6 +227,13 @@ final class TerminalSurfaceView: UIView {
     // bounds change on some rotations, so the fit has to be re-run for one.
     override func safeAreaInsetsDidChange() {
         super.safeAreaInsetsDidChange()
+        setNeedsLayout()
+    }
+
+    // The content box reads the screen's scale first, which only exists once this view is
+    // in a window, so entering or leaving one can change the metrics with no bounds move.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
         setNeedsLayout()
     }
 
@@ -251,17 +278,31 @@ final class TerminalSurfaceView: UIView {
 
     /// Allocates the frame stores one grid needs in this view, at the metrics the view
     /// can actually draw it with. Idempotent: it returns without touching anything when
-    /// neither the grid nor the resolved metrics moved, so the layout pass may call it.
+    /// neither the grid nor the box moved, so the record path and the layout pass may
+    /// both call it.
+    ///
+    /// The `(columns, rows, box)` comparison comes before any construction on purpose:
+    /// building a `MobileObserveSurface` resolves a second font set whenever the grid is
+    /// too wide to draw natively, which is the normal case, and the record path must not
+    /// pay for that when nothing moved.
     private func ensureSurfaces(columns: Int, rows: Int) {
-        guard let box = contentBox,
-              let fitted = MobileObserveSurface(
-                  columns: columns,
-                  rows: rows,
-                  contentBox: box,
-                  fontSize: Self.fontSize
-              )
-        else { return }
-        if geometry?.columns == columns, geometry?.rows == rows, surface == fitted { return }
+        geometry = (columns, rows)
+        guard let cellMetrics else { return }
+        let box = cellMetrics.contentBox
+        if fittedFor?.columns == columns, fittedFor?.rows == rows, fittedFor?.contentBox == box {
+            return
+        }
+        guard let fitted = MobileObserveSurface(
+            columns: columns,
+            rows: rows,
+            cellMetrics: cellMetrics
+        ) else { return }
+        // A box that moved without changing the drawn world -- an origin-only inset shift
+        // -- resolves an identical surface, and the existing stores still hold its pixels.
+        if surface == fitted {
+            fittedFor = (columns, rows, box)
+            return
+        }
         let newStores = (0..<3).compactMap { _ in
             TerminalFrameBackingStore(columns: columns, rows: rows, metrics: fitted.metrics)
         }
@@ -269,7 +310,7 @@ final class TerminalSurfaceView: UIView {
         surface = fitted
         stores = newStores
         policy = MobilePresentationPolicy(surfaceIds: Array(stores.indices))
-        geometry = (columns, rows)
+        fittedFor = (columns, rows, box)
         // The stores are new and hold no pixels, so the replica has to redraw into them
         // before anything can be published from them again.
         policy?.noteDamage()
@@ -277,12 +318,26 @@ final class TerminalSurfaceView: UIView {
         setNeedsLayout()
     }
 
-    /// The one reading of the region this view may put cells in. Every extent question
-    /// -- what grid a claim names, what pixels a frame store holds, where the layer
-    /// showing them sits -- is answered from this single value, so none of them can
-    /// describe a different region than the others. The insets are zero until the
-    /// terminal runs full-bleed and has a safe area to stay clear of.
-    private var contentBox: MobileContentBox? {
+    /// Re-resolves the held pairing from this view's settled extent, insets, and display
+    /// scale. Called only from `layoutSubviews`, which is where all three can move.
+    ///
+    /// The replacement is unconditional: an extent that no longer describes a box, or a
+    /// scale the metrics layer refuses, clears the pairing rather than leaving the old
+    /// one to answer for an extent the phone no longer has. The metrics themselves are
+    /// re-resolved only when the box actually differs, which is what keeps the CoreText
+    /// work off every layout pass.
+    private func refreshCellMetrics() {
+        let box = measuredContentBox
+        guard cellMetrics?.contentBox != box else { return }
+        cellMetrics = box.flatMap { MobileCellMetrics(contentBox: $0, fontSize: Self.fontSize) }
+    }
+
+    /// This view's own reading of the region it may put cells in, taken once per layout
+    /// pass and then held. Every extent question -- what grid a claim names, what pixels a
+    /// frame store holds, where the layer showing them sits -- is answered from the held
+    /// pairing, so none of them can describe a different region than the others. The
+    /// insets are zero until the terminal runs full-bleed and has a safe area to clear.
+    private var measuredContentBox: MobileContentBox? {
         MobileContentBox(
             width: bounds.width,
             height: bounds.height,
@@ -303,9 +358,9 @@ final class TerminalSurfaceView: UIView {
     /// gesture-to-cell mapping -- reads this value, so a keyboard mid-slide cannot put
     /// them in different places.
     private var placement: MobileSurfacePlacement? {
-        contentBox.map {
+        cellMetrics.map {
             MobileSurfacePlacement(
-                contentBox: $0,
+                contentBox: $0.contentBox,
                 obscuredHeight: obscuredBottomHeight,
                 anchorSlackPixels: anchorSlackPixels
             )

@@ -24,16 +24,20 @@ public struct MobileObserveSurface: Equatable, Sendable {
     public let pixelHeight: Int
 
     /// Returns nil when the view cannot draw this grid at all -- no room for a whole
-    /// pixel per cell, or a font size the metrics layer refuses -- which leaves the
+    /// pixel per cell, or a fitted scale the metrics layer refuses -- which leaves the
     /// caller with the surfaces it already has.
     ///
-    /// The extent comes from the content box rather than from the caller's own reading
-    /// of the view, so the pixels drawn and the grid claimed cannot describe different
-    /// regions of it.
-    public init?(columns: Int, rows: Int, contentBox: MobileContentBox, fontSize: CGFloat) {
+    /// The extent and the native metrics both come from the resolved pairing rather than
+    /// from the caller's own reading of the view, so the pixels drawn and the grid
+    /// claimed cannot describe different regions of it -- and the expensive native
+    /// resolution has already happened where the display scale moved. The second
+    /// resolution below is genuinely per-grid: the fitted scale depends on the columns
+    /// and rows, which no layout pass knows.
+    public init?(columns: Int, rows: Int, cellMetrics: MobileCellMetrics) {
+        let contentBox = cellMetrics.contentBox
         let displayScale = contentBox.displayScale
+        let native = cellMetrics.metrics
         guard columns > 0, rows > 0,
-              let native = TerminalRenderMetrics(displayScale: displayScale, fontSize: fontSize),
               let scale = fittedRenderScale(
                   columns: columns,
                   rows: rows,
@@ -45,7 +49,10 @@ public struct MobileObserveSurface: Equatable, Sendable {
         else { return nil }
         if scale >= displayScale {
             metrics = native
-        } else if let fitted = TerminalRenderMetrics(displayScale: scale, fontSize: fontSize) {
+        } else if let fitted = TerminalRenderMetrics(
+            displayScale: scale,
+            fontSize: cellMetrics.fontSize
+        ) {
             metrics = fitted
         } else {
             return nil
