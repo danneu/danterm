@@ -115,7 +115,7 @@ references are the requirement.
 
 | Sev | Id | Sequence | Status | Defect |
 |---|---|---|---|---|
-| 5 | [BUG-01](#bug-01) | ESC ( 0 (SCS, designate DEC Special Characte | unpinned | Implement SCS G0 designation so ESC ( 0 maps GL through the DEC Special Graphics table |
+| 5 | [BUG-01](#bug-01) | ESC ( 0 (SCS, designate DEC Special Characte | **done** `e0d2e80c` | Implement SCS G0 designation so ESC ( 0 maps GL through the DEC Special Graphics table |
 | 5 | [BUG-02](#bug-02) | CSI ! p (DECSTR) | **pinned by a test** | Stop DECSTR from leaving the alternate screen |
 | 4 | [BUG-03](#bug-03) | CSI n B (CUD), CSI n A (CUU), CSI n E (CNL), | unpinned | Clamp CUU/CUD/CNL/CPL to the scroll margins even when origin mode is off |
 | 4 | [BUG-04](#bug-04) | CSI n P (DCH), CSI n @ (ICH) | **pinned by a test** | Stop suppressing ICH and DCH when the cursor row is outside the vertical scroll region |
@@ -156,6 +156,15 @@ references are the requirement.
 ### BUG-01. Implement SCS G0 designation so ESC ( 0 maps GL through the DEC Special Graphics table
 
 `ESC ( 0 (SCS, designate DEC Special Character and Line Drawing Set into G0) and ESC ( B (designate ASCII)` &middot; severity 5 (corrupts the screen or traps a program) &middot; hunter confidence 5
+
+**Done** in `e0d2e80c`, which carries the plan under `plans/impl/`. The fix is
+wider than this item asked for: DanTerm implements the whole 7-bit GL half of
+ISO 2022 -- SCS designation into all four slots, SI/SO and LS2/LS3 locking
+shifts, SS2/SS3 single shifts, and GL translation on the print path -- so
+[BUG-07](#bug-07) is closed by the same commit. `d61c196e` then carries the
+live and saved charset state across a state-synchronization fence, and
+`473b8087` adapts WezTerm's line-drawing resize case now that the glyphs exist.
+The probe below now yields the expected `┌─┐ab     `.
 
 **Problem.** DanTerm has no charset state at all. The absorber recognizes ESC ( 0 as an EscapeSequence with intermediate 0x28 and final 0x30, and the dispatcher throws it away, so the bytes that follow print as plain ASCII letters instead of box-drawing glyphs. DanTerm launches children with TERM=xterm-256color (lib/TerminalPTY/Sources/TerminalPaneSession/TerminalPaneLaunch.swift, EnvironmentEntry TERM), and that terminfo entry defines smacs=\E(0 and rmacs=\E(B, so every ncurses program that draws with ACS characters emits exactly this pair.
 
