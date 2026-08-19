@@ -31,15 +31,7 @@ swift build --package-path "$PACKAGE" --build-path "$OUT/swiftpm" \
   --triple "$TRIPLE" --sdk "$SDK"
 
 echo "== assembling $APP =="
-rm -rf "$APP"
-mkdir -p "$APP/NerdFontsSymbolsOnly" "$APP/Themes"
-cp "$BIN/DanTermMobileApp" "$APP/DanTermMobileApp"
-cp "$PACKAGE/Info.plist" "$APP/Info.plist"
-cp "$ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf" \
-  "$APP/NerdFontsSymbolsOnly/"
-cp "$ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/LICENSE" \
-  "$APP/NerdFontsSymbolsOnly/"
-cp "$ROOT/themes/Builtin Dark.json" "$APP/Themes/"
+"$ROOT/scripts/assemble-ios-app.sh" "$ROOT" "$BIN" "$APP"
 
 if [ "$TARGET" = "simulator" ]; then
   SIMULATOR="${2:-}"
