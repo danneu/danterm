@@ -59,6 +59,14 @@ struct PreferencesPanelProjection: Equatable {
     /// render paths recover to the built-in dark theme.
     var themeWarning: String?
     var remoteThemeWarning: String?
+    /// The `tailnet.listen` base the config file names right now. A save or a
+    /// reload moves this while the running listener keeps the base it froze at
+    /// launch, which is what makes the divergence readable in the panel.
+    var tailnetConfiguredText: String
+    /// The address and port this instance derived for itself at launch.
+    var tailnetEndpointText: String
+    /// What this instance's listener is doing, and why when that needs a reason.
+    var tailnetStatusText: String
 }
 
 /// Project the preferences panel from the model. nil means no draft is open, so
@@ -103,8 +111,26 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         },
         remoteThemeWarning: unresolvedRemoteTheme.map {
             "Theme \"\($0)\" is not available -- using the built-in dark theme."
-        }
+        },
+        // The committed config, not the draft: the tailnet section is read-only,
+        // so there is no draft of it to show.
+        tailnetConfiguredText: committed.tailnet?.listen ?? "Not configured",
+        tailnetEndpointText: model.tailnetStatus.endpoint?.text ?? "None",
+        tailnetStatusText: tailnetStatusText(model.tailnetStatus)
     )
+}
+
+/// The one sentence the panel shows for a listener state. It lives here, not in
+/// the panel, so the text is a model fact the pure tests can pin.
+private func tailnetStatusText(_ status: DanTermTailnetStatus) -> String {
+    switch status {
+    case .disabled(let reason):
+        return "Disabled -- \(reason)"
+    case .waiting(_, let reason):
+        return "Waiting -- \(reason)"
+    case .listening:
+        return "Listening"
+    }
 }
 
 // MARK: - TODO Popover Projections

@@ -3,7 +3,9 @@
 // picking dispatch, and the inline "not installed" warning. The pure projection
 // tests (PreferencesFontFamilyTests) prove the values; only this harness can
 // prove the AppKit control actually shows them and turns user gestures back into
-// the right Msg.
+// the right Msg. The read-only tailnet section rides the same projection, so it is
+// pinned here the same way: the pure text in PreferencesTailnetTests, the rows
+// that display it here.
 import Cocoa
 
 /// Registers Preferences-panel coverage in the standalone UI harness.
@@ -332,6 +334,50 @@ func preferencesPanelTests() {
         try uiExpect(fx.panel.copyOnSelectCheckbox.state == .off, "a disarmed option should untick the box")
     }
 
+    uiTest("the tailnet section shows the projected base, endpoint, and status") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+
+        fx.panel.apply(makeProjection(
+            tailnetConfiguredText: "100.64.0.1:7000",
+            tailnetEndpointText: "100.64.0.1:7001",
+            tailnetStatusText: "Listening"
+        ))
+        let titles = descendantControlTitles(in: fx.panel.contentView)
+
+        try uiExpect(titles.contains("Tailnet"), "the section should name itself")
+        try uiExpect(titles.contains("100.64.0.1:7000"), "expected the configured base")
+        try uiExpect(titles.contains("100.64.0.1:7001"), "expected this instance's derived endpoint")
+        try uiExpect(titles.contains("Listening"), "expected the live listener status")
+    }
+
+    uiTest("the tailnet section is read-only and says when an edit takes effect") {
+        // Intent: nothing in the tailnet section accepts an edit, and the panel
+        //   tells the user that a config change reaches the listener at the next
+        //   launch.
+        // Why it exists: the listener is launch-frozen, so an editable-looking
+        //   field would promise a rebind the app never performs.
+        // Scenario: spec-first; the user opens Settings to check which endpoint
+        //   this instance answers on.
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        fx.panel.apply(makeProjection(
+            tailnetConfiguredText: "100.64.0.1:7000",
+            tailnetEndpointText: "100.64.0.1:7001",
+            tailnetStatusText: "Waiting -- no local interface holds 100.64.0.1"
+        ))
+        let fields = descendantTextFields(in: fx.panel.contentView)
+
+        for text in ["100.64.0.1:7000", "100.64.0.1:7001",
+                     "Waiting -- no local interface holds 100.64.0.1"] {
+            let field = try uiRequire(fields.first { $0.stringValue == text }, "expected field \(text)")
+            try uiExpect(!field.isEditable, "the tailnet section should not accept edits: \(text)")
+        }
+        let titles = descendantControlTitles(in: fx.panel.contentView)
+        try uiExpect(titles.contains { $0.contains("next launch") },
+                     "the section should say a config change applies at the next launch")
+    }
+
 }
 
 // MARK: - Fixture
@@ -356,7 +402,10 @@ private func makeProjection(
     warning: String? = nil,
     themeWarning: String? = nil,
     remoteThemeWarning: String? = nil,
-    copyOnSelect: Bool = true
+    copyOnSelect: Bool = true,
+    tailnetConfiguredText: String = "Not configured",
+    tailnetEndpointText: String = "None",
+    tailnetStatusText: String = "Disabled -- no tailnet endpoint is configured"
 ) -> PreferencesPanelProjection {
     PreferencesPanelProjection(
         selectedAlertClearMode: .focus,
@@ -368,7 +417,10 @@ private func makeProjection(
         fontFamilyChoices: choices,
         fontFamilyWarning: warning,
         themeWarning: themeWarning,
-        remoteThemeWarning: remoteThemeWarning
+        remoteThemeWarning: remoteThemeWarning,
+        tailnetConfiguredText: tailnetConfiguredText,
+        tailnetEndpointText: tailnetEndpointText,
+        tailnetStatusText: tailnetStatusText
     )
 }
 

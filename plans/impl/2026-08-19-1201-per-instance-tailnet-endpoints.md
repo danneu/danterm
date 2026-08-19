@@ -224,7 +224,7 @@ bind recovers on its own; and the listener's state is visible instead of silent.
 - [x] 1. Derive per-instance tailnet endpoints and status in DanTermProtocol
 - [x] 2. Gate and retry the tailnet bind on the derived endpoint
 - [x] 3. Publish listener status through the model and `tailnet.status`
-- [ ] 4. Show the read-only tailnet section in the preferences panel
+- [x] 4. Show the read-only tailnet section in the preferences panel
 - [ ] 5. Launch a pool slot with `--tailnet` and report status in the handle
 
 ## Implementation notes
@@ -261,3 +261,14 @@ bind recovers on its own; and the listener's state is visible instead of silent.
   here rather than with commit 2. The `tailnet status` output names `base`,
   `offset`, and `endpoint`, and none of those can be documented without the
   derivation rule they come from.
+- Commit 4: the section is three rows -- the committed base, the derived
+  endpoint, the live status -- plus a note that a tailnet edit applies at the
+  next launch. Two rows would have folded the endpoint into the status sentence,
+  but the endpoint is the fact the user came to read (it is what the phone
+  saves), so it gets its own row and stays in place while the status moves.
+- Commit 4: the panel builds each row's sentence from the projection and formats
+  nothing itself, so the wording per status is pinned by the pure tests rather
+  than only by the UI harness.
+- Commit 4: the config row reads the committed config while the endpoint row
+  reads the launch-frozen status, which is what makes a post-launch config edit
+  legible as "next launch" instead of looking like the current endpoint.

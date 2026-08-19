@@ -105,6 +105,14 @@ public enum DanTermTailnetStatus: Equatable, Sendable {
     /// The endpoint is bound and serving admitted peers.
     case listening(endpoint: DanTermTailnetEndpoint)
 
+    /// The endpoint this instance derived, or nil when it opens no listener.
+    public var endpoint: DanTermTailnetEndpoint? {
+        switch self {
+        case .disabled: return nil
+        case .waiting(let endpoint, _), .listening(let endpoint): return endpoint
+        }
+    }
+
     /// The frozen wire object. Fields are absent when they do not apply, never null.
     public var json: JSONValue {
         switch self {

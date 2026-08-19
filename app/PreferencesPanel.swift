@@ -36,6 +36,15 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
     private let remoteThemeWarningLabel = NSTextField(labelWithString: "")
     private var remoteThemeWarningRow: NSGridRow?
 
+    // Tailnet listener: read-only, because the listener is frozen at launch and an
+    // editable field would promise a rebind the app never performs.
+    private let tailnetConfiguredField = NSTextField()
+    private let tailnetEndpointField = NSTextField()
+    private let tailnetStatusField = NSTextField()
+    private let tailnetNoteLabel = NSTextField(
+        labelWithString: "Edit tailnet settings in the config file; they apply at the next launch."
+    )
+
     init(runtime: AppRuntime) {
         self.runtime = runtime
         // A placeholder rect. The form's real size comes from its content below,
@@ -80,6 +89,12 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
                 makeButton("Open Config File", action: #selector(openConfigFile(_:))),
                 makeButton("Reload Config", action: #selector(reloadConfig(_:))),
             ])),
+            // The tailnet section goes last so the row indices above it, which the
+            // warning rows and the UI harness both address by number, stay put.
+            formRow("Tailnet", tailnetConfiguredField),
+            formRow("Endpoint", tailnetEndpointField),
+            formRow("Listener", tailnetStatusField),
+            [NSGridCell.emptyContentView, tailnetNoteLabel],
         ])
         grid.translatesAutoresizingMaskIntoConstraints = false
         grid.column(at: 0).xPlacement = .trailing
@@ -92,6 +107,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         grid.row(at: 5).topPadding = 8
         grid.row(at: 7).topPadding = 8
         grid.row(at: 9).topPadding = 4
+        grid.row(at: 10).topPadding = 8
         themeWarningRow = grid.row(at: 1)
         themeWarningRow?.isHidden = true
         fontFamilyWarningRow = grid.row(at: 3)
@@ -179,6 +195,21 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         browseButton.setContentHuggingPriority(.required, for: .horizontal)
         browseButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+        for field in [tailnetConfiguredField, tailnetEndpointField, tailnetStatusField] {
+            field.isEditable = false
+            field.isSelectable = true
+            field.isBezeled = false
+            field.drawsBackground = false
+            field.lineBreakMode = .byWordWrapping
+            field.maximumNumberOfLines = 0
+            field.preferredMaxLayoutWidth = preferencesControlColumnWidth
+        }
+        tailnetNoteLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        tailnetNoteLabel.textColor = .secondaryLabelColor
+        tailnetNoteLabel.lineBreakMode = .byWordWrapping
+        tailnetNoteLabel.maximumNumberOfLines = 0
+        tailnetNoteLabel.preferredMaxLayoutWidth = preferencesControlColumnWidth
+
         // -- Assemble --
         contentView.addSubview(grid)
 
@@ -247,6 +278,16 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         }
         if fontFamilyCombo.stringValue != projection.fontFamilyText {
             fontFamilyCombo.stringValue = projection.fontFamilyText
+        }
+
+        if tailnetConfiguredField.stringValue != projection.tailnetConfiguredText {
+            tailnetConfiguredField.stringValue = projection.tailnetConfiguredText
+        }
+        if tailnetEndpointField.stringValue != projection.tailnetEndpointText {
+            tailnetEndpointField.stringValue = projection.tailnetEndpointText
+        }
+        if tailnetStatusField.stringValue != projection.tailnetStatusText {
+            tailnetStatusField.stringValue = projection.tailnetStatusText
         }
 
         applyWarning(projection.themeWarning, label: themeWarningLabel, row: themeWarningRow)
