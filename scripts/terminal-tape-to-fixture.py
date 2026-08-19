@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Scrub a live-pane terminal tape into a neutral replay fixture.
 
-A tape is the version 3 raw JSON Lines stream printed by `danterm pane tape --pane
+A tape is the raw JSON Lines stream printed by `danterm pane tape --pane
 ID`, with or without `--follow`. Its events already use the neutral recording
 schema, including real PTY chunk boundaries and resize ordering, so this script
 only scrubs the byte payloads they carry in either direction, verifies that local
@@ -75,7 +75,12 @@ def local_identifiers() -> list:
     return sorted((c.encode() for c in candidates if len(c) > 2), key=len, reverse=True)
 
 
-STREAM_VERSION = 3
+# The one stream version whose record shape the checks below describe. This is pinned by
+# hand on purpose: reading `paneTapeStreamVersion` from the source would make the script
+# accept whatever the app currently emits, which is the opposite of what a shape check is
+# for. Bumping it means reading the version's changes and updating the key sets, the way
+# `pinned` was added to the start geometry and to every resize event.
+STREAM_VERSION = 5
 START_KEYS = {
     "kind", "version", "capture", "format", "reconstructible", "provenance",
     "initial", "cursor",
@@ -89,7 +94,7 @@ END_REASONS = {"dump": {"dump-complete"}, "follow": {"pane-closed", "stream-fail
 
 
 def load_tape(path: str):
-    """Loads one version 3 raw pane-tape replay stream as a flat neutral recording."""
+    """Loads one raw pane-tape replay stream as a flat neutral recording."""
     with open(path, encoding="utf-8") as handle:
         contents = handle.read()
     return load_replay_stream(parse_records(contents))
@@ -143,8 +148,9 @@ def load_replay_stream(records: list):
     initial = start["initial"]
     if (
         not isinstance(initial, dict)
-        or set(initial) != {"columns", "rows"}
-        or not all(integer(initial[key]) for key in initial)
+        or set(initial) != {"columns", "rows", "pinned"}
+        or not all(integer(initial[key]) for key in ("columns", "rows"))
+        or not isinstance(initial["pinned"], bool)
     ):
         raise ValueError("invalid start geometry")
     cursor = start["cursor"]
@@ -184,7 +190,11 @@ def load_replay_stream(records: list):
 
     if capture == "dump" and not ended:
         raise ValueError("finite capture stops without its end record")
-    return {"initial": initial, "events": events}
+    # The stream states pinnedness so a replica can tell an override from a projection.
+    # A fixture only replays, and its `initial` is replay geometry, so the bit is checked
+    # above and dropped here rather than written into the corpus.
+    return {"initial": {"columns": initial["columns"], "rows": initial["rows"]},
+            "events": events}
 
 
 def validate_end(record: dict, capture: str):
@@ -309,8 +319,13 @@ def validate_event(event: dict):
             raise ValueError(f"invalid {event_type} event")
         return
     if event_type == "resize":
-        require_shape(event, {"type", "columns", "rows"}, {"elapsedNanoseconds"})
+        # Geometry is one two-part fact: the grid, and whether that grid is pinned. A
+        # reader that took the grid alone could not tell an override from a projection,
+        # so `pinned` travels with every resize rather than being reconstructed.
+        require_shape(event, {"type", "columns", "rows", "pinned"}, {"elapsedNanoseconds"})
         if not all(integer(event[key]) for key in ("columns", "rows")):
+            raise ValueError("invalid resize event")
+        if not isinstance(event["pinned"], bool):
             raise ValueError("invalid resize event")
         return
     if event_type == "input":
@@ -398,7 +413,7 @@ def validate_modifiers(event: dict, event_type: str):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tape", help="version 3 raw replay JSONL from `danterm pane tape`")
+    parser.add_argument("tape", help="raw replay JSONL from `danterm pane tape`")
     parser.add_argument("fixture", help="fixture JSON to write")
     parser.add_argument("--keep-identifiers", action="store_true",
                         help="skip host/home scrubbing (local-only tapes)")

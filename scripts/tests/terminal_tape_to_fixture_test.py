@@ -2,8 +2,10 @@
 """Behavioral tests for converting live-pane recordings into neutral fixtures."""
 
 import base64
+import importlib.util
 import json
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -13,10 +15,48 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "terminal-tape-to-fixture.py"
+PANE_TAPE_STREAM_SOURCE = (
+    ROOT / "lib" / "DanTermProtocol" / "Sources" / "DanTermProtocol" / "PaneTapeStream.swift"
+)
+
+
+def load_converter():
+    """Imports the converter for its constants. Its filename is not an identifier."""
+    spec = importlib.util.spec_from_file_location("tape_to_fixture", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Read from the converter rather than restated here. A test that carried its own copy
+# would keep passing against a version the app stopped emitting, which is exactly how
+# this pair sat at 3 while `paneTapeStreamVersion` reached 5.
+STREAM_VERSION = load_converter().STREAM_VERSION
 FOLLOW_SAMPLE = ROOT / "scripts" / "tests" / "fixtures" / "pane-tape-follow.jsonl"
 
 PROMPT_BYTES = b"\x1b]7;file://workstation/Users/alice/project\x07prompt\r\n"
 SCRUBBED_PROMPT = b"\x1b]7;file://host/home/user/project\x07prompt\r\n"
+
+
+class StreamVersionTests(unittest.TestCase):
+    # Intent: the version the converter accepts is the version the app emits.
+    # Why it exists: the converter refuses any other version outright, so a bump to
+    #   `paneTapeStreamVersion` turns every live capture into an unconvertible file. The
+    #   only thing that used to exercise the pair end to end was the opt-in
+    #   `just test-cli`, so the converter sat two versions behind for the whole life of
+    #   the pinned-geometry and bounded-sync-history changes without a run noticing.
+    # Scenario: someone bumps the stream version and does not revisit this script.
+    def test_converter_accepts_the_version_the_app_emits(self):
+        source = PANE_TAPE_STREAM_SOURCE.read_text(encoding="utf-8")
+        match = re.search(r"^public let paneTapeStreamVersion = (\d+)$", source, re.MULTILINE)
+        self.assertIsNotNone(match, f"no paneTapeStreamVersion in {PANE_TAPE_STREAM_SOURCE}")
+        self.assertEqual(
+            STREAM_VERSION,
+            int(match.group(1)),
+            "terminal-tape-to-fixture.py is pinned to a different pane-tape stream version "
+            "than the app emits. Read what the new version changed, update the record shape "
+            "checks, then bump STREAM_VERSION.",
+        )
 
 
 class TerminalTapeToFixtureTests(unittest.TestCase):
@@ -61,7 +101,7 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
             [
                 stream_start(),
                 byte_event(0, "feed", PROMPT_BYTES, offset=0, elapsed=12),
-                plain_event(1, {"type": "resize", "columns": 79, "rows": 23}, elapsed=25),
+                plain_event(1, {"type": "resize", "columns": 79, "rows": 23, "pinned": False}, elapsed=25),
                 stream_end("dump-complete"),
             ],
             "--test",
@@ -87,7 +127,7 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                     "base64": base64.b64encode(SCRUBBED_PROMPT).decode("ascii"),
                     "elapsedNanoseconds": 12,
                 },
-                {"type": "resize", "columns": 79, "rows": 23, "elapsedNanoseconds": 25},
+                {"type": "resize", "columns": 79, "rows": 23, "pinned": False, "elapsedNanoseconds": 25},
             ],
         )
 
@@ -100,7 +140,7 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
         events = [
             byte_event(0, "feed", b"hi", offset=0, elapsed=4),
             byte_event(1, "write", b"q", offset=0, elapsed=9, origin=7),
-            plain_event(2, {"type": "resize", "columns": 90, "rows": 30}, elapsed=11),
+            plain_event(2, {"type": "resize", "columns": 90, "rows": 30, "pinned": False}, elapsed=11),
         ]
         finite = self.accept(
             [stream_start(), *events, stream_end("dump-complete")], "--keep-identifiers"
@@ -121,7 +161,7 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                     "elapsedNanoseconds": 9,
                     "originElapsedNanoseconds": 7,
                 },
-                {"type": "resize", "columns": 90, "rows": 30, "elapsedNanoseconds": 11},
+                {"type": "resize", "columns": 90, "rows": 30, "pinned": False, "elapsedNanoseconds": 11},
             ],
         )
 
@@ -490,7 +530,7 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                     "elapsedNanoseconds": 0,
                     "byteOffset": 0,
                     "byteLength": 0,
-                    "event": {"type": "resize", "columns": 8, "rows": 2},
+                    "event": {"type": "resize", "columns": 8, "rows": 2, "pinned": False},
                 },
             ],
         }
@@ -609,8 +649,9 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                 self.refuse(records)
 
     def test_committed_follow_sample_is_convertible(self):
-        # Intent: the checked-in sample stays a valid version 3 follow capture, so the shape
-        #   this suite builds by hand is anchored to one whole recording.
+        # Intent: the checked-in sample stays a valid follow capture at the stream version
+        #   the converter accepts, so the shape this suite builds by hand is anchored to
+        #   one whole recording.
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "fixture.json"
 
@@ -626,6 +667,7 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                         "type": "resize",
                         "columns": 90,
                         "rows": 30,
+                        "pinned": False,
                         "elapsedNanoseconds": 5,
                     },
                     {
@@ -661,7 +703,7 @@ def local_identifier():
 def stream_start(capture="dump", *, sequence=0, feed_offset=0, write_offset=0, **overrides):
     record = {
         "kind": "start",
-        "version": 3,
+        "version": STREAM_VERSION,
         "capture": capture,
         "format": "replay",
         "reconstructible": False,
@@ -671,7 +713,7 @@ def stream_start(capture="dump", *, sequence=0, feed_offset=0, write_offset=0, *
             "test": "live-pane-tape",
             "recordedDeviations": [],
         },
-        "initial": {"columns": 80, "rows": 24},
+        "initial": {"columns": 80, "rows": 24, "pinned": False},
         "cursor": {
             "recorderLifetimeId": "11111111-1111-4111-8111-111111111111",
             "sequence": sequence,

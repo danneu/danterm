@@ -11,6 +11,17 @@ trap 'echo "danterm-cli_test.sh: failed at line $LINENO" >&2' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 CLI_PATH="$SCRIPT_DIR/.build/DanTerm Dev.app/Contents/Helpers/danterm"
+# Read the tape stream version from the constant the app reports, rather than keeping a
+# copy of the number here. What this script can prove is that the running app agrees with
+# the source tree it was built from; a literal proves only that someone edited two places
+# at once, and this one sat at 3 while the constant reached 5.
+TAPE_VERSION_SOURCE="$SCRIPT_DIR/lib/DanTermProtocol/Sources/DanTermProtocol/PaneTapeStream.swift"
+tape_version="$(sed -n 's/^public let paneTapeStreamVersion = \([0-9][0-9]*\)$/\1/p' \
+    "$TAPE_VERSION_SOURCE")"
+if [[ ! "$tape_version" =~ ^[0-9]+$ ]]; then
+    echo "could not read paneTapeStreamVersion from $TAPE_VERSION_SOURCE" >&2
+    exit 1
+fi
 launch_output="$(mktemp)"
 launch_error="$(mktemp)"
 smoke_output="$(mktemp)"
@@ -237,18 +248,18 @@ for _ in $(seq 1 30); do
     fi
     sleep 1
 done
-jq -e -s '(.[0] | .kind == "start" and .version == 3 and .capture == "dump"
+jq -e -s --argjson v "$tape_version" '(.[0] | .kind == "start" and .version == $v and .capture == "dump"
              and .format == "replay" and .reconstructible == false)
     and (last | .kind == "end" and .reason == "dump-complete")
     and ([.[] | select(.kind == "event" and .event.type == "feed")] | length > 0)' \
     "$tape_output" >/dev/null
 slot_cli pane tape --pane "$pane_id" --format inspect >"$inspect_output"
-jq -e -s '(.[0] | .kind == "start" and .version == 3 and .format == "inspect")
+jq -e -s --argjson v "$tape_version" '(.[0] | .kind == "start" and .version == $v and .format == "inspect")
     and ([.[] | select(.kind == "event" and (.event.spans | type) == "array")] | length > 0)
     and ([.[] | select(.event.base64 != null)] | length == 0)' \
     "$inspect_output" >/dev/null
 slot_cli pane snapshot --pane "$pane_id" >"$snapshot_output"
-jq -e -s '(.[0] | .kind == "start" and .version == 3 and .capture == "snapshot"
+jq -e -s --argjson v "$tape_version" '(.[0] | .kind == "start" and .version == $v and .capture == "snapshot"
              and .reconstructible == true and .cursor == null)
     and ([.[] | select(.kind == "sync")] | length > 0)
     and (last | .kind == "end" and .reason == "snapshot-complete")' \
