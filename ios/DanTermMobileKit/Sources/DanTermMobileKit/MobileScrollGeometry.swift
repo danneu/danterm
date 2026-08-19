@@ -64,6 +64,19 @@ public struct MobileScrollGeometry: Equatable, Sendable {
     }
 }
 
+/// The strip of a placed scroll-chrome frame that sits above the terminal's visible top
+/// edge, in points: the top inset that keeps the scroll indicator's track on screen.
+///
+/// The chrome's frame must keep the drawn window's full height -- that height is what
+/// makes its offset-to-row arithmetic land on real rows -- so a keyboard lift that slides
+/// the drawn grid up pushes part of the frame above the surface's clip. Only the
+/// indicator may shrink to the visible strip, and only the top can clip: the drawn frame
+/// is bottom-pinned inside the surface and the lift only ever moves it up.
+public func scrollIndicatorTopInset(frameMinY: CGFloat, visibleMinY: CGFloat) -> CGFloat {
+    guard frameMinY.isFinite, visibleMinY.isFinite else { return 0 }
+    return max(0, visibleMinY - frameMinY)
+}
+
 /// Names a scroll mode without its geometry, so a driver can tell a screen-mode flip from
 /// a projection that merely moved.
 public enum MobileScrollModeKind: Equatable, Sendable {

@@ -334,3 +334,25 @@ func scrollDriverInertModeEmitsNoMotion() {
     #expect(driver.interactionChanged(.dragging).isEmpty)
     #expect(driver.offsetChanged(-120).isEmpty)
 }
+
+@Test("The indicator inset is the strip the lift pushed above the visible top")
+func scrollIndicatorTopInsetMeasuresTheClippedStrip() {
+    // Intent: the inset equals exactly how far the chrome frame's top sits above the
+    // terminal's visible top edge, and is zero when the frame starts on screen.
+    // Why it exists: the chrome frame must keep the drawn window's full height for its
+    // offset-to-row arithmetic, so a keyboard lift can push part of it off screen; the
+    // indicator track is the one thing allowed to shrink to the visible strip.
+    // Scenario: a chrome frame lifted 120 points above a visible top at zero, one fully
+    // on screen, and one against a visible top that is itself below zero.
+    #expect(scrollIndicatorTopInset(frameMinY: -120, visibleMinY: 0) == 120)
+    #expect(scrollIndicatorTopInset(frameMinY: 40, visibleMinY: 0) == 0)
+    #expect(scrollIndicatorTopInset(frameMinY: 10, visibleMinY: 59) == 49)
+    #expect(scrollIndicatorTopInset(frameMinY: -30, visibleMinY: -50) == 0)
+}
+
+@Test("A non-finite frame or bound insets nothing")
+func scrollIndicatorTopInsetRejectsNonFiniteInputs() {
+    #expect(scrollIndicatorTopInset(frameMinY: .nan, visibleMinY: 0) == 0)
+    #expect(scrollIndicatorTopInset(frameMinY: 0, visibleMinY: .infinity) == 0)
+    #expect(scrollIndicatorTopInset(frameMinY: -.infinity, visibleMinY: 0) == 0)
+}

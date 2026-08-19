@@ -46,6 +46,9 @@ final class TerminalScrollChromeView: UIScrollView, UIScrollViewDelegate {
         // The content is sized to the engine's own extent, so nothing may adjust it: an
         // inset would move the offset a row maps to and put the chrome off by a safe area.
         contentInsetAdjustmentBehavior = .never
+        // The indicator inset is this view's own statement of what is clipped off screen
+        // (`resizeViewport`), so UIKit must not add safe-area insets on top of it.
+        automaticallyAdjustsScrollIndicatorInsets = false
         isDirectionalLockEnabled = true
         delegate = self
     }
@@ -87,6 +90,14 @@ final class TerminalScrollChromeView: UIScrollView, UIScrollViewDelegate {
         }
         let placed = surface.convert(rect, to: superview)
         if frame != placed { frame = placed }
+        // The frame keeps the drawn window's full height even where the keyboard lift has
+        // pushed it above the surface's clip -- the offset-to-row arithmetic needs it --
+        // so only the indicator track is squeezed to the visible strip.
+        let visible = surface.convert(surface.bounds, to: superview)
+        verticalScrollIndicatorInsets.top = scrollIndicatorTopInset(
+            frameMinY: placed.minY,
+            visibleMinY: visible.minY
+        )
     }
 
     private func perform(_ actions: [MobileScrollDriverAction]) {
