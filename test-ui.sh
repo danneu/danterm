@@ -124,6 +124,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/SwiftTerminalSessionView.swift" \
         "$SCRIPT_DIR/app/TerminalFrameRateSampler.swift" \
         "$SCRIPT_DIR/app/TerminalDeliveryShapeSampler.swift" \
+        "$SCRIPT_DIR/app/PaneLayoutRectBridge.swift" \
         "$SCRIPT_DIR/app/PaneDividerView.swift" \
         "$SCRIPT_DIR/app/TodoInputView.swift" \
         "$SCRIPT_DIR/app/TodoRowView.swift" \

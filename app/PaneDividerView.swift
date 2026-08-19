@@ -134,9 +134,3 @@ final class PaneDividerView: NSView {
         onRatioChanged?(splitId, 0.5)
     }
 }
-
-private extension NSRect {
-    init(_ rect: PaneLayoutRect) {
-        self.init(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
-    }
-}

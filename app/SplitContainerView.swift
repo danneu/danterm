@@ -128,15 +128,3 @@ class SplitContainerView: NSView {
         view.frame = frame
     }
 }
-
-private extension PaneLayoutRect {
-    init(_ rect: NSRect) {
-        self.init(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)
-    }
-}
-
-private extension NSRect {
-    init(_ rect: PaneLayoutRect) {
-        self.init(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
-    }
-}

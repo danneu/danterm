@@ -54,7 +54,7 @@ class PaneDragCoordinator {
             overlayView.clear()
             return
         }
-        let frameInContainer = NSRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
+        let frameInContainer = NSRect(rect)
         let overlayFrame = overlayView.convert(frameInContainer, from: container)
         overlayView.update(rect: highlightRect(for: drop.intent, in: overlayFrame), intent: drop.intent)
     }
