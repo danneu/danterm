@@ -46,6 +46,16 @@ final class TerminalSurfaceView: UIView {
     private var displayLinkTarget: DisplayLinkTarget?
     private var geometry: (columns: Int, rows: Int)?
 
+    /// How far the keyboard-riding bar has risen above this view's bottom, in points,
+    /// measured by the placing controller. It is a presentation offset only: the grid,
+    /// the claim, and the frame stores read the content box, which never sees it.
+    var obscuredBottomHeight: CGFloat = 0 {
+        didSet {
+            guard obscuredBottomHeight != oldValue else { return }
+            setNeedsLayout()
+        }
+    }
+
     /// The one font size this surface renders and claims at; both readings of the cell
     /// box must agree or a claim would name a grid the surface does not draw.
     private static let fontSize: CGFloat = 11
@@ -129,11 +139,11 @@ final class TerminalSurfaceView: UIView {
     /// The engine's scroll truth and the geometry it is drawn with. Nothing until this view
     /// has fitted a surface, because until then there is no drawn row to measure.
     var scrollFacts: TerminalScrollFacts? {
-        guard let surface, let box = contentBox else { return nil }
+        guard let surface, let placement else { return nil }
         return TerminalScrollFacts(
             projection: replica.terminal?.scrollProjection,
-            rowHeight: surface.cellSize(in: box).height,
-            drawnFrame: surface.drawnFrame(in: box),
+            rowHeight: surface.cellSize(in: placement.contentBox).height,
+            drawnFrame: surface.drawnFrame(in: placement),
             isAlternateScreenActive: isAlternateScreenActive
         )
     }
@@ -141,8 +151,8 @@ final class TerminalSurfaceView: UIView {
     /// The grid cell one point in this view's coordinates falls on, so a gesture the owner
     /// turns into a mouse report names a real position instead of the origin.
     func gridCell(at point: CGPoint) -> (column: Int, row: Int)? {
-        guard let surface, let box = contentBox else { return nil }
-        return surface.cell(at: point, in: box)
+        guard let surface, let placement else { return nil }
+        return surface.cell(at: point, in: placement)
     }
 
     /// Whether the replicated pane's grid is an override, or nothing while the replica
@@ -165,20 +175,22 @@ final class TerminalSurfaceView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // The extent decides the metrics, so a rotation or a keyboard has to be able to
-        // change them. Re-running the fit here is what makes the surfaces follow the view.
+        // The extent decides the metrics, so a rotation has to be able to change them.
+        // Re-running the fit here is what makes the surfaces follow the view. The
+        // keyboard is not such a change: this view's bounds are keyboard-absent, so a
+        // show or hide reaches only the placement below, never the fit.
         if let geometry { ensureSurfaces(columns: geometry.columns, rows: geometry.rows) }
-        if let surface, let box = contentBox {
-            let scale = box.displayScale
+        if let surface, let placement {
+            let scale = placement.contentBox.displayScale
             // The pixels are already drawn small enough for this view, so they are shown
             // one for one rather than scaled by a transform.
-            let width = CGFloat(surface.pixelWidth) / scale
-            let height = CGFloat(surface.pixelHeight) / scale
-            surfaceView.bounds = CGRect(x: 0, y: 0, width: width, height: height)
+            let frame = surface.drawnFrame(in: placement)
+            surfaceView.bounds = CGRect(origin: .zero, size: frame.size)
             surfaceView.layer.contentsScale = scale
-            // The replica draws from the bottom of the content box, so newly typed output
-            // stays put while the keyboard changes how much of the view is left.
-            surfaceView.layer.position = CGPoint(x: box.originX, y: box.maxY - height)
+            // The replica draws bottom-pinned at the placement's visible bottom, so newly
+            // typed output stays put on the bar's top and the keyboard only slides the
+            // top rows up out of the clip.
+            surfaceView.layer.position = frame.origin
         }
         // Reported from here, last, because this is the moment the view's own extent and
         // safe area are both settled. An owner watching the controller's layout callback
@@ -280,6 +292,16 @@ final class TerminalSurfaceView: UIView {
             insetBottom: 0,
             displayScale: window?.screen.scale ?? traitCollection.displayScale
         )
+    }
+
+    /// The one reading of where the drawn rectangle sits right now. Every consumer that
+    /// must line up with the cells -- the drawn layer, the scroll chrome's facts, the
+    /// gesture-to-cell mapping -- reads this value, so a keyboard mid-slide cannot put
+    /// them in different places.
+    private var placement: MobileSurfacePlacement? {
+        contentBox.map {
+            MobileSurfacePlacement(contentBox: $0, obscuredHeight: obscuredBottomHeight)
+        }
     }
 }
 

@@ -167,7 +167,7 @@ func observeSurfaceDrawsFromTheBottomOfTheBox() throws {
         contentBox: box,
         fontSize: 11
     ))
-    let frame = surface.drawnFrame(in: box)
+    let frame = surface.drawnFrame(in: MobileSurfacePlacement(contentBox: box, obscuredHeight: 0))
     #expect(abs(frame.maxY - box.maxY) < 0.001)
     #expect(frame.minX == box.originX)
     #expect(frame.height <= CGFloat(box.heightPixels) / box.displayScale)
@@ -198,26 +198,27 @@ func observeSurfaceMapsPointsToCells() throws {
     #expect(surface.columns == 200)
     #expect(surface.rows == 50)
 
-    let frame = surface.drawnFrame(in: box)
+    let placement = MobileSurfacePlacement(contentBox: box, obscuredHeight: 0)
+    let frame = surface.drawnFrame(in: placement)
     let cell = surface.cellSize(in: box)
 
-    let topLeft = surface.cell(at: CGPoint(x: frame.minX, y: frame.minY), in: box)
+    let topLeft = surface.cell(at: CGPoint(x: frame.minX, y: frame.minY), in: placement)
     #expect(topLeft.column == 0)
     #expect(topLeft.row == 0)
 
     let inside = surface.cell(
         at: CGPoint(x: frame.minX + cell.width * 3.5, y: frame.minY + cell.height * 2.5),
-        in: box
+        in: placement
     )
     #expect(inside.column == 3)
     #expect(inside.row == 2)
 
     // Above and leading of the grid, and far past its trailing bottom corner.
-    let before = surface.cell(at: CGPoint(x: -50, y: -50), in: box)
+    let before = surface.cell(at: CGPoint(x: -50, y: -50), in: placement)
     #expect(before.column == 0)
     #expect(before.row == 0)
 
-    let after = surface.cell(at: CGPoint(x: 10_000, y: 10_000), in: box)
+    let after = surface.cell(at: CGPoint(x: 10_000, y: 10_000), in: placement)
     #expect(after.column == 199)
     #expect(after.row == 49)
 }

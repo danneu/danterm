@@ -51,6 +51,15 @@ final class MobileRootViewController: UIViewController {
         presentConnectSheet()
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // The terminal's bottom sits at the bar's rest position, so how far the bar's
+        // top has risen above it is exactly how much of the drawn content the keyboard
+        // obscures. The surface's placement value clamps and quantizes the measurement;
+        // this is the only keyboard fact that ever leaves this controller.
+        terminalView.obscuredBottomHeight = terminalView.frame.maxY - bottomBar.frame.minY
+    }
+
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for press in presses {
@@ -123,12 +132,20 @@ final class MobileRootViewController: UIViewController {
         view.keyboardLayoutGuide.followsUndockedKeyboard = true
         NSLayoutConstraint.activate([
             // Full bleed: the terminal owns the whole width and everything from the
-            // physical top of the window down to the controls at the bottom. Nothing is
+            // physical top of the window down to the bar's rest position. Nothing is
             // allowed to take vertical space above it -- the pill floats over it instead.
             terminalView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             terminalView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             terminalView.topAnchor.constraint(equalTo: view.topAnchor),
-            terminalView.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
+            // The bar's rest position, not the bar itself: the keyboard is a presentation
+            // offset, never a geometry input, so the terminal's bounds -- and with them
+            // the grid a claim names and the pixels the frame stores hold -- must not
+            // move when the bar rides the keyboard up. The rise is measured in
+            // `viewDidLayoutSubviews` and handed to the surface as one scalar.
+            terminalView.bottomAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+                constant: -TerminalBottomBarView.height
+            ),
 
             // The input view is the terminal's own surface as far as touches go, so it
             // covers exactly what the terminal covers.

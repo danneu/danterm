@@ -74,14 +74,20 @@ public struct MobileObserveSurface: Equatable, Sendable {
 
     /// The rectangle the drawn cells occupy in the view's own coordinates.
     ///
-    /// Bottom-pinned, because the replica draws from the bottom of the content box so
-    /// that new output stays put while the keyboard changes how much of the view is
-    /// left. Anything that has to line up with the cells -- a scroll viewport, a hit
-    /// test -- reads it here rather than assuming the view's bounds.
-    public func drawnFrame(in box: MobileContentBox) -> CGRect {
-        let width = CGFloat(pixelWidth) / box.displayScale
-        let height = CGFloat(pixelHeight) / box.displayScale
-        return CGRect(x: box.originX, y: box.maxY - height, width: width, height: height)
+    /// Bottom-pinned to the placement's visible bottom edge, so new output stays put at
+    /// the bar's top whether or not the keyboard is up. Anything that has to line up
+    /// with the cells -- a scroll viewport, a hit test -- reads it here rather than
+    /// assuming the view's bounds, which is what keeps all three moving together.
+    public func drawnFrame(in placement: MobileSurfacePlacement) -> CGRect {
+        let scale = placement.contentBox.displayScale
+        let width = CGFloat(pixelWidth) / scale
+        let height = CGFloat(pixelHeight) / scale
+        return CGRect(
+            x: placement.originX,
+            y: placement.maxY - height,
+            width: width,
+            height: height
+        )
     }
 
     /// The cell one point in the view's coordinates falls on, clamped to the grid.
@@ -89,9 +95,12 @@ public struct MobileObserveSurface: Equatable, Sendable {
     /// Clamped rather than optional: the caller is a gesture that started somewhere on
     /// the terminal, and the nearest real cell is a better answer for a mouse report
     /// than no position at all.
-    public func cell(at point: CGPoint, in box: MobileContentBox) -> (column: Int, row: Int) {
-        let frame = drawnFrame(in: box)
-        let cell = cellSize(in: box)
+    public func cell(
+        at point: CGPoint,
+        in placement: MobileSurfacePlacement
+    ) -> (column: Int, row: Int) {
+        let frame = drawnFrame(in: placement)
+        let cell = cellSize(in: placement.contentBox)
         return (
             column: clampedIndex((point.x - frame.minX) / cell.width, count: columns),
             row: clampedIndex((point.y - frame.minY) / cell.height, count: rows)
