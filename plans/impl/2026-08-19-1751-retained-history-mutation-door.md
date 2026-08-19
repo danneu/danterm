@@ -216,10 +216,11 @@ hosts becomes the door's exit call),
 
 ## Follow Up
 
-- PO4's paired benchmark is unrun: the machine was loaded (load ~15 across 10
-  processors, external `swift-frontend` at 96-100%) through both attempts, which
-  returned contradictory verdicts (`slower +18.69%`, then `equivalent +0.48%`)
-  on 2 pairs each. Re-run `just benchmark-quick baseline=f90eb86a
-  workload=terminal-feed` on an idle machine, and on a regression verdict sample
-  the feed path with `just benchmark-feed-sample` for arena-copy frames under
-  `admit`.
+- PO4's paired benchmark is done: `equivalent` (+0.88% symmetric median of 2
+  pairs) on `terminal-feed` against baseline `f90eb86a`. The two earlier
+  attempts ran on a loaded machine (load ~15 across 10 processors, external
+  `swift-frontend` at 96-100%) and disagreed (`slower +18.69%`, then
+  `equivalent +0.48%`); the settling run had load 0.37 per processor before the
+  first block, so the regression reading was load noise. No
+  `just benchmark-feed-sample` pass was needed, because that step was
+  conditional on a regression verdict.
