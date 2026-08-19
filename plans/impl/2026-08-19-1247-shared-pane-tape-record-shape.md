@@ -130,5 +130,21 @@ the moved types from DanTermProtocol; all already import it.
 
 ## Commit progress
 - [x] 1. test(tape): pin the total-gap and withheld-cursor records end to end
-- [ ] 2. refactor(tape): publish the typed record family from DanTermProtocol
+- [x] 2. refactor(tape): publish the typed record family from DanTermProtocol
 - [ ] 3. refactor(tape): encode pane-tape records from the shared declaration
+
+## Implementation notes
+
+- Commit 2 moved the record family, its decode, and the numeric validators into
+  `lib/DanTermProtocol/Sources/DanTermProtocol/PaneTapeRecord.swift`, and left
+  `PaneTapeStateSynchronization` and `PaneTapeSyncAssembler` in DanTermClient:
+  assembling a multi-part transfer is a reader's job, not part of the record
+  shape. The two modules therefore still collide on the synchronization name in
+  `client-tests/PaneTapeRoundTripTests.swift`, and that file keeps its module
+  qualification.
+- `PaneTapeRecordKey`, `PaneTapeRecordKind`, and `PaneTapeLoss` are public
+  although only the decode and the inspect view read them in commit 2. The
+  producer's encode is the third reader, and it lands in commit 3.
+- The start record's `provenance` is decoded as an optional `JSONValue`, and its
+  initializer defaults it to nil so a test that builds a start record by hand
+  states only the fields it cares about.

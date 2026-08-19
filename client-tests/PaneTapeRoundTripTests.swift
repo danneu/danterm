@@ -47,6 +47,41 @@ struct PaneTapeRoundTripTests {
         }
     }
 
+    @Test("the start record round-trips the provenance the producer stamps on it")
+    func startRecordRoundTripsProvenance() throws {
+        // Intent: whatever the producer stamps as provenance arrives whole in the decoded
+        //   start record, and a start record that states none still decodes.
+        // Why it exists: provenance is the only field on the opening record whose meaning
+        //   the producer alone gives. A reader that dropped it would leave a saved capture
+        //   unable to say which pane it came from, and one that required it would reject
+        //   every stream that states none.
+        // Scenario: a capture written to a file, opened later with nothing but its bytes.
+        let provenance = JSONValue.object([
+            "pane": .string("p7"),
+            "startedAt": .number(1_700_000_000),
+        ])
+        let start = makePaneTapeStart(
+            capture: .dump,
+            provenance: provenance,
+            initial: PaneTapeDimensions(columns: 80, rows: 24, pinned: false),
+            cursor: .beginning
+        )
+
+        guard case .start(let decoded)? = decodePaneTapeRecord(start.record) else {
+            Issue.record("start record did not decode as a start")
+            return
+        }
+        #expect(decoded.provenance == provenance)
+
+        var withoutProvenance = try #require(start.record.asObject)
+        withoutProvenance["provenance"] = nil
+        guard case .start(let bare)? = decodePaneTapeRecord(.object(withoutProvenance)) else {
+            Issue.record("a start record stating no provenance must still decode as a start")
+            return
+        }
+        #expect(bare.provenance == nil)
+    }
+
     @Test("the gap record round-trips every eviction count the producer states")
     func gapRecordRoundTrips() throws {
         let batch = makePaneTapeBatch(from: PaneTapeSnapshot(
