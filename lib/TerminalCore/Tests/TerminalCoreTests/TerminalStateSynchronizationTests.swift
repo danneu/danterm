@@ -189,6 +189,121 @@ struct TerminalStateSynchronizationTests {
         expectObservableState(resumed, equals: source, phase: "open cluster")
     }
 
+    @Test("state bytes preserve live and saved character-set state")
+    func reconstructsCharsetState() throws {
+        // Intent: carry the designations, the GL invocation, and the saved slot's copy of both.
+        // Why it exists: no charset field is compared directly, so a lost designation only
+        // shows up as later text that stops being translated.
+        // Scenario: a reader joins while G1 holds DEC Special under SO, with a different
+        // designation saved by DECSC.
+        var source = try #require(Terminal(columns: 8, rows: 2))
+        source.feed(Array("\u{1B})0\u{0E}\u{1B}7".utf8))
+        source.feed(Array("\u{0F}\u{1B}(A".utf8))
+
+        let synchronization = source.stateSynchronization
+        var resumed = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        resumed.feed(synchronization.bytes)
+        expectObservableState(resumed, equals: source, phase: "charset")
+
+        let live = Array("#".utf8)
+        source.feed(live)
+        resumed.feed(live)
+        #expect(source.screenText.hasPrefix("\u{00A3}"))
+        expectObservableState(resumed, equals: source, phase: "charset live")
+
+        let restored = Array("\u{1B}8lqk".utf8)
+        source.feed(restored)
+        resumed.feed(restored)
+        #expect(source.screenText.hasPrefix("\u{250C}\u{2500}\u{2510}"))
+        expectObservableState(resumed, equals: source, phase: "charset restored")
+    }
+
+    @Test("state bytes preserve character-set state beneath an active alternate screen")
+    func reconstructsCharsetStateUnderAlternateScreen() throws {
+        // Intent: carry the terminal-scoped live charset and each screen's own saved slot
+        // across a synchronized alternate screen.
+        // Why it exists: leaving a reconstructed full-screen program must restore the shell's
+        // designations, which is the regression a per-screen implementation would show.
+        // Scenario: a full-screen program runs with DEC Special invoked over a shell that had
+        // designated the British set.
+        var source = try #require(Terminal(columns: 8, rows: 2))
+        source.feed(Array("\u{1B}(A\u{1B}7\u{1B}[?1049h".utf8))
+        source.feed(Array("\u{1B})0\u{0E}".utf8))
+
+        let synchronization = source.stateSynchronization
+        var resumed = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        resumed.feed(synchronization.bytes)
+        expectObservableState(resumed, equals: source, phase: "alternate charset")
+
+        let inAlternate = Array("lqk".utf8)
+        source.feed(inAlternate)
+        resumed.feed(inAlternate)
+        #expect(source.screenText.hasPrefix("\u{250C}\u{2500}\u{2510}"))
+        expectObservableState(resumed, equals: source, phase: "alternate charset live")
+
+        let leave = Array("\u{1B}[?1049l#".utf8)
+        source.feed(leave)
+        resumed.feed(leave)
+        #expect(source.screenText.hasPrefix("\u{00A3}"))
+        expectObservableState(resumed, equals: source, phase: "alternate charset restored")
+    }
+
+    @Test("state bytes preserve a live pending single shift")
+    func reconstructsLivePendingSingleShift() throws {
+        // Intent: carry an armed SS2 across the fence, spent by exactly one character.
+        // Why it exists: a single shift has no cancel sequence, so it cannot ride the replay
+        // as ordinary bytes.
+        // Scenario: the reader joins between SS2 and the character it shifts.
+        var source = try #require(Terminal(columns: 8, rows: 2))
+        source.feed(Array("\u{1B}*0\u{1B}N".utf8))
+
+        let synchronization = source.stateSynchronization
+        var resumed = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        resumed.feed(synchronization.bytes)
+        expectObservableState(resumed, equals: source, phase: "pending single shift")
+
+        let continuation = Array("qq".utf8)
+        source.feed(continuation)
+        resumed.feed(continuation)
+        #expect(source.screenText.hasPrefix("\u{2500}q"))
+        expectObservableState(resumed, equals: source, phase: "pending single shift spent")
+    }
+
+    @Test("state bytes preserve a single shift saved by DECSC")
+    func reconstructsSavedPendingSingleShift() throws {
+        // Intent: carry the pending single shift stored in the saved-cursor slot, which the
+        // VT420 list includes and only DECRC can reveal.
+        // Why it exists: the saved slot cannot be written without routing through live state,
+        // so a replay that only restores live state silently drops it.
+        // Scenario: DECSC runs with SS2 armed, the shift is then spent, and the reader joins
+        // before DECRC re-arms it.
+        var source = try #require(Terminal(columns: 8, rows: 2))
+        source.feed(Array("\u{1B}*0\u{1B}N\u{1B}7q".utf8))
+
+        let synchronization = source.stateSynchronization
+        var resumed = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        resumed.feed(synchronization.bytes)
+        expectObservableState(resumed, equals: source, phase: "saved single shift")
+
+        let continuation = Array("\u{1B}8qq".utf8)
+        source.feed(continuation)
+        resumed.feed(continuation)
+        #expect(source.screenText.hasPrefix("\u{2500}q"))
+        expectObservableState(resumed, equals: source, phase: "saved single shift restored")
+    }
+
     @Test("state bytes preserve unfinished input recognition", arguments: [
         (prefix: [0xE2], continuation: [0x82, 0xAC]),
         (prefix: Array("\u{1B}[31".utf8), continuation: Array("mX".utf8)),

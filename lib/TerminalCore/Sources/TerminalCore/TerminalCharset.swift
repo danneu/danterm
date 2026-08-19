@@ -32,6 +32,18 @@ enum TerminalCharset: UInt8, Equatable, Sendable {
         }
     }
 
+    /// The SCS final byte that designates this set, the inverse of `init?(designationFinal:)`.
+    ///
+    /// State synchronization spells a designation with it, so the serialized form reads as the
+    /// protocol character a program would have sent.
+    var designationFinal: UInt8 {
+        switch self {
+        case .decSpecialGraphics: 0x30
+        case .british: 0x41
+        case .ascii: 0x42
+        }
+    }
+
     /// Maps one GL byte to the scalar it prints as. Bytes outside 0x20...0x7E pass through.
     ///
     /// Every scalar this can return must be narrow and grapheme-break-class `.other`, because

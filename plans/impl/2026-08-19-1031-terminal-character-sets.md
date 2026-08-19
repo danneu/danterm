@@ -331,7 +331,7 @@ behavior or invariant:
 
 ## Commit progress
 - [x] 1. Character-set designation, locking shifts, and GL translation
-- [ ] 2. Carry charset state through state synchronization
+- [x] 2. Carry charset state through state synchronization
 
 ## Implementation notes
 
@@ -355,6 +355,12 @@ behavior or invariant:
   written, so a combining mark that joins an open cluster leaves the shift
   armed while any character that occupies a cell spends it. It matches where
   ghostty spends it (`Terminal.zig#printCell`).
+
+- The two synchronization forms are `charset` (live) and `charset-saved` (the active
+  screen's saved slot). Both carry the same value: the four slots' SCS finals as one
+  four-character field, then the invoked slot as 0-3, then the pending single shift as
+  0-3 or `none`. Spelling a designation with its protocol final rather than an internal
+  raw value keeps the serialized stream readable next to the `ESC ( 0` a program sends.
 
 ## Follow Up
 

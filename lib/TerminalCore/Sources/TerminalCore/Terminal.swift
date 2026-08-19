@@ -981,6 +981,9 @@ public struct Terminal: Equatable, Sendable {
 
         writer.append(promptRedrawSequence)
         appendGraphemeSynchronization(to: &writer)
+        // Last, because the replica must stay all-ASCII while the encode replays graphic bytes:
+        // stored cell scalars are already translated, so re-translating them would corrupt them.
+        writer.append("\u{1B}]133;S;charset=\(charsetSynchronizationValue(charsets))\u{7}")
         writer.append(inputStream.synchronizationPrefix)
         return EncodedStateSynchronization(
             synchronization: TerminalStateSynchronization(
@@ -1102,6 +1105,10 @@ public struct Terminal: Equatable, Sendable {
             writer.append(styleSequence(saved.style))
         }
         writer.append("\u{1B}7")
+        // Strictly after the DECSC above: that recapture overwrites the replica's saved slot
+        // with its live -- still reset-default -- charset state, so an earlier form would be
+        // silently clobbered back to ASCII.
+        writer.append("\u{1B}]133;S;charset-saved=\(charsetSynchronizationValue(saved.charsets))\u{7}")
     }
 
     private func appendPendingWrap(
@@ -1218,6 +1225,48 @@ public struct Terminal: Equatable, Sendable {
             clusterValue = "none"
         }
         writer.append("\u{1B}]133;S;cluster=\(clusterValue)\u{7}")
+    }
+
+    /// Spells charset state as the four slots' SCS finals, the invoked slot, and the pending
+    /// single shift -- exactly the VT420 list DECSC saves.
+    ///
+    /// Charset state rides this private form rather than real sequences because a pending
+    /// single shift has no cancel sequence and the saved slot cannot be written without
+    /// routing through live state.
+    private func charsetSynchronizationValue(_ state: TerminalCharsetState) -> String {
+        let designations = String(decoding: [
+            state.g0.designationFinal,
+            state.g1.designationFinal,
+            state.g2.designationFinal,
+            state.g3.designationFinal,
+        ], as: UTF8.self)
+        let shift = state.pendingSingleShift.map { String($0.rawValue) } ?? "none"
+        return "\(designations),\(state.invokedSlot.rawValue),\(shift)"
+    }
+
+    private func charsetSynchronizationState(_ value: String) -> TerminalCharsetState? {
+        let fields = value.split(separator: ",", omittingEmptySubsequences: false)
+        guard fields.count == 3 else { return nil }
+        let finals = Array(fields[0].utf8)
+        guard finals.count == 4 else { return nil }
+        var state = TerminalCharsetState()
+        for (index, final) in finals.enumerated() {
+            guard let charset = TerminalCharset(designationFinal: final),
+                  let slot = TerminalCharsetSlot(rawValue: UInt8(index))
+            else { return nil }
+            state[slot] = charset
+        }
+        guard let invokedRaw = UInt8(fields[1]),
+              let invoked = TerminalCharsetSlot(rawValue: invokedRaw)
+        else { return nil }
+        state.invokedSlot = invoked
+        if fields[2] != "none" {
+            guard let shiftRaw = UInt8(fields[2]),
+                  let shift = TerminalCharsetSlot(rawValue: shiftRaw)
+            else { return nil }
+            state.pendingSingleShift = shift
+        }
+        return state
     }
 
     private func graphemeBreakStateCode(_ state: GraphemeBreakState) -> UInt8 {
@@ -1992,6 +2041,14 @@ public struct Terminal: Equatable, Sendable {
         }
         if let clusterValue = semanticPromptOption("cluster", in: options) {
             applyClusterSynchronizationState(clusterValue)
+        }
+        if let charsetValue = semanticPromptOption("charset-saved", in: options),
+           let state = charsetSynchronizationState(charsetValue) {
+            screen.savedCursor.charsets = state
+        }
+        if let charsetValue = semanticPromptOption("charset", in: options),
+           let state = charsetSynchronizationState(charsetValue) {
+            charsets = state
         }
     }
 
