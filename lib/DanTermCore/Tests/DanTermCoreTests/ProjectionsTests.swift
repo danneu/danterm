@@ -299,7 +299,7 @@ import Testing
 
         let tabId = model.groups[0].tabs[0].id
         model.pendingConfirmation = pendingCloseConfirmation(for: .tab(tabId), in: model)
-        #expect(desiredConfirmation(in: model)?.confirmTitle == "Close Tab")
+        #expect(desiredConfirmation(in: model)?.confirm.title == "Close Tab")
 
         model.pendingConfirmation = pendingAppConfirmation()
         #expect(desiredConfirmation(in: model)?.informativeText == "This will close 1 terminal session.")

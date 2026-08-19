@@ -246,6 +246,110 @@ func confirmationPanelTests() {
             throw UITestFailure(message: "Escape should cancel, got \(fx.runtime.sentMessages[1])")
         }
     }
+
+    uiTest("a delete-group confirmation draws its three choices in dialog order") {
+        // Intent: the alternative sits leading, cancel next, and the default
+        //   rightmost against the panel's content inset.
+        // Why it exists: this path had no harness coverage at all, and it drew
+        //   left-aligned in the order [Cancel] [Close Tabs] [Move to General].
+        // Scenario: spec-first -- the only three-button confirmation there is.
+        let fx = makeConfirmationFixture()
+        defer { fx.panel.close() }
+
+        fx.panel.configure(makeDeleteGroupProjection())
+        fx.panel.contentView?.layoutSubtreeIfNeeded()
+
+        let buttons = fx.panel.actionRow.buttonsInVisualOrder
+        let drawn = buttons.sorted { $0.frame.minX < $1.frame.minX }.map(\.title)
+        try uiExpect(drawn == ["Close Tabs", "Cancel", "Move to General"],
+                     "expected the alternative, cancel, then the default, got \(drawn)")
+        guard let contentView = fx.panel.contentView, let last = buttons.last else {
+            throw UITestFailure(message: "the panel drew no buttons")
+        }
+        let trailing = last.convert(last.bounds, to: contentView).maxX
+        let rowTrailing = fx.panel.actionRow.convert(fx.panel.actionRow.bounds, to: contentView).maxX
+        try uiExpect(abs(trailing - rowTrailing) < 0.5,
+                     "the default button should end at the content inset, got \(trailing) vs \(rowTrailing)")
+    }
+
+    uiTest("each confirmation button sends the message its choice names") {
+        // Intent: the message follows the answered choice.
+        // Why it exists: the panel used to pick between confirm and the
+        //   delete-group choice by reading a hidden button's visibility.
+        // Scenario: spec-first -- click all three delete-group buttons.
+        let fx = makeConfirmationFixture()
+        defer { fx.panel.close() }
+        let projection = makeDeleteGroupProjection()
+        fx.panel.configure(projection)
+
+        for button in fx.panel.actionRow.buttonsInVisualOrder {
+            button.performClick(nil)
+        }
+
+        let expected: [String] = ["Close Tabs", "Cancel", "Move to General"]
+        try uiExpect(fx.runtime.sentMessages.count == 3,
+                     "expected one message per button, got \(fx.runtime.sentMessages)")
+        let order = fx.panel.actionRow.buttonsInVisualOrder.map(\.title)
+        try uiExpect(order == expected, "unexpected button order \(order)")
+        if case .chooseDeleteGroupConfirmation(projection.id, false) = fx.runtime.sentMessages[0] {} else {
+            throw UITestFailure(message: "Close Tabs should keep no tabs, got \(fx.runtime.sentMessages[0])")
+        }
+        if case .cancelConfirmation(projection.id) = fx.runtime.sentMessages[1] {} else {
+            throw UITestFailure(message: "Cancel should cancel, got \(fx.runtime.sentMessages[1])")
+        }
+        if case .chooseDeleteGroupConfirmation(projection.id, true) = fx.runtime.sentMessages[2] {} else {
+            throw UITestFailure(message: "Move to General should move tabs, got \(fx.runtime.sentMessages[2])")
+        }
+    }
+
+    uiTest("Return answers the delete-group default from the command area") {
+        // Intent: the reserved Return key answers the projected confirm choice,
+        //   whichever confirmation is open.
+        // Why it exists: the deleted isHidden branch is what used to make Return
+        //   mean "move the tabs" on this subject; the choice must carry it now.
+        // Scenario: spec-first -- the three-button confirmation, Return pressed
+        //   while the panel holds focus.
+        let fx = makeConfirmationFixture()
+        defer { fx.panel.close() }
+        let projection = makeDeleteGroupProjection()
+        fx.panel.configure(projection)
+
+        fx.panel.sendEvent(try keyEvent(in: fx.panel, characters: "\r", keyCode: 36))
+
+        try uiExpect(fx.runtime.sentMessages.count == 1,
+                     "Return should have answered once, got \(fx.runtime.sentMessages)")
+        if case .chooseDeleteGroupConfirmation(projection.id, true) = fx.runtime.sentMessages[0] {} else {
+            throw UITestFailure(message: "Return should move tabs, got \(fx.runtime.sentMessages[0])")
+        }
+    }
+
+    uiTest("a long confirm title keeps the buttons inside the panel") {
+        // Intent: a button row wider than the text column widens the panel
+        //   instead of overflowing it, and the size still settles.
+        // Why it exists: the column width used to be a required constant, so a
+        //   wide row broke a constraint rather than growing the panel.
+        // Scenario: spec-first -- a confirm title far wider than the text column.
+        let fx = makeConfirmationFixture()
+        defer { fx.panel.close() }
+        let long = String(repeating: "Close Every Tab ", count: 12)
+
+        fx.panel.configure(makeConfirmationProjection(commands: ["make test"], confirmTitle: long))
+        fx.panel.contentView?.layoutSubtreeIfNeeded()
+        let settled = fx.panel.frame
+
+        guard let contentView = fx.panel.contentView,
+              let last = fx.panel.actionRow.buttonsInVisualOrder.last else {
+            throw UITestFailure(message: "the panel drew no buttons")
+        }
+        let drawn = last.convert(last.bounds, to: contentView)
+        try uiExpect(drawn.maxX <= contentView.bounds.maxX + 0.5,
+                     "the default button ran past the panel at \(drawn.maxX) of \(contentView.bounds.maxX)")
+
+        fx.panel.configure(makeConfirmationProjection(commands: ["make test"], confirmTitle: long))
+        try uiExpect(abs(fx.panel.frame.width - settled.width) < 0.5
+                     && abs(fx.panel.frame.height - settled.height) < 0.5,
+                     "the same projection resized the panel to \(fx.panel.frame) from \(settled)")
+    }
 }
 
 // MARK: - Fixture
@@ -265,14 +369,35 @@ private func makeConfirmationFixture() -> ConfirmationFixture {
     return ConfirmationFixture(runtime: runtime, panel: panel, pasteboard: pasteboard)
 }
 
-private func makeConfirmationProjection(commands: [String]) -> ConfirmationProjection {
+private func makeConfirmationProjection(
+    commands: [String],
+    confirmTitle: String = "Close Tab"
+) -> ConfirmationProjection {
     ConfirmationProjection(
         id: ConfirmationId(),
         title: "Close tab \"Terminal\"?",
         informativeText: "This tab has a running command.",
         commands: commands.map { DisplayLine($0) },
-        confirmTitle: "Close Tab",
-        secondaryTitle: nil
+        confirm: ConfirmationChoice(
+            title: DisplayLine(confirmTitle), answer: .confirm, isDestructive: true),
+        cancel: ConfirmationChoice(title: "Cancel", answer: .cancel)
+    )
+}
+
+/// The three-button confirmation, the only one with two affirmative answers.
+private func makeDeleteGroupProjection() -> ConfirmationProjection {
+    ConfirmationProjection(
+        id: ConfirmationId(),
+        title: "Delete group \"Work\"?",
+        informativeText: "This group has 2 tab(s).",
+        commands: [],
+        confirm: ConfirmationChoice(
+            title: "Move to General", answer: .deleteGroup(moveTabs: true)),
+        cancel: ConfirmationChoice(title: "Cancel", answer: .cancel),
+        alternatives: [
+            ConfirmationChoice(
+                title: "Close Tabs", answer: .deleteGroup(moveTabs: false), isDestructive: true)
+        ]
     )
 }
 

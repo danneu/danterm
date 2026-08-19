@@ -413,7 +413,7 @@ step 3 is a GUI stimulus. Adding a CLI route is out of scope here.
 
 ## Commit progress
 - [x] 1. feat(app): one dialog action row that owns macOS button order
-- [ ] 2. refactor(app): confirmations project their choices
+- [x] 2. refactor(app): confirmations project their choices
 - [ ] 3. refactor(app): theme sheet and todo editor adopt the action row
 
 ## Implementation notes
@@ -429,3 +429,12 @@ step 3 is a GUI stimulus. Adding a CLI route is out of scope here.
   alternate to `.defaultHigh` would be a no-op and nothing would truncate first.
   Cancel and the default are raised to `.required` instead, leaving the
   alternate at the default and making it the one that gives.
+
+- AR2's "required upper bound" on the panel column is implemented as three
+  constraints, not two: a required floor at the text width, a required ceiling
+  at `confirmationMaxColumnWidth`, and a `.defaultHigh` equality at the text
+  width. Without the optional equality the column would satisfy the floor at any
+  width and stretch to the ceiling for every confirmation.
+- `ConfirmationChoice.isDestructive` and `ConfirmationProjection.alternatives`
+  are `var` with defaults, so the four single-answer branches state neither.
+

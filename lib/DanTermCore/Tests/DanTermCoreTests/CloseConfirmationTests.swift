@@ -21,7 +21,11 @@ struct CloseConfirmationTests {
         #expect(close.title == "Close tab \"Terminal\"?")
         #expect(close.informativeText == "This tab has a running command.")
         #expect(close.commands == ["npm run dev"])
-        #expect(close.confirmTitle == "Close Tab")
+        #expect(close.confirm.title == "Close Tab")
+        #expect(close.confirm.isDestructive)
+        #expect(close.cancel.answer == .cancel)
+        #expect(close.confirm.answer == .confirm)
+        #expect(close.alternatives.isEmpty)
 
         _ = update(&model, .requestQuit)
         let quit = try #require(desiredConfirmation(in: model))
@@ -29,7 +33,88 @@ struct CloseConfirmationTests {
         #expect(quit.title == "Quit DanTerm?")
         #expect(quit.informativeText == "This will close 2 terminal sessions.")
         #expect(quit.commands == ["npm run dev"])
-        #expect(quit.confirmTitle == "Quit")
+        #expect(quit.confirm.title == "Quit")
+        #expect(quit.confirm.isDestructive)
+        #expect(quit.cancel.answer == .cancel)
+        #expect(quit.confirm.answer == .confirm)
+    }
+
+    // Intent: every subject offers exactly one cancel answer and one distinct
+    // default answer, and the answers that destroy work say so.
+    // Why it exists: the panel used to invent Cancel itself and to pick its
+    // message from a hidden view, so no branch could state either fact.
+    // Scenario: project each of the five subjects and read its choices.
+    @Test("every confirmation subject offers a cancel and a distinct default")
+    func everySubjectOffersCancelAndDefault() throws {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let tabIds = model.groups[0].tabs.map(\.id)
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        setRunning("npm run dev", in: paneId, model: &model)
+        _ = update(&model, .createGroup(name: "Work"))
+        let workId = try #require(model.groups.first { $0.name == "Work" }?.id)
+
+        var subjects: [AppModel] = []
+        let closeSubjects: [ConfirmationSubject] = [.pane(paneId), .tab(tabIds[0]), .tabs(tabIds)]
+        for subject in closeSubjects {
+            var copy = model
+            copy.pendingConfirmation = pendingCloseConfirmation(for: subject, in: copy)
+            subjects.append(copy)
+        }
+        var quitModel = model
+        quitModel.pendingConfirmation = pendingAppConfirmation()
+        subjects.append(quitModel)
+        var deleteModel = model
+        _ = update(&deleteModel, .requestDeleteGroup(id: workId))
+        subjects.append(deleteModel)
+
+        for subjectModel in subjects {
+            let projection = try #require(desiredConfirmation(in: subjectModel))
+            #expect(projection.cancel.answer == .cancel)
+            #expect(projection.cancel.title == "Cancel")
+            #expect(projection.cancel.isDestructive == false)
+            #expect(projection.confirm.answer != .cancel)
+            for alternative in projection.alternatives {
+                #expect(alternative.answer != .cancel)
+            }
+        }
+
+        // Only the delete-group default keeps the tabs, so only it is safe.
+        var destructive: [Bool] = []
+        for subjectModel in subjects {
+            destructive.append(try #require(desiredConfirmation(in: subjectModel)).confirm.isDestructive)
+        }
+        #expect(destructive == [true, true, true, true, false])
+
+        let deleteGroup = try #require(desiredConfirmation(in: subjects[4]))
+        #expect(deleteGroup.alternatives.map(\.isDestructive) == [true])
+    }
+
+    // Intent: an alternative is part of the projection's identity.
+    // Why it exists: reconcileConfirmation reconfigures the panel only when the
+    // diffed projection changes, so a choice it cannot see would never be drawn.
+    // Scenario: two projections that agree on everything but one alternative.
+    @Test("projections differing only in an alternative are not equal")
+    func alternativeParticipatesInEquality() {
+        let id = ConfirmationId()
+        func projection(alternatives: [ConfirmationChoice]) -> ConfirmationProjection {
+            ConfirmationProjection(
+                id: id,
+                title: "Delete group \"Work\"?",
+                informativeText: "This group has 1 tab(s).",
+                commands: [],
+                confirm: ConfirmationChoice(
+                    title: "Move to General", answer: .deleteGroup(moveTabs: true)),
+                cancel: ConfirmationChoice(title: "Cancel", answer: .cancel),
+                alternatives: alternatives
+            )
+        }
+        let closeTabs = ConfirmationChoice(
+            title: "Close Tabs", answer: .deleteGroup(moveTabs: false), isDestructive: true)
+
+        #expect(projection(alternatives: []) != projection(alternatives: [closeTabs]))
+        #expect(projection(alternatives: [closeTabs]) == projection(alternatives: [closeTabs]))
     }
 
     @Test("a newer request replaces the pending confirmation")

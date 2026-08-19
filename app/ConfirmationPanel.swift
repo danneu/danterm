@@ -11,14 +11,22 @@ let confirmationTextColumnWidth: CGFloat = 460
 /// shortest display DanTerm supports, whatever the command list holds.
 let confirmationCommandAreaMaxHeight: CGFloat = 220
 
+/// The widest the panel's column may grow when a long button row asks for more
+/// than the text width. Past this the row's alternate truncates instead.
+let confirmationMaxColumnWidth: CGFloat = 640
+
 /// Keeps confirmations non-modal while naming every answer with its transaction id.
 final class ConfirmationPanel: NSPanel, NSWindowDelegate {
     weak var runtime: AppRuntime?
-    private var transactionId: ConfirmationId?
+    /// The whole projection, not just its id: every answer the panel can send
+    /// is named by a choice the model wrote down, so the view never infers one
+    /// from what it drew.
+    private var projection: ConfirmationProjection?
     private let headingLabel = NSTextField(labelWithString: "")
     private let bodyLabel = NSTextField(labelWithString: "")
-    private let secondaryButton = NSButton(title: "", target: nil, action: nil)
-    private let confirmButton = NSButton(title: "", target: nil, action: nil)
+    /// The buttons, in the app's one dialog order. The UI harness reads it to
+    /// prove the drawn order and each button's message.
+    let actionRow = DialogActionRow(actions: [])
 
     // MARK: - Command list
     //
@@ -52,7 +60,9 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        title = "Confirm"
+        // A native alert has no title bar text; the heading in the content is
+        // the whole title, and repeating it above would say it twice.
+        title = ""
         isReleasedWhenClosed = false
         level = .floating
         isExcludedFromWindowsMenu = true  // keep out of the Window menu's auto window list
@@ -76,29 +86,12 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
         bodyLabel.lineBreakMode = .byWordWrapping
         bodyLabel.maximumNumberOfLines = 0
 
-        let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancel(_:)))
-        cancelButton.bezelStyle = .push
-        cancelButton.keyEquivalent = "\u{1b}"
-
         buildCommandList()
-
-        confirmButton.target = self
-        confirmButton.action = #selector(confirm(_:))
-        confirmButton.bezelStyle = .push
-        confirmButton.keyEquivalent = "\r"
-
-        secondaryButton.target = self
-        secondaryButton.action = #selector(chooseCloseTabs(_:))
-        secondaryButton.bezelStyle = .push
-
-        let buttonStack = NSStackView(views: [cancelButton, secondaryButton, confirmButton])
-        buttonStack.orientation = .horizontal
-        buttonStack.spacing = 8
 
         // One vertical stack, so hiding the command list collapses the space it
         // used instead of leaving a gap: a confirmation with no running command
         // must show no command area at all.
-        let column = NSStackView(views: [headingLabel, bodyLabel, commandScrollView, buttonStack])
+        let column = NSStackView(views: [headingLabel, bodyLabel, commandScrollView, actionRow])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 8
@@ -112,15 +105,25 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
             column.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: padding),
             column.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -padding),
             column.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -padding),
-            column.widthAnchor.constraint(equalToConstant: confirmationTextColumnWidth),
-            // The three text rows fill the column; the buttons keep their natural
-            // width and sit at its trailing edge.
+            // A floor rather than a fixed width: a button row wider than the
+            // text column widens the panel instead of breaking a constraint.
+            column.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: confirmationTextColumnWidth),
+            column.widthAnchor.constraint(
+                lessThanOrEqualToConstant: confirmationMaxColumnWidth),
+            // The text rows and the action row all fill the column; the row
+            // itself puts the buttons at the trailing edge.
             headingLabel.widthAnchor.constraint(equalTo: column.widthAnchor),
             bodyLabel.widthAnchor.constraint(equalTo: column.widthAnchor),
             commandScrollView.widthAnchor.constraint(equalTo: column.widthAnchor),
-            buttonStack.trailingAnchor.constraint(equalTo: column.trailingAnchor),
-            cancelButton.heightAnchor.constraint(equalTo: confirmButton.heightAnchor),
+            actionRow.widthAnchor.constraint(equalTo: column.widthAnchor),
         ])
+        // The column wants to be exactly the text width; the floor above only
+        // yields when the buttons need more.
+        let preferredWidth = column.widthAnchor.constraint(
+            equalToConstant: confirmationTextColumnWidth)
+        preferredWidth.priority = .defaultHigh
+        preferredWidth.isActive = true
     }
 
     private func buildCommandList() {
@@ -159,13 +162,14 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
 
     /// Refreshes the reusable panel from one complete model projection.
     func configure(_ projection: ConfirmationProjection) {
-        transactionId = projection.id
-        title = projection.title.text
+        self.projection = projection
         headingLabel.stringValue = projection.title.text
         bodyLabel.stringValue = projection.informativeText
-        confirmButton.title = projection.confirmTitle.text
-        secondaryButton.title = projection.secondaryTitle?.text ?? ""
-        secondaryButton.isHidden = projection.secondaryTitle == nil
+        actionRow.setActions(
+            projection.alternatives.map { action(for: $0, role: .alternate) }
+                + [action(for: projection.cancel, role: .cancel),
+                   action(for: projection.confirm, role: .defaultAction)]
+        )
 
         // Fresh items every time, so an item at a position can only ever hold
         // the command that position now shows.
@@ -235,8 +239,8 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
 
     // NSWindowDelegate: closing the panel is an explicit transaction cancellation.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if let transactionId {
-            runtime?.send(.cancelConfirmation(id: transactionId))
+        if let projection {
+            answer(projection.cancel)
         }
         return true
     }
@@ -259,9 +263,9 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
     override func sendEvent(_ event: NSEvent) {
         switch reservedKey(for: event) {
         case .confirm:
-            confirm(nil)
+            if let projection { answer(projection.confirm) }
         case .cancel:
-            cancel(nil)
+            if let projection { answer(projection.cancel) }
         case nil:
             super.sendEvent(event)
         }
@@ -289,22 +293,26 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
 
     // MARK: - Actions
 
-    @objc private func confirm(_ sender: Any?) {
-        guard let transactionId else { return }
-        if secondaryButton.isHidden {
-            runtime?.send(.confirmConfirmation(id: transactionId))
-        } else {
-            runtime?.send(.chooseDeleteGroupConfirmation(id: transactionId, moveTabs: true))
+    private func action(for choice: ConfirmationChoice, role: DialogActionRole) -> DialogAction {
+        DialogAction(
+            title: choice.title.text,
+            role: role,
+            isDestructive: choice.isDestructive,
+            perform: { [weak self] in self?.answer(choice) }
+        )
+    }
+
+    /// The single seam between a model-owned answer and a Msg. A click and a
+    /// reserved key press both come through here, so the two cannot diverge.
+    private func answer(_ choice: ConfirmationChoice) {
+        guard let id = projection?.id else { return }
+        switch choice.answer {
+        case .confirm:
+            runtime?.send(.confirmConfirmation(id: id))
+        case .cancel:
+            runtime?.send(.cancelConfirmation(id: id))
+        case .deleteGroup(let moveTabs):
+            runtime?.send(.chooseDeleteGroupConfirmation(id: id, moveTabs: moveTabs))
         }
-    }
-
-    @objc private func chooseCloseTabs(_ sender: Any?) {
-        guard let transactionId else { return }
-        runtime?.send(.chooseDeleteGroupConfirmation(id: transactionId, moveTabs: false))
-    }
-
-    @objc private func cancel(_ sender: Any?) {
-        guard let transactionId else { return }
-        runtime?.send(.cancelConfirmation(id: transactionId))
     }
 }

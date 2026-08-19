@@ -1063,7 +1063,26 @@ func desiredSwitcher(in model: AppModel, tally: UnreadAlertTally) -> SwitcherPro
   return SwitcherProjection(rows: rows, cursorIndex: resolved.cursorIndex)
 }
 
+/// What answering a confirmation means, in model terms. Equatable so the
+/// projection stays diffable; the panel is the only thing that maps one to a Msg.
+enum ConfirmationAnswer: Equatable, Sendable {
+  case confirm
+  case cancel
+  case deleteGroup(moveTabs: Bool)
+}
+
+/// One button a confirmation offers: its copy, its answer, and whether it
+/// destroys work.
+struct ConfirmationChoice: Equatable, Sendable {
+  let title: DisplayLine
+  let answer: ConfirmationAnswer
+  var isDestructive: Bool = false
+}
+
 /// Carries all copy and identity needed to render and answer one confirmation.
+/// The three choice fields are separate rather than one list so that a
+/// confirmation with two default answers, or none you can back out of, cannot
+/// be written down.
 struct ConfirmationProjection: Equatable {
   let id: ConfirmationId
   let title: DisplayLine
@@ -1072,9 +1091,17 @@ struct ConfirmationProjection: Equatable {
   /// panel presents each as its own item and scrolls the ones that do not fit;
   /// nothing here is shortened, so an item's copy hands over its whole command.
   let commands: [DisplayLine]
-  let confirmTitle: DisplayLine
-  let secondaryTitle: DisplayLine?
+  /// The default answer, drawn rightmost.
+  let confirm: ConfirmationChoice
+  /// Always present: every confirmation can be backed out of.
+  let cancel: ConfirmationChoice
+  /// Other answers, drawn on the leading side.
+  var alternatives: [ConfirmationChoice] = []
 }
+
+/// The cancel choice every confirmation carries. Its copy is model-owned like
+/// every other word in the dialog, so no view invents a button.
+private let confirmationCancelChoice = ConfirmationChoice(title: "Cancel", answer: .cancel)
 
 /// Projects the single pending transaction into the shared non-modal panel.
 func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
@@ -1091,8 +1118,8 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       // follows the model while the panel is open, so the command list is read
       // from the live panes the same way the session count is.
       commands: model.allPanes.compactMap(\.runningCommand).map { DisplayLine($0) },
-      confirmTitle: "Quit",
-      secondaryTitle: nil
+      confirm: ConfirmationChoice(title: "Quit", answer: .confirm, isDestructive: true),
+      cancel: confirmationCancelChoice
     )
   case .pane:
     guard let impact = pending.impact else { return nil }
@@ -1106,8 +1133,8 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       title: "Close pane?",
       informativeText: copy.informativeText,
       commands: copy.commands,
-      confirmTitle: "Close Pane",
-      secondaryTitle: nil
+      confirm: ConfirmationChoice(title: "Close Pane", answer: .confirm, isDestructive: true),
+      cancel: confirmationCancelChoice
     )
   case .tab(let tabId):
     guard tabById(tabId, in: model) != nil,
@@ -1124,8 +1151,8 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       title: DisplayLine("Close tab \"\(tabTitle.text)\"?"),
       informativeText: copy.informativeText,
       commands: copy.commands,
-      confirmTitle: "Close Tab",
-      secondaryTitle: nil
+      confirm: ConfirmationChoice(title: "Close Tab", answer: .confirm, isDestructive: true),
+      cancel: confirmationCancelChoice
     )
   case .tabs(let tabIds):
     guard let impact = pending.impact else { return nil }
@@ -1142,8 +1169,9 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
         : "Close \(tabCount) tabs?"),
       informativeText: copy.informativeText,
       commands: copy.commands,
-      confirmTitle: DisplayLine("Close \(tabCount) Tabs"),
-      secondaryTitle: nil
+      confirm: ConfirmationChoice(
+        title: DisplayLine("Close \(tabCount) Tabs"), answer: .confirm, isDestructive: true),
+      cancel: confirmationCancelChoice
     )
   case .deleteGroup(let groupId):
     guard let frozen = pending.deleteGroup,
@@ -1157,8 +1185,15 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       title: DisplayLine("Delete group \"\(group.name)\"?"),
       informativeText: "This group has \(frozen.tabIds.count) tab(s).",
       commands: [],
-      confirmTitle: DisplayLine("Move to \(destination.name)"),
-      secondaryTitle: "Close Tabs"
+      confirm: ConfirmationChoice(
+        title: DisplayLine("Move to \(destination.name)"),
+        answer: .deleteGroup(moveTabs: true)
+      ),
+      cancel: confirmationCancelChoice,
+      alternatives: [
+        ConfirmationChoice(
+          title: "Close Tabs", answer: .deleteGroup(moveTabs: false), isDestructive: true)
+      ]
     )
   }
 }
