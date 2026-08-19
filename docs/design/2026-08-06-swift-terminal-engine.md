@@ -129,13 +129,14 @@ Status values:
 | id | Decision | Status |
 |---|---|---|
 | C1 | The core is a synchronous state machine over bytes plus explicit inputs, producing output bytes, damage, and semantic effects. PTY IO, scheduling, rendering, and AppKit live outside it. | live |
-| C2 | Supported surface: primary and alternate screens; cursor movement, wrapping, tabs, margins, scrolling regions; insertion, deletion, erasure, background-color erase; saved cursor and modes; 16-color, 256-color, and RGB presentation; bold, dim, italic, underline and underline color, reverse, hidden, strike; cursor style and the requested blink preference; synchronized updates; device, cursor, and mode queries needed for feature detection. | live |
+| C2 | Supported surface: primary and alternate screens; cursor movement, wrapping, tabs, margins, scrolling regions; insertion, deletion, erasure, background-color erase; saved cursor and modes; 7-bit GL character sets; 16-color, 256-color, and RGB presentation; bold, dim, italic, underline and underline color, reverse, hidden, strike; cursor style and the requested blink preference; synchronized updates; device, cursor, and mode queries needed for feature detection. | live |
 | C3 | Unknown, malformed, canceled, or truncated sequences never poison subsequent input. | live |
 | C4 | Input chunk boundaries do not change behavior. | live |
 | C5 | Alternate-screen content never enters normal scrollback. | live |
 | C6 | Synchronized updates suppress intermediate presentation without suppressing final state changes. | live |
 | C7 | Query replies report only capabilities the engine actually implements. | live |
 | C8 | Out of scope: VT52, printer, Tektronix, and terminal graphics emulation. | deferred |
+| C9 | Character sets are the 7-bit GL half of ISO 2022 in full: ASCII, DEC Special Graphics, and UK, designated into G0-G3 and invoked by SI/SO, LS2/LS3, and SS2/SS3. There is no GR bank, because the UTF-8 decoder consumes every byte at or above 0x80 before charset logic could see it, so GR state could never be observed. An unrecognized designation -- an unknown final, or extra intermediates such as `ESC ( % 5` -- designates ASCII rather than leaving the slot stale, because no program can query charset state and stale line drawing is worse than deterministic plain text. The DEC Special table matches xterm on all of 0x60-0x7E and keeps 0x5F identity, which is ghostty's choice where xterm's wide build maps it to U+2426. | live |
 
 ### D. Unicode, grid, and scrollback
 

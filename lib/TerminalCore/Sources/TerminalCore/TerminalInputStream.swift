@@ -10,9 +10,11 @@ enum TerminalStreamAction: Equatable, Sendable {
     /// keeps the action POD and copies nothing; it is only meaningful to the caller that supplied
     /// the chunk, which is the same call that receives it.
     ///
-    /// Semantically this *is* one `.print` per byte in the range -- the tests state the token
-    /// stream that way and `expandedFeed` expands it -- so no caller may treat the run as a unit
-    /// the character path could not produce.
+    /// Semantically this is one *GL print* per byte in the range -- the parser tests state the
+    /// token stream that way and `expandedFeed` expands it -- so no caller may treat the run as
+    /// a unit the character path could not produce. A GL print is not the same as `.print`: the
+    /// grid reducer translates each byte through the invoked character set, while `.print`
+    /// carries an already-decoded scalar that no character set touches.
     case printASCIIRun(Range<Int>)
     case print(Unicode.Scalar)
     case execute(UInt8)

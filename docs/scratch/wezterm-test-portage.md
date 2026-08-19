@@ -257,6 +257,12 @@ Resize and reflow cases:
   escape does not corrupt a later hard boundary" idea may inform the supported
   control variants, but do not adopt the line-drawing verdict.
 
+  *Superseded 2026-08-19.* DanTerm now implements the whole 7-bit GL half of
+  ISO 2022, register row C9 in
+  [../design/2026-08-06-swift-terminal-engine.md](../design/2026-08-06-swift-terminal-engine.md).
+  Porting this case is possible; the "deliberately unsupported" verdict above,
+  and the same verdict in the closing summary of this note, no longer hold.
+
 Scrollback, Unicode, region, and hyperlink cases, likely superseded or policy-
 different:
 
@@ -639,4 +645,5 @@ Each clause, with its evidence:
 - the policy differences that survive are named in the tests themselves: wide
   cells snap outward, off-grid drag ends clamp to retained content, selection
   coordinates stay in the retained stream, DEC Special Graphics is not
-  implemented, and terminal graphics stay out of scope.
+  implemented (superseded 2026-08-19: it is, see the note above), and terminal
+  graphics stay out of scope.

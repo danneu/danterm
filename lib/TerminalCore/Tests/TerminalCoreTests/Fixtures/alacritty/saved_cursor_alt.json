@@ -8,7 +8,7 @@
     "license": "Apache-2.0",
     "licenseNotice": "LICENSE.alacritty.txt",
     "recordedDeviations": [
-      "DanTerm ignores unpromised legacy G0 character-set state during cursor restore."
+      "DanTerm keeps DEC Special Graphics 0x5F identity, following ghostty and xterm's narrow build, where alacritty renders it blank."
     ]
   },
   "initial": {
@@ -25,12 +25,11 @@
       "expect": {
         "viewportContains": [
           "  test",
-          "[undeadleech@archhq saved_cursor_alt]$ exit"
+          "[\u2524\u253c\u240d\u240a\u2592\u240d\u250c\u240a\u240a\u240c\u2424@\u2592\u23bc\u240c\u2424\u2424\u2500 \u23bd\u2592\u2534\u240a\u240d_\u240c\u2524\u23bc\u23bd\u23ba\u23bc_\u2592\u250c\u251c]$ \u240a\u2502\u240b\u251c"
         ],
         "viewportExcludes": [
           " xxxst",
-          "\u23bd\u251c",
-          "\u2502\u2502\u2502"
+          "[undeadleech@archhq saved_cursor_alt]$ exit"
         ]
       }
     }

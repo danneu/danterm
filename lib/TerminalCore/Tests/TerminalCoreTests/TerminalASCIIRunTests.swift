@@ -363,6 +363,21 @@ struct TerminalASCIIRunTests {
             columns: 16, rows: 3,
             input: "ab\tcd\u{08}\u{08}ef\tg\r\nhij\tk\r\n"
         ),
+        Scenario(
+            name: "charset designation mid-run",
+            columns: 8, rows: 3,
+            input: "abc\u{1B}(0lqqqk\u{1B}(Bdef\u{1B}(Amn#pq\u{1B}(Bz\r\n"
+        ),
+        Scenario(
+            name: "locking shifts mid-run",
+            columns: 8, rows: 3,
+            input: "\u{1B})0ab\u{0E}lqk\u{0F}cd\u{0E}mjx\u{0F}ef\r\n"
+        ),
+        Scenario(
+            name: "single shifts mid-run",
+            columns: 8, rows: 3,
+            input: "\u{1B}*0\u{1B}+0ab\u{1B}Nqq\u{1B}Oq\u{1B}nrs\u{1B}oq\u{0F}tu\r\n"
+        ),
     ]
 
     private func replay(_ scenario: Scenario, chunkSize: Int) throws -> Terminal {

@@ -573,6 +573,9 @@ public struct Terminal: Equatable, Sendable {
         var isCursorVisible = true
         var cursorShape = TerminalCursorShape.block
         var isCursorBlinking = false
+        // The VT420 manual puts the designations, the GL invocation, and any pending single
+        // shift in DECSC's list, so the slot carries the whole charset value.
+        var charsets = TerminalCharsetState()
     }
 
     /// Owns terminal-scoped mode state so reset has one complete default value.
@@ -693,6 +696,9 @@ public struct Terminal: Equatable, Sendable {
     private var scrollRegion: Range<Int>?
     private var promptRedrawMode = PromptRedrawMode.full
     private var modes = TerminalModes()
+    // Terminal-scoped, not per-screen: a raw 1047 switch changes no charset state in any
+    // reference implementation, and storing it here is what makes that true for free.
+    private var charsets = TerminalCharsetState()
     private var tabStops: Set<Int>
     private var lastPrintedCluster: LastPrintedCluster?
     private var clusterContext: ClusterContext?
@@ -6381,12 +6387,25 @@ public struct Terminal: Equatable, Sendable {
             clearPendingMotionState()
         case 0x63:
             hardReset()
+        case 0x6E:
+            charsets.invokedSlot = .g2
+        case 0x6F:
+            charsets.invokedSlot = .g3
+        case 0x4E:
+            charsets.pendingSingleShift = .g2
+        case 0x4F:
+            charsets.pendingSingleShift = .g3
         default:
             break
         }
     }
 
     private mutating func dispatchEscape(_ sequence: EscapeSequence) {
+        if let first = sequence.intermediates.first,
+           let slot = TerminalCharsetSlot(designationIntermediate: first) {
+            designateCharset(into: slot, sequence)
+            return
+        }
         guard sequence.intermediates.key == 0x23, sequence.final == 0x38 else { return }
         invalidateInspection(inViewportRows: screen.rows.indices)
         // DECALN replaces every row, row 0 included, so history's claim on it must end first.
@@ -6398,6 +6417,27 @@ public struct Terminal: Equatable, Sendable {
             })
         }
         clearPendingMotionState()
+    }
+
+    /// Designates one character set into a slot, degrading anything unsupported to ASCII.
+    ///
+    /// A slot left holding its previous set after an unrecognized designation would translate
+    /// later output the program never asked to translate, and no report exists for a program
+    /// to notice. So an unknown final -- and any longer form such as `ESC ( % 5` -- designates
+    /// ASCII, which is deterministic plain text rather than history-dependent line drawing.
+    /// Designation consumes no cell, so it must not touch pending wrap or the open cluster:
+    /// `sgr0=\E(B\E[m` puts one in every attribute reset.
+    private mutating func designateCharset(
+        into slot: TerminalCharsetSlot,
+        _ sequence: EscapeSequence
+    ) {
+        guard sequence.intermediates.count == 1,
+              let charset = TerminalCharset(designationFinal: sequence.final)
+        else {
+            charsets[slot] = .ascii
+            return
+        }
+        charsets[slot] = charset
     }
 
     private mutating func execute(_ control: UInt8) {
@@ -6421,6 +6461,10 @@ public struct Terminal: Equatable, Sendable {
         case 0x0D:
             screen.cursor.column = 0
             clearPendingMotionState()
+        case 0x0E:
+            charsets.invokedSlot = .g1
+        case 0x0F:
+            charsets.invokedSlot = .g0
         default:
             break
         }
@@ -6464,7 +6508,8 @@ public struct Terminal: Equatable, Sendable {
             isOriginMode: modes.isOriginMode,
             isCursorVisible: modes.isCursorVisible,
             cursorShape: modes.cursorShape,
-            isCursorBlinking: modes.isCursorBlinking
+            isCursorBlinking: modes.isCursorBlinking,
+            charsets: charsets
         )
     }
 
@@ -6480,6 +6525,7 @@ public struct Terminal: Equatable, Sendable {
         modes.isCursorVisible = screen.savedCursor.isCursorVisible
         modes.cursorShape = screen.savedCursor.cursorShape
         modes.isCursorBlinking = screen.savedCursor.isCursorBlinking
+        charsets = screen.savedCursor.charsets
         clusterContext = nil
         screen.isPendingWrap = screen.savedCursor.isPendingWrap
             && modes.isAutoWrapMode
@@ -6613,6 +6659,9 @@ public struct Terminal: Equatable, Sendable {
     private mutating func resetControlState() {
         scrollRegion = nil
         modes = TerminalModes()
+        // Covers RIS and DECSTR at once: xterm resets the charsets outside `ReallyReset`'s
+        // full-reset branch, so a soft reset clears them too.
+        charsets = TerminalCharsetState()
         screen.kittyKeyboardStack.removeAll(keepingCapacity: true)
         inactiveScreen?.kittyKeyboardStack.removeAll(keepingCapacity: true)
         tabStops = Self.defaultTabStops(columns: columnCount)
@@ -6653,12 +6702,16 @@ public struct Terminal: Equatable, Sendable {
         screen.kittyKeyboardStack = stack
     }
 
-    /// Prints a run of printable ASCII, taking as much of it in bulk as the grid state allows.
+    /// Prints a run of GL bytes, taking as much of it in bulk as the grid state allows.
     ///
     /// The loop is the whole contract: `printBulkASCII` takes a prefix or declines, and whatever
-    /// it declines goes through `print` one character at a time. So the cut rules live in one
-    /// place, every one of them costs a character rather than the run, and a rule this reducer
-    /// does not know about cannot produce a wrong grid -- only a slower one.
+    /// it declines goes through `printGLByte` one character at a time. So the cut rules live in
+    /// one place, every one of them costs a character rather than the run, and a rule this
+    /// reducer does not know about cannot produce a wrong grid -- only a slower one.
+    ///
+    /// This is the only place raw GL stream bytes become scalars, which is why it is the only
+    /// place charset translation happens. `print(_:)` is reached with already-decoded scalars
+    /// and with already-translated cell scalars re-fed by REP, and must not translate either.
     private mutating func printASCIIRun(
         _ bytes: UnsafeBufferPointer<UInt8>,
         _ range: Range<Int>
@@ -6667,12 +6720,19 @@ public struct Terminal: Equatable, Sendable {
         while index < range.upperBound {
             let taken = printBulkASCII(bytes, from: index, limit: range.upperBound)
             if taken == 0 {
-                print(Unicode.Scalar(bytes[index]))
+                printGLByte(bytes[index])
                 index += 1
             } else {
                 index += taken
             }
         }
+    }
+
+    /// Prints one GL byte through the active character set.
+    ///
+    /// The set is read before the print because printing is what spends a pending single shift.
+    private mutating func printGLByte(_ byte: UInt8) {
+        print(charsets.activeCharset.translate(byte))
     }
 
     /// Writes a prefix of the run into one row in a single pass, or returns 0 to decline it.
@@ -6696,7 +6756,12 @@ public struct Terminal: Equatable, Sendable {
         from start: Int,
         limit: Int
     ) -> Int {
-        guard screen.isPendingWrap == false, modes.isInsertMode == false else { return 0 }
+        // A pending single shift applies to exactly one character, so the run cannot carry it:
+        // declining costs that one character and the rest of the run re-enters unshifted.
+        guard screen.isPendingWrap == false,
+              modes.isInsertMode == false,
+              charsets.pendingSingleShift == nil
+        else { return 0 }
         let row = screen.cursor.row
         let column = screen.cursor.column
         guard screen.rows.indices.contains(row), screen.rows[row].cells.count == columnCount,
@@ -6738,13 +6803,27 @@ public struct Terminal: Equatable, Sendable {
             clearPreviousSpacer(beforeRow: row, column: column)
         }
 
-        writeNarrowCells(
-            row: row,
-            column: column,
-            count: count,
-            baseIdentity: baseIdentity,
-            breakClass: .other
-        ) { Unicode.Scalar(bytes[start + $0]) }
+        // Translation belongs inside the run: a locking shift must not push a whole ncurses
+        // border onto the per-character path. The identity set keeps its own supplier so the
+        // overwhelmingly common case pays no charset branch per character.
+        let charset = charsets[charsets.invokedSlot]
+        if charset == .ascii {
+            writeNarrowCells(
+                row: row,
+                column: column,
+                count: count,
+                baseIdentity: baseIdentity,
+                breakClass: .other
+            ) { Unicode.Scalar(bytes[start + $0]) }
+        } else {
+            writeNarrowCells(
+                row: row,
+                column: column,
+                count: count,
+                baseIdentity: baseIdentity,
+                breakClass: .other
+            ) { charset.translate(bytes[start + $0]) }
+        }
         rememberOpenCluster()
         return count
     }
@@ -6804,6 +6883,11 @@ public struct Terminal: Equatable, Sendable {
 
         let properties = classification.properties
         guard properties.cellWidth != .zero else { return }
+
+        // Past this point a cell is written, which is what spends a single shift -- whatever
+        // the character is, and whether or not it came from a GL byte the shift could map.
+        // A mark that joined the open cluster returned above and leaves the shift armed.
+        charsets.pendingSingleShift = nil
 
         if screen.isPendingWrap {
             invalidateInspection(inViewportRows: screen.cursor.row..<(screen.cursor.row + 1))

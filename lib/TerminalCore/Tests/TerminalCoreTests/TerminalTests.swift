@@ -151,7 +151,7 @@ struct TerminalTests {
 
         let ignored: [UInt8] = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
-            0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
             0x18, 0x19, 0x1A, 0x1C, 0x1D, 0x1E, 0x1F, 0x7F,
         ]
         for control in ignored {
@@ -160,6 +160,17 @@ struct TerminalTests {
             let expected = terminal
             terminal.feed([control])
             #expect(terminal == expected)
+        }
+
+        // SO and SI move the GL invocation, so they are not state-identity no-ops. They still
+        // consume no cell, which is what this test is about: `sgr0` and `rmacs` emit them in
+        // ordinary ncurses traffic, and clearing the latch there would break wrapping.
+        for control in [0x0E, 0x0F] as [UInt8] {
+            var terminal = try #require(Terminal(columns: 2, rows: 2))
+            terminal.feed(Array("AB".utf8))
+            terminal.feed([control])
+            #expect(terminal.geometry.cursor?.isPendingWrap == true)
+            #expect(terminal.cell(row: 0, column: 1)?.scalars == ["B"])
         }
 
         var bell = try #require(Terminal(columns: 2, rows: 2))
