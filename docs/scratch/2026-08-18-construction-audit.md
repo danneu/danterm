@@ -10,6 +10,11 @@ Three fan-outs over the tree at 2026-08-18, 42 agents in total.
   cache, a mirror, or a hand-invalidated side table was scored down on purpose,
   because that is the shape round 1 spends most of its findings undoing. 61
   findings (`FEED-1`, `HIST-3`, ...).
+- **Defects.** Ten agents hunting behavior that is wrong today, checked against
+  the emulators pinned under `references/`, with every claim turned into a probe
+  that two further agents actually ran. 35 defects (`BUG-01`, ...), in their own
+  [Defects](#defects) section ahead of the plan, because a wrong behavior
+  outranks a better structure.
 - **Vetting.** Fourteen adversarial verifiers re-read all 138 findings against
   the real code, one per subsystem, seeing both rounds for the same files. They
   rescored, corrected, pruned, and recorded the dependencies between findings; a
@@ -80,6 +85,939 @@ found the quoted code in the tree. Each finding carries one of five verdicts:
 | `rewrite` | Real, but the finding misstated the problem, the evidence, or the fix. The correction is in the **Vetted** block. |
 | `pruned` | Not real, not worth doing, or already owned by another finding. Moved to [Pruned](#pruned) and out of the plan. |
 | `merged` | Two auditors found the same thing. Keeps its id so links do not dangle; the survivor carries the work. |
+
+<a id="defects"></a>
+
+## Defects
+
+A fourth pass, on 2026-08-19, went looking for behavior that is wrong today
+rather than for structure that could be better. Ten agents each took one area of
+terminal behavior and compared `TerminalCore` against the emulators pinned under
+`references/`; every deviation they found was written as a byte-stream probe, and
+two further agents built a throwaway package against `lib/TerminalCore` and ran
+all 43 probes for real. 35 survive after merging the duplicates that two areas
+found from different sides.
+
+**Read this before acting on any of them.** The runs prove one thing and not the
+other. Every probe below was executed, so what DanTerm does is measured, not
+predicted -- the observed values are verbatim. What was NOT independently
+re-checked is the other half of each claim: that the reference emulators really
+behave as the hunter said. The runner took the expected value from the finding.
+So treat `observed` as fact and `expected` as a citation you should follow into
+`references/` before you change anything.
+
+**Thirteen of the 35 are pinned by a deliberate test.** Those are not oversights;
+somebody decided, wrote the behavior down, and pinned it. Changing one means
+editing the test that records the decision, so it is a decision to revisit rather
+than a bug to fix, and it is marked as such below. The compatibility rule in
+AGENTS.md is what puts them on the table at all: on what a sequence does, the
+references are the requirement.
+
+| Sev | Id | Sequence | Status | Defect |
+|---|---|---|---|---|
+| 5 | [BUG-01](#bug-01) | ESC ( 0 (SCS, designate DEC Special Characte | unpinned | Implement SCS G0 designation so ESC ( 0 maps GL through the DEC Special Graphics table |
+| 5 | [BUG-02](#bug-02) | CSI ! p (DECSTR) | **pinned by a test** | Stop DECSTR from leaving the alternate screen |
+| 4 | [BUG-03](#bug-03) | CSI n B (CUD), CSI n A (CUU), CSI n E (CNL), | unpinned | Clamp CUU/CUD/CNL/CPL to the scroll margins even when origin mode is off |
+| 4 | [BUG-04](#bug-04) | CSI n P (DCH), CSI n @ (ICH) | **pinned by a test** | Stop suppressing ICH and DCH when the cursor row is outside the vertical scroll region |
+| 4 | [BUG-05](#bug-05) | Legacy (non-kitty) Ctrl+key text encoding | **pinned by a test** | Map Ctrl with / and the digits 2-8 to their C0 control bytes |
+| 4 | [BUG-06](#bug-06) | OSC 10 ; ? BEL and OSC 11 ; ? BEL (dynamic c | **pinned by a test** | Reply to an OSC query with the terminator the request used, not always ST |
+| 3 | [BUG-07](#bug-07) | SO (0x0E, LS1) and SI (0x0F, LS0), with ESC  | unpinned | Add G1 designation and SI/SO locking shifts so 0x0E/0x0F switch the active charset |
+| 3 | [BUG-08](#bug-08) | ESC # 8 (DECALN) | unpinned | Make DECALN reset the margins, origin mode, and rendition, and home the cursor |
+| 3 | [BUG-09](#bug-09) | CSI n L (IL), CSI n M (DL) | **pinned by a test** | Move the cursor to column 0 on IL and DL |
+| 3 | [BUG-10](#bug-10) | CSI ? Ps J (DECSED) and CSI ? Ps K (DECSEL) | unpinned | Dispatch DECSED and DECSEL (CSI ? Ps J / CSI ? Ps K) as ED and EL |
+| 3 | [BUG-11](#bug-11) | OSC 7 ; file:///path ST (working directory r | **pinned by a test** | Accept OSC 7 file URIs with an empty host as local |
+| 3 | [BUG-12](#bug-12) | ESC 7 / ESC 8 (DECSC/DECRC), also CSI ? 1048 | **pinned by a test** | Keep DECSC's saved cursor visibility out of DECRC (do not save DECTCEM) |
+| 3 | [BUG-13](#bug-13) | ESC c (RIS) | **pinned by a test** | Reset the saved-cursor slot on RIS |
+| 3 | [BUG-14](#bug-14) | ESC # 8 (DECALN) | unpinned | Clear the character rendition on DECALN, keeping only the colours |
+| 3 | [BUG-15](#bug-15) | CSI Pm m (SGR) with more than 24 parameters  | unpinned | Truncate an over-long CSI parameter list instead of discarding the whole sequence |
+| 3 | [BUG-16](#bug-16) | DECSC / DECRC (ESC 7 / ESC 8), and the impli | **pinned by a test** | Carry the saved cursor through width reflow instead of only clamping it |
+| 3 | [BUG-17](#bug-17) | DECSC / DECRC (ESC 7 / ESC 8) across a row-c | unpinned | Displace the saved cursor by the same row delta as the live cursor on a height shrink |
+| 3 | [BUG-18](#bug-18) | printing a narrow or wide character over one | unpinned | Paint the vacated half of a wide pair with a background, not the default style |
+| 3 | [BUG-19](#bug-19) | DECAWM off (CSI ? 7 l) followed by a double- | **pinned by a test** | Leave the cursor at the last column after a wide char printed there with DECAWM off |
+| 3 | [BUG-20](#bug-20) | IRM on (CSI 4 h) followed by a double-width  | unpinned | Stop insert mode from erasing the wrap spacer a wide character just wrote |
+| 3 | [BUG-21](#bug-21) | CSI 0 K (EL 0) at column 0 of row 0, and CSI | unpinned | Sever history's incoming wrap claim for every erase that blanks all of row 0, not just ED |
+| 2 | [BUG-22](#bug-22) | ESC Z (DECID, obsolete form of CSI c / DA1) | unpinned | Reply to ESC Z (DECID) with the primary device attributes string |
+| 2 | [BUG-23](#bug-23) | Legacy Escape key with the Alt modifier | unpinned | Prefix Alt+Escape with ESC in legacy mode |
+| 2 | [BUG-24](#bug-24) | ESC H (HTS) and CSI Ps g (TBC) | unpinned | Stop HTS and TBC from cancelling the pending-wrap flag |
+| 2 | [BUG-25](#bug-25) | CSI ? 2027 $ p (DECRQM for the grapheme-clus | unpinned | Report DECRQM ?2027 as permanently set instead of unrecognized |
+| 2 | [BUG-26](#bug-26) | A C1 control as a UTF-8 code point, e.g. U+0 | unpinned | Stop printing a cell for C1 code points decoded from UTF-8 |
+| 2 | [BUG-27](#bug-27) | CSI ? 7 h / CSI ? 7 l (DECAWM), CSI 4 h / CS | unpinned | Stop clearing the pending-wrap flag when a mode is set or reset |
+| 2 | [BUG-28](#bug-28) | Keypad Enter with kitty keyboard flag 1 (dis | unpinned | Report unmodified keypad Enter as CSI 57414u under the kitty keyboard protocol |
+| 2 | [BUG-29](#bug-29) | OSC 10 ; ? ; ? ST (multi-parameter dynamic c | **pinned by a test** | Answer every ? in a dynamic colour request, advancing the colour index per parameter |
+| 2 | [BUG-30](#bug-30) | CSI 2 K (EL 2) on a soft-wrapped row of the  | unpinned | Preserve the stale-wrap-claim bit when the alternate screen is resized by height alone |
+| 2 | [BUG-31](#bug-31) | CSI ! p (DECSTR), interacting with CSI 3 g ( | **pinned by a test** | Stop DECSTR from clearing custom tab stops |
+| 2 | [BUG-32](#bug-32) | CSI ! p (DECSTR) followed by ESC 8 (DECRC) | **pinned by a test** | Reset the saved-cursor slot to the default rendition on DECSTR |
+| 2 | [BUG-33](#bug-33) | a zero-width combining mark (for example U+0 | unpinned | Attach a combining mark to the cell left of the cursor when no cluster is open |
+| 1 | [BUG-34](#bug-34) | Keypad Enter in numeric keypad mode while LN | unpinned | Apply LNM to keypad Enter, not only to the main Return key |
+| 1 | [BUG-35](#bug-35) | OSC 8 ; id= ; uri ST (hyperlink open with an | unpinned | Treat an empty OSC 8 id= as no id rather than as an id whose value is the empty string |
+
+<a id="bug-01"></a>
+
+### BUG-01. Implement SCS G0 designation so ESC ( 0 maps GL through the DEC Special Graphics table
+
+`ESC ( 0 (SCS, designate DEC Special Character and Line Drawing Set into G0) and ESC ( B (designate ASCII)` &middot; severity 5 (corrupts the screen or traps a program) &middot; hunter confidence 5
+
+**Problem.** DanTerm has no charset state at all. The absorber recognizes ESC ( 0 as an EscapeSequence with intermediate 0x28 and final 0x30, and the dispatcher throws it away, so the bytes that follow print as plain ASCII letters instead of box-drawing glyphs. DanTerm launches children with TERM=xterm-256color (lib/TerminalPTY/Sources/TerminalPaneSession/TerminalPaneLaunch.swift, EnvironmentEntry TERM), and that terminfo entry defines smacs=\E(0 and rmacs=\E(B, so every ncurses program that draws with ACS characters emits exactly this pair.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#Terminal.dispatchEscape(_:) (the EscapeSequence overload) starts with `guard sequence.intermediates.key == 0x23, sequence.final == 0x38 else { return }`, so every SCS designation returns immediately. lib/TerminalCore/Sources/TerminalCore/Terminal.swift#Terminal.print and #Terminal.printASCIIRun translate nothing; there is no G0/G1 field on the terminal or on SavedCursorState.
+
+**What the references do.** references/xterm/ctlseqs.ms documents `ESC ( C` with `C = 0` as "DEC Special Character and Line Drawing Set, VT100", and references/xterm/terminfo gives the xterm-256color entry smacs=\E(0 and rmacs=\E(B with a full acsc string. references/ghostty/src/terminal/charsets.zig#dec_special defines the table (0x6c -> U+250C, 0x71 -> U+2500, 0x6b -> U+2510) and Slots/ActiveSlot hold the G0..G3 state. references/kitty/kitty/screen.c#screen_designate_charset plus references/kitty/kitty/charsets.c#translation_table do the same, and kitty's map_char applies it on every printed codepoint. The three agree on l/q/k; ghostty and kitty differ only on 0x68 ('h': U+2424 vs U+2591), which no box-drawing app depends on. DanTerm should follow ghostty/xterm's table since its terminfo identity is xterm.
+
+**Who notices.** Any ncurses TUI that draws borders or rules with ACS: dialog, whiptail, mc, ncdu, the box frames in many curses menus, and `tput smacs` in shell scripts. Instead of a frame the user sees rows of the literal letters lqk/mjx/tuvw across the screen, which makes the whole layout unreadable.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}(0lqk\u{1b}(Bab"` at 10 columns x 1 row
+- Observe: `terminal.screenText`
+- Expected (per the references): "┌─┐ab     " -- l/q/k map to U+250C/U+2500/U+2510 per references/ghostty/src/terminal/charsets.zig#dec_special and references/kitty/kitty/charsets.c (charset_translations[0]), and ESC ( B restores ASCII so "ab" prints literally (references/xterm/ctlseqs.ms, ESC ( C).
+- **Observed: "lqkab     "** -- verdict `reproduced`
+- Ablation: None needed and none available -- the whole feed is the designation plus the three letters, and the letters print unmapped. There is no sequence to strip whose removal changes the output.
+- Note: ESC ( 0 is silently dropped; the DEC Special Graphics letters print literally.
+
+<a id="bug-02"></a>
+
+### BUG-02. Stop DECSTR from leaving the alternate screen
+
+`CSI ! p (DECSTR)` &middot; severity 5 (corrupts the screen or traps a program) &middot; hunter confidence 5 &middot; **pinned by a deliberate test**
+
+**Problem.** DanTerm treats a soft reset as if it were a hard reset for screen selection: it forces the primary screen live. Every reference confines the screen switch to the hard-reset path. The application does not know the switch happened, so everything it draws next lands on the shell's primary screen and its scrollback, and its later rmcup is a no-op because the terminal is already on primary -- the alternate buffer it built is stranded in the inactive slot and never shown again.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#softReset calls selectPrimaryScreen() unconditionally, the same call hardReset() makes.
+
+**What the references do.** xterm charproc.c#ReallyReset runs FromAlternate only inside the `if (full)` (RIS) branch; the DECSTR `else` branch touches attributes, autowrap and the saved cursor only. vte src/vteseq.cc#Terminal::DECSTR calls reset(false, false), and src/vte.cc#Terminal::reset switches to the normal screen only under `if (clear_history)`. kitty kitty/screen.c#do_screen_reset guards the buffer toggle with `if (is_hard_reset && self->linebuf == self->alt_linebuf)`. Ghostty does not implement DECSTR at all (src/terminal/stream.zig logs "ignoring unimplemented CSI p with intermediates"), so it cannot switch either. No reference disagrees; DanTerm should follow xterm/vte/kitty and leave the active screen alone.
+
+**Who notices.** Any full-screen program that emits DECSTR after smcup. xterm's own terminfo defines is2 and rs2 as `\E[!p\E[?3;4l\E[4l\E>` (references/xterm/terminfo), so running `tput init`, `tput reset` or `reset` from a shell spawned inside a TUI -- or any curses program that sends its init string after entering the alternate screen -- silently dumps the TUI's redraw onto the shell's scrollback and leaves the screen unrecoverable until the user redraws by hand.
+
+**Existing test.** lib/TerminalCore/Tests/TerminalCoreTests/TerminalAlternateScreenTests.swift#resetsReselectPrimary ("RIS and DECSTR leave the primary screen selected") and #alternateCursorProjectionOverScrollback both pin the current behavior deliberately. Both must change: the DECSTR half of each is a compatibility choice made against three references.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[?1049hALT\u{1b}[!p"` at 80x24
+- Observe: `terminal.isAlternateScreenActive`
+- Expected (per the references): true -- xterm charproc.c#ReallyReset, vte vte.cc#Terminal::reset, kitty screen.c#do_screen_reset all keep the alternate screen live across a soft reset
+- **Observed: isAlternateScreenActive = false** -- verdict `reproduced`
+- Ablation: Removed the \e[!p: isAlternateScreenActive = true.
+- Note: Same run as sgr-color-3.
+
+**Also found as.** `sgr-color-3` in the hunt output -- same defect from another area.
+
+<a id="bug-03"></a>
+
+### BUG-03. Clamp CUU/CUD/CNL/CPL to the scroll margins even when origin mode is off
+
+`CSI n B (CUD), CSI n A (CUU), CSI n E (CNL), CSI n F (CPL)` &middot; severity 4 (a real program misbehaves) &middot; hunter confidence 5
+
+**Problem.** Relative vertical motion ignores DECSTBM margins unless DECOM is on. Every reference clamps relative vertical motion to the margins whenever the cursor starts inside them, independently of origin mode: the cursor may not step past the bottom margin going down, nor past the top margin going up. DanTerm only narrows the clamp range when origin mode is set, so with margins set and origin mode off (the overwhelmingly common configuration) CUD walks the cursor out of the region and down to the last screen row, and CUU walks it up to row 0. CUU (0x41), CUD (0x42), CNL (0x45) and CPL (0x46) all funnel through the same clamp, so all four are wrong; the companion CUU probe is feed "\u{1b}[5;20r\u{1b}[10;1H\u{1b}[9A", which should leave `terminal.geometry.cursor?.row == 4` and today leaves 0.
+
+**What DanTerm does.** `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#movePositionedCursor` clamps the target row to `positioningRowRange`, and `Terminal.swift#positioningRowRange` returns `activeScrollRegion` only when `modes.isOriginMode` is true, otherwise `0..<rowCount`. The CSI dispatch arms for 0x41/0x42/0x45/0x46 in `Terminal.swift#dispatchCSI` compute `screen.cursor.row +/- amount` and hand it straight to that one clamp.
+
+**What the references do.** `references/xterm/cursor.c#CursorDown` sets `max = (cur_row > bot_marg ? max_row : bot_marg)` and `references/xterm/cursor.c#CursorUp` sets `min = (cur_row < top_marg ? 0 : top_marg)` -- neither reads the ORIGIN flag. `references/ghostty/src/terminal/Terminal.zig#cursorDown` and `#cursorUp` compute the move limit from `self.scrolling_region.bottom`/`.top` with the same "already outside" fallback and no origin-mode test; ghostty's CNL/CPL in `references/ghostty/src/terminal/stream.zig` are literally cursor_down/cursor_up plus a carriage return, so they inherit the clamp. `references/kitty/kitty/screen.c#screen_cursor_up` captures `cursor_within_margins(self)` before moving and passes it to `screen_ensure_bounds`, keeping a cursor that started inside the margins inside them. All three agree; there is no disagreement to adjudicate.
+
+**Who notices.** An inline-viewport TUI that pins a footer with `CSI 1;N r` and drives its transcript with CUD: after a large CUD the cursor sits on the footer row instead of the last transcript row, and the next printed line overwrites the footer. The same shape breaks any full-screen editor that sets a text-area region and uses CUD/CNL to walk to the bottom of the area.
+
+**Existing test.** None found. `lib/TerminalCore/Tests/TerminalCoreTests/TerminalModeTests.swift#originModePositionsWithinRegion` pins the origin-mode-ON case only (`CSI 5;15r`, `CSI ?6h`, then `CSI 10A`/`CSI 20B`), and `CSICursorMovementTests#relativeMovement` runs with no region set at all. I grepped every test file for `r\u{1B}[` region-then-motion combinations and for `[?6h`; no test sets a region without also enabling origin mode before a relative vertical move.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[1;10r\u{1b}[3;1H\u{1b}[20B"` at 80x24
+- Observe: `terminal.geometry.cursor?.row`
+- Expected (per the references): 9 -- the cursor starts at row 2, inside the region rows 0..9, so it stops at the bottom margin (references/xterm/cursor.c#CursorDown; references/ghostty/src/terminal/Terminal.zig#cursorDown; references/kitty/kitty/screen.c#screen_cursor_up)
+- **Observed: cursor.row = Optional(22)** -- verdict `reproduced`
+- Ablation: Not needed as a separate run: 22 is exactly 2 + 20, so CUD applied the full count with no clamp of any kind. The DECSTBM 1;10 had no effect on the motion, which is the claim.
+- Note: The finding's *predicted* value (23, clamped to the screen bottom) is wrong -- the cursor is not even clamped to the screen here, it just lands at start+count. The defect itself (no scroll-margin clamp on CUD) is real. Note the arithmetic: on 24 rows, row 2 + 20 = 22 is still on-screen, so this probe cannot distinguish a screen clamp from no clamp; the margin violation is what it does show.
+
+<a id="bug-04"></a>
+
+### BUG-04. Stop suppressing ICH and DCH when the cursor row is outside the vertical scroll region
+
+`CSI n P (DCH), CSI n @ (ICH)` &middot; severity 4 (a real program misbehaves) &middot; hunter confidence 5 &middot; **pinned by a deliberate test**
+
+**Problem.** DanTerm refuses ICH and DCH outright when the cursor row is outside the DECSTBM region. Every reference gates ICH/DCH on the horizontal margins only -- DECSLRM left/right -- and never on the vertical region, because ICH/DCH are single-row edits that have nothing to do with vertical scrolling. Since DanTerm implements no left/right margins, the correct guard is no guard at all: ICH and DCH should always act on the cursor's row. The vertical guard is correct for IL/DL (all references do check the row there), so the two families must not share it.
+
+**What DanTerm does.** `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#insertCharacters` and `Terminal.swift#deleteCharacters` both open with `guard activeScrollRegion.contains(screen.cursor.row) else { return }` after clearing pending motion state, so the cell shift never runs for a cursor outside the region.
+
+**What the references do.** `references/xterm/util.c#InsertChar` tests only `if (screen->cur_col < left || screen->cur_col > right) n = 0;` -- columns, never rows. `references/ghostty/src/terminal/Terminal.zig#insertBlanks` and `#deleteChars` each carry the comment "If our cursor is outside the margins then do nothing" over a test of `cursor.x` against `scrolling_region.left`/`.right` only. `references/vte/src/vteseq.cc#ICH` and `#DCH` comment it explicitly: "If the cursor ... is horizontally outside the DECSLRM margins then do nothing", and compare only `cursor_col` -- while `references/vte/src/vteseq.cc#IL` and `#DL` use `m_scrolling_region.contains_row_col(...)`, proving vte draws the distinction on purpose. All three agree.
+
+**Who notices.** A TUI that reserves a scrolling transcript with `CSI 1;N r` and maintains a status or input line on a row below it: every in-place character insert or delete on that line is silently dropped, so the status line freezes at whatever it last drew with full rewrites. The same applies to a shell line editor running under an application that left a region set.
+
+**Existing test.** `lib/TerminalCore/Tests/TerminalCoreTests/TerminalEditingTests.swift#editingOutsideRegionGuard` deliberately pins the current behavior for all four of `CSI @`, `CSI P`, `CSI L`, `CSI M` ("edits outside the region suppress grid movement but clear side state"). The pin is correct for IL/DL and wrong for ICH/DCH, so the fix must split that test's argument list rather than delete it.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[1;20r\u{1b}[24;1HABC\u{1b}[24;1H\u{1b}[P"` at 80x24
+- Observe: `terminal.cell(row: 23, column: 0)?.scalars`
+- Expected (per the references): ["B"] -- DCH deletes the 'A' on row 24 even though that row is below the region, because ICH/DCH check columns only (references/xterm/util.c#InsertChar; references/ghostty/src/terminal/Terminal.zig#deleteChars; references/vte/src/vteseq.cc#DCH)
+- **Observed: cell(23,0).scalars = ["A"]** -- verdict `reproduced`
+- Ablation: Removed the DECSTBM (feed "\e[24;1HABC\e[24;1H\e[P"): cell(23,0).scalars = ["B"]. DCH works when no vertical region is set, so the region guard is the cause.
+
+**Also found as.** `erase-edit-2` in the hunt output -- same defect from another area.
+
+<a id="bug-05"></a>
+
+### BUG-05. Map Ctrl with / and the digits 2-8 to their C0 control bytes
+
+`Legacy (non-kitty) Ctrl+key text encoding` &middot; severity 4 (a real program misbehaves) &middot; hunter confidence 5 &middot; **pinned by a deliberate test**
+
+**Problem.** `legacyControlBytes` only handles space, @, A-Z, a-z, [ \ ] ^ _ and ?. Every other ASCII character falls through to the `default` branch and is sent as its own literal byte. That silently drops the whole xterm "control alias" family: Ctrl+/ , Ctrl+2, Ctrl+3, Ctrl+4, Ctrl+5, Ctrl+6, Ctrl+7 and Ctrl+8 all send the printable character instead of a control byte.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/TerminalInputEncoding.swift#legacyControlBytes returns `Array(String(scalar).utf8)` for any scalar outside its five listed cases, so `.character("/")` with `.control` yields [0x2F] and `.character("6")` with `.control` yields [0x36]. `encodeLegacyKey` calls it whenever `.control` is present.
+
+**What the references do.** All four references agree and list the same table. references/xterm/input.c#IsControlAlias carries the normative comment block: control 2 -> NUL, control 3 -> 0x1b, control 4 -> 0x1c, control 5 -> 0x1d, control 6 -> 0x1e, control 7 -> 0x1f, control 8 -> 0x7f, control / -> 0x1f. references/kitty/kitty/key_encoding.c#ctrled_key maps '/'->31, '2'->0, '3'->27, '4'->28, '5'->29, '6'->30, '7'->31, '8'->127. references/ghostty/src/input/key_encode.zig#ctrlSeq has the identical switch. references/iterm2/sources/iTermStandardKeyMapper.m#codeForSpecialControlCharacter has the same table (and adds '-'->31, which the other three do not; follow the three-way agreement and leave '-' alone). Note the digits '0', '1' and '9' correctly stay literal in kitty and ghostty, which is what DanTerm already does.
+
+**Who notices.** vim's alternate-file toggle is Ctrl+^, which US-keyboard users type as Ctrl+6; today that inserts a literal '6' into the buffer instead of switching files. Emacs `undo` is bound to C-/ (0x1f) and C-_; C-/ does nothing and inserts '/' in a shell. readline's `undo` (C-_ / C-/) is dead the same way, and Ctrl+3 as an Escape substitute on keyboards without a usable Escape sends '3'.
+
+**Existing test.** lib/TerminalCore/Tests/TerminalCoreTests/TerminalKeyEncodingTests.swift, test "legacy control text uses strict xterm bytes without unsolicited CSI-u", covers a, A, i, space, [, \, ], ^, _ and Alt+Ctrl+a only. Grepping the whole TerminalCoreTests directory for 0x1C/0x1D/0x1E/0x1F finds only those \ ] ^ _ rows. Nothing pins '/' or any digit, so the current behavior is an omission rather than an intended contract.
+
+**Probe (run, not predicted).**
+
+- Feed: `(no terminal feed needed; default modes) evaluate the pure encoder directly` at 80x24
+- Observe: `encodeTerminalKey(.character("/"), modifiers: [.control], modes: .default) and encodeTerminalKey(.character("6"), modifiers: [.control], modes: .default)`
+- Expected (per the references): [0x1F] and [0x1E] respectively (references/xterm/input.c#IsControlAlias table; references/kitty/kitty/key_encoding.c#ctrled_key; references/ghostty/src/input/key_encode.zig#ctrlSeq)
+- **Observed: Ctrl+/ = ["0x2F"], Ctrl+6 = ["0x36"]** -- verdict `reproduced`
+- Ablation: Pure encoder, no feed to ablate. Swept the neighbouring keys instead: Ctrl+2 = ["0x32"], Ctrl+3 = ["0x33"], Ctrl+4 = ["0x34"], Ctrl+5 = ["0x35"], Ctrl+7 = ["0x37"], Ctrl+8 = ["0x38"] -- all literal. But Ctrl+@ = ["0x00"], Ctrl+_ = ["0x1F"], Ctrl+a = ["0x01"] are correct.
+- Note: The encoder handles the letter range and the punctuation aliases @ and _, so the gap is exactly the digit-and-slash alias table (2..8, /). That is a missing table, not a broken mask.
+
+<a id="bug-06"></a>
+
+### BUG-06. Reply to an OSC query with the terminator the request used, not always ST
+
+`OSC 10 ; ? BEL and OSC 11 ; ? BEL (dynamic colour query terminated by BEL)` &middot; severity 4 (a real program misbehaves) &middot; hunter confidence 5 &middot; **pinned by a deliberate test**
+
+**Problem.** DanTerm hardcodes ESC \ (ST) on every OSC reply. Every reference echoes the terminator the request arrived with: a BEL-terminated query gets a BEL-terminated answer. The information is lost before dispatch even sees it -- `EscapeAbsorber.dispatchOSC` emits `.osc(payload)` with no record of whether BEL or ESC \ closed the string, so `Terminal.dispatchDefaultColorQuery` has nothing to echo.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#dispatchDefaultColorQuery builds the reply as `"\u{1B}]\(selector);rgb:...\u{1B}\\"` unconditionally. lib/TerminalCore/Sources/TerminalCore/EscapeAbsorber.swift#consume calls dispatchOSC() from both the BEL branch and the ESC-backslash branch and lib/TerminalCore/Sources/TerminalCore/EscapeAbsorber.swift#dispatchOSC returns `EscapeEvent.osc(oscPayload)` with the terminator discarded.
+
+**What the references do.** references/xterm/ctlseqs.txt states it normatively under "Operating System Commands": "XTerm accepts either BEL or ST for terminating OSC sequences, and when returning information, uses the same terminator used in a query." references/xterm/misc.c#do_osc carries `final` through to references/xterm/misc.c#ReportColorRequest, which ends the reply with `unparseputc1(xw, final)`, and comments that this exists "to make this work better with shell scripts, which may have trouble reading an <ESC><backslash>". references/ghostty/src/terminal/osc.zig#Terminator does the same (`init(ch)` -> .bel when the last byte was 0x07). references/foot/osc.c#osc_dispatch picks `term->vt.osc.bel ? "\a" : "\033\\"`. All three agree; no reference always answers with ST.
+
+**Who notices.** The standard shell recipe for background detection -- `printf '\033]11;?\a'; IFS= read -r -d $'\a' -t 1 reply` -- reads until BEL. Against DanTerm the read hits its timeout and returns nothing, because the reply ends with ESC \ and no BEL ever arrives. Light/dark auto-detection scripts, `.vimrc` background probes, and any tool that follows xterm's documented contract of "answer me the way I asked" silently fall back to a guessed background. The ESC \ also stays in the tty buffer and is read as stray input by the next reader.
+
+**Existing test.** lib/TerminalCore/Tests/TerminalCoreTests/TerminalQueryTests.swift#defaultColorQueries feeds `\u{1B}]10;?\u{07}` (BEL) plus `\u{1B}]11;?\u{1B}\\` (ST) and asserts both replies end with ST. The test's stated subject is "report canonical baked default colors without changing terminal state", and the sibling test #defaultColorQueryOrderingAndRecovery reuses the same mixed-terminator input purely to exercise ordering and chunk splitting -- so the ST-for-BEL assertion looks incidental to what those tests were written to pin, not a deliberate ruling against xterm.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1B}]11;?\u{07}"` at 80x24
+- Observe: `String(decoding: terminal.drainReplyBytes(), as: UTF8.self)`
+- Expected (per the references): "\u{1B}]11;rgb:0000/0000/0000\u{07}" -- reply terminated by BEL because the query was (references/xterm/misc.c#ReportColorRequest, references/ghostty/src/terminal/osc.zig#Terminator, references/foot/osc.c#osc_dispatch)
+- **Observed: "\\x1B]11;rgb:0000/0000/0000\\x1B\\"** -- verdict `reproduced`
+- Ablation: Fed the ST-terminated form `\u{1B}]11;?\u{1B}\\` instead: reply is byte-identical, "\x1B]11;rgb:0000/0000/0000\x1B\\". The reply terminator does not track the request terminator at all.
+- Note: Body is correct; only the terminator is wrong.
+
+**Also found as.** `reports-tabs-2` in the hunt output -- same defect from another area.
+
+<a id="bug-07"></a>
+
+### BUG-07. Add G1 designation and SI/SO locking shifts so 0x0E/0x0F switch the active charset
+
+`SO (0x0E, LS1) and SI (0x0F, LS0), with ESC ) 0 (SCS, designate into G1)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5
+
+**Problem.** SO and SI are C0 controls that select which designated charset is invoked into GL. DanTerm's C0 executor has no case for either, so they are silently discarded, and since there is no G1 slot the ESC ) 0 that precedes them is discarded too. A stream that switches to line drawing with the locking-shift form prints raw ASCII for its whole graphics run. This is the same missing state as the ESC ( 0 defect but a separate dispatch path: a fix for one does not fix the other.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#Terminal.execute switches on 0x08, 0x09, 0x0A/0x0B/0x0C and 0x0D and falls to `default: break` for everything else, so 0x0E and 0x0F are no-ops. lib/TerminalCore/Sources/TerminalCore/Terminal.swift#Terminal.dispatchEscape(_ sequence:) drops the ESC ) 0 designation.
+
+**What the references do.** references/kitty/kitty/vt-parser.c maps `case SI: REPORT_COMMAND(screen_change_charset, 0)` (and SO to slot 1), handled by references/kitty/kitty/screen.c#screen_designate_charset which keeps charset.zero/charset.one and a current_num selector. references/ghostty/src/terminal/charsets.zig#Slots/#ActiveSlot models G0..G3 with GL/GR invocation for the same purpose. references/xterm/terminfo shows the vt100/screen-family entries using smacs=^N and rmacs=^O with enacs=\E(B\E)0, which is precisely the ESC ) 0 + SO idiom.
+
+**Who notices.** A program that hardcodes the vt100/screen idiom (enacs then ^N/^O) rather than reading xterm's terminfo -- GNU screen's own status line drawing, some Emacs terminal frames, and shell scripts that echo \016/\017. The graphics run prints as literal letters and, because SI/SO are also invisible, there is no clue in the output about where it went wrong.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b})0\u{0e}lqk\u{0f}ab"` at 10 columns x 1 row
+- Observe: `terminal.screenText`
+- Expected (per the references): "┌─┐ab     " -- ESC ) 0 designates DEC Special into G1 and SO (0x0E) invokes G1 into GL, so l/q/k map to U+250C/U+2500/U+2510; SI (0x0F) returns to G0 = ASCII (references/kitty/kitty/vt-parser.c SI/SO cases with references/kitty/kitty/screen.c#screen_designate_charset; references/ghostty/src/terminal/charsets.zig#dec_special).
+- **Observed: "lqkab     "** -- verdict `reproduced`
+- Ablation: Same as control-charset-1: the feed has nothing removable. Note that SO/SI at least consume no cell -- the output is 5 characters wide, not 7 -- so 0x0E/0x0F are being swallowed as unhandled controls rather than printed.
+- Note: That 'lqkab' is exactly 5 columns is the informative detail: the locking shifts are parsed as controls and discarded, they are not printed as garbage.
+
+<a id="bug-08"></a>
+
+### BUG-08. Make DECALN reset the margins, origin mode, and rendition, and home the cursor
+
+`ESC # 8 (DECALN)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5
+
+**Problem.** DECALN fills the screen with 'E' but leaves every piece of positioning state as it found it. The references treat DECALN as a positioning reset as well as a fill: it clears origin mode, resets the top/bottom margins to the full screen, resets the character rendition, and homes the cursor to row 1 column 1. DanTerm does none of the four -- it fills with the *current* SGR pen and leaves the cursor, the margins, and DECOM untouched. That leaves the terminal in a state no application can predict after issuing the standard alignment test.
+
+**What DanTerm does.** `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#dispatchEscape(_ sequence: EscapeSequence)` handles intermediate 0x23 final 0x38 by rewriting every row with `GridCell(scalars: .single("E"), kind: .narrow, styleId: styleId)` where `styleId = currentStyleId()`, then calls `clearPendingMotionState()`. It never touches `scrollRegion`, `modes.isOriginMode`, `currentStyle`, or `screen.cursor`.
+
+**What the references do.** `references/xterm/charproc.c#CASE_DECALN` runs, in order, `UIntClr(xw->flags, ORIGIN)`, `screen->do_wrap = False`, `resetRendition(xw)`, `resetMargins(xw)`, `xterm_ResetDouble(xw)`, `CursorSet(screen, 0, 0, xw->flags)`, and only then fills the rectangle with 'E'. `references/ghostty/src/terminal/Terminal.zig#decaln` clears the cursor style (keeping only fg/bg), resets `self.scrolling_region` to the whole grid with the comment "Reset margins, also sets cursor to top-left", sets `.origin` false, calls `setCursorPos(1, 1)`, and then clears the rows. The two agree on all four resets.
+
+**Who notices.** vttest's screen-alignment and margin test pages, and any program that uses DECALN as a known-state fill before measuring: after the fill it believes the cursor is at home with full-screen margins, and its next absolute CUP lands in the wrong place or gets clamped into a stale region. A leftover bold/reverse pen also makes the 'E' field render with the wrong attributes.
+
+**Existing test.** None found for cursor, margins, origin mode, or pen. Grepping the suites for `#8` finds only `CSIEraseTests` (wrap-claim severing), `TerminalHyperlinkTests` (hyperlink pen clearing), `TerminalInputStreamTests` (action expansion), and `TerminalInspectionInvalidationTests` (damage) -- none assert cursor position or region state after DECALN.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[5;10r\u{1b}[?6h\u{1b}#8\u{1b}[20;1H"` at 80x24
+- Observe: `terminal.geometry.cursor?.row`
+- Expected (per the references): 19 -- DECALN clears DECOM and resets the margins to the full screen, so the following CUP 20;1 is absolute (references/xterm/charproc.c#CASE_DECALN; references/ghostty/src/terminal/Terminal.zig#decaln). Additionally, `terminal.geometry.cursor` immediately after the `\u{1b}#8` should be TerminalCursor(row: 0, column: 0, isPendingWrap: false).
+- **Observed: after DECALN cursor = Optional(TerminalCore.TerminalCursor(row: 4, column: 0, isPendingWrap: false)); after CUP 20;1 cursor.row = Optional(9)** -- verdict `reproduced`
+- Note: Matches the prediction on the row values. One detail the finding got slightly wrong: immediately after DECALN the column is 0, not the predicted "row 4, column 0" -- that part matched -- but the cursor is at row 4 because origin mode is still on and the top margin is row 4, i.e. DECALN homed the cursor *within the stale origin* instead of resetting the margins first.
+
+**Also found as.** `sgr-color-5`, `reports-tabs-1` in the hunt output -- same defect from another area.
+
+<a id="bug-09"></a>
+
+### BUG-09. Move the cursor to column 0 on IL and DL
+
+`CSI n L (IL), CSI n M (DL)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5 &middot; **pinned by a deliberate test**
+
+**Problem.** IL and DL leave the cursor in whatever column it was in. All three references perform a carriage return as part of the operation, putting the cursor at the left margin (column 0 with no DECSLRM) on the row it started on. DECSTBM-era applications rely on this: they position with a bare `CSI n d` or a CUD, issue `CSI L`, and then print the new line's content assuming the cursor is at the left edge.
+
+**What DanTerm does.** `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#insertLines` and `Terminal.swift#deleteLines` clear pending motion state, check the region, and shift rows -- neither writes `screen.cursor.column`.
+
+**What the references do.** `references/xterm/util.c#InsertLine` and `#DeleteLine` each call `set_cur_col(screen, ScrnLeftMargin(xw))` before shifting. `references/ghostty/src/terminal/Terminal.zig#insertLines` and `#deleteLines` install `defer { self.screens.active.cursorAbsolute(self.scrolling_region.left, start_y); ... }`, restoring the starting row but forcing the column to the left margin. `references/vte/src/vteseq.cc#IL` and `#DL` both call `carriage_return()` right after the region check. All three agree; there is no disagreement.
+
+**Who notices.** A full-screen application that opens a blank line with `CSI L` and immediately writes the replacement text -- the text lands indented by however far right the cursor happened to be, and the left part of the row keeps stale content. Same shape for `CSI M` followed by a rewrite of the row that scrolled up into place.
+
+**Existing test.** `lib/TerminalCore/Tests/TerminalCoreTests/TerminalEditingTests.swift#lineEditingRegionSemantics` pins the current behavior and names it: its preamble says the test covers "the keep-column deviation", and it asserts `TerminalCursor(row: 1, column: 1, ...)` after `\u{1B}[2;2H\u{1B}[L`. So this is a known, intentional divergence rather than an oversight -- but it is a divergence from every reference on a compatibility surface, and fixing it means changing the three cursor expectations in that test to column 0.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[3;5HX\u{1b}[L"` at 80x24
+- Observe: `terminal.geometry.cursor?.column`
+- Expected (per the references): 0 -- IL carriage-returns to the left margin (references/xterm/util.c#InsertLine; references/ghostty/src/terminal/Terminal.zig#insertLines; references/vte/src/vteseq.cc#IL)
+- **Observed: cursor.column = Optional(5)** -- verdict `reproduced`
+
+**Also found as.** `erase-edit-1` in the hunt output -- same defect from another area.
+
+<a id="bug-10"></a>
+
+### BUG-10. Dispatch DECSED and DECSEL (CSI ? Ps J / CSI ? Ps K) as ED and EL
+
+`CSI ? Ps J (DECSED) and CSI ? Ps K (DECSEL)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5
+
+**Problem.** The private-parameter forms of ED and EL are dropped entirely. DanTerm implements no DECSCA protection, so with no character protected DECSED and DECSEL are exactly ED and EL and must erase. Dropping them leaves the screen unchanged and also skips the pending-wrap reset, so a program that uses the selective forms sees stale content where it asked for blanks.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#dispatchCSI switches on sequence.intermediates.key first. Case 0x3F ('?') handles only finals 0x68 (h), 0x6C (l), 0x6E (n), and 0x75 (u), then falls through to `default: break` and `return`. The erase finals 0x4A and 0x4B are only reachable under the `case 0:` no-intermediate branch, so CSI ? 2 J and CSI ? 0 K reach no erase code at all.
+
+**What the references do.** xterm ctlseqs.txt documents CSI ? Ps J as Erase in Display (DECSED) with the same Ps = 0/1/2/3 meanings as ED, and CSI ? Ps K as Erase in Line (DECSEL) with the same Ps = 0/1/2 as EL; charproc.c routes them to do_erase_display / do_erase_line with ON_PROTECT, which erases every unprotected cell. ghostty src/terminal/Terminal.zig#eraseDisplay and #eraseLine take a protected_req flag and erase the same regions either way. libvterm src/state.c LEADER('?', 0x4a) and LEADER('?', 0x4b) implement DECSED and DECSEL. vte src/vteseq.cc#DECSED and #DECSEL likewise. All references erase; DanTerm alone ignores.
+
+**Who notices.** A form-oriented or DEC-oriented full-screen program that uses the selective erases to clear a field -- the old field text stays on screen under the new value. vttest's erase tests fail outright. Because the sequence is also silently swallowed rather than partially applied, the application has no way to detect the failure.
+
+**Existing test.** None found. Grepping lib/TerminalCore/Tests/TerminalCoreTests/ for "?0K", "?2J", "DECSED", and "DECSEL" returns nothing, and CSIEraseTests.swift covers only the unprefixed forms.
+
+**Probe (run, not predicted).**
+
+- Feed: `"ABC\u{1b}[1;1H\u{1b}[?0K"` at 80x24
+- Observe: `terminal.cell(row: 0, column: 0)?.kind`
+- Expected (per the references): TerminalCellKind.padding -- DECSEL 0 with nothing protected erases exactly as EL 0: xterm ctlseqs.txt "CSI ? Ps K ... Selective Erase to Right", ghostty Terminal.zig#eraseLine, libvterm state.c LEADER('?', 0x4b)
+- **Observed: DECSEL cell(0,0).kind = Optional(TerminalCore.TerminalCellKind.narrow) scalars = ["A"]; DECSED cell(0,0).kind = Optional(TerminalCore.TerminalCellKind.narrow) scalars = ["A"]** -- verdict `reproduced`
+- Ablation: Control with the private-marker dropped ("ABC\e[1;1H\e[0K"): cell(0,0).kind = Optional(TerminalCore.TerminalCellKind.padding). The '?' intermediate is what makes the sequence a no-op; the same CSI without it erases.
+
+<a id="bug-11"></a>
+
+### BUG-11. Accept OSC 7 file URIs with an empty host as local
+
+`OSC 7 ; file:///path ST (working directory report with an empty authority)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5 &middot; **pinned by a deliberate test**
+
+**Problem.** `file:///tmp` -- the canonical RFC 8089 local-file spelling, where an empty authority means "this machine" -- is rejected. `localFilePath` extracts an empty host string, and `namesThisMachine` requires the normalized host to be non-empty before it will compare, so the empty host can never match and the whole report is dropped. The pane's working directory stays stale or nil.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/OSCPayload.swift#localFilePath takes the bytes at offset 7 as the host start, finds the very next byte is '/', and yields an empty host slice. lib/TerminalCore/Sources/TerminalCore/OSCPayload.swift#namesThisMachine then does `return !normalized.isEmpty && normalized == normalizedHost(machineHostname)`, and `normalizedHost("")` is empty, so it returns false. lib/TerminalCore/Sources/TerminalCore/Terminal.swift#dispatchOSC7 gets nil and returns without touching `currentWorkingDirectory` or emitting a `.workingDirectory` event.
+
+**What the references do.** references/foot/uri.c#hostname_is_localhost lists the empty string first: `streq(hostname, "") || streq(hostname, "localhost") || streq(hostname, this_host)`, and references/foot/osc.c#osc_set_pwd gates on exactly that. references/vte/src/vteseq.cc#Terminal::OSC stores the OSC 7 URI as a termprop with no host check at all, so an empty authority is accepted trivially. references/ghostty/src/terminal/osc.zig#Command.report_pwd documents "This is not checked for validity" and hands the raw value up. No reference singles out the empty host as foreign.
+
+**Who notices.** Anything that reports the shell's directory with the standard three-slash form -- hand-rolled `precmd` hooks, `printf '\e]7;file://%s\a' "$PWD"` one-liners, and any emitter whose $HOSTNAME/$HOST happens to be unset so the host field expands to nothing. In those panes "open a new tab here" spawns in the home directory instead of the current one, the cwd-derived title never updates, and `danterm` queries report a nil cwd -- with no diagnostic, because the sequence is silently discarded.
+
+**Existing test.** lib/TerminalCore/Tests/TerminalCoreTests/TerminalSemanticEventTests.swift#cwdForeignHostsRejected includes "" in its argument list, so the current behavior is pinned. But the test's stated intent is "the tolerance is scoped to the suffixes macOS manufactures, not a general 'first label matches' match", and its stated risk is "a laxer rule would let mac.evil.com over an ssh session set this pane's cwd". An empty authority is not a foreign host name that could be attacker-chosen from an ssh session -- it is the RFC 8089 spelling of localhost, and it sits in that list next to "mac.evil.com" and "macbook". This reads like the empty string was swept into the reject list as an edge case rather than adjudicated against the RFC.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1B}]7;file:///tmp\u{07}" fed to a terminal built as Terminal(columns: 20, rows: 2, machineHostname: "mac")` at 20x2
+- Observe: `terminal.drainSemanticEvents()`
+- Expected (per the references): [.workingDirectory("/tmp")] -- empty authority is localhost (references/foot/uri.c#hostname_is_localhost, references/vte/src/vteseq.cc#Terminal::OSC)
+- **Observed: []** -- verdict `reproduced`
+- Ablation: Replaced the empty authority with the matching host, `\u{1B}]7;file://mac/tmp\u{07}` on Terminal(machineHostname: "mac"): [TerminalCore.TerminalSemanticEvent.workingDirectory(Optional("/tmp"))]. The empty authority is the sole reason the report is dropped.
+- Note: `file://localhost/tmp` is also accepted: [TerminalCore.TerminalSemanticEvent.workingDirectory(Optional("/tmp"))]. So the literal string "localhost" is special-cased but the empty host is not.
+
+<a id="bug-12"></a>
+
+### BUG-12. Keep DECSC's saved cursor visibility out of DECRC (do not save DECTCEM)
+
+`ESC 7 / ESC 8 (DECSC/DECRC), also CSI ? 1048 h/l and the 1049 pair` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5 &middot; **pinned by a deliberate test**
+
+**Problem.** DanTerm's saved-cursor slot carries DECTCEM (cursor visibility) along with the shape and blink flags, so any DECRC re-applies whatever visibility was current at the matching DECSC. DECTCEM is a terminal mode, not cursor state; no reference saves it. A restore therefore turns a hidden cursor back on behind the application's back.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#SavedCursorState carries isCursorVisible, cursorShape and isCursorBlinking; #saveCursor copies modes.isCursorVisible into it and #restoreCursor writes it back into modes.
+
+**What the references do.** xterm cursor.c#CursorRestoreFlags restores only `DECSC_FLAGS = (ATTRIBUTES|ORIGIN|PROTECTED)` plus charsets and the last-column flag -- cursor_set is untouched. ghostty src/terminal/Screen.zig#SavedCursor holds x, y, style, protected, pending_wrap, origin, charset and nothing else. vte src/vte.cc#Terminal::save_cursor stores position, reverse and origin modes, defaults and charset replacements only. kitty's Savepoint (kitty/screen.h) stores the Cursor plus DECOM/DECAWM/DECSCNM; visibility lives in `self->modes.mDECTCEM` and is not in it. Four references, no disagreement on visibility. (kitty is the lone reference that restores shape and blink, since those are fields of its Cursor struct -- that part is a genuine split and not what this finding is about.)
+
+**Who notices.** A full-screen program that hides the cursor once at startup and then uses DECSC/DECRC pairs around drawing. On the alternate screen the saved slot starts at its default (visible), so the program's very first DECRC un-hides the cursor: the block cursor reappears and flashes over the TUI's own drawing on every frame that ends with a restore.
+
+**Existing test.** lib/TerminalCore/Tests/TerminalCoreTests/TerminalPresentationModeTests.swift#resetMatrix and the test immediately above it (`\u{1B}[?1047h\u{1B}8` restoring hidden/bar/non-blinking) pin the current behavior deliberately. They encode a choice made against all four references and would need to change.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}7\u{1b}[?25l\u{1b}8"` at 80x24
+- Observe: `terminal.presentation.isCursorVisible`
+- Expected (per the references): false -- xterm cursor.c#CursorRestoreFlags, ghostty Screen.zig#SavedCursor, vte vte.cc#Terminal::save_cursor and kitty screen.h Savepoint all exclude DECTCEM from the saved cursor
+- **Observed: presentation.isCursorVisible = true** -- verdict `reproduced`
+- Ablation: Removed the DECSC/DECRC pair (feed "\e[?25l"): isCursorVisible = false. The DECRC is what un-hides the cursor, so DECTCEM is being carried in the saved-cursor slot.
+
+<a id="bug-13"></a>
+
+### BUG-13. Reset the saved-cursor slot on RIS
+
+`ESC c (RIS)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5 &middot; **pinned by a deliberate test**
+
+**Problem.** A hard reset leaves the DECSC slot holding the pre-reset position, SGR pen, origin flag and pending-wrap flag. Every reference either re-saves a home cursor with default attributes or invalidates the slot, so in all of them a DECRC after RIS homes the cursor with a default pen. In DanTerm the first DECRC after RIS teleports the cursor back to where it was before the reset and re-applies the old colors -- state the application believed it had destroyed.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#hardReset resets modes, tab stops, scroll region, style and the live cursor, but never touches screen.savedCursor or inactiveScreen?.savedCursor.
+
+**What the references do.** xterm charproc.c#ReallyReset ends its `if (full)` branch with `CursorSet(screen, 0, 0, xw->flags); CursorSave(xw);`, so the slot becomes home with reset flags. vte src/vte.cc#Terminal::reset calls save_cursor(&m_normal_screen) and save_cursor(&m_alternate_screen) after clearing defaults and homing both cursors. kitty kitty/screen.c#do_screen_reset sets `self->main_savepoint.is_valid = false; self->alt_savepoint.is_valid = false;` on both reset kinds. No disagreement.
+
+**Who notices.** A shell or script that runs `reset`/`tput reset` (RIS) and then uses a DECSC/DECRC pair -- for example a prompt that restores a cursor it saved before the reset ran. The cursor jumps to a stale row and column and output resumes in the old foreground color instead of the default, so the first prompt after a reset lands in the wrong place and is mis-colored.
+
+**Existing test.** lib/TerminalCore/Tests/TerminalCoreTests/TerminalPresentationModeTests.swift#resetMatrix ("soft and hard reset restore defaults but preserve saved appearance") pins the RIS half deliberately, feeding `\u{1B}c` and then asserting `\u{1B}8` brings back the hidden/bar/non-blinking appearance. That assertion is against xterm, vte and kitty for RIS.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[5;5H\u{1b}[31m\u{1b}7\u{1b}c\u{1b}8"` at 80x24
+- Observe: `terminal.geometry.cursor`
+- Expected (per the references): TerminalCursor(row: 0, column: 0, isPendingWrap: false) -- xterm charproc.c#ReallyReset re-saves a home cursor after RIS; vte vte.cc#Terminal::reset re-saves both screens; kitty screen.c#do_screen_reset invalidates the savepoint. Also expect terminal.currentStyle == TerminalStyle().
+- **Observed: cursor = Optional(TerminalCore.TerminalCursor(row: 4, column: 4, isPendingWrap: false)); currentStyle = TerminalStyle(foreground: TerminalCore.TerminalColor.indexed(1), background: .default, bold: false, dim: false, italic: false, underline: .none, underlineColor: .default, reverse: false, hidden: false, strikethrough: false)** -- verdict `reproduced`
+- Ablation: Removed the trailing \e8 (feed "\e[5;5H\e[31m\e7\ec"): cursor = TerminalCursor(row: 0, column: 0, isPendingWrap: false), currentStyle.foreground = default. RIS itself resets correctly; it is the surviving saved-cursor slot that DECRC replays.
+
+<a id="bug-14"></a>
+
+### BUG-14. Clear the character rendition on DECALN, keeping only the colours
+
+`ESC # 8 (DECALN)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5
+
+**Problem.** DECALN must reset the character attributes (bold, faint, italic, underline, blink, inverse, invisible, strikethrough) while leaving the foreground and background colours alone, then fill the screen with 'E' using that colour-only pen. DanTerm neither resets the pen nor filters it: it fills every cell with the full current pen and leaves the pen untouched afterwards, so every 'E' carries the leftover attributes and so does all output that follows.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#dispatchEscape takes `let styleId = currentStyleId()` and writes `GridCell(scalars: .single("E"), kind: .narrow, styleId: styleId)` into every cell. `currentStyleId()` interns `currentStyle`, the whole pen. Nothing in the function assigns to `currentStyle`, so bold, underline and reverse survive DECALN.
+
+**What the references do.** references/xterm/charproc.c#doSGR (the `CASE_DECALN` arm of the parser switch) calls `resetRendition(xw)` before `ScrnFillRectangle(..., 'E', ...)`; references/xterm/charproc.c#resetRendition clears `SGR_MASK | SGR_MASK2 | INVISIBLE` and italics but deliberately does not call `reset_SGR_Colors`, so colours survive and attributes do not. references/ghostty/src/terminal/Terminal.zig#decaln sets `cursor.style = .{ .bg_color = ..., .fg_color = ... }` -- colours copied over, every attribute dropped -- before filling with 'E', and references/ghostty/src/terminal/Terminal.zig has a test named "Terminal: decaln preserves color" pinning the colour half. The two references agree completely.
+
+**Who notices.** vttest's screen-1 alignment test: in xterm the screen is a plain grid of 'E' and the pen is clean afterwards, while in DanTerm the grid and everything typed after it come out bold, underlined and in reverse video until the next explicit SGR reset. Any diagnostic or terminal-conformance tool that uses DECALN to check cell geometry reads the wrong rendition.
+
+**Existing test.** none found. I grepped `lib/TerminalCore/Tests/TerminalCoreTests/` for `#8`: the four hits (CSIEraseTests.swift, TerminalInputStreamTests.swift, TerminalHyperlinkTests.swift, TerminalInspectionInvalidationTests.swift) all use DECALN as a bulk screen-rewrite stimulus for wrap-claim, expansion, hyperlink and inspection assertions. None asserts the style of the filled cells or the pen afterwards.
+
+**Probe (run, not predicted).**
+
+- Feed: `\u{1b}[7;1;4;31;44m\u{1b}#8` at 80x24 (default)
+- Observe: `terminal.cell(row: 0, column: 0)?.style  and  terminal.currentStyle`
+- Expected (per the references): Both equal TerminalStyle(foreground: .indexed(1), background: .indexed(4)) -- colours kept, bold/underline/reverse cleared (xterm charproc.c#resetRendition; ghostty Terminal.zig#decaln).
+- **Observed: cell(0,0).style = Optional(TerminalCore.TerminalStyle(foreground: TerminalCore.TerminalColor.indexed(1), background: TerminalCore.TerminalColor.indexed(4), bold: true, dim: false, italic: false, underline: TerminalCore.TerminalUnderlineStyle.single, underlineColor: TerminalCore.TerminalColor.default, reverse: true, hidden: false, strikethrough: false))
+currentStyle = TerminalStyle(foreground: TerminalCore.TerminalColor.indexed(1), background: TerminalCore.TerminalColor.indexed(4), bold: true, dim: false, italic: false, underline: TerminalCore.TerminalUnderlineStyle.single, underlineColor: TerminalCore.TerminalColor.default, reverse: true, hidden: false, strikethrough: false)** -- verdict `reproduced`
+- Note: Exactly the predicted value, for both the filled cell and the live pen.
+
+<a id="bug-15"></a>
+
+### BUG-15. Truncate an over-long CSI parameter list instead of discarding the whole sequence
+
+`CSI Pm m (SGR) with more than 24 parameters -- and any other CSI with more than 24 parameters` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5
+
+**Problem.** The parser caps a CSI at 24 parameters. Past that it does not truncate the list, it throws the sequence away: `dispatchCSI` returns nil, so no action at all is dispatched. A 25-parameter SGR therefore leaves the previous pen in force rather than applying the attributes it can. Both references keep the parameters that fit and still execute the sequence.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/EscapeAbsorber.swift#dispatchCSI opens with `guard parameters.count < CSIParameters.capacity else { return nil }` (capacity is 24, declared on EscapeAbsorber.swift#CSIParameters), so the whole event is dropped. EscapeAbsorber.swift#collectParameter separately stops appending past the cap, so the count reaches exactly 24 and then the guard fires on dispatch.
+
+**What the references do.** references/xterm/ptyx.h defines `NPARAM 30`, and every collection site in references/xterm/charproc.c is guarded with `if (nparam < NPARAM)` -- extra parameters are dropped, the sequence still executes. references/vte/src/parser.hh (`VTE_PARSER_ARG_MAX (32)`, the guards in `collect_parameter`/`param_finish`) does the same: over-long parameter lists stop growing and the sequence is still dispatched. Neither reference discards the sequence.
+
+**Who notices.** A program that emits one fully-loaded SGR -- reset plus every attribute plus truecolour foreground, background and underline colour -- gets no style change at all instead of a partial one, so the previous colour bleeds through the rest of its output. The same cliff hits any long CSI: `CSI ?a;b;c;...h` with 25 modes sets none of them. This is also uncomfortably close to home: Terminal.swift#styleSequence, used by state synchronization, emits exactly 24 parameters in its worst case (0;1;2;3;4:2;7;8;9;38;2;r;g;b;48;2;r;g;b;58;2;r;g;b), so DanTerm's own resynchronization stream sits one attribute away from being silently dropped.
+
+**Existing test.** none found. I grepped the test suite for `capacity`, and read TerminalStyleTests.swift and CSIParserTests.swift; the longest SGR exercised is 9 parameters and no test drives a CSI past the cap.
+
+**Probe (run, not predicted).**
+
+- Feed: `\u{1b}[31m\u{1b}[0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;32m` at 80x24 (default)
+- Observe: `terminal.currentStyle.foreground`
+- Expected (per the references): .indexed(2) -- the second sequence has 25 parameters; xterm keeps the first 30 (ptyx.h#NPARAM plus the `nparam < NPARAM` guards in charproc.c) and vte the first 32 (parser.hh#VTE_PARSER_ARG_MAX), and both execute it, so the trailing 32 applies green.
+- **Observed: 25-param SGR: currentStyle.foreground = indexed(1); 24-param control: currentStyle.foreground = indexed(2)** -- verdict `reproduced`
+- Ablation: The 24-parameter control is the ablation: dropping one parameter makes the identical sequence apply. The cliff is exactly at 25 parameters, as the finding predicted.
+
+<a id="bug-16"></a>
+
+### BUG-16. Carry the saved cursor through width reflow instead of only clamping it
+
+`DECSC / DECRC (ESC 7 / ESC 8), and the implicit save in CSI ?1049h / CSI ?1048h, across a width change` &middot; severity 3 (observable, narrow) &middot; hunter confidence 4 &middot; **pinned by a deliberate test**
+
+**Problem.** A width change reflows the live grid, but the saved-cursor slot is not one of the anchors the reflow follows. `Terminal.swift#capturedAnchorAddresses` captures selection start/end, search position, hover start/end, arm start/end, and the browsing top -- the saved cursor is absent. After the rebuild, `#clampScreenCursorState` only clamps `screen.savedCursor.position` into the new rectangle. So a saved position keeps its old row and column while the text under it has moved, and DECRC restores onto different characters.
+
+**What DanTerm does.** `Terminal.swift#resizeWidth` rebuilds every live row through `#reconstructLogicalLines` and `#pack`, restating the captured anchors via `#restateAnchors`. `Terminal.swift#capturedAnchorAddresses` never captures `screen.savedCursor.position`, and `Terminal.swift#clampScreenCursorState` applies only `clampPosition(&screen.savedCursor.position, in: screen.rows)`. The saved slot therefore survives a reflow as a raw row/column pair.
+
+**What the references do.** kitty `kitty/screen.c#screen_resize` builds `main_saved_cursor` and `alt_saved_cursor` as `CursorTrack` values and threads them into `kitty/screen.c#rewrap`, which passes them as `TrackCursor` entries to `kitty/resize.c#resize_screen_buffers`; the rewrap reports each saved cursor's destination cell, and only then does the `S()` macro clamp. ghostty `src/terminal/Screen.zig#resize` installs a tracked pin for `self.saved_cursor` before `pages.resize`, then rewrites `sc.x`/`sc.y` from `pointFromPin` afterwards -- and even fixes up `sc.pending_wrap` when the reflowed position is no longer at the right edge. Both references move the saved cursor with its text. xterm is the odd one out: `cursor.c#AdjustSavedCursor` shifts the saved row only when the screen grew and only while the alternate screen is showing, and xterm does not reflow at all, so it has no opinion here. Follow kitty and ghostty: the saved cursor names a character, not a coordinate.
+
+**Who notices.** Any full-screen application entered with CSI ?1049h -- vim, less, htop, fzf -- while the window is narrowed during the session. The implicit save happens on entry against the shell's primary screen; the primary reflows during the resize; on CSI ?1049l the restore puts the cursor at the pre-reflow row and column. The shell then draws its next prompt over existing output or leaves a gap, and the scrollback keeps the damage.
+
+**Existing test.** `lib/TerminalCore/Tests/TerminalCoreTests/TerminalSavedCursorTests.swift#restoreClampAndPendingTripleGate` currently encodes the clamped value: after `resize(columns: 4, rows: 6)` it expects `TerminalCursor(row: 4, column: 3, isPendingWrap: true)`, where the reflowed answer is row 5. `lib/TerminalCore/Tests/TerminalCoreTests/TerminalAlternateScreenTests.swift#inactiveScreenResizeClampsSavedCursors` likewise expects `(row: 0, column: 3)` after a 5-to-4 column shrink that pushes the wide glyph onto the next row. Neither test's stated intent is about reflow fidelity -- one is about restore-time clamping, the other about which grid gets resized -- and no design doc states a decision, so I read these as incidental rather than deliberate. A fix has to update both expectations.
+
+**Probe (run, not predicted).**
+
+- Feed: `"abcdefgh\u{1b}[2;2H\u{1b}7\u{1b}[3;1H" then terminal.resize(columns: 8, rows: 3) then feed "\u{1b}8"` at 4 columns x 3 rows
+- Observe: `terminal.geometry.cursor`
+- Expected (per the references): TerminalCursor(row: 0, column: 5, isPendingWrap: false) -- the save landed on the 'f' at logical offset 5 of the single wrapped line "abcdefgh"; at width 8 that line occupies one row, so 'f' is row 0 column 5. Per kitty resize.c#resize_screen_buffers and ghostty Screen.zig#resize.
+- **Observed: Optional(TerminalCore.TerminalCursor(row: 1, column: 1, isPendingWrap: false))** -- verdict `reproduced`
+- Ablation: Removed the resize (fed the same bytes plus ESC 8 at width 4): Optional(TerminalCore.TerminalCursor(row: 1, column: 1, isPendingWrap: false)) -- the same value. The saved pair is carried through the width change untouched, so the resize contributes nothing to it.
+- Note: The grid itself did reflow: screenText after the resize is "abcdefgh\x0A        \x0A        " -- the wrapped line is one row at width 8. So the content moved and the saved cursor did not; row 1 is now blank.
+
+<a id="bug-17"></a>
+
+### BUG-17. Displace the saved cursor by the same row delta as the live cursor on a height shrink
+
+`DECSC / DECRC (ESC 7 / ESC 8) across a row-count shrink that pushes rows into scrollback` &middot; severity 3 (observable, narrow) &middot; hunter confidence 4
+
+**Problem.** When rows shrink, `#resizeHeight` moves the top rows into scrollback and subtracts `displacedCount` from the live cursor's row, so the live cursor stays on its own text. The saved cursor gets no such subtraction -- it is only clamped at the end. The two cursors therefore move by different amounts, and a DECRC after the shrink lands on text that is `displacedCount` rows away from what was saved.
+
+**What DanTerm does.** `Terminal.swift#resizeHeight` shrink branch does `screen.rows.removeFirst(displacedCount)` and then `screen.cursor.row -= displacedCount`, touching only `screen.cursor`. `screen.savedCursor.position` is left alone until `Terminal.swift#clampScreenCursorState` clamps it with `min(max(row, 0), rowCount - 1)`. Nothing subtracts the displacement.
+
+**What the references do.** kitty `kitty/screen.c#screen_resize` passes `main_saved_cursor` and `alt_saved_cursor` through `kitty/screen.c#rewrap` into `kitty/resize.c#resize_screen_buffers`, which tracks each of them across the live/history split, so a saved row that moves up by three rows is reported as three rows higher. ghostty `src/terminal/Screen.zig#resize` tracks the saved cursor with a pin and rewrites it from `pointFromPin(.active, p)`, which follows the same content. xterm `cursor.c#AdjustSavedCursor` adjusts only when the screen grew (`if (adjust > 0)`) and only while the alternate screen is showing, so xterm has the same gap on shrink -- but xterm's own `screen.c#ScreenResize` does shift the live cursor by `move_down_by`, so xterm is internally inconsistent here rather than a model to copy. Follow kitty and ghostty.
+
+**Who notices.** A shell or TUI that holds a DECSC across a window shrink. The common path is CSI ?1049h: the primary cursor is saved on entry, the user drags the window shorter while the alternate-screen program runs, and CSI ?1049l restores the shell's cursor several rows below where its prompt actually sits. The shell then overwrites live output.
+
+**Existing test.** none found. `TerminalSavedCursorTests.swift#restoreClampAndPendingTripleGate` resizes only the width (6x6 then 4x6), and `TerminalAlternateScreenTests.swift#inactiveScreenResizeClampsSavedCursors` also changes only columns (5 to 4 at a fixed 3 rows). I grepped every `resize(` call site under `lib/TerminalCore/Tests/TerminalCoreTests/` and found no test that shrinks rows with a live saved cursor.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[5;2H\u{1b}7\u{1b}[6;1HZ" then terminal.resize(columns: 4, rows: 3) then feed "\u{1b}8"` at 4 columns x 6 rows
+- Observe: `terminal.geometry.cursor?.row`
+- Expected (per the references): 1 -- the shrink displaces three rows into scrollback (no trailing-blank trim runs, because the cursor sits on the last row), so the saved row 4 becomes row 1, the same delta the live cursor gets. Per kitty resize.c#resize_screen_buffers and ghostty Screen.zig#resize. The saved row stays inside the active area after the shrink, so both references agree on a concrete row rather than falling back to ghostty's off-screen (0,0) case.
+- **Observed: restored cursor.row = Optional(2); full = Optional(TerminalCore.TerminalCursor(row: 2, column: 1, isPendingWrap: false)); live cursor before restore = Optional(TerminalCore.TerminalCursor(row: 2, column: 1, isPendingWrap: false))** -- verdict `reproduced`
+- Ablation: Removed the resize: Optional(TerminalCore.TerminalCursor(row: 4, column: 1, isPendingWrap: false)) -- the saved row is genuinely 4. After the shrink it restores to 2, which is rowCount-1, i.e. a clamp, not a displacement.
+- Note: Worth flagging: the restored row (2) coincides with the live cursor row after the shrink (2), so this single observation cannot by itself distinguish 'clamped to the last row' from 'accidentally right'. The no-resize ablation settles it -- the saved row was 4, and 4 clamped to rowCount-1 is 2, while the correct displaced value is 1.
+
+<a id="bug-18"></a>
+
+### BUG-18. Paint the vacated half of a wide pair with a background, not the default style
+
+`printing a narrow or wide character over one half of an existing wide pair` &middot; severity 3 (observable, narrow) &middot; hunter confidence 4
+
+**Problem.** When a print overwrites one cell of a wide head/tail pair, DanTerm blanks the partner cell with the *default* style, dropping whatever background was there. Every reference leaves a background on that cell: xterm and kitty keep the original cell's attributes, ghostty fills it with the current pen's background. DanTerm is also internally inconsistent, because its own `eraseCells` already paints expanded wide pairs with `backgroundEraseStyleId()`.
+
+**What DanTerm does.** `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#clearCellAndPair` defaults `replacementStyleId` to `Terminal.defaultStyleId`, and both `Terminal.swift#printNarrow` and `Terminal.swift#printWide` call it without passing a style. The partner cell therefore becomes `GridCell(styleId: Terminal.defaultStyleId)` — no background at all.
+
+**What the references do.** `references/xterm/screen.c#ScrnWriteText` writes a literal space into the orphaned half and never touches its attribute array, so the old background survives. `references/kitty/kitty/screen.c#nuke_in_line` sets the character and clears the sprite position but deliberately leaves the GPU cell's fg/bg untouched, so the old background survives. `references/ghostty/src/terminal/Terminal.zig#printCell` calls `references/ghostty/src/terminal/Screen.zig#clearCells`, which memsets with `references/ghostty/src/terminal/Screen.zig#blankCell` — the cursor's current background. The three disagree on which background, but all three agree it is not the default. DanTerm should follow ghostty (pen background), because that is background-color-erase semantics and is exactly what DanTerm's own `eraseCells` already does, so the print path and the erase path stop contradicting each other.
+
+**Who notices.** Any full-screen TUI that paints a colored bar or a highlighted row containing a CJK or emoji glyph and then overwrites one half of it — a file manager's selected row, a status line, a diff viewer's colored gutter. A default-background hole one cell wide appears in the middle of the colored run.
+
+**Existing test.** none found. `lib/TerminalCore/Tests/TerminalCoreTests/TerminalGraphemeWidthTests.swift#upgradedClusterAtomicity` covers overwriting an upgraded cluster but asserts only `kind`, never `style`. I grepped `TerminalCellStyleTests.swift` and `TerminalStyleTests.swift` for `wideHead`/`wideTail` and got no hits.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[44m\u{754C}\u{1b}[1GX"` at 4 columns x 1 row
+- Observe: `terminal.cell(row: 0, column: 1)?.style.background`
+- Expected (per the references): .indexed(4) — the vacated right half keeps a background (xterm `screen.c#ScrnWriteText` and kitty `screen.c#nuke_in_line` preserve the original blue; ghostty `Screen.zig#blankCell` fills with the pen, which is also blue here, so all three agree on this probe)
+- **Observed: cell(0,1).style.background = Optional(TerminalCore.TerminalColor.default); cell(0,1).kind = Optional(TerminalCore.TerminalCellKind.padding)** -- verdict `reproduced`
+- Note: The vacated right half of the wide pair loses the blue background, exactly as predicted.
+
+<a id="bug-19"></a>
+
+### BUG-19. Leave the cursor at the last column after a wide char printed there with DECAWM off
+
+`DECAWM off (CSI ? 7 l) followed by a double-width character that lands on the final two columns` &middot; severity 3 (observable, narrow) &middot; hunter confidence 4 &middot; **pinned by a deliberate test**
+
+**Problem.** With autowrap disabled, DanTerm backs a wide character up so it occupies the last two columns (which matches kitty) but then parks the cursor on the wide *head* instead of the last column. The next narrow character is therefore written one column to the left of where every reference puts it, and it destroys the wide character it should have overwritten only half of. A following VS15 compounds it, moving the cursor two more columns left.
+
+**What DanTerm does.** `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#advanceCursorPastWideCell` has an early return: when `modes.isAutoWrapMode == false` and `head.column + 1 == columnCount - 1`, it sets `screen.cursor = head` and clears `isPendingWrap`. So after a wide char occupying columns N-2 and N-1, the cursor sits at N-2. The narrow path, `Terminal.swift#writeNarrowCells`, does the opposite and correctly leaves the cursor at `columnCount - 1`. `Terminal.swift#downgradeClusterToNarrow` then reads `screen.cursor.column == columnCount - 1` as its edge test, which is false from this state, so a VS15 subtracts one more column.
+
+**What the references do.** `references/kitty/kitty/screen.c#draw_text_loop` sets `cursor->x = columns - char_width`, draws, then does `cursor->x += 2`, leaving x at `columns`; the next narrow character is clamped back to `columns - 1` and nukes the wide pair from there, so it lands in the final column. `references/ghostty/src/terminal/Terminal.zig#print` discards the wide character entirely when `!wraparound` at `right_limit - 1` and leaves the cursor at the last column, so the next narrow character also lands in the final column. The two references differ on whether the wide character is drawn at all, but they agree that the following narrow character occupies the last column and that the cursor never retreats to the head.
+
+**Who notices.** A TUI that disables autowrap to safely paint the bottom-right cell (vim, tmux and less all do this) and draws a line mixing CJK text with trailing ASCII. The final character lands one column early and the last column is left blank, so a status line or a table's right border is short by one cell.
+
+**Existing test.** `lib/TerminalCore/Tests/TerminalCoreTests/TerminalModeTests.swift#autoWrapModeControlsRightEdge` pins `wide.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: false)` at 4 columns, so the cursor column is deliberately pinned today and that expectation has to change with the fix. The test's stated intent is only that the phantom is never armed with DECAWM off; nothing in it exercises a character printed *after* the wide one, which is where the divergence becomes visible.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[?7l\u{1b}[3G\u{754C}A"` at 4 columns x 1 row
+- Observe: `terminal.cell(row: 0, column: 3)?.scalars.first`
+- Expected (per the references): "A" — kitty `screen.c#draw_text_loop` clamps the follow-up narrow char to `columns - 1` and ghostty `Terminal.zig#print` leaves the cursor at the last column, so both put A in column 3
+- **Observed: cell(0,3).scalars = [] (kind padding). Full row: col0=padding:[] col1=padding:[] col2=narrow:["A"] col3=padding:[]** -- verdict `reproduced`
+- Note: Matches the prediction including its stronger half: the wide char is gone entirely -- 界 was printed at column 2 with DECAWM off and left no trace at all, then A overwrote column 2. Columns 0-1 were never written.
+
+<a id="bug-20"></a>
+
+### BUG-20. Stop insert mode from erasing the wrap spacer a wide character just wrote
+
+`IRM on (CSI 4 h) followed by a double-width character at the last column with autowrap on` &middot; severity 3 (observable, narrow) &middot; hunter confidence 4
+
+**Problem.** `printWide` writes the `.spacerHead` into the margin, marks the row soft-wrapped and advances to the next row — and then runs the insert-mode shift on the new row. That shift calls `clearPreviousSpacer` for column 0, which wipes the spacer it just wrote, while `isSoftWrapped` stays true on the previous row. The result is a row that claims a soft wrap with an ordinary blank in its margin, the exact state `TerminalRowStructure` documents as unreachable by printing, and the copy projection then emits that blank as a spurious space inside the wrapped line.
+
+**What DanTerm does.** In `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#printWide`, the last-column branch sets the spacer, sets `isSoftWrapped`, calls `advanceToNextRow(preservingWrapClaim: true)` and sets `preservesWrappedSpacer = true`. The `if modes.isInsertMode` block runs *after* that, calling `Terminal.swift#moveAndFillCells` with `range.lowerBound == 0` on the new row. `moveAndFillCells` unconditionally calls `Terminal.swift#clearPreviousSpacer(beforeRow:column:replacementStyleId:)`, which sees the `.spacerHead` at `columnCount - 1` of the previous row and replaces it with a plain blank. The `preservesWrappedSpacer` guard only protects the two `clearCellAndPair` calls that come after, so it never sees this. When the wrap also scrolled, the same call hits `history.repairClearedSpacer` instead and damages the retained seam.
+
+**What the references do.** `references/kitty/kitty/screen.c#draw_text_loop` runs `continue_to_next_line` first and then `insert_characters` on the *new* line only; the previous line's `next_char_was_wrapped` flag is never touched, so the wrap survives. `references/ghostty/src/terminal/Terminal.zig#print` runs its `insertBlanks` before the width switch, so the `spacer_head` and `page_row.wrap` are written after the insert and survive it. Both references keep the wrap marker intact; DanTerm destroys it.
+
+**Who notices.** An ncurses application that uses the terminal's insert-character mode (smir/rmir) to scroll text horizontally — for example a wide-column table or a long single-line editor — while printing CJK text that reaches the right margin. The wrapped logical line acquires a phantom space when copied, and a later window resize reflows that line with the extra cell, misplacing the text after it.
+
+**Existing test.** none found. I grepped `TerminalGraphemeWidthTests.swift` and `TerminalGraphemeTests.swift` for `4h`/`insert` and got no hits; the insert-mode suites in `TerminalEditingTests.swift` do not print a wide character at the margin.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[4h\u{1b}[4G\u{754C}"` at 4 columns x 2 rows
+- Observe: `terminal.geometry.rows[0].cells[3].kind`
+- Expected (per the references): .spacerHead — the wrap spacer must survive the insert-mode shift (kitty `screen.c#draw_text_loop` inserts only on the new line; ghostty `Terminal.zig#print` writes the spacer_head after insertBlanks). Compare the same feed without the leading \u{1b}[4h, which already yields .spacerHead.
+- **Observed: with IRM: rows[0].cells[3].kind = padding, rows[0].isSoftWrapped = true** -- verdict `reproduced`
+- Ablation: Removed the leading \e[4h (feed "\e[4G\u{754C}"): rows[0].cells[3].kind = spacerHead, isSoftWrapped = true. Insert mode is the cause, and the inconsistent state the finding names (wrap claimed but no spacer) is present.
+
+<a id="bug-21"></a>
+
+### BUG-21. Sever history's incoming wrap claim for every erase that blanks all of row 0, not just ED
+
+`CSI 0 K (EL 0) at column 0 of row 0, and CSI 1 J (ED 1) at the last column of row 0` &middot; severity 3 (observable, narrow) &middot; hunter confidence 3
+
+**Problem.** When history's last retained row soft-wraps into live row 0, an erase that blanks the whole of row 0 destroys the cells that claim continues into. DanTerm severs that claim for ED 0 at home, ED 1 with the cursor below row 0, and ED 2, but not for EL 0 issued at column 0, and not for ED 1 issued at the last column of row 0 -- both of which blank exactly the same cells. The open history record then absorbs whatever is printed into row 0 next, fusing two separately printed logical lines into one.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#eraseDisplay calls severHistoryWrapClaimForRowZeroErase() only in three places: mode 0 under `if screen.cursor.row == 0, screen.cursor.column == 0`, mode 1 under `if screen.cursor.row > 0`, and unconditionally in mode 2. Terminal.swift#eraseLine and #eraseCharacters never call it. The doc comment on severHistoryWrapClaimForRowZeroErase itself states the rule -- "Call only for erases that blank *all* of row 0" -- and EL 0 at column 0, EL 2, ECH covering the full width, and ED 1 at the last column of row 0 all satisfy that condition without calling it. The GridRow.marginErased gate does not cover this: it is a per-row flag that makes the row's own *outgoing* claim decline, while the claim at issue here is history's open tail record claiming *into* row 0, and LogicalLineStore.swift#admit appends into an open tail record unconditionally.
+
+**What the references do.** No reference models retained scrollback as logical-line records, so none of them can adjudicate this directly -- in xterm, ghostty, kitty, and foot the scrollback row above the screen keeps its own wrap flag through any erase of row 0, so the question does not arise in the same form. The authority here is DanTerm's own contract: docs/design/2026-08-10-session-owned-terminal-reported-facts.md's neighbourhood and the invariant restated on Terminal.swift#severHistoryWrapClaimForRowZeroErase, plus the fusion failure mode documented at research/31/D2 operation 2. The defect is that ED and EL disagree about a screen state they produce identically, which no reading of any reference supports.
+
+**Who notices.** A shell prompt redraw at the top of the viewport. zsh and bash rewrite the prompt line with a carriage return followed by ESC [ K; when that lands on row 0 and the line that just scrolled off was soft-wrapped, the retained transcript joins the scrolled-off line to the new prompt. The user sees it when copying, searching, or resizing: selection and search return one fused line, and a width change reflows the fused pair as a single logical line.
+
+**Existing test.** None found for the incoming edge. lib/TerminalCore/Tests/TerminalCoreTests/TerminalStaleWrapClaimTests.swift covers only the outgoing edge (a live row's own claim on the row below it, gated by marginErased) and every case in it keeps the predecessor row on screen rather than in history. CSIEraseTests#eraseDisplayScrollback and #canonicalClearScreenPair do not exercise an open history tail record either.
+
+**Probe (run, not predicted).**
+
+- Feed: `Run two terminals with identical byte streams that differ in one final byte. A: "AAAAAAAAAABB\u{1b}[2;1H\n\u{1b}[H\u{1b}[Kcccc\u{1b}[2;1H\n\n" -- B: the same with "\u{1b}[J" in place of "\u{1b}[K".` at 10x2
+- Observe: `terminalA.primaryHistoryText == terminalB.primaryHistoryText`
+- Expected (per the references): true. Both erases blank exactly cells 0..9 of row 0 and nothing else, so the retained logical-line structure must be identical; concretely both should read "AAAAAAAAAA\ncccc" as their first two lines, which is what B produces because eraseDisplay mode 0 at home calls severHistoryWrapClaimForRowZeroErase (Terminal.swift#eraseDisplay).
+- **Observed: equal = false
+  A (EL 0 at home) primaryHistoryText = "AAAAAAAAAAcccc"
+  B (ED 0 at home) primaryHistoryText = "AAAAAAAAAA\ncccc"** -- verdict `reproduced`
+- Ablation: B *is* the ablation: the two feeds differ in exactly one byte ('K' vs 'J'), and only the ED form severs the history wrap claim. So the missing sever in eraseLine is the cause.
+- Note: The secondary ED 1 probe is the surprising line. Feed "AAAAAAAAAABB\e[2;1H\n\e[1;10H\e[1Jcccc\e[2;1H\n\n" gives primaryHistoryText = "AAAAAAAAAA         cccc" -- verbatim, nine spaces. So ED 1 both fails to sever (the line is fused, as predicted) AND leaves the erased cells materialized as spaces in the retained text, which neither the EL 0 case nor the ED 0 case does. That second half is not something the finding predicted.
+
+<a id="bug-22"></a>
+
+### BUG-22. Reply to ESC Z (DECID) with the primary device attributes string
+
+`ESC Z (DECID, obsolete form of CSI c / DA1)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 5
+
+**Problem.** ESC Z is a query that must produce a reply on the host channel. DanTerm parses it, hands it to the single-byte escape dispatcher, and drops it, so nothing is written to the reply channel. A program that writes ESC Z and blocks on the answer waits until its own timeout instead of getting an immediate identification.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/EscapeAbsorber.swift#EscapeAbsorber.consume emits `.escape(0x5A)` from the `0x59...0x5A` arm of the escape state, and lib/TerminalCore/Sources/TerminalCore/Terminal.swift#Terminal.dispatchEscape(_ final:) has cases only for 0x3D, 0x3E, 0x37, 0x38, 0x44, 0x45, 0x4D, 0x48 and 0x63, so 0x5A falls to `default: break`. The DA1 responder for `CSI c` lives in Terminal.dispatchCSI and emits "\u{1B}[?1;2c" via appendReply.
+
+**What the references do.** references/xterm/ctlseqs.ms: "ESC Z  Return Terminal ID (DECID is 0x9a). Obsolete form of CSI c (DA)." references/ghostty/src/terminal/stream.zig routes ESC 'Z' with no intermediates to `self.handler.vt(.device_attributes, .primary)`, i.e. the same reply as DA1. The references disagree: references/vte/src/parser.hh states in its parser notes that "DEC parses ESC Z as DECID ... vte implements ECMA-48's SCI (single character introducer) instead". DanTerm should follow xterm and ghostty, because it advertises itself as xterm-256color and already answers CSI c with the xterm-shaped "\u{1B}[?1;2c"; SCI has no consumer here.
+
+**Who notices.** Legacy identification probes -- `tset`/`reset` fallbacks, old vt100-era utilities, and terminal-detection scripts that try ESC Z before CSI c. They stall for their read timeout and then fall back to a less capable terminal profile.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}Z"` at 8 columns x 4 rows
+- Observe: `terminal.pendingReplyBytes`
+- Expected (per the references): Array("\u{1B}[?1;2c".utf8) -- DECID is the obsolete form of DA1 (references/xterm/ctlseqs.ms, "Return Terminal ID"; references/ghostty/src/terminal/stream.zig ESC 'Z' -> .device_attributes .primary), and "\u{1B}[?1;2c" is the exact string DanTerm already returns for CSI c (pinned by TerminalQueryTests#primaryQueries).
+- **Observed: [] = "" (pendingReplyBytes is empty)** -- verdict `reproduced`
+- Ablation: Fed `\u{1b}[c` (CSI c) to a fresh terminal instead: "\x1B[?1;2c". The DA1 reply path exists and works; only the ESC Z spelling is unhandled.
+- Note: ESC Z produces no reply and no visible side effect.
+
+<a id="bug-23"></a>
+
+### BUG-23. Prefix Alt+Escape with ESC in legacy mode
+
+`Legacy Escape key with the Alt modifier` &middot; severity 2 (pedantic but real) &middot; hunter confidence 5
+
+**Problem.** `encodeLegacyKey` returns a bare `[0x1B]` for `.escape` and never looks at the modifier set, so the Alt (Meta) ESC prefix that every other key in the same function applies is skipped for this one key. Alt+Escape is therefore indistinguishable from Escape.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/TerminalInputEncoding.swift#encodeLegacyKey, `case .escape: return [0x1B]`. Compare the sibling cases `.returnKey`, `.tab`, `.backspace` and `.character`, which each do `bytes.insert(0x1B, at: 0)` when `modifiers.contains(.alt)`.
+
+**What the references do.** references/kitty/kitty/key_encoding.c#legacy_functional_key_encoding_with_modifiers handles GLFW_FKEY_ESCAPE with `prefix = ev->mods.value & ALT ? "\x1b" : ""` and `main_bytes = "\x1b"`, so Alt+Escape is ESC ESC. references/xterm/input.c#Input applies the metaSendsEscape prefix generically to `kd.strbuf`, which for the Escape keysym is "\033", giving the same two bytes. The two references agree; DanTerm should follow them.
+
+**Who notices.** Emacs reads Alt+Escape as `ESC ESC`, the prefix for `eval-expression` (M-ESC :) and part of `keyboard-escape-quit` (ESC ESC ESC); with one ESC arriving, the binding never fires and the extra ESC is swallowed as a plain quit. Anything that binds `<M-Esc>` in vim or a readline `\e\e` macro is equally invisible.
+
+**Existing test.** none found. Grepping lib/TerminalCore/Tests/TerminalCoreTests/TerminalKeyEncodingTests.swift for `.escape` returns exactly one row, `(.escape, [], "\u{1B}[27u")` inside the kitty flag-1 matrix. No legacy Escape case, modified or not, is asserted anywhere in the suite.
+
+**Probe (run, not predicted).**
+
+- Feed: `(no terminal feed needed; default modes) evaluate the pure encoder directly` at 80x24
+- Observe: `encodeTerminalKey(.escape, modifiers: [.alt], modes: .default)`
+- Expected (per the references): [0x1B, 0x1B] (references/kitty/kitty/key_encoding.c#legacy_functional_key_encoding_with_modifiers; references/xterm/input.c#Input metaSendsEscape prefix)
+- **Observed: Alt+Esc = ["0x1B"]; plain Esc = ["0x1B"]** -- verdict `reproduced`
+- Ablation: Pure encoder; the control is plain Escape in the same call, which produces the identical single byte. Alt is byte-inert on Escape.
+- Note: Straightforward reproduction, nothing unexpected.
+
+<a id="bug-24"></a>
+
+### BUG-24. Stop HTS and TBC from cancelling the pending-wrap flag
+
+`ESC H (HTS) and CSI Ps g (TBC)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 5
+
+**Problem.** Setting or clearing a tab stop is not cursor motion, but DanTerm treats it as such and clears the deferred-wrap flag. A character written to the last column, followed by a tab-stop edit, followed by another character, overwrites the last column instead of wrapping to the next row.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#dispatchEscape(_ final: UInt8) case 0x48 calls `tabStops.insert(...)` and then `clearPendingMotionState()`, which sets `screen.isPendingWrap = false`. #clearTabStop does the same after editing the stop set.
+
+**What the references do.** references/xterm/charproc.c#CASE_TBC edits the tab array and returns; it never touches screen->do_wrap (xterm clears do_wrap explicitly wherever it means to, for example in CASE_DECALN). references/ghostty/src/terminal/Terminal.zig#tabSet is a single `self.tabstops.set(x)` and #tabClear only unsets bits -- neither touches pending_wrap. references/kitty/kitty/screen.c#screen_set_tab_stop likewise only writes the tabstops array. No reference clears the deferred wrap on a tab-stop edit.
+
+**Who notices.** A program that lays out a full-width line and then installs its column stops -- a table or column formatter that writes a header out to the last column, emits HTS to record the column positions, and continues writing -- loses the last character of the header row and prints the following text over it instead of on the next line.
+
+**Existing test.** None found for this interaction. TerminalResetTests pins isPendingWrap after a last-column write (its autoWrapProbe) and TerminalSavedCursorTests uses "\u{1B}[4G\u{1B}H\r\t\u{1B}[g" for save/restore, but neither combines a pending wrap with HTS or TBC. TerminalQueryTests#queriesArePure deliberately pins that *query* sequences preserve pending wrap, which is the same principle applied to a different family.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[1;80Ha\u{1b}Hb"` at 80x24
+- Observe: `terminal.geometry.cursor`
+- Expected (per the references): TerminalCursor(row: 1, column: 1, isPendingWrap: false) -- 'a' arms the deferred wrap at column 80, HTS leaves it armed (xterm charproc.c#CASE_TBC / tabs.c#TabSet, ghostty Terminal.zig#tabSet, kitty screen.c#screen_set_tab_stop), so 'b' wraps to row 2 column 1
+- **Observed: Optional(TerminalCore.TerminalCursor(row: 0, column: 79, isPendingWrap: true))** -- verdict `reproduced`
+- Ablation: Removed `\u{1b}H` (HTS): Optional(TerminalCore.TerminalCursor(row: 1, column: 1, isPendingWrap: false)) -- 'b' wraps correctly. HTS is what cancels the armed wrap.
+- Note: TBC shares it: the variant `\u{1b}[1;80Ha\u{1b}[0gb` also ends at (row: 0, column: 79, isPendingWrap: true), so `CSI Ps g` clears the flag too, exactly as the finding's title claims.
+
+<a id="bug-25"></a>
+
+### BUG-25. Report DECRQM ?2027 as permanently set instead of unrecognized
+
+`CSI ? 2027 $ p (DECRQM for the grapheme-cluster mode)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 5
+
+**Problem.** DanTerm performs extended-grapheme-cluster segmentation unconditionally: a ZWJ emoji family occupies one wide cell, and VS16 turns a narrow base into a wide one. But `CSI ? 2027 $ p` answers 0, which means "mode not recognized" — a positive statement that the terminal does not cluster. An application that probes before drawing therefore believes DanTerm accounts columns by wcwidth and computes six columns for a three-emoji ZWJ family that DanTerm renders in two.
+
+**What DanTerm does.** `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#decPrivateModeStatus` falls through to `default: 0` for 2027 — there is no key path for it in `Terminal.swift#modeKeyPath` and no case in the switch — while `Terminal.swift#print` and `Terminal.swift#appendToOpenClusterIfJoined` cluster on every input with no mode gate at all. Grepping the whole engine for 2027 returns nothing outside a generated table.
+
+**What the references do.** `references/ghostty/src/terminal/modes.zig` declares `grapheme_cluster` at value 2027 and `references/ghostty/src/terminal/Terminal.zig#print` gates the whole clustering block on it, so ghostty's DECRQM answer always matches its behavior. kitty implements no 2027 at all (grep of `references/kitty/kitty` finds no occurrence) and always clusters, so kitty has the same mismatch DanTerm does. The references disagree, and DanTerm should follow ghostty's contract rather than kitty's silence — but since DanTerm has already committed to kitty's always-on model, the correct answer is 3 (permanently set), not 0. Reporting a fact about the terminal that contradicts what the terminal does is wrong under either reference.
+
+**Who notices.** A TUI that probes 2027 and falls back to wcwidth accounting when it gets 0 — the pattern the mode exists to serve. Emoji-heavy interfaces (lazygit, gitui, fzf previews, starship prompts) then reserve six columns for a family emoji DanTerm draws in two, so everything after it on the line is drawn four columns too far right and the frame's right border shears.
+
+**Existing test.** none found for 2027. `lib/TerminalCore/Tests/TerminalCoreTests/TerminalQueryTests.swift#modeQueries` enumerates the DEC modes it expects a 0 for (1048 only) and does not list 2027, so nothing pins the current answer.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[?2027$p"` at 80 columns x 24 rows
+- Observe: `String(decoding: terminal.drainReplyBytes(), as: UTF8.self)`
+- Expected (per the references): "\u{1b}[?2027;3$y" — the engine clusters unconditionally, so DECRQM must report permanently set, the way ghostty `terminal/modes.zig` plus `Terminal.zig#print` keep the reported value and the behavior in agreement
+- **Observed: reply = "\x1B[?2027;0$y"** -- verdict `reproduced`
+- Note: Reports 0 (not recognized) while the engine clusters unconditionally.
+
+<a id="bug-26"></a>
+
+### BUG-26. Stop printing a cell for C1 code points decoded from UTF-8
+
+`A C1 control as a UTF-8 code point, e.g. U+0092 encoded as C2 92, in ground state` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4
+
+**Problem.** When the stream decoder yields a scalar in U+0080..U+009F, DanTerm treats it as ordinary printable text. The generated width table only marks Mn/Me/Cf as zero width, so category Cc falls through to the default narrow width and the scalar takes a whole cell. Every subsequent character on that row is shifted one column right, and the cell itself renders as a missing glyph.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/TerminalInputStream.swift#TerminalInputStream.nextAction routes scalars by value: 0x1B starts an escape, 0x00...0x1F and 0x7F become `.execute`, and everything else -- including 0x80...0x9F -- becomes `.print(scalar)`. lib/TerminalCore/Sources/TerminalCore/Terminal.swift#Terminal.print only skips scalars whose cellWidth is .zero, and scripts/generate-terminal-unicode-tables.py#parse_zero_width_ranges assigns zero width only to Mn/Me/Cf, so U+0092 is narrow and printNarrow writes a cell and advances the cursor.
+
+**What the references do.** references/xterm/charproc.c#doparsing: when `screen->wide_chars` is set (UTF-8 mode) and the code point is in 128..160 and allowC1Printable is off, it forces `sp->nextstate = CASE_IGNORE` -- the code point produces no cell. references/vte/src/parser.hh#Parser.feed dispatches 0x80...0x8F, 0x91...0x97 and 0x99 to `action_execute` on the decoded code point, which likewise consumes no column. references/ghostty/src/unicode/props_uucode.zig#get takes width straight from uucode's wcwidth-derived `width` property, which is 0 for category Cc, so ghostty's print path does not advance the cursor either. All three agree the column must not be consumed; they differ only on ignore versus execute. DanTerm should take xterm's ignore, since it does not honor 8-bit C1 anywhere else.
+
+**Who notices.** Anything that cats text mis-converted from CP1252 to UTF-8, where 0x91..0x97 become U+0091..U+0097 (very common in scraped or exported data). Column-aligned output from `column`, `ls -l`, `git log --format`, or a pager's line-wrap calculation drifts right by one per occurrence, so table columns stop lining up and long lines wrap a character early.
+
+**Probe (run, not predicted).**
+
+- Feed: `"A\u{92}B"` at 5 columns x 1 row
+- Observe: `terminal.geometry.cursor?.column`
+- Expected (per the references): 2 -- U+0092 must not occupy a cell: xterm forces CASE_IGNORE for 128..160 in UTF-8 mode (references/xterm/charproc.c#doparsing), vte executes it as a C1 control (references/vte/src/parser.hh#Parser.feed), and ghostty gives category Cc width 0 (references/ghostty/src/unicode/props_uucode.zig#get). So only A and B are written and the cursor sits at column 2. `terminal.screenText` should be "AB   ".
+- **Observed: cursor.column = Optional(3); screenText = "A\\x92B  "** -- verdict `reproduced`
+- Ablation: Removed the U+0092 scalar (fed "AB"): column = Optional(2); screenText = "AB   ". The C1 scalar is what consumes the extra cell.
+- Note: The verbatim screenText shows the C1 code point stored in a cell, not merely counted: "A\x92B  ".
+
+<a id="bug-27"></a>
+
+### BUG-27. Stop clearing the pending-wrap flag when a mode is set or reset
+
+`CSI ? 7 h / CSI ? 7 l (DECAWM), CSI 4 h / CSI 4 l (IRM), CSI 20 h / CSI 20 l (LNM)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4
+
+**Problem.** Setting or resetting a recognized mode clears the deferred-wrap flag. No reference touches the wrap flag when a mode changes: in xterm the flag lives in `screen->do_wrap` and the mode handlers only bit-twiddle `xw->flags`, and in ghostty `modes.set` has no side effect on `cursor.pending_wrap`. The consequence is that a mode change issued while the cursor is parked at the right margin swallows a character's worth of wrap: the next printable overwrites the last column instead of starting the next row. Note this is narrower than it looks -- DECOM (mode 6) genuinely must clear it, since it homes the cursor, and mode 25 already does not trigger the clear -- so the fix is to stop the blanket clear and keep it only on the DECOM arm.
+
+**What DanTerm does.** `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#applyANSIModes` sets `recognized = true` for any of modes 4 and 20 and then calls `clearPendingMotionState()`. `Terminal.swift#applyDECPrivateModes` sets `shouldClearPendingMotion = true` on `case 7` (DECAWM) as well as on `case 6` (DECOM), and calls `clearPendingMotionState()` at the end of the loop. `clearPendingMotionState` sets `screen.isPendingWrap = false`.
+
+**What the references do.** `references/xterm/charproc.c#srm_DECAWM` (in both the set and reset paths) does only `(*func)(&xw->flags, WRAPAROUND); update_autowrap();` -- `screen->do_wrap` is untouched, and `ResetWrap` is called only from the cursor-movement primitives in `references/xterm/cursor.c`. `references/ghostty/src/terminal/Terminal.zig` clears `cursor.pending_wrap` in the cursor and erase primitives (`cursorUp`, `cursorDown`, `eraseLine`, ...) but never in the mode-setting path; `.wraparound` is a plain entry in `references/ghostty/src/terminal/modes.zig` with no handler. The two agree.
+
+**Who notices.** A program that fills a row to the right margin and then toggles a mode before continuing -- for example emitting `tput smam`/`rmam` (`\e[?7h`/`\e[?7l`) or entering insert mode mid-line at the margin. The character that should have opened the next row instead replaces the last column of the current one, so one glyph is lost and the following text is shifted a column left for the rest of the paragraph.
+
+**Existing test.** None found pinning this. `lib/TerminalCore/Tests/TerminalCoreTests/TerminalModeTests.swift` line 216 feeds `\u{1B}[4h`, `\u{1B}[20h`, `\u{1B}[?6h`, `\u{1B}[?7l` but asserts mode state, not the wrap flag; `CSICursorMovementTests#movementClearsPendingState` covers movement CSIs only.
+
+**Probe (run, not predicted).**
+
+- Feed: `"ABC\u{1b}[?7hD"` at 3x2
+- Observe: `terminal.screenText`
+- Expected (per the references): "ABC\nD  " -- re-enabling DECAWM leaves the deferred wrap armed, so 'D' wraps to the next row (references/xterm/charproc.c#srm_DECAWM; references/ghostty/src/terminal/modes.zig)
+- **Observed: screenText = "ABD\n   "** -- verdict `reproduced`
+- Ablation: Removed the \e[?7h (feed "ABCD"): screenText = "ABC\nD  ". The deferred wrap survives when no mode change intervenes, so setting DECAWM is what clears isPendingWrap.
+
+**Also found as.** `screen-state-5` in the hunt output -- same defect from another area.
+
+<a id="bug-28"></a>
+
+### BUG-28. Report unmodified keypad Enter as CSI 57414u under the kitty keyboard protocol
+
+`Keypad Enter with kitty keyboard flag 1 (disambiguate) active` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4
+
+**Problem.** In the kitty encoder the keypad branch short-circuits on `modifiers.isEmpty` and returns the key's legacy numeric-mode string for every keypad key. That is right for the printable keypad keys, whose text a real kitty or ghostty also sends verbatim, but wrong for keypad Enter, whose "text" is a control character and which both references therefore encode as a functional CSI-u sequence.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/TerminalInputEncoding.swift#encodeKittyKey, keypad case: `guard modifiers.isEmpty == false else { return Array(normal.utf8) }`, where `keypadEncoding(for: .keypadEnter)` supplies normal = "\r". So Enter on the keypad emits 0x0D, byte-identical to the main Return key, and the 57414 code DanTerm already knows is used only when a modifier is held.
+
+**What the references do.** references/kitty/kitty/key_encoding.c#encode_glfw_key_event converts keypad keys to normal keys only when `!ev.disambiguate`, so with flag 1 the key stays GLFW_FKEY_KP_ENTER; `startswith_ascii_control_char("\r")` returns true, so `has_text` is false and the SEND_TEXT_TO_CHILD shortcut does not fire; references/kitty/kitty/key_encoding.c#encode_function_key then falls past the ENTER special cases (which test GLFW_FKEY_ENTER, not KP_ENTER) into serialize with trailer 'u', giving CSI 57414u. references/ghostty/src/input/key_encode.zig#kitty reaches the same result: its `inline .enter, .backspace` shortcut and its `binding_mods.empty()` switch both name `.enter` only, and its plain-text path breaks out via `isControl(cp)` for "\r", so it falls through to the entry `.{ .numpad_enter, 57414, 'u', false }` in references/ghostty/src/input/kitty.zig.
+
+**Who notices.** A full-screen editor that negotiates the kitty protocol precisely so it can tell keypad Enter from Return -- Neovim distinguishes `<kEnter>` from `<CR>` and users bind them separately. Under DanTerm the two keys are the same byte, so the `<kEnter>` mapping is unreachable while kitty mode is on even though the terminal advertised disambiguation.
+
+**Existing test.** none found. Grepping the whole TerminalCoreTests directory for `keypadEnter` finds two rows: the DECKPNM/DECKPAM table in TerminalKeyEncodingTests.swift (legacy modes only) and one application-keypad assertion expecting ESC O M. The kitty flag-1 matrix in the same file lists only `(.keypad0, [.shift], "\u{1B}[57399;2u")`, a modified key, so the unmodified kitty keypad path is unasserted.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1B}[>1u"` at 80x24
+- Observe: `String(decoding: encodeTerminalKey(.keypadEnter, modifiers: [], modes: terminal.inputModes), as: UTF8.self)`
+- Expected (per the references): "\u{1B}[57414u" (references/kitty/kitty/key_encoding.c#encode_function_key with disambiguate set; references/ghostty/src/input/kitty.zig entry `.{ .numpad_enter, 57414, 'u', false }`)
+- **Observed: "\\x0D"  raw=["0x0D"]; kittyFlags=1** -- verdict `reproduced`
+- Ablation: The terminal did accept the negotiation -- terminal.inputModes.kittyKeyboardFlags == 1 after feeding "\u{1B}[>1u" -- so the mode is on and the key still encodes as bare CR. Nothing to strip; the flag being 1 is the control.
+- Note: Return under the same kitty flags also encodes as "\x0D", which is correct for disambiguate-only mode. So keypad Enter is byte-identical to Return exactly as the finding claims.
+
+<a id="bug-29"></a>
+
+### BUG-29. Answer every ? in a dynamic colour request, advancing the colour index per parameter
+
+`OSC 10 ; ? ; ? ST (multi-parameter dynamic colour query; also OSC 10 ; spec ; ? which sets then queries)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4 &middot; **pinned by a deliberate test**
+
+**Problem.** OSC 10-19 take any number of ';'-separated specs, each of which either sets or queries, with the colour index advancing one step per parameter: the second parameter of an OSC 10 request refers to colour 11, the third to 12, and so on. DanTerm only recognizes a payload that is exactly one '?' byte and drops everything else, so a two-question query produces no reply at all rather than two.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#dispatchDefaultColorQuery opens with `guard payload[(selectorEnd + 1)...].elementsEqual([0x3F]) else { return }`. Anything other than a lone '?' -- a second '?', a colour spec, or a spec followed by '?' -- returns with no reply and no state change.
+
+**What the references do.** references/xterm/misc.c#ChangeColorsRequest loops `for (i = start; i < OSC_NCOLORS; i++)`, consuming one ';'-separated name per colour index and calling ReportColorRequest for each "?", so `OSC 10;?;?` emits an OSC 10 reply and then an OSC 11 reply. references/ghostty/src/terminal/osc/parsers/color.zig#parseGetSetDynamicColor mirrors it exactly -- one request per token, `color = color.next()` after each -- and its comment says so: "This matches the xterm behavior (see misc.c ChangeColorsRequest)". references/windows-terminal/src/terminal/parser/ut_parser/OutputEngineTest.cpp asserts `\033]10;?;?;?;?;?;?;?;?;?;?` requests resources 10 through 19. References disagree: references/foot/osc.c#osc_dispatch checks `string[0] == '?' && string[1] == '\0'` and so behaves as DanTerm does. DanTerm should follow xterm/ghostty/windows-terminal -- xterm's ctlseqs is the normative document here, ghostty cites it explicitly, and foot is the lone outlier.
+
+**Who notices.** A program that probes foreground and background in one round trip -- the compact form of the light/dark detection that otherwise costs two sequences -- gets zero replies instead of two and falls through to its default assumption. The set-then-query form `OSC 10;rgb:11/22/33;?` is likewise inert. Impact is bounded because the single-'?' form that most tools use does work; this is the compact spelling breaking, not the common one.
+
+**Existing test.** lib/TerminalCore/Tests/TerminalCoreTests/TerminalQueryTests.swift#defaultColorQueryOrderingAndRecovery lists "\u{1B}]10;?;?\u{07}" in an array literally named `invalidQueries` and asserts it produces no reply and no state change. So the current behavior is deliberate. The finding is that the classification is wrong: xterm defines this form and two other references implement it.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1B}]10;?;?\u{1B}\\"` at 80x24
+- Observe: `String(decoding: terminal.drainReplyBytes(), as: UTF8.self)`
+- Expected (per the references): "\u{1B}]10;rgb:e5e5/e5e5/e5e5\u{1B}\\\u{1B}]11;rgb:0000/0000/0000\u{1B}\\" -- fg then bg, index advancing per parameter (references/xterm/misc.c#ChangeColorsRequest, references/ghostty/src/terminal/osc/parsers/color.zig#parseGetSetDynamicColor)
+- **Observed: "" (empty -- no reply bytes at all)** -- verdict `reproduced`
+- Ablation: Dropped one '?' -- `\u{1B}]10;?\u{1B}\\` -- and the reply appears: "\x1B]10;rgb:e5e5/e5e5/e5e5\x1B\\". The second parameter is what makes the whole request inert.
+- Note: The set-then-query form `\u{1B}]10;rgb:1111/2222/3333;?\u{1B}\\` also produces "" -- confirmed inert, as the finding predicted.
+
+<a id="bug-30"></a>
+
+### BUG-30. Preserve the stale-wrap-claim bit when the alternate screen is resized by height alone
+
+`CSI 2 K (EL 2) on a soft-wrapped row of the alternate screen, followed by a row-count-only resize` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4
+
+**Problem.** `GridRow.marginErased` records that an erase was the last writer of a row's final column, which is what lets `GridRow.logicallyContinues` decline a wrap claim EL 2 deliberately left standing for xterm parity. The alternate screen's resize rebuilds each row with `GridRow(cells:isSoftWrapped:semanticPrompt:)` and never copies `marginErased`, so it defaults back to false. On a width change this is harmless because the wrap claim is cleared anyway, but on a height-only change the claim is preserved while its refutation is dropped. A claim the engine had correctly declined comes back to life, and every line-structure reader -- copy, search, `danterm pane rows` -- joins the erased row with the one below it.
+
+**What DanTerm does.** `Terminal.swift#resizedRectangle` constructs each output row as `GridRow(cells: cells, isSoftWrapped: clearsRowWrap ? false : source.isSoftWrapped, semanticPrompt: source.semanticPrompt)`. `marginErased` is the fourth stored property of `Terminal.swift#GridRow` and is not passed, so it takes its `false` default. When only the row count changes, the caller passes `clearsSoftWrap: false`, so `source.isSoftWrapped == true` survives while `marginErased == true` does not. `GridRow.logicallyContinues` then reports true where it reported false before the resize.
+
+**What the references do.** kitty `kitty/resize.c#resize_screen_buffer_without_rewrap` -- the function kitty uses for exactly this case, the alternate buffer -- copies the whole per-line attribute word with `ans.lb->line_attrs[y] = lb->line_attrs[y]`, so no line-level bit can be lost by a resize. ghostty `src/terminal/PageList.zig#resizeWithoutReflow` never rebuilds a row at all when rows shrink or columns change: it clears cells beyond the new column count in place and adjusts `page.size`, so every row flag survives by construction. Neither reference has an equivalent of `marginErased` (kitty stores continuation on the following line, ghostty stores `row.wrap`), so the requirement here is the structural one both of them satisfy: a no-reflow resize copies a row's flags in full. DanTerm rebuilds and drops one.
+
+**Who notices.** A TUI on the alternate screen that redraws a status or log line by erasing it with CSI 2 K after that line had wrapped -- tmux status lines, log viewers, and anything that repaints a long line in place all do this. The user then changes only the window height (a very common drag), and from that point selection, copy, and search treat the blanked row and the row beneath it as one logical line, so a copy silently drops the line break.
+
+**Existing test.** none found. `TerminalStaleWrapClaimTests.swift` covers the claim and its refutation but never resizes; `TerminalAlternateScreenTests.swift#alternateRectangleResize` exercises `#resizedRectangle` for cells, wide clusters and spacers but never sets up a margin erase; and no test under `lib/TerminalCore/Tests/TerminalCoreTests/` mentions `marginErased` or `staleWrapClaim` together with `resize(`.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[?1047hABCD\u{1b}[1;1H\u{1b}[2K" then terminal.resize(columns: 3, rows: 2)` at 3 columns x 3 rows
+- Observe: `terminal.rowStructure[0].isSoftWrapped and terminal.rowStructure[0].staleWrapClaim (read both before and after the resize; before the resize they are false and true)`
+- Expected (per the references): isSoftWrapped == false and staleWrapClaim == true, unchanged by a resize that changes only the row count -- the erase is still the last writer of that row's final column. kitty resize.c#resize_screen_buffer_without_rewrap copies line_attrs wholesale and ghostty PageList.zig#resizeWithoutReflow does not rebuild the row, so neither reference can lose a line-level bit across this resize.
+- **Observed: before resize: isSoftWrapped = false, staleWrapClaim = true; after resize: isSoftWrapped = true, staleWrapClaim = false** -- verdict `reproduced`
+- Ablation: Two. (1) Resized to the SAME geometry 3x3 instead of 3x2: isSoftWrapped = false, staleWrapClaim = true -- preserved. So it is the row-count change, not the resize call itself. (2) Dropped the `\u{1b}[2K`: isSoftWrapped = true, staleWrapClaim = false both before and after -- confirming that in the defect case the post-resize state is indistinguishable from a row that was never erased.
+- Note: The pre-resize state matched the finding's stated precondition exactly, so the probe is clean. After the height-only resize the erased row is reported as soft-wrapped into row 1, i.e. the two rows fuse into one logical line.
+
+<a id="bug-31"></a>
+
+### BUG-31. Stop DECSTR from clearing custom tab stops
+
+`CSI ! p (DECSTR), interacting with CSI 3 g (TBC) and ESC H (HTS)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4 &middot; **pinned by a deliberate test**
+
+**Problem.** DanTerm's soft reset rebuilds the default every-8-columns tab stops, discarding whatever the application configured with TBC and HTS. Tab stops are hard-reset state in the two references that document the split; a soft reset must leave them alone. A program that laid out its own columns finds HT jumping to stops it never set.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#resetControlState assigns `tabStops = Self.defaultTabStops(columns: columnCount)`, and #softReset calls it.
+
+**What the references do.** xterm charproc.c#ReallyReset calls TabReset only inside the `if (full)` (RIS) branch. vte src/vteseq.cc#Terminal::DECSTR calls reset(false, false) and src/vte.cc#Terminal::reset guards `m_tabstops.reset()` with `if (clear_tabstops)`. kitty disagrees: kitty/screen.c#do_screen_reset calls init_tabstops unconditionally, so kitty clears them on a soft reset too. DanTerm should follow xterm and vte -- they are the two that make the hard/soft distinction explicit, and xterm's ctlseqs.txt DECSTR entry is the normative description.
+
+**Who notices.** A column-oriented TUI or a pager that sets its own tab stops (TBC-all then HTS per column) and then emits xterm's is2/rs2 string, which begins with DECSTR. After that, every HT snaps to column 8, 16, 24 instead of the application's own columns, so tabular output shears.
+
+**Existing test.** lib/TerminalCore/Tests/TerminalCoreTests/TerminalResetTests.swift#softResetMatrix pins it: after `\u{1B}[3g` and a DECSTR it asserts `tabProbe.geometry.cursor?.column == 8`. That assertion encodes the deviation.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1b}[3g\u{1b}[1;4H\u{1b}H\r\u{1b}[!p\t"` at 80x24
+- Observe: `terminal.geometry.cursor?.column`
+- Expected (per the references): 3 -- xterm charproc.c#ReallyReset keeps TabReset in the RIS-only branch and vte vte.cc#Terminal::reset skips m_tabstops.reset() when clear_tabstops is false, so the single HTS-set stop at column 3 survives the soft reset
+- **Observed: cursor.column = Optional(8)** -- verdict `reproduced`
+- Ablation: Removed `\u{1b}[!p` (DECSTR) from the feed: column = Optional(3). The soft reset is the sole cause -- with it, HT lands on the every-8 default stop; without it, HT lands on the HTS-set stop at column 3.
+- Note: DECSTR restores the default tab stops, which xterm does only on RIS.
+
+**Also found as.** `reports-tabs-4` in the hunt output -- same defect from another area.
+
+<a id="bug-32"></a>
+
+### BUG-32. Reset the saved-cursor slot to the default rendition on DECSTR
+
+`CSI ! p (DECSTR) followed by ESC 8 (DECRC)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4 &middot; **pinned by a deliberate test**
+
+**Problem.** DECSTR resets the active pen but leaves the DECSC slot holding whatever pen was saved before the reset. A later DECRC then reinstates pre-reset attributes and colours that the soft reset was supposed to have cleared. Both references re-save the cursor at the end of a soft reset, precisely so the slot cannot smuggle old rendition across the reset.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#softReset calls recordFullDamage, selectPrimaryScreen, resetControlState, clears the hyperlink pen and the interaction slots, and clears pending motion. It never writes `screen.savedCursor`, whose `style` field (Terminal.swift#SavedCursorState) still holds the pre-DECSTR pen. Terminal.swift#restoreCursor copies that style straight back into `currentStyle`.
+
+**What the references do.** references/xterm/charproc.c#ReallyReset ends its DECSTR arm with `CursorSave(xw);` followed by zeroing `screen->sc[screen->whichBuf].row/col` -- the slot is rewritten with the just-cleared flags and homed. references/vte/src/vte.cc#Terminal::reset calls `save_cursor(&m_normal_screen); save_cursor(&m_alternate_screen);` after resetting `m_defaults`, so both slots carry the default rendition. The two disagree only on the saved position (xterm homes it, vte keeps the current cursor); they agree that the saved attributes become the defaults.
+
+**Who notices.** A program that brackets a section with DECSC/DECRC and issues a soft reset in between -- some line editors and installer TUIs do exactly this when recovering from a garbled screen. After DECRC the text comes back in the colour that was live before the reset instead of the terminal default, so the recovery does not actually recover a clean pen.
+
+**Existing test.** Pinned deliberately: `lib/TerminalCore/Tests/TerminalCoreTests/TerminalResetTests.swift#softResetMatrix` ends with `slotProbe.feed(Array("\u{1B}8".utf8)); #expect(slotProbe.currentStyle.foreground == .indexed(1))`, and the test preamble states DECSTR "must not ... overwrite the saved slot". No reference is cited for that requirement, and xterm and vte both do overwrite it, so the pin looks like an unsourced assumption rather than a researched decision.
+
+**Probe (run, not predicted).**
+
+- Feed: `\u{1b}[31;1m\u{1b}7\u{1b}[!p\u{1b}8` at 80x24 (default)
+- Observe: `terminal.currentStyle`
+- Expected (per the references): TerminalStyle() -- DECSTR rewrites the saved slot with the reset rendition, so DECRC restores the default pen (xterm charproc.c#ReallyReset, DECSTR arm: CursorSave after the flag and colour reset; vte vte.cc#Terminal::reset: save_cursor after m_defaults is reset).
+- **Observed: currentStyle = TerminalStyle(foreground: TerminalCore.TerminalColor.indexed(1), background: TerminalCore.TerminalColor.default, bold: true, dim: false, italic: false, underline: TerminalCore.TerminalUnderlineStyle.none, underlineColor: TerminalCore.TerminalColor.default, reverse: false, hidden: false, strikethrough: false)** -- verdict `reproduced`
+- Note: Exactly the predicted stale pen: red + bold survive DECSTR in the saved slot and DECRC reinstates them.
+
+<a id="bug-33"></a>
+
+### BUG-33. Attach a combining mark to the cell left of the cursor when no cluster is open
+
+`a zero-width combining mark (for example U+0301) printed after any cursor-motion sequence` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4
+
+**Problem.** DanTerm keeps its grapheme state in a `clusterContext` that only the printer opens, and every cursor motion clears it. A combining mark that arrives with no open context is silently dropped, because `print` returns early on any zero-width scalar. Every reference instead derives the attachment target from the grid — the cell left of the cursor — so the mark is never lost.
+
+**What DanTerm does.** `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#print` does `guard properties.cellWidth != .zero else { return }` after `appendToOpenClusterIfJoined` declines, so a zero-width scalar with no open cluster is discarded. `Terminal.swift#movePositionedCursor` (CUP, CUF, CUB, CHA, HVP) and `Terminal.swift#clearPendingMotionState` (CR, LF, HT) both set `clusterContext = nil`, and so does `Terminal.swift#moveCursor`. There is no fallback that inspects the cell to the left.
+
+**What the references do.** `references/kitty/kitty/screen.c#init_prev_cell` re-derives the attachment target as `cursor->x - 1` at the start of every draw call (and walks to the previous row's last cell when that row was wrapped), and `references/kitty/kitty/screen.c#draw_text_loop` then routes the mark to `draw_combining_char`. `references/ghostty/src/terminal/Terminal.zig#print` in mode 2027 reads the previous cell's stored codepoints out of the grid to compute the break, so it attaches across a cursor move too; its non-2027 zero-width branch attaches to `cursorCellLeft(1)`. `references/foot/terminal.c#term_process_and_print_non_ascii` uses `cursor.point.col - 1` and skips back over spacers. xterm is the outlier: `references/xterm/charproc.c#doparse` uses `screen->cur_col` rather than `cur_col - 1` when `char_was_written` is false, so it attaches to the cell *under* the cursor. DanTerm should follow kitty and ghostty, since its cell model is theirs and their rule (previous cell, skipping a wide tail) is the one that survives a wide pair.
+
+**Who notices.** An application that repaints a region by addressing the cursor and then re-emitting decomposed text — common on macOS, where filenames come out of the filesystem in NFD, so an accented character is a base plus a separate U+0301. Wherever a redraw's cursor address lands between the base and the mark, the accent vanishes from the screen and from anything copied out of it.
+
+**Existing test.** none found. I grepped `TerminalGraphemeTests.swift` and `TerminalGraphemeWidthTests.swift`; every combining-mark case feeds the base and the mark in one uninterrupted run, so none of them exercises a cleared `clusterContext`.
+
+**Probe (run, not predicted).**
+
+- Feed: `"e\u{1b}[2G\u{0301}"` at 5 columns x 1 row
+- Observe: `terminal.cell(row: 0, column: 0)?.scalars`
+- Expected (per the references): ["e", "\u{0301}"] — kitty `screen.c#init_prev_cell` re-derives the target as cursor->x - 1 = column 0, and ghostty `Terminal.zig#print` reads column 0's codepoint out of the grid and finds no grapheme break
+- **Observed: cell(0,0).scalars = ["e"]** -- verdict `reproduced`
+- Ablation: Removed the \e[2G (feed "e\u{0301}"): cell(0,0).scalars = ["e", U+0301]. The cursor-motion sequence between base and mark is what drops the combining mark.
+
+<a id="bug-34"></a>
+
+### BUG-34. Apply LNM to keypad Enter, not only to the main Return key
+
+`Keypad Enter in numeric keypad mode while LNM (CSI 20 h) is set` &middot; severity 1 (cosmetic) &middot; hunter confidence 4
+
+**Problem.** LNM is consulted only inside the `.returnKey` branch of the legacy encoder. The keypad branch returns its table string unconditionally, so keypad Enter emits a bare CR while the main Return key emits CR LF, even though both keys are producing the same carriage return.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/TerminalInputEncoding.swift#encodeLegacyKey: `.returnKey` tests `modes.lineFeedNewLine` and returns [0x0D, 0x0A]; the keypad case ends with `return modes.applicationKeypad ? Array("\u{1B}O\(application)".utf8) : Array(normal.utf8)` and never reads `modes.lineFeedNewLine`, so `.keypadEnter` yields [0x0D].
+
+**What the references do.** xterm applies LNM at the byte-emission layer rather than per key: references/xterm/charproc.c#unparseputc appends '\n' to any key byte that is '\r' when the LINEFEED flag is set, and keypad Enter in numeric mode goes through that same path with strbuf "\r". So xterm sends CR LF for both keys. Application keypad mode is unaffected in both implementations, because there keypad Enter is SS3 M and contains no CR. kitty does not implement LNM for key output at all, so xterm is the only reference that speaks to this; follow xterm, since LNM is an xterm/DEC mode and the whole point is that the two Enter keys agree.
+
+**Who notices.** A line-oriented or serial-style program that sets LNM (CSI 20 h) and reads whole lines: pressing keypad Enter delivers CR with no LF, so the line is never terminated while the main Return key works. The user sees Enter working on one key and hanging on the other in the same program.
+
+**Existing test.** none found. TerminalKeyEncodingTests.swift pins keypad Enter as "\r" only in the "DECKPNM and DECKPAM cover the complete keypad table" test, which uses default modes with LNM off, and pins LNM only through `.returnKey` rows in "legacy Return, Tab, and Backspace cover control, Shift, Alt, and LNM forms". No test combines LNM with any keypad key.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1B}[20h"` at 80x24
+- Observe: `encodeTerminalKey(.keypadEnter, modifiers: [], modes: terminal.inputModes) compared against encodeTerminalKey(.returnKey, modifiers: [], modes: terminal.inputModes)`
+- Expected (per the references): both [0x0D, 0x0A] (references/xterm/charproc.c#unparseputc appends the line feed to any '\r' key byte under the LINEFEED flag)
+- **Observed: keypadEnter = ["0x0D"]; returnKey = ["0x0D", "0x0A"]** -- verdict `reproduced`
+- Ablation: Removed `\u{1B}[20h` (LNM): keypadEnter = ["0x0D"]; returnKey = ["0x0D"]. LNM is what adds the LF, and it is applied only to the main Return key.
+- Note: The ablation is clean: LNM is honoured, just on one key of the two.
+
+<a id="bug-35"></a>
+
+### BUG-35. Treat an empty OSC 8 id= as no id rather than as an id whose value is the empty string
+
+`OSC 8 ; id= ; uri ST (hyperlink open with an explicitly empty id parameter)` &middot; severity 1 (cosmetic) &middot; hunter confidence 4
+
+**Problem.** `OSC 8;id=;http://a.test` yields explicitId == "" rather than nil. Because DanTerm reuses an existing target whenever both explicitId and uri match, two runs of text that are separated by an intervening close both land on the same hyperlink id, so they are treated as one wrapped link. With no id at all they would correctly be two separate links.
+
+**What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/OSCPayload.swift#osc8ExplicitId returns `String(pieces[1])` whenever a field splits into exactly two pieces around '=', with no check that the value is non-empty, so "id=" yields "". lib/TerminalCore/Sources/TerminalCore/Terminal.swift#dispatchOSC8 then stores `TerminalHyperlink(uri:explicitId:)` with that empty string and, on a later open, matches it via `$0.value.explicitId == explicitId && $0.value.uri == uri`.
+
+**What the references do.** references/ghostty/src/terminal/osc/parsers/hyperlink.zig#parse guards the assignment with `if (value.len > 0) parser.command.hyperlink_start.id = value;` and has a dedicated unit test, "OSC 8: hyperlink with empty id", asserting the parsed id is null. references/kitty/kitty/hyperlink.c#get_id_for_hyperlink builds its pool key as `"%.*s:%s", id ? id : "", url`, so an empty id and an absent id produce the identical key -- indistinguishable, i.e. also normalized away. References disagree: references/foot/osc.c#osc_uri does `if (streq(key, "id")) id = sdbm_hash(value)` unconditionally, so foot hashes the empty string into a real id, matching DanTerm. Ghostty is the one that ruled on this explicitly with a test, and kitty's keying agrees with it, so DanTerm should normalize.
+
+**Who notices.** A generator that emits `id=` for links it has no identity for -- a templating layer that always writes the parameter and leaves it blank when there is nothing to fill in. Two unrelated links to the same URL then highlight together on hover and are reported as one link, which is wrong for, say, a build log that prints the same file URL on many separate lines. Narrow in practice: few emitters write a blank id.
+
+**Existing test.** none found. lib/TerminalCore/Tests/TerminalCoreTests/TerminalHyperlinkTests.swift#grammarAndIdentity covers `id=42` (non-empty), `id=ignored` with an empty URI (close), and `id=<0xFF>` (invalid UTF-8, which falls back to nil id), but never a well-formed empty value. I grepped the whole TerminalCoreTests tree for "id=" and "osc8(params:" and found no case with an empty id value.
+
+**Probe (run, not predicted).**
+
+- Feed: `"\u{1B}]8;id=;http://a.test\u{07}x"` at 20x2
+- Observe: `terminal.cell(row: 0, column: 0)?.hyperlink?.explicitId`
+- Expected (per the references): nil -- an empty id value is no id (references/ghostty/src/terminal/osc/parsers/hyperlink.zig#parse and its "OSC 8: hyperlink with empty id" test; references/kitty/kitty/hyperlink.c#get_id_for_hyperlink keys it identically to an absent id)
+- **Observed: explicitId = Optional(""); uri = Optional("http://a.test")** -- verdict `reproduced`
+- Ablation: Dropped the `id=` parameter entirely -- `\u{1B}]8;;http://a.test\u{07}x` -- and explicitId = nil. The empty-valued parameter is what stores the empty string.
+- Note: The URI is parsed correctly in both cases, so only the id handling differs.
 
 ## Plan of work
 
