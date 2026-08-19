@@ -11,7 +11,7 @@ struct TerminalInteractionPolicyTests {
 
         var shifted = TerminalInteractionState()
         let shiftedResult = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, modifiers: [.shift]),
+            .down(.left, cell: .init(column: 1, row: 0), modifiers: [.shift]),
             terminal: terminal,
             state: &shifted
         )
@@ -23,7 +23,7 @@ struct TerminalInteractionPolicyTests {
         capturedTerminal.feed(Array("\u{1B}[?1000;1006h".utf8))
         var captured = TerminalInteractionState()
         let capturedResult = decideTerminalPointer(
-            .down(.left, column: 1, row: 0),
+            .down(.left, cell: .init(column: 1, row: 0)),
             terminal: capturedTerminal,
             state: &captured
         )
@@ -35,14 +35,14 @@ struct TerminalInteractionPolicyTests {
         // gesture before the engine sees it, so shift-right under capture emits nothing.
         var shiftedRight = TerminalInteractionState()
         let shiftedRightDown = decideTerminalPointer(
-            .down(.right, column: 2, row: 0, modifiers: [.shift]),
+            .down(.right, cell: .init(column: 2, row: 0), modifiers: [.shift]),
             terminal: capturedTerminal,
             state: &shiftedRight
         )
         #expect(shiftedRightDown.consumption == .ignored)
         #expect(shiftedRightDown.inputBytes.isEmpty)
         let shiftedRightUp = decideTerminalPointer(
-            .up(.right, column: 2, row: 0, modifiers: [.shift]),
+            .up(.right, cell: .init(column: 2, row: 0), modifiers: [.shift]),
             terminal: capturedTerminal,
             state: &shiftedRight
         )
@@ -51,15 +51,15 @@ struct TerminalInteractionPolicyTests {
 
         var uncapturedRight = TerminalInteractionState()
         #expect(decideTerminalPointer(
-            .down(.right, column: 3, row: 1), terminal: terminal, state: &uncapturedRight
+            .down(.right, cell: .init(column: 3, row: 1)), terminal: terminal, state: &uncapturedRight
         ).consumption == .ignored)
         #expect(decideTerminalPointer(
-            .up(.right, column: 4, row: 1), terminal: terminal, state: &uncapturedRight
+            .up(.right, cell: .init(column: 4, row: 1)), terminal: terminal, state: &uncapturedRight
         ).inputBytes.isEmpty)
 
         var middle = TerminalInteractionState()
         #expect(decideTerminalPointer(
-            .down(.middle, column: 0, row: 0), terminal: terminal, state: &middle
+            .down(.middle, cell: .init(column: 0, row: 0)), terminal: terminal, state: &middle
         ).consumption == .ignored)
     }
 
@@ -69,18 +69,18 @@ struct TerminalInteractionPolicyTests {
         localTerminal.feed(Array("abcdef".utf8))
         var local = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 0, row: 0), terminal: localTerminal, state: &local
+            .down(.left, cell: .init(column: 0, row: 0)), terminal: localTerminal, state: &local
         )
         localTerminal.feed(Array("\u{1B}[?1003h".utf8))
         let redundantDown = decideTerminalPointer(
-            .down(.left, column: 0, row: 0), terminal: localTerminal, state: &local
+            .down(.left, cell: .init(column: 0, row: 0)), terminal: localTerminal, state: &local
         )
         #expect(redundantDown.consumption == .selection)
         #expect(redundantDown.selectionMutation == nil)
         // Pressed at column 0's leading edge and dragged to column 3's, so the selection runs
         // from one boundary to the other and stops short of column 3's character.
         let localMove = decideTerminalPointer(
-            .move(column: 3, row: 0, modifiers: [.alt]), terminal: localTerminal, state: &local
+            .move(cell: .init(column: 3, row: 0), modifiers: [.alt]), terminal: localTerminal, state: &local
         )
         #expect(localMove.consumption == .selection)
         #expect(localMove.selectionMutation == .set(range(0, 0, 0, 3)))
@@ -92,11 +92,11 @@ struct TerminalInteractionPolicyTests {
         var reportTerminal = localTerminal
         var report = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 0, row: 0), terminal: reportTerminal, state: &report
+            .down(.left, cell: .init(column: 0, row: 0)), terminal: reportTerminal, state: &report
         )
         reportTerminal.feed(Array("\u{1B}[?1003l".utf8))
         let reportMove = decideTerminalPointer(
-            .move(column: 2, row: 0, modifiers: [.shift]), terminal: reportTerminal, state: &report
+            .move(cell: .init(column: 2, row: 0), modifiers: [.shift]), terminal: reportTerminal, state: &report
         )
         #expect(reportMove.consumption == .report)
         #expect(reportMove.selectionMutation == nil)
@@ -118,7 +118,7 @@ struct TerminalInteractionPolicyTests {
         for clickCount in 1...6 {
             var state = TerminalInteractionState()
             let down = decideTerminalPointer(
-                .down(.left, column: 1, row: 0, clickCount: clickCount),
+                .down(.left, cell: .init(column: 1, row: 0), clickCount: clickCount),
                 terminal: terminal,
                 state: &state
             )
@@ -129,10 +129,10 @@ struct TerminalInteractionPolicyTests {
         // and dragged to column 3's, the selection is the two characters between them.
         var character = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 4), terminal: terminal, state: &character
+            .down(.left, cell: .init(column: 1, row: 0), clickCount: 4), terminal: terminal, state: &character
         )
         #expect(decideTerminalPointer(
-            .move(column: 3, row: 0), terminal: terminal, state: &character
+            .move(cell: .init(column: 3, row: 0)), terminal: terminal, state: &character
         ).selectionMutation == .set(range(0, 1, 0, 3)))
         var characterSettled = terminal
         characterSettled.setSelection(range(0, 1, 0, 3))
@@ -140,26 +140,26 @@ struct TerminalInteractionPolicyTests {
 
         var terminalToken = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 5), terminal: terminal, state: &terminalToken
+            .down(.left, cell: .init(column: 1, row: 0), clickCount: 5), terminal: terminal, state: &terminalToken
         )
         #expect(decideTerminalPointer(
-            .move(column: 5, row: 0), terminal: terminal, state: &terminalToken
+            .move(cell: .init(column: 5, row: 0)), terminal: terminal, state: &terminalToken
         ).selectionMutation == .set(range(0, 0, 0, 7)))
 
         var hardLines = try #require(Terminal(columns: 8, rows: 3))
         hardLines.feed(Array("first\r\nsecond".utf8))
         var lineDrag = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 6),
+            .down(.left, cell: .init(column: 1, row: 0), clickCount: 6),
             terminal: hardLines,
             state: &lineDrag
         )
         #expect(decideTerminalPointer(
-            .move(column: 2, row: 1), terminal: hardLines, state: &lineDrag
+            .move(cell: .init(column: 2, row: 1)), terminal: hardLines, state: &lineDrag
         ).selectionMutation == .set(range(0, 0, 1, 6)))
 
         #expect(decideTerminalPointer(
-            .up(.left, column: 1, row: 0), terminal: terminal, state: &terminalToken
+            .up(.left, cell: .init(column: 1, row: 0)), terminal: terminal, state: &terminalToken
         ).consumption == .selection)
     }
 
@@ -177,7 +177,7 @@ struct TerminalInteractionPolicyTests {
         for clickCount in [3, 6] {
             var state = TerminalInteractionState()
             let down = decideTerminalPointer(
-                .down(.left, column: 13, row: 0, clickCount: clickCount),
+                .down(.left, cell: .init(column: 13, row: 0), clickCount: clickCount),
                 terminal: terminal,
                 state: &state
             )
@@ -199,7 +199,7 @@ struct TerminalInteractionPolicyTests {
 
         var history = TerminalInteractionState()
         let historyDown = decideTerminalPointer(
-            .down(.left, column: 5, row: 0, clickCount: 3),
+            .down(.left, cell: .init(column: 5, row: 0), clickCount: 3),
             terminal: evicting,
             state: &history
         )
@@ -221,10 +221,10 @@ struct TerminalInteractionPolicyTests {
 
         var state = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 0, row: 0, clickCount: 3), terminal: terminal, state: &state
+            .down(.left, cell: .init(column: 0, row: 0), clickCount: 3), terminal: terminal, state: &state
         )
         let move = decideTerminalPointer(
-            .move(column: 11, row: 1), terminal: terminal, state: &state
+            .move(cell: .init(column: 11, row: 1)), terminal: terminal, state: &state
         )
 
         #expect(move.selectionMutation == .set(range(0, 2, 1, 8)))
@@ -247,11 +247,11 @@ struct TerminalInteractionPolicyTests {
 
         var single = TerminalInteractionState()
         let singleDown = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 1), terminal: terminal, state: &single
+            .down(.left, cell: .init(column: 1, row: 0), clickCount: 1), terminal: terminal, state: &single
         )
         var quadruple = TerminalInteractionState()
         let quadrupleDown = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 4), terminal: terminal, state: &quadruple
+            .down(.left, cell: .init(column: 1, row: 0), clickCount: 4), terminal: terminal, state: &quadruple
         )
 
         #expect(singleDown.inputBytes.isEmpty == false)
@@ -268,7 +268,7 @@ struct TerminalInteractionPolicyTests {
         var state = TerminalInteractionState()
 
         let decision = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 2),
+            .down(.left, cell: .init(column: 1, row: 0), clickCount: 2),
             terminal: terminal,
             state: &state
         )
@@ -284,24 +284,24 @@ struct TerminalInteractionPolicyTests {
         terminal.setSelection(from: .init(row: 0, column: 0), to: .init(row: 0, column: 2))
         var local = TerminalInteractionState()
         #expect(decideTerminalPointer(
-            .down(.left, column: 2, row: 0), terminal: terminal, state: &local
+            .down(.left, cell: .init(column: 2, row: 0)), terminal: terminal, state: &local
         ).selectionMutation == .clear)
         // The move lands on the same boundary the press did, so it clears again rather than
         // setting a present-but-empty selection that would leave Copy enabled.
         #expect(decideTerminalPointer(
-            .move(column: 2, row: 0), terminal: terminal, state: &local
+            .move(cell: .init(column: 2, row: 0)), terminal: terminal, state: &local
         ).selectionMutation == .clear)
         #expect(decideTerminalPointer(
-            .up(.left, column: 2, row: 0), terminal: terminal, state: &local
+            .up(.left, cell: .init(column: 2, row: 0)), terminal: terminal, state: &local
         ).selectionMutation == nil)
 
         terminal.feed(Array("\u{1B}[?1000h".utf8))
         var captured = TerminalInteractionState()
         #expect(decideTerminalPointer(
-            .down(.right, column: 1, row: 0), terminal: terminal, state: &captured
+            .down(.right, cell: .init(column: 1, row: 0)), terminal: terminal, state: &captured
         ).consumption == .report)
         let up = decideTerminalPointer(
-            .up(.right, column: 1, row: 0), terminal: terminal, state: &captured
+            .up(.right, cell: .init(column: 1, row: 0)), terminal: terminal, state: &captured
         )
         #expect(up.consumption == .report)
     }
@@ -548,7 +548,7 @@ struct TerminalInteractionPolicyTests {
         var state = TerminalInteractionState()
 
         let down = decideTerminalPointer(
-            .down(.left, column: 2, row: 0, modifiers: [.command]),
+            .down(.left, cell: .init(column: 2, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
@@ -557,7 +557,7 @@ struct TerminalInteractionPolicyTests {
         apply(down.armMutation, to: &terminal)
 
         let drag = decideTerminalPointer(
-            .move(column: 5, row: 0, modifiers: [.command]),
+            .move(cell: .init(column: 5, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
@@ -565,7 +565,7 @@ struct TerminalInteractionPolicyTests {
         #expect(drag.inputBytes.isEmpty)
 
         let wrongRun = decideTerminalPointer(
-            .up(.left, column: 15, row: 0, modifiers: [.command]),
+            .up(.left, cell: .init(column: 15, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
@@ -574,13 +574,13 @@ struct TerminalInteractionPolicyTests {
         apply(wrongRun.armMutation, to: &terminal)
 
         let secondDown = decideTerminalPointer(
-            .down(.left, column: 2, row: 0, modifiers: [.command]),
+            .down(.left, cell: .init(column: 2, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
         apply(secondDown.armMutation, to: &terminal)
         let open = decideTerminalPointer(
-            .up(.left, column: 3, row: 0, modifiers: [.command]),
+            .up(.left, cell: .init(column: 3, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
@@ -598,13 +598,13 @@ struct TerminalInteractionPolicyTests {
             var state = TerminalInteractionState()
 
             let down = decideTerminalPointer(
-                .down(.left, column: 2, row: 0, modifiers: [.command]),
+                .down(.left, cell: .init(column: 2, row: 0), modifiers: [.command]),
                 terminal: terminal,
                 state: &state
             )
             apply(down.armMutation, to: &terminal)
             let up = decideTerminalPointer(
-                .up(.left, column: 3, row: 0, modifiers: [.command]),
+                .up(.left, cell: .init(column: 3, row: 0), modifiers: [.command]),
                 terminal: terminal,
                 state: &state
             )
@@ -625,7 +625,7 @@ struct TerminalInteractionPolicyTests {
         terminal.feed(Array("https://a.co".utf8))
         var state = TerminalInteractionState()
         let down = decideTerminalPointer(
-            .down(.left, column: 2, row: 0, modifiers: [.command]),
+            .down(.left, cell: .init(column: 2, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
@@ -633,7 +633,7 @@ struct TerminalInteractionPolicyTests {
 
         terminal.feed(Array("\u{1B}[1;1Hh".utf8))
         let release = decideTerminalPointer(
-            .up(.left, column: 3, row: 0, modifiers: [.command]),
+            .up(.left, cell: .init(column: 3, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
@@ -650,22 +650,22 @@ struct TerminalInteractionPolicyTests {
         var state = TerminalInteractionState()
 
         #expect(decideTerminalPointer(
-            .down(.right, column: 14, row: 0), terminal: terminal, state: &state
+            .down(.right, cell: .init(column: 14, row: 0)), terminal: terminal, state: &state
         ).consumption == .report)
         #expect(decideTerminalPointer(
-            .down(.left, column: 2, row: 0, modifiers: [.command]),
+            .down(.left, cell: .init(column: 2, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         ).consumption == .link)
         let move = decideTerminalPointer(
-            .move(column: 3, row: 0, modifiers: [.command]),
+            .move(cell: .init(column: 3, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
         #expect(move.consumption == .link)
         #expect(move.inputBytes.isEmpty)
         #expect(decideTerminalPointer(
-            .up(.left, column: 3, row: 0, modifiers: [.command]),
+            .up(.left, cell: .init(column: 3, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         ).inputBytes.isEmpty)
@@ -678,7 +678,7 @@ struct TerminalInteractionPolicyTests {
         var state = TerminalInteractionState()
 
         let hover = decideTerminalPointer(
-            .move(column: 2, row: 0, modifiers: [.command]),
+            .move(cell: .init(column: 2, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
@@ -686,17 +686,17 @@ struct TerminalInteractionPolicyTests {
         #expect(hover.hoverMutation == .set(resolved))
 
         let clear = decideTerminalPointer(
-            .move(column: 2, row: 0), terminal: terminal, state: &state
+            .move(cell: .init(column: 2, row: 0)), terminal: terminal, state: &state
         )
         #expect(clear.hoverMutation == .clear)
 
         _ = decideTerminalPointer(
-            .down(.left, column: 2, row: 0, modifiers: [.command]),
+            .down(.left, cell: .init(column: 2, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
         let outside = decideTerminalPointer(
-            .move(column: -1, row: 0, modifiers: [.command]),
+            .move(cell: .init(column: -1, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
@@ -705,11 +705,13 @@ struct TerminalInteractionPolicyTests {
         #expect(outside.armMutation == .clear)
         apply(outside.armMutation, to: &terminal)
         let release = decideTerminalPointer(
-            .up(.left, column: 2, row: 0, modifiers: [.command]),
+            .up(.left, cell: .init(column: 2, row: 0), modifiers: [.command]),
             terminal: terminal,
             state: &state
         )
-        #expect(release.consumption == .link)
+        // The out-of-bounds move gave up link ownership in the same decision that cleared the
+        // arm, so the release that follows it belongs to no arm and still opens nothing.
+        #expect(release.consumption == .ignored)
         #expect(release.inputBytes.isEmpty)
         #expect(release.openLink == nil)
 
@@ -770,7 +772,7 @@ struct TerminalInteractionPolicyTests {
 
         var state = TerminalInteractionState()
         let down = decideTerminalPointer(
-            .down(.left, column: 0, row: 1, clickCount: 3), terminal: terminal, state: &state
+            .down(.left, cell: .init(column: 0, row: 1), clickCount: 3), terminal: terminal, state: &state
         )
         #expect(down.selectionMutation == .set(range(3, 0, 3, 3)))
 
@@ -779,7 +781,7 @@ struct TerminalInteractionPolicyTests {
             terminal.feed(Array("\r\nr0\(8 + burst)".utf8))
             let anchoredRow = 3 - burst
             let held = decideTerminalPointer(
-                .move(column: 0, row: 1), terminal: terminal, state: &state
+                .move(cell: .init(column: 0, row: 1)), terminal: terminal, state: &state
             )
             #expect(held.selectionMutation == .set(range(anchoredRow, 0, anchoredRow, 3)))
             var settled = terminal
@@ -799,11 +801,11 @@ struct TerminalInteractionPolicyTests {
         following.feed(Array("abc def\r\nghi jkl".utf8))
         var followingState = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 0, row: 0), terminal: following, state: &followingState
+            .down(.left, cell: .init(column: 0, row: 0)), terminal: following, state: &followingState
         )
         // Past the midpoint of column 2, so the character under the pointer is included.
         let followingMove = decideTerminalPointer(
-            .move(column: 2, row: 1, offsetX: 0.6), terminal: following, state: &followingState
+            .move(cell: .init(column: 2, row: 1, offsetX: 0.6)), terminal: following, state: &followingState
         )
         #expect(followingMove.selectionMutation == .set(range(0, 0, 1, 3)))
         following.setSelection(range(0, 0, 1, 3))
@@ -818,10 +820,10 @@ struct TerminalInteractionPolicyTests {
         browsing.scroll(toTopRow: 2)
         var browsingState = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 0, row: 0), terminal: browsing, state: &browsingState
+            .down(.left, cell: .init(column: 0, row: 0)), terminal: browsing, state: &browsingState
         )
         let browsingMove = decideTerminalPointer(
-            .move(column: 2, row: 1, offsetX: 0.6), terminal: browsing, state: &browsingState
+            .move(cell: .init(column: 2, row: 1, offsetX: 0.6)), terminal: browsing, state: &browsingState
         )
         #expect(browsingMove.selectionMutation == .set(range(2, 0, 3, 3)))
         browsing.setSelection(range(2, 0, 3, 3))
@@ -847,13 +849,13 @@ struct TerminalInteractionPolicyTests {
 
         var state = TerminalInteractionState()
         let down = decideTerminalPointer(
-            .down(.left, column: 0, row: 1, clickCount: 3), terminal: terminal, state: &state
+            .down(.left, cell: .init(column: 0, row: 1), clickCount: 3), terminal: terminal, state: &state
         )
         #expect(down.selectionMutation == .set(range(1, 0, 2, 4)))
 
         terminal.feed(Array("\r\nww\r\nvv".utf8))
         let move = decideTerminalPointer(
-            .move(column: 0, row: 1), terminal: terminal, state: &state
+            .move(cell: .init(column: 0, row: 1)), terminal: terminal, state: &state
         )
 
         #expect(move.selectionMutation == .set(range(0, 0, 1, 2)))
@@ -878,11 +880,11 @@ struct TerminalInteractionPolicyTests {
 
         var state = TerminalInteractionState()
         let down = decideTerminalPointer(
-            .down(.left, column: 4, row: 0, clickCount: 2), terminal: terminal, state: &state
+            .down(.left, cell: .init(column: 4, row: 0), clickCount: 2), terminal: terminal, state: &state
         )
         #expect(down.selectionMutation == .set(range(2, 4, 2, 7)))
         let forward = decideTerminalPointer(
-            .move(column: 9, row: 0), terminal: terminal, state: &state
+            .move(cell: .init(column: 9, row: 0)), terminal: terminal, state: &state
         )
         #expect(forward.selectionMutation == .set(range(2, 4, 2, 13)))
 
@@ -890,7 +892,7 @@ struct TerminalInteractionPolicyTests {
         // time now, so the feed has to be long enough for one to go.
         terminal.feed(Array("\r\nf3\r\nf4\r\nf5\r\nf6".utf8))
         let reversed = decideTerminalPointer(
-            .move(column: 1, row: 0), terminal: terminal, state: &state
+            .move(cell: .init(column: 1, row: 0)), terminal: terminal, state: &state
         )
 
         #expect(reversed.selectionMutation == .set(range(1, 0, 1, 7)))
@@ -915,18 +917,18 @@ struct TerminalInteractionPolicyTests {
 
         var state = TerminalInteractionState()
         #expect(decideTerminalPointer(
-            .down(.left, column: 1, row: 1), terminal: terminal, state: &state
+            .down(.left, cell: .init(column: 1, row: 1)), terminal: terminal, state: &state
         ).selectionMutation == .clear)
 
         terminal.feed(Array("\r\nr09".utf8))
         // Asserted as the absence of a selection, not as empty selected text: a present but
         // empty selection is exactly the state this test exists to exclude.
         #expect(decideTerminalPointer(
-            .move(column: 1, row: 1), terminal: terminal, state: &state
+            .move(cell: .init(column: 1, row: 1)), terminal: terminal, state: &state
         ).selectionMutation == .clear)
 
         let extended = decideTerminalPointer(
-            .move(column: 2, row: 1), terminal: terminal, state: &state
+            .move(cell: .init(column: 2, row: 1)), terminal: terminal, state: &state
         )
         #expect(extended.selectionMutation == .set(range(2, 1, 2, 2)))
         terminal.setSelection(range(2, 1, 2, 2))
@@ -975,10 +977,10 @@ struct TerminalInteractionPolicyTests {
 
         var state = TerminalInteractionState()
         #expect(decideTerminalPointer(
-            .down(.left, column: 2, row: 0, offsetX: 0.1), terminal: terminal, state: &state
+            .down(.left, cell: .init(column: 2, row: 0, offsetX: 0.1)), terminal: terminal, state: &state
         ).selectionMutation == .clear)
         let crossed = decideTerminalPointer(
-            .move(column: 2, row: 0, offsetX: 0.9), terminal: terminal, state: &state
+            .move(cell: .init(column: 2, row: 0, offsetX: 0.9)), terminal: terminal, state: &state
         )
 
         #expect(crossed.selectionMutation == .set(range(0, 2, 0, 3)))
@@ -1000,7 +1002,7 @@ struct TerminalInteractionPolicyTests {
 
         var state = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, offsetX: 0.1), terminal: terminal, state: &state
+            .down(.left, cell: .init(column: 1, row: 0, offsetX: 0.1)), terminal: terminal, state: &state
         )
 
         let gestures: [(String, Int, Int, Double, TerminalTextRange, String)] = [
@@ -1010,7 +1012,7 @@ struct TerminalInteractionPolicyTests {
         ]
         for (label, row, column, offsetX, expected, text) in gestures {
             let moved = decideTerminalPointer(
-                .move(column: column, row: row, offsetX: offsetX),
+                .move(cell: .init(column: column, row: row, offsetX: offsetX)),
                 terminal: terminal,
                 state: &state
             )
@@ -1024,10 +1026,10 @@ struct TerminalInteractionPolicyTests {
         // boundary of row 1's first name one position, so a drag between them selects nothing.
         var seam = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 3, row: 0, offsetX: 0.9), terminal: terminal, state: &seam
+            .down(.left, cell: .init(column: 3, row: 0, offsetX: 0.9)), terminal: terminal, state: &seam
         )
         #expect(decideTerminalPointer(
-            .move(column: 0, row: 1, offsetX: 0.1), terminal: terminal, state: &seam
+            .move(cell: .init(column: 0, row: 1, offsetX: 0.1)), terminal: terminal, state: &seam
         ).selectionMutation == .clear)
     }
 
@@ -1050,10 +1052,10 @@ struct TerminalInteractionPolicyTests {
 
         var state = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 2, row: 0, offsetX: 0.1), terminal: terminal, state: &state
+            .down(.left, cell: .init(column: 2, row: 0, offsetX: 0.1)), terminal: terminal, state: &state
         )
         let dragged = decideTerminalPointer(
-            .move(column: offGrid.column, row: offGrid.row, offsetX: offGrid.offsetX),
+            .move(cell: .init(column: offGrid.column, row: offGrid.row, offsetX: offGrid.offsetX)),
             terminal: terminal,
             state: &state
         )
@@ -1128,13 +1130,13 @@ struct TerminalInteractionPolicyTests {
 
             var state = TerminalInteractionState()
             let down = decideTerminalPointer(
-                .down(.left, column: 0, row: 0, clickCount: 2), terminal: terminal, state: &state
+                .down(.left, cell: .init(column: 0, row: 0), clickCount: 2), terminal: terminal, state: &state
             )
             #expect(down.selectionMutation == .set(range(0, 0, 0, 3)), "\(label)")
 
             renumber(&terminal)
             let moved = decideTerminalPointer(
-                .move(column: 4, row: 0), terminal: terminal, state: &state
+                .move(cell: .init(column: 4, row: 0)), terminal: terminal, state: &state
             )
 
             #expect(moved.selectionMutation == nil, "\(label)")
@@ -1162,13 +1164,13 @@ struct TerminalInteractionPolicyTests {
 
             var state = TerminalInteractionState()
             let down = decideTerminalPointer(
-                .down(.left, column: 0, row: 0, clickCount: 2), terminal: terminal, state: &state
+                .down(.left, cell: .init(column: 0, row: 0), clickCount: 2), terminal: terminal, state: &state
             )
             #expect(down.selectionMutation == .set(range(0, 0, 0, 3)), "\(label)")
 
             preserve(&terminal)
             let moved = decideTerminalPointer(
-                .move(column: 4, row: 0), terminal: terminal, state: &state
+                .move(cell: .init(column: 4, row: 0)), terminal: terminal, state: &state
             )
 
             #expect(moved.selectionMutation == .set(range(0, 0, 0, 7)), "\(label)")
@@ -1193,13 +1195,13 @@ struct TerminalInteractionPolicyTests {
 
             var state = TerminalInteractionState()
             let down = decideTerminalPointer(
-                .down(.left, column: 0, row: 0, clickCount: 2), terminal: terminal, state: &state
+                .down(.left, cell: .init(column: 0, row: 0), clickCount: 2), terminal: terminal, state: &state
             )
             #expect(down.selectionMutation == .set(range(0, 0, 0, 3)), "\(label)")
 
             terminal.feed(Array(exit.utf8))
             let moved = decideTerminalPointer(
-                .move(column: 4, row: 0), terminal: terminal, state: &state
+                .move(cell: .init(column: 4, row: 0)), terminal: terminal, state: &state
             )
 
             #expect(moved.selectionMutation == nil, "\(label)")
@@ -1221,7 +1223,7 @@ struct TerminalInteractionPolicyTests {
 
         var scrollbackState = TerminalInteractionState()
         let scrollbackDown = decideTerminalPointer(
-            .down(.left, column: 0, row: 0, clickCount: 2),
+            .down(.left, cell: .init(column: 0, row: 0), clickCount: 2),
             terminal: scrollbackHeld,
             state: &scrollbackState
         )
@@ -1229,7 +1231,7 @@ struct TerminalInteractionPolicyTests {
 
         scrollbackHeld.feed(Array("\u{1b}[3J".utf8))
         #expect(decideTerminalPointer(
-            .move(column: 4, row: 0), terminal: scrollbackHeld, state: &scrollbackState
+            .move(cell: .init(column: 4, row: 0)), terminal: scrollbackHeld, state: &scrollbackState
         ).selectionMutation == nil)
 
         var viewportHeld = try #require(Terminal(columns: 12, rows: 2))
@@ -1237,7 +1239,7 @@ struct TerminalInteractionPolicyTests {
 
         var viewportState = TerminalInteractionState()
         let viewportDown = decideTerminalPointer(
-            .down(.left, column: 0, row: 0, clickCount: 2),
+            .down(.left, cell: .init(column: 0, row: 0), clickCount: 2),
             terminal: viewportHeld,
             state: &viewportState
         )
@@ -1245,7 +1247,7 @@ struct TerminalInteractionPolicyTests {
 
         viewportHeld.feed(Array("\u{1b}[3J".utf8))
         let extended = decideTerminalPointer(
-            .move(column: 4, row: 0), terminal: viewportHeld, state: &viewportState
+            .move(cell: .init(column: 4, row: 0)), terminal: viewportHeld, state: &viewportState
         )
 
         #expect(extended.selectionMutation == .set(range(0, 0, 0, 6)))
@@ -1264,13 +1266,13 @@ struct TerminalInteractionPolicyTests {
 
         var state = TerminalInteractionState()
         let down = decideTerminalPointer(
-            .down(.left, column: 0, row: 0, clickCount: 2), terminal: terminal, state: &state
+            .down(.left, cell: .init(column: 0, row: 0), clickCount: 2), terminal: terminal, state: &state
         )
         #expect(down.selectionMutation == .set(range(0, 0, 0, 3)))
 
         terminal.feed(Array("\u{1b}[1;1Hzzz".utf8))
         let moved = decideTerminalPointer(
-            .move(column: 5, row: 0), terminal: terminal, state: &state
+            .move(cell: .init(column: 5, row: 0)), terminal: terminal, state: &state
         )
 
         #expect(moved.selectionMutation == .set(range(0, 0, 0, 7)))
@@ -1289,11 +1291,11 @@ struct TerminalInteractionPolicyTests {
         terminal.feed(Array("one two".utf8))
         var state = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 0, row: 0), terminal: terminal, state: &state
+            .down(.left, cell: .init(column: 0, row: 0)), terminal: terminal, state: &state
         )
 
         let firstMove = decideTerminalPointer(
-            .move(column: 2, row: 0), terminal: terminal, state: &state
+            .move(cell: .init(column: 2, row: 0)), terminal: terminal, state: &state
         )
         guard case let .set(firstRange)? = firstMove.selectionMutation else {
             Issue.record("first pointer move did not set a selection")
@@ -1306,7 +1308,7 @@ struct TerminalInteractionPolicyTests {
         #expect(terminal.selectionRange != nil)
 
         let secondMove = decideTerminalPointer(
-            .move(column: 6, row: 0), terminal: terminal, state: &state
+            .move(cell: .init(column: 6, row: 0)), terminal: terminal, state: &state
         )
         guard case let .set(secondRange)? = secondMove.selectionMutation else {
             Issue.record("second pointer move did not set a selection")
@@ -1333,15 +1335,15 @@ struct TerminalInteractionPolicyTests {
         for clickCount in 1...3 {
             var state = TerminalInteractionState()
             _ = decideTerminalPointer(
-                .down(.left, column: 0, row: 0, clickCount: clickCount),
+                .down(.left, cell: .init(column: 0, row: 0), clickCount: clickCount),
                 terminal: terminal,
                 state: &state
             )
             _ = decideTerminalPointer(
-                .move(column: 4, row: 0), terminal: terminal, state: &state
+                .move(cell: .init(column: 4, row: 0)), terminal: terminal, state: &state
             )
             let release = decideTerminalPointer(
-                .up(.left, column: 4, row: 0), terminal: terminal, state: &state
+                .up(.left, cell: .init(column: 4, row: 0)), terminal: terminal, state: &state
             )
             #expect(release.consumption == .selection, "click count \(clickCount)")
             #expect(release.completedSelectionGesture, "click count \(clickCount)")
@@ -1352,12 +1354,12 @@ struct TerminalInteractionPolicyTests {
 
         var shiftDrag = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 0, row: 0, modifiers: [.shift]),
+            .down(.left, cell: .init(column: 0, row: 0), modifiers: [.shift]),
             terminal: reporting,
             state: &shiftDrag
         )
         let shiftRelease = decideTerminalPointer(
-            .up(.left, column: 4, row: 0, modifiers: [.shift]),
+            .up(.left, cell: .init(column: 4, row: 0), modifiers: [.shift]),
             terminal: reporting,
             state: &shiftDrag
         )
@@ -1366,34 +1368,34 @@ struct TerminalInteractionPolicyTests {
 
         var reported = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 0, row: 0), terminal: reporting, state: &reported
+            .down(.left, cell: .init(column: 0, row: 0)), terminal: reporting, state: &reported
         )
         let reportedRelease = decideTerminalPointer(
-            .up(.left, column: 4, row: 0), terminal: reporting, state: &reported
+            .up(.left, cell: .init(column: 4, row: 0)), terminal: reporting, state: &reported
         )
         #expect(reportedRelease.consumption == .report)
         #expect(reportedRelease.completedSelectionGesture == false)
 
         var menu = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.right, column: 0, row: 0), terminal: terminal, state: &menu
+            .down(.right, cell: .init(column: 0, row: 0)), terminal: terminal, state: &menu
         )
         #expect(decideTerminalPointer(
-            .up(.right, column: 0, row: 0), terminal: terminal, state: &menu
+            .up(.right, cell: .init(column: 0, row: 0)), terminal: terminal, state: &menu
         ).completedSelectionGesture == false)
 
         var linked = try #require(Terminal(columns: 24, rows: 2))
         linked.feed(Array("\u{1B}]8;;https://a.co\u{7}link\u{1B}]8;;\u{7}".utf8))
         var link = TerminalInteractionState()
         let linkDown = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, modifiers: [.command]),
+            .down(.left, cell: .init(column: 1, row: 0), modifiers: [.command]),
             terminal: linked,
             state: &link
         )
         #expect(linkDown.consumption == .link)
         apply(linkDown.armMutation, to: &linked)
         let linkRelease = decideTerminalPointer(
-            .up(.left, column: 1, row: 0, modifiers: [.command]),
+            .up(.left, cell: .init(column: 1, row: 0), modifiers: [.command]),
             terminal: linked,
             state: &link
         )
@@ -1402,10 +1404,10 @@ struct TerminalInteractionPolicyTests {
 
         var ignored = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.middle, column: 0, row: 0), terminal: terminal, state: &ignored
+            .down(.middle, cell: .init(column: 0, row: 0)), terminal: terminal, state: &ignored
         )
         #expect(decideTerminalPointer(
-            .up(.middle, column: 0, row: 0), terminal: terminal, state: &ignored
+            .up(.middle, cell: .init(column: 0, row: 0)), terminal: terminal, state: &ignored
         ).completedSelectionGesture == false)
     }
 
@@ -1423,30 +1425,25 @@ struct TerminalInteractionPolicyTests {
 
         var before = TerminalInteractionState()
         let beforeDown = decideTerminalPointer(
-            .down(
-                .left,
-                column: 1,
-                row: 0,
-                offsetX: 0.25,
-                modifiers: [.shift]
-            ),
+            .down(.left, cell: .init(column: 1, row: 0, offsetX: 0.25),
+                modifiers: [.shift]),
             terminal: terminal,
             state: &before
         )
         #expect(beforeDown.selectionMutation == .set(range(0, 1, 0, 5)))
         #expect(beforeDown.inputBytes.isEmpty)
         #expect(decideTerminalPointer(
-            .move(column: 5, row: 0, modifiers: [.shift]),
+            .move(cell: .init(column: 5, row: 0), modifiers: [.shift]),
             terminal: terminal,
             state: &before
         ).selectionMutation == .clear)
         #expect(decideTerminalPointer(
-            .move(column: 7, row: 0, offsetX: 0.5, modifiers: [.shift]),
+            .move(cell: .init(column: 7, row: 0, offsetX: 0.5), modifiers: [.shift]),
             terminal: terminal,
             state: &before
         ).selectionMutation == .set(range(0, 5, 0, 8)))
         let beforeRelease = decideTerminalPointer(
-            .up(.left, column: 7, row: 0, modifiers: [.shift]),
+            .up(.left, cell: .init(column: 7, row: 0), modifiers: [.shift]),
             terminal: terminal,
             state: &before
         )
@@ -1456,14 +1453,9 @@ struct TerminalInteractionPolicyTests {
         for clickCount in 1...3 {
             var after = TerminalInteractionState()
             #expect(decideTerminalPointer(
-                .down(
-                    .left,
-                    column: 6,
-                    row: 0,
-                    offsetX: 0.5,
+                .down(.left, cell: .init(column: 6, row: 0, offsetX: 0.5),
                     modifiers: [.shift],
-                    clickCount: clickCount
-                ),
+                    clickCount: clickCount),
                 terminal: terminal,
                 state: &after
             ).selectionMutation == .set(range(0, 2, 0, 7)))
@@ -1471,12 +1463,12 @@ struct TerminalInteractionPolicyTests {
 
         var startBoundary = TerminalInteractionState()
         #expect(decideTerminalPointer(
-            .down(.left, column: 2, row: 0, modifiers: [.shift]),
+            .down(.left, cell: .init(column: 2, row: 0), modifiers: [.shift]),
             terminal: terminal,
             state: &startBoundary
         ).selectionMutation == .set(range(0, 2, 0, 5)))
         #expect(decideTerminalPointer(
-            .up(.left, column: 2, row: 0, modifiers: [.shift]),
+            .up(.left, cell: .init(column: 2, row: 0), modifiers: [.shift]),
             terminal: terminal,
             state: &startBoundary
         ).completedSelectionGesture)
@@ -1484,21 +1476,21 @@ struct TerminalInteractionPolicyTests {
         for column in [3, 5] {
             var inside = TerminalInteractionState()
             let down = decideTerminalPointer(
-                .down(.left, column: column, row: 0, modifiers: [.shift]),
+                .down(.left, cell: .init(column: column, row: 0), modifiers: [.shift]),
                 terminal: terminal,
                 state: &inside
             )
             #expect(down.selectionMutation == nil, "column \(column)")
             #expect(down.inputBytes.isEmpty, "column \(column)")
             let move = decideTerminalPointer(
-                .move(column: 9, row: 0, modifiers: [.shift]),
+                .move(cell: .init(column: 9, row: 0), modifiers: [.shift]),
                 terminal: terminal,
                 state: &inside
             )
             #expect(move.selectionMutation == nil, "column \(column)")
             #expect(move.inputBytes.isEmpty, "column \(column)")
             let release = decideTerminalPointer(
-                .up(.left, column: 9, row: 0, modifiers: [.shift]),
+                .up(.left, cell: .init(column: 9, row: 0), modifiers: [.shift]),
                 terminal: terminal,
                 state: &inside
             )
@@ -1525,13 +1517,9 @@ struct TerminalInteractionPolicyTests {
         for clickCount in 1...3 {
             var state = TerminalInteractionState()
             let boundary = decideTerminalPointer(
-                .down(
-                    .left,
-                    column: 8,
-                    row: 0,
+                .down(.left, cell: .init(column: 8, row: 0),
                     modifiers: [.shift],
-                    clickCount: clickCount
-                ),
+                    clickCount: clickCount),
                 terminal: terminal,
                 state: &state
             )
@@ -1541,24 +1529,19 @@ struct TerminalInteractionPolicyTests {
 
         var reversal = TerminalInteractionState()
         #expect(decideTerminalPointer(
-            .down(
-                .left,
-                column: 8,
-                row: 0,
-                offsetX: 0.75,
+            .down(.left, cell: .init(column: 8, row: 0, offsetX: 0.75),
                 modifiers: [.shift],
-                clickCount: 1
-            ),
+                clickCount: 1),
             terminal: terminal,
             state: &reversal
         ).selectionMutation == .set(range(0, 4, 0, 13)))
         #expect(decideTerminalPointer(
-            .move(column: 4, row: 0, modifiers: [.shift]),
+            .move(cell: .init(column: 4, row: 0), modifiers: [.shift]),
             terminal: terminal,
             state: &reversal
         ).selectionMutation == .clear)
         #expect(decideTerminalPointer(
-            .move(column: 2, row: 0, offsetX: 0.25, modifiers: [.shift]),
+            .move(cell: .init(column: 2, row: 0, offsetX: 0.25), modifiers: [.shift]),
             terminal: terminal,
             state: &reversal
         ).selectionMutation == .set(range(0, 0, 0, 4)))
@@ -1582,31 +1565,91 @@ struct TerminalInteractionPolicyTests {
         for clickCount in 1...3 {
             var boundaryState = TerminalInteractionState()
             #expect(decideTerminalPointer(
-                .down(
-                    .left,
-                    column: 1,
-                    row: 2,
+                .down(.left, cell: .init(column: 1, row: 2),
                     modifiers: [.shift],
-                    clickCount: clickCount
-                ),
+                    clickCount: clickCount),
                 terminal: terminal,
                 state: &boundaryState
             ).selectionMutation == .set(range(1, 1, 2, 1)))
 
             var enteredState = TerminalInteractionState()
             #expect(decideTerminalPointer(
-                .down(
-                    .left,
-                    column: 1,
-                    row: 2,
-                    offsetX: 0.75,
+                .down(.left, cell: .init(column: 1, row: 2, offsetX: 0.75),
                     modifiers: [.shift],
-                    clickCount: clickCount
-                ),
+                    clickCount: clickCount),
                 terminal: terminal,
                 state: &enteredState
             ).selectionMutation == .set(range(1, 1, 2, 6)))
         }
+    }
+
+    @Test("a measured off-grid press move or release arms opens and hovers nothing")
+    func offGridPointerDecidesNoLinkWork() throws {
+        // Intent: the one pointer decision refuses every link effect when the view measured the
+        //   point outside the grid, and clears whatever link state an earlier event left.
+        // Why it exists: the coordinates the view sends are clamped into the viewport, so the
+        //   geometry test alone accepts an off-grid pointer. Each case below lands on a real
+        //   activatable link at an in-range cell, which is exactly the pointer that used to
+        //   arm, hover, or open a link the user never pointed at.
+        // Scenario: the pointer sits past the right edge of a pane whose first row is a URL.
+        func linkTerminal() throws -> Terminal {
+            var terminal = try #require(Terminal(columns: 24, rows: 2))
+            terminal.feed(Array("https://a.co".utf8))
+            let link = try #require(terminal.activatableLink(at: .init(row: 0, column: 2)))
+            terminal.setHoveredLink(link)
+            _ = terminal.setArmedLink(link)
+            return terminal
+        }
+        let offGrid = TerminalViewportCell(column: 2, row: 0, isInsideGrid: false)
+
+        var pressTerminal = try linkTerminal()
+        var pressState = TerminalInteractionState()
+        let press = decideTerminalPointer(
+            .down(.left, cell: offGrid, modifiers: [.command]),
+            terminal: pressTerminal,
+            state: &pressState
+        )
+        #expect(press.armMutation == .clear)
+        #expect(press.hoverMutation == .clear)
+        #expect(press.openLink == nil)
+        apply(press.armMutation, to: &pressTerminal)
+        #expect(pressTerminal.armedLink == nil)
+
+        var moveTerminal = try linkTerminal()
+        var moveState = TerminalInteractionState()
+        let move = decideTerminalPointer(
+            .move(cell: offGrid, modifiers: [.command]),
+            terminal: moveTerminal,
+            state: &moveState
+        )
+        #expect(move.armMutation == .clear)
+        #expect(move.hoverMutation == .clear)
+        #expect(move.openLink == nil)
+        apply(move.armMutation, to: &moveTerminal)
+        #expect(moveTerminal.armedLink == nil)
+
+        // The release starts from a real on-grid link press, so the arm it must refuse to
+        // activate is one this same gesture took.
+        var releaseTerminal = try #require(Terminal(columns: 24, rows: 2))
+        releaseTerminal.feed(Array("https://a.co".utf8))
+        var releaseState = TerminalInteractionState()
+        let releasePress = decideTerminalPointer(
+            .down(.left, cell: .init(column: 2, row: 0), modifiers: [.command]),
+            terminal: releaseTerminal,
+            state: &releaseState
+        )
+        #expect(releasePress.armMutation != nil)
+        apply(releasePress.armMutation, to: &releaseTerminal)
+        let release = decideTerminalPointer(
+            .up(.left, cell: offGrid, modifiers: [.command]),
+            terminal: releaseTerminal,
+            state: &releaseState
+        )
+        #expect(release.openLink == nil)
+        #expect(release.armMutation == .clear)
+        #expect(release.hoverMutation == .clear)
+        apply(release.armMutation, to: &releaseTerminal)
+        #expect(releaseTerminal.armedLink == nil)
     }
 
     private func apply(_ mutation: TerminalLinkArmMutation?, to terminal: inout Terminal) {

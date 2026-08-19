@@ -211,9 +211,9 @@ struct TerminalWezTermAdaptedTests {
         var state = TerminalInteractionState()
         var policyRange: TerminalTextRange?
         for event: TerminalPointerEvent in [
-            .down(.left, column: from.column, row: from.row, offsetX: fromOffsetX),
-            .move(column: to.column, row: to.row, offsetX: toOffsetX),
-            .up(.left, column: to.column, row: to.row),
+            .down(.left, cell: .init(column: from.column, row: from.row, offsetX: fromOffsetX)),
+            .move(cell: .init(column: to.column, row: to.row, offsetX: toOffsetX)),
+            .up(.left, cell: .init(column: to.column, row: to.row)),
         ] {
             switch decideTerminalPointer(event, terminal: terminal, state: &state)
                 .selectionMutation

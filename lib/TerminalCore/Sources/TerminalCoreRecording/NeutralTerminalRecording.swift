@@ -623,32 +623,25 @@ public func applyNeutralTerminalMouse(
 
 private func neutralPointerEvent(for mouse: NeutralTerminalMouseEvent) -> TerminalPointerEvent? {
     let button = mouse.button.flatMap { TerminalMouseButton(rawValue: $0 - 1) }
+    let cell = TerminalViewportCell(
+        column: mouse.column,
+        row: mouse.row,
+        offsetX: mouse.offsetX
+    )
     switch mouse.action {
     case .down:
         guard let button else { return nil }
         return .down(
             button,
-            column: mouse.column,
-            row: mouse.row,
-            offsetX: mouse.offsetX,
+            cell: cell,
             modifiers: mouse.modifiers,
             clickCount: mouse.clickCount
         )
     case .up:
         guard let button else { return nil }
-        return .up(
-            button,
-            column: mouse.column,
-            row: mouse.row,
-            modifiers: mouse.modifiers
-        )
+        return .up(button, cell: cell, modifiers: mouse.modifiers)
     case .move:
-        return .move(
-            column: mouse.column,
-            row: mouse.row,
-            offsetX: mouse.offsetX,
-            modifiers: mouse.modifiers
-        )
+        return .move(cell: cell, modifiers: mouse.modifiers)
     }
 }
 

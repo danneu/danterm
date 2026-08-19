@@ -20,9 +20,10 @@ public struct TerminalViewportCell: Equatable, Sendable {
     public let offsetX: Double
     /// Whether the point this cell was normalized from actually fell inside the grid. The
     /// column and row above are clamped, so they cannot say it; a caller that needs to know
-    /// -- link interaction cancels on an off-grid pointer -- reads it here instead of
-    /// re-deriving the grid extents with its own math. A cell minted from a policy decision
-    /// rather than from a point is inside by construction, which is why the default is `true`.
+    /// -- link interaction arms nothing under an off-grid pointer -- reads it here instead of
+    /// re-deriving the grid extents with its own math. The default is `true` so a cell built
+    /// from coordinates alone, such as one decoded from a recording made before insideness
+    /// was carried, reads as measured inside.
     public let isInsideGrid: Bool
 
     /// Creates a normalized cell value for cross-layer input forwarding.
@@ -110,24 +111,33 @@ public func terminalCell(
 
 /// One platform-neutral pointer transition delivered to serialized interaction policy.
 ///
-/// `offsetX` is the pointer's `0...1` position inside its own cell, carried only on the two
-/// transitions that resolve a character boundary; release re-resolves nothing.
+/// All three cases carry the normalized cell whole, release included, even though release
+/// re-resolves no character boundary and so reads no `offsetX`. One shape for every case is
+/// what keeps the clamped coordinates and the measured insideness they were clamped from
+/// travelling together: a case that carried loose scalars would drop insideness at the event
+/// boundary and force the receiver to be told about it a second time.
 public enum TerminalPointerEvent: Equatable, Sendable {
     case down(
         TerminalMouseButton,
-        column: Int,
-        row: Int,
-        offsetX: Double = 0,
+        cell: TerminalViewportCell,
         modifiers: TerminalKeyModifiers = [],
         clickCount: Int = 1
     )
     case up(
         TerminalMouseButton,
-        column: Int,
-        row: Int,
+        cell: TerminalViewportCell,
         modifiers: TerminalKeyModifiers = []
     )
-    case move(column: Int, row: Int, offsetX: Double = 0, modifiers: TerminalKeyModifiers = [])
+    case move(cell: TerminalViewportCell, modifiers: TerminalKeyModifiers = [])
+
+    /// The pointed cell, for callers that route or measure an event without matching its case.
+    public var cell: TerminalViewportCell {
+        switch self {
+        case let .down(_, cell, _, _): cell
+        case let .up(_, cell, _): cell
+        case let .move(cell, _): cell
+        }
+    }
 }
 
 /// Marks normalized wheel lifecycle so direct scrolling and momentum share one route.

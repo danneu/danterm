@@ -129,18 +129,50 @@ public struct TerminalInteractionState: Equatable, Sendable {
 }
 
 /// Chooses and advances exactly one pointer arm against authoritative terminal state.
+///
+/// Link work needs two independent facts, and this is where both are checked together: the
+/// view measured the point inside the grid it drew, and the coordinates address this
+/// terminal's geometry. A tape replayed at a smaller grid satisfies the first and fails the
+/// second. When either fails the event is off-grid, and every link effect -- arming, hover,
+/// opening -- is refused and any link state an earlier event left is cleared, so the caller
+/// never has to follow the event with a second cancellation message.
 public func decideTerminalPointer(
     _ event: TerminalPointerEvent,
     terminal: Terminal,
     state: inout TerminalInteractionState
 ) -> TerminalPointerDecision {
+    let onGrid = isOnGrid(event.cell, terminal: terminal)
+    let decision = decidePointerArm(event, onGrid: onGrid, terminal: terminal, state: &state)
+    guard onGrid == false else { return decision }
+    state.pointerOwners = state.pointerOwners.map { $0 == .link ? nil : $0 }
+    return TerminalPointerDecision(
+        consumption: decision.consumption,
+        inputBytes: decision.inputBytes,
+        selectionMutation: decision.selectionMutation,
+        selectionGranularity: decision.selectionGranularity,
+        hoverMutation: .clear,
+        openLink: nil,
+        armMutation: .clear,
+        completedSelectionGesture: decision.completedSelectionGesture
+    )
+}
+
+/// Runs the arm that owns the event. Off-grid events still reach it, so selection keeps its
+/// clamped-edge semantics; `onGrid` gates only the link work its caller then overrides.
+private func decidePointerArm(
+    _ event: TerminalPointerEvent,
+    onGrid: Bool,
+    terminal: Terminal,
+    state: inout TerminalInteractionState
+) -> TerminalPointerDecision {
     let modes = terminal.inputModes
     switch event {
-    case let .down(button, column, row, offsetX, modifiers, clickCount):
+    case let .down(button, cell, modifiers, clickCount):
+        let (column, row, offsetX) = (cell.column, cell.row, cell.offsetX)
         if state.pointerOwners[button.rawValue] == nil,
            button == .left,
            modifiers.contains(.command),
-           isViewportPosition(column: column, row: row, terminal: terminal),
+           onGrid,
            let link = terminal.activatableLink(at: streamPosition(
                column: column, row: row, terminal: terminal
            )),
@@ -182,11 +214,12 @@ public func decideTerminalPointer(
             state: &state
         )
 
-    case let .up(button, column, row, modifiers):
+    case let .up(button, cell, modifiers):
+        let (column, row) = (cell.column, cell.row)
         let owner = state.pointerOwners[button.rawValue] ?? .ignored
         if owner == .link {
             state.pointerOwners[button.rawValue] = nil
-            guard isViewportPosition(column: column, row: row, terminal: terminal) else {
+            guard onGrid else {
                 return pointerDecision(
                     .link,
                     hoverMutation: .clear,
@@ -239,9 +272,10 @@ public func decideTerminalPointer(
             return pointerDecision(.ignored)
         }
 
-    case let .move(column, row, offsetX, modifiers):
+    case let .move(cell, modifiers):
+        let (column, row, offsetX) = (cell.column, cell.row, cell.offsetX)
         if state.pointerOwners.contains(where: { $0 == .link }) {
-            guard isViewportPosition(column: column, row: row, terminal: terminal) else {
+            guard onGrid else {
                 return pointerDecision(
                     .link,
                     hoverMutation: .clear,
@@ -250,9 +284,7 @@ public func decideTerminalPointer(
             }
             return pointerDecision(
                 .link,
-                hoverMutation: hoverMutation(
-                    column: column, row: row, modifiers: modifiers, terminal: terminal
-                )
+                hoverMutation: hoverMutation(cell: cell, modifiers: modifiers, terminal: terminal)
             )
         }
         let reportBytes = encodeTerminalMouse(
@@ -262,9 +294,7 @@ public func decideTerminalPointer(
         )
         if let drag = state.selectionDrag,
            state.pointerOwners[TerminalMouseButton.left.rawValue] == .selection {
-            let dragHover = hoverMutation(
-                column: column, row: row, modifiers: modifiers, terminal: terminal
-            )
+            let dragHover = hoverMutation(cell: cell, modifiers: modifiers, terminal: terminal)
             // The anchored text is no longer retained, so there is nothing to extend from.
             // The button stays selection-owned -- releasing it must still end the gesture
             // without sending bytes to the child.
@@ -320,9 +350,7 @@ public func decideTerminalPointer(
                 hoverMutation: dragHover
             )
         }
-        let hover = hoverMutation(
-            column: column, row: row, modifiers: modifiers, terminal: terminal
-        )
+        let hover = hoverMutation(cell: cell, modifiers: modifiers, terminal: terminal)
         if state.pointerOwners.contains(where: { $0 == .report }) {
             return pointerDecision(.report, bytes: reportBytes, hoverMutation: hover)
         }
@@ -336,7 +364,10 @@ public func decideTerminalPointer(
     }
 }
 
-/// Invalidates only link-owned pointer state when the pointer leaves the terminal surface.
+/// Invalidates only link-owned pointer state for the one caller that has no pointer event to
+/// decide from: the view's `mouseExited`, where the pointer left the surface and nothing else
+/// will arrive to say so. Every off-grid pointer that does arrive is decided by
+/// `decideTerminalPointer` instead, so this must not be used to follow up an event.
 public func cancelTerminalLinkInteraction(
     state: inout TerminalInteractionState
 ) -> TerminalLinkCancellation {
@@ -570,24 +601,26 @@ private func pointerDecision(
 
 /// Resolves presentation independently so hover can coexist with any byte-owning arm.
 private func hoverMutation(
-    column: Int,
-    row: Int,
+    cell: TerminalViewportCell,
     modifiers: TerminalKeyModifiers,
     terminal: Terminal
 ) -> TerminalHoverMutation {
     guard modifiers.contains(.command),
-          isViewportPosition(column: column, row: row, terminal: terminal),
+          isOnGrid(cell, terminal: terminal),
           let link = terminal.activatableLink(at: streamPosition(
-              column: column, row: row, terminal: terminal
+              column: cell.column, row: cell.row, terminal: terminal
           ))
     else { return .clear }
     return .set(link)
 }
 
-/// Rejects owner inputs that did not normalize to the terminal's current viewport.
-private func isViewportPosition(column: Int, row: Int, terminal: Terminal) -> Bool {
-    (0..<terminal.geometry.columns).contains(column)
-        && terminal.geometry.rows.indices.contains(row)
+/// Answers whether an event may touch a link at all: the view measured its point inside the
+/// grid, and its clamped coordinates still address this terminal. A selection drag reaches
+/// this with off-grid coordinates, so it also keeps link resolution from indexing out of range.
+private func isOnGrid(_ cell: TerminalViewportCell, terminal: Terminal) -> Bool {
+    cell.isInsideGrid
+        && (0..<terminal.geometry.columns).contains(cell.column)
+        && terminal.geometry.rows.indices.contains(cell.row)
 }
 
 private func streamPosition(column: Int, row: Int, terminal: Terminal) -> TerminalTextPosition {

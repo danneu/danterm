@@ -258,7 +258,7 @@ struct TerminalSelectionUnitTests {
 
         var state = TerminalInteractionState()
         let decision = decideTerminalPointer(
-            .down(.left, column: 0, row: 0, clickCount: 2),
+            .down(.left, cell: .init(column: 0, row: 0), clickCount: 2),
             terminal: terminal,
             state: &state
         )

@@ -1740,36 +1740,25 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller.sendPointer(
             .down(
                 button,
-                column: cell.column,
-                row: cell.row,
-                offsetX: cell.offsetX,
+                cell: cell,
                 modifiers: Self.terminalModifiers(event.modifierFlags),
                 clickCount: event.clickCount
             ),
             origin: PaneInputOrigin.systemEvent(event),
             waitGeneration: originatedWaitGeneration
         )
-        // The press is delivered before the cancellation so an off-grid press cannot survive
-        // as an arm that a later on-grid release would activate.
-        if cell.isInsideGrid == false {
-            controller.cancelLinkInteraction()
-        }
     }
 
     private func forwardPointerUp(_ event: NSEvent, button: TerminalMouseButton) {
         guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
         lastPointerLocationInWindow = event.locationInWindow
-        // The cancellation runs before the release so an off-grid release cannot activate an
-        // arm the press left behind.
         if cell.isInsideGrid == false {
             isPointerInside = false
-            controller.cancelLinkInteraction()
         }
         controller.sendPointer(
             .up(
                 button,
-                column: cell.column,
-                row: cell.row,
+                cell: cell,
                 modifiers: Self.terminalModifiers(event.modifierFlags)
             ),
             origin: PaneInputOrigin.systemEvent(event),
@@ -1808,18 +1797,10 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         origin: UInt64
     ) {
         controller.sendPointer(
-            .move(
-                column: cell.column,
-                row: cell.row,
-                offsetX: cell.offsetX,
-                modifiers: Self.terminalModifiers(modifiers)
-            ),
+            .move(cell: cell, modifiers: Self.terminalModifiers(modifiers)),
             origin: origin,
             waitGeneration: originatedWaitGeneration
         )
-        if cell.isInsideGrid == false {
-            controller.cancelLinkInteraction()
-        }
     }
 
     private func openLink(_ link: TerminalHyperlink) {

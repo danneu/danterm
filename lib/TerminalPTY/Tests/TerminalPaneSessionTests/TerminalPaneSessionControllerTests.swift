@@ -536,14 +536,10 @@ struct TerminalPaneSessionControllerTests {
             from: lines[viewportRow].startIndex,
             to: linkRange.lowerBound
         )
-        controller.sendPointer(.down(
-            .left, column: column, row: viewportRow, modifiers: [.command]
-        ))
-        controller.sendPointer(.up(
-            .left, column: column, row: viewportRow, modifiers: [.command]
-        ))
-        controller.sendPointer(.down(.left, column: column, row: viewportRow, clickCount: 2))
-        controller.sendPointer(.up(.left, column: column, row: viewportRow))
+        controller.sendPointer(.down(.left, cell: .init(column: column, row: viewportRow), modifiers: [.command]))
+        controller.sendPointer(.up(.left, cell: .init(column: column, row: viewportRow), modifiers: [.command]))
+        controller.sendPointer(.down(.left, cell: .init(column: column, row: viewportRow), clickCount: 2))
+        controller.sendPointer(.up(.left, cell: .init(column: column, row: viewportRow)))
         controller.beginSearch("link")
         _ = host.fencedSnapshot()
 
@@ -591,38 +587,29 @@ struct TerminalPaneSessionControllerTests {
         let beta = try #require(lines[row].range(of: "beta"))
         let column = lines[row].distance(from: lines[row].startIndex, to: beta.lowerBound)
 
-        controller.sendPointer(.down(.left, column: column, row: row, clickCount: 2))
+        controller.sendPointer(.down(.left, cell: .init(column: column, row: row), clickCount: 2))
         // Overwrites the selected columns before the release is applied, so the text the
         // owner captures is "gamm" -- what the highlight covers at completion, not "beta".
         host.stageFixtureOutput(Array("\u{1B}[Halpha gamma".utf8))
-        controller.sendPointer(.up(.left, column: column, row: row))
+        controller.sendPointer(.up(.left, cell: .init(column: column, row: row)))
         // Applied after the release, so it can only corrupt a main-actor re-read.
         host.stageFixtureOutput(Array("\u{1B}[Halpha delta".utf8))
         await drainMainQueue()
 
         #expect(copied == ["gamm"])
 
-        controller.sendPointer(.down(
-            .left,
-            column: column + 1,
-            row: row,
-            modifiers: [.shift]
-        ))
-        controller.sendPointer(.move(column: 0, row: row, modifiers: [.shift]))
-        controller.sendPointer(.up(.left, column: 0, row: row, modifiers: [.shift]))
+        controller.sendPointer(.down(.left, cell: .init(column: column + 1, row: row),
+            modifiers: [.shift]))
+        controller.sendPointer(.move(cell: .init(column: 0, row: row), modifiers: [.shift]))
+        controller.sendPointer(.up(.left, cell: .init(column: 0, row: row), modifiers: [.shift]))
         controller.synchronizeState()
         await drainMainQueue()
         #expect(copied == ["gamm"], "an inside-selection gesture does not complete")
 
-        controller.sendPointer(.down(
-            .left,
-            column: 2,
-            row: row,
-            offsetX: 0.75,
+        controller.sendPointer(.down(.left, cell: .init(column: 2, row: row, offsetX: 0.75),
             modifiers: [.shift],
-            clickCount: 3
-        ))
-        controller.sendPointer(.up(.left, column: 2, row: row, modifiers: [.shift]))
+            clickCount: 3))
+        controller.sendPointer(.up(.left, cell: .init(column: 2, row: row), modifiers: [.shift]))
         controller.synchronizeState()
         await drainMainQueue()
         #expect(copied == ["gamm", "alpha delt"])
@@ -666,8 +653,8 @@ struct TerminalPaneSessionControllerTests {
         let beta = try #require(lines[row].range(of: "beta"))
         let column = lines[row].distance(from: lines[row].startIndex, to: beta.lowerBound)
 
-        controller.sendPointer(.down(.left, column: column, row: row, clickCount: 2))
-        controller.sendPointer(.up(.left, column: column, row: row))
+        controller.sendPointer(.down(.left, cell: .init(column: column, row: row), clickCount: 2))
+        controller.sendPointer(.up(.left, cell: .init(column: column, row: row)))
 
         var copied: [String] = []
         controller.onSelectionCopy = { copied.append($0) }
@@ -706,14 +693,14 @@ struct TerminalPaneSessionControllerTests {
             .split(separator: "\n", omittingEmptySubsequences: false)
         let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
 
-        controller.sendPointer(.down(.left, column: 0, row: row))
-        controller.sendPointer(.up(.left, column: 0, row: row))
+        controller.sendPointer(.down(.left, cell: .init(column: 0, row: row)))
+        controller.sendPointer(.up(.left, cell: .init(column: 0, row: row)))
         controller.synchronizeState()
         #expect(controller.readSelectedText() == nil, "a bare click leaves no selection")
 
         let blankRow = row + 1
-        controller.sendPointer(.down(.left, column: 0, row: blankRow, clickCount: 3))
-        controller.sendPointer(.up(.left, column: 0, row: blankRow))
+        controller.sendPointer(.down(.left, cell: .init(column: 0, row: blankRow), clickCount: 3))
+        controller.sendPointer(.up(.left, cell: .init(column: 0, row: blankRow)))
         controller.synchronizeState()
         #expect(controller.readSelectedText() == "", "a padding selection is present and empty")
 
@@ -750,15 +737,11 @@ struct TerminalPaneSessionControllerTests {
         var iterator = opened.stream.makeAsyncIterator()
         controller.onOpenLink = { opened.continuation.yield($0) }
 
-        controller.sendPointer(.move(column: column + 2, row: row, modifiers: [.command]))
+        controller.sendPointer(.move(cell: .init(column: column + 2, row: row), modifiers: [.command]))
         controller.synchronizeState()
         #expect(try #require(controller.readHoveredLink()).uri == "https://a.co")
-        controller.sendPointer(.down(
-            .left, column: column + 2, row: row, modifiers: [.command]
-        ))
-        controller.sendPointer(.up(
-            .left, column: column + 3, row: row, modifiers: [.command]
-        ))
+        controller.sendPointer(.down(.left, cell: .init(column: column + 2, row: row), modifiers: [.command]))
+        controller.sendPointer(.up(.left, cell: .init(column: column + 3, row: row), modifiers: [.command]))
         #expect(await iterator.next()?.uri == "https://a.co")
 
         controller.cancelLinkInteraction()
@@ -2051,8 +2034,8 @@ struct TerminalPaneSessionControllerTests {
         let beta = try #require(lines[row].range(of: "beta"))
         let column = lines[row].distance(from: lines[row].startIndex, to: beta.lowerBound)
 
-        controller.sendPointer(.down(.left, column: column, row: row, clickCount: 2))
-        controller.sendPointer(.up(.left, column: column, row: row))
+        controller.sendPointer(.down(.left, cell: .init(column: column, row: row), clickCount: 2))
+        controller.sendPointer(.up(.left, cell: .init(column: column, row: row)))
 
         #expect(controller.readSelectedTextSynchronizing() == "beta")
         #expect(controller.hasSelection)
@@ -2183,30 +2166,18 @@ struct TerminalPaneSessionControllerTests {
 
         controller.scroll(byRows: -5)
         controller.synchronizeState()
-        controller.sendPointer(.down(
-            .left,
-            column: 0,
-            row: selectionRow,
-            modifiers: [.shift]
-        ))
-        controller.sendPointer(.move(column: 3, row: selectionRow, modifiers: [.shift]))
-        controller.sendPointer(.up(.left, column: 3, row: selectionRow, modifiers: [.shift]))
-        controller.sendPointer(.down(
-            .left,
-            column: 1,
-            row: selectionRow,
+        controller.sendPointer(.down(.left, cell: .init(column: 0, row: selectionRow),
+            modifiers: [.shift]))
+        controller.sendPointer(.move(cell: .init(column: 3, row: selectionRow), modifiers: [.shift]))
+        controller.sendPointer(.up(.left, cell: .init(column: 3, row: selectionRow), modifiers: [.shift]))
+        controller.sendPointer(.down(.left, cell: .init(column: 1, row: selectionRow),
             modifiers: [.shift],
-            clickCount: 2
-        ))
-        controller.sendPointer(.up(.left, column: 1, row: selectionRow, modifiers: [.shift]))
-        controller.sendPointer(.down(
-            .left,
-            column: 1,
-            row: selectionRow,
+            clickCount: 2))
+        controller.sendPointer(.up(.left, cell: .init(column: 1, row: selectionRow), modifiers: [.shift]))
+        controller.sendPointer(.down(.left, cell: .init(column: 1, row: selectionRow),
             modifiers: [.shift],
-            clickCount: 3
-        ))
-        controller.sendPointer(.up(.left, column: 1, row: selectionRow, modifiers: [.shift]))
+            clickCount: 3))
+        controller.sendPointer(.up(.left, cell: .init(column: 1, row: selectionRow), modifiers: [.shift]))
         controller.sendKey(.f5, modifiers: [.shift])
         controller.sendPaste("paste")
         controller.sendFocus(true)

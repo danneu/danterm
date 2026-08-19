@@ -518,14 +518,22 @@ final class TerminalPaneSessionController {
     }
     private func sendPointer(_ event: TerminalPointerEvent, origin: UInt64?) {
         pointerEvents.append(event)
+        // Link work follows the real policy: an event the view measured outside the grid arms
+        // nothing, hovers nothing, opens nothing, and drops whatever an earlier event armed.
         switch event {
-        case let .move(_, _, _, modifiers):
-            cachedHoveredLink = modifiers.contains(.command) ? hoveredLinkForCommandMove : nil
+        case let .move(cell, modifiers):
+            cachedHoveredLink = cell.isInsideGrid && modifiers.contains(.command)
+                ? hoveredLinkForCommandMove
+                : nil
+            if cell.isInsideGrid == false { linkClickArmed = false }
             emitFrame()
-        case let .down(.left, _, _, _, modifiers, _):
-            linkClickArmed = modifiers.contains(.command) && linkForCommandClick != nil
-        case let .up(.left, _, _, modifiers):
-            if linkClickArmed, modifiers.contains(.command), let linkForCommandClick {
+        case let .down(.left, cell, modifiers, _):
+            linkClickArmed = cell.isInsideGrid
+                && modifiers.contains(.command)
+                && linkForCommandClick != nil
+        case let .up(.left, cell, modifiers):
+            if cell.isInsideGrid, linkClickArmed, modifiers.contains(.command),
+               let linkForCommandClick {
                 onOpenLink?(linkForCommandClick)
             }
             linkClickArmed = false

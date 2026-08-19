@@ -379,8 +379,8 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(shown != atNativeCellSize,
                      "the two cell boxes agree, so this test proves nothing")
         let named = controller.pointerEvents.compactMap { event -> TerminalViewportCell? in
-            guard case let .down(_, column, row, _, _, _) = event else { return nil }
-            return .init(column: column, row: row)
+            guard case let .down(_, cell, _, _) = event else { return nil }
+            return .init(column: cell.column, row: cell.row)
         }
         try uiExpect(named == [shown],
                      "the click did not name the cell drawn under it: \(named)")
@@ -1118,12 +1118,18 @@ func swiftTerminalSessionViewTests() {
         // the way into their columns: the sub-cell position character selection resolves a
         // boundary from has to survive the view boundary, not just the column.
         try uiExpect(controller.pointerEvents == [
-            .down(.left, column: 2, row: 2, offsetX: 0.125, modifiers: [.shift], clickCount: 2),
-            .move(column: 3, row: 3, offsetX: 0.875, modifiers: [.shift]),
-            .up(.left, column: 9, row: 9, modifiers: [.shift]),
+            .down(.left, cell: .init(column: 2, row: 2, offsetX: 0.125), modifiers: [.shift], clickCount: 2),
+            .move(cell: .init(column: 3, row: 3, offsetX: 0.875), modifiers: [.shift]),
+            .up(
+                .left,
+                cell: .init(column: 9, row: 9, offsetX: 1, isInsideGrid: false),
+                modifiers: [.shift]
+            ),
         ], "pointer normalization diverged: \(controller.pointerEvents)")
-        try uiExpect(controller.linkInteractionCancellations == 1,
-                     "out-of-bounds release did not cancel link interaction first")
+        // The release past the viewport says so inside its own cell, so the pane sends the
+        // one event and nothing else.
+        try uiExpect(controller.linkInteractionCancellations == 0,
+                     "an out-of-bounds release still sent a separate cancellation")
     }
 
     uiTest("wheel direct and momentum phases reach the owner unchanged") {
@@ -1191,8 +1197,8 @@ func swiftTerminalSessionViewTests() {
 //      pane.rightMouseDown(with: down)
 //      pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
 //      try uiExpect(controller.pointerEvents == [
-//          .down(.right, column: 2, row: 2, offsetX: 0.125, modifiers: [], clickCount: 1),
-//          .up(.right, column: 2, row: 2, modifiers: []),
+//          .down(.right, cell: .init(column: 2, row: 2, offsetX: 0.125), modifiers: [], clickCount: 1),
+//          .up(.right, cell: .init(column: 2, row: 2), modifiers: []),
 //      ], "a claimed right press did not reach the engine: \(controller.pointerEvents)")
 //
 //      let shiftDown = try makeMouseEvent(
@@ -1228,8 +1234,8 @@ func swiftTerminalSessionViewTests() {
 //      pane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: point))
 //      pane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
 //      try uiExpect(controller.pointerEvents == [
-//          .down(.right, column: 2, row: 2, offsetX: 0.125, modifiers: [], clickCount: 1),
-//          .up(.right, column: 2, row: 2, modifiers: []),
+//          .down(.right, cell: .init(column: 2, row: 2, offsetX: 0.125), modifiers: [], clickCount: 1),
+//          .up(.right, cell: .init(column: 2, row: 2), modifiers: []),
 //      ], "the claimed gesture was not delivered whole: \(controller.pointerEvents)")
 //  }
 
@@ -1267,8 +1273,8 @@ func swiftTerminalSessionViewTests() {
         pane.mouseDown(with: down)
         pane.mouseUp(with: up)
         try uiExpect(controller.pointerEvents == [
-            .down(.right, column: 1, row: 1, offsetX: 0.125, modifiers: [.control], clickCount: 1),
-            .up(.right, column: 1, row: 1, modifiers: [.control]),
+            .down(.right, cell: .init(column: 1, row: 1, offsetX: 0.125), modifiers: [.control], clickCount: 1),
+            .up(.right, cell: .init(column: 1, row: 1, offsetX: 0.125), modifiers: [.control]),
         ], "a claimed control-click escaped the right-button lifecycle")
         try uiExpect(events == [.clickedToFocus], "a claimed control-click reported \(events)")
     }
@@ -1523,7 +1529,7 @@ func swiftTerminalSessionViewTests() {
             modifiers: [.option]
         ))
         try uiExpect(controller.pointerEvents == [
-            .move(column: 2, row: 2, offsetX: 0.125, modifiers: [.alt]),
+            .move(cell: .init(column: 2, row: 2, offsetX: 0.125), modifiers: [.alt]),
         ], "mouse move did not reach the owner adapter")
     }
 
@@ -1571,9 +1577,7 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(
             controller.pointerEvents.first == .down(
                 .left,
-                column: 2,
-                row: 2,
-                offsetX: 0.125,
+                cell: .init(column: 2, row: 2, offsetX: 0.125),
                 modifiers: [.command],
                 clickCount: 1
             ),
@@ -1582,8 +1586,7 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(
             controller.pointerEvents.dropFirst().first == .up(
                 .left,
-                column: 2,
-                row: 2,
+                cell: .init(column: 2, row: 2, offsetX: 0.125),
                 modifiers: [.command]
             ),
             "Cmd-up lost Command intent"
@@ -1611,8 +1614,8 @@ func swiftTerminalSessionViewTests() {
         pane.flagsChanged(with: try makeFlagsChangedEvent(keyCode: 55, modifiers: [.command]))
 
         try uiExpect(controller.pointerEvents.suffix(2) == [
-            .move(column: 2, row: 2, offsetX: 0.125),
-            .move(column: 2, row: 2, offsetX: 0.125, modifiers: [.command]),
+            .move(cell: .init(column: 2, row: 2, offsetX: 0.125)),
+            .move(cell: .init(column: 2, row: 2, offsetX: 0.125), modifiers: [.command]),
         ], "Cmd press did not replay the last pointer cell")
         let preview = pane.subviews.compactMap { $0 as? LinkPreviewView }.first
         try uiExpect(preview?.isHidden == false, "hover did not show the URL pill")
@@ -1624,7 +1627,7 @@ func swiftTerminalSessionViewTests() {
 
         pane.flagsChanged(with: try makeFlagsChangedEvent(keyCode: 55, modifiers: []))
 
-        try uiExpect(controller.pointerEvents.last == .move(column: 2, row: 2, offsetX: 0.125),
+        try uiExpect(controller.pointerEvents.last == .move(cell: .init(column: 2, row: 2, offsetX: 0.125)),
                      "Cmd release did not replay the last pointer cell")
         try uiExpect(preview?.isHidden == true, "Cmd release did not hide the URL pill")
 
@@ -1678,9 +1681,9 @@ func swiftTerminalSessionViewTests() {
 
     uiTest("an off-grid press or release cannot open a link") {
         // Intent: whichever half of a Cmd-click lands off the grid, the gesture opens nothing.
-        // Why it exists: the cancellation and the pointer report have to run in the order that
-        //   produces this outcome -- cancel before an off-grid release, deliver before an
-        //   off-grid press -- and the reverse order silently opens a link on either path.
+        // Why it exists: the pane sends one message per pointer transition, and the measured
+        //   insideness rides inside it, so the decision that refuses the link is the same one
+        //   that reports the press or release. Nothing follows an event to correct it.
         // Scenario: the user Cmd-drags off the pane and releases, then Cmd-presses in the
         //   blank surround beside the grid and releases over the link.
         let controller = TerminalPaneSessionController()

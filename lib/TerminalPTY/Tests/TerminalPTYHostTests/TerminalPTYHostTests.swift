@@ -123,7 +123,7 @@ struct TerminalPTYHostTests {
         let completion = InputCompletionRecorder(expecting: 1)
 
         host.sendPointer(
-            .down(.left, column: 2, row: 3),
+            .down(.left, cell: .init(column: 2, row: 3)),
             waitGeneration: .init(rawValue: 8)
         )
         host.sendWheel(
@@ -382,14 +382,14 @@ struct TerminalPTYHostTests {
         let opened = AsyncStream<TerminalHyperlink>.makeStream()
         var iterator = opened.stream.makeAsyncIterator()
 
-        host.sendPointer(.move(column: column + 2, row: row, modifiers: [.command]))
+        host.sendPointer(.move(cell: .init(column: column + 2, row: row), modifiers: [.command]))
         _ = try #require(host.fencedSnapshot().hoveredLink)
         host.sendPointer(
-            .down(.left, column: column + 2, row: row, modifiers: [.command]),
+            .down(.left, cell: .init(column: column + 2, row: row), modifiers: [.command]),
             onOpenLink: { opened.continuation.yield($0) }
         )
         host.sendPointer(
-            .up(.left, column: column + 3, row: row, modifiers: [.command]),
+            .up(.left, cell: .init(column: column + 3, row: row), modifiers: [.command]),
             onOpenLink: { opened.continuation.yield($0) }
         )
 
@@ -446,13 +446,13 @@ struct TerminalPTYHostTests {
         _ = host.fencedFrameState()
         let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
-        host.sendPointer(.down(.left, column: 1, row: 0, clickCount: 3))
+        host.sendPointer(.down(.left, cell: .init(column: 1, row: 0), clickCount: 3))
         _ = host.fencedSnapshot()
         #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == baseline + 1)
-        host.sendPointer(.up(.left, column: 1, row: 0))
+        host.sendPointer(.up(.left, cell: .init(column: 1, row: 0)))
         _ = host.fencedSnapshot()
 
-        host.sendPointer(.down(.left, column: 1, row: 2, clickCount: 3))
+        host.sendPointer(.down(.left, cell: .init(column: 1, row: 2), clickCount: 3))
         _ = host.fencedSnapshot()
         #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == baseline + 1)
 
@@ -473,11 +473,11 @@ struct TerminalPTYHostTests {
         #expect(await pane.writeFromChild("https://a.co"))
         _ = host.fencedFrameState()
 
-        host.sendPointer(.move(column: 3, row: 0, modifiers: [.command]))
+        host.sendPointer(.move(cell: .init(column: 3, row: 0), modifiers: [.command]))
         _ = host.fencedFrameState()
         let baseline = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
 
-        host.sendPointer(.down(.left, column: 3, row: 0, modifiers: [.command]))
+        host.sendPointer(.down(.left, cell: .init(column: 3, row: 0), modifiers: [.command]))
         _ = host.fencedSnapshot()
 
         #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == baseline)
@@ -497,7 +497,7 @@ struct TerminalPTYHostTests {
         _ = host.fencedFrameState()
 
         let comparisons = Instrument.wholeStoreEquality.measure {
-            host.applyInteractionForTesting(.pointer(.move(column: 0, row: 0)))
+            host.applyInteractionForTesting(.pointer(.move(cell: .init(column: 0, row: 0))))
             host.applyInteractionForTesting(.cancelLinkInteraction)
             host.applyInteractionForTesting(.clearSelection)
             host.applyInteractionForTesting(.beginSearch("line"))
@@ -520,10 +520,10 @@ struct TerminalPTYHostTests {
         #expect(await pane.writeFromChild("https://a.co hit"))
         _ = host.fencedFrameState()
 
-        host.sendPointer(.move(column: 3, row: 0, modifiers: [.command]))
+        host.sendPointer(.move(cell: .init(column: 3, row: 0), modifiers: [.command]))
         _ = host.fencedFrameState()
         let afterFirstHover = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
-        host.sendPointer(.move(column: 3, row: 0, modifiers: [.command]))
+        host.sendPointer(.move(cell: .init(column: 3, row: 0), modifiers: [.command]))
         _ = host.fencedSnapshot()
         #expect(
             (await host.resourceSnapshot()).census.emittedUpdateSignalCount
@@ -641,7 +641,7 @@ struct TerminalPTYHostTests {
         let owner = OwnerHold()
         try owner.hold(host)
         host.resize(unpinned(columns: 80, rows: 30))
-        host.sendPointer(.down(.left, column: 2, row: 0, clickCount: 3))
+        host.sendPointer(.down(.left, cell: .init(column: 2, row: 0), clickCount: 3))
         host.resize(unpinned(columns: 80, rows: 10))
         owner.release()
 
@@ -649,13 +649,13 @@ struct TerminalPTYHostTests {
         let ordered = (await host.transitions()).dropFirst(baseline).filter { transition in
             switch transition {
             case .resize: true
-            case .mouse(.down(.left, _, _, _, _, _)): true
+            case .mouse(.down(.left, _, _, _)): true
             default: false
             }
         }
         #expect(ordered == [
             .resize(unpinned(columns: 80, rows: 30)),
-            .mouse(.down(.left, column: 2, row: 0, clickCount: 3)),
+            .mouse(.down(.left, cell: .init(column: 2, row: 0), clickCount: 3)),
             .resize(unpinned(columns: 80, rows: 10)),
         ])
         #expect(
@@ -1130,8 +1130,8 @@ struct TerminalPTYHostTests {
         #expect(await pane.writeFromChild("\u{1B}[?1000;1006h"))
         let baseline = await host.inputWrites().count
 
-        host.sendPointer(.down(.left, column: 4, row: 2))
-        host.sendPointer(.up(.left, column: 4, row: 2))
+        host.sendPointer(.down(.left, cell: .init(column: 4, row: 2)))
+        host.sendPointer(.up(.left, cell: .init(column: 4, row: 2)))
         _ = host.fencedSnapshot()
 
         #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
@@ -1153,25 +1153,16 @@ struct TerminalPTYHostTests {
         let alpha = try #require(lines[row].range(of: "alpha"))
         let column = lines[row].distance(from: lines[row].startIndex, to: alpha.lowerBound)
 
-        host.sendPointer(.down(
-            .left,
-            column: column,
-            row: row,
+        host.sendPointer(.down(.left, cell: .init(column: column, row: row),
             modifiers: [.shift],
-            clickCount: 2
-        ))
-        host.sendPointer(.up(.left, column: column, row: row, modifiers: [.shift]))
+            clickCount: 2))
+        host.sendPointer(.up(.left, cell: .init(column: column, row: row), modifiers: [.shift]))
         // The extending click count maps to line selection on a fresh gesture, but the settled
         // token granularity wins and entering beta includes that token as one unit.
-        host.sendPointer(.down(
-            .left,
-            column: column + 6,
-            row: row,
-            offsetX: 0.75,
+        host.sendPointer(.down(.left, cell: .init(column: column + 6, row: row, offsetX: 0.75),
             modifiers: [.shift],
-            clickCount: 3
-        ))
-        host.sendPointer(.up(.left, column: column + 6, row: row, modifiers: [.shift]))
+            clickCount: 3))
+        host.sendPointer(.up(.left, cell: .init(column: column + 6, row: row), modifiers: [.shift]))
         let snapshot = host.fencedSnapshot()
         let recording = NeutralTerminalRecording(
             provenance: .danTerm(test: "captured-shift-selection"),
@@ -1222,9 +1213,9 @@ struct TerminalPTYHostTests {
         let host = try await startChildlessHost().host
         let before = await host.inputWrites().count
 
-        host.sendPointer(.down(.right, column: 9, row: 4))
+        host.sendPointer(.down(.right, cell: .init(column: 9, row: 4)))
         _ = host.fencedSnapshot()
-        host.sendPointer(.up(.right, column: 9, row: 4))
+        host.sendPointer(.up(.right, cell: .init(column: 9, row: 4)))
         _ = host.fencedSnapshot()
 
         #expect(await host.inputWrites().count == before)
@@ -3340,30 +3331,30 @@ private extension TerminalPTYAppliedTransition {
 private extension TerminalPointerEvent {
     var neutralEvent: NeutralTerminalMouseEvent {
         switch self {
-        case let .down(button, column, row, offsetX, modifiers, clickCount):
+        case let .down(button, cell, modifiers, clickCount):
             .init(
                 action: .down,
                 button: button.rawValue + 1,
-                column: column,
-                row: row,
-                offsetX: offsetX,
+                column: cell.column,
+                row: cell.row,
+                offsetX: cell.offsetX,
                 modifiers: modifiers,
                 clickCount: clickCount
             )
-        case let .up(button, column, row, modifiers):
+        case let .up(button, cell, modifiers):
             .init(
                 action: .up,
                 button: button.rawValue + 1,
-                column: column,
-                row: row,
+                column: cell.column,
+                row: cell.row,
                 modifiers: modifiers
             )
-        case let .move(column, row, offsetX, modifiers):
+        case let .move(cell, modifiers):
             .init(
                 action: .move,
-                column: column,
-                row: row,
-                offsetX: offsetX,
+                column: cell.column,
+                row: cell.row,
+                offsetX: cell.offsetX,
                 modifiers: modifiers
             )
         }
