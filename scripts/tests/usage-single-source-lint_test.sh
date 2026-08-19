@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Self-test for the creation-command usage single-source gate.
+# Self-test for the usage single-source gate: every `danterm` usage line in the
+# protocol module is written once, creation command or not.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LINT="$SCRIPT_DIR/../creation-usage-single-source-lint.sh"
+LINT="$SCRIPT_DIR/../usage-single-source-lint.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -30,6 +31,14 @@ if "$LINT" "$TMP/denied" >/dev/null 2>&1; then
     fail "a second copy of a creation usage line should fail"
 fi
 
+cat > "$TMP/denied/Parser.swift" <<'SWIFT'
+throw CLIParseError("usage: danterm theme set --pane <pane-id> <name>|--clear")
+throw CLIParseError("usage: danterm theme set --pane <pane-id> <name>|--clear")
+SWIFT
+if "$LINT" "$TMP/denied" >/dev/null 2>&1; then
+    fail "a second copy of a non-creation usage line should fail"
+fi
+
 rm -f "$TMP/denied/Parser.swift"
 cat > "$TMP/denied/Args.swift" <<'SWIFT'
 let tabNewUsage = "usage: danterm tab new (--group <group-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
@@ -39,4 +48,4 @@ if "$LINT" "$TMP/denied" >/dev/null 2>&1; then
     fail "spelling the shared flags out in two usage lines should fail"
 fi
 
-echo "creation usage single-source lint self-test passed"
+echo "usage single-source lint self-test passed"

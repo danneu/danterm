@@ -244,13 +244,13 @@ public func parseCLI(
 
     case "theme":
         guard args.count >= 2, args[1] == "set" else {
-            throw CLIParseError("usage: danterm theme set --pane <pane-id> <name>|--clear")
+            throw CLIParseError(themeSetUsage)
         }
         return try parseThemeSetCommand(Array(args.dropFirst(2)))
 
     case "agent":
         guard args.count >= 2 else {
-            throw CLIParseError("usage: danterm agent <attach|activity|detach>")
+            throw CLIParseError(agentSubcommandUsage)
         }
         switch args[1] {
         case "attach":
@@ -268,7 +268,7 @@ public func parseCLI(
                 attach: false
             )
         default:
-            throw CLIParseError("usage: danterm agent <attach|activity|detach>")
+            throw CLIParseError(agentSubcommandUsage)
         }
 
     case "todo":
@@ -446,6 +446,10 @@ private func parsePaneCloseCommand(_ args: [String]) throws -> CLICommand {
     )
 }
 
+/// The one `pane input` usage line. Two distinct parse failures report it: no
+/// tokens at all, and tokens that never reached a `--pane`.
+let paneInputUsage = "usage: danterm pane input --pane <pane-id> [--literal] -- <token>..."
+
 private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
     let parsed: ParsedSendKeys
     do {
@@ -457,13 +461,13 @@ private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
     } catch SendKeysParseError.literalRequiresSeparator {
         throw CLIParseError("--literal requires -- before the tokens")
     } catch SendKeysParseError.missingArguments {
-        throw CLIParseError("usage: danterm pane input --pane <pane-id> [--literal] -- <token>...")
+        throw CLIParseError(paneInputUsage)
     } catch SendKeysParseError.keyToken(.unknownKey(let token)) {
         throw CLIParseError("unknown key: \(token)")
     }
 
     guard let pane = parsed.pane else {
-        throw CLIParseError("usage: danterm pane input --pane <pane-id> [--literal] -- <token>...")
+        throw CLIParseError(paneInputUsage)
     }
     return CLICommand(
         request: .paneInput(pane: try paneId(pane), input: .events(parsed.events)),
@@ -471,18 +475,21 @@ private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
     )
 }
 
+/// The one `theme set` usage line, read both by this parser and by the command
+/// dispatch above, which reports it when the `set` subcommand is missing.
+let themeSetUsage = "usage: danterm theme set --pane <pane-id> <name>|--clear"
+
 private func parseThemeSetCommand(_ args: [String]) throws -> CLICommand {
     var remaining = args
-    let usage = "usage: danterm theme set --pane <pane-id> <name>|--clear"
-    guard remaining.count >= 2, remaining.first == "--pane" else { throw CLIParseError(usage) }
+    guard remaining.count >= 2, remaining.first == "--pane" else { throw CLIParseError(themeSetUsage) }
     let pane = try paneId(remaining[1])
     remaining.removeFirst(2)
     guard !remaining.isEmpty else {
-        throw CLIParseError(usage)
+        throw CLIParseError(themeSetUsage)
     }
     if remaining[0] == "--clear" {
         guard remaining.count == 1 else {
-            throw CLIParseError(usage)
+            throw CLIParseError(themeSetUsage)
         }
         return CLICommand(request: .themeSet(pane: pane, themeName: nil), outputMode: .none)
     }
@@ -491,7 +498,7 @@ private func parseThemeSetCommand(_ args: [String]) throws -> CLICommand {
     }
     let name = remaining.joined(separator: " ")
     guard !name.isEmpty else {
-        throw CLIParseError(usage)
+        throw CLIParseError(themeSetUsage)
     }
     return CLICommand(request: .themeSet(pane: pane, themeName: name), outputMode: .none)
 }
@@ -691,6 +698,10 @@ private func parsePaneSnapshotCommand(_ args: [String]) throws -> CLICommand {
         outputMode: .tapeStream(.replay)
     )
 }
+
+/// The one `agent` subcommand usage line, reported both when the subcommand is
+/// missing and when it is not one of the three this parser knows.
+let agentSubcommandUsage = "usage: danterm agent <attach|activity|detach>"
 
 private func parseAgentSessionCommand(
     _ args: [String],
