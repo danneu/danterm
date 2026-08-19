@@ -287,8 +287,11 @@ prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
   release-configuration dev build (still not a release or publish operation).
 - `just test` -- the local gate. Steps live in `scripts/run-test-suite.sh`, not
   the justfile; add new ones there, and only steps independent of every other
-  one (no shared temp path, build directory, port, or socket). `just test-serial`
-  when parallel interleaving is in the way.
+  one (no shared temp path, build directory, port, or socket). The gate's core
+  budget is machine-wide, shared by every checkout: when other agents are testing,
+  your steps queue rather than fighting them for cores, and each queued step
+  reports how long it waited. A slower run beside other runs is the pool working,
+  not a hang. `just test-serial` when parallel interleaving is in the way.
 - Codex only: run `just test` with [sandbox escalation](https://learn.chatgpt.com/docs/agent-approvals-security);
   SwiftPM cannot nest its macOS sandbox inside Codex's.
 - `just test-ui` -- AppKit UI harness. Excluded from the gate because it needs a

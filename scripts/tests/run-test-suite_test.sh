@@ -13,6 +13,12 @@ RUNNER="$REPO_ROOT/scripts/run-test-suite.sh"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
+# The gate draws CPU tokens from a pool shared by every checkout on the machine. This
+# file must never draw on the real one: it runs as a gate step itself, so it would
+# compete with the very run that started it, and it would leave tokens in the user's
+# cache. Every case below inherits this throwaway pool.
+export DANTERM_GATE_TOKEN_DIR="$TEST_ROOT/token-pool"
+
 fail() {
     echo "run-test-suite_test: $*" >&2
     exit 1
@@ -124,5 +130,74 @@ fi
 # shellcheck disable=SC2016
 rc="$(run_with_steps 'test $(ps -o nice= -p $$) -gt 0')"
 [[ "$rc" == "0" ]] || fail "gate steps did not run at reduced scheduling priority"
+
+# The budget is machine-wide, not per run. This is the case the pool exists for: several
+# agents in separate worktrees each used to reserve the same cores, so N concurrent
+# gates asked the machine for N times its budget and every one of them ran slower than
+# a serial gate would have. Two runs are started against one shared pool and every step
+# records the interval it occupied; the peak overlap computed from those intervals is
+# what the budget has to hold down.
+#
+# Overlap is computed from recorded intervals rather than sampled while the runs go, so
+# the verdict is exact rather than dependent on catching the pool at its peak.
+mkdir -p "$TEST_ROOT/intervals"
+cat >"$TEST_ROOT/observe.sh" <<'OBSERVE'
+#!/usr/bin/env bash
+# One gate step that does nothing but record when it held a token.
+exec python3 -c 'import os, sys, time
+started = time.time()
+time.sleep(0.4)
+with open(os.path.join(sys.argv[1], str(os.getpid())), "w") as record:
+    record.write(f"{started} {time.time()}")' "$1"
+OBSERVE
+
+# The step line carries no quotes: xargs -I strips them out.
+for run in a b; do
+    : >"$TEST_ROOT/steps-$run"
+    for _ in $(seq 1 8); do
+        echo "bash $TEST_ROOT/observe.sh $TEST_ROOT/intervals" >>"$TEST_ROOT/steps-$run"
+    done
+done
+
+RUN_TEST_SUITE_STEPS_FILE="$TEST_ROOT/steps-a" "$RUNNER" 4 >"$TEST_ROOT/shared-a" 2>&1 &
+run_a=$!
+RUN_TEST_SUITE_STEPS_FILE="$TEST_ROOT/steps-b" "$RUNNER" 4 >"$TEST_ROOT/shared-b" 2>&1 &
+run_b=$!
+
+# A hang guard, not a measurement: 16 sleeps of 0.4s finish in seconds even on a packed
+# machine, so only a wedged pool can reach this deadline. It fails by name so a stuck
+# token pool does not read as an unrelated slow test.
+guard_deadline=$((SECONDS + 120))
+for pid in $run_a $run_b; do
+    while kill -0 "$pid" 2>/dev/null; do
+        (( SECONDS < guard_deadline )) || {
+            kill -9 $run_a $run_b 2>/dev/null || true
+            fail "concurrent runs did not finish within 120s; the token pool is wedged"
+        }
+        sleep 0.1
+    done
+done
+wait $run_a || fail "first concurrent run failed: $(cat "$TEST_ROOT/shared-a")"
+wait $run_b || fail "second concurrent run failed: $(cat "$TEST_ROOT/shared-b")"
+
+header="$(grep -h '^run-test-suite: .*workers' "$TEST_ROOT/shared-a")"
+per_worker="$(sed -E 's/.*swift -j ([0-9]+).*/\1/' <<<"$header")"
+budget="$(sed -E 's/.*<= ([0-9]+) of [0-9]+ cores.*/\1/' <<<"$header")"
+allowed=$(( budget / per_worker ))
+observed="$(python3 -c 'import pathlib, sys
+events = []
+for record in pathlib.Path(sys.argv[1]).iterdir():
+    start, end = (float(value) for value in record.read_text().split())
+    events += [(start, 1), (end, -1)]
+peak = live = 0
+for _, delta in sorted(events):
+    live += delta
+    peak = max(peak, live)
+print(peak)' "$TEST_ROOT/intervals")"
+
+(( observed <= allowed )) \
+    || fail "two runs overlapped $observed steps against a machine budget of $allowed"
+(( allowed < 2 || observed >= 2 )) \
+    || fail "pool serialized the gate to $observed step at a time; expected up to $allowed"
 
 echo "run-test-suite_test: ok"

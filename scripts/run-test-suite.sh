@@ -20,6 +20,14 @@ cd "$REPO_ROOT"
 # write Clang's default cache under ~/.cache, and every gate child inherits this boundary.
 export CLANG_MODULE_CACHE_PATH="$REPO_ROOT/.build/clang-module-cache"
 
+# Total compile jobs the gate may ask this machine for. Derived from hw.ncpu alone, so
+# concurrent runs in different checkouts agree on the size of the pool they share
+# without negotiating it. Computed up here because the worker branch below needs it as
+# well; the rest of the budget arithmetic stays with its explanation further down.
+NCPU="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+BUDGET=$(( NCPU - 2 ))
+(( BUDGET < 2 )) && BUDGET=2
+
 # Ordered longest-measured-first. With a bounded pool this is list scheduling: putting
 # the long poles in front keeps the tail from being one slow step finishing alone.
 #
@@ -68,6 +76,7 @@ STEPS=(
     'swift test --scratch-path .build-app-tests'
     './scripts/tests/core-purity-lint_test.sh'
     './scripts/tests/run-test-suite_test.sh'
+    './scripts/tests/gate-cpu-tokens_test.sh'
     './scripts/gate-test-coverage-lint.py'
     'python3 ./scripts/tests/gate_test_coverage_lint_test.py'
     './scripts/manifest-ownership-lint.py'
@@ -161,6 +170,31 @@ if [[ -n "${RUN_TEST_SUITE_STEPS_FILE:-}" ]]; then
     done <"$RUN_TEST_SUITE_STEPS_FILE"
 fi
 
+# Time waiting for the machine-wide budget is reported apart from time spent running,
+# so a step's own duration stays comparable between a quiet machine and a busy one.
+# Reading the gate's timings would otherwise mean guessing how loaded the host was.
+queue_seconds() {
+    local waited
+    waited="$(cat "$1.wait" 2>/dev/null || true)"
+    [[ "$waited" =~ ^[0-9]+$ ]] || waited=0
+    printf '%d' "$waited"
+}
+
+step_seconds() {
+    local ran=$((SECONDS - start - $(queue_seconds "$1")))
+    # Both terms are whole seconds from clocks that truncate, so a very short step can
+    # subtract its way below zero. Report the floor rather than a negative duration.
+    (( ran < 0 )) && ran=0
+    printf '%d' "$ran"
+}
+
+queued_note() {
+    local waited
+    waited="$(queue_seconds "$1")"
+    (( waited > 0 )) && printf ' +%ds queued' "$waited"
+    return 0
+}
+
 # Worker mode: the pool re-invokes this script once per step. Output is captured to a
 # file so a failing step can be replayed in one contiguous block at the end, rather
 # than interleaved with whatever else was running at the same instant.
@@ -171,12 +205,19 @@ if [[ "${1:-}" == "--worker" ]]; then
     log="$RUN_TEST_SUITE_LOGS/$$-$(printf '%s' "$step" | shasum | cut -c1-12)"
     printf '%s\n' "$step" >"$log.cmd"
     start=$SECONDS
-    if bash -c "$step" >"$log.out" 2>&1; then
-        printf '  ok   %4ds  %s\n' "$((SECONDS - start))" "$step"
+    # Every step holds its share of the machine-wide budget for as long as it runs: the
+    # helper blocks until that share is free, then supervises the step and gives the
+    # share back when it ends. The share is what bounds this host's total gate load, so
+    # concurrent runs in other checkouts queue here instead of oversubscribing the CPU.
+    if DANTERM_GATE_TOKEN_WAIT_FILE="$log.wait" \
+        "$REPO_ROOT/scripts/gate-cpu-tokens.py" \
+        --weight "${DANTERM_SWIFT_JOBS:-1}" --pool "$BUDGET" \
+        -- bash -c "$step" >"$log.out" 2>&1; then
+        printf '  ok   %4ds%s  %s\n' "$(step_seconds "$log")" "$(queued_note "$log")" "$step"
     else
         rc=$?
         printf '%d\n' "$rc" >"$log.rc"
-        printf '  FAIL %4ds  %s\n' "$((SECONDS - start))" "$step"
+        printf '  FAIL %4ds%s  %s\n' "$(step_seconds "$log")" "$(queued_note "$log")" "$step"
     fi
     exit 0
 fi
@@ -194,9 +235,16 @@ fi
 #   * SWIFT_JOBS -- per-worker cap, derived from the budget and whatever JOBS ended up
 #                   being, so an override like `just test 8` shrinks the inner number
 #                   rather than multiplying through it.
-NCPU="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-BUDGET=$(( NCPU - 2 ))
-(( BUDGET < 2 )) && BUDGET=2
+#
+# BUDGET is spent against a pool shared by every checkout on the machine, not claimed
+# fresh per run. Bounding it per process bounds nothing once several agents work in
+# parallel worktrees: each one reserves the same cores, so N gates ask the host for N
+# times its budget and all N finish later than a serial gate would have. Because BUDGET
+# is derived from hw.ncpu alone, concurrent runs agree on the pool size without having
+# to negotiate one. See scripts/gate-cpu-tokens.py.
+#
+# NCPU and BUDGET are computed at the top of this file, because a worker needs the pool
+# size too.
 JOBS="${1:-${JOBS:-$(( BUDGET / 2 ))}}"
 (( JOBS < 1 )) && JOBS=1
 SWIFT_JOBS=$(( BUDGET / JOBS ))
@@ -235,6 +283,8 @@ fi
 
 echo "run-test-suite: ${#STEPS[@]} steps, $JOBS parallel workers," \
     "swift -j $SWIFT_JOBS each (<= $BUDGET of $NCPU cores)"
+echo "run-test-suite: the $BUDGET-core budget is shared with every other gate on this" \
+    "machine, so steps queue while another checkout is testing"
 started=$SECONDS
 
 # nice(1) covers the pool and everything it forks. Leaving cores free is not enough on

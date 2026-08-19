@@ -38,6 +38,10 @@ build-icons:
 # scripts/run-test-suite.sh. The pool leaves two cores and normal scheduling priority
 # to the desktop, so the machine stays usable during a run. Pass a job count to
 # override the worker count; the per-worker SwiftPM cap shrinks to match.
+#
+# The core budget is shared with every other gate running on this machine, so a run
+# started beside other agents' runs queues instead of oversubscribing the host. A
+# queued step says so in its own line.
 test jobs="":
     ./scripts/run-test-suite.sh {{jobs}}
 
