@@ -1082,7 +1082,7 @@ wave.
 - [x] **[STORE-1](#store-1)** (4x5, medium) Derive arena bytes-in-use from the ring cursors instead of maintaining it at twelve sites -- `3354fd46`
 - [x] **[XPORT-1](#xport-1)** (4x5, medium) Make the read turn, not the read() syscall, the unit that is fed and published -- `7448dd16`
 - [x] **[CHROME-1](#chrome-1)** (4x5, large) Replace the fatalError-based TODO popover base class with one controller parameterized by a scope value -- `ab1173b8..6fcae32d`
-- [ ] **[FEED-2](#feed-2)** (3x5, small) Reach a row's cells once per run, not once per cell, on the bulk ASCII write and scan loops
+- [x] **[FEED-2](#feed-2)** (3x5, small) Reach a row's cells once per run, not once per cell, on the bulk ASCII write and scan loops -- `cd2a6960`
 - [x] **[IPC-3](#ipc-3)** (3x5, small) Give the todo state change one catalog case so three unreachable `preconditionFailure` arms disappear -- `177c07ef`
 - [x] **[MODEL-3](#model-3)** (3x5, small) Collapse ContainerShape to layout plus zoomedLeaf; derive the structural fingerprint -- `63e0c675`
 - [ ] **[PERSIST-4](#persist-4)** (3x5, small) Confine the IPC connection's descriptor to its write queue so a queued write cannot land on a reused fd
@@ -1138,7 +1138,7 @@ rewrites.
 - [ ] **[RECON-1](#recon-1)** (3x5, small) Make container visibility a diffed field of ContainerShape instead of an unconditional per-tab op _(after [MODEL-3](#model-3))_
 - [ ] **[REDUCE-2](#reduce-2)** (3x5, small) Let .startSearch open the pane's search state directly instead of round-tripping through the view
 - [ ] **[REDUCE-5](#reduce-5)** (3x5, small) Raise every pane alert through one function instead of duplicating the ritual in .sessionBell
-- [ ] **[ROW-4](#row-4)** (3x5, small) Write each printed cell once: clearCellAndPair's store at the target column is immediately overwritten
+- [x] **[ROW-4](#row-4)** (3x5, small) Write each printed cell once: clearCellAndPair's store at the target column is immediately overwritten -- `0527bb09`
 - [ ] **[WIRE-6](#wire-6)** (3x5, small) Chunk and base64 the sync payload from slices, without copying the bytes three times first _(after [PERSIST-6](#persist-6))_
 - [ ] **[IPC-4](#ipc-4)** (3x5, medium) Return one traits value from a single exhaustive switch instead of six parallel per-method enumerations _(after [IPC-3](#ipc-3))_
 - [x] **[STORE-2](#store-2)** (3x5, medium) Delete PackedRetainedRow's dead body and move the cell-word constants to the store that uses them _(after [STORE-1](#store-1))_ -- `863a81f4`

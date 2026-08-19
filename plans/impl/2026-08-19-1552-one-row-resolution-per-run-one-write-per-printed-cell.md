@@ -243,7 +243,7 @@ the wave checklists (the `- [ ] **[FEED-2](#feed-2)**` /
 ## Commit progress
 - [x] 1. D1 -- row-cells accessor (FEED-2)
 - [x] 2. D2 -- prepare a destination range (ROW-4)
-- [ ] 3. Mark FEED-2 and ROW-4 done in the construction audit
+- [x] 3. Mark FEED-2 and ROW-4 done in the construction audit
 
 ## Implementation notes
 
@@ -269,3 +269,14 @@ the wave checklists (the `- [ ] **[FEED-2](#feed-2)**` /
   printed character, so it is a payoff check rather than a gate -- rerun
   `just benchmark-quick baseline=HEAD workload=terminal-feed` (and
   `scrollback-stream`'s per-arm drain MB/s) on an idle machine to record it.
+- The closeout commit ran `just test` as the plan's final gate (101 steps
+  passed). D2's benchmark stayed deferred: the machine was still busy, and the
+  user asked to hold it until the machine is quiet.
+
+## Follow Up
+
+- Run D2's deferred PO4 benchmark on an idle machine:
+  `just benchmark-quick cd2a6960 terminal-feed`, reading
+  `feedDurationNanoseconds`, plus `scrollback-stream`'s per-arm drain MB/s.
+  `cd2a6960` is D2's parent (the D1 commit). This is a payoff record, not a
+  gate -- D1 already measured 16.92% faster on the same workload.
