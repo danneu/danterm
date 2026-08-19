@@ -87,6 +87,37 @@ private final class RemoteConnectionSlots: Sendable {
     }
 }
 
+/// How long a failed tailnet bind waits before it tries the same endpoint again.
+///
+/// Discretionary: long enough that a permanently rejected address does not spin, short
+/// enough that a login-time race with Tailscale heals in seconds rather than minutes.
+private let tailnetBindRetryInterval = Duration.seconds(5)
+
+/// Keeps the tailnet listener reachable from a synchronous stop, whichever attempt bound it.
+///
+/// The bind is retried, so the descriptor `stop()` must close does not exist yet when stop
+/// may first be called, and the attempt that creates it runs on the actor. This box is the
+/// one place the two sides meet, and it refuses to adopt a listener once stop has won.
+private final class TailnetListenerHandle: Sendable {
+    private let listener = Mutex<TailnetListener?>(nil)
+
+    /// The bound port, or nil while no attempt has succeeded.
+    var port: UInt16? { listener.withLock { $0?.port } }
+
+    /// Takes ownership of a freshly bound listener; false tells the caller to close it itself.
+    func adopt(_ opened: TailnetListener, unless stopState: IpcServerStopState) -> Bool {
+        listener.withLock { current in
+            guard stopState.isStopped == false else { return false }
+            current = opened
+            return true
+        }
+    }
+
+    func close() {
+        listener.withLock { $0?.close() }
+    }
+}
+
 /// Lets synchronous stop win against accept and admission work already off-actor.
 private final class IpcServerStopState: Sendable {
     private let stopped = Mutex(false)
@@ -116,8 +147,13 @@ actor IpcServer {
 
     nonisolated let socketPath: URL
     nonisolated private let listener: ControlSocketListener
-    nonisolated private let tailnetListener: TailnetListener?
-    nonisolated let tailnetPort: UInt16?
+    nonisolated private let tailnetListenerHandle = TailnetListenerHandle()
+
+    /// The port this instance's tailnet listener took, or nil while nothing is bound.
+    nonisolated var tailnetPort: UInt16? { tailnetListenerHandle.port }
+
+    /// What this instance's tailnet listener is doing, authored here and reported everywhere.
+    private(set) var tailnetStatus: DanTermTailnetStatus
 
     private let runtimeDispatch: AppRuntimeIpcDispatch?
     private let appVersion: String
@@ -125,6 +161,12 @@ actor IpcServer {
     private let auditWriter: IpcAuditLogWriter
     private let whoisResolver: TailnetWhoisResolver
     private let admittedNodeIds: Set<String>
+    /// The launch-frozen decision: this instance's endpoint, or why it opens no listener.
+    private let tailnetActivation: DanTermTailnetActivation
+    private let resolveTailnetBindAddress: @Sendable (String) throws -> TailnetBindAddress
+    private let tailnetBindRetryDelay: @Sendable () async -> Void
+    /// The failure the log already carries, so retries record transitions and not attempts.
+    private var recordedBindFailureReason: String?
     nonisolated private let remoteSlots: RemoteConnectionSlots
     nonisolated private let stopState = IpcServerStopState()
     private let acceptQueue = DispatchQueue(label: "danterm.ipc.accept", qos: .utility)
@@ -136,11 +178,16 @@ actor IpcServer {
         appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev",
         livenessBound: IpcLivenessBound = .standard,
         tailnetConfig: DanTermTailnetConfig? = nil,
+        identity: DanTermInstanceIdentity = DanTermInstanceIdentity(),
+        tailnetOptIn: Bool = false,
         auditWriter: IpcAuditLogWriter = IpcAuditLogWriter(directory: recoveryDirectoryURL()),
         whoisResolver: TailnetWhoisResolver = .live,
         remoteConnectionLimit: Int = 8,
-        resolveTailnetBindAddress: @Sendable (String) throws -> TailnetBindAddress = {
+        resolveTailnetBindAddress: @escaping @Sendable (String) throws -> TailnetBindAddress = {
             try TailnetBindAddress.resolve($0)
+        },
+        tailnetBindRetryDelay: @escaping @Sendable () async -> Void = {
+            try? await Task.sleep(for: tailnetBindRetryInterval)
         },
         runtimeDispatch: AppRuntimeIpcDispatch?
     ) throws {
@@ -153,25 +200,84 @@ actor IpcServer {
         self.admittedNodeIds = Set(tailnetConfig?.admittedNodeIds ?? [])
         self.remoteSlots = RemoteConnectionSlots(limit: remoteConnectionLimit)
         self.runtimeDispatch = runtimeDispatch
+        self.resolveTailnetBindAddress = resolveTailnetBindAddress
+        self.tailnetBindRetryDelay = tailnetBindRetryDelay
 
-        var openedTailnetListener: TailnetListener?
-        if let tailnetConfig, tailnetConfig.admittedNodeIds.isEmpty == false {
-            do {
-                try auditWriter.prepare()
-                let bindAddress = try resolveTailnetBindAddress(tailnetConfig.listen)
-                openedTailnetListener = try TailnetListener.open(on: bindAddress)
-            } catch {
-                try? auditWriter.append(.listenerFailed(reason: String(describing: error)))
-            }
+        // Frozen here, for this whole run: a later config reload changes what the next
+        // launch would bind, never what this process is bound to.
+        let activation = DanTermTailnetActivation.resolve(
+            config: tailnetConfig,
+            identity: identity,
+            optedIn: tailnetOptIn
+        )
+        self.tailnetActivation = activation
+        switch activation {
+        case .disabled(let reason):
+            self.tailnetStatus = .disabled(reason: reason)
+        case .active(let endpoint):
+            self.tailnetStatus = .waiting(endpoint: endpoint, reason: "the listener is not open yet")
         }
-        self.tailnetListener = openedTailnetListener
-        self.tailnetPort = openedTailnetListener?.port
     }
 
+    /// Opens both surfaces, and returns once the first tailnet bind attempt has been made.
     func start() {
         guard stopState.isStopped == false else { return }
         startLocalAcceptLoop()
-        startTailnetAcceptLoop()
+        openTailnetListener()
+    }
+
+    /// Binds this instance's endpoint, and keeps trying on its own until it does.
+    ///
+    /// The first attempt runs inline, so a caller that awaited `start()` knows whether the
+    /// listener came up at launch. Only a failure schedules the retry loop.
+    private func openTailnetListener() {
+        guard case .active(let endpoint) = tailnetActivation else { return }
+        guard attemptTailnetBind(endpoint) == false else { return }
+        let delay = tailnetBindRetryDelay
+        // Weak between turns on purpose: the loop ends with the server, and a strong
+        // reference held across the delay would keep a dead server alive for it.
+        Task { [weak self] in
+            while true {
+                await delay()
+                guard let self, await self.retryTailnetBind(endpoint) == false else { return }
+            }
+        }
+    }
+
+    /// One retry turn. False keeps the loop going; true means bound, or stopped.
+    private func retryTailnetBind(_ endpoint: DanTermTailnetEndpoint) -> Bool {
+        guard stopState.isStopped == false else { return true }
+        return attemptTailnetBind(endpoint)
+    }
+
+    /// Makes one complete bind attempt and records only the transition it caused.
+    ///
+    /// Address resolution runs again on every attempt, because the interface the endpoint
+    /// belongs to is exactly what may still be missing -- that is the case the retry heals,
+    /// and re-running it keeps the tailnet-range and local-interface checks in front of
+    /// every listener this process opens.
+    private func attemptTailnetBind(_ endpoint: DanTermTailnetEndpoint) -> Bool {
+        do {
+            try auditWriter.prepare()
+            let bindAddress = try resolveTailnetBindAddress(endpoint.text)
+            let opened = try TailnetListener.open(on: bindAddress)
+            guard tailnetListenerHandle.adopt(opened, unless: stopState) else {
+                opened.close()
+                return true
+            }
+            tailnetStatus = .listening(endpoint: endpoint)
+            try? auditWriter.append(.listenerBound(endpoint: endpoint.text))
+            startTailnetAcceptLoop(on: opened.fileDescriptor)
+            return true
+        } catch {
+            let reason = String(describing: error)
+            tailnetStatus = .waiting(endpoint: endpoint, reason: reason)
+            if reason != recordedBindFailureReason {
+                recordedBindFailureReason = reason
+                try? auditWriter.append(.listenerFailed(reason: reason))
+            }
+            return false
+        }
     }
 
     /// Makes both listener surfaces unreachable before returning to synchronous app exit.
@@ -182,7 +288,7 @@ actor IpcServer {
     nonisolated func stop() {
         stopState.markStopped()
         listener.close()
-        tailnetListener?.close()
+        tailnetListenerHandle.close()
         Task { await self.closeConnections() }
     }
 
@@ -200,9 +306,7 @@ actor IpcServer {
         }
     }
 
-    private func startTailnetAcceptLoop() {
-        guard let tailnetListener else { return }
-        let listenerFileDescriptor = tailnetListener.fileDescriptor
+    private func startTailnetAcceptLoop(on listenerFileDescriptor: Int32) {
         let slots = remoteSlots
         let resolver = whoisResolver
         let auditWriter = auditWriter

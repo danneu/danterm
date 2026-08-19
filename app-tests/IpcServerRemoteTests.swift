@@ -20,6 +20,84 @@ private let hangGuardSeconds = 30.0
 /// retry loop turns over, and keep it far below the hang guard so the two never blur.
 private let silenceProbeSeconds = 0.5
 
+/// The retry delay handed to a server whose bind is expected to fail and stay failed.
+///
+/// No test in this file may wait on the clock for a retry, so this parks the retry loop
+/// past the hang guard: a passing run always stops the server long before it returns.
+/// A test that wants retries drives them with `BindRetryGate` instead.
+private let noRetryWithinThisTest: @Sendable () async -> Void = {
+    try? await Task.sleep(for: .seconds(hangGuardSeconds))
+}
+
+/// Releases bind retries on the test's word, so a retry test never waits on the clock.
+private actor BindRetryGate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var pendingTicks = 0
+    private var startedWaits = 0
+
+    /// The delay seam handed to the server in place of its wall-clock interval.
+    nonisolated var delay: @Sendable () async -> Void {
+        { await self.wait() }
+    }
+
+    /// Releases the retry that is waiting, or the next one to arrive.
+    func tick() {
+        if waiters.isEmpty {
+            pendingTicks += 1
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+
+    /// Waits until the retry loop has entered its delay `count` times.
+    func waitsStarted(_ count: Int) async throws {
+        let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
+        while ContinuousClock.now < deadline {
+            if startedWaits >= count { return }
+            await Task.yield()
+        }
+        throw POSIXError(.ETIMEDOUT)
+    }
+
+    private func wait() async {
+        startedWaits += 1
+        if pendingTicks > 0 {
+            pendingTicks -= 1
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+}
+
+/// Gives each bind attempt a scripted answer, so a test can stage the interface appearing.
+///
+/// A nil entry resolves to a loopback address the test can really bind; the last entry
+/// repeats once the script runs out, and an empty script resolves every attempt.
+private final class ScriptedBindResolver: Sendable {
+    private let script: [TailnetBindAddress.Rejection?]
+    private let requested = Mutex<[String]>([])
+
+    init(_ script: [TailnetBindAddress.Rejection?]) {
+        self.script = script
+    }
+
+    /// The bind-address seam, which records every endpoint the server asked it to resolve.
+    var resolve: @Sendable (String) throws -> TailnetBindAddress {
+        { [self] endpoint in
+            let attempt = requested.withLock { endpoints -> Int in
+                endpoints.append(endpoint)
+                return endpoints.count
+            }
+            if let rejection = script.isEmpty ? nil : script[min(attempt - 1, script.count - 1)] {
+                throw rejection
+            }
+            return TailnetBindAddress(address: "127.0.0.1", port: 0, interfaceName: "lo0")
+        }
+    }
+
+    var requestedEndpoints: [String] { requested.withLock { $0 } }
+}
+
 @Suite(.serialized, .timeLimit(.minutes(1)))
 @MainActor
 struct IpcServerRemoteTests {
@@ -51,7 +129,9 @@ struct IpcServerRemoteTests {
                 listen: "0.0.0.0:24863",
                 admittedNodeIds: ["node-phone"]
             ),
+            identity: .production,
             auditWriter: fixture.auditWriter,
+            tailnetBindRetryDelay: noRetryWithinThisTest,
             runtimeDispatch: nil
         )
         defer { server.stop() }
@@ -80,6 +160,7 @@ struct IpcServerRemoteTests {
                 listen: "100.99.4.1:24863",
                 admittedNodeIds: ["node-phone"]
             ),
+            identity: .production,
             auditWriter: fixture.auditWriter,
             resolveTailnetBindAddress: { _ in
                 TailnetBindAddress(
@@ -88,6 +169,7 @@ struct IpcServerRemoteTests {
                     interfaceName: "lo0"
                 )
             },
+            tailnetBindRetryDelay: noRetryWithinThisTest,
             runtimeDispatch: nil
         )
         defer { server.stop() }
@@ -98,6 +180,175 @@ struct IpcServerRemoteTests {
         defer { local.close() }
         #expect(try await local.readRequest().method == Methods.hello)
         #expect(try fixture.auditEntries().contains { $0.event.kind == .listenerFailed })
+    }
+
+    @Test("a launcher pool slot opens no tailnet listener without --tailnet")
+    func poolSlotWithoutOptInNeverBinds() async throws {
+        // Intent: a slot from the launcher pool ignores the shared config's tailnet block
+        //   unless the launch asked for it, and says so.
+        // Why it exists: closed by default. Every agent's `just launch-slot` reads the one
+        //   config file, so without this gate each slot would open a network socket
+        //   carrying the user's admitted node ids.
+        // Scenario: slot 3 launches with a usable tailnet config and no `--tailnet`.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let resolver = ScriptedBindResolver([])
+        let server = try fixture.makeServer(
+            runtimeDispatch: nil,
+            identity: try #require(DanTermInstanceIdentity(developmentSlot: 3)),
+            resolveTailnetBindAddress: resolver.resolve
+        )
+        defer { server.stop() }
+
+        await server.start()
+        #expect(server.tailnetPort == nil)
+        #expect(resolver.requestedEndpoints.isEmpty)
+        guard case .disabled(let reason) = await server.tailnetStatus else {
+            Issue.record("expected a disabled tailnet status")
+            return
+        }
+        #expect(reason.contains("--tailnet"))
+    }
+
+    @Test("an opted-in pool slot binds the endpoint derived for its slot")
+    func optedInPoolSlotBindsItsDerivedEndpoint() async throws {
+        // Intent: the listener binds the configured base port plus this identity's offset,
+        //   and reports that endpoint as its status.
+        // Why it exists: every instance on one Mac reads the same base from the same config,
+        //   so the offset is the only thing keeping two of them off one port -- and the
+        //   phone saves the derived endpoint, not the configured one.
+        // Scenario: slot 3, offset 4, against base 100.99.4.1:24863.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let resolver = ScriptedBindResolver([])
+        let server = try fixture.makeServer(
+            runtimeDispatch: nil,
+            identity: try #require(DanTermInstanceIdentity(developmentSlot: 3)),
+            tailnetOptIn: true,
+            resolveTailnetBindAddress: resolver.resolve
+        )
+        defer { server.stop() }
+
+        await server.start()
+        #expect(resolver.requestedEndpoints == ["100.99.4.1:24867"])
+        #expect(server.tailnetPort != nil)
+        guard case .listening(let endpoint) = await server.tailnetStatus else {
+            Issue.record("expected a listening tailnet status")
+            return
+        }
+        #expect(endpoint.offset == 4)
+        #expect(endpoint.text == "100.99.4.1:24867")
+    }
+
+    @Test("a bind that fails on a missing interface retries and then serves an admitted peer")
+    func lateBindServesRemotePeers() async throws {
+        // Intent: a listener that only binds on a later attempt accepts, admits, and serves
+        //   a remote peer exactly like one bound at launch.
+        // Why it exists: the motivating case is a Mac that starts DanTerm before Tailscale
+        //   is up. The remote surface exists for the times nobody is at the keyboard, so a
+        //   listener that gives up at launch defeats it.
+        // Scenario: address resolution rejects the first attempt, then the interface
+        //   appears and the second attempt binds.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let gate = BindRetryGate()
+        let resolver = ScriptedBindResolver([.notLocal("100.99.4.1"), nil])
+        let server = try fixture.makeServer(
+            runtimeDispatch: runtime.makeIpcDispatch(),
+            resolveTailnetBindAddress: resolver.resolve,
+            tailnetBindRetryDelay: gate.delay
+        )
+        defer { server.stop() }
+
+        await server.start()
+        #expect(server.tailnetPort == nil)
+        guard case .waiting = await server.tailnetStatus else {
+            Issue.record("expected a waiting tailnet status")
+            return
+        }
+
+        try await gate.waitsStarted(1)
+        await gate.tick()
+        let peer = try RemotePeer(port: try await boundPort(of: server))
+        defer { peer.close() }
+
+        #expect(try await peer.readRequest().method == Methods.hello)
+        try peer.writeRequest(method: IpcRequestMethod.ls.rawValue, id: .number(3))
+        let response = try await peer.readResponse()
+        #expect(response.id == .number(3))
+        #expect(response.error == nil)
+        guard case .listening(let endpoint) = await server.tailnetStatus else {
+            Issue.record("expected a listening tailnet status")
+            return
+        }
+        #expect(endpoint.text == "100.99.4.1:24863")
+    }
+
+    @Test("stopping the server while it waits ends the retry")
+    func stopDuringWaitingEndsTheRetry() async throws {
+        // Intent: a server stopped before its listener came up never opens one.
+        // Why it exists: the retry outlives the failed attempt that started it, so app exit
+        //   has to beat it -- otherwise a quitting instance can still take the port and
+        //   start accepting remote peers.
+        // Scenario: the first attempt fails, the app quits, and the attempt the script
+        //   would have bound never runs.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let gate = BindRetryGate()
+        let resolver = ScriptedBindResolver([.notLocal("100.99.4.1"), nil])
+        let server = try fixture.makeServer(
+            runtimeDispatch: nil,
+            resolveTailnetBindAddress: resolver.resolve,
+            tailnetBindRetryDelay: gate.delay
+        )
+        defer { server.stop() }
+
+        await server.start()
+        #expect(resolver.requestedEndpoints.count == 1)
+        try await gate.waitsStarted(1)
+        server.stop()
+        await gate.tick()
+
+        #expect(await resolvedAgain(resolver, beyond: 1) == false)
+        #expect(server.tailnetPort == nil)
+    }
+
+    @Test("the audit log records bind transitions, not attempts")
+    func bindAuditRecordsTransitions() async throws {
+        // Intent: repeated failures for one reason leave one record; a new reason and the
+        //   successful bind each leave one more.
+        // Why it exists: the retry runs until the app quits, so a record per attempt would
+        //   bury the connection events the log exists for.
+        // Scenario: two rejections for the same reason, one for a different reason, then a
+        //   bind.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let gate = BindRetryGate()
+        let resolver = ScriptedBindResolver([
+            .notLocal("100.99.4.1"),
+            .notLocal("100.99.4.1"),
+            .notTailscaleRange("100.99.4.1"),
+            nil,
+        ])
+        let server = try fixture.makeServer(
+            runtimeDispatch: nil,
+            resolveTailnetBindAddress: resolver.resolve,
+            tailnetBindRetryDelay: gate.delay
+        )
+        defer { server.stop() }
+
+        await server.start()
+        for attempt in 1...3 {
+            try await gate.waitsStarted(attempt)
+            await gate.tick()
+        }
+        let events = try await fixture.auditEntries(untilCount: 1, ofKind: .listenerBound)
+            .map(\.event)
+        #expect(events.count(where: { $0.kind == .listenerFailed }) == 2)
+        #expect(events.count(where: { $0.kind == .listenerBound }) == 1)
+        #expect(events.first { $0.kind == .listenerBound }?.endpoint == "100.99.4.1:24863")
     }
 
     @Test("an unavailable audit sink prevents tailnet service but not local IPC")
@@ -585,6 +836,7 @@ struct IpcServerRemoteTests {
         let entries = try await fixture.auditEntriesWhenConnectionCloses()
         let kinds = entries.map(\.event.kind)
         #expect(kinds == [
+            .listenerBound,
             .connectionOpened,
             .connectionOpened,
             .localRequest,
@@ -639,6 +891,7 @@ struct IpcServerRemoteTests {
 
         let entries = try await fixture.auditEntriesWhenConnectionCloses()
         #expect(entries.map(\.event.kind) == [
+            .listenerBound,
             .connectionOpened,
             .requestStarted,
             .requestCompleted,
@@ -881,6 +1134,29 @@ struct IpcServerRemoteTests {
 /// the main actor, so the request cannot proceed past the boundary however long this waits.
 private let handoffSettleSeconds = 0.25
 
+/// Waits for the retry loop to bind, so a test never has to guess when the port appeared.
+private func boundPort(of server: IpcServer) async throws -> UInt16 {
+    let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
+    while ContinuousClock.now < deadline {
+        if let port = server.tailnetPort { return port }
+        await Task.yield()
+    }
+    throw POSIXError(.ETIMEDOUT)
+}
+
+/// Reports whether a further bind attempt ran, on a deadline that is meant to expire.
+///
+/// "The deadline passed" and "the retry never ran again" are one observation here, so a
+/// bool states it honestly. Keep the wait short: a stopped retry loop never reports.
+private func resolvedAgain(_ resolver: ScriptedBindResolver, beyond count: Int) async -> Bool {
+    let deadline = ContinuousClock.now + .seconds(silenceProbeSeconds)
+    while ContinuousClock.now < deadline {
+        if resolver.requestedEndpoints.count > count { return true }
+        await Task.yield()
+    }
+    return false
+}
+
 /// Blocks until the server records that it started a remote request.
 ///
 /// Synchronous on purpose: its caller must keep the main actor while it waits, so this
@@ -963,11 +1239,17 @@ private struct RemoteIpcServerFixture {
 
     func makeServer(
         runtimeDispatch: AppRuntimeIpcDispatch?,
+        identity: DanTermInstanceIdentity = .production,
+        tailnetOptIn: Bool = false,
         whoisResolver: TailnetWhoisResolver = TailnetWhoisResolver { _ in
             TailnetPeerIdentity(nodeId: "node-phone", user: "dan@example.com", machineName: "iphone")
         },
         remoteConnectionLimit: Int = 4,
-        livenessBound: IpcLivenessBound = .standard
+        livenessBound: IpcLivenessBound = .standard,
+        resolveTailnetBindAddress: @escaping @Sendable (String) throws -> TailnetBindAddress = { _ in
+            TailnetBindAddress(address: "127.0.0.1", port: 0, interfaceName: "lo0")
+        },
+        tailnetBindRetryDelay: @escaping @Sendable () async -> Void = noRetryWithinThisTest
     ) throws -> IpcServer {
         try IpcServer(
             socketPath: socketURL,
@@ -977,12 +1259,13 @@ private struct RemoteIpcServerFixture {
                 listen: "100.99.4.1:24863",
                 admittedNodeIds: ["node-phone"]
             ),
+            identity: identity,
+            tailnetOptIn: tailnetOptIn,
             auditWriter: auditWriter,
             whoisResolver: whoisResolver,
             remoteConnectionLimit: remoteConnectionLimit,
-            resolveTailnetBindAddress: { _ in
-                TailnetBindAddress(address: "127.0.0.1", port: 0, interfaceName: "lo0")
-            },
+            resolveTailnetBindAddress: resolveTailnetBindAddress,
+            tailnetBindRetryDelay: tailnetBindRetryDelay,
             runtimeDispatch: runtimeDispatch
         )
     }

@@ -8,6 +8,7 @@ import Synchronization
 /// Uses a stable JSON vocabulary for every connection and request lifecycle record.
 struct IpcAuditEvent: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Equatable, Sendable {
+        case listenerBound
         case listenerFailed
         case connectionOpened
         case connectionRefused
@@ -28,7 +29,14 @@ struct IpcAuditEvent: Codable, Equatable, Sendable {
     let outcome: String?
     /// How many requests a closing connection was served. Absent on every other kind.
     let servedRequests: Int?
+    /// The `address:port` a listener took. Absent on every kind but `listenerBound`.
+    let endpoint: String?
     let reason: String?
+
+    /// Records the address a listener took, so the log says which instance owns which port.
+    static func listenerBound(endpoint: String) -> IpcAuditEvent {
+        IpcAuditEvent(kind: .listenerBound, endpoint: endpoint)
+    }
 
     /// Records a listener failure without pretending that a connection existed.
     static func listenerFailed(reason: String) -> IpcAuditEvent {
@@ -156,6 +164,7 @@ struct IpcAuditEvent: Codable, Equatable, Sendable {
         rawMethod: String? = nil,
         outcome: String? = nil,
         servedRequests: Int? = nil,
+        endpoint: String? = nil,
         reason: String? = nil
     ) {
         self.kind = kind
@@ -166,6 +175,7 @@ struct IpcAuditEvent: Codable, Equatable, Sendable {
         self.rawMethod = rawMethod
         self.outcome = outcome
         self.servedRequests = servedRequests
+        self.endpoint = endpoint
         self.reason = reason
     }
 }

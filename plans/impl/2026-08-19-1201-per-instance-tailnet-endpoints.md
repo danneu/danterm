@@ -222,7 +222,24 @@ bind recovers on its own; and the listener's state is visible instead of silent.
 ## Commit progress
 
 - [x] 1. Derive per-instance tailnet endpoints and status in DanTermProtocol
-- [ ] 2. Gate and retry the tailnet bind on the derived endpoint
+- [x] 2. Gate and retry the tailnet bind on the derived endpoint
 - [ ] 3. Publish listener status through the model and `tailnet.status`
 - [ ] 4. Show the read-only tailnet section in the preferences panel
 - [ ] 5. Launch a pool slot with `--tailnet` and report status in the handle
+
+## Implementation notes
+
+- Commit 2: `IpcServer` resolves the activation itself, from the config, the
+  process identity, and the opt-in flag it is given. The alternative was to
+  resolve in `AppRuntime` and hand the server a finished endpoint, but the
+  server already takes the config for the admitted node ids, and one owner for
+  the whole launch-frozen decision keeps the status it authors and the address
+  it binds from ever disagreeing.
+- Commit 2: `tailnetOptIn` defaults to false and `AppRuntime` does not pass it
+  yet, so a launcher pool slot opens no listener until commit 5 parses
+  `--tailnet`. Production and dev slot 0 are unaffected, because the gate only
+  applies to pool slots.
+- Commit 2: the server holds its status as its own state and nothing reads it
+  outside the server and its tests. Commit 3 publishes it into the model.
+- Commit 2: the audit log gains a `listenerBound` event carrying the endpoint,
+  which is the "success appends one entry" half of the transition rule.
