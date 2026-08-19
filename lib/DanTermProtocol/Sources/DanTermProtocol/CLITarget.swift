@@ -13,19 +13,24 @@ enum CLITargetKind: CaseIterable {
     case pane
     case tab
     case group
+    /// `tab new`'s anchor form: a tab named by `--after-tab` rather than by
+    /// `--tab`. It is a separate case because the flag differs from the plain
+    /// tab target while the id it carries is still a tab id.
+    case afterTab
 
     var flag: String {
         switch self {
         case .pane: return "--pane"
         case .tab: return "--tab"
         case .group: return "--group"
+        case .afterTab: return "--after-tab"
         }
     }
 
     var entity: String {
         switch self {
         case .pane: return "pane"
-        case .tab: return "tab"
+        case .tab, .afterTab: return "tab"
         case .group: return "group"
         }
     }
@@ -51,18 +56,32 @@ func parseCLITarget(
 ) throws -> CLITargetParse {
     if let head = args.first, let kind = kinds.first(where: { $0.flag == head }) {
         guard args.count >= 2, args[1].isEmpty == false else { throw CLIParseError(usage) }
-        return CLITargetParse(kind: kind, rawId: args[1], rest: Array(args.dropFirst(2)))
+        let rest = Array(args.dropFirst(2))
+        try rejectLateTarget(rest, accepting: kinds, usage: usage)
+        return CLITargetParse(kind: kind, rawId: args[1], rest: rest)
     }
     if let head = args.first, let stray = CLITargetKind.allCases.first(where: { $0.flag == head }) {
         throw CLIParseError("\(stray.flag) is not a target of this command\n\(usage)")
     }
+    try rejectLateTarget(args, accepting: kinds, usage: usage)
+    throw CLIParseError(usage)
+}
+
+/// Refuses a target flag that trails another argument. It runs over the tail of
+/// an accepted target too, because a subcommand names its target once: a second
+/// one is the same misplacement whether or not the first was in the right place,
+/// and a command whose tail is free text would otherwise swallow it silently.
+private func rejectLateTarget(
+    _ args: some Collection<String>,
+    accepting kinds: [CLITargetKind],
+    usage: String
+) throws {
     // A `--` separator ends the arguments this command owns, so a target flag
     // written after it is one of the caller's own tokens, not a misplaced target.
     let owned = args.prefix(while: { $0 != "--" })
     if let kind = kinds.first(where: { kind in owned.contains(kind.flag) }) {
         throw CLIParseError("\(kind.flag) must come first\n\(usage)")
     }
-    throw CLIParseError(usage)
 }
 
 /// Reads the one pane a subcommand targets. The wrappers exist so a command

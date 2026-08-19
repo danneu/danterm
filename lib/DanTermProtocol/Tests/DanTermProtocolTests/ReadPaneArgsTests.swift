@@ -4,56 +4,37 @@ import Testing
 @testable import DanTermProtocol
 
 struct ReadPaneArgsTests {
-    @Test("pane only parses")
-    func paneOnlyParses() throws {
-        let parsed = try parseReadPaneArgs(["--pane", "P1"])
-        #expect(parsed == ParsedReadPane(pane: "P1", lineLimit: nil))
+    @Test("an empty tail parses")
+    func anEmptyTailParses() throws {
+        #expect(try parseReadPaneArgs([]) == ParsedReadPane(lineLimit: nil))
     }
 
-    @Test("pane with lines parses")
-    func paneWithLinesParses() throws {
-        let parsed = try parseReadPaneArgs(["--pane", "P1", "--lines", "50"])
-        #expect(parsed == ParsedReadPane(pane: "P1", lineLimit: 50))
+    @Test("lines parses")
+    func linesParses() throws {
+        #expect(try parseReadPaneArgs(["--lines", "50"]) == ParsedReadPane(lineLimit: 50))
     }
 
-    @Test("flags can be in any order")
-    func flagsCanBeInAnyOrder() throws {
-        let parsed = try parseReadPaneArgs(["--lines", "50", "--pane", "P1"])
-        #expect(parsed == ParsedReadPane(pane: "P1", lineLimit: 50))
-    }
-
-    @Test("no flags throws missing pane")
-    func noFlagsThrowsMissingPane() {
-        #expect(throws: ReadPaneParseError.missingPane) {
-            try parseReadPaneArgs([])
-        }
-    }
-
-    @Test("missing pane arg throws")
-    func missingPaneArgThrows() {
-        #expect(throws: ReadPaneParseError.missingPaneArg) {
-            try parseReadPaneArgs(["--pane"])
-        }
-    }
-
-    @Test("empty pane throws missing pane")
-    func emptyPaneThrowsMissingPane() {
-        #expect(throws: ReadPaneParseError.missingPane) {
-            try parseReadPaneArgs(["--pane", ""])
+    @Test("the pane flag is not this parser's to read")
+    func thePaneFlagIsNotThisParsersToRead() {
+        // Intent: the tail parser treats `--pane` as any other unknown flag.
+        // Why it exists: the target belongs to the shared step that runs before
+        //   this parser, so a target reaching it would mean two owners.
+        #expect(throws: ReadPaneParseError.unknownFlag("--pane")) {
+            try parseReadPaneArgs(["--pane", "P1"])
         }
     }
 
     @Test("missing lines arg throws")
     func missingLinesArgThrows() {
         #expect(throws: ReadPaneParseError.missingLinesArg) {
-            try parseReadPaneArgs(["--pane", "P1", "--lines"])
+            try parseReadPaneArgs(["--lines"])
         }
     }
 
     @Test("invalid lines throw", arguments: ["0", "-5", "abc", "1.5"])
     func invalidLinesThrow(_ value: String) {
         #expect(throws: ReadPaneParseError.invalidLines(value)) {
-            try parseReadPaneArgs(["--pane", "P1", "--lines", value])
+            try parseReadPaneArgs(["--lines", value])
         }
     }
 

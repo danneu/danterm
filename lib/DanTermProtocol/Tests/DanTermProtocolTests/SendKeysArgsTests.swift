@@ -14,29 +14,30 @@ struct SendKeysArgsTests {
     @Test("tmux mode basic")
     func tmuxModeBasic() throws {
         let parsed = try parseSendKeysArgs(["--", "ls", "Enter"])
-        #expect(parsed == ParsedSendKeys(
-                pane: nil,
-                events: [.text("ls"), .key(.named(.enter), [])]
-            ))
+        #expect(parsed == ParsedSendKeys(events: [.text("ls"), .key(.named(.enter), [])]))
     }
 
-    @Test("explicit pane in tmux mode")
-    func explicitPaneInTmuxMode() throws {
-        let parsed = try parseSendKeysArgs(["--pane", "P1", "--", "x"])
-        #expect(parsed == ParsedSendKeys(pane: "P1", events: [.text("x")]))
+    @Test("the pane flag is not this parser's to read")
+    func thePaneFlagIsNotThisParsersToRead() {
+        // Intent: the tail parser treats `--pane` as any other unknown flag.
+        // Why it exists: the target belongs to the shared step that runs before
+        //   this parser, so a target reaching it would mean two owners.
+        #expect(throws: SendKeysParseError.unknownFlag("--pane")) {
+            try parseSendKeysArgs(["--pane", "P1", "--", "x"])
+        }
     }
 
-    @Test("explicit pane without separator throws")
-    func explicitPaneWithoutSeparatorThrows() {
+    @Test("one token without a separator throws")
+    func oneTokenWithoutSeparatorThrows() {
         #expect(throws: SendKeysParseError.missingArguments) {
-            try parseSendKeysArgs(["--pane", "P1", "hello"])
+            try parseSendKeysArgs(["hello"])
         }
     }
 
     @Test("literal flag passes through to tokens")
     func literalFlagPassesThroughToTokens() throws {
         let parsed = try parseSendKeysArgs(["--literal", "--", "Enter"])
-        #expect(parsed == ParsedSendKeys(pane: nil, events: [.text("Enter")]))
+        #expect(parsed == ParsedSendKeys(events: [.text("Enter")]))
     }
 
     @Test("literal without separator throws")
@@ -50,13 +51,6 @@ struct SendKeysArgsTests {
     func unknownFlagThrows() {
         #expect(throws: SendKeysParseError.unknownFlag("--bogus")) {
             try parseSendKeysArgs(["--bogus", "x"])
-        }
-    }
-
-    @Test("missing pane arg throws")
-    func missingPaneArgThrows() {
-        #expect(throws: SendKeysParseError.missingPaneArg) {
-            try parseSendKeysArgs(["--pane"])
         }
     }
 

@@ -1,11 +1,9 @@
-// CLI argument parser for `danterm pane split`. Holds only the flags unique to
-// this command -- its pane-or-tab target and pane direction; the launch and focus
-// flags come from `NewCommandFlags`. The usage line lives here too, next to the
-// flags it documents.
+// Parses the tail of `danterm pane split` after the shared target step has
+// consumed its pane or tab. Target-dependent direction rules stay in
+// CLIParser; this file owns the direction, launch, and focus flags.
 import Foundation
 
-/// The one `pane split` usage line, read both by this parser, which renders its
-/// errors with it, and by `CLIParser`, whose post-parse guard reports it.
+/// The one `pane split` usage line, shared by target and tail parsing.
 let paneSplitUsage = "usage: danterm pane split (--pane <pane-id> -h|-v | --tab <tab-id>) \(newCommandFlagsUsage)"
 
 public enum PaneSplitDirection: Equatable, Sendable {
@@ -13,15 +11,10 @@ public enum PaneSplitDirection: Equatable, Sendable {
     case vertical
 }
 
-/// Keeps the two accepted CLI target forms internally consistent after parsing.
-public enum ParsedPaneSplitTarget: Equatable {
-    case pane(String, direction: PaneSplitDirection)
-    case tab(String)
-}
-
-/// Carries a validated split target with the launch and focus flags shared by both forms.
+/// Carries the split tail independently of whether the shared target was a
+/// pane, which requires a direction, or a tab, which forbids one.
 public struct ParsedPaneSplit: Equatable {
-    public let target: ParsedPaneSplitTarget
+    public let direction: PaneSplitDirection?
     public let launch: LaunchSpec?
     public let background: Bool
     /// Records that `--foreground` was typed while leaving background-default
@@ -29,34 +22,27 @@ public struct ParsedPaneSplit: Equatable {
     public let foreground: Bool
 
     public init(
-        target: ParsedPaneSplitTarget,
+        direction: PaneSplitDirection? = nil,
         launch: LaunchSpec? = nil,
         background: Bool = false,
         foreground: Bool = false
     ) {
-        self.target = target
+        self.direction = direction
         self.launch = launch
         self.background = background
         self.foreground = foreground
     }
 }
 
+/// Parses only the flags that follow a pane-split target.
 public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
     var flags = NewCommandFlags(usage: paneSplitUsage)
-    var pane: String?
-    var tab: String?
     var direction: PaneSplitDirection?
     var i = 0
 
     while i < args.count {
         let arg = args[i]
         switch arg {
-        case "--pane":
-            pane = try flags.value(in: args, at: i)
-            i += 2
-        case "--tab":
-            tab = try flags.value(in: args, at: i)
-            i += 2
         case "-h", "-v":
             guard direction == nil else {
                 throw CLIParseError("unexpected argument: \(arg)")
@@ -68,18 +54,8 @@ public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
         }
     }
 
-    // Checked after the loop, so every flag error in the loop outranks target grammar.
-    let target: ParsedPaneSplitTarget
-    switch (pane, tab, direction) {
-    case (.some(let pane), .none, .some(let direction)):
-        target = .pane(pane, direction: direction)
-    case (.none, .some(let tab), .none):
-        target = .tab(tab)
-    default:
-        throw CLIParseError(paneSplitUsage)
-    }
     return ParsedPaneSplit(
-        target: target,
+        direction: direction,
         launch: flags.launch,
         background: flags.background,
         foreground: flags.foreground

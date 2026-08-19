@@ -3,26 +3,24 @@
 // `-- <token>...` form without going through a real subprocess.
 import Foundation
 
+/// The tail of `danterm pane input`, after the shared target step has taken the
+/// pane: the `--literal` mode and the tokens behind the `--` separator.
 public struct ParsedSendKeys: Equatable {
-    public let pane: String?
     public let events: [InputEvent]
 
-    public init(pane: String?, events: [InputEvent]) {
-        self.pane = pane
+    public init(events: [InputEvent]) {
         self.events = events
     }
 }
 
 public enum SendKeysParseError: Error, Equatable {
     case unknownFlag(String)
-    case missingPaneArg
     case literalRequiresSeparator
     case missingArguments
     case keyToken(KeyTokenError)
 }
 
 public func parseSendKeysArgs(_ args: [String]) throws -> ParsedSendKeys {
-    var pane: String? = nil
     var literal = false
     var i = 0
 
@@ -36,18 +34,10 @@ public func parseSendKeysArgs(_ args: [String]) throws -> ParsedSendKeys {
             if tokens.isEmpty { throw SendKeysParseError.missingArguments }
             do {
                 let events = try parseKeyTokens(tokens, literal: literal)
-                return ParsedSendKeys(pane: pane, events: events)
+                return ParsedSendKeys(events: events)
             } catch let err as KeyTokenError {
                 throw SendKeysParseError.keyToken(err)
             }
-        }
-        if arg == "--pane" {
-            guard i + 1 < args.count else {
-                throw SendKeysParseError.missingPaneArg
-            }
-            pane = args[i + 1]
-            i += 2
-            continue
         }
         if arg == "--literal" {
             literal = true

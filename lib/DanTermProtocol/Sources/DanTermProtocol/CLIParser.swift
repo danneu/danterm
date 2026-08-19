@@ -280,13 +280,8 @@ public func parseCLI(
 }
 
 private func parseTabNewCommand(_ args: [String], currentDirectory: String) throws -> CLICommand {
-    let parsed = try parseTabNewArgs(args)
-
-    let afterTab: String?
-    if case .afterTab(let id) = parsed.position { afterTab = id } else { afterTab = nil }
-    guard (parsed.group == nil) != (afterTab == nil) else {
-        throw CLIParseError(tabNewUsage)
-    }
+    let anchor = try parseCLITarget(args, accepting: [.group, .afterTab], usage: tabNewUsage)
+    let parsed = try parseTabNewArgs(anchor.rest)
 
     let launch = LaunchSpec(
         cmd: parsed.launch?.cmd,
@@ -294,18 +289,19 @@ private func parseTabNewCommand(_ args: [String], currentDirectory: String) thro
         title: parsed.launch?.title
     )
     let target: IpcTabTarget
-    switch parsed.position {
-    case .none:
-        guard let group = parsed.group else { throw CLIParseError(tabNewUsage) }
-        target = .group(try parseGroupId(group), position: .atGroupEnd)
-    case .afterSelected:
-        guard let group = parsed.group else { throw CLIParseError(tabNewUsage) }
-        target = .group(try parseGroupId(group), position: .afterSelected)
-    case .atGroupEnd:
-        guard let group = parsed.group else { throw CLIParseError(tabNewUsage) }
-        target = .group(try parseGroupId(group), position: .atGroupEnd)
-    case .afterTab(let id):
-        target = .afterTab(try parseTabId(id))
+    switch anchor.kind {
+    case .afterTab:
+        // An anchoring tab already fixes the position, so a position flag beside
+        // it names a second one.
+        guard parsed.position == nil else { throw CLIParseError(tabNewPositionConflict) }
+        target = .afterTab(try parseTabId(anchor.rawId))
+    case .group:
+        target = .group(
+            try parseGroupId(anchor.rawId),
+            position: parsed.position == .afterSelected ? .afterSelected : .atGroupEnd
+        )
+    case .pane, .tab:
+        preconditionFailure("tab new accepts only a group or an anchoring tab")
     }
     return CLICommand(
         request: .tabNew(target: target, launch: launch, background: parsed.foreground == false),
@@ -399,13 +395,18 @@ private func parsePaneInfoCommand(_ args: [String]) throws -> CLICommand {
 }
 
 private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
-    let parsed = try parsePaneSplitArgs(args)
+    let parsedTarget = try parseCLITarget(args, accepting: [.pane, .tab], usage: paneSplitUsage)
+    let parsed = try parsePaneSplitArgs(parsedTarget.rest)
     let target: IpcPaneSplitTarget
-    switch parsed.target {
-    case .pane(let pane, let direction):
-        target = .pane(try parsePaneId(pane), direction: direction)
-    case .tab(let tab):
-        target = .tab(try parseTabId(tab))
+    switch parsedTarget.kind {
+    case .pane:
+        guard let direction = parsed.direction else { throw CLIParseError(paneSplitUsage) }
+        target = .pane(try parsePaneId(parsedTarget.rawId), direction: direction)
+    case .tab:
+        guard parsed.direction == nil else { throw CLIParseError(paneSplitUsage) }
+        target = .tab(try parseTabId(parsedTarget.rawId))
+    case .group, .afterTab:
+        preconditionFailure("target parser returned a kind pane split does not accept")
     }
     return CLICommand(
         request: .paneSplit(
@@ -424,18 +425,17 @@ private func parsePaneCloseCommand(_ args: [String]) throws -> CLICommand {
     return CLICommand(request: .paneClose(pane: pane), outputMode: .none)
 }
 
-/// The one `pane input` usage line. Two distinct parse failures report it: no
-/// tokens at all, and tokens that never reached a `--pane`.
+/// The one `pane input` usage line, reported both by the shared target step and
+/// by the tail parser when no tokens ever reach the `--` separator.
 let paneInputUsage = "usage: danterm pane input --pane <pane-id> [--literal] -- <token>..."
 
 private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(args, usage: paneInputUsage)
     let parsed: ParsedSendKeys
     do {
-        parsed = try parseSendKeysArgs(args)
+        parsed = try parseSendKeysArgs(remaining)
     } catch SendKeysParseError.unknownFlag(let flag) {
         throw CLIParseError("unknown flag: \(flag)")
-    } catch SendKeysParseError.missingPaneArg {
-        throw CLIParseError("usage: danterm pane input --pane <pane-id> ...")
     } catch SendKeysParseError.literalRequiresSeparator {
         throw CLIParseError("--literal requires -- before the tokens")
     } catch SendKeysParseError.missingArguments {
@@ -444,11 +444,8 @@ private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
         throw CLIParseError("unknown key: \(token)")
     }
 
-    guard let pane = parsed.pane else {
-        throw CLIParseError(paneInputUsage)
-    }
     return CLICommand(
-        request: .paneInput(pane: try parsePaneId(pane), input: .events(parsed.events)),
+        request: .paneInput(pane: pane, input: .events(parsed.events)),
         outputMode: .none
     )
 }
@@ -478,14 +475,16 @@ private func parseThemeSetCommand(_ args: [String]) throws -> CLICommand {
     return CLICommand(request: .themeSet(pane: pane, themeName: name), outputMode: .none)
 }
 
+/// The one `pane read` usage line, reported by the shared target step.
+let paneReadUsage = "usage: danterm pane read --pane <uuid> [--lines <n>]"
+
 private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(args, usage: paneReadUsage)
     let parsed: ParsedReadPane
     do {
-        parsed = try parseReadPaneArgs(args)
+        parsed = try parseReadPaneArgs(remaining)
     } catch let error as ReadPaneParseError {
         switch error {
-        case .missingPane, .missingPaneArg:
-            throw CLIParseError("usage: danterm pane read --pane <uuid> [--lines <n>]")
         case .missingLinesArg, .invalidLines(_):
             throw CLIParseError("--lines must be a positive integer")
         case .unknownFlag(let flag):
@@ -496,7 +495,7 @@ private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
     }
 
     return CLICommand(
-        request: .paneRead(pane: try parsePaneId(parsed.pane), lineLimit: parsed.lineLimit),
+        request: .paneRead(pane: pane, lineLimit: parsed.lineLimit),
         outputMode: .text
     )
 }
@@ -575,13 +574,12 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
         [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] \
         [--sync-history-bytes <n>] [--format replay|inspect]
         """
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     let parsed: ParsedTapePane
     do {
-        parsed = try parseTapePaneArgs(args)
+        parsed = try parseTapePaneArgs(remaining)
     } catch let error as TapePaneParseError {
         switch error {
-        case .missingPane, .missingPaneArg:
-            throw CLIParseError(usage)
         case .conflictingStart:
             throw CLIParseError("choose only one tape start position\n\(usage)")
         case .missingCursorArg:
@@ -610,7 +608,7 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
     }
     return CLICommand(
         request: .paneTape(
-            pane: try parsePaneId(parsed.pane),
+            pane: pane,
             follow: parsed.follow,
             start: parsed.start,
             policy: parsed.policy
@@ -760,17 +758,18 @@ private func parseTodo(_ args: [String]) throws -> CLICommand {
     }
 }
 
+/// Reads the todo owner, which is a pane or a tab. The shared target step picks
+/// between the two forms, so this only turns the choice it made into a
+/// `TodoOwner`.
 private func parseTodoOwnerPrefix(_ args: [String], usage: String) throws -> (TodoOwner, [String]) {
-    guard args.first == "--pane" || args.first == "--tab" else { throw CLIParseError(usage) }
-    guard args.count >= 2 else { throw CLIParseError(usage) }
-    let owner: TodoOwner = args[0] == "--pane"
-        ? .pane(try parsePaneId(args[1]))
-        : .tab(try parseTabId(args[1]))
-    let rest = Array(args.dropFirst(2))
-    guard rest.contains("--pane") == false, rest.contains("--tab") == false else {
-        throw CLIParseError(usage)
+    let parsed = try parseCLITarget(args, accepting: [.pane, .tab], usage: usage)
+    let owner: TodoOwner
+    switch parsed.kind {
+    case .pane: owner = .pane(try parsePaneId(parsed.rawId))
+    case .tab: owner = .tab(try parseTabId(parsed.rawId))
+    case .group, .afterTab: preconditionFailure("a todo belongs to a pane or a tab")
     }
-    return (owner, rest)
+    return (owner, parsed.rest)
 }
 
 /// Parses the argument grammar shared by every todo verb that names one todo. The

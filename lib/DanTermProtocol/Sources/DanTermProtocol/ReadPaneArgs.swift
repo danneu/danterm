@@ -1,19 +1,17 @@
 // CLI argument parser and rendering helpers for `danterm pane read`.
 import Foundation
 
+/// The tail of `danterm pane read`, after the shared target step has taken the
+/// pane. Only `--lines` is left, so this carries one optional limit.
 public struct ParsedReadPane: Equatable {
-    public let pane: String
     public let lineLimit: Int?
 
-    public init(pane: String, lineLimit: Int?) {
-        self.pane = pane
+    public init(lineLimit: Int?) {
         self.lineLimit = lineLimit
     }
 }
 
 public enum ReadPaneParseError: Error, Equatable {
-    case missingPane
-    case missingPaneArg
     case missingLinesArg
     case invalidLines(String)
     case unknownFlag(String)
@@ -21,19 +19,12 @@ public enum ReadPaneParseError: Error, Equatable {
 }
 
 public func parseReadPaneArgs(_ args: [String]) throws -> ParsedReadPane {
-    var pane: String?
     var lineLimit: Int?
     var i = 0
 
     while i < args.count {
         let arg = args[i]
         switch arg {
-        case "--pane":
-            guard i + 1 < args.count else {
-                throw ReadPaneParseError.missingPaneArg
-            }
-            pane = args[i + 1]
-            i += 2
         case "--lines":
             guard i + 1 < args.count else {
                 throw ReadPaneParseError.missingLinesArg
@@ -52,10 +43,7 @@ public func parseReadPaneArgs(_ args: [String]) throws -> ParsedReadPane {
         }
     }
 
-    guard let pane, !pane.isEmpty else {
-        throw ReadPaneParseError.missingPane
-    }
-    return ParsedReadPane(pane: pane, lineLimit: lineLimit)
+    return ParsedReadPane(lineLimit: lineLimit)
 }
 
 public func renderReadPaneResult(_ result: JSONValue) -> String? {

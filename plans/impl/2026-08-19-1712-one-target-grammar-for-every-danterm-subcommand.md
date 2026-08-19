@@ -158,7 +158,7 @@ the `pane focus` call sites in `scripts/terminal-viability.sh`.
   shared step and the subcommands parsed inline in `CLIParser.swift`, the
   leading-target rule, and uniform trailing-argument rejection. Carries PO3 and
   the inline half of PO1. `pane focus` keeps its positional form here.
-- [ ] 2. `refactor(cli): remove target handling from the command parsers` --
+- [x] 2. `refactor(cli): remove target handling from the command parsers` --
   `pane read`, `pane input`, `pane tape`, `pane split`, `tab new`'s anchor, and
   the todo owner move onto the shared step and lose their target fields and
   target error cases. Carries PO4 and the rest of PO1.
@@ -199,3 +199,25 @@ the `pane focus` call sites in `scripts/terminal-viability.sh`.
   `ownTargetCommands` for the life of commit 2. Only the shared rows can be
   swept for the misplaced and wrong-flag axes; the split disappears when the
   last command parser gives up its target.
+- `tab new`'s `--after-tab` anchor became a fourth `CLITargetKind` case, whose
+  flag differs from the plain tab target while the id it carries is still a tab
+  id. That keeps the anchor inside the one grammar instead of beside it, and it
+  makes `--after-tab` read as a wrong target rather than an unknown flag in
+  every other subcommand.
+- A sweep row is now one target *form*, not one subcommand: `tab new` has a
+  `--group` row and an `--after-tab` row, and every todo verb has a `--pane` row
+  and a `--tab` row. The row also carries the target flag this command does not
+  take, because a command that accepts either of two targets rejects only the
+  third.
+- `--after-tab` stopped being a `ParsedTabPosition` case. It names the anchor,
+  not a position inside a group, so the shared step reads it and `CLIParser`
+  raises the conflict when a position flag appears beside it. The two remaining
+  position flags still conflict inside `parseTabNewArgs`, which now reports the
+  one shared `tabNewPositionConflict` message.
+- The misplaced-target check now also runs over the tail of a target that was
+  in the right place, so a second target flag is refused as misplaced. Without
+  it the todo owner would have lost its guard against `todo add --pane <id>
+  --tab <id> <text>`, which swallows the second owner into free text, and `tab
+  new --group <id> --after-tab <id>` would have reported `--after-tab` as an
+  unknown flag. A target is named once, so a repeat is the same misplacement as
+  one written too early rather than a fifth failure kind.

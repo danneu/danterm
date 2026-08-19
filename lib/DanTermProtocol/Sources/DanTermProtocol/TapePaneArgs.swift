@@ -1,10 +1,9 @@
 // CLI argument parser for the explicitly addressed `danterm pane tape` capture command.
 import Foundation
 
-/// Keeps pane-tape targeting independent from the broader command parser.
+/// The tail of `danterm pane tape`, after the shared target step has taken the
+/// pane: the streaming options that shape the record stream.
 public struct ParsedTapePane: Equatable {
-    /// Names the required pane target exactly as the caller supplied it.
-    public let pane: String
     /// Keeps the stream open for appended recorder events.
     public let follow: Bool
     /// Selects the first recorder position the producer must account for.
@@ -18,13 +17,11 @@ public struct ParsedTapePane: Equatable {
 
     /// Creates one validated pane-tape invocation for the broader CLI parser.
     public init(
-        pane: String,
         follow: Bool = false,
         start: PaneTapeStartPosition = .beginning,
         policy: PaneTapeSyncPolicy = .raw,
         format: PaneTapeFormat = .replay
     ) {
-        self.pane = pane
         self.follow = follow
         self.start = start
         self.policy = policy
@@ -34,10 +31,6 @@ public struct ParsedTapePane: Equatable {
 
 /// Distinguishes usage errors so the CLI can retain precise diagnostics.
 public enum TapePaneParseError: Error, Equatable {
-    /// The required pane flag was not present.
-    case missingPane
-    /// The pane flag had no following value.
-    case missingPaneArg
     /// More than one explicit start position was supplied.
     case conflictingStart
     /// The cursor flag had no following JSON value.
@@ -62,9 +55,8 @@ public enum TapePaneParseError: Error, Equatable {
     case unexpectedArgument(String)
 }
 
-/// Parses exactly one explicit pane target without consulting ambient shell context.
+/// Parses the streaming options a pane-tape capture takes after its target.
 public func parseTapePaneArgs(_ args: [String]) throws -> ParsedTapePane {
-    var pane: String?
     var follow = false
     var start = PaneTapeStartPosition.beginning
     var hasExplicitStart = false
@@ -76,12 +68,6 @@ public func parseTapePaneArgs(_ args: [String]) throws -> ParsedTapePane {
     while index < args.count {
         let argument = args[index]
         switch argument {
-        case "--pane":
-            guard index + 1 < args.count else {
-                throw TapePaneParseError.missingPaneArg
-            }
-            pane = args[index + 1]
-            index += 2
         case "--follow":
             follow = true
             index += 1
@@ -130,9 +116,6 @@ public func parseTapePaneArgs(_ args: [String]) throws -> ParsedTapePane {
         }
     }
 
-    guard let pane, pane.isEmpty == false else {
-        throw TapePaneParseError.missingPane
-    }
     let mode = explicitMode ?? ((follow || hasExplicitStart) ? .reconstructible : .raw)
     let policy: PaneTapeSyncPolicy
     do {
@@ -142,5 +125,5 @@ public func parseTapePaneArgs(_ args: [String]) throws -> ParsedTapePane {
         // so an inapplicable budget on a raw stream is the only failure left to report.
         throw TapePaneParseError.syncHistoryBytesOnRawStream
     }
-    return ParsedTapePane(pane: pane, follow: follow, start: start, policy: policy, format: format)
+    return ParsedTapePane(follow: follow, start: start, policy: policy, format: format)
 }

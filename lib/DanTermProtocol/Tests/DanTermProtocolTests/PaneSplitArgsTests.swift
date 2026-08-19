@@ -1,7 +1,6 @@
-// Tests for what is unique to the `danterm pane split` argument parser: the
-// pane-or-tab target, pane direction, and background it reports. The flag
-// grammar it shares with `tab new` and `group new` is asserted once, in
-// `NewCommandFlagsTests`.
+// Tests the direction and focus flags in the `danterm pane split` tail. The
+// shared target parser and CLIParser own the pane-or-tab grammar and its
+// target-dependent direction rule.
 import Foundation
 import Testing
 @testable import DanTermProtocol
@@ -9,31 +8,16 @@ import Testing
 struct PaneSplitArgsTests {
     @Test("direction flags parse")
     func directionFlagsParse() throws {
-        #expect(throws: CLIParseError.self) { try parsePaneSplitArgs(["-h"]) }
-        #expect(throws: CLIParseError.self) { try parsePaneSplitArgs(["-v"]) }
+        #expect(try parsePaneSplitArgs(["-h"]) == ParsedPaneSplit(direction: .horizontal))
+        #expect(try parsePaneSplitArgs(["-v"]) == ParsedPaneSplit(direction: .vertical))
     }
 
-    @Test("explicit pane parses")
-    func explicitPaneParses() throws {
-        #expect(try parsePaneSplitArgs(["--pane", "P1", "-h"]) == ParsedPaneSplit(target: .pane("P1", direction: .horizontal)))
-    }
-
-    @Test("explicit tab parses without a direction")
-    func explicitTabParses() throws {
-        #expect(try parsePaneSplitArgs(["--tab", "T1"]) == ParsedPaneSplit(target: .tab("T1")))
-    }
-
-    @Test("a repeated pane overwrites silently")
-    func aRepeatedPaneOverwritesSilently() throws {
-        #expect(try parsePaneSplitArgs(["--pane", "P1", "--pane", "P2", "-h"]) == ParsedPaneSplit(target: .pane("P2", direction: .horizontal)))
-    }
-
-    @Test("a missing pane value reports the usage line")
-    func aMissingPaneValueReportsTheUsageLine() {
+    @Test("target flags are not this parser's to read", arguments: ["--pane", "--tab"])
+    func targetFlagsAreNotThisParsersToRead(_ flag: String) {
         let error = #expect(throws: CLIParseError.self) {
-            try parsePaneSplitArgs(["--pane"])
+            try parsePaneSplitArgs([flag, "target", "-h"])
         }
-        #expect(error?.message == paneSplitUsage)
+        #expect(error?.message == "unknown flag: \(flag)")
     }
 
     @Test("both focus flags are reported")
@@ -42,27 +26,13 @@ struct PaneSplitArgsTests {
         // Why it exists: `group new` reports only the foreground, so which flags
         //   reach a result is a per-command fact and belongs in this file.
         // Scenario: an agent recipe still passes the now-redundant `--background`.
-        #expect(try parsePaneSplitArgs(["--tab", "T1", "--background"]) == ParsedPaneSplit(target: .tab("T1"), background: true, foreground: false))
-        #expect(try parsePaneSplitArgs(["--tab", "T1", "--foreground"]) == ParsedPaneSplit(target: .tab("T1"), background: false, foreground: true))
+        #expect(try parsePaneSplitArgs(["--background"]) == ParsedPaneSplit(background: true, foreground: false))
+        #expect(try parsePaneSplitArgs(["--foreground"]) == ParsedPaneSplit(background: false, foreground: true))
     }
 
-    @Test("target and direction combinations are enforced")
-    func targetAndDirectionCombinationsAreEnforced() {
-        for args in [
-            ["--pane", "P1"],
-            ["--tab", "T1", "-h"],
-            ["--pane", "P1", "--tab", "T1", "-h"],
-        ] {
-            #expect(throws: CLIParseError.self) { try parsePaneSplitArgs(args) }
-        }
-    }
-
-    @Test("no direction reports the usage line")
-    func noDirectionReportsTheUsageLine() {
-        let error = #expect(throws: CLIParseError.self) {
-            try parsePaneSplitArgs([])
-        }
-        #expect(error?.message == paneSplitUsage)
+    @Test("no direction remains available to a tab target")
+    func noDirectionRemainsAvailableToATabTarget() throws {
+        #expect(try parsePaneSplitArgs([]) == ParsedPaneSplit())
     }
 
     @Test("a repeated direction flag is rejected")
@@ -80,13 +50,8 @@ struct PaneSplitArgsTests {
         }
     }
 
-    @Test("a bad token outranks the missing direction checked after the scan")
-    func aBadTokenOutranksTheMissingDirectionCheckedAfterTheScan() {
-        // Intent: an error raised while scanning tokens beats the direction check
-        //   that runs once the scan is over.
-        // Why it exists: the direction check is the one guard placed after the
-        //   loop, so it is the one that could wrongly pre-empt a real token error.
-        // Scenario: a malformed split carries a typo and never names a direction.
+    @Test("an unknown flag is reported without a direction")
+    func anUnknownFlagIsReportedWithoutADirection() {
         let error = #expect(throws: CLIParseError.self) {
             try parsePaneSplitArgs(["--bogus"])
         }

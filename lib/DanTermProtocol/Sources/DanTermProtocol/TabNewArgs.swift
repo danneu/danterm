@@ -1,5 +1,6 @@
-// CLI argument parser for `danterm tab new`. Holds only the flags unique to this
-// command -- `--group` and the position flags; the launch and focus flags come
+// CLI argument parser for the tail of `danterm tab new`, after the shared target
+// step has taken the anchor (`--group` or `--after-tab`). Holds only the flags
+// unique to this command -- the position flags; the launch and focus flags come
 // from `NewCommandFlags`. The usage line lives here too, next to the flags it
 // documents.
 import Foundation
@@ -8,14 +9,18 @@ import Foundation
 /// errors with it, and by `CLIParser`, whose post-parse guards report it.
 let tabNewUsage = "usage: danterm tab new (--group <group-id> | --after-tab <tab-id>) \(newCommandFlagsUsage) [--after-selected | --at-group-end]"
 
+/// Where a new tab lands inside the group that anchors it. `--after-tab` is not
+/// a position: it names the anchor itself, and the shared target step reads it.
 public enum ParsedTabPosition: Equatable {
     case afterSelected
     case atGroupEnd
-    case afterTab(String)
 }
 
+/// The message every way of naming two positions at once reports. The
+/// `--after-tab` half is raised by `CLIParser`, which owns the anchor.
+let tabNewPositionConflict = "--after-selected, --at-group-end, and --after-tab are mutually exclusive\n\(tabNewUsage)"
+
 public struct ParsedTabNew: Equatable {
-    public let group: String?
     public let launch: LaunchSpec?
     public let background: Bool
     /// Records that `--foreground` was typed so CLI policy can invert its
@@ -24,13 +29,11 @@ public struct ParsedTabNew: Equatable {
     public let position: ParsedTabPosition?
 
     public init(
-        group: String?,
         launch: LaunchSpec?,
         background: Bool = false,
         foreground: Bool = false,
         position: ParsedTabPosition? = nil
     ) {
-        self.group = group
         self.launch = launch
         self.background = background
         self.foreground = foreground
@@ -40,36 +43,24 @@ public struct ParsedTabNew: Equatable {
 
 public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
     var flags = NewCommandFlags(usage: tabNewUsage)
-    var group: String?
     var position: ParsedTabPosition?
     var i = 0
 
     while i < args.count {
         let arg = args[i]
         switch arg {
-        case "--group":
-            group = try flags.value(in: args, at: i)
-            i += 2
         case "--after-selected":
             try setPosition(.afterSelected, into: &position)
             i += 1
         case "--at-group-end":
             try setPosition(.atGroupEnd, into: &position)
             i += 1
-        case "--after-tab":
-            // Read the id before the conflict check, so a bare trailing
-            // `--after-tab` reports the usage line rather than accusing the user
-            // of a position conflict they can only fix by supplying a value.
-            let id = try flags.value(in: args, at: i)
-            try setPosition(.afterTab(id), into: &position)
-            i += 2
         default:
             i = try flags.consume(args, at: i)
         }
     }
 
     return ParsedTabNew(
-        group: group,
         launch: flags.launch,
         background: flags.background,
         foreground: flags.foreground,
@@ -80,8 +71,6 @@ public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
 /// Fills the single position slot, rejecting a second position flag even when it
 /// repeats the first. Unlike the focus flags, position tolerates no repetition.
 private func setPosition(_ newPosition: ParsedTabPosition, into position: inout ParsedTabPosition?) throws {
-    guard position == nil else {
-        throw CLIParseError("--after-selected, --at-group-end, and --after-tab are mutually exclusive\n\(tabNewUsage)")
-    }
+    guard position == nil else { throw CLIParseError(tabNewPositionConflict) }
     position = newPosition
 }

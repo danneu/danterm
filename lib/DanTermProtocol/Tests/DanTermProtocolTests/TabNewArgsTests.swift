@@ -1,28 +1,30 @@
-// Tests for what is unique to the `danterm tab new` argument parser: `--group`,
-// the position flags, the flags it does not own, and the background it reports.
-// The flag grammar it shares with `pane split` and `group new` is asserted once,
-// in `NewCommandFlagsTests`.
+// Tests for what is unique to the `danterm tab new` argument parser: the
+// position flags, the flags it does not own, and the background it reports. The
+// flag grammar it shares with `pane split` and `group new` is asserted once, in
+// `NewCommandFlagsTests`; the anchor -- `--group` or `--after-tab` -- is read by
+// the shared target step before this parser sees anything.
 import Foundation
 import Testing
 @testable import DanTermProtocol
 
 struct TabNewArgsTests {
-    @Test("group parses")
-    func groupParses() throws {
-        #expect(try parseTabNewArgs(["--group", "G1"]) == ParsedTabNew(group: "G1", launch: nil))
+    @Test("an empty tail parses")
+    func anEmptyTailParses() throws {
+        #expect(try parseTabNewArgs([]) == ParsedTabNew(launch: nil))
     }
 
-    @Test("a repeated group overwrites silently")
-    func aRepeatedGroupOverwritesSilently() throws {
-        #expect(try parseTabNewArgs(["--group", "G1", "--group", "G2"]) == ParsedTabNew(group: "G2", launch: nil))
-    }
-
-    @Test("a missing group value reports the usage line")
-    func aMissingGroupValueReportsTheUsageLine() {
+    @Test("the anchor flags are not this parser's to read", arguments: [
+        ["--group", "G1"],
+        ["--after-tab", "T1"],
+    ])
+    func theAnchorFlagsAreNotThisParsersToRead(_ args: [String]) {
+        // Intent: the tail parser treats an anchor flag as any other unknown flag.
+        // Why it exists: the anchor belongs to the shared target step that runs
+        //   before this parser, so an anchor reaching it would mean two owners.
         let error = #expect(throws: CLIParseError.self) {
-            try parseTabNewArgs(["--group"])
+            try parseTabNewArgs(args)
         }
-        #expect(error?.message == tabNewUsage)
+        #expect(error?.message == "unknown flag: \(args[0])")
     }
 
     @Test("both focus flags are reported")
@@ -31,8 +33,8 @@ struct TabNewArgsTests {
         // Why it exists: `group new` reports only the foreground, so which flags
         //   reach a result is a per-command fact and belongs in this file.
         // Scenario: an agent recipe still passes the now-redundant `--background`.
-        #expect(try parseTabNewArgs(["--background"]) == ParsedTabNew(group: nil, launch: nil, background: true, foreground: false))
-        #expect(try parseTabNewArgs(["--foreground"]) == ParsedTabNew(group: nil, launch: nil, background: false, foreground: true))
+        #expect(try parseTabNewArgs(["--background"]) == ParsedTabNew(launch: nil, background: true, foreground: false))
+        #expect(try parseTabNewArgs(["--foreground"]) == ParsedTabNew(launch: nil, background: false, foreground: true))
     }
 
     @Test("split direction flags are unknown to tab new")
@@ -51,9 +53,8 @@ struct TabNewArgsTests {
 
     @Test("position flags parse")
     func positionFlagsParse() throws {
-        #expect(try parseTabNewArgs(["--after-selected"]) == ParsedTabNew(group: nil, launch: nil, position: .afterSelected))
-        #expect(try parseTabNewArgs(["--at-group-end"]) == ParsedTabNew(group: nil, launch: nil, position: .atGroupEnd))
-        #expect(try parseTabNewArgs(["--after-tab", "T7"]) == ParsedTabNew(group: nil, launch: nil, position: .afterTab("T7")))
+        #expect(try parseTabNewArgs(["--after-selected"]) == ParsedTabNew(launch: nil, position: .afterSelected))
+        #expect(try parseTabNewArgs(["--at-group-end"]) == ParsedTabNew(launch: nil, position: .atGroupEnd))
     }
 
     @Test("position flags conflict, including with themselves")
@@ -63,30 +64,14 @@ struct TabNewArgsTests {
         // Why it exists: position is a single slot filled once, unlike the focus
         //   flags, which tolerate repetition. The asymmetry is intentional.
         // Scenario: a command asks for two placements for one new tab.
-        let message = "--after-selected, --at-group-end, and --after-tab are mutually exclusive\n\(tabNewUsage)"
         for args in [
             ["--after-selected", "--at-group-end"],
             ["--at-group-end", "--at-group-end"],
-            ["--after-tab", "T1", "--after-tab", "T2"],
         ] {
             let error = #expect(throws: CLIParseError.self) {
                 try parseTabNewArgs(args)
             }
-            #expect(error?.message == message)
+            #expect(error?.message == tabNewPositionConflict)
         }
-    }
-
-    @Test("after-tab reads its value before the position conflict")
-    func afterTabReadsItsValueBeforeThePositionConflict() {
-        // Intent: a trailing `--after-tab` with no value reports the bare usage
-        //   line, not the position conflict it would also cause.
-        // Why it exists: the value is read first on purpose, so the message does
-        //   not accuse the user of a conflict they can only fix by supplying a value.
-        // Scenario: a command sets a position and then appends a bare
-        //   `--after-tab` whose id was dropped.
-        let error = #expect(throws: CLIParseError.self) {
-            try parseTabNewArgs(["--after-selected", "--after-tab"])
-        }
-        #expect(error?.message == tabNewUsage)
     }
 }
