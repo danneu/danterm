@@ -3,7 +3,7 @@
 // contracts. The stream's shared vocabulary -- version, format, capture mode, end reasons --
 // lives in DanTermProtocol, and the follow-only subscription lifecycle in
 // PaneTapeFollow.swift; neither belongs here. Putting a built record on a connection is a
-// side effect and lives in app/PaneTapeWireWrite.swift.
+// side effect and lives in app/PaneTapeBroker.swift.
 import Foundation
 import DanTermProtocol
 

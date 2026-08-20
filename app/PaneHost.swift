@@ -2,8 +2,8 @@
 // chrome, and every other resource created and destroyed with the pane.
 // What does NOT belong here: state keyed by the pane *id* rather than by this record.
 // A discarded staged restore can carry the same pane id as a live pane, so anything
-// resolved by id -- pane-tape follow streams -- stays in AppRuntime and is retired only
-// when a live pane goes away.
+// resolved by id -- pane-tape follow streams -- stays in PaneTapeBroker and is retired
+// only when a live pane goes away.
 import Cocoa
 
 /// The runtime's whole record of one pane. It is produced whole by session creation and

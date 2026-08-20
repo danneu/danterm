@@ -168,6 +168,8 @@ Accepted risks:
   sibling isolation, table keying) travel with the code.
 - `app/PaneHost.swift` -- header says pane-tape follow streams "stay in
   AppRuntime"; repoint it at the broker, keeping the id-keyed-state rationale.
+- `lib/DanTermCore/Sources/DanTermCore/PaneTapeRecords.swift` -- repoint its
+  side-effect boundary comment at the broker file that now owns the wire write.
 - `app-tests/AppRuntimeCommandTestSupport.swift` -- fixture extension (PO2).
 - New app-tests suite for PO1-PO4.
 - `docs/scratch/2026-08-18-construction-audit.md` -- mark RUNTIME-6 done in the
@@ -183,5 +185,11 @@ Accepted risks:
 ## Commit progress
 
 - [x] 1. test(runtime): pin pane-tape stream lifecycle behavior
-- [ ] 2. refactor(runtime): extract the pane-tape broker
+- [x] 2. refactor(runtime): extract the pane-tape broker
 - [ ] 3. chore(audit): mark RUNTIME-6 done
+
+## Implementation notes
+
+- Installed the broker's session lookup after runtime initialization. This lets
+  the broker require the runtime's lifecycle at construction while the stored
+  lookup captures the runtime weakly.
