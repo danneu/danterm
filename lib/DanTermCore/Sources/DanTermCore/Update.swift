@@ -812,6 +812,10 @@ func update(
         for i in model.alerts.indices { model.alerts[i].isUnread = false }
         return []   // bell badges reconcile via reconcileSidebar
 
+    case .toggleThemeBrowser:
+        model.themeBrowserOpen.toggle()
+        return []
+
     case .toggleAlertsPopover:
         model.alertsPopoverOpen.toggle()
         return []

@@ -56,6 +56,7 @@ import Testing
         //   themed panes; switching focus across panes flips the
         //   projected theme.
         var model = makeModel()
+        model.themeBrowserOpen = true
         createTab(&model)
         let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: paneA, direction: .horizontal))
@@ -64,38 +65,40 @@ import Testing
         update(&model, .setPaneTheme(paneId: focused, themeName: "Dracula"))
         update(&model, .setPaneTheme(paneId: other, themeName: "Nord"))
 
-        #expect(desiredThemeBrowser(in: model).currentThemeName == "Dracula",
+        #expect(desiredThemeBrowser(in: model)?.currentThemeName == "Dracula",
             "projection returns the focused pane's theme")
 
         update(&model, .paneBecameFirstResponder(paneId: other))
-        #expect(desiredThemeBrowser(in: model).currentThemeName == "Nord",
+        #expect(desiredThemeBrowser(in: model)?.currentThemeName == "Nord",
             "projection updates on same-tab focus change -- the bug this fixes")
     }
 
-    @Test("desiredThemeBrowser: nil theme when no selected tab or no override")
-    func desiredThemeBrowserNilWhenNoSelectedTabOrTheme() {
-        // Intent: currentThemeName is nil if there's no selected tab or
-        //   no pane theme set.
-        // Why it exists: pins the absence branch the browser uses to
-        //   show the default placeholder.
-        // Scenario: spec-first absence -- empty model, then a tab with
-        //   no theme set.
+    @Test("desiredThemeBrowser: existence follows the model slot")
+    func desiredThemeBrowserExistenceFollowsModelSlot() throws {
+        // Intent: the optional projection exists exactly while the model says the
+        //   theme browser is open.
+        // Why it exists: a view-owned existence fact let the browser bypass update
+        //   and the ordered reconcile sweep.
+        // Scenario: the browser starts closed, then its toggle message opens it.
         var model = makeModel()
 
-        #expect(desiredThemeBrowser(in: model).currentThemeName == nil)
+        #expect(desiredThemeBrowser(in: model) == nil)
 
         createTab(&model)
-        #expect(desiredThemeBrowser(in: model).currentThemeName == nil)
+        #expect(update(&model, .toggleThemeBrowser).isEmpty)
+        let projection = try #require(desiredThemeBrowser(in: model))
+        #expect(projection.currentThemeName == nil)
     }
 
     @Test("desiredThemeBrowser reports the user theme independent of live lifecycles")
     func desiredThemeBrowserReportsUserTheme() {
         var model = makeModel()
+        model.themeBrowserOpen = true
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
 
-        #expect(desiredThemeBrowser(in: model).currentThemeName == "Dracula",
+        #expect(desiredThemeBrowser(in: model)?.currentThemeName == "Dracula",
             "projection reads the user's pane theme")
     }
 

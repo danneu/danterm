@@ -1423,32 +1423,6 @@ class AppRuntime {
         )
     }
 
-    // MARK: - Theme Browser
-
-    /// Toggle the theme browser panel on the right side of the content area.
-    func toggleThemeBrowser() {
-        if let existing = themeBrowserView {
-            existing.removeFromSuperview()
-            themeBrowserView = nil
-            reconcileThemeBrowser()
-            reconcilePaneFocus()
-            return
-        }
-        guard let contentArea = contentArea else { return }
-
-        let browser = ThemeBrowserView()
-        browser.runtime = self
-        contentArea.addSubview(browser)
-        NSLayoutConstraint.activate([
-            browser.topAnchor.constraint(equalTo: contentArea.topAnchor),
-            browser.bottomAnchor.constraint(equalTo: contentArea.bottomAnchor),
-            browser.trailingAnchor.constraint(equalTo: contentArea.trailingAnchor),
-        ])
-        themeBrowserView = browser
-        browser.reloadTable()
-        reconcileThemeBrowser()
-    }
-
     // MARK: - Snapshot Bootstrap
 
     /// Validate a raw snapshot (the --init path) then stage + commit it.
@@ -1551,6 +1525,8 @@ class AppRuntime {
         preferencesPanel = nil
         confirmationPanel?.orderOut(nil)
         confirmationPanel = nil
+        themeBrowserView?.removeFromSuperview()
+        themeBrowserView = nil
 
         for tabId in Array(tabContainers.keys) {
             removeTabContainer(tabId)

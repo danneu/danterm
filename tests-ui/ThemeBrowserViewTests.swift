@@ -53,10 +53,28 @@ func themeBrowserViewTests() {
         let runtime = AppRuntime()
         let view = ThemeBrowserView()
         view.runtime = runtime
-        view.reloadTable()
         view.apply(ThemeBrowserProjection(currentThemeName: nil))
 
         try uiExpect(runtime.sentMessages.isEmpty, "apply must not dispatch")
+    }
+
+    uiTest("a freshly constructed browser renders its catalog without an external reload") {
+        let view = ThemeBrowserView(themeNames: ["Dracula", "Nord"])
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.close() }
+        window.contentView = view
+        window.layoutIfNeeded()
+
+        try uiExpect(view.tableView.numberOfRows == 2, "construction should publish both catalog rows")
+        try uiExpect(
+            view.tableView.view(atColumn: 0, row: 0, makeIfNecessary: true) != nil,
+            "the first catalog row should render without reloadTable()"
+        )
     }
 
     uiTest("search filter narrows rows case-insensitively") {
@@ -194,14 +212,16 @@ func themeBrowserViewTests() {
         try expectSingleSetPaneTheme(fx.runtime, paneId: fx.paneId, themeName: nil)
     }
 
-    uiTest("close button calls toggleThemeBrowser") {
+    uiTest("close button sends the theme browser toggle message") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
 
         fx.view.closeButton.performClick(nil)
 
-        try uiExpect(fx.runtime.themeBrowserToggles == 1, "close should toggle browser exactly once")
-        try uiExpect(fx.runtime.sentMessages.isEmpty, "close should not send model messages")
+        try uiExpect(fx.runtime.sentMessages.count == 1, "close should send exactly one message")
+        guard case .toggleThemeBrowser? = fx.runtime.sentMessages.first else {
+            throw UITestFailure(message: "close should send toggleThemeBrowser")
+        }
     }
 
     uiTest("context-menu builder yields Copy Name carrying the row's theme and a strong anchor") {
@@ -470,8 +490,7 @@ private func makeThemeBrowserFixture(
         view.bottomAnchor.constraint(equalTo: contentArea.bottomAnchor),
         view.trailingAnchor.constraint(equalTo: contentArea.trailingAnchor),
     ])
-    view.reloadTable()
-    view.apply(desiredThemeBrowser(in: runtime.model))
+    view.apply(ThemeBrowserProjection(currentThemeName: currentTheme))
     settleThemeBrowserFixture(view: view, window: window)
 
     return ThemeBrowserFixture(view: view, runtime: runtime, window: window, tabId: tabId, paneId: paneId, names: names)

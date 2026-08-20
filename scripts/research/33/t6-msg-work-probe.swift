@@ -177,7 +177,7 @@ func sweep(
     // reconcileThemeBrowser
     let browser = desiredThemeBrowser(in: model)
     if caches.themeBrowser != browser {
-        blackhole &+= browser.currentThemeName?.count ?? 0
+        blackhole &+= browser?.currentThemeName?.count ?? 0
         caches.themeBrowser = browser
     }
 }
@@ -371,7 +371,7 @@ func timeProjections(_ layout: Layout, iterations: Int) -> [String: Double] {
         measure("desiredQuitConfirmation") { desiredQuitConfirmation(in: model)?.paneCount ?? 0 },
         measure("desiredPreferencesPanel") { desiredPreferencesPanel(in: model) == nil ? 0 : 1 },
         measure("desiredThemeBrowser") {
-            desiredThemeBrowser(in: model).currentThemeName?.count ?? 0
+            desiredThemeBrowser(in: model)?.currentThemeName?.count ?? 0
         },
     ]
     if blackhole == Int.min { print("unreachable") }

@@ -625,7 +625,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func toggleThemeBrowser(_ sender: Any?) {
-        runtime.toggleThemeBrowser()
+        runtime.send(.toggleThemeBrowser)
     }
 
     // nil paneId means the focused pane of the selected tab, which is what a

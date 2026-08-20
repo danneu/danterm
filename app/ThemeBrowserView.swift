@@ -161,6 +161,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
 
         allNames = themeNames
         filteredNames = allNames
+        tableView.reloadData()
     }
 
     /// Production entry point: theme names come from the bundled catalog.
@@ -173,11 +174,6 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
     }
 
     // MARK: - Public
-
-    /// Reload all rows when the browser is first opened.
-    func reloadTable() {
-        tableView.reloadData()
-    }
 
     /// Single entry point the reconciler uses to push focused-pane theme content.
     /// Filter text and focus stay view-local.
@@ -228,7 +224,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
     }
 
     @objc private func closeBrowser() {
-        runtime?.toggleThemeBrowser()
+        runtime?.send(.toggleThemeBrowser)
     }
 
     @objc private func searchChanged(_ sender: NSSearchField) {

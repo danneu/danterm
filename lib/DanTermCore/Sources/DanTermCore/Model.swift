@@ -536,6 +536,7 @@ struct AppModel: Equatable {
     var searchState: [PaneId: SearchModel] = [:]  // ephemeral — excluded from snapshots
     var showAllAlerts: Bool = false  // ephemeral — excluded from snapshots
     var alertsPopoverOpen: Bool = false  // ephemeral -- projected alerts-popover existence
+    var themeBrowserOpen: Bool = false  // ephemeral -- projected theme-browser existence
     var config: DanTermConfig = .default  // ephemeral — loaded from disk, not snapshots
     // The canonical installed family `config.fontFamily` resolved to, or nil for the
     // system monospace font. Ephemeral: re-derived from disk on every config apply,

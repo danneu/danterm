@@ -23,9 +23,10 @@ struct ThemeBrowserProjection: Equatable {
 
 /// Project the focused pane's user-set theme for the selected tab. This reads
 /// `pane.theme`, not `effectiveTheme`, so remote theme overrides do not move
-/// the browser checkmark.
-func desiredThemeBrowser(in model: AppModel) -> ThemeBrowserProjection {
-    ThemeBrowserProjection(
+/// the browser checkmark. nil means the model wants no browser on screen.
+func desiredThemeBrowser(in model: AppModel) -> ThemeBrowserProjection? {
+    guard model.themeBrowserOpen else { return nil }
+    return ThemeBrowserProjection(
         currentThemeName: selectedTab(in: model).flatMap {
             $0.paneTree.focusedPane.theme
         }

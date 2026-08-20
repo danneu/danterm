@@ -15,7 +15,6 @@ final class AppRuntime {
     var todoPopover: NSPopover?
     var onSend: ((Msg) -> Void)?
     var focusedPaneSessions: [PaneId] = []
-    var themeBrowserToggles = 0
     /// The production outbox, wired to the shim's send, so the UI suites observe
     /// the real buffering and wake-up rules rather than a harness imitation.
     let outbox = MainActor.assumeIsolated { ReconcileOutbox() }
@@ -72,10 +71,6 @@ final class AppRuntime {
     func findPaneWrapper(for paneId: PaneId) -> PaneWrapperView? {
         paneHost(for: paneId)?.wrapper
     }
-
-    /// ThemeBrowserView close-button hook. Production toggles the panel in and
-    /// out of the content area; the harness only counts invocations.
-    func toggleThemeBrowser() { themeBrowserToggles += 1 }
 
     // PreferencesPanel's "Config file" row. Both reach the filesystem in
     // production, so the harness keeps them inert.

@@ -76,6 +76,7 @@ extension AppRuntime {
         let alertTally = unreadAlertTally(for: model)
         reconcileFocusBorders(tally: alertTally)
         reconcilePaneChrome(tally: alertTally)
+        reconcileThemeBrowser()              // remove a focused browser before pane-focus repair
         reconcilePaneFocus()                 // after chrome creates any desired search field
         reconcileSidebar(tally: alertTally)
         reconcileWindowChrome(tally: alertTally)
@@ -84,7 +85,6 @@ extension AppRuntime {
         reconcilePreferencesPanel()
         reconcileAlertsPopover()
         reconcileTodoPopover()
-        reconcileThemeBrowser()
         syncPaneVisibility()  // existing occlusion pass; stays last
     }
 
@@ -410,13 +410,29 @@ extension AppRuntime {
         (todoPopover?.contentViewController as? TodoPopoverApplying)?.apply(projection)
     }
 
-    /// Push the focused pane's user theme into the open theme browser. The browser's
-    /// filter and first-responder state stay view-local; nil means no browser is open.
+    /// Creates, refreshes, or removes the model-projected theme browser overlay.
     func reconcileThemeBrowser() {
-        let new = themeBrowserView == nil ? nil : desiredThemeBrowser(in: model)
+        let new = desiredThemeBrowser(in: model)
         guard caches.themeBrowser != new else { return }
-        if let proj = new {
-            themeBrowserView?.apply(proj)
+        if let projection = new {
+            if themeBrowserView == nil {
+                guard let contentArea else {
+                    preconditionFailure("theme browser content area is missing")
+                }
+                let browser = ThemeBrowserView()
+                browser.runtime = self
+                contentArea.addSubview(browser)
+                NSLayoutConstraint.activate([
+                    browser.topAnchor.constraint(equalTo: contentArea.topAnchor),
+                    browser.bottomAnchor.constraint(equalTo: contentArea.bottomAnchor),
+                    browser.trailingAnchor.constraint(equalTo: contentArea.trailingAnchor),
+                ])
+                themeBrowserView = browser
+            }
+            themeBrowserView?.apply(projection)
+        } else {
+            themeBrowserView?.removeFromSuperview()
+            themeBrowserView = nil
         }
         caches.themeBrowser = new
     }
