@@ -1807,26 +1807,12 @@ public actor TerminalPTYHost {
             if descriptorOwnershipSealed == false {
                 installSources(for: spawned)
             }
-            let resume: @Sendable () -> Void = { [weak self] in
-                self?.enqueueSpawnActivation()
-            }
-            switch resourceLifecycle.gateSpawnActivation(resume: resume) {
-            case .proceed:
-                process(.spawnSucceeded)
-            case .deferred:
-                break
-            }
+            // Delivered in the same owner turn that installed the sources, so no spawn
+            // source outlives this turn unactivated, and the generation check above is
+            // the only path from a spawn outcome to the reducer.
+            process(.spawnSucceeded)
         case .failure(let failure):
             process(.spawnFailed(failure))
-        }
-    }
-
-    /// Re-enters the owner after a test witness releases parked source activation.
-    private nonisolated func enqueueSpawnActivation() {
-        queue.async { [weak self] in
-            self?.assumeIsolated { owner in
-                owner.process(.spawnSucceeded)
-            }
         }
     }
 
@@ -2413,9 +2399,10 @@ public actor TerminalPTYHost {
     private func closeMaster() {
         descriptorOwnershipSealed = true
         masterCloseRequested = true
-        // A close can race source installation before the reducer activates IO.
-        // Resume before cancellation so libdispatch never releases a suspended
-        // source. A spawn adopted after this seal installs no sources at all.
+        // Activate before cancelling, for the same reason `cancelAllRetainedSources`
+        // does: a source cancelled while still suspended never runs its cancellation
+        // handler, so it would stay in the retained registry forever. Activating an
+        // already-active source does nothing.
         processSource?.activate()
         cancelReadSource()
         cancelWriteSource()

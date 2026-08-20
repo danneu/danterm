@@ -213,16 +213,12 @@ struct TerminalPTYHostTests {
     func preSpawnInputCompletesAfterDelivery() async throws {
         // Intent: pre-spawn input stays pending, then completes only after its last byte writes.
         // Why it exists: the old lifecycle dropped input received before spawn without a result.
-        // Scenario: source activation holds a successful spawn while one submission arrives.
-        let spawnInstalled = ExitCompletionRecorder(expecting: 1)
-        let lifecycle = ControlledTerminalPTYResourceLifecycle()
-        lifecycle.holdSpawnActivation {
-            spawnInstalled.signal()
-        }
-        let host = try makeHost(
-            resourceLifecycle: lifecycle,
-            spawner: try ChildlessPTYChannel()
+        // Scenario: the launch report holds a successful spawn while one submission arrives.
+        let spawner = ControlledTerminalPTYSpawner(
+            wrapping: try ChildlessPTYChannel(),
+            holdLaunchReport: true
         )
+        let host = try makeHost(spawner: spawner)
         await host.start(makeLaunchInput(command: childlessLaunchCommand))
         let completion = InputCompletionRecorder(expecting: 1)
 
@@ -230,9 +226,9 @@ struct TerminalPTYHostTests {
             completion.signal($0)
         }
 
-        #expect(spawnInstalled.waitForAll(within: .seconds(20)))
+        #expect(spawner.waitForLaunchReport(within: .seconds(20)))
         #expect(completion.results.isEmpty)
-        lifecycle.releaseSpawnActivation()
+        spawner.releaseLaunchReport()
         #expect(completion.waitForAll(within: .seconds(20)))
         #expect(completion.results == [.delivered])
         await host.close()
@@ -242,27 +238,23 @@ struct TerminalPTYHostTests {
     func closeDuringSpawnRejectsBufferedInput() async throws {
         // Intent: closing a spawning pane rejects every submission that cannot reach its PTY.
         // Why it exists: buffered input needs a terminal result on every failed readiness edge.
-        // Scenario: a close arrives while source activation holds a successful spawn.
-        let spawnInstalled = ExitCompletionRecorder(expecting: 1)
-        let lifecycle = ControlledTerminalPTYResourceLifecycle()
-        lifecycle.holdSpawnActivation {
-            spawnInstalled.signal()
-        }
-        let host = try makeHost(
-            resourceLifecycle: lifecycle,
-            spawner: try ChildlessPTYChannel()
+        // Scenario: a close arrives while the launch report holds a successful spawn.
+        let spawner = ControlledTerminalPTYSpawner(
+            wrapping: try ChildlessPTYChannel(),
+            holdLaunchReport: true
         )
+        let host = try makeHost(spawner: spawner)
         await host.start(makeLaunchInput(command: childlessLaunchCommand))
         let completion = InputCompletionRecorder(expecting: 1)
         host.send(Array("buffered".utf8)) {
             completion.signal($0)
         }
 
-        #expect(spawnInstalled.waitForAll(within: .seconds(20)))
+        #expect(spawner.waitForLaunchReport(within: .seconds(20)))
         let close = Task { await host.close() }
         #expect(completion.waitForAll(within: .seconds(20)))
         #expect(completion.results == [.rejected(.processEnded)])
-        lifecycle.releaseSpawnActivation()
+        spawner.releaseLaunchReport()
         await close.value
     }
 
@@ -271,15 +263,11 @@ struct TerminalPTYHostTests {
         // Intent: the shared byte bound admits or rejects each submission as one unit.
         // Why it exists: buffering input before spawn must not introduce unbounded pane state.
         // Scenario: launch input and one submission fill the bound before another byte arrives.
-        let spawnInstalled = ExitCompletionRecorder(expecting: 1)
-        let lifecycle = ControlledTerminalPTYResourceLifecycle()
-        lifecycle.holdSpawnActivation {
-            spawnInstalled.signal()
-        }
-        let host = try makeHost(
-            resourceLifecycle: lifecycle,
-            spawner: try ChildlessPTYChannel()
+        let spawner = ControlledTerminalPTYSpawner(
+            wrapping: try ChildlessPTYChannel(),
+            holdLaunchReport: true
         )
+        let host = try makeHost(spawner: spawner)
         await host.start(makeLaunchInput(command: childlessLaunchCommand))
         let accepted = InputCompletionRecorder(expecting: 1)
         let rejected = InputCompletionRecorder(expecting: 1)
@@ -295,13 +283,13 @@ struct TerminalPTYHostTests {
             rejected.signal($0)
         }
 
-        #expect(spawnInstalled.waitForAll(within: .seconds(20)))
+        #expect(spawner.waitForLaunchReport(within: .seconds(20)))
         #expect(rejected.waitForAll(within: .seconds(20)))
         #expect(rejected.results == [.rejected(.bufferLimitExceeded)])
         let close = Task { await host.close() }
         #expect(accepted.waitForAll(within: .seconds(20)))
         #expect(accepted.results == [.rejected(.processEnded)])
-        lifecycle.releaseSpawnActivation()
+        spawner.releaseLaunchReport()
         await close.value
     }
 
@@ -3180,90 +3168,6 @@ struct TerminalPTYHostChildProcessTests {
         #expect((await host.resourceSnapshot()).isReleased)
     }
 
-    @Test("close during spawn activates inactive sources before cancellation", .timeLimit(.minutes(1)))
-    func closeDuringSpawnJoinsInactiveSources() async throws {
-        // Intent: sources installed before launch adoption can still reach their
-        //   cancellation handlers when shutdown wins before activation.
-        // Why it exists: canceling a suspended Dispatch source does not make its
-        //   cancellation handler runnable until the source is activated.
-        // Scenario: a newly opened pane receives Cmd-Q between source installation
-        //   and the reducer command that would normally activate PTY IO.
-        let sourcesInstalled = ExitCompletionRecorder(expecting: 1)
-        let lifecycle = ControlledTerminalPTYResourceLifecycle()
-        lifecycle.holdSpawnActivation {
-            sourcesInstalled.signal()
-        }
-        let host = try makeHost(
-            resourceLifecycle: lifecycle
-        )
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
-        #expect(sourcesInstalled.waitForAll(within: .seconds(20)))
-
-        let cancellationReached = ExitCompletionRecorder(expecting: 1)
-        lifecycle.holdSourceCancellationAcknowledgements {
-            cancellationReached.signal()
-        }
-        let completion = ExitCompletionRecorder(expecting: 1)
-        host.requestShutdown { completion.signal() }
-        lifecycle.releaseSpawnActivation()
-        #expect(cancellationReached.waitForAll(within: .seconds(20)))
-
-        let whileHeld = await host.resourceSnapshot()
-        #expect(whileHeld.hasOpenMaster)
-        #expect(whileHeld.descriptorSourceCount == 1)
-        #expect(completion.queueLabels.isEmpty)
-
-        lifecycle.releaseSourceCancellationAcknowledgements()
-        #expect(completion.waitForAll(within: .seconds(20)))
-        #expect((await host.resourceSnapshot()).isReleased)
-    }
-
-    @Test("bound expiry activates inactive sources before cancelling them", .timeLimit(.minutes(1)))
-    func forcedShutdownJoinsInactiveSources() async throws {
-        // Intent: the forced path releases a host whose sources were installed but never
-        //   activated, the same way the ordinary path does.
-        // Why it exists: cancelling a source that was never activated does not make its
-        //   cancellation handler runnable, so the forced path would wait on a release
-        //   that can never arrive -- and it is the path with nothing left to rescue it.
-        // Scenario: a newly opened pane receives Cmd-Q between source installation and
-        //   the reducer command that activates PTY IO, and the ladder does not converge
-        //   before the host's own bound expires.
-        let sourcesInstalled = ExitCompletionRecorder(expecting: 1)
-        let lifecycle = ControlledTerminalPTYResourceLifecycle()
-        lifecycle.holdSpawnActivation {
-            sourcesInstalled.signal()
-        }
-        let host = try makeHost(
-            applicationExitBound: .seconds(30),
-            resourceLifecycle: lifecycle
-        )
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
-        #expect(sourcesInstalled.waitForAll(within: .seconds(20)))
-
-        // Held acknowledgements keep the ladder from converging, so the bound below is
-        // what resolves this host, and a source that never reached its cancellation
-        // handler is one this test would wait on forever.
-        let cancellationReached = ExitCompletionRecorder(expecting: 1)
-        lifecycle.holdSourceCancellationAcknowledgements {
-            cancellationReached.signal()
-        }
-        let completion = ExitCompletionRecorder(expecting: 1)
-        host.requestShutdown { completion.signal() }
-        await host.forceExitBoundForTesting()
-        #expect(cancellationReached.waitForAll(within: .seconds(20)))
-        lifecycle.releaseSpawnActivation()
-        lifecycle.releaseSourceCancellationAcknowledgements()
-
-        #expect(completion.waitForAll(within: .seconds(20)))
-        let finished = await host.resourceSnapshot()
-        #expect(finished.census.forcedQuiescenceCount == 1)
-        #expect(finished.isReleased)
-    }
-
     @Test("teardown releases a host whose canonical input hold is armed", .timeLimit(.minutes(1)))
     func teardownReleasesArmedCanonicalInputHold() async throws {
         // Intent: a line the child's canonical queue cannot accept, still waiting on its
@@ -4085,7 +3989,7 @@ private final class ControlledTerminalPTYSpawner: TerminalPTYSpawning {
         var launchedLeader: pid_t?
     }
 
-    private let production = SystemTerminalPTYSpawner()
+    private let inner: any TerminalPTYSpawning
     private let state = Mutex(State())
     private let holdLaunchReport: Bool
     private let holdDelivery: Bool
@@ -4094,7 +3998,15 @@ private final class ControlledTerminalPTYSpawner: TerminalPTYSpawning {
     private let deliveryReached = DispatchSemaphore(value: 0)
     private let deliveryRelease = DispatchSemaphore(value: 0)
 
-    init(holdLaunchReport: Bool = false, holdDelivery: Bool = false) {
+    /// `wrapping` picks what the held launch actually launches. It defaults to a real
+    /// spawn, but a suite that must fork no child passes its own `ChildlessPTYChannel`
+    /// and still gets the launch-report hold.
+    init(
+        wrapping inner: any TerminalPTYSpawning = SystemTerminalPTYSpawner(),
+        holdLaunchReport: Bool = false,
+        holdDelivery: Bool = false
+    ) {
+        self.inner = inner
         self.holdLaunchReport = holdLaunchReport
         self.holdDelivery = holdDelivery
     }
@@ -4104,7 +4016,7 @@ private final class ControlledTerminalPTYSpawner: TerminalPTYSpawning {
         bootstrapExecutable: String,
         didLaunch: (SpawnedPTY) -> Bool
     ) -> PTYSpawnOutcome {
-        production.spawn(spec, bootstrapExecutable: bootstrapExecutable) { [self] spawned in
+        inner.spawn(spec, bootstrapExecutable: bootstrapExecutable) { [self] spawned in
             state.withLock { $0.launchedLeader = spawned.leader }
             if holdLaunchReport {
                 launchReportReached.signal()
@@ -4115,6 +4027,7 @@ private final class ControlledTerminalPTYSpawner: TerminalPTYSpawning {
     }
 
     func waitForDeliveryPermission() {
+        inner.waitForDeliveryPermission()
         guard holdDelivery else { return }
         deliveryReached.signal()
         deliveryRelease.wait()
@@ -4193,9 +4106,6 @@ private final class ControlledTerminalPTYResourceLifecycle: TerminalPTYResourceL
     }
 
     private struct State: Sendable {
-        var holdsSpawnActivation = false
-        var spawnActivationObserver: (@Sendable () -> Void)?
-        var spawnActivationResumes: [@Sendable () -> Void] = []
         var holdsSourceCancellationAcknowledgements = false
         var delaysSourceCancellationAcknowledgements = false
         var sourceCancellationObserver: (@Sendable () -> Void)?
@@ -4206,22 +4116,6 @@ private final class ControlledTerminalPTYResourceLifecycle: TerminalPTYResourceL
 
     private let production = SystemTerminalPTYResourceLifecycle()
     private let state = Mutex(State())
-
-    func gateSpawnActivation(
-        resume: @escaping @Sendable () -> Void
-    ) -> TerminalPTYLifecycleGateVerdict {
-        let result = state.withLock { state -> GateResult in
-            guard state.holdsSpawnActivation else {
-                return GateResult(verdict: .proceed, observer: nil)
-            }
-            state.spawnActivationResumes.append(resume)
-            let observer = state.spawnActivationObserver
-            state.spawnActivationObserver = nil
-            return GateResult(verdict: .deferred, observer: observer)
-        }
-        result.observer?()
-        return result.verdict
-    }
 
     func gateSourceCancellationAcknowledgement(
         resume: @escaping @Sendable () -> Void
@@ -4253,23 +4147,6 @@ private final class ControlledTerminalPTYResourceLifecycle: TerminalPTYResourceL
             return
         }
         state.withLock { $0.reusedDescriptor = descriptor }
-    }
-
-    func holdSpawnActivation(onDeferred: @escaping @Sendable () -> Void) {
-        state.withLock { state in
-            state.holdsSpawnActivation = true
-            state.spawnActivationObserver = onDeferred
-        }
-    }
-
-    func releaseSpawnActivation() {
-        let resumes = state.withLock { state in
-            state.holdsSpawnActivation = false
-            let resumes = state.spawnActivationResumes
-            state.spawnActivationResumes.removeAll()
-            return resumes
-        }
-        for resume in resumes { resume() }
     }
 
     func holdSourceCancellationAcknowledgements(
