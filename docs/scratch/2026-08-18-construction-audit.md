@@ -1082,7 +1082,7 @@ wave.
 - [x] **[STORE-1](#store-1)** (4x5, medium) Derive arena bytes-in-use from the ring cursors instead of maintaining it at twelve sites -- `3354fd46`
 - [x] **[XPORT-1](#xport-1)** (4x5, medium) Make the read turn, not the read() syscall, the unit that is fed and published -- `7448dd16`
 - [x] **[CHROME-1](#chrome-1)** (4x5, large) Replace the fatalError-based TODO popover base class with one controller parameterized by a scope value -- `ab1173b8..6fcae32d`
-- [x] **[FEED-2](#feed-2)** (3x5, small) Reach a row's cells once per run, not once per cell, on the bulk ASCII write and scan loops -- `cd2a6960`
+- [x] **[FEED-2](#feed-2)** (3x5, small) Reach a row's cells once per run, not once per cell, on the bulk ASCII write and scan loops -- `26c15e55`
 - [x] **[IPC-3](#ipc-3)** (3x5, small) Give the todo state change one catalog case so three unreachable `preconditionFailure` arms disappear -- `177c07ef`
 - [x] **[MODEL-3](#model-3)** (3x5, small) Collapse ContainerShape to layout plus zoomedLeaf; derive the structural fingerprint -- `63e0c675`
 - [ ] **[PERSIST-4](#persist-4)** (3x5, small) Confine the IPC connection's descriptor to its write queue so a queued write cannot land on a reused fd
@@ -1097,7 +1097,7 @@ wave.
 - [ ] **[BUILD-5](#build-5)** (2x5, small) Give the three manifest-discovery lists one owner so a new package root cannot be skipped
 - [ ] **[MODEL-6](#model-6)** (2x5, small) Drop the submission-to-request reverse index and derive it from the pending requests _(with [REDUCE-6](#reduce-6))_
 - [ ] **[STORE-5](#store-5)** (2x5, small) Give a block one record-range accessor instead of five hand-copied index conversions
-- [x] **[INTERACT-3](#interact-3)** (2x5, medium) Delete `TerminalDamageAccumulator`'s copy of the shift-composition rule and let it hold a `TerminalDamage` -- `840eda18`
+- [x] **[INTERACT-3](#interact-3)** (2x5, medium) Delete `TerminalDamageAccumulator`'s copy of the shift-composition rule and let it hold a `TerminalDamage` -- `d7f541e9`
 - [ ] **[REDUCE-6](#reduce-6)** (2x4, small) Tie a pending IPC input request to its pane so pane teardown can reject it _(with [MODEL-6](#model-6))_
 - [ ] **[STORE-4](#store-4)** (2x4, small) State the open tail's scratch-table key base once, so a trimmed head cannot key it two ways **[decide first](#decisions-to-make-first)**
 - [ ] **[MODEL-5](#model-5)** (2x4, medium) Move per-pane search and notification-throttle state into PaneModel so pane teardown prunes them **[decide first](#decisions-to-make-first)**
@@ -1138,7 +1138,7 @@ rewrites.
 - [ ] **[RECON-1](#recon-1)** (3x5, small) Make container visibility a diffed field of ContainerShape instead of an unconditional per-tab op _(after [MODEL-3](#model-3))_
 - [ ] **[REDUCE-2](#reduce-2)** (3x5, small) Let .startSearch open the pane's search state directly instead of round-tripping through the view
 - [ ] **[REDUCE-5](#reduce-5)** (3x5, small) Raise every pane alert through one function instead of duplicating the ritual in .sessionBell
-- [x] **[ROW-4](#row-4)** (3x5, small) Write each printed cell once: clearCellAndPair's store at the target column is immediately overwritten -- `0527bb09`
+- [x] **[ROW-4](#row-4)** (3x5, small) Write each printed cell once: clearCellAndPair's store at the target column is immediately overwritten -- `c36da989`
 - [ ] **[WIRE-6](#wire-6)** (3x5, small) Chunk and base64 the sync payload from slices, without copying the bytes three times first _(after [PERSIST-6](#persist-6))_
 - [ ] **[IPC-4](#ipc-4)** (3x5, medium) Return one traits value from a single exhaustive switch instead of six parallel per-method enumerations _(after [IPC-3](#ipc-3))_
 - [x] **[STORE-2](#store-2)** (3x5, medium) Delete PackedRetainedRow's dead body and move the cell-word constants to the store that uses them _(after [STORE-1](#store-1))_ -- `863a81f4`
@@ -1165,7 +1165,7 @@ projection work in MODEL-2/MODEL-4. LOOKUP-1 and LOOKUP-2 sit here as a pair
 -- LOOKUP-1 was downgraded to 3x3 large, so it is worth doing only once the
 reducer and projection churn above it has stopped.
 
-- [x] **[STORE-3](#store-3)** (3x5, small) Give the 8-byte cell word one encode/decode type instead of eight hand-inlined shift sites _(after [STORE-1](#store-1), [STORE-2](#store-2))_ -- `0a64d509`
+- [x] **[STORE-3](#store-3)** (3x5, small) Give the 8-byte cell word one encode/decode type instead of eight hand-inlined shift sites _(after [STORE-1](#store-1), [STORE-2](#store-2))_ -- `7e019772`
 - [ ] **[PARSE-2](#parse-2)** (3x5, medium) Make "alternate screen live without a retained primary" unrepresentable
 - [ ] **[PARSE-3](#parse-3)** (3x5, medium) Derive DEC/ANSI mode set, reset, query and resynchronization from one mode table
 - [ ] **[RUNTIME-6](#runtime-6)** (3x5, medium) Move the pane-tape follow broker out of AppRuntime into its own owner
