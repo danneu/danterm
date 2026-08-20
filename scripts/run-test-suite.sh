@@ -91,7 +91,14 @@ STEPS=(
     './scripts/manifest-ownership-lint.py'
     'python3 ./scripts/tests/manifest_ownership_lint_test.py'
     'python3 ./scripts/tests/manifest_targets_test.py'
-    './scripts/tests/ios-portability-gate_test.sh'
+    # The compiling half of the iOS gate's self-test. It runs its fixture cases in
+    # parallel and is mostly SwiftPM startup, so it earns the wide marker.
+    'wide: ./scripts/tests/ios-portability-gate_test.sh'
+    # The half of the same self-test that answers from manifests alone. It is split out
+    # because it needs no iOS SDK and no compiler at all, so it has no business paying
+    # for one -- and because a broken manifest-discovery claim should be reported as
+    # that, not as an iOS portability failure.
+    './scripts/tests/ios-portability-gate-discovery_test.sh'
     './scripts/tests/ios-app_test.sh'
     'swift test --package-path lib/TerminalHostTools --scratch-path lib/TerminalHostTools/.build-gate'
     './scripts/tests/provision-worktree_test.sh'
@@ -180,8 +187,8 @@ elif [[ "${1:-}" != "--worker" ]]; then
     # loudly, before the header prints, if the pinned set is empty or DanTermSupport has
     # picked up a pin.
     #
-    # These go in front: they are the longest steps in the gate, and the list is ordered
-    # longest-first so the pool packs well.
+    # These go in front of the light lint tail, but behind the declared long poles: the
+    # reorder below is what puts them there.
     ios_steps=()
     while IFS= read -r package; do
         [[ -n "$package" ]] && ios_steps+=("./scripts/ios-portability-gate.sh --package $package")
@@ -191,6 +198,32 @@ elif [[ "${1:-}" != "--worker" ]]; then
         exit 1
     }
     STEPS=("${ios_steps[@]}" "${STEPS[@]}")
+fi
+
+# Put the declared long poles at the head of the assembled list. A wide step's extra
+# tokens are claimed opportunistically -- it takes only what is free at that instant and
+# never waits -- so a long pole that starts late finds a full pool and compiles at one
+# job, which is the whole thing the marker exists to avoid. The pool is idle only at the
+# start of a run, so that is where the wide steps have to be dispatched. Writing them
+# first in STEPS is not enough on its own: the iOS package steps are spliced in above,
+# and they used to take the startup slots away from steps ten times their length.
+#
+# The reorder is stable, so within each group the list keeps the longest-measured-first
+# order it is written in. It happens before --list-steps prints, so what a reader sees is
+# the order the gate really dispatches.
+if [[ "${1:-}" != "--worker" ]]; then
+    wide_steps=()
+    plain_steps=()
+    for step in "${STEPS[@]}"; do
+        if [[ "$step" == "$WIDE_MARKER"* ]]; then
+            wide_steps+=("$step")
+        else
+            plain_steps+=("$step")
+        fi
+    done
+    STEPS=()
+    if (( ${#wide_steps[@]} > 0 )); then STEPS+=("${wide_steps[@]}"); fi
+    if (( ${#plain_steps[@]} > 0 )); then STEPS+=("${plain_steps[@]}"); fi
 fi
 
 # Report the assembled list and stop. The list is built rather than written down, so

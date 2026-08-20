@@ -86,6 +86,18 @@ actual_ios="$(grep -cE '^\./scripts/ios-portability-gate\.sh --package ' "$TEST_
 [[ "$actual_ios" == "$expected_ios" ]] \
     || fail "gate has $actual_ios iOS steps for $expected_ios pinned packages"
 
+# A long pole only widens where the pool is already idle, and the pool is only idle at
+# the start of a run. A step that declares itself wide but is dispatched behind a hundred
+# one-token steps therefore finds nothing free to claim, and the declaration buys it
+# nothing. So the assembled list must lead with the wide steps -- including after the iOS
+# package steps are spliced in, which is where the ordering used to be lost.
+last_wide="$(grep -n '^wide: ' "$TEST_ROOT/step-list" | tail -1 | cut -d: -f1)"
+first_plain="$(grep -vn '^wide: ' "$TEST_ROOT/step-list" | head -1 | cut -d: -f1)"
+[[ "$last_wide" =~ ^[0-9]+$ ]] || fail "the gate declares no wide steps, so nothing pins the order"
+[[ "$first_plain" =~ ^[0-9]+$ ]] || fail "the gate is entirely wide steps; the list is not what it was"
+(( last_wide < first_plain )) \
+    || fail "a one-token step is dispatched at line $first_plain, ahead of a wide step at line $last_wide"
+
 # The pool nests: each worker can be a whole `swift build`, and SwiftPM defaults to one
 # compile job per core. Uncapped, N workers ask for N x ncpu compile jobs on an ncpu
 # machine, which saturates the desktop and makes the OS UI lag. These cases pin the two
