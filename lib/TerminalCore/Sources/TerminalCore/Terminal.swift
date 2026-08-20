@@ -6477,13 +6477,21 @@ public struct Terminal: Equatable, Sendable {
         invalidateInspection(inViewportRows: screen.rows.indices)
         // DECALN replaces every row, row 0 included, so history's claim on it must end first.
         severHistoryWrapClaimForRowZeroErase()
+        // DEC STD 070 makes DECALN a known-state reset and then a fill, which is what a program
+        // uses it for: origin mode off, no scroll region, and the pen reduced to its colours, so
+        // the absolute CUP that follows lands on its literal row and later output is not still
+        // bold or reversed. The reset stays narrower than RIS -- the saved cursor, the tab stops,
+        // the charsets, and the hyperlink pen all survive.
+        modes.isOriginMode = false
+        scrollRegion = nil
+        currentStyle = backgroundEraseStyle
         let styleId = currentStyleId()
         for row in screen.rows.indices {
             screen.rows[row] = GridRow(cells: (0..<columnCount).map { _ in
                 GridCell(scalars: .single("E"), kind: .narrow, styleId: styleId)
             })
         }
-        clearPendingMotionState()
+        moveCursor(row: 0, column: 0)
     }
 
     /// Designates one character set into a slot, degrading anything unsupported to ASCII.

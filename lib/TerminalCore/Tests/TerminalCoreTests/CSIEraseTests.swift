@@ -408,6 +408,101 @@ struct CSIEraseTests {
         expectValidGrid(terminal)
     }
 
+    @Test("DECALN homes the cursor and drops origin mode and the scroll region")
+    func alignmentFillResetsPositioningState() throws {
+        // Intent: after DECALN the cursor is home with no pending wrap, origin mode is off,
+        //   and the scroll margins span the whole screen again.
+        // Why it exists: DanTerm's DECALN is a known-state reset plus fill, per DEC STD 070.
+        //   A fill that leaves the old margins and origin mode standing means the very next
+        //   absolute CUP -- the reason a program issues DECALN at all -- lands somewhere else.
+        // Scenario: vttest's margin page sets a region, turns origin mode on, fills the screen
+        //   with DECALN, and then positions absolutely.
+        var terminal = try #require(Terminal(columns: 4, rows: 4))
+        terminal.feed(Array("\u{1B}[2;3r\u{1B}[?6h".utf8))
+
+        terminal.feed(Array("\u{1B}#8".utf8))
+
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
+
+        // With origin mode still on and the old region standing, this CUP would clamp to row 2.
+        terminal.feed(Array("\u{1B}[4;1H".utf8))
+        #expect(terminal.geometry.cursor?.row == 3)
+
+        // With the old region standing, scroll-down would leave row 0 untouched.
+        terminal.feed(Array("\u{1B}[T".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.scalars.description == "")
+        #expect(terminal.cell(row: 3, column: 0)?.scalars.description == "E")
+        expectValidGrid(terminal)
+    }
+
+    @Test("DECALN reduces the pen to its colours and fills in that pen")
+    func alignmentFillKeepsOnlyThePenColours() throws {
+        // Intent: DECALN's cells and the live pen afterwards both carry the pen's foreground
+        //   and background and no other attribute.
+        // Why it exists: DanTerm's contract is DEC STD 070's rendition reset, which keeps the
+        //   colours and drops the attributes -- so text printed after DECALN is not still bold,
+        //   underlined, or reversed from whatever the program set before the fill. (alacritty
+        //   and wezterm drop the colours too; DanTerm deliberately keeps them.)
+        // Scenario: a program sets a loud pen, fills the screen with DECALN, and then prints.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("\u{1B}[1;4;7;31;44m".utf8))
+
+        terminal.feed(Array("\u{1B}#8".utf8))
+
+        let coloursOnly = TerminalStyle(foreground: .indexed(1), background: .indexed(4))
+        #expect(terminal.cell(row: 0, column: 0)?.style == coloursOnly)
+        #expect(terminal.cell(row: 1, column: 3)?.style == coloursOnly)
+        #expect(terminal.currentStyle == coloursOnly)
+
+        terminal.feed(Array("x".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.scalars.description == "x")
+        #expect(terminal.cell(row: 0, column: 0)?.style == coloursOnly)
+        expectValidGrid(terminal)
+    }
+
+    @Test("DECALN leaves the saved cursor and the tab stops alone")
+    func alignmentFillPreservesSavedCursorAndTabStops() throws {
+        // Intent: DECALN resets positioning state, not the DECSC slot or the tab stops.
+        // Why it exists: the reset is deliberately narrower than RIS. A program that saves its
+        //   cursor around a DECALN, or that set its own tab stops earlier, must still find both
+        //   intact afterwards.
+        // Scenario: a program clears the tab stops, sets one of its own, saves the cursor,
+        //   fills with DECALN, then restores and tabs.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("\u{1B}[3g\u{1B}[1;4H\u{1B}H".utf8))
+        terminal.feed(Array("\u{1B}[2;3H\u{1B}7".utf8))
+
+        terminal.feed(Array("\u{1B}#8".utf8))
+        terminal.feed(Array("\u{1B}8".utf8))
+
+        #expect(terminal.geometry.cursor?.row == 1)
+        #expect(terminal.geometry.cursor?.column == 2)
+
+        // The only remaining stop is column 3; a cleared stop table would send HT to column 7.
+        terminal.feed(Array("\t".utf8))
+        #expect(terminal.geometry.cursor?.column == 3)
+    }
+
+    @Test("DECALN links none of the cells it fills and leaves an open hyperlink open")
+    func alignmentFillDoesNotTouchTheHyperlinkPen() throws {
+        // Intent: the filled cells carry no hyperlink, and DECALN does not close a hyperlink
+        //   the program opened before it.
+        // Why it exists: DECALN's reset covers rendition and positioning only. Linking a
+        //   screenful of 'E's would make them all activatable, and closing the pen would drop
+        //   the link from output the program still expects to be linked.
+        // Scenario: a program opens an OSC 8 link, fills with DECALN, and keeps printing.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("\u{1B}]8;;https://example.test\u{7}".utf8))
+
+        terminal.feed(Array("\u{1B}#8".utf8))
+
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink == nil)
+        #expect(terminal.cell(row: 1, column: 3)?.hyperlink == nil)
+
+        terminal.feed(Array("x".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == "https://example.test")
+    }
+
     /// Builds a terminal whose last retained row is the head of a wrapped line whose remainder
     /// is still live on row 0 -- i.e. history holds an open tail record claiming live row 0.
     private func makeSeamTerminal() throws -> Terminal {

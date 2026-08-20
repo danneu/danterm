@@ -168,10 +168,11 @@ struct TerminalHyperlinkTests {
         #expect(terminal.cell(row: 0, column: 4)?.hyperlink == nil)
         #expect(terminal.cell(row: 0, column: 0)?.hyperlink == nil)
 
+        // DECALN homed the cursor, so "x" and "y" land on the first two columns.
         terminal.feed(osc8(uri: "https://reset.test"))
         terminal.feed(Array("x\u{1B}[!py".utf8))
-        #expect(terminal.cell(row: 0, column: 5)?.hyperlink != nil)
-        #expect(terminal.cell(row: 0, column: 6)?.hyperlink == nil)
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink != nil)
+        #expect(terminal.cell(row: 0, column: 1)?.hyperlink == nil)
     }
 
     @Test("REP inherits the pen while resize fill, alternate cells, and RIS do not leak links")
