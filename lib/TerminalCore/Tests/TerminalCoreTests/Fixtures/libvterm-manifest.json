@@ -532,7 +532,7 @@
     {
       "path": "t/90vttest_01-movement-1.test",
       "licenseNotice": "LICENSE.libvterm.txt",
-      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session movement recording requires DECALN, which DanTerm does not implement." }]
+      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "DanTerm now implements DECALN, pinned directly by CSIEraseTests; this full-session recording has not been ported, so it stays outside the adopted fixture set." }]
     },
     {
       "path": "t/90vttest_01-movement-2.test",
