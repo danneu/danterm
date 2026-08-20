@@ -179,13 +179,13 @@ references are the requirement.
 | 2 | [BUG-25](#bug-25) | CSI ? 2027 $ p (DECRQM for the grapheme-clus | unpinned | Report DECRQM ?2027 as permanently set instead of unrecognized |
 | 2 | [BUG-26](#bug-26) | A C1 control as a UTF-8 code point, e.g. U+0 | unpinned | Stop printing a cell for C1 code points decoded from UTF-8 |
 | 2 | [BUG-27](#bug-27) | CSI ? 7 h / CSI ? 7 l (DECAWM), CSI 4 h / CS | unpinned | Stop clearing the pending-wrap flag when a mode is set or reset |
-| 2 | [BUG-28](#bug-28) | Keypad Enter with kitty keyboard flag 1 (dis | unpinned | Report unmodified keypad Enter as CSI 57414u under the kitty keyboard protocol |
+| 2 | [BUG-28](#bug-28) | Keypad Enter with kitty keyboard flag 1 (dis | **done** `bf3e3841` | Report unmodified keypad Enter as CSI 57414u under the kitty keyboard protocol |
 | 2 | [BUG-29](#bug-29) | OSC 10 ; ? ; ? ST (multi-parameter dynamic c | **pinned by a test** | Answer every ? in a dynamic colour request, advancing the colour index per parameter |
 | 2 | [BUG-30](#bug-30) | CSI 2 K (EL 2) on a soft-wrapped row of the  | unpinned | Preserve the stale-wrap-claim bit when the alternate screen is resized by height alone |
 | 2 | [BUG-31](#bug-31) | CSI ! p (DECSTR), interacting with CSI 3 g ( | **pinned by a test** | Stop DECSTR from clearing custom tab stops |
 | 2 | [BUG-32](#bug-32) | CSI ! p (DECSTR) followed by ESC 8 (DECRC) | **pinned by a test** | Reset the saved-cursor slot to the default rendition on DECSTR |
 | 2 | [BUG-33](#bug-33) | a zero-width combining mark (for example U+0 | unpinned | Attach a combining mark to the cell left of the cursor when no cluster is open |
-| 1 | [BUG-34](#bug-34) | Keypad Enter in numeric keypad mode while LN | unpinned | Apply LNM to keypad Enter, not only to the main Return key |
+| 1 | [BUG-34](#bug-34) | Keypad Enter in numeric keypad mode while LN | **done** `bf3e3841` | Apply LNM to keypad Enter, not only to the main Return key |
 | 1 | [BUG-35](#bug-35) | OSC 8 ; id= ; uri ST (hyperlink open with an | **done** `419319cb` | Treat an empty OSC 8 id= as no id rather than as an id whose value is the empty string |
 
 <a id="bug-01"></a>
@@ -877,6 +877,9 @@ currentStyle = TerminalStyle(foreground: TerminalCore.TerminalColor.indexed(1), 
 
 `Keypad Enter with kitty keyboard flag 1 (disambiguate) active` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4
 
+**Done** in `bf3e3841`. The kitty encoder now reports unmodified keypad
+Enter as CSI 57414u, and a test pins it apart from the main Return key.
+
 **Problem.** In the kitty encoder the keypad branch short-circuits on `modifiers.isEmpty` and returns the key's legacy numeric-mode string for every keypad key. That is right for the printable keypad keys, whose text a real kitty or ghostty also sends verbatim, but wrong for keypad Enter, whose "text" is a control character and which both references therefore encode as a functional CSI-u sequence.
 
 **What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/TerminalInputEncoding.swift#encodeKittyKey, keypad case: `guard modifiers.isEmpty == false else { return Array(normal.utf8) }`, where `keypadEncoding(for: .keypadEnter)` supplies normal = "\r". So Enter on the keypad emits 0x0D, byte-identical to the main Return key, and the 57414 code DanTerm already knows is used only when a modifier is held.
@@ -1026,6 +1029,9 @@ currentStyle = TerminalStyle(foreground: TerminalCore.TerminalColor.indexed(1), 
 ### BUG-34. Apply LNM to keypad Enter, not only to the main Return key
 
 `Keypad Enter in numeric keypad mode while LNM (CSI 20 h) is set` &middot; severity 1 (cosmetic) &middot; hunter confidence 4
+
+**Done** in `bf3e3841`. LNM is now applied as a byte rule, so keypad Enter
+and the main Return key both send CR LF, and a test pins the pair.
 
 **Problem.** LNM is consulted only inside the `.returnKey` branch of the legacy encoder. The keypad branch returns its table string unconditionally, so keypad Enter emits a bare CR while the main Return key emits CR LF, even though both keys are producing the same carriage return.
 
