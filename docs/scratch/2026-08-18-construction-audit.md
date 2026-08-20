@@ -1224,10 +1224,10 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [ ] **[PANE-5](#pane-5)** (2x5, medium) Collapse the four duplicated fire-and-forget input methods into one completion-taking path
 - [ ] **[PTY-2](#pty-2)** (2x5, medium) Give TerminalPTYHost its geometry from the launch input instead of storing a second copy
 - [ ] **[REDUCE-4](#reduce-4)** (3x3, medium) Derive terminal focus from the model instead of emitting focusSession(false) from four arms
-- [x] **[FEED-5](#feed-5)** (2x4, small) Test grapheme-break class membership with a bitmask instead of array-literal `contains`
+- [x] **[FEED-5](#feed-5)** (2x4, small) Test grapheme-break class membership with a bitmask instead of array-literal `contains` -- `4baa36f5`
 - [ ] **[PTY-5](#pty-5)** (2x4, small) Dedupe grid submissions on the applied fact, not on an optimistic mirror in the controller
 - [ ] **[RECON-5](#recon-5)** (2x4, small) Separate the pane strip's overflow-label metrics from its color so fitting stops measuring text
-- [x] **[UNI-3](#uni-3)** (2x4, small) Generate the UAX #29 pair verdicts as a class table instead of array-literal set membership
+- [x] **[UNI-3](#uni-3)** (2x4, small) Generate the UAX #29 pair verdicts as a class table instead of array-literal set membership -- `4baa36f5`
 - [ ] **[DRAW-4](#draw-4)** (2x4, medium) Route single-scalar astral cells through the batched cmap path instead of one CTLine per cell
 - [ ] **[WIRE-5](#wire-5)** (2x4, medium) Let the engine cut the checkpoint tail once, instead of re-walking the projected text to trim it
 
