@@ -80,4 +80,4 @@ Behavioral scope: none. No user-visible or IPC-visible behavior changes.
 ## Commit progress
 
 - [x] 1. Delete the senderless mark-alert-read path
-- [ ] 2. Record REDUCE-7 completion in the construction audit
+- [x] 2. Record REDUCE-7 completion in the construction audit

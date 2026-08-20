@@ -1310,7 +1310,7 @@ cheapest to do once nothing else is going to add a caller.
 - [ ] **[IOS-5](#ios-5)** (2x5, small) Delete the session vocabulary only tests can reach
 - [ ] **[IPC-6](#ipc-6)** (2x5, small) Collapse CLIResolvedTarget into CLIConnectionTarget
 - [x] **[PTY-6](#pty-6)** (2x5, small) Give viewport navigation its own three-case type instead of a nine-case enum guarded by preconditionFailure -- `570cf066`
-- [ ] **[REDUCE-7](#reduce-7)** (2x5, small) Delete the senderless .markAlertRead message
+- [x] **[REDUCE-7](#reduce-7)** (2x5, small) Delete the senderless .markAlertRead message -- `2865051c`
 - [ ] **[PERSIST-7](#persist-7)** (2x5, large) Drive doctor's agent probes from one agent registry shared with KnownAgent
 
 <a id="decisions-to-make-first"></a>
