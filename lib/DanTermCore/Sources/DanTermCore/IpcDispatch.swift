@@ -372,9 +372,11 @@ private func dispatchIpc(
         guard submissionIds.isEmpty == false else {
             return [.ipcReply(reqId: reqId, result: okResult())]
         }
-        model.pendingInputRequests[reqId] = PendingInputRequest(remaining: Set(submissionIds))
         for submissionId in submissionIds {
-            model.pendingInputSubmissions[submissionId] = reqId
+            model.pendingInputSubmissions[submissionId] = PendingInputSubmission(
+                requestId: reqId,
+                paneId: paneId
+            )
         }
         return commands
 

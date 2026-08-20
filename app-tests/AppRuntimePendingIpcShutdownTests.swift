@@ -47,10 +47,10 @@ struct AppRuntimePendingIpcShutdownTests {
             result: .null
         )
         let submissionId = InputSubmissionId(rawValue: UUID())
-        runtime.model.pendingInputRequests[inputRequestId] = PendingInputRequest(
-            remaining: [submissionId]
+        runtime.model.pendingInputSubmissions[submissionId] = PendingInputSubmission(
+            requestId: inputRequestId,
+            paneId: PaneId(rawValue: UUID())
         )
-        runtime.model.pendingInputSubmissions[submissionId] = inputRequestId
 
         runtime.shutdown()
         creation.connection.close()

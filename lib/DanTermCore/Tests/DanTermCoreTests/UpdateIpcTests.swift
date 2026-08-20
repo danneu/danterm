@@ -2613,6 +2613,129 @@ import DanTermProtocol
         #expect(try requireIpcReply(second)["ok"]?.asBool == true)
     }
 
+    @Test("pane.input replies once, after the last submission, whatever the order")
+    func paneInputRepliesOnceOnOutOfOrderCompletion() throws {
+        // Intent: the reply waits for every submission and lands exactly once,
+        //   even when the host completes them out of order.
+        // Why it exists: the reducer derives "still waiting" by scanning the
+        //   pending submissions, so completion order must not decide the reply.
+        // Scenario: spec-first -- a three-item request completed 1, 2, 0.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        let pending = try dispatchPendingInput(&model, pane: paneId, items: 3)
+
+        var replies = 0
+        for index in [1, 2, 0] {
+            let commands = update(
+                &model,
+                .inputSubmissionCompleted(id: pending.submissions[index], result: .delivered)
+            )
+            replies += commands.count { if case .ipcReply = $0 { true } else { false } }
+            if index != 0 {
+                #expect(commands.isEmpty, "completing submission \(index) must not reply yet")
+            }
+        }
+        #expect(replies == 1)
+        #expect(model.pendingInputSubmissions.isEmpty)
+    }
+
+    @Test("every pane teardown path rejects that pane's pending input exactly once")
+    func paneTeardownRejectsPendingInputExactlyOnce() throws {
+        // Intent: closing a pane, closing its tab, deleting its group, and
+        //   failing its spawn each fail the pane's in-flight pane.input request
+        //   once, and a later completion for a sibling submission says nothing.
+        // Why it exists: pending input used to be reachable only from app
+        //   shutdown, so every other teardown path left the request in the model
+        //   with no pane behind it.
+        // Scenario: spec-first -- a two-item request is in flight when the pane
+        //   leaves the tree.
+        let scenarios: [(
+            name: String,
+            setUp: (inout AppModel) -> PaneId,
+            tearDown: (inout AppModel, PaneId) -> [Command]
+        )] = [
+            ("closePane", { model in
+                createTab(&model)
+                let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+                _ = update(&model, .splitPane(paneId: paneId, direction: .horizontal))
+                return selectedTab(in: model)!.paneTree.focusedPaneId
+            }, { model, paneId in
+                update(&model, .closePane(paneId: paneId))
+            }),
+            ("closeTab", { model in
+                createTab(&model)
+                createTab(&model)
+                return selectedTab(in: model)!.paneTree.focusedPaneId
+            }, { model, paneId in
+                let tabId = tabForPane(paneId, in: model)!.id
+                return update(&model, .closeTab(id: tabId))
+            }),
+            ("deleteGroup", { model in
+                createTab(&model)
+                _ = update(&model, .createGroup(name: "Second", launch: nil, background: false))
+                createTab(&model, inGroupId: model.groups[1].id)
+                return model.groups[1].tabs[0].paneTree.focusedPaneId
+            }, { model, _ in
+                update(&model, .deleteGroup(id: model.groups[1].id, moveTabs: false))
+            }),
+            ("sessionCreationFailed", { model in
+                createTab(&model)
+                createTab(&model)
+                return selectedTab(in: model)!.paneTree.focusedPaneId
+            }, { model, paneId in
+                let sessionId = model.pane(paneId)!.session!.id
+                return update(&model, .sessionCreationFailed(sessionId: sessionId))
+            }),
+        ]
+
+        for scenario in scenarios {
+            var model = makeModel()
+            let paneId = scenario.setUp(&model)
+            let pending = try dispatchPendingInput(&model, pane: paneId)
+
+            let commands = scenario.tearDown(&model, paneId)
+
+            let errors = commands.compactMap { command -> Int? in
+                if case .ipcError(let id, let code, _) = command, id == pending.requestId {
+                    return code
+                }
+                return nil
+            }
+            #expect(errors == [-32603], "\(scenario.name) must reject the request once")
+            let late = update(
+                &model,
+                .inputSubmissionCompleted(id: pending.submissions[1], result: .delivered)
+            )
+            #expect(late.isEmpty, "\(scenario.name) must silence a late completion")
+        }
+    }
+
+    @Test("a pane moved to another tab keeps its pending input")
+    func movedPaneKeepsPendingInput() throws {
+        // Intent: moving a pane between tabs is not teardown, so its in-flight
+        //   pane.input request still replies when its submissions land.
+        // Why it exists: the teardown paths reject by pane id; a move must not
+        //   look like a close to them.
+        // Scenario: spec-first -- the pane leaves a tab that then disappears.
+        var model = makeModel()
+        createTab(&model)
+        let targetTabId = selectedTab(in: model)!.id
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        let pending = try dispatchPendingInput(&model, pane: paneId)
+
+        let moveCommands = update(&model, .movePaneToTab(paneId: paneId, targetTabId: targetTabId))
+        #expect(moveCommands.contains { if case .ipcError = $0 { true } else { false } } == false)
+
+        _ = update(&model, .inputSubmissionCompleted(id: pending.submissions[0], result: .delivered))
+        let last = update(
+            &model,
+            .inputSubmissionCompleted(id: pending.submissions[1], result: .delivered)
+        )
+        #expect(try requireIpcReply(last)["ok"]?.asBool == true)
+    }
+
     @Test("pane.input preserves each host rejection reason in its IPC error")
     func paneInputRejectsOnceWhenAnySubmissionFails() throws {
         var model = makeModel()
@@ -3479,6 +3602,31 @@ private func expectAfterTabInserted(
         return
     }
     #expect(model.selectedTabId == tabId)
+}
+
+/// Dispatches a multi-item `pane.input` at one pane and reports what the
+/// reducer is now waiting on, so a test seeds pending input the way a caller
+/// does instead of writing the model's map by hand.
+private func dispatchPendingInput(
+    _ model: inout AppModel,
+    pane paneId: PaneId,
+    items: Int = 2
+) throws -> (requestId: UUID, submissions: [InputSubmissionId]) {
+    let requestId = UUID()
+    let request = try IpcRequest.decode(
+        method: IpcRequestMethod.paneInput.rawValue,
+        params: .object([
+            "pane": .string(paneId.rawValue.uuidString),
+            "input": .array((0..<items).map { .object(["text": .string("item \($0)")]) }),
+        ])
+    )
+    let commands = update(&model, .ipcRequest(reqId: requestId, caller: .local, request: request))
+    let submissions = commands.compactMap { command -> InputSubmissionId? in
+        if case .sendInputText(_, _, let id, _) = command { return id }
+        return nil
+    }
+    #expect(submissions.count == items)
+    return (requestId, submissions)
 }
 
 private func requireIpcReply(_ commands: [Command]) throws -> JSONValue {

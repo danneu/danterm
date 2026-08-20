@@ -276,10 +276,10 @@ struct AppRuntimeIpcCommandTests {
         let submissionId = InputSubmissionId(rawValue: UUID())
         wire.remember(reqId: requestId, rpcId: .number(9))
         runtime.registerIpcConnection(wire.connection, for: requestId)
-        runtime.model.pendingInputRequests[requestId] = PendingInputRequest(
-            remaining: [submissionId]
+        runtime.model.pendingInputSubmissions[submissionId] = PendingInputSubmission(
+            requestId: requestId,
+            paneId: PaneId(rawValue: UUID())
         )
-        runtime.model.pendingInputSubmissions[submissionId] = requestId
 
         runtime.perform(.sendText(
             paneId: PaneId(rawValue: UUID()),
@@ -291,7 +291,6 @@ struct AppRuntimeIpcCommandTests {
         #expect(response.error?.code == -32603)
         #expect(response.error?.message ==
             "pane input was not delivered because the pane process ended")
-        #expect(runtime.model.pendingInputRequests.isEmpty)
         #expect(runtime.model.pendingInputSubmissions.isEmpty)
     }
 
@@ -315,10 +314,10 @@ struct AppRuntimeIpcCommandTests {
         runtime.installTerminalSession(ports.session, paneId: paneId)
         wire.remember(reqId: requestId, rpcId: .number(10))
         runtime.registerIpcConnection(wire.connection, for: requestId)
-        runtime.model.pendingInputRequests[requestId] = PendingInputRequest(
-            remaining: [submissionId]
+        runtime.model.pendingInputSubmissions[submissionId] = PendingInputSubmission(
+            requestId: requestId,
+            paneId: paneId
         )
-        runtime.model.pendingInputSubmissions[submissionId] = requestId
 
         runtime.perform(.sendInputWheel(
             paneId: paneId,
@@ -331,7 +330,6 @@ struct AppRuntimeIpcCommandTests {
         let response = try await wire.readResponseAsync()
         #expect(response.result == .object(["ok": .bool(true)]))
         #expect(ports.session.sentInputWheels.count == 1)
-        #expect(runtime.model.pendingInputRequests.isEmpty)
         #expect(runtime.model.pendingInputSubmissions.isEmpty)
     }
 
