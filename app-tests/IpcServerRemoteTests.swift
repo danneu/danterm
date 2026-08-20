@@ -107,6 +107,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         let server = try IpcServer(
             socketPath: fixture.socketURL,
+            identity: .production,
             auditWriter: fixture.auditWriter,
             runtimeDispatch: nil
         )

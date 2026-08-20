@@ -184,14 +184,18 @@ actor IpcServer {
     private let tailnetAcceptQueue = DispatchQueue(label: "danterm.ipc.tailnet.accept", qos: .utility)
     private var connections: [UUID: ConnectionState] = [:]
 
+    /// The socket, the identity, and the audit sink have no defaults: all three are
+    /// this instance's own, and the launch-resolved paths value is what knows them.
+    /// The audit writer stays a separate input rather than a path, because the
+    /// remote fixture breaks and restores that sink to read what the server wrote.
     init(
-        socketPath: URL = userControlSocketPath(identity: DanTermInstanceIdentity()),
+        socketPath: URL,
         appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev",
         livenessBound: IpcLivenessBound = .standard,
         tailnetConfig: DanTermTailnetConfig? = nil,
-        identity: DanTermInstanceIdentity = DanTermInstanceIdentity(),
+        identity: DanTermInstanceIdentity,
         tailnetOptIn: Bool = false,
-        auditWriter: IpcAuditLogWriter = IpcAuditLogWriter(directory: recoveryDirectoryURL()),
+        auditWriter: IpcAuditLogWriter,
         whoisResolver: TailnetWhoisResolver = .live,
         remoteConnectionLimit: Int = 8,
         resolveTailnetBindAddress: @escaping @Sendable (String) throws -> TailnetBindAddress = {

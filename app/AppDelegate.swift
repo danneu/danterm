@@ -9,6 +9,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     nonisolated static let minWindowHeight: CGFloat = 300
     nonisolated static let minSidebarWidth: CGFloat = 200
 
+    /// Every identity-keyed path this process owns, resolved once at launch and
+    /// handed down from there, so nothing below re-derives a directory of its own.
+    let instancePaths: DanTermInstancePaths
     var window: NSWindow!
     var terminalBackend: SwiftTerminalBackend!
     var runtime: AppRuntime!
@@ -32,6 +35,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     /// applicationShouldTerminate safety net (user already confirmed).
     var quitConfirmed = false
 
+    init(instancePaths: DanTermInstancePaths) {
+        self.instancePaths = instancePaths
+        super.init()
+    }
+
     // NSApplicationDelegate: finish bootstrapping the terminal backend, main
     // window, and launch-time services once AppKit has started the app.
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -49,6 +57,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
                 notificationAuthorizationPolicy: launchPolicy.notificationAuthorization
             ),
             dialogSurfaces: .live(),
+            instancePaths: instancePaths,
             tailnetOptIn: launchPolicy.tailnetOptIn
         )
         installWorkspaceLifecycleObserver()
@@ -147,7 +156,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         // Write session lock (crash detection for next launch). Atomically
         // overwrites any stale lock from a previous crash, so there's no window
         // where a startup crash would lose the lock.
-        writeSessionLockFile()
+        writeSessionLockFile(paths: instancePaths)
 
         // Clean up stale replay files from prior sessions
         runtime.cleanupStaleReplayDirectory()
@@ -785,7 +794,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime?.prepareRecoveryForApplicationExit()
         runtime?.shutdown()
         terminalBackend?.terminateForApplicationExit()
-        deleteSessionLockFile()
+        deleteSessionLockFile(paths: instancePaths)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

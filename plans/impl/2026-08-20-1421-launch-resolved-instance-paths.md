@@ -241,7 +241,7 @@ resolver); the PERSIST-2 entry in the construction audit.
 
 ## Commit progress
 - [x] 1. Protocol derives the control socket from an explicit identity and caches root
-- [ ] 2. One launch-resolved instance-paths value threaded through the app and IPC server
+- [x] 2. One launch-resolved instance-paths value threaded through the app and IPC server
 - [ ] 3. Lift the launch-recovery read into a testable app function
 - [ ] 4. Lint ambient identity resolution and update the docs
 
@@ -258,3 +258,18 @@ resolver); the PERSIST-2 entry in the construction audit.
   the call site instead of hidden in a Protocol default. Commit 2 deletes those
   defaults when the support value arrives; keeping them here is what leaves the gate
   green at this boundary.
+
+- Commit 2 puts the launch resolver in its own `app/LaunchInstancePaths.swift` rather
+  than in `main.swift`: `danTermTemporaryDirectoryURL` moved there from `AppRuntime`,
+  and it is the only reader of `Bundle.main` and the user-domain roots for a path.
+  `main.swift` calls it once into `launchInstancePaths`. Commit 4's lint allowlists
+  that one file plus `userControlSocketPath` and `CoreEnv.live`.
+- `AppDelegate` takes the value through a new initializer rather than a
+  launch-assigned property, so no code path can reach a delegate whose paths are
+  not yet set. `main.swift` was already its only construction site.
+- App tests share `app-tests/TemporaryInstancePaths.swift`. It creates nothing on
+  disk -- the production writers make their own directories -- so a test that writes
+  nothing leaves nothing behind. Its root is `/tmp/dt-<uuid>` and its identity is
+  `dt.test`, both short, because the derived control socket must stay inside the
+  104-byte Unix socket limit. That identity is deliberately not a real DanTerm
+  identity, so no test can reach a production or development instance's files.

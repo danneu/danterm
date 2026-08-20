@@ -8,12 +8,13 @@ import Testing
     @Test("pane host constructs without a WindowServer-backed window")
     @MainActor
     func constructsHeadlessly() {
-        let absentConfig = FileManager.default.temporaryDirectory
-            .appendingPathComponent("danterm-no-config-\(UUID().uuidString)")
+        let instance = TemporaryInstancePaths()
+        defer { instance.remove() }
         let runtime = AppRuntime(
             ports: .live(terminalBackend: SwiftTerminalBackend()),
             dialogSurfaces: RecordingDialogSurfaces().value,
-            configStore: DanTermConfigStore(url: absentConfig),
+            instancePaths: instance.paths,
+            configStore: DanTermConfigStore(url: instance.absentConfigURL),
             startsApplicationServices: false
         )
         defer { runtime.shutdown() }

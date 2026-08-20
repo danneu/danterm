@@ -24,20 +24,24 @@ do {
     exit(2)
 }
 
+// The one resolution of this process's identity-keyed paths. Everything below --
+// the path probe, the recovery read, the delegate, and through it the runtime and
+// the IPC server -- is handed this value instead of deriving a path of its own.
+let launchInstancePaths = resolveLaunchInstancePaths()
+
 #if DANTERM_TERMINAL_CHARACTERIZATION || DANTERM_TERMINAL_BENCHMARK
 /// Publish the app process's resolved filesystem paths before terminal creation,
 /// allowing the real-backend harness to reject any escape from its isolated run.
 func writeTerminalCharacterizationPathProbe(to path: String) throws {
-    let fileManager = FileManager.default
     let paths: [String: Any] = [
         "home": NSHomeDirectory(),
-        "applicationSupport": fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].path,
-        "caches": fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0].path,
-        "temporary": danTermTemporaryDirectoryURL(fileManager: fileManager).path,
+        "applicationSupport": launchInstancePaths.applicationSupportRoot.path,
+        "caches": launchInstancePaths.cachesRoot.path,
+        "temporary": launchInstancePaths.temporaryRoot.path,
         "config": DanTermConfigPaths.configFilePath(),
-        "recovery": recoveryDirectoryURL().path,
-        "socket": userControlSocketPath(identity: DanTermInstanceIdentity()).path,
-        "replay": scrollbackReplayDirectoryURL().path,
+        "recovery": launchInstancePaths.recoveryDirectory.path,
+        "socket": launchInstancePaths.controlSocket.path,
+        "replay": launchInstancePaths.scrollbackReplayDirectory.path,
         "displayScale": NSScreen.main?.backingScaleFactor ?? 1.0,
     ]
     let data = try JSONSerialization.data(withJSONObject: paths, options: [.prettyPrinted, .sortedKeys])
@@ -99,14 +103,14 @@ if initSnapshot == nil, launchPolicy.startup == .promptForRecovery {
     // Don't delete it here — writeSessionLockFile() in applicationDidFinishLaunching
     // atomically overwrites it, so there's no gap where a startup crash would be
     // mistaken for a clean exit on the next launch.
-    if readSessionLockFile() != nil {
+    if readSessionLockFile(paths: launchInstancePaths) != nil {
         previousSessionCrashed = true
     }
 
     // Load last session from split checkpoint files.
     // Light has fresh structure; enriched has scrollback. Merge both when available.
-    let lightData = try? Data(contentsOf: lightCheckpointURL())
-    let enrichedData = try? Data(contentsOf: enrichedCheckpointURL())
+    let lightData = try? Data(contentsOf: launchInstancePaths.lightCheckpointFile)
+    let enrichedData = try? Data(contentsOf: launchInstancePaths.enrichedCheckpointFile)
 
     if let ld = lightData, let ed = enrichedData,
        let light = try? loadValidatedInitFile(from: ld),
@@ -123,7 +127,7 @@ let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
 let delegate = MainActor.assumeIsolated { () -> AppDelegate in
-    let delegate = AppDelegate()
+    let delegate = AppDelegate(instancePaths: launchInstancePaths)
     delegate.initSnapshot = initSnapshot
     delegate.lastSessionSnapshot = lastSessionSnapshot
     delegate.previousSessionCrashed = previousSessionCrashed

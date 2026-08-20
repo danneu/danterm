@@ -4,26 +4,6 @@ import DanTermProtocol
 import UniformTypeIdentifiers
 @preconcurrency import UserNotifications
 
-/// Resolve DanTerm's process-temporary root, with a harness-only override
-/// because macOS Foundation ignores a launched app's `TMPDIR` value.
-func danTermTemporaryDirectoryURL(fileManager: FileManager = .default) -> URL {
-    #if DANTERM_TERMINAL_CHARACTERIZATION || DANTERM_TERMINAL_BENCHMARK
-    if let path = ProcessInfo.processInfo.environment["DANTERM_TERMINAL_CHARACTERIZATION_TEMP_ROOT"] {
-        return URL(fileURLWithPath: path, isDirectory: true)
-    }
-    #endif
-    return fileManager.temporaryDirectory
-}
-
-/// Centralize the replay directory used by restore writes, stale cleanup, and
-/// the characterization isolation probe so all three observe the same path.
-func scrollbackReplayDirectoryURL(fileManager: FileManager = .default) -> URL {
-    scrollbackReplayDirectoryURL(
-        identity: DanTermInstanceIdentity(),
-        temporaryDirectory: danTermTemporaryDirectoryURL(fileManager: fileManager)
-    )
-}
-
 #if DANTERM_TERMINAL_CHARACTERIZATION
 /// Records terminal boundary events so opt-in characterization harnesses can
 /// assert callback conformance without exposing backend details.
@@ -122,6 +102,10 @@ class AppRuntime {
     var model: AppModel
     private let configStore: DanTermConfigStore
     private let ports: AppRuntimePorts
+    // Every identity-keyed path this runtime reads or writes -- the control socket,
+    // both checkpoint tiers, the audit log, the replay directory. Given rather than
+    // derived, so a runtime cannot reach a directory its owner did not name.
+    let instancePaths: DanTermInstancePaths
     private var pendingConfigError: Error?
     // The one pane-keyed table of live panes. Each record owns everything whose lifetime
     // is the pane's -- session, pane chrome, pushed visibility, replay file, search
@@ -210,20 +194,22 @@ class AppRuntime {
     // update instead of a visible flicker.
     private static let reconcileCoalesceInterval: TimeInterval = 0.075
 
-    /// `dialogSurfaces` has no default on purpose: presenting on screen is a
-    /// capability a caller grants, so a runtime built without naming it does not
-    /// exist. `startsApplicationServices` is now only about the switcher event
-    /// monitor and the IPC server -- presenting is the surfaces' business.
+    /// Neither `dialogSurfaces` nor `instancePaths` has a default, for the same
+    /// reason: presenting on screen and writing to this instance's directories are
+    /// both capabilities a caller grants, so a runtime built without naming them
+    /// does not exist. `startsApplicationServices` is now only about the switcher
+    /// event monitor and the IPC server -- presenting is the surfaces' business.
     init(
         ports: AppRuntimePorts,
         dialogSurfaces: DialogSurfaces,
+        instancePaths: DanTermInstancePaths,
         configStore: DanTermConfigStore = DanTermConfigStore(),
         startsApplicationServices: Bool = true,
-        tailnetOptIn: Bool = false,
-        socketPath: URL = userControlSocketPath(identity: DanTermInstanceIdentity())
+        tailnetOptIn: Bool = false
     ) {
         self.ports = ports
         self.dialogSurfaces = dialogSurfaces
+        self.instancePaths = instancePaths
         self.configStore = configStore
         // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
         self.model = AppModel(
@@ -269,9 +255,11 @@ class AppRuntime {
         if startsApplicationServices {
             do {
                 let server = try IpcServer(
-                    socketPath: socketPath,
+                    socketPath: instancePaths.controlSocket,
                     tailnetConfig: launchConfig.tailnet,
+                    identity: instancePaths.identity,
                     tailnetOptIn: tailnetOptIn,
+                    auditWriter: IpcAuditLogWriter(directory: instancePaths.ipcAuditDirectory),
                     runtimeDispatch: makeIpcDispatch()
                 )
                 self.ipcServer = server
@@ -1079,7 +1067,7 @@ class AppRuntime {
     /// Write scrollback text to a temp file for shell replay. Returns the file URL.
     private func writeReplayFile(scrollback: String) -> URL? {
         guard let data = scrollback.data(using: .utf8) else { return nil }
-        let dir = scrollbackReplayDirectoryURL()
+        let dir = instancePaths.scrollbackReplayDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let fileURL = dir.appendingPathComponent(UUID().uuidString).appendingPathExtension("txt")
         guard (try? data.write(to: fileURL, options: .atomic)) != nil else { return nil }
@@ -1102,10 +1090,7 @@ class AppRuntime {
 
     /// Delete this identity's replay files from prior sessions.
     func cleanupStaleReplayDirectory() {
-        cleanupStaleScrollbackReplayDirectory(
-            identity: DanTermInstanceIdentity(),
-            temporaryDirectory: danTermTemporaryDirectoryURL()
-        )
+        instancePaths.removeStaleScrollbackReplayDirectory()
     }
 
     // MARK: - Session Checkpointing
@@ -1273,7 +1258,7 @@ class AppRuntime {
         }
         lightCheckpointBaseline = projection
         checkpointWriter.write(
-            to: lightCheckpointURL(),
+            to: instancePaths.lightCheckpointFile,
             async: async,
             encode: capture.encoder()
         )
@@ -1329,7 +1314,7 @@ class AppRuntime {
         guard schedulingLifecycle.isActive else { return }
         let capture = captureEnrichedCheckpoint()
         checkpointWriter.write(
-            to: enrichedCheckpointURL(),
+            to: instancePaths.enrichedCheckpointFile,
             async: async,
             encode: capture.encoder(),
             completion: completion

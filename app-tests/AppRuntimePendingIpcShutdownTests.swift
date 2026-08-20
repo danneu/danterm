@@ -22,12 +22,13 @@ struct AppRuntimePendingIpcShutdownTests {
         // Why it exists: runtime shutdown previously erased its connection census first and
         //   stranded callers, while creation and input travel through separate model tables.
         // Scenario: one creation and one input remain in flight when application teardown starts.
-        let absentConfig = FileManager.default.temporaryDirectory
-            .appendingPathComponent("danterm-no-config-\(UUID().uuidString)")
+        let instance = TemporaryInstancePaths()
+        defer { instance.remove() }
         let runtime = AppRuntime(
             ports: .live(terminalBackend: SwiftTerminalBackend()),
             dialogSurfaces: RecordingDialogSurfaces().value,
-            configStore: DanTermConfigStore(url: absentConfig),
+            instancePaths: instance.paths,
+            configStore: DanTermConfigStore(url: instance.absentConfigURL),
             startsApplicationServices: false
         )
         let creation = try ShutdownConnectionFixture()

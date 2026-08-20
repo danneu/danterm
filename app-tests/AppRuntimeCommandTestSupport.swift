@@ -238,12 +238,12 @@ func makeCommandTestRuntime(
     configStore: DanTermConfigStore? = nil,
     dialogSurfaces: RecordingDialogSurfaces = RecordingDialogSurfaces()
 ) -> AppRuntime {
-    let absentConfig = FileManager.default.temporaryDirectory
-        .appendingPathComponent("danterm-no-config-\(UUID().uuidString)")
+    let instance = TemporaryInstancePaths()
     return AppRuntime(
         ports: fixture.value,
         dialogSurfaces: dialogSurfaces.value,
-        configStore: configStore ?? DanTermConfigStore(url: absentConfig),
+        instancePaths: instance.paths,
+        configStore: configStore ?? DanTermConfigStore(url: instance.absentConfigURL),
         startsApplicationServices: false
     )
 }

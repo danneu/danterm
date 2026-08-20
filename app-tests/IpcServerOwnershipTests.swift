@@ -16,11 +16,11 @@ struct IpcServerOwnershipTests {
         //   own, then deleted the winning app's live socket during shutdown.
         // Scenario: instance A owns the slot socket while instance B starts,
         //   loses the bind race, and quits before A later quits normally.
-        let fixture = try IpcServerSocketFixture()
+        let fixture = TemporaryInstancePaths()
         defer { fixture.remove() }
-        let owner = try IpcServer(socketPath: fixture.socketURL, runtimeDispatch: nil)
+        let owner = try makeOwnershipServer(fixture)
 
-        let contender = try? IpcServer(socketPath: fixture.socketURL, runtimeDispatch: nil)
+        let contender = try? makeOwnershipServer(fixture)
         #expect(contender == nil)
         contender?.stop()
 
@@ -41,15 +41,14 @@ struct IpcServerOwnershipTests {
         //   model that the later restore then replaced wholesale.
         // Scenario: a client connects and sends ping before bootstrap finishes, then the
         //   delegate-equivalent start call releases that same queued request.
-        let fixture = try IpcServerSocketFixture()
+        let fixture = TemporaryInstancePaths()
         defer { fixture.remove() }
-        let configURL = fixture.directoryURL.appendingPathComponent("absent-config.json")
         let runtime = AppRuntime(
             ports: RecordingAppRuntimePorts().value,
             dialogSurfaces: RecordingDialogSurfaces().value,
-            configStore: DanTermConfigStore(url: configURL),
-            startsApplicationServices: true,
-            socketPath: fixture.socketURL
+            instancePaths: fixture.paths,
+            configStore: DanTermConfigStore(url: fixture.absentConfigURL),
+            startsApplicationServices: true
         )
         defer { runtime.shutdown() }
         let peer = try connectToIpcServer(at: fixture.socketURL)
@@ -70,21 +69,26 @@ struct IpcServerOwnershipTests {
             try readResponse(id: .number(7), from: peer)
         }.value
         #expect(response.error == nil)
+        // The runtime derives its audit sink from the same paths value it was given,
+        // so a test runtime never appends to the user's real recovery directory.
+        #expect(FileManager.default.fileExists(
+            atPath: fixture.paths.ipcAuditDirectory
+                .appendingPathComponent("ipc-audit.jsonl").path
+        ))
+        #expect(fixture.paths.ipcAuditDirectory.path.hasPrefix(fixture.rootURL.path))
     }
 
     @Test("recovery answer commits the restore before IPC starts accepting")
     func restoreAnswerStartsIpcAfterCommit() async throws {
-        let socket = try IpcServerSocketFixture()
+        let socket = TemporaryInstancePaths()
         defer { socket.remove() }
         let ports = RecordingAppRuntimePorts()
         let runtime = AppRuntime(
             ports: ports.value,
             dialogSurfaces: RecordingDialogSurfaces().value,
-            configStore: DanTermConfigStore(
-                url: socket.directoryURL.appendingPathComponent("absent-config.json")
-            ),
-            startsApplicationServices: true,
-            socketPath: socket.socketURL
+            instancePaths: socket.paths,
+            configStore: DanTermConfigStore(url: socket.absentConfigURL),
+            startsApplicationServices: true
         )
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
@@ -112,17 +116,15 @@ struct IpcServerOwnershipTests {
 
     @Test("Start Fresh creates a fresh tab before IPC starts accepting")
     func startFreshStartsIpcAfterFreshTab() async throws {
-        let socket = try IpcServerSocketFixture()
+        let socket = TemporaryInstancePaths()
         defer { socket.remove() }
         let ports = RecordingAppRuntimePorts()
         let runtime = AppRuntime(
             ports: ports.value,
             dialogSurfaces: RecordingDialogSurfaces().value,
-            configStore: DanTermConfigStore(
-                url: socket.directoryURL.appendingPathComponent("absent-config.json")
-            ),
-            startsApplicationServices: true,
-            socketPath: socket.socketURL
+            instancePaths: socket.paths,
+            configStore: DanTermConfigStore(url: socket.absentConfigURL),
+            startsApplicationServices: true
         )
         defer { runtime.shutdown() }
         let recoveredPaneId = PaneId(rawValue: UUID())
@@ -152,18 +154,16 @@ struct IpcServerOwnershipTests {
 
     @Test("failed recovery build falls back to fresh before IPC starts accepting")
     func failedRestoreStillStartsIpc() async throws {
-        let socket = try IpcServerSocketFixture()
+        let socket = TemporaryInstancePaths()
         defer { socket.remove() }
         let ports = RecordingAppRuntimePorts()
         ports.failedSessionRequestNumbers = [1]
         let runtime = AppRuntime(
             ports: ports.value,
             dialogSurfaces: RecordingDialogSurfaces().value,
-            configStore: DanTermConfigStore(
-                url: socket.directoryURL.appendingPathComponent("absent-config.json")
-            ),
-            startsApplicationServices: true,
-            socketPath: socket.socketURL
+            instancePaths: socket.paths,
+            configStore: DanTermConfigStore(url: socket.absentConfigURL),
+            startsApplicationServices: true
         )
         defer { runtime.shutdown() }
         let restore = try ownershipValidatedRestore(
@@ -201,20 +201,15 @@ private func ownershipValidatedRestore(_ snapshot: AppModelSnapshot) throws -> V
     )
 }
 
-private struct IpcServerSocketFixture {
-    let directoryURL: URL
-    let socketURL: URL
-
-    init() throws {
-        directoryURL = URL(fileURLWithPath: "/tmp", isDirectory: true)
-            .appendingPathComponent("dt-ipc-server-\(UUID().uuidString)", isDirectory: true)
-        socketURL = directoryURL.appendingPathComponent("control.sock")
-        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-    }
-
-    func remove() {
-        try? FileManager.default.removeItem(at: directoryURL)
-    }
+/// Builds a server on the fixture's own paths, so the socket it claims and the audit
+/// log it writes both stay inside the fixture directory.
+private func makeOwnershipServer(_ fixture: TemporaryInstancePaths) throws -> IpcServer {
+    try IpcServer(
+        socketPath: fixture.socketURL,
+        identity: fixture.paths.identity,
+        auditWriter: IpcAuditLogWriter(directory: fixture.paths.ipcAuditDirectory),
+        runtimeDispatch: nil
+    )
 }
 
 private func canConnectToIpcServer(at url: URL) -> Bool {
