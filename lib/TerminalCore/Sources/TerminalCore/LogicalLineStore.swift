@@ -52,12 +52,14 @@ extension Terminal {
         }
 
         /// A side-table key measured from the record's cell base before any head trim.
-        private struct OriginalCellOffset: Sendable, Equatable, Comparable {
+        fileprivate struct OriginalCellOffset: Sendable, Equatable, Comparable, Strideable {
             var value: Int
 
             static func < (lhs: Self, rhs: Self) -> Bool { lhs.value < rhs.value }
             static func + (lhs: Self, rhs: Int) -> Self { Self(value: lhs.value + rhs) }
             static func - (lhs: Self, rhs: Self) -> Int { lhs.value - rhs.value }
+            func distance(to other: Self) -> Int { other - self }
+            func advanced(by distance: Int) -> Self { self + distance }
         }
 
         /// A hyperlink id stamped at one original cell offset within the record.
@@ -142,11 +144,16 @@ extension Terminal {
         /// Names a cell boundary by stable record identity and its original offset in that record.
         struct RecordTextPosition: Equatable, Comparable, Sendable {
             var record: RecordIdentity
-            var cellOffset: Int
+            fileprivate var cellOffset: OriginalCellOffset
 
             static func < (lhs: Self, rhs: Self) -> Bool {
                 lhs.record < rhs.record
                     || (lhs.record == rhs.record && lhs.cellOffset < rhs.cellOffset)
+            }
+
+            /// Moves within the same stable record by a retained-relative distance.
+            func advanced(by distance: Int) -> Self {
+                Self(record: record, cellOffset: cellOffset + distance)
             }
         }
 
@@ -269,7 +276,7 @@ extension Terminal {
         /// trimmed**, and the header word is full: `research/31/D2` Decision 1 prices a blank record at
         /// eight arena bytes, so a per-record trim field would have cost the blank-history depth
         /// the whole budget derivation rests on.
-        private var headTrimmedCells = 0
+        private var headTrimmedCells = OriginalCellOffset(value: 0)
 
         /// Set when eviction dropped an open record whose line has no follower yet, so the next
         /// record opened continues that line rather than starting one (`research/31/D2` Decision 2).
@@ -1026,7 +1033,7 @@ extension Terminal {
                 identity: recordIdentity(in: offset)
             )
             head = newOffset
-            headTrimmedCells += cut
+            headTrimmedCells = headTrimmedCells + cut
         }
 
         private mutating func dropHeadRecord(_ record: LogicalLineRecord) {
@@ -1059,7 +1066,7 @@ extension Terminal {
                retiredSequence / Self.blockSize != firstRecordSequence / Self.blockSize {
                 blocks.removeFirst()
             }
-            headTrimmedCells = 0
+            headTrimmedCells = OriginalCellOffset(value: 0)
 
             if offsets.count == 0 {
                 resetToEmptyArena()
@@ -1083,7 +1090,7 @@ extension Terminal {
         private mutating func resetToEmptyArena() {
             head = 0
             writeCursor = 0
-            headTrimmedCells = 0
+            headTrimmedCells = OriginalCellOffset(value: 0)
             blocks.removeAll()
             sideTables.removeAll()
             clearOpenScratch()
@@ -1339,10 +1346,12 @@ extension Terminal {
         /// Resolves a retained coordinate to its maintained width-free content rank.
         func contentRank(of coordinate: RecordTextPosition) -> Int? {
             guard let index = recordIndex(of: coordinate.record) else { return nil }
-            let retainedStart = index == 0 ? headTrimmedCells : 0
-            let relativeOffset = coordinate.cellOffset - retainedStart
+            guard let relativeOffset = retainedCellOffset(
+                recordIndex: index,
+                originalOffset: coordinate.cellOffset
+            ) else { return nil }
             let record = self.record(at: offsets[index])
-            guard relativeOffset >= 0, relativeOffset <= record.cellCount else { return nil }
+            guard relativeOffset <= record.cellCount else { return nil }
             guard let blockIndex = blockIndex(containingRecordAt: index) else { return nil }
             var rank = blocks[blockIndex].contentStart - evictedContentUnitCount
             let blockFirst = recordIndices(inBlockAt: blockIndex).lowerBound
@@ -1368,7 +1377,10 @@ extension Terminal {
             let record = self.record(at: address)
             let coordinate = RecordTextPosition(
                 record: recordIdentity(in: address),
-                cellOffset: record.cellCount + (index == 0 ? headTrimmedCells : 0)
+                cellOffset: originalCellOffset(
+                    recordIndex: index,
+                    retainedOffset: record.cellCount
+                )
             )
             guard let rank = contentRank(of: coordinate) else { return 0 }
             let boundary = includingTrailingBoundary && record.isForcedSplit == false ? 1 : 0
@@ -1378,10 +1390,12 @@ extension Terminal {
         /// Full-walk oracle for `contentRank(of:)`.
         func independentContentRank(of coordinate: RecordTextPosition) -> Int? {
             guard let index = recordIndex(of: coordinate.record) else { return nil }
-            let retainedStart = index == 0 ? headTrimmedCells : 0
-            let relativeOffset = coordinate.cellOffset - retainedStart
+            guard let relativeOffset = retainedCellOffset(
+                recordIndex: index,
+                originalOffset: coordinate.cellOffset
+            ) else { return nil }
             let record = self.record(at: offsets[index])
-            guard relativeOffset >= 0, relativeOffset <= record.cellCount else { return nil }
+            guard relativeOffset <= record.cellCount else { return nil }
             var rank = 0
             for earlier in 0..<index {
                 rank += independentlyRecountedContentContribution(recordIndex: earlier)
@@ -1595,15 +1609,14 @@ extension Terminal {
             return (0..<record.cellCount).map { cell(recordIndex: recordIndex, cellOffset: $0) }
         }
 
-        /// Everything a width-free scan of one closed record needs before it reads a cell: the
-        /// record's stable identity, the original cell offset its first retained cell carries,
-        /// how many cells it holds, and whether its end is a hard line boundary.
+        /// Everything a width-free scan of one closed record needs before it reads a cell: its
+        /// stable starting position, how many cells it holds, and whether its end is a hard line
+        /// boundary.
         ///
         /// Read once per record so a scan states coordinates arithmetically instead of deriving
         /// identity and trim base again for every cell it keys.
         struct ClosedRecordScan: Equatable, Sendable {
-            var identity: RecordIdentity
-            var cellOffsetBase: Int
+            var start: RecordTextPosition
             var cellCount: Int
             var isForcedSplit: Bool
         }
@@ -1615,8 +1628,10 @@ extension Terminal {
             let record = self.record(at: address)
             guard record.isOpen == false else { return nil }
             return ClosedRecordScan(
-                identity: recordIdentity(in: address),
-                cellOffsetBase: recordIndex == 0 ? headTrimmedCells : 0,
+                start: RecordTextPosition(
+                    record: recordIdentity(in: address),
+                    cellOffset: originalCellOffset(recordIndex: recordIndex, retainedOffset: 0)
+                ),
                 cellCount: record.cellCount,
                 isForcedSplit: record.isForcedSplit
             )
@@ -1906,7 +1921,7 @@ extension Terminal {
             for index in 0..<offsets.count {
                 let offset = offsets[index]
                 let record = self.record(at: offset)
-                let retainedStart = index == 0 ? headTrimmedCells : 0
+                let retainedStart = originalCellOffset(recordIndex: index, retainedOffset: 0)
                 let retainedEnd = retainedStart + record.cellCount
                 if record.isOpen {
                     for run in openIdentityRuns {
@@ -1923,14 +1938,14 @@ extension Terminal {
                     + record.hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
                 if record.identityPerCell {
                     for cell in retainedStart..<retainedEnd {
-                        let value = u32(base + cell * LogicalLineRecord.identityCellBytes)
+                        let value = u32(base + cell.value * LogicalLineRecord.identityCellBytes)
                         if value != 0 { body(value) }
                     }
                     continue
                 }
                 for entryIndex in 0..<record.identityEntryCount {
                     let entry = base + entryIndex * LogicalLineRecord.identityRunEntryBytes
-                    let runStart = u16(entry)
+                    let runStart = OriginalCellOffset(value: u16(entry))
                     let runEnd = runStart + u16(entry + 2)
                     let start = max(runStart, retainedStart)
                     let end = min(runEnd, retainedEnd)
@@ -2101,10 +2116,12 @@ extension Terminal {
             guard record.isOpen == false, cellOffset >= 0, cellOffset <= record.cellCount else {
                 return nil
             }
-            let originalOffset = cellOffset + (recordIndex == 0 ? headTrimmedCells : 0)
             return RecordTextPosition(
                 record: recordIdentity(in: address),
-                cellOffset: originalOffset
+                cellOffset: originalCellOffset(
+                    recordIndex: recordIndex,
+                    retainedOffset: cellOffset
+                )
             )
         }
 
@@ -2147,9 +2164,10 @@ extension Terminal {
             guard low < offsets.count, recordIdentity(in: offsets[low]) == coordinate.record else {
                 return nil
             }
-            let retainedStart = low == 0 ? headTrimmedCells : 0
-            let relativeOffset = coordinate.cellOffset - retainedStart
-            guard relativeOffset >= 0 else { return nil }
+            guard let relativeOffset = retainedCellOffset(
+                recordIndex: low,
+                originalOffset: coordinate.cellOffset
+            ) else { return nil }
             return position(ofRecord: low, cellOffset: relativeOffset)
         }
 
@@ -2415,9 +2433,20 @@ extension Terminal {
             recordIndex: Int,
             retainedOffset: Int
         ) -> OriginalCellOffset {
-            OriginalCellOffset(
-                value: retainedOffset + (recordIndex == 0 ? headTrimmedCells : 0)
-            )
+            let retainedStart = recordIndex == 0
+                ? headTrimmedCells
+                : OriginalCellOffset(value: 0)
+            return retainedStart + retainedOffset
+        }
+
+        /// Converts an original side-table key into a retained-relative cell offset.
+        private func retainedCellOffset(
+            recordIndex: Int,
+            originalOffset: OriginalCellOffset
+        ) -> Int? {
+            let retainedStart = originalCellOffset(recordIndex: recordIndex, retainedOffset: 0)
+            guard originalOffset >= retainedStart else { return nil }
+            return originalOffset - retainedStart
         }
 
         private func cell(recordIndex: Int, cellOffset: Int) -> Terminal.GridCell {

@@ -561,10 +561,7 @@ extension Terminal {
         private func recordPosition(
             endingRecord scan: LogicalLineStore.ClosedRecordScan
         ) -> LogicalLineStore.RecordTextPosition {
-            LogicalLineStore.RecordTextPosition(
-                record: scan.identity,
-                cellOffset: scan.cellOffsetBase + scan.cellCount
-            )
+            scan.start.advanced(by: scan.cellCount)
         }
 
         private func scanClosedRecordSearchUnits(
@@ -602,18 +599,15 @@ extension Terminal {
                         NeedleWindow.Unit(
                             key: .scalar(0x0A),
                             start: recordPosition(endingRecord: previous),
-                            end: LogicalLineStore.RecordTextPosition(
-                                record: scan.identity,
-                                cellOffset: scan.cellOffsetBase
-                            )
+                            end: scan.start
                         )
                     ) {
                         matches.append(RecordSearchRange(start: match.start, end: match.end))
                     }
                 }
-                // The record's identity and trim base are constant across its cells and its offsets
-                // are the loop's own arithmetic, so the scan states each unit's coordinates instead
-                // of asking the store to derive them twice per cell.
+                // The stable start is constant across the record and the cell offsets are the
+                // loop's own arithmetic, so the scan advances that position instead of asking the
+                // store to derive it twice per cell.
                 history.forEachClosedRecordCell(at: recordIndex) { cellOffset, kind, scalars in
                     let key: SearchGraphemeKey?
                     switch kind {
@@ -625,18 +619,13 @@ extension Terminal {
                         key = nil
                     }
                     guard let key else { return }
-                    let base = scan.cellOffsetBase
                     let width = kind == .wideHead ? 2 : 1
                     if let match = matcher.record(
                         NeedleWindow.Unit(
                             key: key,
-                            start: LogicalLineStore.RecordTextPosition(
-                                record: scan.identity,
-                                cellOffset: base + cellOffset
-                            ),
-                            end: LogicalLineStore.RecordTextPosition(
-                                record: scan.identity,
-                                cellOffset: base + min(scan.cellCount, cellOffset + width)
+                            start: scan.start.advanced(by: cellOffset),
+                            end: scan.start.advanced(
+                                by: min(scan.cellCount, cellOffset + width)
                             )
                         )
                     ) {

@@ -748,6 +748,27 @@ struct TerminalSearchTests {
         assertSearchIndexMatchesOracle(terminal, needle: "Dhit")
     }
 
+    @Test("head trimming keeps a later match in the same record")
+    func headTrimKeepsMatchInsideRetainedSuffix() throws {
+        // Intent: trimming one display row retires its match but preserves a later retained match.
+        // Why it exists: closed-record search positions use original offsets after a head trim.
+        // Scenario: one two-row record contains a match in each row before its first row leaves.
+        var terminal = try #require(Terminal(
+            columns: 4,
+            rows: 1,
+            scrollbackBudgetBytes: historyBudget(lineCells: [8, 1, 1, 1], paneColumns: 4)
+        ))
+        terminal.feed(Array("hitXhitZ\r\nx".utf8))
+        _ = terminal.beginSearch("hit")
+        #expect(terminal.indexedSearchRecordRangesForTesting.count == 2)
+
+        terminal.feed(Array("\r\ny\r\nz\r\na".utf8))
+
+        #expect(terminal.retainedRecordSummaryForTesting(at: 0)?.cellCount == 4)
+        #expect(terminal.indexedSearchRecordRangesForTesting.count == 1)
+        assertSearchIndexMatchesOracle(terminal, needle: "hit")
+    }
+
     @Test("a width change reports search work only when the closed seam moves")
     func widthChangeSearchMaintenanceInstrumentDetectsSeamMovement() throws {
         // Intent: the resize maintenance counter stays live for the bounded case where reflow

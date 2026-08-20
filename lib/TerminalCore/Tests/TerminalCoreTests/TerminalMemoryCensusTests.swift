@@ -200,6 +200,70 @@ struct TerminalMemoryCensusTests {
         #expect(identities == [200, 201, 202, 203])
     }
 
+    @Test("identity census clips an open table to a head-trimmed record")
+    func headTrimmedOpenIdentityTable() {
+        // Intent: a head trim excludes open-table identities before the retained window.
+        // Why it exists: the open tail keeps original offsets while its stored cells move.
+        // Scenario: eviction trims the first display row from one open two-row record.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        let row = { (base: Terminal.ContentIdentity) -> Terminal.GridRow in
+            var row = Terminal.GridRow(cells: (0..<4).map { offset in
+                Terminal.GridCell(
+                    scalars: TerminalScalars("x"),
+                    kind: .narrow,
+                    hyperlinkId: Terminal.HyperlinkId(base / 100),
+                    contentIdentity: base + Terminal.ContentIdentity(offset)
+                )
+            })
+            row.isSoftWrapped = true
+            return row
+        }
+        store.admit(row(100))
+        store.admit(row(200))
+
+        let evicted = store.evictOneDisplayRow()
+        #expect(evicted)
+        var hyperlinks: [Terminal.HyperlinkId] = []
+        store.forEachHyperlinkId { hyperlinks.append($0) }
+        var identities: [Terminal.ContentIdentity] = []
+        store.forEachContentIdentity { identities.append($0) }
+
+        #expect(hyperlinks == [2, 2, 2, 2])
+        #expect(identities == [200, 201, 202, 203])
+    }
+
+    @Test("identity census clips a closed per-cell table to a head-trimmed record")
+    func headTrimmedPerCellIdentityTable() {
+        // Intent: a head trim excludes per-cell identities before the retained window.
+        // Why it exists: fragmented identities use a different closed arena encoding than runs.
+        // Scenario: eviction trims four of eight repeated identities, which force per-cell storage.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        let row = { (hyperlink: Terminal.HyperlinkId, softWrapped: Bool) -> Terminal.GridRow in
+            var row = Terminal.GridRow(cells: (0..<4).map { _ in
+                Terminal.GridCell(
+                    scalars: TerminalScalars("x"),
+                    kind: .narrow,
+                    hyperlinkId: hyperlink,
+                    contentIdentity: 300
+                )
+            })
+            row.isSoftWrapped = softWrapped
+            return row
+        }
+        store.admit(row(1, true))
+        store.admit(row(2, false))
+
+        let evicted = store.evictOneDisplayRow()
+        #expect(evicted)
+        var hyperlinks: [Terminal.HyperlinkId] = []
+        store.forEachHyperlinkId { hyperlinks.append($0) }
+        var identities: [Terminal.ContentIdentity] = []
+        store.forEachContentIdentity { identities.append($0) }
+
+        #expect(hyperlinks == [2, 2, 2, 2])
+        #expect(identities == [300, 300, 300, 300])
+    }
+
     @Test("cell count stays stable when resize moves retained display rows")
     func retainedCellCountIsWidthFree() throws {
         // Intent: a resize can move display rows without changing whole-grid stored cell counts.
