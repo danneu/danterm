@@ -766,10 +766,10 @@ func update(
                 let groupId = model.groups[gi].id
                 var commands: [Command] = []
                 for pid in allPaneIds(tab.paneTree.root) {
-                    commands.append(contentsOf: rejectPendingCreation(
+                    commands.append(contentsOf: rejectPendingIpcWork(
                         for: pid,
                         in: &model,
-                        message: "pane process failed to start"
+                        cause: .processFailedToStart
                     ))
                     // Session teardown is reconcileSessionExistence's (these panes leave the
                     // tree below); the global alert feed still needs explicit pruning.
@@ -925,7 +925,7 @@ func update(
                 message: "application shut down before the pane process started"
             )
         }
-        let inputErrors = model.pendingInputRequests.keys.map {
+        let inputErrors = Set(model.pendingInputSubmissions.values.map(\.requestId)).map {
             Command.ipcError(
                 reqId: $0,
                 code: -32603,
@@ -933,26 +933,25 @@ func update(
             )
         }
         model.pendingSessionCreations.removeAll()
-        model.pendingInputRequests.removeAll()
         model.pendingInputSubmissions.removeAll()
         return creationErrors + inputErrors
 
     case .inputSubmissionCompleted(let submissionId, let result):
-        guard let requestId = model.pendingInputSubmissions.removeValue(forKey: submissionId),
-              var request = model.pendingInputRequests[requestId]
+        // A submission whose request already replied is not in the map any
+        // more, so a late completion after a rejection or a teardown is silent.
+        guard let pending = model.pendingInputSubmissions.removeValue(forKey: submissionId)
         else { return [] }
-        request.remaining.remove(submissionId)
+        let requestId = pending.requestId
         switch result {
-        case .delivered where request.remaining.isEmpty == false:
-            model.pendingInputRequests[requestId] = request
-            return []
         case .delivered:
-            model.pendingInputRequests.removeValue(forKey: requestId)
+            let stillWaiting = model.pendingInputSubmissions.values.contains {
+                $0.requestId == requestId
+            }
+            guard stillWaiting == false else { return [] }
             return [.ipcReply(reqId: requestId, result: .object(["ok": .bool(true)]))]
         case .rejected(let failure):
-            model.pendingInputRequests.removeValue(forKey: requestId)
-            for pendingId in request.remaining {
-                model.pendingInputSubmissions.removeValue(forKey: pendingId)
+            model.pendingInputSubmissions = model.pendingInputSubmissions.filter {
+                $0.value.requestId != requestId
             }
             return [.ipcError(
                 reqId: requestId,
@@ -1553,10 +1552,10 @@ private func deleteGroupBody(
         var commands: [Command] = []
         for tab in group.tabs {
             for paneId in allPaneIds(tab.paneTree.root) {
-                commands.append(contentsOf: rejectPendingCreation(
+                commands.append(contentsOf: rejectPendingIpcWork(
                     for: paneId,
                     in: &model,
-                    message: "pane closed before its process started"
+                    cause: .paneClosed
                 ))
                 removeAlertsForPane(paneId, in: &model)
             }
@@ -1678,10 +1677,10 @@ private func closePaneBody(
         return closeTabRemoval(&model, id: tab.id)
     }
 
-    let commands = rejectPendingCreation(
+    let commands = rejectPendingIpcWork(
         for: paneId,
         in: &model,
-        message: "pane closed before its process started"
+        cause: .paneClosed
     )
     removeAlertsForPane(paneId, in: &model)
     if model.todoPopover == .pane(paneId) {
@@ -1929,10 +1928,10 @@ private func closeTabRemoval(_ model: inout AppModel, id: TabId) -> [Command] {
 
     var commands: [Command] = []
     for pid in paneIds {
-        commands.append(contentsOf: rejectPendingCreation(
+        commands.append(contentsOf: rejectPendingIpcWork(
             for: pid,
             in: &model,
-            message: "pane closed before its process started"
+            cause: .paneClosed
         ))
         // Session teardown is reconcileSessionExistence's (these panes leave the tree
         // below); keep global alert cleanup + per-pane popover dismiss here.
@@ -1957,16 +1956,60 @@ private func closeTabRemoval(_ model: inout AppModel, id: TabId) -> [Command] {
     return commands
 }
 
-/// Removes and rejects the creation request owned by one pane, if it still waits on spawn.
-private func rejectPendingCreation(
+/// Why a pane's pending IPC work is being failed. One cause words both replies,
+/// so a teardown site names what happened and never picks the wording of one
+/// half without the other.
+private enum PendingIpcRejectionCause {
+    case paneClosed
+    case processFailedToStart
+
+    var creationMessage: String {
+        switch self {
+        case .paneClosed: "pane closed before its process started"
+        case .processFailedToStart: "pane process failed to start"
+        }
+    }
+
+    var inputMessage: String {
+        switch self {
+        case .paneClosed: "pane closed before its input was delivered"
+        case .processFailedToStart: "pane process failed to start before its input was delivered"
+        }
+    }
+}
+
+/// Removes and rejects every pending IPC request owned by one pane that is
+/// leaving the tree: the creation reply still waiting on spawn, and any
+/// `pane.input` request still waiting on submissions. It is the single teardown
+/// point for both, so a new teardown path cannot fail one half and strand the
+/// other.
+private func rejectPendingIpcWork(
     for paneId: PaneId,
     in model: inout AppModel,
-    message: String
+    cause: PendingIpcRejectionCause
 ) -> [Command] {
-    guard let sessionId = model.pane(paneId)?.session?.id,
-          let pending = model.pendingSessionCreations.removeValue(forKey: sessionId)
-    else { return [] }
-    return [.ipcError(reqId: pending.requestId, code: -32603, message: message)]
+    var commands: [Command] = []
+    if let sessionId = model.pane(paneId)?.session?.id,
+       let pending = model.pendingSessionCreations.removeValue(forKey: sessionId) {
+        commands.append(.ipcError(
+            reqId: pending.requestId,
+            code: -32603,
+            message: cause.creationMessage
+        ))
+    }
+
+    var rejectedRequests: Set<UUID> = []
+    for pending in model.pendingInputSubmissions.values where pending.paneId == paneId {
+        rejectedRequests.insert(pending.requestId)
+    }
+    guard rejectedRequests.isEmpty == false else { return commands }
+    model.pendingInputSubmissions = model.pendingInputSubmissions.filter {
+        rejectedRequests.contains($0.value.requestId) == false
+    }
+    commands.append(contentsOf: rejectedRequests.map {
+        Command.ipcError(reqId: $0, code: -32603, message: cause.inputMessage)
+    })
+    return commands
 }
 
 /// Throttle macOS notification delivery: one per pane per kind every 1 second.

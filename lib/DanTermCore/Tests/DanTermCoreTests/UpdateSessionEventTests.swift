@@ -6,6 +6,7 @@
 // across pending and inline scheduling states.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -87,29 +88,42 @@ import Testing
     }
 
     @Test("runtime shutdown rejects pending creation and input requests")
-    func runtimeShutdownRejectsEveryPendingPaneEffect() {
+    func runtimeShutdownRejectsEveryPendingPaneEffect() throws {
+        // A multi-item input request is in flight, so this also pins that
+        // shutdown answers a request once rather than once per submission.
         var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let creationRequestId = UUID()
-        let inputRequestId = UUID()
         let sessionId = SessionId()
-        let submissionId = InputSubmissionId()
         model.pendingSessionCreations[sessionId] = PendingSessionCreation(
             requestId: creationRequestId,
             result: .null
         )
-        model.pendingInputRequests[inputRequestId] = PendingInputRequest(
-            remaining: [submissionId]
+        let inputRequestId = UUID()
+        let request = try IpcRequest.decode(
+            method: IpcRequestMethod.paneInput.rawValue,
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "input": .array([
+                    .object(["text": .string("a")]),
+                    .object(["text": .string("b")]),
+                ]),
+            ])
         )
+        _ = update(&model, .ipcRequest(reqId: inputRequestId, caller: .local, request: request))
+        #expect(model.pendingInputSubmissions.count == 2)
 
         let commands = update(&model, .runtimeWillShutdown)
 
-        let rejected = Set(commands.compactMap { command -> UUID? in
+        let rejectedIds = commands.compactMap { command -> UUID? in
             if case .ipcError(let id, _, _) = command { return id }
             return nil
-        })
-        #expect(rejected == [creationRequestId, inputRequestId])
+        }
+        #expect(rejectedIds.count == 2)
+        #expect(Set(rejectedIds) == [creationRequestId, inputRequestId])
         #expect(model.pendingSessionCreations.isEmpty)
-        #expect(model.pendingInputRequests.isEmpty)
+        #expect(model.pendingInputSubmissions.isEmpty)
     }
 
     @Test("testBellOnFocusedPaneIsIgnored")

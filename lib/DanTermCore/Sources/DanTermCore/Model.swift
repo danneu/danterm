@@ -79,9 +79,15 @@ struct PendingSessionCreation: Equatable {
     let result: JSONValue
 }
 
-/// Owns every submission that must finish before one pane input request can reply.
-struct PendingInputRequest: Equatable {
-    var remaining: Set<InputSubmissionId>
+/// One in-flight `pane.input` submission. It names the request that replies
+/// once no submission of its own is left, and the pane whose teardown must fail
+/// that request early. Storing both here keeps the request->submission and
+/// submission->request directions from being able to disagree: the
+/// request-to-submissions direction is derived by scanning values, and in-flight
+/// counts are single digits.
+struct PendingInputSubmission: Equatable {
+    let requestId: UUID
+    let paneId: PaneId
 }
 
 struct AlertModel: Equatable {
@@ -620,8 +626,7 @@ struct AppModel: Equatable {
     var pendingConfirmation: PendingConfirmation? = nil  // ephemeral -- non-nil while the confirmation panel is active
     var noticeQueue: [PendingNotice] = []  // ephemeral -- oldest first; projected one at a time
     var pendingSessionCreations: [SessionId: PendingSessionCreation] = [:]
-    var pendingInputRequests: [UUID: PendingInputRequest] = [:]
-    var pendingInputSubmissions: [InputSubmissionId: UUID] = [:]
+    var pendingInputSubmissions: [InputSubmissionId: PendingInputSubmission] = [:]
 
     /// Whether any group holds at least one tab. Short-circuits on the first
     /// non-empty group without materializing `groups.flatMap(\.tabs)`, which
