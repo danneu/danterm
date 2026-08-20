@@ -100,10 +100,10 @@ final class TerminalBottomBarView: UIView {
         keyRow.alignment = .fill
         keyRow.distribution = .fillEqually
         keyRow.spacing = 2
-        for entry in terminalAccessoryEntries {
-            let button = makeKeyButton(entry)
+        for key in MobileAccessoryKey.allCases {
+            let button = makeKeyButton(key)
             keyRow.addArrangedSubview(button)
-            if entry.tag == 1 { controlButton = button }
+            if key == .control { controlButton = button }
         }
 
         for subview in [paneButton, keyRow, overflowButton, keyboardDismissButton] {
@@ -152,12 +152,13 @@ final class TerminalBottomBarView: UIView {
         ])
     }
 
-    private func makeKeyButton(_ entry: TerminalAccessoryEntry) -> UIButton {
+    private func makeKeyButton(_ key: MobileAccessoryKey) -> UIButton {
+        let appearance = TerminalAccessoryAppearance(key)
         var configuration = UIButton.Configuration.plain()
         configuration.contentInsets = NSDirectionalEdgeInsets(
             top: 0, leading: 0, bottom: 0, trailing: 0
         )
-        configuration.title = entry.systemImage == nil ? entry.title : nil
+        configuration.title = appearance.systemImage == nil ? appearance.title : nil
         configuration.titleLineBreakMode = .byClipping
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer {
             incoming in
@@ -165,14 +166,20 @@ final class TerminalBottomBarView: UIView {
             outgoing.font = .systemFont(ofSize: 13, weight: .semibold)
             return outgoing
         }
-        configuration.image = entry.systemImage.flatMap(UIImage.init(systemName:))
+        configuration.image = appearance.systemImage.flatMap(UIImage.init(systemName:))
         configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
             textStyle: .body
         )
         let button = UIButton(configuration: configuration)
-        button.tag = entry.tag
         button.titleLabel?.numberOfLines = 1
-        button.addTarget(self, action: #selector(accessoryTapped(_:)), for: .touchUpInside)
+        // The action carries the key it was built for, so a button cannot report a key
+        // other than the one the row drew it as. It is added rather than passed as the
+        // primary action, because a primary action would backfill its title onto the
+        // image-only buttons.
+        button.addAction(
+            UIAction { [weak self] _ in self?.onAccessoryKey?(key) },
+            for: .touchUpInside
+        )
         return button
     }
 
@@ -190,70 +197,36 @@ final class TerminalBottomBarView: UIView {
         controlButton.configuration = configuration
     }
 
-    @objc private func accessoryTapped(_ sender: UIButton) {
-        guard let key = MobileAccessoryKey(tag: sender.tag) else { return }
-        onAccessoryKey?(key)
-    }
-
     @objc private func dismissKeyboard() {
         onDismissKeyboard?()
     }
 }
 
-/// Describes one terminal key without coupling its presentation to input mapping.
-private struct TerminalAccessoryEntry {
+/// Says how one terminal key is drawn, without coupling its presentation to input
+/// mapping: the kit enum names the input vocabulary, and this switch is the only place
+/// that gives a case a face. It has no `default`, so a new key cannot reach the row until
+/// the row says how to draw it.
+private struct TerminalAccessoryAppearance {
     let title: String
     let systemImage: String?
-    let tag: Int
-}
 
-private let terminalAccessoryEntries = [
-    TerminalAccessoryEntry(
-        title: "Esc", systemImage: nil, tag: 0
-    ),
-    TerminalAccessoryEntry(
-        title: "Ctrl", systemImage: nil, tag: 1
-    ),
-    TerminalAccessoryEntry(
-        title: "Tab", systemImage: nil, tag: 2
-    ),
-    TerminalAccessoryEntry(
-        title: "Up", systemImage: "arrow.up", tag: 3
-    ),
-    TerminalAccessoryEntry(
-        title: "Down", systemImage: "arrow.down", tag: 4
-    ),
-    TerminalAccessoryEntry(
-        title: "Left", systemImage: "arrow.left", tag: 5
-    ),
-    TerminalAccessoryEntry(
-        title: "Right", systemImage: "arrow.right", tag: 6
-    ),
-    TerminalAccessoryEntry(
-        title: "|", systemImage: nil, tag: 7
-    ),
-    TerminalAccessoryEntry(
-        title: "~", systemImage: nil, tag: 8
-    ),
-    TerminalAccessoryEntry(
-        title: "/", systemImage: nil, tag: 9
-    ),
-]
-
-private extension MobileAccessoryKey {
-    init?(tag: Int) {
-        switch tag {
-        case 0: self = .escape
-        case 1: self = .control
-        case 2: self = .tab
-        case 3: self = .up
-        case 4: self = .down
-        case 5: self = .left
-        case 6: self = .right
-        case 7: self = .pipe
-        case 8: self = .tilde
-        case 9: self = .slash
-        default: return nil
+    init(_ key: MobileAccessoryKey) {
+        switch key {
+        case .escape: self.init(title: "Esc", systemImage: nil)
+        case .control: self.init(title: "Ctrl", systemImage: nil)
+        case .tab: self.init(title: "Tab", systemImage: nil)
+        case .up: self.init(title: "Up", systemImage: "arrow.up")
+        case .down: self.init(title: "Down", systemImage: "arrow.down")
+        case .left: self.init(title: "Left", systemImage: "arrow.left")
+        case .right: self.init(title: "Right", systemImage: "arrow.right")
+        case .pipe: self.init(title: "|", systemImage: nil)
+        case .tilde: self.init(title: "~", systemImage: nil)
+        case .slash: self.init(title: "/", systemImage: nil)
         }
+    }
+
+    private init(title: String, systemImage: String?) {
+        self.title = title
+        self.systemImage = systemImage
     }
 }

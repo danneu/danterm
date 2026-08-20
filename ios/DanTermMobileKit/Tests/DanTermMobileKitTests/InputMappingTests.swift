@@ -47,6 +47,25 @@ func accessoryRowMapping() {
     }
 }
 
+@Test("Every accessory key reaches the pane, and only Ctrl stays local")
+func everyAccessoryKeyIsMapped() {
+    // Intent: the mapper answers for every case of the row's vocabulary -- traffic for
+    //   each key, and only the latch for Ctrl.
+    // Why it exists: the bar builds its row from `MobileAccessoryKey.allCases`, so a case
+    //   the mapper drops would draw a button that sends nothing.
+    for key in MobileAccessoryKey.allCases {
+        var mapper = MobileInputMapper()
+        let action = mapper.accessory(key)
+        if key == .control {
+            #expect(action == nil)
+            #expect(mapper.isControlLatched)
+        } else {
+            #expect(action != nil, "\(key) produced no input")
+            #expect(mapper.isControlLatched == false)
+        }
+    }
+}
+
 @Test("An armed Ctrl latch chords the next key from any source and is consumed by it")
 func controlLatchIsOneShotAcrossSources() {
     // Intent: the latch applies to the next key-shaped input whatever produced it -- a

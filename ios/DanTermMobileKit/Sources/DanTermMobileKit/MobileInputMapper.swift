@@ -20,7 +20,10 @@ public enum MobileInputAction: Equatable, Sendable {
 }
 
 /// Names every key in the step-0 phone accessory row.
-public enum MobileAccessoryKey: Equatable, Sendable {
+///
+/// The bar builds its row from `allCases`, so declaration order is row order, left to
+/// right, and a case added here appears in the row as soon as the bar says how to draw it.
+public enum MobileAccessoryKey: Equatable, Sendable, CaseIterable {
     case escape
     case control
     case tab
