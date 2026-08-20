@@ -265,7 +265,11 @@ struct FramePlanner {
             }
 
         let emptyRow = RenderPlanRow(
-            backgroundRuns: [], overlayRuns: [], textRuns: [], decorationRuns: []
+            backgroundRuns: [],
+            overlayRuns: [],
+            textRuns: [],
+            decorationRuns: [],
+            inkClass: []
         )
         var rows = [RenderPlanRow](repeating: emptyRow, count: rowCount)
 
@@ -306,7 +310,8 @@ struct FramePlanner {
                     backgroundRuns: sourceRow.backgroundRuns.map { $0.translated(to: row) },
                     overlayRuns: sourceRow.overlayRuns.map { $0.translated(to: row) },
                     textRuns: sourceRow.textRuns.map { $0.translated(to: row) },
-                    decorationRuns: sourceRow.decorationRuns.map { $0.translated(to: row) }
+                    decorationRuns: sourceRow.decorationRuns.map { $0.translated(to: row) },
+                    inkClass: sourceRow.inkClass
                 )
             }
         }
@@ -338,6 +343,7 @@ struct FramePlanner {
             var backgroundRuns: [RenderBackgroundRun] = []
             var overlayRuns: [RenderOverlayRun] = []
             var textRuns: [RenderTextRun] = []
+            var inkClass: RenderRowInkClass = []
             var decorationRuns: [RenderDecorationRun] = []
             var openBackground: OpenBackgroundRun?
             var openOverlay: OpenOverlayRun?
@@ -451,6 +457,15 @@ struct FramePlanner {
                     }
                     if style.hidden == false, scalars.isEmpty == false, let textWidth {
                         let cell = RenderTextCell(scalars: scalars, columnWidth: textWidth)
+                        if scalars.count == 1, let scalar = scalars.first {
+                            if scalar.value >= 0x20, scalar.value <= 0x7E {
+                                inkClass.insert(.asciiText)
+                            } else {
+                                inkClass.insert(.generalText)
+                            }
+                        } else {
+                            inkClass.insert(.band)
+                        }
                         if let run = openText, run.continues(at: column, style: style) {
                             openText?.extend(with: cell)
                         } else {
@@ -499,11 +514,18 @@ struct FramePlanner {
             if let openOverlay { overlayRuns.append(openOverlay.finished(row: row)) }
             if let openText { textRuns.append(openText.finished(row: row)) }
             if let openDecoration { decorationRuns.append(openDecoration.finished(row: row)) }
+            if backgroundRuns.isEmpty == false
+                || overlayRuns.isEmpty == false
+                || decorationRuns.isEmpty == false
+            {
+                inkClass.insert(.band)
+            }
             rows[row] = RenderPlanRow(
                 backgroundRuns: backgroundRuns,
                 overlayRuns: overlayRuns,
                 textRuns: textRuns,
-                decorationRuns: decorationRuns
+                decorationRuns: decorationRuns,
+                inkClass: inkClass
             )
         }
 

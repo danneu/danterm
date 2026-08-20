@@ -38,7 +38,7 @@ public struct RenderRowReach: Equatable, Sendable {
     }
 }
 
-/// Classifies every row of a plan by how far its drawing can reach, per the
+/// Maps every plan row's metrics-free ink class to its pixel reach, per the
 /// containment facts research/33 D9 audited:
 ///
 /// - a single-scalar cell in `0x20...0x7E` is submitted unclipped from the
@@ -75,36 +75,15 @@ public func renderRowReaches(
         }
     }
 
-    for row in plan.rows {
-        for run in row.textRuns {
-            var lower = Int.max
-            var upper = Int.min
-            for cell in run.cells {
-                if cell.scalars.count == 1, let scalar = cell.scalars.first {
-                    if scalar.value >= 0x20, scalar.value <= 0x7E {
-                        lower = min(lower, asciiLower)
-                        upper = max(upper, asciiUpper)
-                    } else {
-                        lower = min(lower, -cellHeight)
-                        upper = max(upper, 2 * cellHeight)
-                    }
-                } else {
-                    lower = min(lower, 0)
-                    upper = max(upper, cellHeight)
-                }
-            }
-            if lower < upper {
-                include(row: run.row, lower: lower, upper: upper)
-            }
+    for (rowIndex, row) in plan.rows.enumerated() {
+        if row.inkClass.contains(.asciiText) {
+            include(row: rowIndex, lower: asciiLower, upper: asciiUpper)
         }
-        for run in row.backgroundRuns {
-            include(row: run.row, lower: 0, upper: cellHeight)
+        if row.inkClass.contains(.generalText) {
+            include(row: rowIndex, lower: -cellHeight, upper: 2 * cellHeight)
         }
-        for run in row.overlayRuns {
-            include(row: run.row, lower: 0, upper: cellHeight)
-        }
-        for run in row.decorationRuns {
-            include(row: run.row, lower: 0, upper: cellHeight)
+        if row.inkClass.contains(.band) {
+            include(row: rowIndex, lower: 0, upper: cellHeight)
         }
     }
     if let cursor = plan.cursor {

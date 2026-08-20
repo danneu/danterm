@@ -219,8 +219,27 @@ public struct RenderPresentation: Equatable, Sendable {
     }
 }
 
-/// Owns every drawing run for one viewport row so publication and reuse share
-/// the same damage-sized unit.
+/// Records the metrics-free drawing facts that determine one row's vertical
+/// pixel reach when the executor later supplies its measured envelope.
+public struct RenderRowInkClass: OptionSet, Sendable {
+    public let rawValue: UInt8
+
+    public init(rawValue: UInt8) {
+        self.rawValue = rawValue
+    }
+
+    /// Printable-ASCII single-scalar text submitted from measured glyph tables.
+    public static let asciiText = RenderRowInkClass(rawValue: 1 << 0)
+
+    /// Other single-scalar text submitted from the wider, unmeasured cmap.
+    public static let generalText = RenderRowInkClass(rawValue: 1 << 1)
+
+    /// Content clipped to or exactly contained by the row's cell band.
+    public static let band = RenderRowInkClass(rawValue: 1 << 2)
+}
+
+/// Owns every drawing run and its metrics-free ink class for one viewport row
+/// so publication and reuse share the same damage-sized unit (research/33 D9).
 public struct RenderPlanRow: Equatable, Sendable {
     /// Non-default background spans in canonical within-row order.
     public let backgroundRuns: [RenderBackgroundRun]
@@ -234,16 +253,21 @@ public struct RenderPlanRow: Equatable, Sendable {
     /// Underline and strikethrough spans in canonical within-row order.
     public let decorationRuns: [RenderDecorationRun]
 
+    /// Facts derived with the runs that map to pixel reach at execution time.
+    public let inkClass: RenderRowInkClass
+
     init(
         backgroundRuns: [RenderBackgroundRun],
         overlayRuns: [RenderOverlayRun],
         textRuns: [RenderTextRun],
-        decorationRuns: [RenderDecorationRun]
+        decorationRuns: [RenderDecorationRun],
+        inkClass: RenderRowInkClass
     ) {
         self.backgroundRuns = backgroundRuns
         self.overlayRuns = overlayRuns
         self.textRuns = textRuns
         self.decorationRuns = decorationRuns
+        self.inkClass = inkClass
     }
 }
 

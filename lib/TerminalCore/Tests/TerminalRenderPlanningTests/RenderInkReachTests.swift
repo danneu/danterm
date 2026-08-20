@@ -14,6 +14,10 @@ struct RenderInkReachTests {
     private let cellHeight = 31
     private let envelope = RenderInkEnvelope(inkTopOffsetPixels: 4, inkBottomOffsetPixels: 2)
 
+    private var hiddenCursor: RenderPresentation {
+        RenderPresentation(theme: .dark, isCursorVisible: false, cursorShape: .block)
+    }
+
     private func plan(
         rows: Int = 6,
         columns: Int = 20,
@@ -84,6 +88,117 @@ struct RenderInkReachTests {
         let plan = try plan(feeding: Array("ascii\r\n".utf8))
         let reaches = renderRowReaches(of: plan, envelope: nil, cellHeightPixels: cellHeight)
         #expect(reaches[0] == RenderRowReach(lowerOffsetPixels: -31, upperOffsetPixels: 62))
+    }
+
+    @Test("partial reuse preserves copied, transitioned, and band-only row reaches")
+    func partialReusePreservesRowReaches() throws {
+        // Intent: row reach remains identical to fresh planning when retained
+        //   rows copy forward and damaged rows change their ink facts.
+        // Why it exists: the plan now carries the classifier result with each
+        //   row, so reuse must replace it exactly when that row's runs change.
+        // Scenario: one update leaves an ASCII row untouched, another row
+        //   transitions ASCII -> accented -> ASCII, and a third gains then
+        //   loses a background band while otherwise empty.
+        var terminal = try #require(Terminal(columns: 20, rows: 6))
+        terminal.feed(Array("copied ascii\r\ntransition ascii\r\n\r\ntail".utf8))
+        _ = terminal.drainDamage()
+
+        var planner = PaneFramePlanner()
+        _ = planner.planFrame(for: terminal, presentation: hiddenCursor, damage: .full)
+
+        let updates: [(bytes: String, row: Int, expected: RenderRowReach?)] = [
+            (
+                "\u{1B}[2;1Hcaf\u{E9}\u{1B}[K",
+                1,
+                RenderRowReach(lowerOffsetPixels: -31, upperOffsetPixels: 62)
+            ),
+            (
+                "\u{1B}[2;1Hplain ascii\u{1B}[K",
+                1,
+                RenderRowReach(lowerOffsetPixels: 4, upperOffsetPixels: 33)
+            ),
+            (
+                "\u{1B}[3;1H\u{1B}[44m\u{1B}[2K\u{1B}[0m",
+                2,
+                RenderRowReach(lowerOffsetPixels: 0, upperOffsetPixels: 31)
+            ),
+            ("\u{1B}[3;1H\u{1B}[2K", 2, nil),
+        ]
+        for update in updates {
+            terminal.feed(Array(update.bytes.utf8))
+            let damage = terminal.drainDamage()
+            try #require(damage.isFull == false)
+            try #require(damage.shift == nil)
+            try #require(damage.contains(row: 0) == false)
+
+            let reused = planner.planFrame(
+                for: terminal,
+                presentation: hiddenCursor,
+                damage: damage
+            )
+            let fresh = planFrame(for: terminal, presentation: hiddenCursor)
+            let reusedReaches = renderRowReaches(
+                of: reused,
+                envelope: envelope,
+                cellHeightPixels: cellHeight
+            )
+            let freshReaches = renderRowReaches(
+                of: fresh,
+                envelope: envelope,
+                cellHeightPixels: cellHeight
+            )
+            #expect(reusedReaches == freshReaches)
+            #expect(reusedReaches[0] == RenderRowReach(lowerOffsetPixels: 4, upperOffsetPixels: 33))
+            #expect(reusedReaches[update.row] == update.expected)
+        }
+
+        let final = planner.planFrame(for: terminal, presentation: hiddenCursor, damage: .none)
+        let reaches = renderRowReaches(of: final, envelope: envelope, cellHeightPixels: cellHeight)
+        #expect(reaches[0] == RenderRowReach(lowerOffsetPixels: 4, upperOffsetPixels: 33))
+        #expect(reaches[1] == RenderRowReach(lowerOffsetPixels: 4, upperOffsetPixels: 33))
+        #expect(reaches[2] == nil)
+    }
+
+    @Test("translated reuse preserves reaches for viewport and DECSTBM scrolls")
+    func translatedReusePreservesRowReaches() throws {
+        // Intent: translated rows carry the same reach as a fresh traversal.
+        // Why it exists: relocation rewrites each run's row coordinate but
+        //   must not reclassify or drop the content facts stored beside it.
+        // Scenario: a mixed-content viewport scrolls once, then a bounded
+        //   region containing mixed rows scrolls while its footer stays put.
+        for setupAndStep in [
+            (
+                "ascii\r\ncaf\u{E9}\r\nplain\r\nmore\r\ntail\r\nbottom\r",
+                "new line\r\n"
+            ),
+            (
+                "ascii\r\ncaf\u{E9}\r\nplain\r\nmore\r\nfooter\r\nbottom\r"
+                    + "\u{1B}[2;5r\u{1B}[5;1H",
+                "region line\r\n"
+            ),
+        ] {
+            var terminal = try #require(Terminal(columns: 20, rows: 6))
+            terminal.feed(Array(setupAndStep.0.utf8))
+            _ = terminal.drainDamage()
+
+            var planner = PaneFramePlanner()
+            _ = planner.planFrame(for: terminal, presentation: hiddenCursor, damage: .full)
+            terminal.feed(Array(setupAndStep.1.utf8))
+            let damage = terminal.drainDamage()
+            try #require(damage.isFull == false)
+            try #require((damage.shift?.delta ?? 0) != 0)
+
+            let reused = planner.planFrame(
+                for: terminal,
+                presentation: hiddenCursor,
+                damage: damage
+            )
+            let fresh = planFrame(for: terminal, presentation: hiddenCursor)
+            #expect(
+                renderRowReaches(of: reused, envelope: envelope, cellHeightPixels: cellHeight)
+                    == renderRowReaches(of: fresh, envelope: envelope, cellHeightPixels: cellHeight)
+            )
+        }
     }
 
     private func asciiReaches(rows: Int) -> [RenderRowReach?] {

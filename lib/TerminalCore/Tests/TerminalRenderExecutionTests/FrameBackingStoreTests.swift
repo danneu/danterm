@@ -63,7 +63,12 @@ struct FrameBackingStoreTests {
     ) throws -> (shifted: Int, applied: Int) {
         let metrics = try metrics
         _ = terminal.drainDamage()
-        let initial = planFrame(for: terminal, presentation: blockCursor)
+        var planner = PaneFramePlanner()
+        let initial = planner.planFrame(
+            for: terminal,
+            presentation: blockCursor,
+            damage: .full
+        )
         let store = try #require(TerminalFrameBackingStore(
             columns: initial.columns,
             rows: initial.rowCount,
@@ -77,7 +82,11 @@ struct FrameBackingStoreTests {
             terminal.feed(bytes)
             let damage = terminal.drainDamage()
             if damage.shift != nil { shifted += 1 }
-            let plan = planFrame(for: terminal, presentation: blockCursor)
+            let plan = planner.planFrame(
+                for: terminal,
+                presentation: blockCursor,
+                damage: damage
+            )
             if store.apply(plan: plan, damage: damage) {
                 applied += 1
             } else {
