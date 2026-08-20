@@ -6,10 +6,18 @@ import TerminalCore
 @testable import TerminalRenderPlanning
 
 struct OverlayContrastPropertyTests {
-    @Test("Every bundled theme satisfies overlay and cursor contrast over truecolor inputs")
-    func bundledThemeContrastSweep() throws {
-        let themes = try loadBundledThemes()
-        try #require(themes.count == 592)
+    @Test("The bundled theme fleet is the size the contrast sweep claims to cover")
+    func bundledThemeFleetSize() throws {
+        let names = try bundledThemeNames()
+        #expect(names.count == 592)
+    }
+
+    @Test(
+        "Every bundled theme satisfies overlay and cursor contrast over truecolor inputs",
+        arguments: try bundledThemeNames()
+    )
+    func bundledThemeContrastSweep(themeName: String) throws {
+        let theme = try loadBundledTheme(named: themeName)
         let lattice: [UInt8] = [0, 127, 255]
         let latticeColors = lattice.flatMap { red in
             lattice.flatMap { green in
@@ -17,117 +25,116 @@ struct OverlayContrastPropertyTests {
             }
         }
 
-        for theme in themes {
-            let backgrounds = latticeColors + adversarialColors(for: theme)
-            for background in backgrounds {
-                let styles = [
-                    resolveOverlayStyle(
-                        state: .selection,
-                        background: background,
-                        foreground: theme.selectionForeground,
-                        theme: theme
-                    ),
-                    resolveOverlayStyle(
-                        state: .activeSearchMatch,
-                        background: background,
-                        foreground: theme.defaultForeground,
-                        theme: theme
-                    ),
-                    resolveOverlayStyle(
-                        state: .selectionAndActiveSearchMatch,
-                        background: background,
-                        foreground: theme.selectionForeground,
-                        theme: theme
-                    ),
-                    resolveOverlayStyle(
-                        state: .searchMatch,
-                        background: background,
-                        foreground: theme.defaultForeground,
-                        theme: theme
-                    ),
-                    resolveOverlayStyle(
-                        state: .selectionAndSearchMatch,
-                        background: background,
-                        foreground: theme.selectionForeground,
-                        theme: theme
-                    ),
-                ]
-                let fills = [background] + styles.prefix(4).map(\.fill)
-                for first in fills.indices {
-                    for second in fills.indices where second > first {
-                        try requireSeparation(fills[first], fills[second], minimum: 40)
-                    }
-                }
-                for style in styles {
-                    try requireSeparation(style.foreground, style.fill, minimum: 100)
-                }
-                try requireSelectionContract(
-                    fill: styles[0].fill,
+        let backgrounds = latticeColors + adversarialColors(for: theme)
+        for background in backgrounds {
+            let styles = [
+                resolveOverlayStyle(
+                    state: .selection,
                     background: background,
+                    foreground: theme.selectionForeground,
                     theme: theme
-                )
-                #expect(resolveBrightnessSeparatedColor(
-                    seed: styles[0].fill,
-                    avoiding: [background],
-                    minimumSeparation: 40
-                ) == styles[0].fill)
-                #expect(resolveBrightnessSeparatedColor(
-                    seed: styles[1].fill,
-                    avoiding: [background, styles[0].fill],
-                    minimumSeparation: 40
-                ) == styles[1].fill)
-                #expect(resolveBrightnessSeparatedColor(
-                    seed: styles[2].fill,
-                    avoiding: [background, styles[0].fill, styles[1].fill],
-                    minimumSeparation: 40
-                ) == styles[2].fill)
-                #expect(resolveBrightnessSeparatedColor(
-                    seed: styles[3].fill,
-                    avoiding: [background, styles[0].fill, styles[1].fill, styles[2].fill],
-                    minimumSeparation: 40
-                ) == styles[3].fill)
-                #expect(styles[4].fill == styles[3].fill)
-                for cursorBackground in fills {
-                    let cursor = resolveCursorStyle(background: cursorBackground, theme: theme)
-                    try requireSeparation(cursor.fill, cursorBackground, minimum: 60)
-                    try requireSeparation(cursor.foreground, cursor.fill, minimum: 100)
-                    #expect(resolveBrightnessSeparatedColor(
-                        seed: cursor.fill,
-                        avoiding: [cursorBackground],
-                        minimumSeparation: 60
-                    ) == cursor.fill)
+                ),
+                resolveOverlayStyle(
+                    state: .activeSearchMatch,
+                    background: background,
+                    foreground: theme.defaultForeground,
+                    theme: theme
+                ),
+                resolveOverlayStyle(
+                    state: .selectionAndActiveSearchMatch,
+                    background: background,
+                    foreground: theme.selectionForeground,
+                    theme: theme
+                ),
+                resolveOverlayStyle(
+                    state: .searchMatch,
+                    background: background,
+                    foreground: theme.defaultForeground,
+                    theme: theme
+                ),
+                resolveOverlayStyle(
+                    state: .selectionAndSearchMatch,
+                    background: background,
+                    foreground: theme.selectionForeground,
+                    theme: theme
+                ),
+            ]
+            let fills = [background] + styles.prefix(4).map(\.fill)
+            for first in fills.indices {
+                for second in fills.indices where second > first {
+                    try requireSeparation(fills[first], fills[second], minimum: 40)
                 }
+            }
+            for style in styles {
+                try requireSeparation(style.foreground, style.fill, minimum: 100)
+            }
+            try requireSelectionContract(
+                fill: styles[0].fill,
+                background: background,
+                theme: theme
+            )
+            #expect(resolveBrightnessSeparatedColor(
+                seed: styles[0].fill,
+                avoiding: [background],
+                minimumSeparation: 40
+            ) == styles[0].fill)
+            #expect(resolveBrightnessSeparatedColor(
+                seed: styles[1].fill,
+                avoiding: [background, styles[0].fill],
+                minimumSeparation: 40
+            ) == styles[1].fill)
+            #expect(resolveBrightnessSeparatedColor(
+                seed: styles[2].fill,
+                avoiding: [background, styles[0].fill, styles[1].fill],
+                minimumSeparation: 40
+            ) == styles[2].fill)
+            #expect(resolveBrightnessSeparatedColor(
+                seed: styles[3].fill,
+                avoiding: [background, styles[0].fill, styles[1].fill, styles[2].fill],
+                minimumSeparation: 40
+            ) == styles[3].fill)
+            #expect(styles[4].fill == styles[3].fill)
+            for cursorBackground in fills {
+                let cursor = resolveCursorStyle(background: cursorBackground, theme: theme)
+                try requireSeparation(cursor.fill, cursorBackground, minimum: 60)
+                try requireSeparation(cursor.foreground, cursor.fill, minimum: 100)
+                #expect(resolveBrightnessSeparatedColor(
+                    seed: cursor.fill,
+                    avoiding: [cursorBackground],
+                    minimumSeparation: 60
+                ) == cursor.fill)
+            }
 
-                if brightnessSeparation(theme.cursor, background) >= 60 {
-                    #expect(resolveCursorStyle(background: background, theme: theme).fill == theme.cursor)
-                }
+            if brightnessSeparation(theme.cursor, background) >= 60 {
+                #expect(resolveCursorStyle(background: background, theme: theme).fill == theme.cursor)
             }
         }
     }
 
-    @Test("Darkening preserves one channel ratio within one code point over all RGB seeds")
-    func darkeningRoundingBoundOverFullColorDomain() {
-        for red in UInt8.min...UInt8.max {
-            for green in UInt8.min...UInt8.max {
-                for blue in UInt8.min...UInt8.max {
-                    let seed = RenderColor(red: red, green: green, blue: blue)
-                    let sourceBrightness = perceivedBrightness(of: seed)
-                    guard sourceBrightness > 0 else { continue }
-                    let targetBrightness = sourceBrightness / 2
-                    let moved = colorMoved(seed, toBrightness: targetBrightness)
-                    let channels = [
-                        (seed.red, moved.red),
-                        (seed.green, moved.green),
-                        (seed.blue, moved.blue),
-                    ]
-                    for (source, result) in channels {
-                        let roundingError = abs(
-                            Int(result) * sourceBrightness - Int(source) * targetBrightness
-                        )
-                        if roundingError > sourceBrightness {
-                            Issue.record("Darkening exceeded one code point for \(seed)")
-                            return
-                        }
+    @Test(
+        "Darkening preserves one channel ratio within one code point over all RGB seeds",
+        arguments: UInt8.min...UInt8.max
+    )
+    func darkeningRoundingBoundOverFullColorDomain(red: UInt8) {
+        for green in UInt8.min...UInt8.max {
+            for blue in UInt8.min...UInt8.max {
+                let seed = RenderColor(red: red, green: green, blue: blue)
+                let sourceBrightness = perceivedBrightness(of: seed)
+                guard sourceBrightness > 0 else { continue }
+                let targetBrightness = sourceBrightness / 2
+                let moved = colorMoved(seed, toBrightness: targetBrightness)
+                let channels = [
+                    (seed.red, moved.red),
+                    (seed.green, moved.green),
+                    (seed.blue, moved.blue),
+                ]
+                for (source, result) in channels {
+                    let roundingError = abs(
+                        Int(result) * sourceBrightness - Int(source) * targetBrightness
+                    )
+                    if roundingError > sourceBrightness {
+                        Issue.record("Darkening exceeded one code point for \(seed)")
+                        return
                     }
                 }
             }
@@ -468,22 +475,6 @@ struct OverlayContrastPropertyTests {
         RenderColor(red: component, green: component, blue: component)
     }
 
-    private func loadBundledThemes() throws -> [RenderTheme] {
-        var repository = URL(fileURLWithPath: #filePath)
-        for _ in 0..<5 {
-            repository.deleteLastPathComponent()
-        }
-        let themeDirectory = repository.appending(path: "themes", directoryHint: .isDirectory)
-        let paths = try FileManager.default.contentsOfDirectory(
-            at: themeDirectory,
-            includingPropertiesForKeys: nil
-        ).filter { $0.pathExtension == "json" }
-        return try paths.sorted { $0.lastPathComponent < $1.lastPathComponent }.map { path in
-            let source = try JSONDecoder().decode(ThemeSource.self, from: Data(contentsOf: path))
-            return try source.renderTheme()
-        }
-    }
-
     private func adversarialColors(for theme: RenderTheme) -> [RenderColor] {
         [
             theme.defaultBackground,
@@ -512,6 +503,38 @@ struct OverlayContrastPropertyTests {
         }
         return colors
     }
+}
+
+/// The repository's bundled theme directory, found by walking up from this file
+/// rather than through a test bundle resource: the themes ship with the app, not
+/// with this test target.
+private func bundledThemeDirectory() -> URL {
+    var repository = URL(fileURLWithPath: #filePath)
+    for _ in 0..<5 {
+        repository.deleteLastPathComponent()
+    }
+    return repository.appending(path: "themes", directoryHint: .isDirectory)
+}
+
+/// The file names of every bundled theme, sorted so the sweep's case list is
+/// stable. It is the parameter axis of `bundledThemeContrastSweep`, so it must
+/// stay evaluable outside an instance and cheap enough to run at collection time.
+private func bundledThemeNames() throws -> [String] {
+    try FileManager.default.contentsOfDirectory(
+        at: bundledThemeDirectory(),
+        includingPropertiesForKeys: nil
+    )
+    .filter { $0.pathExtension == "json" }
+    .map(\.lastPathComponent)
+    .sorted()
+}
+
+/// Decodes one bundled theme by file name, so a sweep case pays for its own
+/// theme instead of the whole fleet.
+private func loadBundledTheme(named name: String) throws -> RenderTheme {
+    let path = bundledThemeDirectory().appending(path: name, directoryHint: .notDirectory)
+    let source = try JSONDecoder().decode(ThemeSource.self, from: Data(contentsOf: path))
+    return try source.renderTheme()
 }
 
 private struct ThemeSource: Decodable {
