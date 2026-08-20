@@ -124,22 +124,15 @@ public struct Terminal: Equatable, Sendable {
     /// generation cannot drift from the pending work it describes.
     private struct PendingConsumerWork: Equatable, Sendable {
         private(set) var clipboardWrite: String?
-        private(set) var title: PendingTerminalSemanticEvent?
-        private(set) var workingDirectory: PendingTerminalSemanticEvent?
-        private(set) var progress: PendingTerminalSemanticEvent?
-        private(set) var discrete: [PendingTerminalSemanticEvent] = []
+        private(set) var semanticEvents = TerminalSemanticEventRetention()
         private(set) var generation = ObservationGeneration()
 
         var hasWork: Bool {
-            clipboardWrite != nil || title != nil || workingDirectory != nil
-                || progress != nil || discrete.isEmpty == false
+            clipboardWrite != nil || semanticEvents.isEmpty == false
         }
 
         var retainedSemanticEventBytes: Int {
-            (title?.byteCost ?? 0)
-                + (workingDirectory?.byteCost ?? 0)
-                + (progress?.byteCost ?? 0)
-                + discrete.reduce(0) { $0 + $1.byteCost }
+            semanticEvents.retainedBytes
         }
 
         mutating func noteDamageChanged() {
@@ -152,27 +145,18 @@ public struct Terminal: Equatable, Sendable {
             generation.value &+= 1
         }
 
-        mutating func setTitle(_ value: PendingTerminalSemanticEvent?) {
-            guard title != value else { return }
-            title = value
-            generation.value &+= 1
-        }
-
-        mutating func setWorkingDirectory(_ value: PendingTerminalSemanticEvent?) {
-            guard workingDirectory != value else { return }
-            workingDirectory = value
-            generation.value &+= 1
-        }
-
-        mutating func setProgress(_ value: PendingTerminalSemanticEvent?) {
-            guard progress != value else { return }
-            progress = value
-            generation.value &+= 1
-        }
-
-        mutating func appendDiscrete(_ value: PendingTerminalSemanticEvent) {
-            discrete.append(value)
-            generation.value &+= 1
+        mutating func admit(
+            _ event: TerminalSemanticEvent,
+            order: UInt64,
+            externalRetainedBytes: Int
+        ) -> TerminalSemanticEventAdmission {
+            let admission = semanticEvents.admit(
+                event,
+                order: order,
+                externalRetainedBytes: externalRetainedBytes
+            )
+            if admission == .admitted { generation.value &+= 1 }
+            return admission
         }
 
         mutating func drainClipboardWrite() -> String? {
@@ -181,16 +165,7 @@ public struct Terminal: Equatable, Sendable {
         }
 
         mutating func drainSemanticEvents() -> [TerminalSemanticEvent] {
-            var events = discrete
-            if let title { events.append(title) }
-            if let workingDirectory { events.append(workingDirectory) }
-            if let progress { events.append(progress) }
-            events.sort { $0.order < $1.order }
-            title = nil
-            workingDirectory = nil
-            progress = nil
-            discrete.removeAll(keepingCapacity: true)
-            return events.map(\.event)
+            semanticEvents.takeAll()
         }
     }
 
@@ -825,10 +800,12 @@ public struct Terminal: Equatable, Sendable {
     /// Smallest table size worth a sweep. Well above the 1-5 distinct styles `research/15/F11` measured in
     /// ordinary output, so a normal session never sweeps at all.
     static let baseStyleSweepThreshold = 512
-    static let maximumTerminalMetadataBytes = 256 * 1_024
+    /// The one ceiling retained hyperlink targets and retained semantic events are held
+    /// against together. It is the retention surface's own limit, named here for the
+    /// hyperlink side of the arithmetic so the two halves cannot diverge.
+    static let maximumTerminalMetadataBytes = TerminalSemanticEventRetention.maximumRetainedBytes
     static let maximumSemanticValueBytes = 64 * 1_024
     static let maximumShellOSCBytes = 88 * 1_024
-    static let maximumDiscreteSemanticEvents = 100
     static let maximumReplyBytes = 64 * 1_024
 
     /// Exposes aggregate retained link cost to structural bound tests.
@@ -1876,7 +1853,7 @@ public struct Terminal: Equatable, Sendable {
             print(scalar)
         case let .execute(control):
             if control == 0x07 {
-                admitDiscreteSemanticEvent(.bell)
+                admitSemanticEvent(.bell)
             } else {
                 execute(control)
             }
@@ -2212,10 +2189,7 @@ public struct Terminal: Equatable, Sendable {
               let value = String(validating: valueBytes, as: UTF8.self)
         else { return }
         titleUsesWorkingDirectory = value.isEmpty
-        pendingConsumerWork.setTitle(admittedCoalescedSemanticEvent(
-            .title(value.isEmpty ? currentWorkingDirectory ?? "" : value),
-            replacing: pendingConsumerWork.title
-        ))
+        admitSemanticEvent(.title(value.isEmpty ? currentWorkingDirectory ?? "" : value))
     }
 
     private mutating func dispatchDanTermShell(_ payload: [UInt8], selectorEnd: Int) {
@@ -2232,7 +2206,7 @@ public struct Terminal: Equatable, Sendable {
         switch eventName {
         case "integration-ready":
             guard fields.count == 2 else { return }
-            admitDiscreteSemanticEvent(.integrationReady)
+            admitSemanticEvent(.integrationReady)
         case "command-start":
             guard fields.count == 3,
                   let command = OSCPayload.decodedCanonicalBase64(
@@ -2242,12 +2216,12 @@ public struct Terminal: Equatable, Sendable {
                   !command.contains("\0"),
                   command.utf8.count <= Self.maximumSemanticValueBytes
             else { return }
-            admitDiscreteSemanticEvent(.commandStarted(command))
+            admitSemanticEvent(.commandStarted(command))
         case "command-end":
             guard fields.count == 3,
                   let exitStatus = OSCPayload.canonicalExitStatus(fields[2])
             else { return }
-            admitDiscreteSemanticEvent(.commandEnded(exitStatus: exitStatus))
+            admitSemanticEvent(.commandEnded(exitStatus: exitStatus))
         case "connection":
             guard fields.count >= 3,
                   let state = String(validating: fields[2], as: UTF8.self)
@@ -2255,10 +2229,10 @@ public struct Terminal: Equatable, Sendable {
             switch state {
             case "local":
                 guard fields.count == 3 else { return }
-                admitDiscreteSemanticEvent(.connectionDeclared(.local))
+                admitSemanticEvent(.connectionDeclared(.local))
             case "remote":
                 if fields.count == 3 {
-                    admitDiscreteSemanticEvent(.connectionDeclared(.remote(identity: nil)))
+                    admitSemanticEvent(.connectionDeclared(.remote(identity: nil)))
                     return
                 }
                 guard fields.count == 5,
@@ -2272,7 +2246,7 @@ public struct Terminal: Equatable, Sendable {
                       ),
                       user.utf8.count + host.utf8.count <= Self.maximumSemanticValueBytes
                 else { return }
-                admitDiscreteSemanticEvent(.connectionDeclared(.remote(
+                admitSemanticEvent(.connectionDeclared(.remote(
                     identity: TerminalRemoteIdentity(user: user, host: host)
                 )))
             default:
@@ -2312,7 +2286,7 @@ public struct Terminal: Equatable, Sendable {
               let title = String(validating: titleBytes, as: UTF8.self),
               let body = String(validating: bodyBytes, as: UTF8.self)
         else { return }
-        admitDiscreteSemanticEvent(.desktopNotification(title: title, body: body))
+        admitSemanticEvent(.desktopNotification(title: title, body: body))
     }
 
     private mutating func dispatchProgress(_ payload: ArraySlice<UInt8>) {
@@ -2337,10 +2311,7 @@ public struct Terminal: Equatable, Sendable {
             event = .pause(percent: percent)
         default: return
         }
-        pendingConsumerWork.setProgress(admittedCoalescedSemanticEvent(
-            .progress(event),
-            replacing: pendingConsumerWork.progress
-        ))
+        admitSemanticEvent(.progress(event))
     }
 
     private mutating func dispatchOSC7(_ payload: [UInt8], selectorEnd: Int) {
@@ -2357,49 +2328,33 @@ public struct Terminal: Equatable, Sendable {
             cwd = parsed
         }
         currentWorkingDirectory = cwd
-        pendingConsumerWork.setWorkingDirectory(admittedCoalescedSemanticEvent(
-            .workingDirectory(cwd),
-            replacing: pendingConsumerWork.workingDirectory
-        ))
+        admitSemanticEvent(.workingDirectory(cwd))
         if titleUsesWorkingDirectory {
-            pendingConsumerWork.setTitle(admittedCoalescedSemanticEvent(
-                .title(cwd ?? ""),
-                replacing: pendingConsumerWork.title
-            ))
+            admitSemanticEvent(.title(cwd ?? ""))
         }
     }
 
-    private mutating func admitDiscreteSemanticEvent(_ event: TerminalSemanticEvent) {
-        guard pendingConsumerWork.discrete.count < Self.maximumDiscreteSemanticEvents else { return }
-        let candidate = PendingTerminalSemanticEvent(order: nextSemanticEventOrder, event: event)
-        guard canAdmitSemanticBytes(candidate.byteCost) else { return }
-        nextSemanticEventOrder &+= 1
-        pendingConsumerWork.appendDiscrete(candidate)
-    }
-
-    private mutating func admittedCoalescedSemanticEvent(
-        _ event: TerminalSemanticEvent,
-        replacing existing: PendingTerminalSemanticEvent?
-    ) -> PendingTerminalSemanticEvent? {
-        let candidate = PendingTerminalSemanticEvent(order: nextSemanticEventOrder, event: event)
-        let releasedBytes = existing?.byteCost ?? 0
-        if retainedTerminalMetadataBytes - releasedBytes + candidate.byteCost
-            > Self.maximumTerminalMetadataBytes
-        {
+    /// Offers one parsed event to the shared J6 accumulator, paying for it out of the
+    /// metadata budget the retained hyperlink targets share.
+    ///
+    /// The retry is the whole reason the accumulator reports *why* it refused: only the
+    /// engine can free bytes in this budget, and only a byte refusal is worth a sweep.
+    private mutating func admitSemanticEvent(_ event: TerminalSemanticEvent) {
+        var admission = pendingConsumerWork.admit(
+            event,
+            order: nextSemanticEventOrder,
+            externalRetainedBytes: retainedHyperlinkMetadataBytes
+        )
+        if admission == .droppedForBytes {
             reclaimDeadHyperlinkTargets()
+            admission = pendingConsumerWork.admit(
+                event,
+                order: nextSemanticEventOrder,
+                externalRetainedBytes: retainedHyperlinkMetadataBytes
+            )
         }
-        guard retainedTerminalMetadataBytes - releasedBytes + candidate.byteCost
-                <= Self.maximumTerminalMetadataBytes
-        else { return existing }
+        guard admission == .admitted else { return }
         nextSemanticEventOrder &+= 1
-        return candidate
-    }
-
-    private mutating func canAdmitSemanticBytes(_ byteCount: Int) -> Bool {
-        if retainedTerminalMetadataBytes + byteCount > Self.maximumTerminalMetadataBytes {
-            reclaimDeadHyperlinkTargets()
-        }
-        return retainedTerminalMetadataBytes + byteCount <= Self.maximumTerminalMetadataBytes
     }
 
     private mutating func dispatchOSC8(_ payload: [UInt8], selectorEnd: Int) {
