@@ -386,8 +386,8 @@
         },
         {
           "name": "SEL",
-          "disposition": "out-of-scope",
-          "rationale": "Selective erase is deferred."
+          "disposition": "adopted",
+          "rationale": "CSIEraseTests pins DECSEL 0/1/2 over the same regions as EL through public viewport and cell state."
         },
         {
           "name": "ED 0",
@@ -411,13 +411,13 @@
         },
         {
           "name": "SED",
-          "disposition": "out-of-scope",
-          "rationale": "Selective erase is deferred."
+          "disposition": "adopted",
+          "rationale": "CSIEraseTests pins DECSED 0/1/2 over the same regions as ED through public viewport and cell state."
         },
         {
           "name": "DECRQSS on DECSCA",
           "disposition": "out-of-scope",
-          "rationale": "DECSCA and DCS-carried DECRQSS replies are deferred."
+          "rationale": "DCS-carried DECRQSS replies are deferred; DanTerm implements DECSCA itself."
         },
         {
           "name": "ICH move+erase emuation",
@@ -458,7 +458,7 @@
         { "name": "UTF-8 combining chars", "disposition": "adopted", "rationale": "state-putglyph.json adopts the combined scalar sequence in one public cell." },
         { "name": "Combining across buffers", "disposition": "adopted", "rationale": "state-putglyph.json adopts combining attachment across authored feed boundaries." },
         { "name": "Spare combining chars get truncated", "disposition": "adapted", "rationale": "state-putglyph.json retains all ten marks because DanTerm is scalar-exact rather than truncating at five." },
-        { "name": "DECSCA protected", "disposition": "out-of-scope", "rationale": "DECSCA and selective erase are not in DanTerm's declared support matrix." }
+        { "name": "DECSCA protected", "disposition": "adapted", "rationale": "state-putglyph.json reads the upstream putglyph prot flag back as the public protected style on each cell." }
       ]
     },
     {
@@ -1160,8 +1160,8 @@
       "path": "t/65screen_protect.test",
       "licenseNotice": "LICENSE.libvterm.txt",
       "cases": [
-        { "name": "Selective erase", "disposition": "out-of-scope", "rationale": "DECSCA and selective erase are not in DanTerm's declared support matrix." },
-        { "name": "Non-selective erase", "disposition": "out-of-scope", "rationale": "This case belongs to the DECSCA/selective-erase fixture family, which is not in DanTerm's declared support matrix." }
+        { "name": "Selective erase", "disposition": "adopted", "rationale": "screen-protect.json replays DECSCA and DECSED and pins the surviving protected cell." },
+        { "name": "Non-selective erase", "disposition": "adopted", "rationale": "screen-protect.json replays the same feed through bare ED and pins that protection does not stop it." }
       ]
     },
     {

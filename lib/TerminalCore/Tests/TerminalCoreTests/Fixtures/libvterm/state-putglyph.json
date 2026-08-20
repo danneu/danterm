@@ -4,7 +4,7 @@
     "source": "libvterm",
     "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/10state_putglyph.test",
     "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
-    "upstreamCase": "Low; UTF-8 1 char; UTF-8 split writes; UTF-8 wide char; UTF-8 emoji wide char; UTF-8 combining chars; Combining across buffers; Spare combining chars get truncated",
+    "upstreamCase": "Low; UTF-8 1 char; UTF-8 split writes; UTF-8 wide char; UTF-8 emoji wide char; UTF-8 combining chars; Combining across buffers; Spare combining chars get truncated; DECSCA protected",
     "license": "MIT",
     "licenseNotice": "LICENSE.libvterm.txt",
     "recordedDeviations": [
@@ -55,6 +55,18 @@
       "expect": {
         "cellScalars": [{ "row": 0, "column": 0, "scalars": "e\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301" }],
         "cursor": { "row": 0, "column": 1, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\u001bcA\u001b[1\"qB\u001b[2\"qC" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellStyles": [
+          { "row": 0, "column": 0, "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" } },
+          { "row": 0, "column": 1, "style": { "foreground": "default", "background": "default", "attributes": ["protected"], "underline": "none" } },
+          { "row": 0, "column": 2, "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" } }
+        ],
+        "viewportText": "ABC             "
       }
     }
   ]

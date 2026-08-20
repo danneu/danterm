@@ -262,7 +262,7 @@ sees the new one.
 ## Commit progress
 - [x] 1. carry DECSCA protection on the pen and every cell
 - [x] 2. honor protection in DECSED and DECSEL
-- [ ] 3. adopt the libvterm protection fixtures and re-adjudicate the manifests
+- [x] 3. adopt the libvterm protection fixtures and re-adjudicate the manifests
 
 ## Implementation notes
 
@@ -291,3 +291,21 @@ sees the new one.
   every SGR it writes. That is what keeps the encoder stateless per run now that
   the leading SGR 0 no longer clears protection, and it costs 5 bytes per style
   change rather than per cell.
+- The fixture decoder takes `protected` as one more token in a style's
+  `attributes` array, which is where the plan left the choice open. It reads the
+  way the upstream putglyph `prot` flag does and needs no new expectation key.
+- `screen-protect.json` replays both upstream cases in one recording, separated
+  by RIS, because they share one setup feed and differ only in whether the erase
+  carries the `?`. That keeps the pair readable as the contrast it is.
+- The libvterm SEL and SED cases are marked `adopted` against `CSIEraseTests`
+  rather than against a new fixture. They assert erase-callback regions, which
+  DanTerm has no vocabulary for, and the surrounding EL 0/1/2 and ED 0/1/2 rows
+  already use that same form.
+
+## Follow Up
+
+- `docs/research/26-external-corpus-expansion/README.md` rejects reopening
+  "DECSCA/selective erase" and `findings.md` lists the family as `deferred`.
+  This plan made the support-matrix decision that reverses both. Decide whether
+  those research documents get a supersession note or stay as the historical
+  record they were written as.

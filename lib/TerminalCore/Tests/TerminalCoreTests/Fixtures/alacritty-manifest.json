@@ -29,7 +29,7 @@
     { "name": "saved_cursor_alt", "disposition": "adapted", "milestone": 6, "rationale": "Proves independent alternate-screen saved cursor and character-set state." },
     { "name": "scroll_in_region_up_preserves_history", "disposition": "adapted", "milestone": 6, "rationale": "Proves bounded scrolling does not enter primary history." },
     { "name": "scroll_up_reset", "disposition": "superseded", "milestone": 6, "rationale": "Native scroll-region tests cover SU and vacated-cell style.", "evidence": "TerminalScrollRegionTests" },
-    { "name": "selective_erasure", "disposition": "out-of-scope", "rationale": "DECSCA and selective erase are not in the Milestone 6 support matrix." },
+    { "name": "selective_erasure", "disposition": "out-of-scope", "rationale": "The golden grid pins the ignore-protection reading of DECSED/DECSEL that DanTerm deliberately does not follow; DanTerm honors DECSCA instead." },
     { "name": "sgr", "disposition": "adopted", "milestone": 6, "rationale": "Proves captured SGR foreground, background, underline, and strike combinations." },
     { "name": "tab_rendering", "disposition": "adapted", "milestone": 6, "rationale": "Proves tab-stop layout through normalized public cell text." },
     { "name": "tmux_git_log", "disposition": "adopted", "milestone": 8, "rationale": "Proves captured git log output, tmux chrome, alternate-screen state, and input modes through public terminal projections." },

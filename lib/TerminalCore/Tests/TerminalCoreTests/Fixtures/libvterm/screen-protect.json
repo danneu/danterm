@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/65screen_protect.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Selective erase; Non-selective erase",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 4, "rows": 1 },
+  "events": [
+    { "type": "feed", "text": "A\u001b[1\"qB\u001b[\"qC" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "ABC ",
+        "cellStyles": [
+          { "row": 0, "column": 0, "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" } },
+          { "row": 0, "column": 1, "style": { "foreground": "default", "background": "default", "attributes": ["protected"], "underline": "none" } },
+          { "row": 0, "column": 2, "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" } }
+        ]
+      }
+    },
+    { "type": "feed", "text": "\u001b[G\u001b[?J" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": " B  ",
+        "cellKinds": [["padding", "narrow", "padding", "padding"]],
+        "cellStyles": [
+          { "row": 0, "column": 1, "style": { "foreground": "default", "background": "default", "attributes": ["protected"], "underline": "none" } },
+          { "row": 0, "column": 2, "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" } }
+        ],
+        "cursor": { "row": 0, "column": 0, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\u001bcA\u001b[1\"qB\u001b[\"qC" },
+    { "type": "expect", "expect": { "viewportText": "ABC " } },
+    { "type": "feed", "text": "\u001b[G\u001b[J" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "    ",
+        "cellKinds": [["padding", "padding", "padding", "padding"]],
+        "cellStyles": [
+          { "row": 0, "column": 1, "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" } }
+        ],
+        "cursor": { "row": 0, "column": 0, "pendingWrap": false }
+      }
+    }
+  ]
+}

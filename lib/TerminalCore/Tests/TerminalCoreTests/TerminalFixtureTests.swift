@@ -33,7 +33,7 @@ struct TerminalFixtureTests {
                 + ["windows-terminal/osc52-unicode"]
         )
         let names = try Self.chunkInvariantFixtureNames()
-        #expect(names.count == 68)
+        #expect(names.count == 69)
         #expect(Set(names) == expected)
     }
 
@@ -454,7 +454,7 @@ struct TerminalFixtureTests {
         "erase-scrollback", "flow-hard-boundary", "flow-soft-wrap", "parser-csi",
         "parser-strings", "reflow-narrow-wide", "reflow-shell-prompt", "resize-altscreen",
         "resize-grow-phantom", "resize-height-transfer", "resize-mid-csi", "screen-altscreen",
-        "screen-copycell", "screen-damage", "screen-pen", "screen-unicode",
+        "screen-copycell", "screen-damage", "screen-pen", "screen-protect", "screen-unicode",
         "scroll-boundaries", "scroll-controls", "scroll-region-index", "scroll-region-linefeed",
         "scroll-region-up-down", "scroll-up-down", "scrollback-pushline", "state-input",
         "state-mode", "state-mouse", "state-mouse-idempotent-1002", "state-movecursor",
@@ -1491,6 +1491,7 @@ private struct FixtureStyle: Decodable {
         var reverse = false
         var hidden = false
         var strikethrough = false
+        var protected = false
         for attribute in attributes {
             switch attribute {
             case "bold": bold = true
@@ -1499,6 +1500,7 @@ private struct FixtureStyle: Decodable {
             case "reverse": reverse = true
             case "hidden": hidden = true
             case "strikethrough": strikethrough = true
+            case "protected": protected = true
             default: throw FixtureError.invalidStyleToken(attribute)
             }
         }
@@ -1521,7 +1523,8 @@ private struct FixtureStyle: Decodable {
             underline: underlineStyle,
             reverse: reverse,
             hidden: hidden,
-            strikethrough: strikethrough
+            strikethrough: strikethrough,
+            protected: protected
         )
     }
 

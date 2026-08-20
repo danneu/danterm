@@ -161,7 +161,7 @@ references are the requirement.
 | 3 | [BUG-07](#bug-07) | SO (0x0E, LS1) and SI (0x0F, LS0), with ESC  | **done** `e0d2e80c` | Add G1 designation and SI/SO locking shifts so 0x0E/0x0F switch the active charset |
 | 3 | [BUG-08](#bug-08) | ESC # 8 (DECALN) | **done** `7b5d10f0` | Make DECALN reset the margins, origin mode, and rendition, and home the cursor |
 | 3 | [BUG-09](#bug-09) | CSI n L (IL), CSI n M (DL) | **pinned by a test** | Move the cursor to column 0 on IL and DL |
-| 3 | [BUG-10](#bug-10) | CSI ? Ps J (DECSED) and CSI ? Ps K (DECSEL) | unpinned | Dispatch DECSED and DECSEL (CSI ? Ps J / CSI ? Ps K) as ED and EL |
+| 3 | [BUG-10](#bug-10) | CSI ? Ps J (DECSED) and CSI ? Ps K (DECSEL) | **done** `c365b5e5` | Implement DECSCA protection and honor it in DECSED and DECSEL |
 | 3 | [BUG-11](#bug-11) | OSC 7 ; file:///path ST (working directory r | **pinned by a test** | Accept OSC 7 file URIs with an empty host as local |
 | 3 | [BUG-12](#bug-12) | ESC 7 / ESC 8 (DECSC/DECRC), also CSI ? 1048 | **pinned by a test** | Keep DECSC's saved cursor visibility out of DECRC (do not save DECTCEM) |
 | 3 | [BUG-13](#bug-13) | ESC c (RIS) | **pinned by a test** | Reset the saved-cursor slot on RIS |
@@ -436,9 +436,20 @@ pen to its colours, fills the active screen, and homes the cursor.
 
 <a id="bug-10"></a>
 
-### BUG-10. Dispatch DECSED and DECSEL (CSI ? Ps J / CSI ? Ps K) as ED and EL
+### BUG-10. Implement DECSCA protection and honor it in DECSED and DECSEL
 
 `CSI ? Ps J (DECSED) and CSI ? Ps K (DECSEL)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5
+
+**Done** in `87040714` and `c365b5e5`. The fix went wider than the row asked
+for: dispatching the `?` forms as plain ED and EL would erase the field a
+program used `CSI Ps " q` (DECSCA) to protect, so protection landed first as a
+pen attribute carried by every cell, and the selective erases then skip the
+protected cells.
+
+**Status correction.** The row said `unpinned`. That was wrong:
+`CSIEraseTests#invalidEraseIsNoOp` listed `ESC [ ? K` among the sequences that
+must leave the terminal bit-identical, so the no-op was pinned on purpose as a
+recorded deferral. That case now names the malformed `?` forms instead.
 
 **Problem.** The private-parameter forms of ED and EL are dropped entirely. DanTerm implements no DECSCA protection, so with no character protected DECSED and DECSEL are exactly ED and EL and must erase. Dropping them leaves the screen unchanged and also skips the pending-wrap reset, so a program that uses the selective forms sees stale content where it asked for blanks.
 
@@ -448,7 +459,7 @@ pen to its colours, fills the active screen, and homes the cursor.
 
 **Who notices.** A form-oriented or DEC-oriented full-screen program that uses the selective erases to clear a field -- the old field text stays on screen under the new value. vttest's erase tests fail outright. Because the sequence is also silently swallowed rather than partially applied, the application has no way to detect the failure.
 
-**Existing test.** None found. Grepping lib/TerminalCore/Tests/TerminalCoreTests/ for "?0K", "?2J", "DECSED", and "DECSEL" returns nothing, and CSIEraseTests.swift covers only the unprefixed forms.
+**Existing test.** None named the sequences, but `CSIEraseTests#invalidEraseIsNoOp` pinned `ESC [ ? K` as a no-op (see the status correction above).
 
 **Probe (run, not predicted).**
 
