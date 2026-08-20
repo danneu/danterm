@@ -28,11 +28,23 @@ NCPU="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 BUDGET=$(( NCPU - 2 ))
 (( BUDGET < 2 )) && BUDGET=2
 
+# Opens a step that declares itself a long pole; see the STEPS list and the concurrency
+# budget below. The worker strips it before running or reporting the step, so nothing
+# downstream of here ever sees it.
+WIDE_MARKER='wide: '
+
 # Ordered longest-measured-first. With a bounded pool this is list scheduling: putting
 # the long poles in front keeps the tail from being one slow step finishing alone.
 #
 # Every entry is a command line for a worker to expand, never for this file to expand,
 # so a `$` inside one stays single-quoted on purpose.
+#
+# A `wide: ` prefix declares a long pole: a step whose measured time is mostly one
+# SwiftPM build, which at the default one token compiles at -j1. A wide step asks for the
+# whole budget and takes only what is free at that instant, so it can never starve the
+# rest of the gate -- it widens where the pool is already idle. Keep the marker for steps
+# measured in tens of seconds of compiling; a lint that finishes in a second gains
+# nothing from it and only adds noise here.
 # shellcheck disable=SC2016
 STEPS=(
     # The cold-build lane. Every other step builds into a warm per-purpose scratch --
@@ -44,7 +56,7 @@ STEPS=(
     # construction. It carries no quotes because xargs -I strips them from a step line.
     # Scope: the root graph, where every cross-manifest edge terminates. The nested
     # package test lanes and the iOS gate still build warm.
-    'scratch=$(mktemp -d); swift build --build-tests --scratch-path $scratch; rc=$?; rm -rf $scratch; exit $rc'
+    'wide: scratch=$(mktemp -d); swift build --build-tests --scratch-path $scratch; rc=$?; rm -rf $scratch; exit $rc'
     # The type-check budget lives in lib/TerminalCore/Package.swift, so this lane needs
     # no extra flags -- but the compiler only warns, and this pool discards a passing
     # step's output, so the wrapper is what turns a breach into a red step. It keeps its
@@ -53,10 +65,10 @@ STEPS=(
     # build has to recompile. A tree only gate runs touch guarantees every file changed
     # since the last `just test` is re-type-checked, and therefore measured, during the
     # run that judges it.
-    './scripts/type-check-budget-gate.sh swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate'
-    'swift test --package-path ios/DanTermMobileKit --scratch-path ios/DanTermMobileKit/.build-gate'
-    './scripts/test-terminal-pty.sh'
-    './scripts/tests/terminal-capture-api-gate_test.sh'
+    'wide: ./scripts/type-check-budget-gate.sh swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate'
+    'wide: swift test --package-path ios/DanTermMobileKit --scratch-path ios/DanTermMobileKit/.build-gate'
+    'wide: ./scripts/test-terminal-pty.sh'
+    'wide: ./scripts/tests/terminal-capture-api-gate_test.sh'
     './scripts/tests/terminal-capture-api-gate-cache_test.sh'
     './scripts/tests/shell-integration_test.sh'
     'python3 ./scripts/tests/fetch_references_test.py'
@@ -70,7 +82,7 @@ STEPS=(
     'python3 ./scripts/tests/dev-slot-launcher_test.py'
     'python3 ./scripts/tests/terminal_benchmark_calibration_test.py'
     'swift test --package-path lib/DanTermSupport'
-    'swift test --scratch-path .build-app-tests'
+    'wide: swift test --scratch-path .build-app-tests'
     './scripts/tests/core-purity-lint_test.sh'
     './scripts/tests/run-test-suite_test.sh'
     './scripts/tests/gate-cpu-tokens_test.sh'
@@ -216,6 +228,14 @@ queued_note() {
 # than interleaved with whatever else was running at the same instant.
 if [[ "${1:-}" == "--worker" ]]; then
     step="$2"
+    # A declared long pole asks for the whole budget. The ask is opportunistic -- the
+    # supervisor claims one token firmly and sweeps for the rest without ever waiting --
+    # so a wide step still holds only tokens that stand behind work it is doing.
+    ask="${DANTERM_GATE_ASK:-1}"
+    if [[ "$step" == "$WIDE_MARKER"* ]]; then
+        step="${step#"$WIDE_MARKER"}"
+        (( ask < BUDGET )) && ask=$BUDGET
+    fi
     # Worker pid disambiguates the rare case of two identical step strings; the hash
     # keeps the filename traceable back to a step while debugging.
     log="$RUN_TEST_SUITE_LOGS/$$-$(printf '%s' "$step" | shasum | cut -c1-12)"
@@ -227,7 +247,7 @@ if [[ "${1:-}" == "--worker" ]]; then
     # concurrent runs in other checkouts queue here instead of oversubscribing the CPU.
     if DANTERM_GATE_TOKEN_WAIT_FILE="$log.wait" \
         "$REPO_ROOT/scripts/gate-cpu-tokens.py" \
-        --ask "${DANTERM_GATE_ASK:-1}" --pool "$BUDGET" \
+        --ask "$ask" --pool "$BUDGET" \
         -- bash -c "$step" >"$log.out" 2>&1; then
         printf '  ok   %4ds%s  %s\n' "$(step_seconds "$log")" "$(queued_note "$log")" "$step"
     else
@@ -267,6 +287,14 @@ fi
 # a bigger ASK: `just test-serial` runs one step at a time with an ask of the whole
 # budget, so a solo serial run still builds wide, and one beside other gates degrades
 # toward -j1 instead of blocking for the whole pool.
+#
+# The default ASK of 1 is right for the sixty-odd lint steps that finish in under two
+# seconds, and wrong for the handful of steps that are one whole SwiftPM build: a cold
+# build of lib/DanTermCore measured 104s at -j1 against 35s at -j8. Those steps carry the
+# `wide: ` marker in the list above and ask for the whole budget instead. The marker rides
+# on the step string, so it stays attached to the step it describes rather than drifting
+# in a second list, and because the ask is still opportunistic a wide step waits for
+# nothing and holds nothing that is not standing behind its own compile.
 #
 # NCPU and BUDGET are computed at the top of this file, because a worker needs the pool
 # size too.

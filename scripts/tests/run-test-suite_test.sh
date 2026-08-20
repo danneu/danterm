@@ -120,6 +120,72 @@ explicit_ask="$(sed -E 's/.*\(ask ([0-9]+)\).*/\1/' <<<"$header")"
 (( explicit_ask * 4 <= budget || explicit_ask == 1 )) \
     || fail "4-worker override kept a per-worker ask of $explicit_ask"
 
+# A declared long pole builds wide. Most of the gate is sub-second lint steps, so the
+# default ask of one token is right for them -- but it also compiled the gate's two
+# longest lanes at -j1, which measured 3x slower than a wide build of the same package.
+# A step that marks itself wide asks for the whole budget instead.
+# The step lines below carry no quotes: xargs -I strips them out of a step line.
+# shellcheck disable=SC2016
+rc="$(run_with_default_jobs 'wide: test $DANTERM_SWIFT_JOBS -gt 1')"
+[[ "$rc" == "0" ]] || fail "a wide step got one compile job on an idle pool: $(cat "$TEST_ROOT/output")"
+
+# The marker is a declaration, not part of the command line: the step that runs, and the
+# step the report names, are both the command that follows the marker.
+# shellcheck disable=SC2016
+grep -qE '^  ok +[0-9]+s +test \$DANTERM_SWIFT_JOBS -gt 1$' "$TEST_ROOT/output" \
+    || fail "wide marker was not stripped from the reported step: $(cat "$TEST_ROOT/output")"
+
+# A step that does not declare itself wide still holds exactly one token, so the light
+# lint tail cannot sit on half the budget while a long pole waits behind it.
+# shellcheck disable=SC2016
+rc="$(run_with_default_jobs 'test $DANTERM_SWIFT_JOBS -eq 1')"
+[[ "$rc" == "0" ]] || fail "an undeclared step was given more than one token: $(cat "$TEST_ROOT/output")"
+
+# A wide ask is opportunistic and must never wait. This is the property the whole design
+# rests on: a claimant that blocked while holding would reintroduce the deadlock the
+# token pool has no admission lock to prevent. The holder below keeps every token but one
+# until the wide step has run, so the step demonstrably finished against a full pool.
+cat >"$TEST_ROOT/saturate.sh" <<CASE
+#!/usr/bin/env bash
+# Holds all but one token until the wide step runs. The deadline is a hang guard: it
+# fails by name so a wide step that blocks does not read as an unrelated slow test.
+touch "$TEST_ROOT/saturated"
+deadline=\$((SECONDS + 60))
+until [[ -e "$TEST_ROOT/wide-ran" ]]; do
+    (( SECONDS < deadline )) || { echo "saturating holder timed out" >&2; exit 70; }
+    sleep 0.05
+done
+CASE
+(
+    "$REPO_ROOT/scripts/gate-cpu-tokens.py" --ask $((budget - 1)) --pool "$budget" \
+        -- bash "$TEST_ROOT/saturate.sh"
+) &
+saturator=$!
+saturate_deadline=$((SECONDS + 60))
+until [[ -e "$TEST_ROOT/saturated" ]]; do
+    (( SECONDS < saturate_deadline )) || {
+        kill -9 "$saturator" 2>/dev/null || true
+        fail "the holder never claimed its share of the test pool"
+    }
+    sleep 0.05
+done
+
+rc="$(run_with_default_jobs "wide: touch $TEST_ROOT/wide-ran; test \$DANTERM_SWIFT_JOBS -eq 1")"
+[[ "$rc" == "0" ]] \
+    || fail "a wide step waited for extras against a full pool: $(cat "$TEST_ROOT/output")"
+wait "$saturator" || fail "the saturating holder did not exit cleanly"
+
+# `just test-serial` runs one step at a time with an ask of the whole budget, so a solo
+# serial run still builds wide. The wide marker must not narrow that.
+run_serial() {
+    printf '%s\n' "$@" >"$TEST_ROOT/steps"
+    JOBS=1 RUN_TEST_SUITE_STEPS_FILE="$TEST_ROOT/steps" "$RUNNER" \
+        >"$TEST_ROOT/output" 2>&1 && echo 0 || echo $?
+}
+rc="$(run_serial "test \$DANTERM_SWIFT_JOBS -eq $budget")"
+[[ "$rc" == "0" ]] \
+    || fail "the serial path did not give its one step the whole budget: $(cat "$TEST_ROOT/output")"
+
 # The cap has to reach every descendant, not just the `swift` calls written in the step
 # list: steps call scripts, and those scripts call SwiftPM too. A shim first on PATH is
 # the only placement a new call site cannot forget, so pin that `swift` resolves to it
