@@ -269,7 +269,7 @@ private final class PreparedDraw {
     /// reports the work it actually did rather than the work it was asked for.
     let surface: DrawBenchmarkSurface
     private let plan: RenderFramePlan
-    private let restrictedRows: [Int]?
+    private let restriction: TerminalDamage?
     private let metrics: TerminalRenderMetrics
     private var context: CGContext?
     private let storage: UnsafeMutableRawPointer
@@ -278,10 +278,12 @@ private final class PreparedDraw {
         guard let metrics = TerminalRenderMetrics(displayScale: displayScale) else {
             throw DrawBenchmarkError.invalidMetrics
         }
-        let rows = Array(0..<min(4, plan.rowCount))
-        let restriction: [Int]? = scenario == .fullFrame ? nil : rows
+        let rows = 0..<min(4, plan.rowCount)
+        let restriction: TerminalDamage? = scenario == .fullFrame
+            ? nil
+            : TerminalDamage(rows: rows, rowCount: plan.rowCount)
         self.plan = plan
-        self.restrictedRows = restriction
+        self.restriction = restriction
         guard let size = renderFrameSize(for: plan, metrics: metrics) else {
             throw DrawBenchmarkError.invalidFrame
         }
@@ -330,11 +332,11 @@ private final class PreparedDraw {
             cellPixelWidth: metrics.cellWidthPixels,
             cellPixelHeight: metrics.cellHeightPixels,
             drawnRunCount: plan.rows.enumerated().reduce(0) { total, element in
-                total + (restriction == nil || restriction?.contains(element.offset) == true
+                total + (restriction == nil || restriction?.contains(row: element.offset) == true
                     ? element.element.textRuns.count : 0)
             },
             drawnCellCount: plan.rows.enumerated().reduce(0) { total, element in
-                total + (restriction == nil || restriction?.contains(element.offset) == true
+                total + (restriction == nil || restriction?.contains(row: element.offset) == true
                     ? element.element.textRuns.reduce(0) { $0 + $1.cells.count } : 0)
             }
         )
@@ -350,6 +352,6 @@ private final class PreparedDraw {
 
     func draw() {
         guard let context else { return }
-        drawRenderFrame(plan, rows: restrictedRows, metrics: metrics, in: context)
+        drawRenderFrame(plan, restrictedTo: restriction, metrics: metrics, in: context)
     }
 }

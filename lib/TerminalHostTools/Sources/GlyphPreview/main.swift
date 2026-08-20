@@ -167,7 +167,9 @@ final class GlyphPreviewView: NSView {
         context.clip(to: dirtyRect)
         drawRenderFrame(
             plan,
-            rows: rows == 0..<layout.rows ? nil : Array(rows),
+            restrictedTo: rows == 0..<layout.rows
+                ? nil
+                : TerminalDamage(rows: rows, rowCount: layout.rows),
             metrics: metrics,
             in: context
         )

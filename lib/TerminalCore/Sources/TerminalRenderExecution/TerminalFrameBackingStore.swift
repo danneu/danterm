@@ -144,8 +144,7 @@ public final class TerminalFrameBackingStore {
     public func apply(plan: RenderFramePlan, damage: TerminalDamage) -> Bool {
         guard plan.columns == columns, plan.rowCount == rows else { return false }
         guard damage.isFull == false else { return false }
-        let indices = damage.rowIndices
-        guard indices.allSatisfy({ $0 < rows }) else { return false }
+        guard damage.fitsGrid(rowCount: rows) else { return false }
         // CPU writes to IOSurface memory sit between lock and unlock so the
         // surface's seed advances and coherency with a later texture read
         // holds. `translateRows`'s refusal paths return before any mutation,
@@ -169,7 +168,7 @@ public final class TerminalFrameBackingStore {
                 return false
             }
         }
-        guard indices.isEmpty == false || staleStrips.isEmpty == false else { return true }
+        guard damage.damagedRowCount > 0 || staleStrips.isEmpty == false else { return true }
 
         // Byte-exactness in two derived sets (research/33 T14, D9). The erase
         // spans cover every pixel a damaged row's band, its stale ink (the
@@ -185,7 +184,7 @@ public final class TerminalFrameBackingStore {
             cellHeightPixels: metrics.cellHeightPixels
         )
         let shape = renderApplyShape(
-            damagedRows: indices,
+            damage: damage,
             rowCount: rows,
             cellHeightPixels: metrics.cellHeightPixels,
             oldReaches: rowReaches,
@@ -204,12 +203,12 @@ public final class TerminalFrameBackingStore {
         context.clip()
         drawRenderFrame(
             plan,
-            rows: shape.planDamage.expandingShift().rowIndices,
+            restrictedTo: shape.planDamage,
             metrics: metrics,
             in: context
         )
         context.restoreGState()
-        for row in indices {
+        damage.forEachRow { row in
             rowReaches[row] = newReaches[row]
         }
         return true

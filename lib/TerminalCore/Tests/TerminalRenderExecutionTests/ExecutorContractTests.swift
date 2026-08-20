@@ -457,7 +457,12 @@ private func renderRows(
     if unrestricted {
         drawRenderFrame(plan, metrics: metrics, in: context)
     } else {
-        drawRenderFrame(plan, rows: rows.sorted(), metrics: metrics, in: context)
+        drawRenderFrame(
+            plan,
+            restrictedTo: TerminalDamage(rows: rows),
+            metrics: metrics,
+            in: context
+        )
     }
     return surface.bitmap()
 }

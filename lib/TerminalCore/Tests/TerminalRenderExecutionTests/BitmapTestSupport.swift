@@ -229,7 +229,7 @@ func renderIncrementalBitmap(
     context.clip()
     drawRenderFrame(
         current,
-        rows: damage.expandingShift().rowIndices,
+        restrictedTo: damage.expandingShift(),
         metrics: metrics,
         in: context
     )
@@ -256,7 +256,9 @@ func renderDirtyRectBitmap(
     context.clip(to: dirtyRect)
     drawRenderFrame(
         current,
-        rows: rows == 0..<current.rowCount ? nil : Array(rows),
+        restrictedTo: rows == 0..<current.rowCount
+            ? nil
+            : TerminalDamage(rows: rows, rowCount: current.rowCount),
         metrics: metrics,
         in: context
     )

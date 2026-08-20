@@ -216,7 +216,7 @@ struct RenderInkReachTests {
         // Scenario: one damaged row mid-grid, every row all-ASCII.
         let reaches = asciiReaches(rows: 20)
         let shape = renderApplyShape(
-            damagedRows: [10],
+            damage: TerminalDamage(rows: [10], rowCount: 20),
             rowCount: 20,
             cellHeightPixels: cellHeight,
             oldReaches: reaches,
@@ -231,7 +231,7 @@ struct RenderInkReachTests {
         var reaches = asciiReaches(rows: 20)
         reaches[10] = RenderRowReach(lowerOffsetPixels: -31, upperOffsetPixels: 62)
         let shape = renderApplyShape(
-            damagedRows: [10],
+            damage: TerminalDamage(rows: [10], rowCount: 20),
             rowCount: 20,
             cellHeightPixels: cellHeight,
             oldReaches: reaches,
@@ -255,7 +255,7 @@ struct RenderInkReachTests {
         old[10] = RenderRowReach(lowerOffsetPixels: -31, upperOffsetPixels: 62)
         let new = asciiReaches(rows: 20)
         let shape = renderApplyShape(
-            damagedRows: [10],
+            damage: TerminalDamage(rows: [10], rowCount: 20),
             rowCount: 20,
             cellHeightPixels: cellHeight,
             oldReaches: old,
@@ -270,7 +270,7 @@ struct RenderInkReachTests {
         var reaches = asciiReaches(rows: 20)
         reaches[10] = nil
         let shape = renderApplyShape(
-            damagedRows: [10],
+            damage: TerminalDamage(rows: [10], rowCount: 20),
             rowCount: 20,
             cellHeightPixels: cellHeight,
             oldReaches: reaches,
@@ -284,7 +284,7 @@ struct RenderInkReachTests {
     func adjacentSpansMerge() {
         let reaches = asciiReaches(rows: 20)
         let shape = renderApplyShape(
-            damagedRows: [4, 3],
+            damage: TerminalDamage(rows: [4, 3], rowCount: 20),
             rowCount: 20,
             cellHeightPixels: cellHeight,
             oldReaches: reaches,
@@ -298,7 +298,7 @@ struct RenderInkReachTests {
     func edgeRowsClamp() {
         let reaches = asciiReaches(rows: 4)
         let top = renderApplyShape(
-            damagedRows: [0],
+            damage: TerminalDamage(rows: [0], rowCount: 4),
             rowCount: 4,
             cellHeightPixels: cellHeight,
             oldReaches: reaches,
@@ -307,7 +307,7 @@ struct RenderInkReachTests {
         #expect(top.erasePixelSpans == [0..<33])
         #expect(top.planDamage.rowIndices == [0])
         let bottom = renderApplyShape(
-            damagedRows: [3],
+            damage: TerminalDamage(rows: [3], rowCount: 4),
             rowCount: 4,
             cellHeightPixels: cellHeight,
             oldReaches: reaches,
@@ -324,7 +324,7 @@ struct RenderInkReachTests {
         var reaches = asciiReaches(rows: 20)
         reaches[11] = RenderRowReach(lowerOffsetPixels: 0, upperOffsetPixels: 31)
         let shape = renderApplyShape(
-            damagedRows: [10],
+            damage: TerminalDamage(rows: [10], rowCount: 20),
             rowCount: 20,
             cellHeightPixels: cellHeight,
             oldReaches: reaches,

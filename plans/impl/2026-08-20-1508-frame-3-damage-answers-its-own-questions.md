@@ -205,7 +205,7 @@ count check, which the live path never reaches.
 
 ## Commit progress
 - [x] 1. damage answers viewport coverage with the shift folded in, and the swapchain barrier asks it
-- [ ] 2. the apply seam carries damage end to end
+- [x] 2. the apply seam carries damage end to end
 
 ## Implementation notes
 - The fold-aware predicate reuses `TerminalDamageRowBits.covers` with an
@@ -218,3 +218,11 @@ count check, which the live path never reaches.
 - One edge the old expression answered differently: a zero-row plan. The old
   count check read `0 == 0` and installed the barrier; prefix coverage of an
   empty viewport is false. The live path never publishes a zero-row plan.
+- The executor's restriction travels as `RenderPlanRowSelection`, a sequence
+  over the plan's rows that tests one damage bit per row. The four drawing
+  passes keep their `for row in rows` shape, and nothing is materialized. A
+  nil restriction selects every row, and so does `.full`, which names no rows
+  precisely because it means all of them.
+- The store answers "damage fits this grid" with a new public
+  `TerminalDamage.fitsGrid(rowCount:)`: one scan of the words at or above the
+  grid height, no row walk and no copy.

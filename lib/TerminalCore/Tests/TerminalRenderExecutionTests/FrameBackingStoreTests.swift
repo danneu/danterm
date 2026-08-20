@@ -336,14 +336,15 @@ struct FrameBackingStoreTests {
         #expect(result.applied == 32)
     }
 
-    @Test("full damage and grid mismatch are refused with the store untouched")
+    @Test("full damage, a grid mismatch, and an out-of-grid row are refused with the store untouched")
     func refusalLeavesStoreIntact() throws {
         // Intent: apply's false return is a no-op, not a partial write.
         // Why it exists: the view maps false to "stale, fold this frame"; a
         //   half-applied store would then be re-trusted after the next full
         //   render of a *different* frame lineage.
-        // Scenario: a valid store refuses `.full` and a differently-sized
-        //   plan; its pixels still equal the frame it last rendered.
+        // Scenario: a valid store refuses `.full`, a differently-sized plan,
+        //   and damage sized to a taller grid that names a row the store does
+        //   not have; its pixels still equal the frame it last rendered.
         let metrics = try metrics
         var terminal = try #require(Terminal(columns: 24, rows: 6))
         prefill(&terminal, rows: 6)
@@ -362,6 +363,10 @@ struct FrameBackingStoreTests {
         #expect(store.apply(
             plan: mismatched,
             damage: TerminalDamage(rows: [0], rowCount: 8)
+        ) == false)
+        #expect(store.apply(
+            plan: plan,
+            damage: TerminalDamage(rows: [1, 7], rowCount: 8)
         ) == false)
 
         let blitted = try blitBitmap(store, plan: plan, metrics: metrics)

@@ -3,6 +3,7 @@
 import CoreGraphics
 import CoreText
 import Foundation
+import TerminalCore
 import TerminalRenderPlanning
 import TerminalSpriteGeometry
 
@@ -477,15 +478,59 @@ public func terminalRows(
     return lowerRow..<max(lowerRow, upperRow)
 }
 
+/// The plan rows a draw restriction selects, walked straight out of the
+/// damage bits so a restricted draw never materializes a row array.
+///
+/// A nil restriction selects the whole plan, and so does `.full`, which names
+/// no rows precisely because it means every one of them. Rows the restriction
+/// names outside the plan are ignored, and rows come out in ascending plan
+/// order whatever order the damage was recorded in.
+struct RenderPlanRowSelection: Sequence {
+    let rows: [RenderPlanRow]
+    let restriction: TerminalDamage?
+
+    func selects(row: Int) -> Bool {
+        guard let restriction, restriction.isFull == false else { return true }
+        return restriction.contains(row: row)
+    }
+
+    func makeIterator() -> Iterator {
+        Iterator(selection: self)
+    }
+
+    struct Iterator: IteratorProtocol {
+        let selection: RenderPlanRowSelection
+        private var index = 0
+
+        init(selection: RenderPlanRowSelection) {
+            self.selection = selection
+        }
+
+        mutating func next() -> RenderPlanRow? {
+            while index < selection.rows.count {
+                let row = index
+                index += 1
+                if selection.selects(row: row) { return selection.rows[row] }
+            }
+            return nil
+        }
+    }
+}
+
 /// Executes every planned layer in fixed order while borrowing the caller's
-/// context without retaining or changing its state. A restriction names rows
-/// in ascending plan order; invalid indices are ignored.
+/// context without retaining or changing its state. A restriction is the row
+/// damage the draw is clipped to; it must be shift-free, because a
+/// translation is the caller's to realize before it asks for a draw.
 public func drawRenderFrame(
     _ plan: RenderFramePlan,
-    rows restrictedRows: [Int]? = nil,
+    restrictedTo restriction: TerminalDamage? = nil,
     metrics: TerminalRenderMetrics,
     in context: CGContext
 ) {
+    precondition(
+        restriction?.shift == nil,
+        "restrict a draw with folded damage; a shift is not row damage"
+    )
     guard let frameSize = renderFrameSize(for: plan, metrics: metrics),
           let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
     else {
@@ -503,11 +548,7 @@ public func drawRenderFrame(
     context.setFillColor(plan.defaultBackground.cgColor(in: colorSpace))
     context.fill(CGRect(origin: .zero, size: frameSize.pointSize))
 
-    let rows = restrictedRows.map { restriction in
-        restriction.compactMap { row in
-            plan.rows.indices.contains(row) ? plan.rows[row] : nil
-        }
-    } ?? plan.rows
+    let rows = RenderPlanRowSelection(rows: plan.rows, restriction: restriction)
 
     for row in rows {
         for run in row.backgroundRuns {
@@ -537,7 +578,7 @@ public func drawRenderFrame(
     // background after both highlight channels but before glyphs so selection and
     // search cannot hide it while the planned cursor-text foreground remains visible.
     let cursor = plan.cursor.flatMap { cursor in
-        restrictedRows == nil || restrictedRows?.contains(cursor.row) == true ? cursor : nil
+        rows.selects(row: cursor.row) ? cursor : nil
     }
     if let cursor, cursor.shape == .block {
         context.setFillColor(cursor.color.cgColor(in: colorSpace))
@@ -710,7 +751,7 @@ private extension CGContext {
     }
 
     func drawTextRuns(
-        _ rows: [RenderPlanRow],
+        _ rows: RenderPlanRowSelection,
         metrics: TerminalRenderMetrics,
         colorSpace: CGColorSpace
     ) {
@@ -1281,7 +1322,7 @@ private extension CGContext {
     }
 
     func drawDecorationRuns(
-        _ rows: [RenderPlanRow],
+        _ rows: RenderPlanRowSelection,
         metrics: TerminalRenderMetrics,
         colorSpace: CGColorSpace
     ) {

@@ -297,6 +297,17 @@ public struct TerminalDamage: Equatable, Sendable {
         isFull || bits.covers(rowCount: rowCount, orRegion: shift?.region)
     }
 
+    /// True when every damaged row lies in `0..<rowCount`, so a consumer sized
+    /// to that grid can realize the value row by row.
+    ///
+    /// Read straight from the word storage, so a consumer can refuse a
+    /// mis-sized value without materializing its rows. `.full` names no rows
+    /// and therefore fits; a consumer that cannot realize full damage refuses
+    /// it on `isFull` instead.
+    public func fitsGrid(rowCount: Int) -> Bool {
+        bits.fits(rowCount: rowCount)
+    }
+
     /// True once row damage alone already tells a consumer to redraw every
     /// viewport row.
     ///
@@ -389,6 +400,26 @@ struct TerminalDamageRowBits: Sendable {
         if remainder != 0 {
             let mask: UInt64 = (1 << UInt64(remainder)) &- 1
             if word(fullWords) & mask != mask { return false }
+        }
+        return true
+    }
+
+    /// True when no bit at or above `rowCount` is set. The tail is read word
+    /// at a time, so the answer costs no row walk and no copy.
+    func fits(rowCount: Int) -> Bool {
+        guard rowCount >= 0 else { return false }
+        var index = rowCount >> 6
+        let remainder = rowCount & 63
+        if remainder != 0 {
+            if index < words.count {
+                let mask: UInt64 = (1 << UInt64(remainder)) &- 1
+                if words[index] & ~mask != 0 { return false }
+            }
+            index += 1
+        }
+        while index < words.count {
+            if words[index] != 0 { return false }
+            index += 1
         }
         return true
     }

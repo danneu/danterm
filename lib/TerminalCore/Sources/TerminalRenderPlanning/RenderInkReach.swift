@@ -176,8 +176,11 @@ public struct RenderApplyShape: Equatable, Sendable {
 /// inside the clip). The plan set is every row whose new reach intersects
 /// that region; undamaged rows' content is unchanged between the two frames,
 /// so their old and new reaches agree by construction.
+///
+/// The damage is read for its rows only: a shift is the caller's to realize
+/// on the pixels before it asks for a shape.
 public func renderApplyShape(
-    damagedRows: [Int],
+    damage: TerminalDamage,
     rowCount: Int,
     cellHeightPixels: Int,
     oldReaches: [RenderRowReach?],
@@ -186,17 +189,13 @@ public func renderApplyShape(
 ) -> RenderApplyShape {
     let cellHeight = cellHeightPixels
     let frameHeight = rowCount * cellHeight
-    var isDamaged = [Bool](repeating: false, count: rowCount)
-    for row in damagedRows where row >= 0 && row < rowCount {
-        isDamaged[row] = true
-    }
 
     func reach(_ reaches: [RenderRowReach?], _ row: Int) -> RenderRowReach? {
         row < reaches.count ? reaches[row] : nil
     }
 
     var intervals: [Range<Int>] = []
-    for row in 0..<rowCount where isDamaged[row] {
+    for row in 0..<rowCount where damage.contains(row: row) {
         var lower = 0
         var upper = cellHeight
         if let old = reach(oldReaches, row) {
@@ -247,9 +246,11 @@ public func renderApplyShape(
         }
     }
 
-    let plannedRows = (0..<rowCount).filter { isPlanned[$0] }
     return RenderApplyShape(
         erasePixelSpans: spans,
-        planDamage: TerminalDamage(rows: plannedRows, rowCount: rowCount)
+        planDamage: TerminalDamage(
+            rows: (0..<rowCount).lazy.filter { isPlanned[$0] },
+            rowCount: rowCount
+        )
     )
 }
