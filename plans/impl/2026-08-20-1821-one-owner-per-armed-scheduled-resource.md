@@ -213,7 +213,7 @@ search-needle arms, the three timer arm sites and their cancel sites),
 
 - [x] 1. refactor(runtime): give each scheduled timer one census-owned owner
 - [x] 2. refactor(runtime): put the event monitor and the IPC server in owners
-- [ ] 3. refactor(pane): own the search debounce timer through the census
+- [x] 3. refactor(pane): own the search debounce timer through the census
 
 ## Implementation notes
 
@@ -240,3 +240,12 @@ search-needle arms, the three timer arm sites and their cancel sites),
   guard even though the owner now fails closed on its own (I3). The guard is
   the cheaper answer: it never installs a monitor that would be removed one
   line later.
+- The pane's search owner is built in `PaneHost.init`, not on the first needle.
+  The old `Debouncer` was lazy because it wrapped a live dispatch source; the
+  owner holds no source until it is armed, so eager construction costs one small
+  object per pane and lets the field be a `let`. No pane can now be reached
+  without one.
+- `docs/design/2026-06-09-appkit-lifetime-safety.md` cited
+  `Debouncer.swift:50-74` by path, which `docs-lint.py` resolves. That bullet now
+  points at `app/AppRuntimeSchedulingLifecycle.swift`, which is where the timer
+  handlers it describes live.

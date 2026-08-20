@@ -109,7 +109,6 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/TerminalSession.swift" \
         "$SCRIPT_DIR/app/AppRuntimeSchedulingLifecycle.swift" \
         "$SCRIPT_DIR/app/AppPresentationLifecycle.swift" \
-        "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/Debouncer.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/DanTermConfigPaths.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/FontAvailability.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/IpcConnection.swift" \

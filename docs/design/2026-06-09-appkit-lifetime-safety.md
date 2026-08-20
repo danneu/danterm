@@ -142,10 +142,9 @@ The current high-risk sites are safe for these specific reasons:
   popover handle on close, and close shortcut-help child popovers before parent
   TODO popovers close. The shortcut help controller keeps weak parent references
   (`app/TodoShortcutHelpView.swift:146-200`).
-- Debouncers, `DispatchSourceTimer` handlers, and the IPC actor
-  (`app/AppRuntime.swift:842-899`,
-  `lib/DanTermSupport/Sources/DanTermSupport/Debouncer.swift:50-74`,
-  `app/IpcServer.swift:35-69`) use `[weak self]` or explicit close/cancel paths
+- `DispatchSourceTimer` handlers and the IPC actor
+  (`app/AppRuntimeSchedulingLifecycle.swift`, `app/IpcServer.swift:35-69`)
+  use `[weak self]` or explicit close/cancel paths
   so an owner teardown does not leave a strong callback cycle that can message a
   freed owner.
 - `AppRuntime` has no `deinit`, and must not gain one. Its last reference can be

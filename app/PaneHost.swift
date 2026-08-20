@@ -17,11 +17,10 @@ final class PaneHost {
     /// under a reused pane id starts at `nil`, so it gets its own push instead of having it
     /// suppressed by what its predecessor was told.
     var pushedVisibility: Bool?
-    /// Debounces this pane's short search needles. Built on first use, because most panes
-    /// never search.
-    var searchDebouncer: Debouncer?
-    /// Census registration for the pending debounce, and the mechanism that disarms it.
-    var searchDebounceToken: AppRuntimeSchedulingToken?
+    /// Debounces this pane's short search needles. Unarmed until the pane gets one, and
+    /// armed with the timer that will deliver it, so the pending delivery and its census
+    /// entry cannot come apart.
+    let searchDebounce: AppRuntimeScheduledOwner<DispatchSourceTimer>
     /// Scrollback replay file written for a restored pane and read once by its shell.
     private var replayFile: URL?
     /// Retires the session's `onEvent` and `onPrimaryHistoryMutation` callbacks. Armed
@@ -38,6 +37,10 @@ final class PaneHost {
         self.session = session
         self.sessionSubscriptionToken = subscriptionToken
         self.replayFile = replayFile
+        self.searchDebounce = AppRuntimeScheduledOwner(
+            timerIn: runtime.schedulingLifecycle,
+            category: .debouncer
+        )
         self.wrapper = PaneWrapperView(
             paneId: paneId,
             terminalView: session,
@@ -58,9 +61,7 @@ final class PaneHost {
     /// Destroys everything the record owns. Correct for a staged record as much as a live
     /// one: nothing here reaches state that another pane could be sharing.
     func tearDown(scheduling: AppRuntimeSchedulingLifecycle) {
-        scheduling.cancel(searchDebounceToken)
-        searchDebounceToken = nil
-        searchDebouncer = nil
+        searchDebounce.cancel()
         scheduling.cancel(sessionSubscriptionToken)
         removeReplayFile()
         session.tearDown()

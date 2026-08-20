@@ -183,6 +183,83 @@ struct AppRuntimeSessionCommandTests {
         #expect(fixture.session.endSearchCount == 1)
     }
 
+    // Intent: a burst of short needles holds one debounce and delivers only the last one.
+    // Why it exists: this trailing-edge coalescing used to be the Debouncer's own
+    // coverage; it belongs to the search needle, which is the only thing that promises it.
+    // Scenario: a user types three one- and two-character needles inside the 300 ms window.
+    @Test("a burst of short needles delivers only the last needle, once")
+    func shortNeedleBurstDeliversOnlyTheLastNeedle() async {
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        runtime.installTerminalSession(fixture.session, paneId: paneId)
+
+        for needle in ["g", "go", "gp"] {
+            runtime.perform(.sendSearchNeedle(paneId: paneId, needle: needle))
+            #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == 1)
+        }
+        #expect(fixture.session.searchNeedles.isEmpty)
+
+        // This sleep is meant to expire: it is well past the 300 ms window, so every
+        // delivery that was ever going to happen has happened when the expectations run.
+        try? await Task.sleep(for: .milliseconds(600))
+
+        #expect(fixture.session.searchNeedles == ["gp"])
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == nil)
+    }
+
+    // Intent: clearing the needle delivers at once and retires the pending short needle.
+    // Why it exists: an empty needle leaves search mode showing every match again, so a
+    // superseded short needle arriving after it would re-filter a pane the user cleared.
+    @Test("an empty needle delivers at once and drops a pending short needle")
+    func emptyNeedleSupersedesPendingShortNeedle() async {
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        runtime.installTerminalSession(fixture.session, paneId: paneId)
+
+        runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "go"))
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == 1)
+
+        runtime.perform(.sendSearchNeedle(paneId: paneId, needle: ""))
+
+        #expect(fixture.session.searchNeedles == [""])
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == nil)
+
+        // Meant to expire: past the window the retired "go" would have fired in.
+        try? await Task.sleep(for: .milliseconds(600))
+
+        #expect(fixture.session.searchNeedles == [""])
+    }
+
+    // Intent: a needle of three or more characters delivers at once and retires the
+    // pending short needle it grew out of.
+    // Why it exists: the short needle is a prefix of the long one, so a late delivery
+    // would leave the pane matching fewer characters than the user has typed.
+    @Test("a long needle delivers at once and drops the short needle it grew from")
+    func longNeedleSupersedesPendingShortNeedle() async {
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        runtime.installTerminalSession(fixture.session, paneId: paneId)
+
+        runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "go"))
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == 1)
+
+        runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "goo"))
+
+        #expect(fixture.session.searchNeedles == ["goo"])
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == nil)
+
+        // Meant to expire: past the window the retired "go" would have fired in.
+        try? await Task.sleep(for: .milliseconds(600))
+
+        #expect(fixture.session.searchNeedles == ["goo"])
+    }
+
     // Intent: a pane's session and its chrome enter and leave the runtime together.
     // Why it exists: they used to live in two tables written by different call sites,
     // so one could survive the other.

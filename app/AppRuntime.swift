@@ -1020,24 +1020,15 @@ class AppRuntime {
             let session = host.session
             // Debounce: immediate for empty or 3+ chars, 300ms for 1-2 chars
             let delay: TimeInterval = (needle.isEmpty || needle.count >= 3) ? 0 : 0.3
-            schedulingLifecycle.cancel(host.searchDebounceToken)
-            host.searchDebounceToken = nil
 
             if delay == 0 {
+                host.searchDebounce.cancel()
                 session.setSearchNeedle(needle)
             } else {
-                let debouncer = host.searchDebouncer ?? {
-                    let debouncer = Debouncer(queue: .main)
-                    host.searchDebouncer = debouncer
-                    return debouncer
-                }()
-                debouncer.schedule(after: delay) { [weak self, weak host] in
-                    guard let self, let host, let token = host.searchDebounceToken else { return }
-                    host.searchDebounceToken = nil
-                    self.schedulingLifecycle.run(token) { session.setSearchNeedle(needle) }
-                }
-                host.searchDebounceToken = schedulingLifecycle.arm(.debouncer) {
-                    debouncer.cancel()
+                // Arming retires the pending needle first, so a burst of short needles
+                // holds one timer and only the last one is delivered.
+                host.searchDebounce.armTimer(deadline: .now() + delay) {
+                    session.setSearchNeedle(needle)
                 }
             }
 
@@ -1046,9 +1037,7 @@ class AppRuntime {
 
         case .sendEndSearch(let paneId):
             guard let host = paneHost(for: paneId) else { break }
-            schedulingLifecycle.cancel(host.searchDebounceToken)
-            host.searchDebounceToken = nil
-            host.searchDebouncer = nil
+            host.searchDebounce.cancel()
             host.session.endSearch()
 
         }
@@ -1105,7 +1094,9 @@ class AppRuntime {
     /// Defer the whole-model reconcile() sweep while cosmetic title/cwd/progress,
     /// background alert-badge, and shell command-event messages arrive at high
     /// frequency. The timer reads the latest model when it fires. This is
-    /// fixed-window coalescing; use Debouncer for trailing-edge debounce.
+    /// fixed-window coalescing: an armed window stays fixed, so message traffic
+    /// cannot postpone the sweep. Re-arming an owner instead gives a trailing edge,
+    /// which is what the search needle wants.
     private func scheduleCoalescedReconcile() {
         guard coalescedReconcileTimer.isArmed == false,
               schedulingLifecycle.isActive
