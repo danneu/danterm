@@ -113,13 +113,23 @@ struct TerminalShiftDamageTests {
     // testing library does not offer that on iOS, so the case is compiled where it
     // can run. macOS -- where the gate runs it -- loses no coverage.
     #if os(macOS)
-    @Test("an out-of-range row cannot be constructed into bounded damage")
+    @Test("an out-of-range row or shift region cannot enter bounded damage")
     func outOfRangeRowsAreUnrepresentable() async {
         await #expect(processExitsWith: .failure) {
             _ = TerminalDamage(rows: [7], rowCount: 4)
         }
         await #expect(processExitsWith: .failure) {
             _ = TerminalDamage(rows: [-1])
+        }
+        // The shift legs matter because `recordShift` reaches word storage through
+        // `translate`, which indexes `words` with no bounds check of its own.
+        await #expect(processExitsWith: .failure) {
+            var damage = TerminalDamage(rows: [], rowCount: 4)
+            damage.recordShift(region: -1..<3, delta: 1)
+        }
+        await #expect(processExitsWith: .failure) {
+            var damage = TerminalDamage(rows: [], rowCount: 4)
+            damage.recordShift(region: 2..<6, delta: 1)
         }
     }
     #endif
@@ -236,6 +246,28 @@ struct TerminalScrollShiftDamageTests {
         #expect(damage.isFull == false)
         #expect(damage.shift == TerminalDamageShift(region: 2..<10, delta: -1))
         #expect(damage.rowIndices == [8, 9])
+    }
+
+    @Test("same-region scrolls summing to the region height collapse to region rows")
+    func summedRegionScrollsCollapseToRegionRows() throws {
+        // Intent: shifts of one region that sum to the region height, composed with no
+        //   drain between them, publish region-wide row damage and no shift.
+        // Why it exists: the collapse branch is unreachable from a single scroll --
+        //   `recordScrollDamage` turns a scroll that covers its region into plain range
+        //   damage -- so only the summing path reaches it, and nothing drove that path.
+        var terminal = try #require(Terminal(columns: 80, rows: 12))
+        prefill(&terminal, rows: 12)
+        terminal.feed(Array("\u{1B}[3;10r\u{1B}[10;1H".utf8))
+        _ = terminal.drainDamage()
+
+        // Eight one-line scrolls of the eight-row region: nothing survives the summed
+        // translation, so the carried shift must give way to the rows themselves.
+        for _ in 0..<8 { terminal.feed(Array("\r\n".utf8)) }
+
+        let damage = terminal.drainDamage()
+        #expect(damage.isFull == false)
+        #expect(damage.shift == nil)
+        #expect(damage.rowIndices == Array(2..<10))
     }
 
     @Test("reverse index at the top records a downward shift")

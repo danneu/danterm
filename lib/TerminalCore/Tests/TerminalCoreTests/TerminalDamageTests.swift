@@ -56,7 +56,7 @@ struct TerminalDamageTests {
         terminal.feed(Array("\u{1B}[9z".utf8))
         #expect(terminal.pendingConsumerWorkGeneration == quiescent)
         // A print into an already-damaged row re-sets a bit that is already set, so
-        // `TerminalDamageAccumulator.record(row:)` returns false and nothing bumps. Both prints
+        // `TerminalDamage.record(row:)` returns false and nothing bumps. Both prints
         // stay on the same row so neither can scroll and escalate to full damage.
         terminal.feed(Array("\u{1B}[1;1HP".utf8))
         let damagedRow = terminal.pendingConsumerWorkGeneration
@@ -226,6 +226,57 @@ struct TerminalDamageTests {
         #expect(oneChunk == byteChunks)
         #expect(oneChunk.drainDamage() == TerminalDamage(rows: [0, 2]))
         #expect(byteChunks.drainDamage() == TerminalDamage(rows: [0, 2]))
+    }
+
+    @Test("a region-mismatch escalation keeps recording damage for the live grid")
+    func mismatchedShiftRegionsEscalateAndKeepRecording() throws {
+        // Intent: after two scroll regions collide into full damage and that full damage
+        //   drains, the terminal still records ordinary row damage for the same grid.
+        // Why it exists: the escalation branch is shared with the value-level `formUnion`,
+        //   where "become full" may be spelled as an assignment of the static `.full`.
+        //   That value carries a zero-height bitset, so a producer spelled the same way
+        //   would silently refuse every row recorded after the drain and the pane would
+        //   stop repainting.
+        var terminal = try #require(Terminal(columns: 8, rows: 12))
+        terminal.feed(Array("\u{1B}[3;10r\u{1B}[10;1H".utf8))
+        _ = terminal.drainDamage()
+
+        terminal.feed(Array("\r\n".utf8))
+        terminal.feed(Array("\u{1B}[2;12r\u{1B}[12;1H".utf8))
+        terminal.feed(Array("\r\n".utf8))
+        #expect(terminal.drainDamage() == .full)
+
+        terminal.feed(Array("\u{1B}[1;1HX".utf8))
+        let damage = terminal.drainDamage()
+        #expect(damage.isFull == false)
+        #expect(damage.contains(row: 0))
+    }
+
+    @Test("a shift reports its own change to the consumer-work generation")
+    func shiftReportsChangeToConsumerWorkGeneration() throws {
+        // Intent: recording a scroll translation bumps the consumer-work generation when
+        //   it changes pending damage, and leaves it alone when it does not.
+        // Why it exists: the suites that read drained damage cannot see this contract at
+        //   all, so a recording path that reported nothing would still leave them green
+        //   while the PTY host stopped waking for a scroll.
+        // Scenario: eight one-line scrolls of an eight-row DECSTBM region. The eighth
+        //   collapses the summed shift into region-wide rows, which pre-fills the vacated
+        //   row and both cursor rows -- so the shift is the only change left to report.
+        var terminal = try #require(Terminal(columns: 8, rows: 12))
+        terminal.feed(Array("\u{1B}[3;10r\u{1B}[10;1H".utf8))
+        _ = terminal.drainDamage()
+        for _ in 0..<7 { terminal.feed(Array("\r\n".utf8)) }
+
+        let beforeCollapse = terminal.pendingConsumerWorkGeneration
+        terminal.feed(Array("\r\n".utf8))
+        #expect(terminal.pendingConsumerWorkGeneration != beforeCollapse)
+
+        // The negative leg: with pending damage already escalated to full, a further
+        // scroll adds nothing a consumer can act on and must not wake one.
+        terminal.feed(Array("\u{1B}[?1049h\u{1B}[12;1H".utf8))
+        let alreadyFull = terminal.pendingConsumerWorkGeneration
+        terminal.feed(Array("\r\n".utf8))
+        #expect(terminal.pendingConsumerWorkGeneration == alreadyFull)
     }
 
     // The negative-row sanitizer test that used to close this suite is gone with the

@@ -1,7 +1,11 @@
 // Canonical bounded logical damage shared by the terminal core and frame consumers.
 //
+// One type is both the terminal's producer accumulator and the value it drains to
+// a consumer, so the shift-composition rule has exactly one body. The producer
+// members are internal; the consumer surface is the public one.
+//
 // The representation is words end to end (research/33 T20): rows live in a
-// width-bounded bitset from the accumulator through the public seam, so spans and
+// width-bounded bitset from recording through the public seam, so spans and
 // row walks come out canonical from a word scan with no set, no hashing, and no
 // sort anywhere on the path. Damage additionally carries at most one scroll shift
 // (research/33 T9): `(region, delta)` recorded at the scroll site, meaning
@@ -29,8 +33,16 @@ public struct TerminalDamageShift: Equatable, Sendable {
 /// Accumulates the viewport rows a consumer must redraw plus at most one scroll
 /// translation, escalating to one full-frame marker when neither can express a
 /// mutation safely.
+///
+/// The terminal keeps one of these as its live accumulator and drains a copy to
+/// each frame consumer, so recording and `formUnion` share one composition rule.
+/// A producer instance is sized to the live grid and must stay that way: the
+/// static `.full` and `.none` values carry a zero-height bitset, so assigning one
+/// into the accumulator would make `TerminalDamageRowBits.insert` refuse every
+/// later row and silently end all damage recording. `escalateToFull` and `drain`
+/// exist to keep the height.
 public struct TerminalDamage: Equatable, Sendable {
-    /// Represents a drained accumulator with no redraw work.
+    /// Represents drained damage with no redraw work.
     public static let none = TerminalDamage(isFull: false)
 
     /// Represents damage that cannot be expressed safely as a shift plus rows.
@@ -74,6 +86,13 @@ public struct TerminalDamage: Equatable, Sendable {
         self.isFull = isFull
         shift = nil
         bits = TerminalDamageRowBits(rowCount: 0)
+    }
+
+    /// Creates the terminal's live accumulator, sized to the grid it records for.
+    init(rowCount: Int, isFull: Bool) {
+        self.isFull = isFull
+        shift = nil
+        bits = TerminalDamageRowBits(rowCount: rowCount)
     }
 
     init(bits: TerminalDamageRowBits, shift: TerminalDamageShift?) {
@@ -148,7 +167,7 @@ public struct TerminalDamage: Equatable, Sendable {
     public mutating func formUnion(_ later: TerminalDamage) {
         guard isFull == false else { return }
         if later.isFull {
-            self = .full
+            escalateToFull()
             return
         }
         if later.isEmpty { return }
@@ -159,7 +178,7 @@ public struct TerminalDamage: Equatable, Sendable {
         guard bits.rowCount == later.bits.rowCount else {
             // Widths differ only across a grid resize, which records `.full` on
             // its own; a mismatch here is a lineage error, so stay safe.
-            self = .full
+            escalateToFull()
             return
         }
         if let laterShift = later.shift {
@@ -171,12 +190,12 @@ public struct TerminalDamage: Equatable, Sendable {
     }
 
     /// Applies one newer shift on top of whatever is pending. Returns false
-    /// after escalating to `.full`.
+    /// after escalating to full damage.
     private mutating func applyShift(region: Range<Int>, delta: Int) -> Bool {
         let combined: Int
         if let pending = shift {
             guard pending.region == region else {
-                self = .full
+                escalateToFull()
                 return false
             }
             combined = pending.delta + delta
@@ -193,16 +212,88 @@ public struct TerminalDamage: Equatable, Sendable {
         return true
     }
 
-    /// Records a scroll translation into this value, translating pending rows.
-    /// The producer-side twin of the `formUnion` shift rules.
-    public mutating func recordShift(region: Range<Int>, delta: Int) {
-        guard isFull == false else { return }
-        guard region.isEmpty == false, delta != 0 else { return }
+    /// Records a scroll translation into this value, translating pending rows
+    /// under the same rules `formUnion` applies to a later value's shift.
+    ///
+    /// Returns true when pending damage changed, which is what lets the terminal
+    /// bump its consumer-work generation only for a scroll a consumer must act on.
+    @discardableResult
+    public mutating func recordShift(region: Range<Int>, delta: Int) -> Bool {
+        guard isFull == false else { return false }
+        guard region.isEmpty == false, delta != 0 else { return false }
         precondition(
             region.lowerBound >= 0 && region.upperBound <= bits.rowCount,
             "shift region \(region) is outside 0..<\(bits.rowCount)"
         )
         _ = applyShift(region: region, delta: delta)
+        return true
+    }
+
+    /// Escalates to full damage without discarding the grid height, so a
+    /// producer keeps accepting rows after the escalation drains.
+    private mutating func escalateToFull() {
+        isFull = true
+        shift = nil
+        bits.removeAll()
+    }
+
+    /// Marks the whole frame damaged, reporting whether that changed anything.
+    @discardableResult
+    mutating func recordFull() -> Bool {
+        guard isFull == false else { return false }
+        escalateToFull()
+        return true
+    }
+
+    /// Records one damaged row, reporting whether it was not already pending.
+    /// Rows outside the grid are refused, not trapped: the terminal derives them
+    /// from clamped viewport ranges, and a stale row is not worth a crash.
+    @discardableResult
+    mutating func record(row: Int) -> Bool {
+        guard isFull == false else { return false }
+        return bits.insert(row)
+    }
+
+    @discardableResult
+    mutating func record(rows: some Sequence<Int>) -> Bool {
+        guard isFull == false else { return false }
+        var changed = false
+        for row in rows {
+            changed = bits.insert(row) || changed
+        }
+        return changed
+    }
+
+    /// Re-sizes the accumulator to a new grid, discarding what the old one held.
+    mutating func reset(rowCount: Int, isFull: Bool) {
+        self.isFull = isFull
+        shift = nil
+        bits.reset(rowCount: rowCount)
+    }
+
+    /// Hands all pending work to one consumer and re-arms for the live grid.
+    mutating func drain() -> TerminalDamage {
+        if isFull {
+            isFull = false
+            return .full
+        }
+        if shift == nil, bits.isEmpty {
+            return .none
+        }
+        let drained = TerminalDamage(bits: bits, shift: shift)
+        shift = nil
+        bits.removeAll()
+        return drained
+    }
+
+    /// True once this already tells a consumer to redraw every viewport row.
+    ///
+    /// The scroll site uses this to stop paying per-scroll shift bookkeeping in
+    /// the flood regime: with every viewport row pending, a further translation
+    /// carries no information any consumer can act on, and full damage is the
+    /// same value spelled in one bit.
+    func coversViewport(rowCount: Int) -> Bool {
+        isFull || bits.covers(rowCount: rowCount)
     }
 
     public static func == (lhs: TerminalDamage, rhs: TerminalDamage) -> Bool {
@@ -212,7 +303,7 @@ public struct TerminalDamage: Equatable, Sendable {
     }
 }
 
-/// Width-bounded row bitset backing both the accumulator and the public seam.
+/// Width-bounded row bitset backing every damage value, recorded and drained.
 ///
 /// `rowCount` is the exact grid height, not a word multiple: an insert at or
 /// beyond it is refused, so an out-of-grid row cannot enter the representation.
@@ -263,6 +354,22 @@ struct TerminalDamageRowBits: Sendable {
         } else {
             removeAll()
         }
+    }
+
+    /// True when every row of `0..<rowCount` is set, read word at a time so the
+    /// scroll site's flood check costs one scan and no row loop.
+    func covers(rowCount: Int) -> Bool {
+        guard rowCount > 0, self.rowCount >= rowCount else { return false }
+        let fullWords = rowCount >> 6
+        for index in 0..<fullWords where words[index] != .max {
+            return false
+        }
+        let remainder = rowCount & 63
+        if remainder != 0 {
+            let mask: UInt64 = (1 << UInt64(remainder)) &- 1
+            if words[fullWords] & mask != mask { return false }
+        }
+        return true
     }
 
     mutating func formUnion(_ other: TerminalDamageRowBits) {
@@ -418,119 +525,5 @@ struct TerminalDamageRowBits: Sendable {
             return false
         }
         return true
-    }
-}
-
-/// Keeps hot-path damage in reusable words plus one pending shift until a
-/// consumer requests the public value.
-struct TerminalDamageAccumulator: Equatable, Sendable {
-    private var isFull: Bool
-    private var shift: TerminalDamageShift?
-    private var bits: TerminalDamageRowBits
-
-    init(rowCount: Int, isFull: Bool = false) {
-        self.isFull = isFull
-        shift = nil
-        bits = TerminalDamageRowBits(rowCount: rowCount)
-    }
-
-    var hasDamage: Bool {
-        isFull || shift != nil || bits.isEmpty == false
-    }
-
-    /// True once the accumulator already tells a consumer to redraw everything.
-    ///
-    /// The scroll site uses this to stop paying per-scroll shift bookkeeping in
-    /// the flood regime: with every viewport row pending, a further translation
-    /// carries no information any consumer can act on, and `.full` is the same
-    /// value spelled in one bit.
-    func coversViewport(rowCount: Int) -> Bool {
-        if isFull { return true }
-        guard rowCount > 0, bits.rowCount >= rowCount else { return false }
-        let fullWords = rowCount >> 6
-        for index in 0..<fullWords where bits.words[index] != .max {
-            return false
-        }
-        let remainder = rowCount & 63
-        if remainder != 0 {
-            let mask: UInt64 = (1 << UInt64(remainder)) &- 1
-            if bits.words[fullWords] & mask != mask { return false }
-        }
-        return true
-    }
-
-    mutating func recordFull() -> Bool {
-        guard isFull == false else { return false }
-        isFull = true
-        shift = nil
-        bits.removeAll()
-        return true
-    }
-
-    mutating func record(row: Int) -> Bool {
-        guard isFull == false else { return false }
-        return bits.insert(row)
-    }
-
-    mutating func record(rows: some Sequence<Int>) -> Bool {
-        guard isFull == false else { return false }
-        var changed = false
-        for row in rows {
-            changed = bits.insert(row) || changed
-        }
-        return changed
-    }
-
-    /// Records a scroll translation, composing with whatever is pending per the
-    /// contract on `TerminalDamage.formUnion`. The caller guarantees
-    /// `0 < abs(delta) < region.count` and `region` within the grid.
-    mutating func recordShift(region: Range<Int>, delta: Int) -> Bool {
-        guard isFull == false else { return false }
-        guard region.isEmpty == false, delta != 0 else { return false }
-        if let pending = shift {
-            guard pending.region == region else { return recordFull() }
-            let combined = pending.delta + delta
-            bits.translate(region: region, by: delta)
-            if abs(combined) >= region.count {
-                shift = nil
-                bits.fill(region)
-            } else {
-                shift = TerminalDamageShift(region: region, delta: combined)
-            }
-        } else {
-            bits.translate(region: region, by: delta)
-            if abs(delta) >= region.count {
-                bits.fill(region)
-            } else {
-                shift = TerminalDamageShift(region: region, delta: delta)
-            }
-        }
-        return true
-    }
-
-    mutating func reset(rowCount: Int, isFull: Bool) {
-        self.isFull = isFull
-        shift = nil
-        bits.reset(rowCount: rowCount)
-    }
-
-    mutating func drain() -> TerminalDamage {
-        if isFull {
-            isFull = false
-            return .full
-        }
-        if shift == nil, bits.isEmpty {
-            return .none
-        }
-        let drained = TerminalDamage(bits: bits, shift: shift)
-        shift = nil
-        bits.removeAll()
-        return drained
-    }
-
-    static func == (lhs: TerminalDamageAccumulator, rhs: TerminalDamageAccumulator) -> Bool {
-        lhs.isFull == rhs.isFull
-            && lhs.shift == rhs.shift
-            && lhs.bits.sameRows(as: rhs.bits)
     }
 }

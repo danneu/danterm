@@ -745,7 +745,7 @@ public struct Terminal: Equatable, Sendable {
     /// observers do not fire during initialization.
     private var hasContentInspectionState = false
     private var viewportState = ViewportState.following
-    private var damage: TerminalDamageAccumulator
+    private var damage: TerminalDamage
 
     /// Total following-viewport rows advanced by scrolls recorded as damage
     /// shifts, in the same eviction-corrected units as `absoluteViewportTopRow`.
@@ -1482,7 +1482,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Reports whether a frame consumer has redraw work or a completed semantic write to drain.
     public var hasPendingConsumerWork: Bool {
-        damage.hasDamage || pendingConsumerWork.hasWork
+        damage.isEmpty == false || pendingConsumerWork.hasWork
     }
 
     /// Lets the serialized host detect accumulator changes without copying terminal storage.
@@ -1808,7 +1808,7 @@ public struct Terminal: Equatable, Sendable {
         self.programVersion = programVersion
         self.defaultColors = defaultColors
         tabStops = Self.defaultTabStops(columns: columns)
-        damage = TerminalDamageAccumulator(rowCount: rows, isFull: true)
+        damage = TerminalDamage(rowCount: rows, isFull: true)
         screen = ScreenState(
             rows: (0..<rows).map { _ in
                 GridRow(cells: (0..<columns).map { _ in GridCell() })
