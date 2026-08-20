@@ -221,9 +221,15 @@ Rejected ideas:
   after the bootstrap branch on all three paths; add the socket-path
   injection point; land PO1. Gate: `just test` green; this commit alone
   closes the demonstrated race and unblocks RUNTIME-1.
-- [ ] Commit 2 -- `feat(runtime): project user-visible notices from the
+- [x] Commit 2 -- `feat(runtime): project user-visible notices from the
   model`. Delete the `presentAlert` port; add the notice queue, projection,
   reconcile pass, and panel; convert the four alert sites, the install-path
   alerts, and the restore prompt; move IPC start for the prompt path behind
   the answer; land PO2-PO6 and rewrite the one recording-port test. Gate:
   `just test` green, `just test-ui` green, no `runModal` left in `app/`.
+
+## Implementation notes
+
+- Current master moved pane search state into `PaneModel.live`. The UI gate
+  still used the removed `AppModel.searchState` API, so commit 2 also migrates
+  those fixtures to the pane-owned state without changing their behavior.

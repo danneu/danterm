@@ -57,6 +57,8 @@ struct ReconcilerCaches {
     // destroyed on teardown, so nil after ReconcilerCaches() re-init correctly
     // means "no panel, nothing shown".
     var confirmation: ConfirmationProjection? = nil
+    // Single-optional FIFO-head notice cache. The panel survives between queued notices.
+    var notice: NoticeProjection? = nil
 }
 
 extension AppRuntime {
@@ -82,6 +84,7 @@ extension AppRuntime {
         reconcileWindowChrome(tally: alertTally)
         reconcileSwitcher(tally: alertTally)      // single-optional MRU projection; nil (no mruCycle) -> orderOut
         reconcileConfirmation()
+        reconcileNotice()
         reconcilePreferencesPanel()
         reconcileAlertsPopover()
         reconcileTodoPopover()
@@ -294,6 +297,26 @@ extension AppRuntime {
             confirmationPanel?.orderOut(nil)
         }
         caches.confirmation = new
+    }
+
+    /// Shows, refreshes, or hides the oldest queued user-visible notice.
+    func reconcileNotice() {
+        let new = desiredNotice(in: model)
+        guard caches.notice != new else { return }
+        let wasShowing = caches.notice != nil
+        if let projection = new {
+            if noticePanel == nil {
+                noticePanel = NoticePanel(runtime: self)
+            }
+            noticePanel?.configure(projection)
+            if wasShowing == false {
+                noticePanel?.center(on: window)
+                noticePanel?.makeKeyAndOrderFront(nil)
+            }
+        } else {
+            noticePanel?.orderOut(nil)
+        }
+        caches.notice = new
     }
 
     /// Create/show, render, or hide the preferences panel from one diffed

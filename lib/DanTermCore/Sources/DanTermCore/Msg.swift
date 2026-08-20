@@ -119,6 +119,10 @@ enum Msg {
     case cancelConfirmation(id: ConfirmationId)
     case chooseDeleteGroupConfirmation(id: ConfirmationId, moveTabs: Bool)
 
+    // User-visible notices
+    case noticeReported(NoticeSubject)
+    case noticeAnswered(id: NoticeId, answer: NoticeAnswer)
+
     // Export
     case exportState
 

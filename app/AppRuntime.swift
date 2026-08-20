@@ -156,6 +156,8 @@ class AppRuntime {
     var preferencesPanel: PreferencesPanel?
     // internal (not private): the cross-file reconcileConfirmation extension reads it.
     var confirmationPanel: ConfirmationPanel?
+    // internal: the cross-file reconcileNotice extension owns its projection lifecycle.
+    var noticePanel: NoticePanel?
     // internal (not private): the cross-file reconcileSwitcher extension reads it.
     var switcherPanel: SwitcherPanel?
     private var switcherEventMonitor: Any?
@@ -199,6 +201,8 @@ class AppRuntime {
     private var ipcServer: IpcServer?
     private var ipcServerToken: AppRuntimeSchedulingToken?
     private var ipcServerStartToken: AppRuntimeSchedulingToken?
+    // Recovery data stays inert until the projected launch notice resolves to Restore.
+    private var pendingLaunchRestore: ValidatedAppRestore?
     let schedulingLifecycle = AppRuntimeSchedulingLifecycle()
     private lazy var paneTapeBroker = PaneTapeBroker(
         schedulingLifecycle: schedulingLifecycle
@@ -558,8 +562,8 @@ class AppRuntime {
 
     /// Captures one main-actor callback that becomes inert when runtime shutdown wins the race.
     private func captureDeferredCallback(
-        _ action: @escaping (AppRuntime) -> Void
-    ) -> (() -> Void)? {
+        _ action: @escaping @MainActor @Sendable (AppRuntime) -> Void
+    ) -> (@MainActor @Sendable () -> Void)? {
         guard let token = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
             return nil
         }
@@ -863,20 +867,34 @@ class AppRuntime {
                 retention: .checkpoint
             )
             let exportWriter = exportWriter
-            let presentAlert = ports.presentAlert
-            ports.selectExportDestination(window) { url in
-                guard let url else { return }
+            ports.selectExportDestination(window) { [weak self] url in
+                guard let self, let url else { return }
                 exportWriter.write(
                     to: url,
                     async: true,
                     encode: capture.encoder(prettyPrinted: true)
-                ) { outcome in
-                    guard case .failed(let description) = outcome else { return }
-                    // The writer's completion already arrives a main-queue turn after the sheet
-                    // dismissed, so this modal cannot open inside the panel's completion.
-                    presentAlert("Export Failed", description)
+                ) { [weak self] outcome in
+                    guard let self, case .failed(let description) = outcome else { return }
+                    self.send(.noticeReported(.message(
+                        title: "Export Failed",
+                        message: description
+                    )))
                 }
             }
+
+        case .resolveLaunchRestore(let shouldRestore):
+            guard let callback = captureDeferredCallback({ runtime in
+                let retained = runtime.pendingLaunchRestore
+                runtime.pendingLaunchRestore = nil
+                if shouldRestore, let retained {
+                    runtime.bootstrapFromValidatedRestore(retained)
+                } else {
+                    runtime.send(.createTabInSelectedGroup())
+                }
+                runtime.startIpcServer()
+            }) else { break }
+            // Leave both the answering send frame and the panel button-action stack.
+            DispatchQueue.main.async(execute: callback)
 
         case .ipcReply(let reqId, let result):
             guard let connection = takeIpcConnection(for: reqId) else { break }
@@ -1439,10 +1457,10 @@ class AppRuntime {
     }
 
     private func presentConfigError(_ error: Error) {
-        ports.presentAlert(
-            "DanTerm Config Error",
-            (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        )
+        send(.noticeReported(.message(
+            title: "DanTerm Config Error",
+            message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        )))
     }
 
     // MARK: - Snapshot Bootstrap
@@ -1470,6 +1488,12 @@ class AppRuntime {
             print("[init] Snapshot session creation failed, falling back to default startup")
             send(.createTabInSelectedGroup())
         }
+    }
+
+    /// Retains validated recovery data and reports the launch decision as model state.
+    func requestRestorePrompt(_ loaded: ValidatedAppRestore, message: String) {
+        pendingLaunchRestore = loaded
+        send(.noticeReported(.restorePrompt(message: message)))
     }
 
     /// Build all runtime objects for a validated restore without touching the live session.
@@ -1547,6 +1571,8 @@ class AppRuntime {
         preferencesPanel = nil
         confirmationPanel?.orderOut(nil)
         confirmationPanel = nil
+        noticePanel?.orderOut(nil)
+        noticePanel = nil
         themeBrowserView?.removeFromSuperview()
         themeBrowserView = nil
 
@@ -1729,7 +1755,7 @@ class AppRuntime {
     }
 
     private func showImportError(message: String) {
-        ports.presentAlert("Import Failed", message)
+        send(.noticeReported(.message(title: "Import Failed", message: message)))
     }
 
     // MARK: - Pane Toolbars

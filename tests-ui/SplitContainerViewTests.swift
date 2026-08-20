@@ -374,18 +374,19 @@ func splitContainerViewTests() {
         // Scenario: pane A's field owns focus, pane B is added, and reconciliation
         //   restores the same field from the model-declared owner.
         let paneA = PaneId(), paneB = PaneId(), tabId = TabId()
-        let oldRoot = SplitNodeModel.leaf(PaneModel(id: paneA))
+        var paneAModel = PaneModel(id: paneA)
+        paneAModel.live.search = SearchModel(needle: "hit")
+        let oldRoot = SplitNodeModel.leaf(paneAModel)
         let newRoot = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            first: .leaf(paneAModel), second: .leaf(PaneModel(id: paneB)),
             ratio: 0.5
         )
         let tab = TabModel(id: tabId, paneTree: PaneTree(root: oldRoot, focusedPaneId: paneA))
-        var model = AppModel(
+        let model = AppModel(
             groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
             selectedTabId: tabId
         )
-        model.searchState[paneA] = SearchModel(needle: "hit")
         let runtime = AppRuntime(model: model)
         runtime.installTerminalSession(FocusableTerminalView(), paneId: paneA)
         runtime.installTerminalSession(FocusableTerminalView(), paneId: paneB)
@@ -396,7 +397,7 @@ func splitContainerViewTests() {
         container.rebuild()
         container.ensureLaidOut()
         let wrapper = try requireWrapper(runtime, paneA)
-        wrapper.showSearchOverlay(search: model.searchState[paneA]!, runtime: runtime)
+        wrapper.showSearchOverlay(search: model.pane(paneA)!.live.search!, runtime: runtime)
         let field = wrapper.searchOverlay!.searchField
         try uiExpect(window.makeFirstResponder(field), "window refused the search field")
 
@@ -430,8 +431,8 @@ func splitContainerViewTests() {
             groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
             selectedTabId: tabId
         )
-        model.searchState[paneA] = SearchModel(needle: "hit")
-        model.searchState[paneB] = SearchModel(needle: "hit")
+        model.updatePane(paneA) { $0.live.search = SearchModel(needle: "hit") }
+        model.updatePane(paneB) { $0.live.search = SearchModel(needle: "hit") }
         let runtime = AppRuntime(model: model)
 
         for paneId in [paneA, paneB] {
@@ -466,7 +467,7 @@ func splitContainerViewTests() {
             groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
             selectedTabId: tabId
         )
-        model.searchState[paneId] = SearchModel(needle: "hit")
+        model.updatePane(paneId) { $0.live.search = SearchModel(needle: "hit") }
         let runtime = AppRuntime(model: model)
         let terminal = FocusableTerminalView()
         runtime.installTerminalSession(terminal, paneId: paneId)
@@ -477,7 +478,7 @@ func splitContainerViewTests() {
         container.rebuild()
         container.ensureLaidOut()
         let wrapper = try requireWrapper(runtime, paneId)
-        wrapper.showSearchOverlay(search: model.searchState[paneId]!, runtime: runtime)
+        wrapper.showSearchOverlay(search: model.pane(paneId)!.live.search!, runtime: runtime)
         try uiExpect(window.makeFirstResponder(terminal), "window refused the terminal")
         runtime.sentMessages = []
 
@@ -487,7 +488,7 @@ func splitContainerViewTests() {
             "the pass did not repair the responder to the search field")
         try uiExpect(runtime.sentMessages.isEmpty,
             "the search-field repair originated \(runtime.sentMessages)")
-        try uiExpect(runtime.model.searchState[paneId]?.focusOwner == .field,
+        try uiExpect(runtime.model.pane(paneId)?.live.search?.focusOwner == .field,
             "the repair changed search focus ownership")
     }
 
@@ -553,7 +554,7 @@ func splitContainerViewTests() {
             groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
             selectedTabId: tabId
         )
-        model.searchState[paneId] = SearchModel()
+        model.updatePane(paneId) { $0.live.search = SearchModel() }
         let runtime = AppRuntime(model: model)
         let terminal = FocusableTerminalView()
         runtime.installTerminalSession(terminal, paneId: paneId)
@@ -568,7 +569,7 @@ func splitContainerViewTests() {
         container.rebuild()
         container.ensureLaidOut()
         let wrapper = try requireWrapper(runtime, paneId)
-        wrapper.showSearchOverlay(search: model.searchState[paneId]!, runtime: runtime)
+        wrapper.showSearchOverlay(search: model.pane(paneId)!.live.search!, runtime: runtime)
         let searchField = wrapper.searchOverlay!.searchField
 
         try uiExpect(window.makeFirstResponder(terminal), "window refused terminal")
@@ -588,7 +589,7 @@ func splitContainerViewTests() {
         try uiExpect(window.makeFirstResponder(nonPaneField), "window refused non-pane field")
         try uiExpect(runtime.paneFocusClaimant() == .nonPane,
             "non-pane field editor should remain a deliberate claimant")
-        runtime.model.searchState[paneId]?.focusOwner = .terminal
+        runtime.model.updatePane(paneId) { $0.live.search?.focusOwner = .terminal }
         let savedResponder = window.firstResponder
         runtime.reconcilePaneFocus()
         try uiExpect(window.firstResponder === savedResponder,

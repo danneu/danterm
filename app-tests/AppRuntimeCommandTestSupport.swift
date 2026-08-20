@@ -19,7 +19,6 @@ final class RecordingAppRuntimePorts {
     var sessionRequests: [TerminalSessionRequest] = []
     var notifications: [UNNotificationRequest] = []
     var exportDestination: URL?
-    var alerts: [(title: String, message: String)] = []
     var doctorPermissions = DoctorFacts.Permissions.unavailable
     var terminateCount = 0
     var activationCount = 0
@@ -32,6 +31,8 @@ final class RecordingAppRuntimePorts {
     /// request. `nil` never refuses. A test that needs a restore to fail partway through
     /// building its panes counts the ones it wants built first.
     var sessionsBeforeFailure: Int?
+    /// Specific one-based request numbers the fixture refuses while later requests may succeed.
+    var failedSessionRequestNumbers: Set<Int> = []
 
     init(session: RecordingTerminalSession = RecordingTerminalSession()) {
         self.session = session
@@ -41,6 +42,9 @@ final class RecordingAppRuntimePorts {
         AppRuntimePorts(
             createTerminalSession: { [self] request in
                 sessionRequests.append(request)
+                if failedSessionRequestNumbers.contains(sessionRequests.count) {
+                    return nil
+                }
                 if let sessionsBeforeFailure, sessionRequests.count > sessionsBeforeFailure {
                     return nil
                 }
@@ -52,9 +56,6 @@ final class RecordingAppRuntimePorts {
             },
             selectExportDestination: { [self] _, completion in
                 completion(exportDestination)
-            },
-            presentAlert: { [self] title, message in
-                alerts.append((title, message))
             },
             readDoctorPermissions: { [self] in doctorPermissions },
             terminateApp: { [self] in terminateCount += 1 },

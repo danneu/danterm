@@ -155,36 +155,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         if let snapshot = initSnapshot {
             runtime.bootstrapFromSnapshot(snapshot)
             initSnapshot = nil
+            runtime.startIpcServer()
         } else if launchPolicy.startup == .promptForRecovery,
                   let lastSession = lastSessionSnapshot {
-            // Prompt the user before restoring so they know what's coming.
-            // Crash path gets a warning tone; clean exit is a neutral prompt.
             let summary = sessionSummary(lastSession)
-            let alert = NSAlert()
-            alert.addButton(withTitle: "Restore")
-            let startFreshButton = alert.addButton(withTitle: "Start Fresh")
-            // Enter activates "Restore" (first button = default). Bind Escape to
-            // "Start Fresh" so dismissing the modal matches clicking it.
-            startFreshButton.keyEquivalent = "\u{1b}"
-            if previousSessionCrashed {
-                alert.messageText = "Restore Previous Session?"
-                alert.informativeText = "DanTerm did not exit cleanly last time.\n\(summary)"
-                alert.alertStyle = .warning
-            } else {
-                alert.messageText = "Restore Previous Session?"
-                alert.informativeText = summary
-            }
-            let response = alert.runModal()
-            if response == .alertFirstButtonReturn {
-                runtime.bootstrapFromValidatedRestore(lastSession)
-            } else {
-                runtime.send(.createTabInSelectedGroup())
-            }
+            let message = previousSessionCrashed
+                ? "DanTerm did not exit cleanly last time.\n\(summary)"
+                : summary
+            runtime.requestRestorePrompt(lastSession, message: message)
             lastSessionSnapshot = nil
         } else {
             runtime.send(.createTabInSelectedGroup())
+            runtime.startIpcServer()
         }
-        runtime.startIpcServer()
 
         #if DANTERM_TERMINAL_BENCHMARK
         let benchmarkRuntime = runtime
@@ -596,20 +579,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     @objc func installDantermInPath(_ sender: Any?) {
         do {
             let outcome = try CLIPathInstaller.default.install()
-            let alert = NSAlert()
-            alert.messageText = "danterm Installed"
+            let message: String
             if outcome.usedAdministratorPrivileges {
-                alert.informativeText = "Installed \(outcome.destinationURL.path) with administrator privileges."
+                message = "Installed \(outcome.destinationURL.path) with administrator privileges."
             } else {
-                alert.informativeText = "Installed \(outcome.destinationURL.path)."
+                message = "Installed \(outcome.destinationURL.path)."
             }
-            alert.runModal()
+            runtime.send(.noticeReported(.message(title: "danterm Installed", message: message)))
         } catch {
-            let alert = NSAlert()
-            alert.messageText = "Install Failed"
-            alert.informativeText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            alert.alertStyle = .warning
-            alert.runModal()
+            runtime.send(.noticeReported(.message(
+                title: "Install Failed",
+                message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            )))
         }
     }
 

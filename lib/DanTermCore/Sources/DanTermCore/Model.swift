@@ -17,6 +17,8 @@ enum SplitTag {}
 enum AlertTag {}
 /// Separates panel answers from every replaced confirmation transaction.
 enum ConfirmationTag {}
+/// Separates panel answers from every queued user-visible notice.
+enum NoticeTag {}
 /// Separates one inline rename session from its successor on the same row.
 enum RenameSessionTag {}
 
@@ -26,6 +28,8 @@ typealias SplitId = TypedId<SplitTag>
 typealias AlertId = TypedId<AlertTag>
 /// Names the exact confirmation transaction a panel answer belongs to.
 typealias ConfirmationId = TypedId<ConfirmationTag>
+/// Names the exact queued notice a panel answer belongs to.
+typealias NoticeId = TypedId<NoticeTag>
 /// Names the exact inline rename session an end belongs to.
 typealias RenameSessionId = TypedId<RenameSessionTag>
 
@@ -553,6 +557,18 @@ struct PendingConfirmation: Equatable {
     let quitAuthorized: Bool
 }
 
+/// The copy and launch semantics frozen when a user-visible notice is reported.
+enum NoticeSubject: Equatable {
+    case message(title: DisplayLine, message: String)
+    case restorePrompt(message: String)
+}
+
+/// One queued notice transaction. The id makes stale panel answers inert.
+struct PendingNotice: Equatable {
+    let id: NoticeId
+    let subject: NoticeSubject
+}
+
 struct AppModel: Equatable {
     var groups: [GroupModel]
     var selectedTabId: TabId?
@@ -594,6 +610,7 @@ struct AppModel: Equatable {
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
     var pendingConfirmation: PendingConfirmation? = nil  // ephemeral -- non-nil while the confirmation panel is active
+    var noticeQueue: [PendingNotice] = []  // ephemeral -- oldest first; projected one at a time
     var pendingSessionCreations: [SessionId: PendingSessionCreation] = [:]
     var pendingInputRequests: [UUID: PendingInputRequest] = [:]
     var pendingInputSubmissions: [InputSubmissionId: UUID] = [:]

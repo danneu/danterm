@@ -241,7 +241,7 @@ struct AppRuntimeIpcCommandTests {
         #expect(decodePaneTapeRecord(records[1]) == .end(reason: .dumpComplete))
     }
 
-    @Test("config save failure alerts and completes font resolution before return")
+    @Test("config save failure queues a notice and completes font resolution before return")
     func configFailureReentersBeforePerformReturns() {
         let ports = RecordingAppRuntimePorts()
         let url = FileManager.default.temporaryDirectory
@@ -252,14 +252,13 @@ struct AppRuntimeIpcCommandTests {
         let runtime = makeCommandTestRuntime(ports, configStore: store)
         defer { runtime.shutdown() }
         runtime.model.resolvedFontFamily = "stale family"
-        var config = DanTermConfig.default
-        config.fontFamily = "DanTerm Missing Font \(UUID().uuidString)"
+        runtime.send(.preferencesOpened())
+        runtime.send(.prefSet(.fontFamily("DanTerm Missing Font \(UUID().uuidString)")))
+        runtime.send(.prefSave)
 
-        runtime.perform(.saveDanTermConfig(config))
-
-        #expect(ports.alerts.count == 1)
-        #expect(ports.alerts.first?.title == "DanTerm Config Error")
-        #expect(ports.alerts.first?.message.contains("could not save") == true)
+        #expect(runtime.model.noticeQueue.count == 1)
+        #expect(desiredNotice(in: runtime.model)?.title == "DanTerm Config Error")
+        #expect(desiredNotice(in: runtime.model)?.message.contains("could not save") == true)
         #expect(runtime.model.resolvedFontFamily == nil)
     }
 

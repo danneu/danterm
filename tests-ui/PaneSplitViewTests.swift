@@ -35,6 +35,7 @@ struct UITestRunner {
         alertsPopoverViewTests()
         preferencesPanelTests()
         confirmationPanelTests()
+        noticePanelTests()
         dialogActionRowTests()
         singleLineLabelTests()
 

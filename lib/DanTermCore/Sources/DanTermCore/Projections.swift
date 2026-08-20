@@ -14,6 +14,53 @@
 import Foundation
 import DanTermProtocol
 
+// MARK: - Notice Panel
+
+/// One model-authored answer drawn by the notice panel.
+enum NoticeAnswer: Equatable {
+    case dismiss
+    case restore
+    case startFresh
+}
+
+/// The copy and answer carried by one notice-panel button.
+struct NoticeChoice: Equatable {
+    let title: DisplayLine
+    let answer: NoticeAnswer
+}
+
+/// Pure value describing the oldest queued user-visible notice.
+struct NoticeProjection: Equatable {
+    let id: NoticeId
+    let title: DisplayLine
+    let message: String
+    let primary: NoticeChoice
+    let secondary: NoticeChoice?
+}
+
+/// Projects only the FIFO head so answering it reveals, rather than replaces, its successor.
+func desiredNotice(in model: AppModel) -> NoticeProjection? {
+    guard let pending = model.noticeQueue.first else { return nil }
+    switch pending.subject {
+    case .message(let title, let message):
+        return NoticeProjection(
+            id: pending.id,
+            title: title,
+            message: message,
+            primary: NoticeChoice(title: "OK", answer: .dismiss),
+            secondary: nil
+        )
+    case .restorePrompt(let message):
+        return NoticeProjection(
+            id: pending.id,
+            title: "Restore Previous Session?",
+            message: message,
+            primary: NoticeChoice(title: "Restore", answer: .restore),
+            secondary: NoticeChoice(title: "Start Fresh", answer: .startFresh)
+        )
+    }
+}
+
 // MARK: - Theme Browser
 
 /// Pure value describing the model-derived content shown in the theme browser.

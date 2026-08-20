@@ -109,6 +109,8 @@ enum Command {
     case sendNotification(alertId: AlertId, paneId: PaneId, title: DisplayLine, subtitle: DisplayLine?, body: String)
     case terminate
     case activateApp
+    /// Resolves the launch recovery decision outside the answering send frame.
+    case resolveLaunchRestore(restore: Bool)
     // The dock + toolbar-bell unread badges are derived by reconcileWindowChrome (Stage 6).
 
     // Config persistence

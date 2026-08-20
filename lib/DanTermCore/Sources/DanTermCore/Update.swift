@@ -906,6 +906,29 @@ func update(
     case .chooseDeleteGroupConfirmation(let id, let moveTabs):
         return chooseDeleteGroupConfirmation(&model, id: id, moveTabs: moveTabs, env: env)
 
+    case .noticeReported(let subject):
+        model.noticeQueue.append(PendingNotice(
+            id: NoticeId(rawValue: env.newId()),
+            subject: subject
+        ))
+        return []
+
+    case .noticeAnswered(let id, let answer):
+        guard model.noticeQueue.first?.id == id else { return [] }
+        let commands: [Command]
+        switch (model.noticeQueue[0].subject, answer) {
+        case (.message, .dismiss):
+            commands = []
+        case (.restorePrompt, .restore):
+            commands = [.resolveLaunchRestore(restore: true)]
+        case (.restorePrompt, .startFresh):
+            commands = [.resolveLaunchRestore(restore: false)]
+        default:
+            return []
+        }
+        model.noticeQueue.removeFirst()
+        return commands
+
     case .terminate:
         return [.terminate]
 

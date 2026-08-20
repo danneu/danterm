@@ -70,6 +70,131 @@ struct IpcServerOwnershipTests {
         }.value
         #expect(response.error == nil)
     }
+
+    @Test("recovery answer commits the restore before IPC starts accepting")
+    func restoreAnswerStartsIpcAfterCommit() async throws {
+        let socket = try IpcServerSocketFixture()
+        defer { socket.remove() }
+        let ports = RecordingAppRuntimePorts()
+        let runtime = AppRuntime(
+            ports: ports.value,
+            configStore: DanTermConfigStore(
+                url: socket.directoryURL.appendingPathComponent("absent-config.json")
+            ),
+            startsApplicationServices: true,
+            socketPath: socket.socketURL
+        )
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        let restore = try ownershipValidatedRestore(makeCommandSnapshot(paneId: paneId))
+        runtime.requestRestorePrompt(restore, message: "1 tab, 1 pane.")
+        let peer = try connectToIpcServer(at: socket.socketURL)
+        defer { Darwin.close(peer) }
+        try writeAll(try encodeIpcLine(JsonRpcRequest(
+            id: .number(8),
+            method: IpcRequestMethod.ping.rawValue,
+            params: .object([:])
+        )), to: peer)
+
+        // This expiry is the observation: the recovery decision must still gate acceptance.
+        #expect(pollForReadableData(peer, timeoutMilliseconds: 50) == false)
+        let noticeId = try #require(runtime.model.noticeQueue.first?.id)
+        runtime.send(.noticeAnswered(id: noticeId, answer: .restore))
+
+        let response = try await Task.detached {
+            try readResponse(id: .number(8), from: peer)
+        }.value
+        #expect(response.error == nil)
+        #expect(runtime.paneHosts.keys.contains(paneId))
+    }
+
+    @Test("Start Fresh creates a fresh tab before IPC starts accepting")
+    func startFreshStartsIpcAfterFreshTab() async throws {
+        let socket = try IpcServerSocketFixture()
+        defer { socket.remove() }
+        let ports = RecordingAppRuntimePorts()
+        let runtime = AppRuntime(
+            ports: ports.value,
+            configStore: DanTermConfigStore(
+                url: socket.directoryURL.appendingPathComponent("absent-config.json")
+            ),
+            startsApplicationServices: true,
+            socketPath: socket.socketURL
+        )
+        defer { runtime.shutdown() }
+        let recoveredPaneId = PaneId(rawValue: UUID())
+        let restore = try ownershipValidatedRestore(makeCommandSnapshot(paneId: recoveredPaneId))
+        runtime.requestRestorePrompt(restore, message: "1 tab, 1 pane.")
+        let peer = try connectToIpcServer(at: socket.socketURL)
+        defer { Darwin.close(peer) }
+        try writeAll(try encodeIpcLine(JsonRpcRequest(
+            id: .number(9),
+            method: IpcRequestMethod.ping.rawValue,
+            params: .object([:])
+        )), to: peer)
+
+        // This expiry is the observation: the recovery decision must still gate acceptance.
+        #expect(pollForReadableData(peer, timeoutMilliseconds: 50) == false)
+        let noticeId = try #require(runtime.model.noticeQueue.first?.id)
+        runtime.send(.noticeAnswered(id: noticeId, answer: .startFresh))
+
+        let response = try await Task.detached {
+            try readResponse(id: .number(9), from: peer)
+        }.value
+        #expect(response.error == nil)
+        #expect(ports.sessionRequests.count == 1)
+        #expect(runtime.paneHosts.keys.contains(recoveredPaneId) == false)
+        #expect(runtime.model.allPaneIds.count == 1)
+    }
+
+    @Test("failed recovery build falls back to fresh before IPC starts accepting")
+    func failedRestoreStillStartsIpc() async throws {
+        let socket = try IpcServerSocketFixture()
+        defer { socket.remove() }
+        let ports = RecordingAppRuntimePorts()
+        ports.failedSessionRequestNumbers = [1]
+        let runtime = AppRuntime(
+            ports: ports.value,
+            configStore: DanTermConfigStore(
+                url: socket.directoryURL.appendingPathComponent("absent-config.json")
+            ),
+            startsApplicationServices: true,
+            socketPath: socket.socketURL
+        )
+        defer { runtime.shutdown() }
+        let restore = try ownershipValidatedRestore(
+            makeCommandSnapshot(paneId: PaneId(rawValue: UUID()))
+        )
+        runtime.requestRestorePrompt(restore, message: "1 tab, 1 pane.")
+        let peer = try connectToIpcServer(at: socket.socketURL)
+        defer { Darwin.close(peer) }
+        try writeAll(try encodeIpcLine(JsonRpcRequest(
+            id: .number(10),
+            method: IpcRequestMethod.ping.rawValue,
+            params: .object([:])
+        )), to: peer)
+
+        // This expiry is the observation: the recovery decision must still gate acceptance.
+        #expect(pollForReadableData(peer, timeoutMilliseconds: 50) == false)
+        let noticeId = try #require(runtime.model.noticeQueue.first?.id)
+        runtime.send(.noticeAnswered(id: noticeId, answer: .restore))
+
+        let response = try await Task.detached {
+            try readResponse(id: .number(10), from: peer)
+        }.value
+        #expect(response.error == nil)
+        #expect(ports.sessionRequests.count == 2)
+        #expect(runtime.model.allPaneIds.count == 1)
+    }
+}
+
+private func ownershipValidatedRestore(_ snapshot: AppModelSnapshot) throws -> ValidatedAppRestore {
+    let built = try #require(validateAndBuildDetailed(snapshot))
+    return ValidatedAppRestore(
+        snapshot: snapshot,
+        model: built.model,
+        paneSnapshots: built.paneSnapshots
+    )
 }
 
 private struct IpcServerSocketFixture {

@@ -12,7 +12,6 @@ struct AppRuntimePorts {
         NSWindow?,
         @escaping @MainActor (URL?) -> Void
     ) -> Void
-    var presentAlert: @MainActor (_ title: String, _ message: String) -> Void
     var readDoctorPermissions: @MainActor () async -> DoctorFacts.Permissions
     var terminateApp: @MainActor () -> Void
     var activateApp: @MainActor () -> Void
@@ -42,12 +41,6 @@ struct AppRuntimePorts {
                 panel.beginSheetModal(for: window) { response in
                     completion(response == .OK ? panel.url : nil)
                 }
-            },
-            presentAlert: { title, message in
-                let alert = NSAlert()
-                alert.messageText = title
-                alert.informativeText = message
-                alert.runModal()
             },
             readDoctorPermissions: {
                 await DoctorPermissionProber().gather()
