@@ -640,10 +640,27 @@ moment the app stopped, which is what surviving a crash looks like.
 Geometry is one fact on this stream: the grid, plus whether that grid is pinned.
 Pinned means the grid is an override a `pane resize` set; unpinned means it follows
 the pane's rectangle. The start record, the first sync part, and every geometry
-event all state both, so a reader always knows the pane's current pinnedness
-without comparing grids. Clearing an override back to the grid the pane already
-ran at still produces one geometry event, with `pinned` false and the same
-columns and rows -- the child sees no size change and no cell content changes.
+event all state both, so a reader never has to compare grids to learn whether a
+grid is pinned. Clearing an override back to the grid the pane already ran at
+still produces one geometry event, with `pinned` false and the same columns and
+rows -- the child sees no size change and no cell content changes.
+
+The start record's geometry is not always the geometry at the cursor the same
+record publishes, so which grid it states depends on how the stream opened:
+
+- `--from-now` on a raw stream: the live grid, so it is the pane's current
+  geometry and current pinnedness.
+- A stream a sync opens: the sync's grid, which the first sync part repeats.
+- `--from-cursor`, and a stream from the beginning: the recorder's birth grid at
+  sequence zero, which is the pane's current grid only if the pane never resized.
+
+Every geometry change after the published cursor arrives as a geometry event or
+a sync, never only through the start record. So a reader resuming from its own
+cursor keeps the grid and the pinnedness it already holds and lets the replayed
+records move them. A reader that adopted the start record's `pinned` on a resume
+would replace the correct bit at its own cursor with the birth bit, and offer to
+release a claim the pane still holds until the next resize -- which may never
+come.
 
 A reconstructible stream injects a sync only when the requested position plus
 the delivered events cannot reconstruct exact pane state. A bounded stream has

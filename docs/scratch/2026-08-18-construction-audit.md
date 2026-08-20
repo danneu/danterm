@@ -1166,7 +1166,7 @@ rewrites.
 - [ ] **[FEED-1](#feed-1)** (4x5, large) Represent the viewport as a rotating row ring so a scroll advances a head index instead of moving every row _(after [FEED-2](#feed-2))_
 - [ ] **[MOBILE-2](#mobile-2)** (4x5, large) Feed the drained damage into the frame stores instead of re-rendering the whole grid every tick _(after [MOBILE-1](#mobile-1))_
 - [x] **[WIRE-2](#wire-2)** (4x5, large) Carry a tape record as its typed event, not as a JSONValue decoded from its own encoding _(after [PERSIST-6](#persist-6))_ -- `c0e4c026..c4d7ef21`
-- [ ] **[MOBILE-6](#mobile-6)** (4x4, small) Store the start record's stated pinnedness in the replica instead of keeping the checkpoint's
+- [x] **[MOBILE-6](#mobile-6)** (4x4, small) Store the start record's stated pinnedness in the replica instead of keeping the checkpoint's -- resolved by docs: the premise is wrong, and the fix would be a regression
 - [x] **[UNI-2](#uni-2)** (4x4, large) Derive the bulk-print run predicate from the scalar record instead of from a printable-ASCII byte range _(after [UNI-1](#uni-1))_
 - [ ] **[CHROME-2](#chrome-2)** (3x5, small) Make the confirmation projection carry each button's answer instead of inferring it from button visibility _(after [MODEL-2](#model-2))_
 - [ ] **[IOS-1](#ios-1)** (3x5, small) Let the replica report pinnedness instead of re-decoding tape JSON in the session model
@@ -1973,7 +1973,7 @@ all of them sit in an early wave.
 - [HIST-2](#hist-2) (4x5, W1) -- Skip the per-cell content-unit walk when the record's hasWideCells bit proves the count
 - [MOBILE-4](#mobile-4) (4x5, W2) -- Signal replica state and surface geometry only when they change, not once per applied record
 - [WIRE-1](#wire-1) (4x5, W1) -- Frame IPC lines by scanning for the newline, not by appending one byte at a time
-- [MOBILE-6](#mobile-6) (4x4, W2) -- Store the start record's stated pinnedness in the replica instead of keeping the checkpoint's
+- ~~[MOBILE-6](#mobile-6)~~ (4x4, W2) -- Store the start record's stated pinnedness in the replica instead of keeping the checkpoint's
 - [BUILD-3](#build-3) (3x5, W6) -- Put every gate scratch tree under one root so `just clean` cannot miss one
 - [CHROME-2](#chrome-2) (3x5, W2) -- Make the confirmation projection carry each button's answer instead of inferring it from button visibility
 - [FEED-2](#feed-2) (3x5, W1) -- Reach a row's cells once per run, not once per cell, on the bulk ASCII write and scan loops
@@ -2020,7 +2020,7 @@ Vetted scores, ties broken by effort. The wave column says when it is unblocked.
 | 4x5 = 20 | [IPC-2](#ipc-2) | W5 | large | structural | Generate the CLI help text and SKILL.md synopsis from one command table instead of hand-syncing three copies |
 | 4x5 = 20 | [MOBILE-2](#mobile-2) | W2 | large | structural | Feed the drained damage into the frame stores instead of re-rendering the whole grid every tick |
 | 4x5 = 20 | [WIRE-2](#wire-2) | W2 | large | data-modeling | Carry a tape record as its typed event, not as a JSONValue decoded from its own encoding |
-| 4x4 = 16 | [MOBILE-6](#mobile-6) | W2 | small | correctness | Store the start record's stated pinnedness in the replica instead of keeping the checkpoint's |
+| 4x4 = 16 | ~~[MOBILE-6](#mobile-6)~~ | W2 | small | correctness | Store the start record's stated pinnedness in the replica instead of keeping the checkpoint's |
 | 4x4 = 16 | [UNI-2](#uni-2) | W2 | large | perf-hot-path | Derive the bulk-print run predicate from the scalar record instead of from a printable-ASCII byte range |
 | 3x5 = 15 | [BUILD-3](#build-3) | W6 | small | structural | Put every gate scratch tree under one root so `just clean` cannot miss one |
 | 3x5 = 15 | [CHROME-2](#chrome-2) | W2 | small | correctness | Make the confirmation projection carry each button's answer instead of inferring it from button visibility |
@@ -5406,7 +5406,7 @@ _Scope: The iOS client (ios/DanTermMobileKit/Sources, ios/DanTermMobileApp)_
 
 **Correction.** The duplicated decoder is the `.event` arm alone -- `.start` and `.sync` read typed fields of `PaneTapeStartRecord`/`PaneTapeStateSynchronization` and have no second reader. The finding should say: one wire fact (the resize event's `pinned` key) is parsed by hand in `MobileSessionModel#pinnedStatement` and properly in `NeutralTerminalRecordingEvent`, so a rename of the key or the `resize` type name silently degrades the model's reading to `false` instead of failing to compile.
 
-**Sharper ideal.** Make `PaneReplica` the single owner of the bit rather than making the event carry a post-apply snapshot. Two things must land together: (a) `applyStart` must store `start.pinned` in `heldPinned` -- it is the contract's stated truth at the subscription's own cursor and today it is dropped; (b) the statement is then read from the replica, either as a `static func pinnedStatement(in: PaneTapeRecord) -> Bool?` built on the typed event (the finding's own fallback) or as a reported post-apply bit. The event-carried variant as written loses two behaviors the current code has: a `.start` record's pinnedness, and any statement made while the replica is not exact (`pinned` is nil there by design, documented on `PaneReplica#pinned`, so a claim that the tape says is released would stop being released behind a gap).
+**Sharper ideal.** Make `PaneReplica` the single owner of the bit rather than making the event carry a post-apply snapshot: read the statement from the replica, as a `static func pinnedStatement(in: PaneTapeRecord) -> Bool?` built on the typed event (the finding's own fallback) or as a reported post-apply bit. This has no precondition in `applyStart`. An earlier version of this paragraph also required `applyStart` to store `start.pinned` in `heldPinned`; that restated MOBILE-6's wrong premise -- `start.pinned` is the bit at the record's own initial geometry, which on a resume is the recorder's birth grid and not the grid at the cursor -- and it is struck. The event-carried variant as written loses two behaviors the current code has: a `.start` record's pinnedness, and any statement made while the replica is not exact (`pinned` is nil there by design, documented on `PaneReplica#pinned`, so a claim that the tape says is released would stop being released behind a gap).
 
 **Conflicts with.** [MOBILE-3](#mobile-3), [IOS-3](#ios-3)
 
@@ -8201,6 +8201,8 @@ _How this list was built: I grepped lib/, app/, and ios/ (excluding .build*) for
 **Verification.** A behavioral test in `PaneReplicaTests`: build a replica from a checkpoint whose `pinned` is true, apply a start record at the checkpoint's cursor whose `pinned` is false, and assert `replica.pinned == false`; and the mirror case. Then a `MobileSessionModelTests` case asserting the projection's claim control offers Claim rather than Release after that resume. Run `swift test --package-path ios/DanTermMobileKit`.
 
 **Risk.** Low. The only behavior that changes is the bit's value immediately after a resumed start; nothing else reads `heldPinned` before the next event. Worth confirming with the user that the start record's pinnedness is meant to be authoritative on resume rather than deliberately deferred to the first resize event -- nothing in the code says it is deliberate, but nothing says it is an oversight either.
+
+**Resolved by docs.** The finding's premise is wrong and its fix would be a regression: on a `--from-cursor` resume the producer states the recorder's **birth** geometry beside the client's own cursor, so `start.pinned` is the bit at sequence zero rather than at the cursor, and a replica that adopted it would replace a correct checkpoint bit with the birth bit -- a phone that claimed a pane, checkpointed, and resumed would offer Claim on a pane it still holds until the next resize, which may never come. Keeping the checkpoint's bit and letting events and syncs move it is the intended behavior; it was only ever recorded in a commit message, which is why two auditors misread it. Closed by stating the contract at `PaneTapeStartRecord`'s geometry fields, `PaneReplica#applyStart`, `PaneTapeStreamState`'s resume branch, and the pane-tape geometry section of `integrations/danterm/SKILL.md`, and by pinning both halves with behavioral tests in `PaneReplicaTests` and `PaneTapeStreamStateTests`.
 
 #### Area: Unicode tables and lookups (`UNI`)
 

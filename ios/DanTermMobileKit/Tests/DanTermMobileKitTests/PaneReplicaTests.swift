@@ -506,6 +506,42 @@ func replicaMarksItsOwnFindingsAsDetected() throws {
     #expect(producerReported.state == .gap(.declared(.total)))
 }
 
+@Test("A matching resume start record cannot replace the replica's own pinnedness")
+func resumeStartRecordIsNotAPinnednessSource() throws {
+    // Intent: a start record whose cursor matches the replica's leaves pinnedness alone,
+    //   whichever bit the record states.
+    // Why it exists: on a `--from-cursor` resume the producer publishes the recorder's
+    //   birth geometry beside the client's own cursor, so the start bit describes sequence
+    //   zero, not the cursor. Adopting it would offer Claim on a pane the phone still holds.
+    // Scenario: a checkpointed pane resumes and the birth grid disagrees with the
+    //   checkpoint, in both directions.
+    let paneId = PaneId(rawValue: UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!)
+    for checkpointed in [true, false] {
+        let live = try synchronizedReplica(
+            bytes: Data("claimed".utf8),
+            cursor: testCursor(sequence: 4),
+            pinned: checkpointed
+        )
+        let checkpoint = try #require(live.checkpoint(for: paneId))
+        var resumed = try PaneReplica(checkpoint: checkpoint, for: paneId)
+        #expect(resumed.pinned == checkpointed)
+
+        try resumed.apply(.start(PaneTapeStartRecord(
+            version: 1,
+            capture: .follow,
+            format: .replay,
+            columns: 8,
+            rows: 2,
+            pinned: !checkpointed,
+            cursor: checkpoint.cursor,
+            reconstructible: true
+        )))
+
+        #expect(resumed.state == .exact)
+        #expect(resumed.pinned == checkpointed)
+    }
+}
+
 private func startRecord(cursor: PaneTapeCursor) -> MobilePaneTapeRecord {
     .start(PaneTapeStartRecord(
         version: 1,

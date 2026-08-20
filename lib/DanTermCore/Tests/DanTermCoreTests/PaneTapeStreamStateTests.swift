@@ -294,6 +294,47 @@ struct PaneTapeStreamStateTests {
                 == .init(columns: 100, rows: 30, pinned: true, droppedHistoryRows: 0))
     }
 
+    @Test("a placed resume opens with birth geometry and replays the later transition")
+    func placedResumePublishesBirthGeometry() {
+        // Intent: on a `--from-cursor` resume the start record states the recorder's birth
+        //   grid, and the geometry change after that grid reaches the reader as a replayed
+        //   event rather than only through the start record.
+        // Why it exists: readers have twice read the start record as the pane's geometry at
+        //   the cursor it publishes. It is not, and a reader that adopted it would hold the
+        //   birth grid's pinnedness until the pane's next resize, which may never come.
+        // Scenario: a pane born pinned at 80x24, resized to an unpinned 100x30 while the
+        //   client was away, resumed from a cursor before that resize.
+        let resumed = openStream(
+            request: .init(
+                capture: .follow,
+                policy: .raw,
+                position: .cursor(cursor(sequence: 1, feed: 1))
+            ),
+            pane: pane(
+                retainedSequences: [1, 2],
+                requested: .placed(snapshot(
+                    sequences: [1, 2],
+                    nextSequence: 3,
+                    resizeSequences: [2]
+                )),
+                initial: .init(columns: 80, rows: 24, pinned: true),
+                syncDimensions: .init(columns: 100, rows: 30, pinned: false)
+            )
+        )
+
+        #expect(resumed.start.record.columns == 80)
+        #expect(resumed.start.record.rows == 24)
+        #expect(resumed.start.record.pinned)
+        #expect(resumed.start.record.cursor == cursor(sequence: 1, feed: 1))
+        #expect(resumed.records.compactMap(sequence) == [1, 2])
+        #expect(resumed.records.compactMap(event).contains(.object([
+            "type": .string("resize"),
+            "columns": .number(100),
+            "rows": .number(30),
+            "pinned": .bool(false),
+        ])))
+    }
+
     @Test("a reconstructible continuation repairs eviction while a raw continuation reports it")
     func continuationDependsOnMode() {
         let evicted = snapshot(sequences: [4, 5], nextSequence: 6, droppedEventCount: 4)
@@ -789,6 +830,11 @@ struct PaneTapeStreamStateTests {
     private func part(_ record: PaneTapeOutgoingRecord<JSONValue>?) -> PaneTapeSyncRecord? {
         guard case .sync(let part)? = record else { return nil }
         return part
+    }
+
+    private func event(_ record: PaneTapeOutgoingRecord<JSONValue>) -> JSONValue? {
+        guard case .event(let event) = record else { return nil }
+        return event.event
     }
 
     private func sequence(_ record: PaneTapeOutgoingRecord<JSONValue>) -> UInt64? {

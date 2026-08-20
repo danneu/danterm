@@ -115,13 +115,24 @@ public struct PaneTapeStartRecord: Equatable, Sendable {
     /// Whatever the producer stamped about where this recording came from, left as JSON
     /// because only the producer gives it meaning; nil when the record stated none.
     public let provenance: JSONValue?
-    /// Gives the initial terminal width.
+    /// Gives the initial terminal width. Which grid that is depends on how the stream
+    /// opened, and it is not always the grid at `cursor`: a stream that replays recorder
+    /// events (`--from-cursor`, or from the beginning) states the recorder's birth grid, a
+    /// raw `--from-now` stream states the live grid, and a stream a synchronization opens
+    /// states the sync's grid. A reader resuming from its own cursor keeps its own grid;
+    /// every geometry change after the published cursor reaches it as a geometry event or
+    /// a sync.
     public let columns: Int
-    /// Gives the initial terminal height.
+    /// Gives the initial terminal height, for the grid `columns` names.
     public let rows: Int
     /// States whether that grid is pinned -- an explicit override rather than a projection
     /// of the pane's rectangle. Required: the producer states geometry whole, and a reader
     /// that guessed would report a claim the pane does not hold.
+    ///
+    /// It is the pinnedness of the grid `columns` names, so it answers for the pane's
+    /// current pinnedness only on a stream whose initial grid is the live one. A resuming
+    /// reader that adopted this bit would overwrite the correct bit at its own cursor with
+    /// the birth bit, and offer a claim on a pane it still holds.
     public let pinned: Bool
     /// Continues the stream when no opening synchronization is pending.
     public let cursor: PaneTapeCursor?

@@ -316,6 +316,10 @@ private func rawOpening<Event>(
         switch fence.requested {
         case .placed(let snapshot):
             return eventOpening(
+                // Birth geometry beside the client's own cursor: the two do not describe the
+                // same moment, and that is the contract. The replayed events carry every
+                // geometry change since, so a resuming reader keeps its own grid and its own
+                // pinnedness rather than adopting what this record states.
                 initial: fence.origin.initial,
                 cursor: cursor,
                 snapshot: snapshot,

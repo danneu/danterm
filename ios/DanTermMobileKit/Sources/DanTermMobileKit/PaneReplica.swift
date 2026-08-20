@@ -162,6 +162,11 @@ public struct PaneReplica: Sendable {
             state = .gap(.detected)
             return
         }
+        // Pinnedness is deliberately left alone here. A start record is not a pinnedness
+        // source: on a resume the producer states the recorder's birth grid beside the
+        // cursor the client asked for, so `start.pinned` is the bit at sequence zero, not
+        // the bit at this cursor. The replica's own bit is the one at its cursor, and every
+        // later transition arrives as a geometry event or a sync.
         cursor = startCursor
         state = .exact
     }
