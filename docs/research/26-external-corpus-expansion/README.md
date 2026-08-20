@@ -237,6 +237,16 @@ reads, and the SGR presentation omissions stay out-of-scope. F2 verified none of
 them has an implementation. Reopening any one of them is a support-matrix
 decision that must precede the test change, not follow it.
 
+**DECSCA/selective erase was reopened that way on 2026-08-20**, and this entry
+no longer covers it. The decision came first, as
+[plans/impl/2026-08-20-1546-decsca-protection-and-selective-erase.md](../../../plans/impl/2026-08-20-1546-decsca-protection-and-selective-erase.md)
+and the amended C2 row of
+[docs/design/2026-08-06-swift-terminal-engine.md](../../design/2026-08-06-swift-terminal-engine.md);
+the manifest re-adjudication followed it. See the supersession note under F2.
+The rest of the families listed here are unchanged, and the rule the entry
+states -- decision before test change -- is what the reopening followed, so it
+is not weakened by the exception.
+
 ### Adopting libvterm's damage-merge and callback-topology cases
 
 `62screen_damage`'s merge modes, `moverect`, and `66screen_extent`'s

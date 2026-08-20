@@ -76,6 +76,21 @@ script edit). No finding depends on the uncommitted files.
   families pending a semantic rather than name-based check.
 - Next action: none for these. Examine the residue that did not fit these
   families (F3, F4).
+- **Superseded in part, 2026-08-20.** The `DECSCA / selective erase` row above
+  is no longer accurate. Its blocker was real when measured, and the route this
+  finding named is the route that was taken: the support-matrix decision came
+  first, as
+  [plans/impl/2026-08-20-1546-decsca-protection-and-selective-erase.md](../../../plans/impl/2026-08-20-1546-decsca-protection-and-selective-erase.md),
+  and the C2 row of
+  [docs/design/2026-08-06-swift-terminal-engine.md](../../design/2026-08-06-swift-terminal-engine.md)
+  now names DECSCA and selective erase. `TerminalCore` carries protection as a
+  pen attribute and honors it in DECSED and DECSEL. The six libvterm cases were
+  then re-adjudicated: `t/65screen_protect.test` and the `t/10state_putglyph.test`
+  DECSCA case adopted, the `t/13state_edit.test` SEL/SED cases adopted, the
+  DECRQSS-on-DECSCA rationale narrowed to its DCS half. Alacritty
+  `selective_erasure` stays out-of-scope on a corrected rationale: its golden
+  grid pins the ignore behavior DanTerm deliberately does not follow. The rest
+  of the table stands.
 
 ### F3 -- `t/92lp1640917.test` is blocked only on a resolved milestone
 

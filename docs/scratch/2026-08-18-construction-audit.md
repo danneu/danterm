@@ -161,7 +161,7 @@ references are the requirement.
 | 3 | [BUG-07](#bug-07) | SO (0x0E, LS1) and SI (0x0F, LS0), with ESC  | **done** `e0d2e80c` | Add G1 designation and SI/SO locking shifts so 0x0E/0x0F switch the active charset |
 | 3 | [BUG-08](#bug-08) | ESC # 8 (DECALN) | **done** `7b5d10f0` | Make DECALN reset the margins, origin mode, and rendition, and home the cursor |
 | 3 | [BUG-09](#bug-09) | CSI n L (IL), CSI n M (DL) | **pinned by a test** | Move the cursor to column 0 on IL and DL |
-| 3 | [BUG-10](#bug-10) | CSI ? Ps J (DECSED) and CSI ? Ps K (DECSEL) | **done** `c365b5e5` | Implement DECSCA protection and honor it in DECSED and DECSEL |
+| 3 | [BUG-10](#bug-10) | CSI ? Ps J (DECSED) and CSI ? Ps K (DECSEL) | **done** `d60bc17c` | Implement DECSCA protection and honor it in DECSED and DECSEL |
 | 3 | [BUG-11](#bug-11) | OSC 7 ; file:///path ST (working directory r | **pinned by a test** | Accept OSC 7 file URIs with an empty host as local |
 | 3 | [BUG-12](#bug-12) | ESC 7 / ESC 8 (DECSC/DECRC), also CSI ? 1048 | **pinned by a test** | Keep DECSC's saved cursor visibility out of DECRC (do not save DECTCEM) |
 | 3 | [BUG-13](#bug-13) | ESC c (RIS) | **pinned by a test** | Reset the saved-cursor slot on RIS |
@@ -440,7 +440,7 @@ pen to its colours, fills the active screen, and homes the cursor.
 
 `CSI ? Ps J (DECSED) and CSI ? Ps K (DECSEL)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5
 
-**Done** in `87040714` and `c365b5e5`. The fix went wider than the row asked
+**Done** in `f2158cb6` and `d60bc17c`. The fix went wider than the row asked
 for: dispatching the `?` forms as plain ED and EL would erase the field a
 program used `CSI Ps " q` (DECSCA) to protect, so protection landed first as a
 pen attribute carried by every cell, and the selective erases then skip the
