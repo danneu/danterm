@@ -48,7 +48,7 @@ enum IpcConnectionCloseReason: String, Sendable {
 final class IpcConnection: @unchecked Sendable {
     let id: UUID
 
-    private let fd: Int32
+    private var writeFileDescriptor: Int32?
     private let writeQueue: DispatchQueue
     private let lock = NSLock()
     private var pendingResponseIds: [UUID: JSONValue] = [:]
@@ -56,9 +56,9 @@ final class IpcConnection: @unchecked Sendable {
 
     init(id: UUID = UUID(), fileDescriptor: Int32) {
         self.id = id
-        self.fd = fileDescriptor
+        self.writeFileDescriptor = fileDescriptor
         self.writeQueue = DispatchQueue(label: "danterm.ipc.connection.\(id.uuidString)")
-        Self.disableSigPipe(on: fd)
+        Self.disableSigPipe(on: fileDescriptor)
     }
 
     /// Reads request lines until the peer leaves or, on a connection under the liveness
@@ -75,14 +75,31 @@ final class IpcConnection: @unchecked Sendable {
         livenessBound: IpcLivenessBound? = nil,
         onEvent: @escaping @Sendable (IpcConnectionEvent, IpcConnection) -> Void
     ) {
-        if let livenessBound { Self.armReceiveDeadline(livenessBound, on: fd) }
         DispatchQueue.global(qos: .utility).async { [self] in
+            lock.lock()
+            let readFileDescriptor = if !closed, let writeFileDescriptor {
+                Darwin.dup(writeFileDescriptor)
+            } else {
+                Int32(-1)
+            }
+            lock.unlock()
+
+            guard readFileDescriptor >= 0 else {
+                close()
+                onEvent(.closed(.peerClosed), self)
+                return
+            }
+            defer { Darwin.close(readFileDescriptor) }
+            if let livenessBound {
+                Self.armReceiveDeadline(livenessBound, on: readFileDescriptor)
+            }
+
             var framer = IpcLineFramer()
             var buffer = [UInt8](repeating: 0, count: 4096)
             var reason = IpcConnectionCloseReason.peerClosed
 
             while true {
-                let count = Darwin.read(fd, &buffer, buffer.count)
+                let count = Darwin.read(readFileDescriptor, &buffer, buffer.count)
                 if count < 0 {
                     if errno == EINTR { continue }
                     // The armed deadline reports itself as a would-block read, and it is
@@ -312,24 +329,38 @@ final class IpcConnection: @unchecked Sendable {
         closed = true
         lock.unlock()
         guard shouldClose else { return }
-        writeQueue.async { [fd] in
-            Darwin.close(fd)
-        }
+        enqueueWriteDescriptorRelease()
     }
 
-    /// Releases the descriptor now, failing whatever write is parked on it.
+    /// Shuts the socket down now, failing any parked write, then queues its release.
     ///
     /// Reclamation at the silence bound and server stop both end connections the peer is
     /// no longer reading, where waiting for the write queue to drain means waiting on a
     /// peer that has stopped participating. The shutdown runs under the same lock that
-    /// guards `closed`, which keeps it from touching a descriptor number the queued close
-    /// has already released and the kernel has already handed to someone else.
+    /// guards the optional write descriptor, so it either targets the descriptor this
+    /// connection still owns or finds that the queued close has already released it.
     func forceClose() {
         lock.lock()
-        let shouldShutDown = !closed
-        if shouldShutDown { Darwin.shutdown(fd, SHUT_RDWR) }
+        let shouldClose = !closed
+        closed = true
+        if let writeFileDescriptor {
+            Darwin.shutdown(writeFileDescriptor, SHUT_RDWR)
+        }
         lock.unlock()
-        close()
+        if shouldClose { enqueueWriteDescriptorRelease() }
+    }
+
+    /// Shuts down and releases the write queue's descriptor after earlier writes drain.
+    private func enqueueWriteDescriptorRelease() {
+        writeQueue.async { [self] in
+            lock.lock()
+            if let writeFileDescriptor {
+                Darwin.shutdown(writeFileDescriptor, SHUT_RDWR)
+                Darwin.close(writeFileDescriptor)
+                self.writeFileDescriptor = nil
+            }
+            lock.unlock()
+        }
     }
 
     private func takeResponseId(_ reqId: UUID) -> JSONValue? {
@@ -401,11 +432,20 @@ final class IpcConnection: @unchecked Sendable {
     /// Only the write queue calls this: it touches the descriptor directly and blocks the
     /// caller until the peer has taken the bytes.
     private func write(line: Data) -> Bool {
-        line.withUnsafeBytes { rawBuffer -> Bool in
+        lock.lock()
+        let writeFileDescriptor = self.writeFileDescriptor
+        lock.unlock()
+        guard let writeFileDescriptor else { return false }
+
+        return line.withUnsafeBytes { rawBuffer -> Bool in
             guard let baseAddress = rawBuffer.baseAddress else { return false }
             var written = 0
             while written < line.count {
-                let result = Darwin.write(fd, baseAddress.advanced(by: written), line.count - written)
+                let result = Darwin.write(
+                    writeFileDescriptor,
+                    baseAddress.advanced(by: written),
+                    line.count - written
+                )
                 if result < 0 && errno == EINTR { continue }
                 guard result > 0 else { return false }
                 written += result

@@ -229,6 +229,133 @@ struct IpcConnectionWriteTests {
         #expect(onMainThread, "every completion path must report on the main thread")
     }
 
+    @Test("closing during a read callback cannot redirect the reader to a reclaimed descriptor")
+    func closeCannotRedirectReaderToReclaimedDescriptor() throws {
+        // Intent: a connection reader never reads from a descriptor number after its owner
+        //   has released that number, even when the reader is paused outside the syscall.
+        // Why it exists: `close()` used to release the reader's descriptor while `onEvent`
+        //   was running, so the next read could consume bytes from a later owner of the number.
+        // Scenario: PERSIST-4. A live socket reclaims the connection descriptor while the
+        //   reader is held in its first request callback.
+        let descriptors = try highDescriptorSocketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        let probe = ReclaimedReadProbe()
+        defer { Darwin.close(descriptors.peer) }
+
+        connection.startReading { event, _ in
+            probe.record(event)
+        }
+        try writeIpcLine(
+            JsonRpcRequest(id: .string("first"), method: IpcRequestMethod.ls.rawValue),
+            to: descriptors.peer
+        )
+        try probe.waitUntilFirstRequestIsHeld()
+
+        connection.close()
+        try waitForDescriptorRelease(descriptors.connection)
+        let replacement = try DescriptorReplacement(target: descriptors.connection)
+        defer { replacement.close() }
+        try writeIpcLine(
+            JsonRpcRequest(id: .string("foreign"), method: IpcRequestMethod.ls.rawValue),
+            to: replacement.peer
+        )
+        Darwin.shutdown(replacement.peer, SHUT_WR)
+
+        probe.releaseFirstRequest()
+        try probe.waitUntilClosed()
+
+        let foreign = try JSONDecoder().decode(
+            JsonRpcRequest.self,
+            from: readIpcLine(from: replacement.owner)
+        )
+        #expect(foreign.id == .string("foreign"))
+        #expect(probe.requestIds == [.string("first")])
+    }
+
+    @Test("force close interrupts a parked write after close has begun")
+    func forceCloseAfterCloseInterruptsParkedWrite() async throws {
+        // Intent: `forceClose()` interrupts a parked write even after `close()` has marked
+        //   the connection closed and queued its normal draining release.
+        // Why it exists: the old closed-state guard made this force call a no-op, leaving
+        //   the queued release stuck behind a peer that had stopped reading.
+        // Scenario: PERSIST-4. A multi-megabyte notification fills a small socket buffer,
+        //   then server shutdown escalates a draining close to a forced close.
+        let descriptors = try socketPair()
+        var sendBufferBytes: Int32 = 4_096
+        setsockopt(
+            descriptors.connection,
+            SOL_SOCKET,
+            SO_SNDBUF,
+            &sendBufferBytes,
+            socklen_t(MemoryLayout<Int32>.size)
+        )
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        let completion = WriteCompletionProbe()
+        defer { Darwin.close(descriptors.peer) }
+
+        connection.writeNotification(
+            method: Methods.paneTapeEvent,
+            params: JSONValue.object([
+                "record": .string(String(repeating: "x", count: 4_000_000)),
+            ]),
+            completion: { completion.record($0) }
+        )
+        guard waitForReadable(descriptors.peer, timeout: hangGuardMilliseconds) else {
+            throw POSIXError(.ETIMEDOUT)
+        }
+
+        connection.close()
+        connection.forceClose()
+
+        #expect(try await completion.wait() == false)
+    }
+
+    @Test("released write descriptor is never touched again")
+    func releasedWriteDescriptorIsNeverTouchedAgain() async throws {
+        // Intent: every public write path and both close paths leave a descriptor alone after
+        //   the connection has released it, while skipped writes report failure uniformly.
+        // Why it exists: a stale descriptor number can belong to an unrelated connection or
+        //   file by the time a late queued block runs.
+        // Scenario: PERSIST-4. A live socket reclaims the released write descriptor before
+        //   repeated closes and late single and batched notifications arrive.
+        let descriptors = try highDescriptorSocketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        defer { Darwin.close(descriptors.peer) }
+
+        connection.close()
+        try waitForDescriptorRelease(descriptors.connection)
+        let replacement = try DescriptorReplacement(target: descriptors.connection)
+        defer { replacement.close() }
+
+        connection.close()
+        connection.forceClose()
+        let single: Bool = await withCheckedContinuation { continuation in
+            connection.writeNotification(method: "probe", params: JSONValue.object([:])) {
+                continuation.resume(returning: $0)
+            }
+        }
+        let batch: Bool = await withCheckedContinuation { continuation in
+            writeGroupedRecords(
+                [eventRecord(sequence: 1)],
+                connection: connection,
+                stream: "released",
+                completion: { continuation.resume(returning: $0) }
+            )
+        }
+        #expect(single == false)
+        #expect(batch == false)
+
+        try writeIpcLine(
+            JsonRpcRequest(id: .string("owner"), method: IpcRequestMethod.ls.rawValue),
+            to: replacement.peer
+        )
+        let ownerLine = try JSONDecoder().decode(
+            JsonRpcRequest.self,
+            from: readIpcLine(from: replacement.owner)
+        )
+        #expect(ownerLine.id == .string("owner"))
+    }
+
     @Test("a terminator never overtakes a batch already enqueued for the same stream")
     func terminatorFollowsTheBatchEnqueuedBeforeIt() throws {
         // Intent: records handed to the follow write helper reach the socket in the order
@@ -537,6 +664,19 @@ struct IpcConnectionWriteTests {
         return (descriptors[0], descriptors[1])
     }
 
+    private func highDescriptorSocketPair() throws -> (connection: Int32, peer: Int32) {
+        let descriptors = try socketPair()
+        let elevated = Darwin.fcntl(descriptors.connection, F_DUPFD_CLOEXEC, 200)
+        guard elevated >= 0 else {
+            let error = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            Darwin.close(descriptors.connection)
+            Darwin.close(descriptors.peer)
+            throw error
+        }
+        Darwin.close(descriptors.connection)
+        return (elevated, descriptors.peer)
+    }
+
     private func readIpcLine(
         from descriptor: Int32,
         timeout: Int32 = hangGuardMilliseconds
@@ -603,6 +743,119 @@ struct IpcConnectionWriteTests {
             if ready < 0 && errno == EINTR { continue }
             return ready > 0
         }
+    }
+
+    private func waitForDescriptorRelease(_ descriptor: Int32) throws {
+        let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
+        while ContinuousClock.now < deadline {
+            errno = 0
+            if Darwin.fcntl(descriptor, F_GETFD) == -1, errno == EBADF { return }
+            usleep(10_000)
+        }
+        throw POSIXError(.ETIMEDOUT)
+    }
+}
+
+private struct DescriptorReplacement {
+    let owner: Int32
+    let peer: Int32
+
+    init(target: Int32) throws {
+        var descriptors: [Int32] = [-1, -1]
+        guard Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        if descriptors[0] == target {
+            owner = descriptors[0]
+            peer = descriptors[1]
+        } else if descriptors[1] == target {
+            owner = descriptors[1]
+            peer = descriptors[0]
+        } else {
+            guard Darwin.dup2(descriptors[0], target) == target else {
+                let error = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                Darwin.close(descriptors[0])
+                Darwin.close(descriptors[1])
+                throw error
+            }
+            Darwin.close(descriptors[0])
+            owner = target
+            peer = descriptors[1]
+        }
+    }
+
+    func close() {
+        Darwin.close(owner)
+        Darwin.close(peer)
+    }
+}
+
+private final class ReclaimedReadProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private let firstRequestHeld = DispatchSemaphore(value: 0)
+    private let releaseFirstRequestGate = DispatchSemaphore(value: 0)
+    private let closed = DispatchSemaphore(value: 0)
+    private var ids: [JSONValue] = []
+
+    func record(_ event: IpcConnectionEvent) {
+        switch event {
+        case .request(let request):
+            lock.lock()
+            ids.append(request.id ?? .null)
+            let isFirst = ids.count == 1
+            lock.unlock()
+            if isFirst {
+                firstRequestHeld.signal()
+                releaseFirstRequestGate.wait()
+            }
+        case .malformedRequest:
+            break
+        case .closed:
+            closed.signal()
+        }
+    }
+
+    func waitUntilFirstRequestIsHeld() throws {
+        guard firstRequestHeld.wait(timeout: .now() + hangGuardSeconds) == .success else {
+            throw POSIXError(.ETIMEDOUT)
+        }
+    }
+
+    func releaseFirstRequest() {
+        releaseFirstRequestGate.signal()
+    }
+
+    func waitUntilClosed() throws {
+        guard closed.wait(timeout: .now() + hangGuardSeconds) == .success else {
+            throw POSIXError(.ETIMEDOUT)
+        }
+    }
+
+    var requestIds: [JSONValue] {
+        lock.lock()
+        defer { lock.unlock() }
+        return ids
+    }
+}
+
+private final class WriteCompletionProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Bool?
+
+    func record(_ result: Bool) {
+        lock.lock()
+        self.result = result
+        lock.unlock()
+    }
+
+    func wait() async throws -> Bool {
+        let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
+        while ContinuousClock.now < deadline {
+            let result = lock.withLock { self.result }
+            if let result { return result }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        throw POSIXError(.ETIMEDOUT)
     }
 }
 
