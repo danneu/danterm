@@ -288,6 +288,28 @@ public struct TerminalFlightRecordingStatePairing: Sendable {
 
 /// Owns one pane's mutable terminal, lifecycle reducer, PTY, child, and event sources.
 public actor TerminalPTYHost {
+    /// Which typed handle a retained source belongs to.
+    ///
+    /// Every source names its slot when it registers, so the teardown walk can drop the
+    /// handle without a ladder that lists sources by name. A new source cannot skip this:
+    /// it has to add a case, and the switch over the slots stops compiling until it does.
+    private enum SourceSlot {
+        case read
+        case write
+        case canonicalInputRetry
+        case process
+        case childExitPoll
+        case grace
+        case sessionPoll
+        case exitBound
+    }
+
+    /// One source libdispatch has not released yet, with the slot it came from.
+    private struct RetainedSource {
+        let source: any DispatchSourceProtocol
+        let slot: SourceSlot
+    }
+
     /// One submission's bytes inside the shared pending-input buffer, paired with where they
     /// came from. `endOffset` is one past its last byte, so consecutive spans tile the buffer.
     private struct PendingInputSpan {
@@ -381,18 +403,16 @@ public actor TerminalPTYHost {
     private var sessionID: pid_t?
     private var leaderReaped = false
     private var readSource: (any DispatchSourceRead)?
-    private var readSourceActivated = false
     private var writeSource: (any DispatchSourceWrite)?
     private var canonicalInputRetrySource: (any DispatchSourceTimer)?
     private var canonicalInputDeadline: DispatchTime?
     private var processSource: (any DispatchSourceProcess)?
-    private var processSourceActivated = false
     private var childExitPollSource: (any DispatchSourceTimer)?
     private var graceSource: (any DispatchSourceTimer)?
     private var sessionPollSource: (any DispatchSourceTimer)?
     private var sessionPollStage: TeardownStage?
     private var sessionPollStageSignaled = false
-    private var retainedSources: [Int: any DispatchSourceProtocol] = [:]
+    private var retainedSources: [Int: RetainedSource] = [:]
     private var descriptorSourceIDs: Set<Int> = []
     private var nextSourceID = 0
     private var descriptorOwnershipSealed = false
@@ -868,20 +888,21 @@ public actor TerminalPTYHost {
         timer.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.exitBoundElapsed() }
         }
-        retainUntilCancellation(timer, descriptorBacked: false)
+        retainUntilCancellation(timer, slot: .exitBound, descriptorBacked: false)
         exitBoundSource = timer
         timer.activate()
     }
 
     private func cancelExitBound() {
         exitBoundSource?.cancel()
-        exitBoundSource = nil
+        forgetSource(.exitBound)
     }
 
     /// Retains one source through its cancellation callback and enrolls
     /// descriptor-backed sources in the PTY close barrier.
     private func retainUntilCancellation<Source: DispatchSourceProtocol>(
         _ source: Source,
+        slot: SourceSlot,
         descriptorBacked: Bool
     ) {
         let id = nextSourceID
@@ -891,9 +912,55 @@ public actor TerminalPTYHost {
                 owner.sourceCancellationHandlerRan(id)
             }
         }
-        retainedSources[id] = source
+        retainedSources[id] = RetainedSource(source: source, slot: slot)
         if descriptorBacked {
             descriptorSourceIDs.insert(id)
+        }
+    }
+
+    /// Cancels every source the host still owns, so neither teardown ladder can
+    /// forget one.
+    ///
+    /// Both ladders call this instead of enumerating sources by name: a source added
+    /// later, by code that edits neither ladder, is torn down anyway. Each entry is
+    /// activated first because cancelling a source that was never activated only
+    /// records the request -- its cancel handler cannot run, so the entry would stay
+    /// in the registry forever and quiescence would never arrive. Activating a source
+    /// that is already active does nothing.
+    private func cancelAllRetainedSources() {
+        for entry in Array(retainedSources.values) {
+            entry.source.activate()
+            entry.source.cancel()
+            forgetSource(entry.slot)
+        }
+    }
+
+    /// Drops the host's typed handle to a cancelled source, and any tracking state
+    /// that only means something while that source is armed.
+    ///
+    /// Called at cancel time, never when a cancellation is acknowledged: the typed
+    /// handle means "the source this host still drives", while the registry means
+    /// "sources libdispatch has not released yet". A replace-on-arm source depends on
+    /// the difference -- a predecessor awaiting release must not clear the handle its
+    /// successor now occupies.
+    private func forgetSource(_ slot: SourceSlot) {
+        switch slot {
+        case .read:
+            readSource = nil
+        case .write:
+            writeSource = nil
+        case .canonicalInputRetry:
+            clearCanonicalInputHoldTracking()
+        case .process:
+            processSource = nil
+        case .childExitPoll:
+            childExitPollSource = nil
+        case .grace:
+            graceSource = nil
+        case .sessionPoll:
+            clearSessionPollTracking()
+        case .exitBound:
+            exitBoundSource = nil
         }
     }
 
@@ -929,17 +996,18 @@ public actor TerminalPTYHost {
     /// The teardown ladder did not converge inside this host's bound, so ownership
     /// of the child session is resolved here rather than abandoned: every surviving
     /// member is killed before teardown finishes. Returning while those processes
-    /// could still be running would satisfy the bound by breaking `I2`.
+    /// could still be running would satisfy the bound by giving up a session that
+    /// may still be alive, which is not what the bound promises.
     private func exitBoundElapsed() {
         guard teardownFinished == false else { return }
         forcedQuiescenceCount += 1
         forcedCleanupAfterMasterClose = true
         reducerAwaitsMasterClose = false
-        cancelExitBound()
-        cancelGrace()
-        cancelSessionPoll()
-        cancelProcessSource()
-        cancelChildExitPoll()
+        // Every driver of the reducer stops before the master closes, and the walk
+        // reaches sources this path never names.
+        cancelAllRetainedSources()
+        // Last: it owns the descriptor seal and the join barrier that re-enters
+        // forced cleanup once the descriptor sources have released.
         closeMaster()
     }
 
@@ -1767,9 +1835,8 @@ public actor TerminalPTYHost {
         read.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.readSourceFired() }
         }
-        retainUntilCancellation(read, descriptorBacked: true)
+        retainUntilCancellation(read, slot: .read, descriptorBacked: true)
         readSource = read
-        readSourceActivated = false
 
         // A channel with no child behind it has no process to watch. The rest of the
         // process plane already treats an absent leader and session as nothing to do,
@@ -1783,9 +1850,8 @@ public actor TerminalPTYHost {
         process.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.processSourceFired() }
         }
-        retainUntilCancellation(process, descriptorBacked: false)
+        retainUntilCancellation(process, slot: .process, descriptorBacked: false)
         processSource = process
-        processSourceActivated = false
     }
 
     private func activateIO() {
@@ -1793,20 +1859,8 @@ public actor TerminalPTYHost {
             closeMaster()
             return
         }
-        activateReadSourceIfNeeded()
-        activateProcessSourceIfNeeded()
-    }
-
-    private func activateReadSourceIfNeeded() {
-        guard let readSource, readSourceActivated == false else { return }
-        readSourceActivated = true
-        readSource.activate()
-    }
-
-    private func activateProcessSourceIfNeeded() {
-        guard let processSource, processSourceActivated == false else { return }
-        processSourceActivated = true
-        processSource.activate()
+        readSource?.activate()
+        processSource?.activate()
     }
 
     private func submitInput(
@@ -2065,14 +2119,14 @@ public actor TerminalPTYHost {
         source.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.writeSourceFired() }
         }
-        retainUntilCancellation(source, descriptorBacked: true)
+        retainUntilCancellation(source, slot: .write, descriptorBacked: true)
         writeSource = source
         source.activate()
     }
 
     private func cancelWriteSource() {
         writeSource?.cancel()
-        writeSource = nil
+        forgetSource(.write)
     }
 
     private func installCanonicalInputRetryIfNeeded() {
@@ -2086,7 +2140,7 @@ public actor TerminalPTYHost {
         source.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.canonicalInputRetryFired() }
         }
-        retainUntilCancellation(source, descriptorBacked: false)
+        retainUntilCancellation(source, slot: .canonicalInputRetry, descriptorBacked: false)
         canonicalInputRetrySource = source
         source.activate()
     }
@@ -2099,6 +2153,10 @@ public actor TerminalPTYHost {
 
     private func cancelCanonicalInputHold() {
         canonicalInputRetrySource?.cancel()
+        clearCanonicalInputHoldTracking()
+    }
+
+    private func clearCanonicalInputHoldTracking() {
         canonicalInputRetrySource = nil
         canonicalInputDeadline = nil
     }
@@ -2248,7 +2306,7 @@ public actor TerminalPTYHost {
         timer.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.childExitPollFired() }
         }
-        retainUntilCancellation(timer, descriptorBacked: false)
+        retainUntilCancellation(timer, slot: .childExitPoll, descriptorBacked: false)
         childExitPollSource = timer
         timer.activate()
     }
@@ -2260,7 +2318,7 @@ public actor TerminalPTYHost {
 
     private func cancelChildExitPoll() {
         childExitPollSource?.cancel()
-        childExitPollSource = nil
+        forgetSource(.childExitPoll)
     }
 
     private func drainCommittedOutput() {
@@ -2358,7 +2416,7 @@ public actor TerminalPTYHost {
         // A close can race source installation before the reducer activates IO.
         // Resume before cancellation so libdispatch never releases a suspended
         // source. A spawn adopted after this seal installs no sources at all.
-        activateProcessSourceIfNeeded()
+        processSource?.activate()
         cancelReadSource()
         cancelWriteSource()
         cancelCanonicalInputHold()
@@ -2384,24 +2442,18 @@ public actor TerminalPTYHost {
 
     private func cancelReadSource() {
         guard let readSource else { return }
-        if readSourceActivated == false {
-            readSourceActivated = true
-            readSource.activate()
-        }
+        // Activate first: a source cancelled before it was ever activated never runs
+        // its cancel handler, so it would never leave the retained registry.
+        readSource.activate()
         readSource.cancel()
-        self.readSource = nil
-        readSourceActivated = false
+        forgetSource(.read)
     }
 
     private func cancelProcessSource() {
         guard let processSource else { return }
-        if processSourceActivated == false {
-            processSourceActivated = true
-            processSource.activate()
-        }
+        processSource.activate()
         processSource.cancel()
-        self.processSource = nil
-        processSourceActivated = false
+        forgetSource(.process)
     }
 
     private func signalSession(_ stage: TeardownStage) {
@@ -2465,14 +2517,14 @@ public actor TerminalPTYHost {
         timer.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.graceTimerFired(stage) }
         }
-        retainUntilCancellation(timer, descriptorBacked: false)
+        retainUntilCancellation(timer, slot: .grace, descriptorBacked: false)
         graceSource = timer
         timer.activate()
     }
 
     private func cancelGrace() {
         graceSource?.cancel()
-        graceSource = nil
+        forgetSource(.grace)
     }
 
     private func graceTimerFired(_ stage: TeardownStage) {
@@ -2491,7 +2543,7 @@ public actor TerminalPTYHost {
         timer.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.sessionPollFired() }
         }
-        retainUntilCancellation(timer, descriptorBacked: false)
+        retainUntilCancellation(timer, slot: .sessionPoll, descriptorBacked: false)
         sessionPollSource = timer
         timer.activate()
     }
@@ -2506,6 +2558,10 @@ public actor TerminalPTYHost {
 
     private func cancelSessionPoll() {
         sessionPollSource?.cancel()
+        clearSessionPollTracking()
+    }
+
+    private func clearSessionPollTracking() {
         sessionPollSource = nil
         sessionPollStage = nil
         sessionPollStageSignaled = false
@@ -2532,13 +2588,8 @@ public actor TerminalPTYHost {
         // of adopted into a host that is about to be quiescent.
         spawnGeneration += 1
         pendingSpawnAdoption = false
-        cancelExitBound()
+        cancelAllRetainedSources()
         closeMaster()
-        cancelGrace()
-        cancelSessionPoll()
-        cancelProcessSource()
-        cancelChildExitPoll()
-        cancelCanonicalInputHold()
         leaderPID = nil
         sessionID = nil
         teardownFinalizationRequested = true

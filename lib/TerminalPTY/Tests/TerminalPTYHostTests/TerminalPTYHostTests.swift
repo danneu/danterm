@@ -3220,6 +3220,197 @@ struct TerminalPTYHostChildProcessTests {
         #expect((await host.resourceSnapshot()).isReleased)
     }
 
+    @Test("bound expiry activates inactive sources before cancelling them", .timeLimit(.minutes(1)))
+    func forcedShutdownJoinsInactiveSources() async throws {
+        // Intent: the forced path releases a host whose sources were installed but never
+        //   activated, the same way the ordinary path does.
+        // Why it exists: cancelling a source that was never activated does not make its
+        //   cancellation handler runnable, so the forced path would wait on a release
+        //   that can never arrive -- and it is the path with nothing left to rescue it.
+        // Scenario: a newly opened pane receives Cmd-Q between source installation and
+        //   the reducer command that activates PTY IO, and the ladder does not converge
+        //   before the host's own bound expires.
+        let sourcesInstalled = ExitCompletionRecorder(expecting: 1)
+        let lifecycle = ControlledTerminalPTYResourceLifecycle()
+        lifecycle.holdSpawnActivation {
+            sourcesInstalled.signal()
+        }
+        let host = try makeHost(
+            applicationExitBound: .seconds(30),
+            resourceLifecycle: lifecycle
+        )
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(sourcesInstalled.waitForAll(within: .seconds(20)))
+
+        // Held acknowledgements keep the ladder from converging, so the bound below is
+        // what resolves this host, and a source that never reached its cancellation
+        // handler is one this test would wait on forever.
+        let cancellationReached = ExitCompletionRecorder(expecting: 1)
+        lifecycle.holdSourceCancellationAcknowledgements {
+            cancellationReached.signal()
+        }
+        let completion = ExitCompletionRecorder(expecting: 1)
+        host.requestShutdown { completion.signal() }
+        await host.forceExitBoundForTesting()
+        #expect(cancellationReached.waitForAll(within: .seconds(20)))
+        lifecycle.releaseSpawnActivation()
+        lifecycle.releaseSourceCancellationAcknowledgements()
+
+        #expect(completion.waitForAll(within: .seconds(20)))
+        let finished = await host.resourceSnapshot()
+        #expect(finished.census.forcedQuiescenceCount == 1)
+        #expect(finished.isReleased)
+    }
+
+    @Test("teardown releases a host whose canonical input hold is armed", .timeLimit(.minutes(1)))
+    func teardownReleasesArmedCanonicalInputHold() async throws {
+        // Intent: a line the child's canonical queue cannot accept, still waiting on its
+        //   retry timer, does not stop either teardown path from reaching quiescence, and
+        //   its submission is answered rather than dropped.
+        // Why it exists: the canonical retry timer is retained like every other source, so
+        //   a teardown path that does not cancel it waits on a release that never comes.
+        //   No other canonical-input test asserts release.
+        // Scenario: a pane holds an oversized line when the user quits -- once where the
+        //   ladder converges, and once where the host's bound forces quiescence.
+        for forcesBound in [false, true] {
+            // The 30 second canonical wait is meant NOT to expire: the retry source has to
+            // still be armed when teardown starts.
+            let lifecycle = ControlledTerminalPTYResourceLifecycle()
+            let host = try makeHost(
+                applicationExitBound: .seconds(30),
+                canonicalInputWait: .seconds(30),
+                resourceLifecycle: lifecycle
+            )
+            await host.start(makeLaunchInput(
+                command: "exec \(try probeExecutable()) canonical-hold \"$0\""
+            ))
+            #expect(await host.waitForOutput(containing: Array("__CANONICAL_READY__".utf8)))
+            let held = InputCompletionRecorder(expecting: 1)
+            host.send([UInt8](repeating: 0x61, count: CanonicalInputDeliveryGate.capacity)) {
+                held.signal($0)
+            }
+            #expect(await waitForSnapshot(of: host) { $0.pendingInputByteCount > 0 })
+
+            // Holding the acknowledgements stops the ordinary ladder short, so the forced
+            // path is what resolves the host rather than a race between the two.
+            let cancellationReached = ExitCompletionRecorder(expecting: 1)
+            if forcesBound {
+                lifecycle.holdSourceCancellationAcknowledgements {
+                    cancellationReached.signal()
+                }
+            }
+            let completion = ExitCompletionRecorder(expecting: 1)
+            host.requestShutdown { completion.signal() }
+            if forcesBound {
+                #expect(cancellationReached.waitForAll(within: .seconds(20)))
+                await host.forceExitBoundForTesting()
+                lifecycle.releaseSourceCancellationAcknowledgements()
+            }
+
+            #expect(completion.waitForAll(within: .seconds(20)))
+            #expect(held.waitForAll(within: .seconds(20)))
+            #expect(held.results == [.rejected(.processEnded)])
+            let finished = await host.resourceSnapshot()
+            #expect(finished.census.forcedQuiescenceCount == (forcesBound ? 1 : 0))
+            #expect(finished.isReleased)
+        }
+    }
+
+    @Test("teardown releases a host whose lifecycle polls are armed", .timeLimit(.minutes(1)))
+    func teardownReleasesArmedLifecyclePolls() async throws {
+        // Intent: a running child-exit poll, alongside the session poll the ladder itself
+        //   arms, does not stop either teardown path from reaching quiescence.
+        // Why it exists: both are retained sources, and neither is armed in the common
+        //   case, so a teardown path could drop one without any existing test noticing.
+        // Scenario: a child's exit arrives before its wait status is readable, so the host
+        //   is polling for it when the pane closes -- once where the ladder converges, and
+        //   once where the child never becomes waitable and the bound forces quiescence.
+        for forcesBound in [false, true] {
+            // Int.max keeps the child unwaitable for the whole run, so the forced path is
+            // the only way that host can resolve.
+            let probe = TransientChildExitProbe(
+                notYetWaitableCount: forcesBound ? Int.max : 20
+            )
+            let lifecycle = ControlledTerminalPTYResourceLifecycle()
+            let host = try makeHost(
+                applicationExitBound: .seconds(30),
+                childExitProbe: probe,
+                resourceLifecycle: lifecycle
+            )
+            await host.start(makeLaunchInput(command: "\(printMarker("READY")); exit 3"))
+            #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+            // Two reports: the first arms the poll, the second can only come from the poll.
+            #expect(await pollUntil(
+                { probe.notYetWaitableReportCount >= 2 },
+                within: .seconds(20)
+            ))
+
+            // Holding the acknowledgements stops the ordinary ladder short, so the forced
+            // path is what resolves the host rather than a race between the two.
+            let cancellationReached = ExitCompletionRecorder(expecting: 1)
+            if forcesBound {
+                lifecycle.holdSourceCancellationAcknowledgements {
+                    cancellationReached.signal()
+                }
+            }
+            let completion = ExitCompletionRecorder(expecting: 1)
+            host.requestShutdown { completion.signal() }
+            if forcesBound {
+                #expect(cancellationReached.waitForAll(within: .seconds(20)))
+                await host.forceExitBoundForTesting()
+                lifecycle.releaseSourceCancellationAcknowledgements()
+            }
+
+            #expect(completion.waitForAll(within: .seconds(20)))
+            let finished = await host.resourceSnapshot()
+            #expect(finished.census.forcedQuiescenceCount == (forcesBound ? 1 : 0))
+            #expect(finished.isReleased)
+        }
+    }
+
+    @Test("a re-armed grace timer keeps driving teardown while its predecessor releases", .timeLimit(.minutes(1)))
+    func reArmedGraceSourceKeepsDrivingTeardown() async throws {
+        // Intent: every stage of the ladder re-arms the grace timer while the timer it
+        //   replaced is still waiting to be released, and the ladder still escalates to
+        //   kill and reaches quiescence on its own, without the host's bound.
+        // Why it exists: the host's typed handle to a source and the registry of sources
+        //   libdispatch has not released yet are different facts. Treating a release as
+        //   the moment to drop the handle would let a predecessor clear the handle its
+        //   successor now occupies.
+        // Scenario: a pane holding a signal-resistant job tree closes while every
+        //   cancellation acknowledgement lands one owner turn later than its cancel.
+        let lifecycle = ControlledTerminalPTYResourceLifecycle()
+        lifecycle.delaySourceCancellationAcknowledgements()
+        let host = try makeHost(
+            applicationExitBound: .seconds(30),
+            resourceLifecycle: lifecycle
+        )
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) teardown \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
+        let ownedPIDs = try [
+            taggedInt("__LEADER__", in: output),
+            taggedInt("__FOREGROUND__", in: output),
+            taggedInt("__BACKGROUND__", in: output),
+            taggedInt("__STOPPED__", in: output),
+            taggedInt("__RESISTANT__", in: output),
+        ]
+
+        await host.close()
+
+        // The resistant job only dies to SIGKILL, so its exit is the ladder's last stage.
+        for pid in ownedPIDs {
+            #expect(await waitForProcessExit(pid), "owned process \(pid) survived teardown")
+        }
+        let finished = await host.resourceSnapshot()
+        #expect(finished.census.forcedQuiescenceCount == 0)
+        #expect(finished.isReleased)
+    }
+
     @Test("joined descriptor sources cannot touch a reused fd number", .timeLimit(.minutes(1)))
     func teardownDoesNotTouchReusedDescriptor() async throws {
         // Intent: after quiescence, reusing the former PTY fd for a pipe leaves
@@ -4006,6 +4197,7 @@ private final class ControlledTerminalPTYResourceLifecycle: TerminalPTYResourceL
         var spawnActivationObserver: (@Sendable () -> Void)?
         var spawnActivationResumes: [@Sendable () -> Void] = []
         var holdsSourceCancellationAcknowledgements = false
+        var delaysSourceCancellationAcknowledgements = false
         var sourceCancellationObserver: (@Sendable () -> Void)?
         var sourceCancellationResumes: [@Sendable () -> Void] = []
         var descriptorReuseReplacementFD: Int32?
@@ -4036,7 +4228,14 @@ private final class ControlledTerminalPTYResourceLifecycle: TerminalPTYResourceL
     ) -> TerminalPTYLifecycleGateVerdict {
         let result = state.withLock { state -> GateResult in
             guard state.holdsSourceCancellationAcknowledgements else {
-                return GateResult(verdict: .proceed, observer: nil)
+                guard state.delaysSourceCancellationAcknowledgements else {
+                    return GateResult(verdict: .proceed, observer: nil)
+                }
+                // Resumed off the owner's queue, so the acknowledgement re-enters in a
+                // later turn than the cancel that produced it -- after a replace-on-arm
+                // source has already armed its successor.
+                DispatchQueue.global().async { resume() }
+                return GateResult(verdict: .deferred, observer: nil)
             }
             state.sourceCancellationResumes.append(resume)
             let observer = state.sourceCancellationObserver
@@ -4082,6 +4281,14 @@ private final class ControlledTerminalPTYResourceLifecycle: TerminalPTYResourceL
         }
     }
 
+    /// Makes every source cancellation acknowledgement arrive one owner turn after the
+    /// cancel that caused it, instead of inline. Production acknowledges inline, which
+    /// always lands before a replacement source is armed, so this is the only way a test
+    /// can witness a predecessor releasing while its successor is already driving.
+    func delaySourceCancellationAcknowledgements() {
+        state.withLock { $0.delaysSourceCancellationAcknowledgements = true }
+    }
+
     func releaseSourceCancellationAcknowledgements() {
         let resumes = state.withLock { state in
             state.holdsSourceCancellationAcknowledgements = false
@@ -4102,17 +4309,29 @@ private final class ControlledTerminalPTYResourceLifecycle: TerminalPTYResourceL
 }
 
 private final class TransientChildExitProbe: TerminalPTYChildExitProbing {
+    private struct State: Sendable {
+        var remainingNotYetWaitableCount: Int
+        var notYetWaitableReportCount = 0
+    }
+
     private let production = SystemTerminalPTYChildExitProbe()
-    private let remainingNotYetWaitableCount: Mutex<Int>
+    private let state: Mutex<State>
 
     init(notYetWaitableCount: Int) {
-        remainingNotYetWaitableCount = Mutex(notYetWaitableCount)
+        state = Mutex(State(remainingNotYetWaitableCount: notYetWaitableCount))
+    }
+
+    /// How many times this probe has said the child is not waitable yet. The host arms
+    /// its child-exit poll on the first one, so a second can only come from that poll.
+    var notYetWaitableReportCount: Int {
+        state.withLock { $0.notYetWaitableReportCount }
     }
 
     func probe(_ leaderPID: pid_t) -> TerminalPTYChildExitProbeResult {
-        let shouldReportNotYetWaitable = remainingNotYetWaitableCount.withLock { remaining in
-            guard remaining > 0 else { return false }
-            remaining -= 1
+        let shouldReportNotYetWaitable = state.withLock { state in
+            guard state.remainingNotYetWaitableCount > 0 else { return false }
+            state.remainingNotYetWaitableCount -= 1
+            state.notYetWaitableReportCount += 1
             return true
         }
         guard shouldReportNotYetWaitable == false else { return .notYetWaitable }
@@ -4261,6 +4480,23 @@ private func submitAndAwait(_ bytes: [UInt8], to host: TerminalPTYHost) throws {
     host.send(bytes) { completion.signal($0) }
     guard completion.waitForAll(within: .seconds(30)) else { throw POSIXError(.ETIMEDOUT) }
     #expect(completion.results == [.delivered])
+}
+
+/// Polls the host's own resource census until it satisfies the predicate.
+///
+/// The host's `waitForSnapshot(where:)` cannot answer this one: its predicate is
+/// synchronous, and `resourceSnapshot()` is actor-isolated.
+private func waitForSnapshot(
+    of host: TerminalPTYHost,
+    within limit: Duration = .seconds(20),
+    where predicate: @Sendable (TerminalPTYResourceSnapshot) -> Bool
+) async -> Bool {
+    let deadline = ContinuousClock().now + limit
+    while ContinuousClock().now < deadline {
+        if predicate(await host.resourceSnapshot()) { return true }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    return false
 }
 
 private func taggedInt(_ tag: String, in output: String) throws -> Int {
