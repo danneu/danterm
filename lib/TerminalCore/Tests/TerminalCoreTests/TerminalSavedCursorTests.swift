@@ -104,13 +104,23 @@ struct TerminalSavedCursorTests {
         #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 4, isPendingWrap: false))
 
         terminal.feed(Array("\u{1B}[?7h".utf8))
+        // A width change carries the saved slot with its text: the save sat one past the 'A' with
+        // the wrap pending, so the widening leaves it one past the 'A' with room to spare -- and
+        // the wrap goes out even though column 5 is the new right edge.
         terminal.resize(columns: 6, rows: 6)
         terminal.feed(Array("\u{1B}8".utf8))
-        #expect(terminal.geometry.cursor == TerminalCursor(row: 4, column: 4, isPendingWrap: false))
+        #expect(terminal.cell(row: 4, column: 4)?.scalars == ["A"])
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 4, column: 5, isPendingWrap: false))
 
         terminal.resize(columns: 4, rows: 6)
         terminal.feed(Array("\u{1B}8".utf8))
-        #expect(terminal.geometry.cursor == TerminalCursor(row: 4, column: 3, isPendingWrap: true))
+        #expect(terminal.cell(row: 4, column: 0)?.scalars == ["A"])
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 4, column: 1, isPendingWrap: false))
+
+        // The re-arm gate is the saved flag, not the column: a save taken at the right edge with
+        // no wrap pending restores without one.
+        terminal.feed(Array("\u{1B}[4;4H\u{1B}7\u{1B}[1;1H\u{1B}8".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 3, column: 3, isPendingWrap: false))
     }
 
     @Test("DEC mode parameters apply left-to-right around save and restore aliases")

@@ -619,6 +619,24 @@ public struct Terminal: Equatable, Sendable {
         case boundary(line: Int, offset: Int)
     }
 
+    /// One position a width change carries through the refold: the live cursor, and the DECSC
+    /// slot that has to come back onto the same text it was saved on.
+    private struct TrackedCursor {
+        var row: Int
+        var column: Int
+        var isPendingWrap: Bool
+    }
+
+    /// What one tracked cursor attaches to in the reconstructed lines.
+    ///
+    /// The second case exists because the refold only rebuilds rows down to the last content row:
+    /// a saved position on a never-written row below that has no line to follow, so it is mapped
+    /// by how far under the content it sat.
+    private enum ReflowCursorAttachment {
+        case inLine(anchor: ReflowCursorAnchor, line: Int)
+        case belowContent(rowsBelow: Int, column: Int)
+    }
+
     /// Records a cursor destination before the rebuilt stream is split into regions.
     private struct ReflowDestination {
         var row: Int
@@ -5132,11 +5150,14 @@ public struct Terminal: Equatable, Sendable {
             if displacedCount > 0 {
                 appendToScrollback(screen.rows.prefix(displacedCount))
                 screen.rows.removeFirst(displacedCount)
-                if screen.cursor.row < displacedCount {
-                    screen.cursor.row = 0
-                } else {
-                    screen.cursor.row -= displacedCount
+                // The saved slot is a passenger: it takes the displacement the live cursor takes,
+                // and the same off-screen policy (row 0, column kept) when its row left the
+                // active area, so DECRC still lands on the text DECSC saved.
+                func displaced(_ row: Int) -> Int {
+                    row < displacedCount ? 0 : row - displacedCount
                 }
+                screen.cursor.row = displaced(screen.cursor.row)
+                screen.savedCursor.position.row = displaced(screen.savedCursor.position.row)
                 enforceScrollbackBudget()
             }
         } else {
@@ -5157,6 +5178,7 @@ public struct Terminal: Equatable, Sendable {
                         at: 0
                     )
                     screen.cursor.row += pulledCount
+                    screen.savedCursor.position.row += pulledCount
                 }
             }
             screen.rows.append(contentsOf: (pulledCount..<addedCount).map { _ in
@@ -5205,69 +5227,46 @@ public struct Terminal: Equatable, Sendable {
         let lastSourceRow = max(screen.cursor.row, lastLiveContentRow)
         let trailingBlankRowCount = screen.rows.count - lastSourceRow - 1
         let sourceRows = Array(screen.rows[...lastSourceRow])
+        // Order is the contract with `placed` below: the live cursor first, because it alone
+        // decides the resulting layout, then the saved slot as its passenger.
+        let liveCursorIndex = 0
+        let savedCursorIndex = 1
+        let trackedCursors = [
+            TrackedCursor(
+                row: screen.cursor.row,
+                column: screen.cursor.column,
+                isPendingWrap: screen.isPendingWrap
+            ),
+            TrackedCursor(
+                row: screen.savedCursor.position.row,
+                column: screen.savedCursor.position.column,
+                isPendingWrap: screen.savedCursor.isPendingWrap
+            ),
+        ]
         let reconstruction = reconstructLogicalLines(
             from: sourceRows,
             leadingCells: seamPrefix,
             leadingSemanticPrompt: seamPrompt,
-            cursorRow: screen.cursor.row,
+            trackedCursors: trackedCursors,
             oldColumnCount: oldColumnCount
         )
 
         var rebuiltRows: [GridRow] = []
-        var cursorDestination: ReflowDestination?
+        var trackedDestinations = [ReflowDestination?](repeating: nil, count: trackedCursors.count)
         var liveDestinations = [WidthChangeAnchor: TextAnchor]()
         for (lineIndex, line) in reconstruction.lines.enumerated() {
             let packed = pack(line: line, columns: newColumnCount)
             let baseRow = rebuiltRows.count
 
-            switch reconstruction.anchor {
-            case let .cell(key) where lineIndex == reconstruction.cursorLine:
-                if let local = packed.cellDestinations[key] {
-                    cursorDestination = ReflowDestination(
-                        row: baseRow + local.row,
-                        column: local.column,
-                        isPendingWrap: false
-                    )
-                }
-            case let .trailingPadding(line, distance, allPaddingColumn) where line == lineIndex:
-                if let allPaddingColumn {
-                    cursorDestination = ReflowDestination(
-                        row: baseRow,
-                        column: min(allPaddingColumn, newColumnCount - 1),
-                        isPendingWrap: false
-                    )
-                } else {
-                    // `contentEnd.column` is one past the line's last committed cell, so the
-                    // cursor wants to sit at `contentEnd.column + distance`. That can land
-                    // past the right margin and has to clamp. Clamping onto a blank is
-                    // harmless, but when the reflowed content fills the row exactly the
-                    // clamp would park the cursor *on* the final character, and the next
-                    // printed scalar would overwrite committed output rather than wrap --
-                    // e.g. 19 columns of text narrowed to a 19-column grid turned the next
-                    // keystroke into "some long long texX".
-                    //
-                    // DanTerm has no one-past-the-end cursor column: everywhere else, "past
-                    // the last cell of a full row" is spelled as the last column plus a
-                    // deferred wrap (`printNarrow` arms `isPendingWrap` instead of moving to
-                    // a column that does not exist). Reflow has to use that same spelling,
-                    // or the distinction is lost in the clamp.
-                    let desired = packed.contentEnd.column + distance
-                    cursorDestination = ReflowDestination(
-                        row: baseRow + packed.contentEnd.row,
-                        column: min(desired, newColumnCount - 1),
-                        isPendingWrap: distance == 0 && packed.contentEnd.column == newColumnCount
-                    )
-                }
-            case let .boundary(line, offset) where line == lineIndex:
-                if let local = packed.boundaryDestinations[offset] {
-                    cursorDestination = ReflowDestination(
-                        row: baseRow + local.row,
-                        column: local.column,
-                        isPendingWrap: local.isPendingWrap
-                    )
-                }
-            default:
-                break
+            for index in trackedCursors.indices {
+                guard let resolved = reflowDestination(
+                    for: reconstruction.attachments[index],
+                    lineIndex: lineIndex,
+                    baseRow: baseRow,
+                    packed: packed,
+                    columns: newColumnCount
+                ) else { continue }
+                trackedDestinations[index] = resolved
             }
 
             for (slot, address) in captured {
@@ -5280,12 +5279,28 @@ public struct Terminal: Equatable, Sendable {
             }
             rebuiltRows.append(contentsOf: packed.rows)
         }
+        let reflowedContentEndRow = max(0, rebuiltRows.count - 1)
 
-        var destination = cursorDestination ?? ReflowDestination(
-            row: 0,
-            column: min(screen.cursor.column, newColumnCount - 1),
-            isPendingWrap: false
-        )
+        /// Turns one tracked cursor's resolution into a position in the rebuilt stream. A cursor
+        /// the refold could not place keeps its column and homes to the top, which is the same
+        /// off-screen policy a height shrink applies.
+        func placed(_ index: Int) -> ReflowDestination {
+            if case let .belowContent(rowsBelow, column) = reconstruction.attachments[index] {
+                return ReflowDestination(
+                    row: reflowedContentEndRow + rowsBelow,
+                    column: min(column, newColumnCount - 1),
+                    isPendingWrap: false
+                )
+            }
+            return trackedDestinations[index] ?? ReflowDestination(
+                row: 0,
+                column: min(trackedCursors[index].column, newColumnCount - 1),
+                isPendingWrap: false
+            )
+        }
+
+        var destination = placed(liveCursorIndex)
+        var savedDestination = placed(savedCursorIndex)
 
         // Restated against the fold as it stands now, before the viewport fill below moves rows
         // across the seam: that move keeps every row's absolute stream position, so an anchor
@@ -5314,6 +5329,7 @@ public struct Terminal: Equatable, Sendable {
                 at: 0
             )
             destination.row += pulled.count
+            savedDestination.row += pulled.count
         }
         while rebuiltRows.count < rowCount {
             rebuiltRows.append(makeBlankRow(columns: newColumnCount))
@@ -5335,6 +5351,14 @@ public struct Terminal: Equatable, Sendable {
             column: destination.column
         )
         screen.isPendingWrap = destination.isPendingWrap
+        // Stage two: the layout above was decided by the live cursor alone, and the saved slot is
+        // mapped through it. A saved row the refold pushed above the viewport is gone from the
+        // active area, so it takes the live cursor's off-screen policy: row 0, column kept.
+        screen.savedCursor.position = CellPosition(
+            row: max(0, savedDestination.row - viewportStart),
+            column: savedDestination.column
+        )
+        screen.savedCursor.isPendingWrap = savedDestination.isPendingWrap
 
         // Whatever the refold pushed above the viewport scrolled off, so it is admitted exactly
         // as it would have been had it scrolled off one row at a time.
@@ -5571,12 +5595,11 @@ public struct Terminal: Equatable, Sendable {
         from sourceRows: [GridRow],
         leadingCells: [GridCell],
         leadingSemanticPrompt: SemanticPromptRow,
-        cursorRow: Int,
+        trackedCursors: [TrackedCursor],
         oldColumnCount: Int
     ) -> (
         lines: [ReflowLine],
-        anchor: ReflowCursorAnchor,
-        cursorLine: Int
+        attachments: [ReflowCursorAttachment]
     ) {
         var lines: [ReflowLine] = []
         var currentLine = ReflowLine()
@@ -5692,35 +5715,99 @@ public struct Terminal: Equatable, Sendable {
             lines.append(currentLine)
         }
 
-        let cursorMetadata = metadata[min(cursorRow, metadata.count - 1)]
-        let cursorKey = sourceKey(
-            row: min(cursorRow, sourceRows.count - 1),
-            column: screen.cursor.column,
-            columns: oldColumnCount
-        )
-        let anchor: ReflowCursorAnchor
-        if screen.isPendingWrap {
-            anchor = .boundary(
-                line: cursorMetadata.line,
-                offset: cursorMetadata.boundaryOffset
-            )
-        } else if retainedSourceKeys.contains(cursorKey) {
-            anchor = .cell(key: cursorKey)
-        } else if cursorMetadata.retainedEnd == 0 {
-            anchor = .trailingPadding(
-                line: cursorMetadata.line,
-                distance: 0,
-                allPaddingColumn: screen.cursor.column
-            )
-        } else {
-            anchor = .trailingPadding(
-                line: cursorMetadata.line,
-                distance: max(0, screen.cursor.column - cursorMetadata.retainedEnd),
-                allPaddingColumn: nil
-            )
+        let attachments = trackedCursors.map { tracked -> ReflowCursorAttachment in
+            guard tracked.row < metadata.count else {
+                return .belowContent(
+                    rowsBelow: tracked.row - (metadata.count - 1),
+                    column: tracked.column
+                )
+            }
+            let rowMetadata = metadata[tracked.row]
+            let key = sourceKey(row: tracked.row, column: tracked.column, columns: oldColumnCount)
+            let anchor: ReflowCursorAnchor
+            if tracked.isPendingWrap {
+                anchor = .boundary(
+                    line: rowMetadata.line,
+                    offset: rowMetadata.boundaryOffset
+                )
+            } else if retainedSourceKeys.contains(key) {
+                anchor = .cell(key: key)
+            } else if rowMetadata.retainedEnd == 0 {
+                anchor = .trailingPadding(
+                    line: rowMetadata.line,
+                    distance: 0,
+                    allPaddingColumn: tracked.column
+                )
+            } else {
+                anchor = .trailingPadding(
+                    line: rowMetadata.line,
+                    distance: max(0, tracked.column - rowMetadata.retainedEnd),
+                    allPaddingColumn: nil
+                )
+            }
+            return .inLine(anchor: anchor, line: rowMetadata.line)
         }
 
-        return (lines, anchor, cursorMetadata.line)
+        return (lines, attachments)
+    }
+
+    /// Resolves one tracked cursor's attachment against the line that has just been packed.
+    ///
+    /// Returns nil until the packed line is the one the attachment names, so the caller can walk
+    /// every line once and keep the first destination each cursor produces.
+    private func reflowDestination(
+        for attachment: ReflowCursorAttachment,
+        lineIndex: Int,
+        baseRow: Int,
+        packed: PackedReflowLine,
+        columns: Int
+    ) -> ReflowDestination? {
+        guard case let .inLine(anchor, cursorLine) = attachment else { return nil }
+        switch anchor {
+        case let .cell(key) where lineIndex == cursorLine:
+            guard let local = packed.cellDestinations[key] else { return nil }
+            return ReflowDestination(
+                row: baseRow + local.row,
+                column: local.column,
+                isPendingWrap: false
+            )
+        case let .trailingPadding(line, distance, allPaddingColumn) where line == lineIndex:
+            if let allPaddingColumn {
+                return ReflowDestination(
+                    row: baseRow,
+                    column: min(allPaddingColumn, columns - 1),
+                    isPendingWrap: false
+                )
+            }
+            // `contentEnd.column` is one past the line's last committed cell, so the cursor
+            // wants to sit at `contentEnd.column + distance`. That can land past the right
+            // margin and has to clamp. Clamping onto a blank is harmless, but when the
+            // reflowed content fills the row exactly the clamp would park the cursor *on* the
+            // final character, and the next printed scalar would overwrite committed output
+            // rather than wrap -- e.g. 19 columns of text narrowed to a 19-column grid turned
+            // the next keystroke into "some long long texX".
+            //
+            // DanTerm has no one-past-the-end cursor column: everywhere else, "past the last
+            // cell of a full row" is spelled as the last column plus a deferred wrap
+            // (`printNarrow` arms `isPendingWrap` instead of moving to a column that does not
+            // exist). Reflow has to use that same spelling, or the distinction is lost in the
+            // clamp.
+            let desired = packed.contentEnd.column + distance
+            return ReflowDestination(
+                row: baseRow + packed.contentEnd.row,
+                column: min(desired, columns - 1),
+                isPendingWrap: distance == 0 && packed.contentEnd.column == columns
+            )
+        case let .boundary(line, offset) where line == lineIndex:
+            guard let local = packed.boundaryDestinations[offset] else { return nil }
+            return ReflowDestination(
+                row: baseRow + local.row,
+                column: local.column,
+                isPendingWrap: local.isPendingWrap
+            )
+        default:
+            return nil
+        }
     }
 
     private func pack(line: ReflowLine, columns: Int) -> PackedReflowLine {

@@ -229,7 +229,8 @@ struct TerminalAlternateScreenTests {
 
     @Test("inactive screens resize their grids and saved cursors from either active side")
     func inactiveScreenResizeClampsSavedCursors() throws {
-        // Intent: resize updates both retained grids and clamps each grid's saved cursor locally.
+        // Intent: resize updates both retained grids and each grid's saved cursor locally -- the
+        //   primary's follows its text through the reflow, the alternate's only clamps.
         // Why it exists: switching which screen is live must not decide which state gets resized.
         // Scenario: each screen takes a save on a wide tail before it becomes inactive and shrinks.
         var primaryInactive = try #require(Terminal(columns: 5, rows: 3))
@@ -237,8 +238,11 @@ struct TerminalAlternateScreenTests {
         primaryInactive.feed(Array("\u{1B}[3;1H\u{1B}7".utf8))
         primaryInactive.resize(columns: 4, rows: 3)
         primaryInactive.feed(Array("\u{1B}[?1047l\u{1B}8".utf8))
-        #expect(primaryInactive.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
-        #expect(primaryInactive.cell(row: 0, column: 3)?.kind != .wideTail)
+        // The save was on the glyph's tail, which the narrowing wrapped onto its own row; the
+        // restore follows it there and steps off the tail onto the head.
+        #expect(primaryInactive.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
+        #expect(primaryInactive.cell(row: 0, column: 0)?.scalars == ["\u{754C}"])
+        #expect(primaryInactive.cell(row: 0, column: 0)?.kind != .wideTail)
 
         var alternateInactive = try #require(Terminal(columns: 5, rows: 3))
         alternateInactive.feed(Array("\u{1B}[?1047h\u{1B}[1;4H\u{754C}\u{1B}[1;5H\u{1B}7\u{1B}[?1047l".utf8))
