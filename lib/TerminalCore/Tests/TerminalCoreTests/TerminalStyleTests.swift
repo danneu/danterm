@@ -54,6 +54,25 @@ struct TerminalStyleTests {
         #expect(terminal.currentStyle == TerminalStyle())
     }
 
+    @Test("an over-long SGR applies its first 24 parameters")
+    func overLongSequenceTruncates() throws {
+        // Intent: an SGR past the parser's parameter cap still applies everything that fits,
+        //   and applies nothing past the cap.
+        // Why it exists: the parser used to drop such a sequence whole, so one extra
+        //   parameter left the previous pen in force with no sign anything was lost.
+        // Scenario: a generator emits bold, an RGB foreground, a long run of italic, and a
+        //   final reverse that sits one parameter past the cap.
+        var terminal = try #require(Terminal(columns: 2, rows: 1))
+
+        let fitting = ["1", "38", "2", "10", "20", "30"] + Array(repeating: "3", count: 18)
+        terminal.feed(Array("\u{1B}[\((fitting + ["7"]).joined(separator: ";"))m".utf8))
+
+        #expect(terminal.currentStyle.bold)
+        #expect(terminal.currentStyle.italic)
+        #expect(terminal.currentStyle.foreground == .rgb(red: 10, green: 20, blue: 30))
+        #expect(terminal.currentStyle.reverse == false)
+    }
+
     @Test("SGR underline variants honor colon groups and legacy double underline")
     func underlineVariants() throws {
         var terminal = try #require(Terminal(columns: 2, rows: 1))

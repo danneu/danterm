@@ -568,7 +568,9 @@ struct EscapeAbsorber: Equatable, Sendable {
         if byte == 0x3A || byte == 0x3B {
             guard parameters.count < CSIParameters.capacity else { return }
             parameters.append(parameterAccumulator)
-            colonSeparators.append(byte == 0x3A)
+            // Whatever follows the last slot is overflow the dispatch discards, so that slot
+            // never separates this parameter from a retained one and never carries a colon.
+            colonSeparators.append(byte == 0x3A && parameters.count < CSIParameters.capacity)
             parameterAccumulator = 0
             hasParameterDigits = false
             return
@@ -583,8 +585,11 @@ struct EscapeAbsorber: Equatable, Sendable {
 
     private mutating func dispatchCSI(final: UInt8) -> EscapeEvent? {
         defer { clearCollection() }
-        guard parameters.count < CSIParameters.capacity else { return nil }
-        if hasParameterDigits || parameters.isEmpty == false {
+        // Parameters past the cap are ignored, never a reason to drop the sequence: the
+        // dispatch carries the first `capacity` of them, exactly as if the sender had stopped
+        // there. Anything still accumulating at the final byte belongs to the overflow.
+        if parameters.count < CSIParameters.capacity,
+           hasParameterDigits || parameters.isEmpty == false {
             parameters.append(parameterAccumulator)
             colonSeparators.append(false)
         }

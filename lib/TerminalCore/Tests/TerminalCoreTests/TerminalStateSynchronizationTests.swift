@@ -54,6 +54,26 @@ struct TerminalStateSynchronizationTests {
         expectObservableState(resumed, equals: source, phase: "primary")
     }
 
+    @Test("state bytes round-trip a style carrying every attribute and RGB color")
+    func reconstructsFullyLoadedStyle() throws {
+        // Intent: the worst-case style the writer can emit survives its own round trip.
+        // Why it exists: that sequence spends exactly the parser's 24-parameter budget, so
+        //   the resync sits on the overflow boundary and must stay on the safe side of it.
+        // Scenario: a cell and the live pen both carry every attribute plus an RGB
+        //   foreground, background, and underline color.
+        var source = try #require(Terminal(columns: 4, rows: 1))
+        source.feed(Array("\u{1B}[1;2;3;4:3;7;8;9;38;2;1;2;3;48;2;4;5;6;58;2;7;8;9mx".utf8))
+
+        let synchronization = source.stateSynchronization
+        var resumed = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        resumed.feed(synchronization.bytes)
+
+        expectObservableState(resumed, equals: source, phase: "fully loaded style")
+    }
+
     @Test("state bytes preserve live hyperlinks at the shared metadata cap")
     func reconstructsHyperlinkMetadataCap() throws {
         // Intent: replay the same surviving link set when admission has no metadata space left.

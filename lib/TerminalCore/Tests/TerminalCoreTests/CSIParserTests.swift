@@ -127,20 +127,28 @@ struct CSIParserTests {
         }
     }
 
-    @Test("CSI parameter capacity dispatches 24 values and drops 25")
+    @Test("CSI parameter capacity truncates past 24 values without dropping the dispatch")
     func parameterCapacity() {
-        let twentyFour = "\u{1B}[" + Array(repeating: "1", count: 23).joined(separator: ";") + ";2H"
-        let twentyFive = "\u{1B}[" + Array(repeating: "1", count: 24).joined(separator: ";") + ";2H"
-
-        #expect(dispatches(twentyFour) == [
+        // Intent: an over-long CSI dispatches with exactly its first 24 parameters, and that
+        //   value is the one the same sequence cut after its 24th parameter dispatches.
+        // Why it exists: dropping the whole sequence turned one extra parameter into a silent
+        //   no-op for a whole SGR or mode set, which is a cliff rather than a degradation.
+        // Scenario: a 25-parameter CUP arrives with digits still pending at the final byte,
+        //   ending on a separator, and with a colon-bearing tail.
+        let head = Array(repeating: "1", count: 23).joined(separator: ";")
+        let truncated = [
             CSISequence(
                 parameters: Array(repeating: 1, count: 23) + [2],
                 colonSeparators: Array(repeating: false, count: 24),
                 intermediates: [],
                 final: 0x48
             ),
-        ])
-        #expect(dispatches(twentyFive).isEmpty)
+        ]
+
+        #expect(dispatches("\u{1B}[\(head);2H") == truncated)
+        #expect(dispatches("\u{1B}[\(head);2;9H") == truncated)
+        #expect(dispatches("\u{1B}[\(head);2;9;H") == truncated)
+        #expect(dispatches("\u{1B}[\(head);2:9:8H") == truncated)
     }
 
     @Test("CSI numeric accumulation saturates at UInt16.max")
