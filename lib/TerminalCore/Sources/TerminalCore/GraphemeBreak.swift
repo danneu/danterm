@@ -68,9 +68,11 @@ private extension GraphemeBreakState {
         if previous.isControl || current.isControl { return true }
 
         // GB6-GB8: Hangul syllable sequences.
-        if previous == .l && [.l, .v, .lv, .lvt].contains(current) { return false }
-        if [.lv, .v].contains(previous) && [.v, .t].contains(current) { return false }
-        if [.lvt, .t].contains(previous) && current == .t { return false }
+        if previous == .l && (current == .l || current == .v || current == .lv || current == .lvt) {
+            return false
+        }
+        if (previous == .lv || previous == .v) && (current == .v || current == .t) { return false }
+        if (previous == .lvt || previous == .t) && current == .t { return false }
 
         // GB9a-GB9b. GB9 follows the stateful rules below.
         if current == .spacingMark { return false }

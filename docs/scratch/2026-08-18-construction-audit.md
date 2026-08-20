@@ -1224,10 +1224,10 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [ ] **[PANE-5](#pane-5)** (2x5, medium) Collapse the four duplicated fire-and-forget input methods into one completion-taking path
 - [ ] **[PTY-2](#pty-2)** (2x5, medium) Give TerminalPTYHost its geometry from the launch input instead of storing a second copy
 - [ ] **[REDUCE-4](#reduce-4)** (3x3, medium) Derive terminal focus from the model instead of emitting focusSession(false) from four arms
-- [ ] **[FEED-5](#feed-5)** (2x4, small) Test grapheme-break class membership with a bitmask instead of array-literal `contains`
+- [x] **[FEED-5](#feed-5)** (2x4, small) Test grapheme-break class membership with a bitmask instead of array-literal `contains`
 - [ ] **[PTY-5](#pty-5)** (2x4, small) Dedupe grid submissions on the applied fact, not on an optimistic mirror in the controller
 - [ ] **[RECON-5](#recon-5)** (2x4, small) Separate the pane strip's overflow-label metrics from its color so fitting stops measuring text
-- [ ] **[UNI-3](#uni-3)** (2x4, small) Generate the UAX #29 pair verdicts as a class table instead of array-literal set membership
+- [x] **[UNI-3](#uni-3)** (2x4, small) Generate the UAX #29 pair verdicts as a class table instead of array-literal set membership
 - [ ] **[DRAW-4](#draw-4)** (2x4, medium) Route single-scalar astral cells through the batched cmap path instead of one CTLine per cell
 - [ ] **[WIRE-5](#wire-5)** (2x4, medium) Let the engine cut the checkpoint tail once, instead of re-walking the projected text to trim it
 
@@ -1742,7 +1742,7 @@ pass could see, because no single area auditor was looking at both halves.
 
 **Issue.** UNI-2 replaces the bulk-print run predicate -- currently `isPrintableASCII` -- with one derived from the scalar record, which is the exact loop FEED-2 is optimizing to reach a row's cells once per run. Likewise UNI-3 and FEED-5 both replace array-literal membership tests in the grapheme-break classifier. Neither area's verifier saw that the other is editing the same two loops.
 
-**Resolution.** UNI-1 in wave 1 (the palette the record decodes from), FEED-2 in wave 1 (it changes the store, not the predicate), UNI-2 in wave 2 once the palette exists, and FEED-5/UNI-3 together in wave 4 as one bitmask change rather than two.
+**Resolution.** UNI-1 in wave 1 (the palette the record decodes from), FEED-2 in wave 1 (it changes the store, not the predicate), UNI-2 in wave 2 once the palette exists, and FEED-5/UNI-3 together in wave 4 by rewriting the four array literals as `==` chains that match the existing class predicates.
 
 ### X12. [MOBILE-3](#mobile-3) + [IOS-1](#ios-1) + [IOS-3](#ios-3)
 
@@ -8298,9 +8298,9 @@ _How this list was built: I grepped app/, lib/, and scripts/ (excluding .build) 
 
 **Vetted.** The three quoted lines are verbatim in `GraphemeBreak.swift#shouldBreak`, and `shouldBreak` does run once per printed scalar with an open cluster (`Terminal.appendToOpenClusterIfJoined`) and once per search-query scalar pair. But this is the same finding as FEED-5, on the same three lines of the same file, and FEED-5 states the better ideal. I also read the whole cascade against the proposed pair table: `normalize` mutates state before any rule runs, and the GB9c/GB11/GB12 arms both read and write state, so a pair table would have to mark a large share of pairs `consultState` and still guarantee the state each `break` verdict leaves behind -- it does not remove the cascade, it adds a generated artifact in front of it.
 
-**Correction.** Merge into FEED-5 and reduce to its ideal: give `GraphemeBreakClass` a `var bit: UInt32 { 1 << rawValue }` and express each class set as a `static let` mask, which makes an allocating membership test unrepresentable in two lines and spells the Hangul rules the same way as the `isExtend`/`isIndicExtend` predicates already in the file. Drop the 19x19 pair table: it is a larger structure, not a simpler one, it introduces a hand-transcribed precedence reading as a new failure mode, and the stateful rules still have to run. Also correct the count -- `shouldBreak` has three set-shaped rules holding four array literals, not five.
+**Correction.** Merge into FEED-5 and use its vetted ideal: rewrite the four array literals as `==` chains, matching the five class predicates already written that way. Drop the 19x19 pair table: it is a larger structure, not a simpler one, it introduces a hand-transcribed precedence reading as a new failure mode, and the stateful rules still have to run. A `UInt32` bitmask also adds new vocabulary and would achieve uniformity only by rewriting five correct predicates, with no expected generated-code difference for these 2-4-element sets. Also correct the count -- `shouldBreak` has three set-shaped rules holding four array literals, not five.
 
-**Sharper ideal.** The `UInt32` bitmask is the ideal here, not the fallback: the problem is "a compile-time-constant set spelled as a collection that can allocate", and the mask removes it by construction. The pair table addresses a different, unmeasured problem (branch count) and should be raised separately if a profile ever shows the cascade rather than the array literals.
+**Sharper ideal.** The `==` chains are the ideal here: they remove the collection-shaped expression and make this file consistent without adding a mask representation. The pair table addresses a different, unmeasured problem (branch count) and should be raised separately if a profile ever shows the cascade rather than the array literals.
 
 **Conflicts with.** [FEED-5](#feed-5)
 
