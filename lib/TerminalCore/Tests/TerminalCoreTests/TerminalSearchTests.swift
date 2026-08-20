@@ -5,6 +5,92 @@ import Testing
 
 /// Locks unit-aligned search to live terminal content without a stale match cache.
 struct TerminalSearchTests {
+    @Test("incremental needle entry is identical to a fresh search")
+    func incrementalNeedleEntryMatchesFreshSearch() throws {
+        // Intent: every strict grapheme-key append produces exactly the state a fresh search of
+        //   the final needle produces, while re-segmentation falls back without changing results.
+        // Why it exists: refining from old match starts can otherwise lose overlaps, boundaries,
+        //   wide cells, folded graphemes, or a match that crosses the closed/live seam.
+        // Scenario: a user types and pastes through representative needles over mixed history.
+        var base = try #require(Terminal(columns: 8, rows: 3))
+        base.feed(Array("aaaa\r\nwide🙂x\r\nA\r\nX\r\nn\u{0303} sharpß\r\nseam error".utf8))
+
+        let sequences = [
+            ["a", "aa", "aaa"],
+            ["w", "wide🙂"],
+            ["A", "A\n", "A\nX"],
+            ["n", "n\u{0303}"],
+            ["s", "sharpß"],
+            ["ß", "ßx"],
+            ["e", "error"],
+            ["z", "zz"],
+        ]
+        for sequence in sequences {
+            var incremental = base
+            for needle in sequence {
+                _ = incremental.beginSearch(needle)
+                var fresh = base
+                _ = fresh.beginSearch(needle)
+
+                #expect(incremental == fresh, "needle: \(needle)")
+                assertSearchIndexMatchesOracle(incremental, needle: needle)
+            }
+        }
+
+        var denseBase = try #require(Terminal(columns: 4, rows: 1))
+        denseBase.feed(Array("a\r\na\r\na\r\na".utf8))
+        var denseIncremental = denseBase
+        _ = denseIncremental.beginSearch("a")
+        _ = denseIncremental.beginSearch("aa")
+        var denseFresh = denseBase
+        _ = denseFresh.beginSearch("aa")
+        #expect(denseIncremental == denseFresh)
+        assertSearchIndexMatchesOracle(denseIncremental, needle: "aa")
+
+        var seamBase = try #require(Terminal(columns: 8, rows: 1))
+        seamBase.feed(Array("old\r\nerr\r\nor".utf8))
+        var seamIncremental = seamBase
+        _ = seamIncremental.beginSearch("err\n")
+        _ = seamIncremental.beginSearch("err\nor")
+        var seamFresh = seamBase
+        _ = seamFresh.beginSearch("err\nor")
+        #expect(seamIncremental == seamFresh)
+        assertSearchIndexMatchesOracle(seamIncremental, needle: "err\nor")
+    }
+
+    @Test("needle append scans only old-match neighborhoods")
+    func needleAppendClosedRecordWorkIsIndependentOfUnmatchedDepth() throws {
+        // Intent: extending a needle visits only closed records near matches of the old needle.
+        // Why it exists: rebuilding from record zero makes every find-field keystroke scale with
+        //   retained history even when all added history cannot contain the longer needle.
+        // Scenario: shallow and deep panes have the same matching tail after different amounts of
+        //   non-matching history; an append costs the same, while a replacement scans both depths.
+        func work(depth: Int) throws -> (append: Int, rebuild: Int) {
+            var terminal = try #require(Terminal(columns: 16, rows: 3))
+            for index in 0..<depth {
+                terminal.feed(Array("quiet \(index)\r\n".utf8))
+            }
+            terminal.feed(Array("target error\r\ntail one\r\ntail two\r\ntail three".utf8))
+            _ = terminal.beginSearch("err")
+
+            let append = Instrument.closedRecordSearchScan.measure {
+                _ = terminal.beginSearch("error")
+            }
+            let rebuild = Instrument.closedRecordSearchScan.measure {
+                _ = terminal.beginSearch("miss")
+            }
+            return (append, rebuild)
+        }
+
+        let shallow = try work(depth: 20)
+        let deep = try work(depth: 200)
+
+        #expect(shallow.append > 0, "the append path must scan its old-match neighborhood")
+        #expect(deep.append == shallow.append)
+        #expect(shallow.rebuild > shallow.append)
+        #expect(deep.rebuild > shallow.rebuild, "the full-build instrument must remain live")
+    }
+
     @Test("search matches canonical caseless graphemes and preserves their cell ranges")
     func foldingAndUnicodeExactness() throws {
         // Intent: search compares one canonical caseless grapheme at a time and

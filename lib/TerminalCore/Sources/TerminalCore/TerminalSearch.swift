@@ -81,6 +81,30 @@ extension Terminal {
             index = builtSearchMatchIndex(needleKeys: needleKeys, history: history)
         }
 
+        /// Derives a longer needle's closed-history index from the starts already known to match
+        /// its strict key prefix, or returns nil when the query requires a from-scratch build.
+        func refined(
+            query: String,
+            position: TextAnchor,
+            history: LogicalLineStore
+        ) -> Search? {
+            let needleKeys = Self.searchGraphemeKeys(for: query)
+            let oldKeys = index.needleKeys
+            guard needleKeys.count > oldKeys.count,
+                  Array(needleKeys.prefix(oldKeys.count)) == oldKeys,
+                  let refinedIndex = refinedSearchMatchIndex(
+                    needleKeys: needleKeys,
+                    appendedKeyCount: needleKeys.count - oldKeys.count,
+                    history: history
+                  )
+            else { return nil }
+            var result = self
+            result.query = query
+            result.position = position
+            result.index = refinedIndex
+            return result
+        }
+
         /// Bounds the rows whose presentation can change when nearby text changes.
         var damageRowRadius: Int { max(1, index.needleKeys.count - 1) }
 
@@ -451,6 +475,80 @@ extension Terminal {
             )
         }
 
+        /// Rechecks only merged record neighborhoods around starts that matched the old needle.
+        private func refinedSearchMatchIndex(
+            needleKeys: [SearchGraphemeKey],
+            appendedKeyCount: Int,
+            history: LogicalLineStore
+        ) -> SearchMatchIndex? {
+            let closedCount = history.closedRecordCount
+            var neighborhoods: [Range<Int>] = []
+            for match in index.prefixMatches {
+                guard let start = history.recordIndex(of: match.start.record),
+                      let end = history.recordIndex(of: match.end.record)
+                else { return nil }
+                let neighborhood = Range(
+                    uncheckedBounds: (
+                        max(0, start - appendedKeyCount),
+                        min(closedCount, end + 1 + appendedKeyCount)
+                    )
+                )
+                if let last = neighborhoods.last, last.upperBound >= neighborhood.lowerBound {
+                    neighborhoods[neighborhoods.count - 1] = Range(
+                        uncheckedBounds: (
+                            last.lowerBound,
+                            max(last.upperBound, neighborhood.upperBound)
+                        )
+                    )
+                } else {
+                    neighborhoods.append(neighborhood)
+                }
+            }
+
+            let oldStarts = index.prefixMatches.map(\.start)
+            var matches: [RecordSearchRange] = []
+            for records in neighborhoods {
+                let scanned = scanClosedRecordSearchUnits(
+                    needleKeys: needleKeys,
+                    seededBy: [],
+                    records: records,
+                    includesLeadingBoundary: false,
+                    history: history
+                )
+                matches.append(contentsOf: scanned.matches.filter { candidate in
+                    var low = 0
+                    var high = oldStarts.count
+                    while low < high {
+                        let middle = low + (high - low) / 2
+                        if oldStarts[middle] < candidate.start {
+                            low = middle + 1
+                        } else {
+                            high = middle
+                        }
+                    }
+                    return low < oldStarts.count && oldStarts[low] == candidate.start
+                })
+            }
+
+            let boundaryWindow = recordSearchBoundaryWindow(
+                needleKeys: needleKeys,
+                endingAt: closedCount,
+                history: history
+            )
+            assert(boundaryWindow.count <= max(0, needleKeys.count - 1))
+            return SearchMatchIndex(
+                needleKeys: needleKeys,
+                indexedThroughRecord: closedCount > 0
+                    ? history.recordIdentity(at: closedCount - 1)
+                    : nil,
+                retainedStart: closedCount > 0
+                    ? history.recordTextPosition(recordIndex: 0, cellOffset: 0)
+                    : nil,
+                boundaryWindow: boundaryWindow,
+                prefixMatches: Deque(matches)
+            )
+        }
+
         private func closedRecordEndPosition(
             in history: LogicalLineStore
         ) -> LogicalLineStore.RecordTextPosition? {
@@ -494,6 +592,7 @@ extension Terminal {
                 ? history.closedRecordScan(at: records.lowerBound - 1)
                 : nil
             for recordIndex in records {
+                Instrument.closedRecordSearchScan.record()
                 guard let scan = history.closedRecordScan(at: recordIndex) else {
                     previous = nil
                     continue

@@ -3725,11 +3725,12 @@ public struct Terminal: Equatable, Sendable {
             return false
         }
         let streamRows = evictedRowCount..<(evictedRowCount + projectionRowCount)
-        var newSearch = Search(
+        let position = TextAnchor(row: streamRows.upperBound, column: 0)
+        var newSearch = search?.refined(
             query: query,
-            position: TextAnchor(row: streamRows.upperBound, column: 0),
+            position: position,
             history: history.store
-        )
+        ) ?? Search(query: query, position: position, history: history.store)
         let newestMatch = newSearch.selectNewest(in: searchContext)
         search = newSearch
         revealSearchMatchIfNeeded(newestMatch)

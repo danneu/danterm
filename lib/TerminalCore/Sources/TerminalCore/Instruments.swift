@@ -75,6 +75,10 @@ enum Instrument: Int, CaseIterable, Sendable {
     /// bounded.
     case searchIndexMaintenance
 
+    /// Closed records visited while scanning search units, so incremental needle entry can prove
+    /// that retained history with no old match adds no work.
+    case closedRecordSearchScan
+
     /// Records `count` of this instrument's operation against whatever measurements are in scope,
     /// and nothing when there are none.
     @inline(__always)
