@@ -1123,7 +1123,7 @@ wave.
 - [x] **[IPC-3](#ipc-3)** (3x5, small) Give the todo state change one catalog case so three unreachable `preconditionFailure` arms disappear -- `177c07ef`
 - [x] **[MODEL-3](#model-3)** (3x5, small) Collapse ContainerShape to layout plus zoomedLeaf; derive the structural fingerprint -- `63e0c675`
 - [ ] **[PERSIST-4](#persist-4)** (3x5, small) Confine the IPC connection's descriptor to its write queue so a queued write cannot land on a reused fd
-- [ ] **[MODEL-1](#model-1)** (3x5, medium) Replace PendingConfirmation's subject-plus-optional-payloads with one per-subject enum
+- [x] **[MODEL-1](#model-1)** (3x5, medium) Replace PendingConfirmation's subject-plus-optional-payloads with one per-subject enum -- `ae7c437c`
 - [ ] **[PERSIST-2](#persist-2)** (3x5, medium) Give the recovery directory one owner: a RecoveryPaths value threaded from launch
 - [x] **[PERSIST-6](#persist-6)** (3x5, medium) Publish the pane-tape record shape once in DanTermProtocol instead of writing keys on both sides -- `9967905a..b0ef4e7a`
 - [x] **[RUNTIME-2](#runtime-2)** (3x5, medium) Give the theme browser a model slot so `reconcileThemeBrowser` owns its existence **[decide first](#decisions-to-make-first)**
