@@ -35,7 +35,6 @@ struct SidebarGroupCollapseState {
 
 /// Gives the AppKit bridge the exact outline work accepted by the backing store.
 enum SidebarOutlineMutation {
-    case none
     case reloadAll(groupCollapseStates: [SidebarGroupCollapseState])
     case insert(
         item: SidebarItem,
@@ -59,7 +58,9 @@ struct SidebarItemStore {
     /// Test convenience: apply a whole ordered row-op script to the store.
     mutating func apply(_ ops: [SidebarRowOp], projection: SidebarProjection) {
         for op in ops {
-            _ = apply(op, projection: projection)
+            if case .reloadAll = apply(op, projection: projection) {
+                break
+            }
         }
     }
 
@@ -71,18 +72,13 @@ struct SidebarItemStore {
     ) -> SidebarOutlineMutation {
         switch op {
         case .reloadAll:
-            rebuildAllRows(projection: projection)
-            let collapseStates = rootItems.compactMap { item -> SidebarGroupCollapseState? in
-                guard case .group(let group) = item.kind else { return nil }
-                return SidebarGroupCollapseState(item: item, collapsed: group.isCollapsed)
-            }
-            return .reloadAll(groupCollapseStates: collapseStates)
+            return rebuildMutation(projection: projection)
 
         case .insertGroup(let id, let index):
             guard !projection.isSingleGroupMode,
                   let group = projection.group(id),
                   rootItems.indices.contains(index) || index == rootItems.count
-            else { return .none }
+            else { return rebuildMutation(projection: projection) }
 
             let item = groupItemCache[id] ?? SidebarItem(id: id.rawValue, kind: .group(group))
             item.kind = .group(group)
@@ -101,7 +97,7 @@ struct SidebarItemStore {
             guard !projection.isSingleGroupMode,
                   rootItems.indices.contains(index),
                   case .group(let group) = rootItems[index].kind
-            else { return .none }
+            else { return rebuildMutation(projection: projection) }
 
             let item = rootItems[index]
             for child in childItems[group.id] ?? [] {
@@ -116,7 +112,7 @@ struct SidebarItemStore {
 
         case .reloadGroup(let id):
             guard let item = updateGroupItem(groupId: id, projection: projection) else {
-                return .none
+                return rebuildMutation(projection: projection)
             }
             return .repaint(item: item)
 
@@ -125,15 +121,17 @@ struct SidebarItemStore {
                   let group = projection.group(id),
                   group.isCollapsed == collapsed,
                   let item = updateGroupItem(groupId: id, projection: projection)
-            else { return .none }
+            else { return rebuildMutation(projection: projection) }
             return .setGroupCollapsed(item: item, collapsed: collapsed)
 
         case .insertTab(let id, let groupId, let index):
-            guard let tab = projection.tab(id) else { return .none }
+            guard let tab = projection.tab(id) else {
+                return rebuildMutation(projection: projection)
+            }
 
             if projection.isSingleGroupMode {
                 guard rootItems.indices.contains(index) || index == rootItems.count else {
-                    return .none
+                    return rebuildMutation(projection: projection)
                 }
                 let item = makeFreshTabItem(for: tab)
                 rootItems.insert(item, at: index)
@@ -146,7 +144,7 @@ struct SidebarItemStore {
                 guard let parent = groupItemCache[groupId],
                       var children = childItems[groupId],
                       children.indices.contains(index) || index == children.count
-                else { return .none }
+                else { return rebuildMutation(projection: projection) }
                 let item = makeFreshTabItem(for: tab)
                 children.insert(item, at: index)
                 childItems[groupId] = children
@@ -161,7 +159,7 @@ struct SidebarItemStore {
             if projection.isSingleGroupMode {
                 guard rootItems.indices.contains(index),
                       case .tab = rootItems[index].kind
-                else { return .none }
+                else { return rebuildMutation(projection: projection) }
                 let item = rootItems.remove(at: index)
                 removeCachedTabItemIfCurrent(item)
                 return .remove(item: item, at: index, inParent: nil)
@@ -170,7 +168,7 @@ struct SidebarItemStore {
                       var children = childItems[groupId],
                       children.indices.contains(index),
                       case .tab = children[index].kind
-                else { return .none }
+                else { return rebuildMutation(projection: projection) }
                 let item = children.remove(at: index)
                 childItems[groupId] = children
                 removeCachedTabItemIfCurrent(item)
@@ -179,7 +177,7 @@ struct SidebarItemStore {
 
         case .reloadTab(let id):
             guard let item = updateTabItem(tabId: id, projection: projection) else {
-                return .none
+                return rebuildMutation(projection: projection)
             }
             return .repaint(item: item)
         }
@@ -279,5 +277,16 @@ struct SidebarItemStore {
         childItems = newChildItems
         tabItemCache = tabItemCache.filter { liveTabIds.contains($0.key) }
         groupItemCache = groupItemCache.filter { displayedGroupIds.contains($0.key) }
+    }
+
+    private mutating func rebuildMutation(
+        projection: SidebarProjection
+    ) -> SidebarOutlineMutation {
+        rebuildAllRows(projection: projection)
+        let collapseStates = rootItems.compactMap { item -> SidebarGroupCollapseState? in
+            guard case .group(let group) = item.kind else { return nil }
+            return SidebarGroupCollapseState(item: item, collapsed: group.isCollapsed)
+        }
+        return .reloadAll(groupCollapseStates: collapseStates)
     }
 }

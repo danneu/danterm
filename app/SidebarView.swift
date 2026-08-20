@@ -399,11 +399,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let priorSelectedTabIds = Set(selectedTabIds())
 
         for op in ops {
-            applyRowOp(
+            let shouldContinue = applyRowOp(
                 op,
                 projection: projection,
                 unappliedTabIds: &unappliedTabIds,
                 unappliedGroupIds: &unappliedGroupIds)
+            if !shouldContinue { break }
         }
 
         // Reapply selection (NSOutlineView-owned) through the existing pure rule, then
@@ -443,19 +444,20 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         return (unappliedTabIds, unappliedGroupIds)
     }
 
-    /// Apply one ordered op by obeying the outline mutation accepted by the store.
+    /// Apply one ordered op and return whether the current script remains valid.
     private func applyRowOp(
         _ op: SidebarRowOp,
         projection: SidebarProjection,
         unappliedTabIds: inout Set<TabId>,
         unappliedGroupIds: inout Set<GroupId>
-    ) {
+    ) -> Bool {
         switch store.apply(op, projection: projection) {
-        case .none:
-            return
-
         case .reloadAll(let collapseStates):
+            if let target = activeRenameTarget {
+                endActiveRename(target)
+            }
             rebuildAllRows(groupCollapseStates: collapseStates)
+            return false
 
         case .insert(_, let index, let parent, let collapseState):
             outlineView.insertItems(
@@ -469,12 +471,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                     outlineView.expandItem(collapseState.item)
                 }
             }
+            return true
 
         case .remove(_, let index, let parent):
             outlineView.removeItems(
                 at: IndexSet(integer: index),
                 inParent: parent,
                 withAnimation: [])
+            return true
 
         case .setGroupCollapsed(let item, let collapsed):
             if collapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
@@ -482,6 +486,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                updateGroupRow(item) {
                 unappliedGroupIds.insert(group.id)
             }
+            return true
 
         case .repaint(let item):
             switch item.kind {
@@ -490,6 +495,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             case .group(let group):
                 if updateGroupRow(item) { unappliedGroupIds.insert(group.id) }
             }
+            return true
         }
     }
 

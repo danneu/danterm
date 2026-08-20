@@ -136,6 +136,16 @@ func sidebarTabRow(
     throw UITestFailure(message: "missing row for tab \(tabId) (\(file):\(line))")
 }
 
+/// Returns the visible tab ids in outline row order.
+func sidebarTabIds(in outline: NSOutlineView) -> [TabId] {
+    (0..<outline.numberOfRows).compactMap { row in
+        guard let item = outline.item(atRow: row) as? SidebarItem,
+              case .tab(let tab) = item.kind
+        else { return nil }
+        return tab.id
+    }
+}
+
 /// Builds the common unread bell fixture for sidebar projection tests.
 func sidebarBellAlert(paneId: PaneId) -> AlertModel {
     AlertModel(

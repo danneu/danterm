@@ -147,20 +147,22 @@ import Testing
         _ = try requireRemove(removeRootTab, at: 0, parent: nil)
     }
 
-    @Test("rejected row ops return none without changing the store")
-    func rejectedRowOpsReturnNoneWithoutChangingStore() {
+    @Test("unappliable row ops rebuild the store from the handed projection")
+    func unappliableRowOpsRebuildStoreFromProjection() throws {
         let groupA = GroupId()
         let groupB = GroupId()
         let tabA = TabId()
         let tabB = TabId()
-        let model = sidebarStoreModel([
+        let oldModel = sidebarStoreModel([
             (groupA, "A", [tabA]),
             (groupB, "B", [tabB]),
         ], selected: tabA)
-        var store = seedSidebarStore(model)
-        let before = sidebarStoreSnapshot(store)
-
-        let projection = desiredSidebar(in: model)
+        let replacement = TabId()
+        let newModel = sidebarStoreModel([
+            (groupA, "Renamed", [tabA, replacement]),
+            (groupB, "B", [tabB]),
+        ], selected: replacement)
+        let projection = desiredSidebar(in: newModel)
 
         let rejectedOps: [SidebarRowOp] = [
             .insertGroup(id: GroupId(), index: 0),
@@ -177,23 +179,27 @@ import Testing
             .reloadTab(id: TabId()),
         ]
         for op in rejectedOps {
-            #expect(isNoOutlineMutation(store.apply(op, projection: projection)))
-            #expect(sidebarStoreSnapshot(store) == before)
+            var store = seedSidebarStore(oldModel)
+            _ = try requireReloadAll(store.apply(op, projection: projection))
+            try assertSidebarStoreMatchesProjection(store, projection: projection)
         }
 
-        let singleModel = sidebarStoreModel([
+        let singleOldModel = sidebarStoreModel([
             (groupA, "A", [tabA]),
         ], selected: tabA)
-        let singleProjection = desiredSidebar(in: singleModel)
-        var singleStore = seedSidebarStore(singleModel)
-        let singleBefore = sidebarStoreSnapshot(singleStore)
+        let singleReplacement = TabId()
+        let singleNewModel = sidebarStoreModel([
+            (groupA, "Renamed", [singleReplacement]),
+        ], selected: singleReplacement)
+        let singleProjection = desiredSidebar(in: singleNewModel)
         let wrongModeOps: [SidebarRowOp] = [
             .insertGroup(id: groupA, index: 0),
             .removeGroup(index: 0),
         ]
         for op in wrongModeOps {
-            #expect(isNoOutlineMutation(singleStore.apply(op, projection: singleProjection)))
-            #expect(sidebarStoreSnapshot(singleStore) == singleBefore)
+            var singleStore = seedSidebarStore(singleOldModel)
+            _ = try requireReloadAll(singleStore.apply(op, projection: singleProjection))
+            try assertSidebarStoreMatchesProjection(singleStore, projection: singleProjection)
         }
     }
 
@@ -457,9 +463,14 @@ private struct SidebarStoreSnapshot: Equatable {
     var groupItemCache: [GroupId: ObjectIdentifier]
 }
 
-private func isNoOutlineMutation(_ mutation: SidebarOutlineMutation) -> Bool {
-    if case .none = mutation { return true }
-    return false
+private func requireReloadAll(
+    _ mutation: SidebarOutlineMutation
+) throws -> [SidebarGroupCollapseState] {
+    guard case .reloadAll(let collapseStates) = mutation else {
+        Issue.record("expected a full outline reload")
+        throw SidebarStoreTestError.unexpectedMutation
+    }
+    return collapseStates
 }
 
 private func requireRepaint(_ mutation: SidebarOutlineMutation) throws -> SidebarItem {
@@ -509,6 +520,52 @@ private func sidebarStoreSnapshot(_ store: SidebarItemStore) -> SidebarStoreSnap
         tabItemCache: store.tabItemCache.mapValues(ObjectIdentifier.init),
         groupItemCache: store.groupItemCache.mapValues(ObjectIdentifier.init)
     )
+}
+
+/// Verifies that every mounted row and cache entry represents the handed projection.
+private func assertSidebarStoreMatchesProjection(
+    _ store: SidebarItemStore,
+    projection: SidebarProjection
+) throws {
+    let expectedTabs = Set(projection.groups.flatMap(\.tabs).map(\.id))
+    #expect(Set(store.tabItemCache.keys) == expectedTabs)
+
+    if projection.isSingleGroupMode {
+        #expect(store.groupItemCache.isEmpty)
+        #expect(store.childItems.isEmpty)
+        let tabs = projection.groups.first?.tabs ?? []
+        #expect(store.rootItems.count == tabs.count)
+        for (item, tab) in zip(store.rootItems, tabs) {
+            guard case .tab(let mounted) = item.kind else {
+                Issue.record("single-group root should be a tab")
+                throw SidebarStoreTestError.unexpectedMutation
+            }
+            #expect(mounted == tab)
+            #expect(store.tabItemCache[tab.id] === item)
+        }
+        return
+    }
+
+    #expect(Set(store.groupItemCache.keys) == Set(projection.groups.map(\.id)))
+    #expect(store.rootItems.count == projection.groups.count)
+    for (item, group) in zip(store.rootItems, projection.groups) {
+        guard case .group(let mounted) = item.kind else {
+            Issue.record("multi-group root should be a group")
+            throw SidebarStoreTestError.unexpectedMutation
+        }
+        #expect(mounted == group)
+        #expect(store.groupItemCache[group.id] === item)
+        let children = store.childItems[group.id] ?? []
+        #expect(children.count == group.tabs.count)
+        for (child, tab) in zip(children, group.tabs) {
+            guard case .tab(let mountedTab) = child.kind else {
+                Issue.record("group child should be a tab")
+                throw SidebarStoreTestError.unexpectedMutation
+            }
+            #expect(mountedTab == tab)
+            #expect(store.tabItemCache[tab.id] === child)
+        }
+    }
 }
 
 private func seedSidebarStore(_ model: AppModel) -> SidebarItemStore {

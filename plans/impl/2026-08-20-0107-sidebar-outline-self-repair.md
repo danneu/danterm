@@ -155,7 +155,7 @@ so advancing the cache to `new` is exactly right.
 - [x] 1. `computeSidebarRowOps` emits no group-row ops in single-group mode;
   a lone-group identity change rebuilds wholesale (D1, I1; tests PO1, PO2
   written first and failing).
-- [ ] 2. Delete `SidebarOutlineMutation.none`; unappliable ops self-repair
+- [x] 2. Delete `SidebarOutlineMutation.none`; unappliable ops self-repair
   via full rebuild; the executor stops the script after a full reload and
   ends a live rename first (D2, I2-I4; tests PO3-PO5; rewrite the
   rejected-ops store test; drop the executor's `.none` arm).

@@ -11,6 +11,71 @@ import Cocoa
 func sidebarRenameRecycleTests() {
     print("SidebarRenameRecycle")
 
+    uiTest("a self-repairing row op stops the stale remainder of its script") {
+        // Intent: a full rebuild caused by an unappliable op supersedes every
+        //   later op in the same script.
+        // Why it exists: applying a stale insert after rebuilding from the live
+        //   projection can duplicate a row and strand the outline again.
+        // Scenario: an invalid remove rebuilds a one-group outline that already
+        //   contains the new tab; a stale insert for that tab follows it.
+        let (sidebar, outline, window, _) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let group = GroupId()
+        let first = TabId()
+        let inserted = TabId()
+        let oldModel = renameRecycleModel([
+            (group, "A", false, [(first, "first")]),
+        ], selected: first)
+        _ = applyRenameRecycleModel(oldModel, to: sidebar, outline: outline, old: nil)
+        let newModel = renameRecycleModel([
+            (group, "A", false, [(first, "first"), (inserted, "inserted")]),
+        ], selected: inserted)
+        let projection = desiredSidebar(in: newModel)
+
+        sidebar.applySidebarOps([
+            .removeTab(groupId: group, index: 99),
+            .insertTab(id: inserted, groupId: group, index: 1),
+        ], projection: projection, renameTargetToEnd: nil)
+        materializeSidebarRows(sidebar, outline: outline)
+
+        try uiExpect(sidebarTabIds(in: outline) == [first, inserted],
+            "the stale insert after a self-repair must not duplicate the new tab")
+    }
+
+    uiTest("a self-repairing row op ends a live inline rename") {
+        // Intent: a store-escalated full rebuild tears down an active field editor
+        //   before NSOutlineView reloads its rows.
+        // Why it exists: the rename guard cannot predict a refusal inside the store,
+        //   so only the executor can keep a rebuilt row from retaining a live editor.
+        // Scenario: an invalid remove arrives while the only tab is being renamed.
+        let (sidebar, outline, window, _) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let group = GroupId()
+        let edited = TabId()
+        var model = renameRecycleModel([
+            (group, "A", false, [(edited, "edited")]),
+        ], selected: edited)
+        let driver = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        beginRenameThroughModel(
+            .tab(edited), in: &model, driver: driver,
+            sidebar: sidebar, outline: outline)
+        let cell: SidebarTabCellView = try sidebarCell(for: .tab(edited), in: outline)
+        try uiExpect(cell.titleField.currentEditor() != nil,
+            "precondition: rename should attach a live field editor")
+
+        sidebar.applySidebarOps(
+            [.removeTab(groupId: group, index: 99)],
+            projection: desiredSidebar(in: model),
+            renameTargetToEnd: nil)
+
+        try uiExpect(sidebar.activeRenameTarget == nil,
+            "self-repair should release rename ownership")
+        try uiExpect(cell.titleField.currentEditor() == nil,
+            "self-repair should detach the live field editor")
+    }
+
     uiTest("a resized sidebar row immediately resizes its materialized cell") {
         // Intent: a hosted cell follows the row's complete bounds as soon as AppKit
         //   changes the row frame, without requiring a later layout pass.
