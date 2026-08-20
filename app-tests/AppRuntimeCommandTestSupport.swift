@@ -63,6 +63,26 @@ final class RecordingAppRuntimePorts {
     }
 }
 
+/// Holds one follow notice behind reference identity so fixture traversals never wrap closures.
+@MainActor
+private final class RecordedPaneTapeFollowNotice {
+    private let notifyAction: @Sendable () -> Void
+    private var isCancelled = false
+
+    init(notify: @escaping @Sendable () -> Void) {
+        notifyAction = notify
+    }
+
+    func notify() {
+        guard isCancelled == false else { return }
+        notifyAction()
+    }
+
+    func cancel() {
+        isCancelled = true
+    }
+}
+
 @MainActor
 final class RecordingTerminalSession: NSView, TerminalSession {
     var paneMenuProvider: (() -> NSMenu?)?
@@ -90,6 +110,10 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     /// Counts follow notices the runtime retired, which is how a stream ending shows up on
     /// the session side.
     var cancelledTapeNotices = 0
+    /// Continuations handed to follow fetches in order. The returned work closure captures
+    /// only the removed value because the runtime executes it off the main actor.
+    var tapeFollowContinuations: [PaneTapeContinuation<PaneTapeSessionEvent>] = []
+    private var tapeFollowNotices: [UUID: RecordedPaneTapeFollowNotice] = [:]
     var sentText: [String] = []
     var sentInputText: [String] = []
     var sentInputKeys: [(key: KeyName, modifiers: KeyMods)] = []
@@ -174,9 +198,30 @@ final class RecordingTerminalSession: NSView, TerminalSession {
         notify: @escaping @Sendable () -> Void
     ) -> PaneTapeFollowNoticeRegistration? {
         guard tapeOpening != nil else { return nil }
+        let notice = RecordedPaneTapeFollowNotice(notify: notify)
+        tapeFollowNotices[id] = notice
         return PaneTapeFollowNoticeRegistration(cancel: { [weak self] in
+            notice.cancel()
             self?.cancelledTapeNotices += 1
         })
+    }
+
+    func paneTapeFollowBatch(
+        subscriptionId: UUID,
+        from cursor: PaneTapeCursor,
+        policy: PaneTapeSyncPolicy,
+        replicaHistoryIsComplete: Bool
+    ) -> (@Sendable () -> PaneTapeContinuation<PaneTapeSessionEvent>)? {
+        guard tapeFollowContinuations.isEmpty == false else { return nil }
+        let continuation = tapeFollowContinuations.removeFirst()
+        return { continuation }
+    }
+
+    /// Fires every live recorder notice as the terminal owner would after an append.
+    func notifyPaneTapeFollowers() {
+        for notice in tapeFollowNotices.values {
+            notice.notify()
+        }
     }
     func scroll(toRow row: Int) {}
     func copySelection() {}
