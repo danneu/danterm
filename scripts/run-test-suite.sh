@@ -187,17 +187,30 @@ elif [[ "${1:-}" != "--worker" ]]; then
     # loudly, before the header prints, if the pinned set is empty or DanTermSupport has
     # picked up a pin.
     #
-    # These go in front of the light lint tail, but behind the declared long poles: the
-    # reorder below is what puts them there.
+    # Every one of these is a SwiftPM cross-compile, so the whole class carries the wide
+    # marker. Which package is cheap is not a property of the package: lib/TerminalCore
+    # took 5s with a warm .build-ios-gate and 116s cold at -j1, and any commit touching
+    # its sources turns the first into the second. Marking the class rather than a
+    # measured subset also keeps the marker out of the drift the discovery loop exists to
+    # avoid -- a written-down list of which packages are expensive would go stale exactly
+    # like a written-down list of which packages are pinned.
+    #
+    # These sort in front of the light lint tail but behind the poles declared above.
     ios_steps=()
     while IFS= read -r package; do
-        [[ -n "$package" ]] && ios_steps+=("./scripts/ios-portability-gate.sh --package $package")
+        [[ -n "$package" ]] \
+            && ios_steps+=("${WIDE_MARKER}./scripts/ios-portability-gate.sh --package $package")
     done < <(./scripts/ios-portability-gate.sh --list)
     (( ${#ios_steps[@]} > 0 )) || {
         echo "run-test-suite: the iOS portability gate reported no pinned packages." >&2
         exit 1
     }
-    STEPS=("${ios_steps[@]}" "${STEPS[@]}")
+    # Appended, not prepended. These sort into the wide group either way, but a stable
+    # partition keeps written order inside it, so prepending put the cheapest iOS steps
+    # (ChipArtwork and the two small libraries, 2-4s each) at the head of the run -- the
+    # one moment the token pool is empty and a wide ask can actually claim anything. The
+    # measured long poles above have to be the steps that reach that idle pool.
+    STEPS=("${STEPS[@]}" "${ios_steps[@]}")
 fi
 
 # Put the declared long poles at the head of the assembled list. A wide step's extra

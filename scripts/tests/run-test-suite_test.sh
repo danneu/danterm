@@ -81,10 +81,19 @@ if grep -qE '^\./scripts/ios-portability-gate\.sh$' "$TEST_ROOT/step-list"; then
     fail "the gate still runs the iOS sweep as one looping step"
 fi
 expected_ios="$("$REPO_ROOT/scripts/ios-portability-gate.sh" --list | wc -l | tr -d ' ')"
-actual_ios="$(grep -cE '^\./scripts/ios-portability-gate\.sh --package ' "$TEST_ROOT/step-list" || true)"
+actual_ios="$(grep -cE '(^|^wide: )\./scripts/ios-portability-gate\.sh --package ' "$TEST_ROOT/step-list" || true)"
 (( expected_ios > 0 )) || fail "the gate discovered no pinned packages to make steps from"
 [[ "$actual_ios" == "$expected_ios" ]] \
     || fail "gate has $actual_ios iOS steps for $expected_ios pinned packages"
+
+# Every iOS step is a SwiftPM cross-compile, so the whole class earns the wide marker.
+# Which of them is cheap is not a property of the package: lib/TerminalCore measured 5s
+# with a warm .build-ios-gate and 116s cold at -j1, and any commit touching its sources
+# turns the first into the second. Marking the class rather than a measured subset also
+# keeps this out of the drift the discovery loop exists to avoid.
+wide_ios="$(grep -cE '^wide: \./scripts/ios-portability-gate\.sh --package ' "$TEST_ROOT/step-list" || true)"
+[[ "$wide_ios" == "$expected_ios" ]] \
+    || fail "$wide_ios of $expected_ios iOS steps declare themselves wide, so the rest compile at -j1"
 
 # A long pole only widens where the pool is already idle, and the pool is only idle at
 # the start of a run. A step that declares itself wide but is dispatched behind a hundred
@@ -97,6 +106,15 @@ first_plain="$(grep -vn '^wide: ' "$TEST_ROOT/step-list" | head -1 | cut -d: -f1
 [[ "$first_plain" =~ ^[0-9]+$ ]] || fail "the gate is entirely wide steps; the list is not what it was"
 (( last_wide < first_plain )) \
     || fail "a one-token step is dispatched at line $first_plain, ahead of a wide step at line $last_wide"
+
+# Leading with the wide group is not enough on its own: the pool is empty for one moment
+# at the start of a run, and whichever wide steps reach it are the only ones whose ask
+# finds anything free. So the heaviest step has to be the one dispatched into it. The iOS
+# package steps are the trap here -- they are all wide, and splicing them in at the front
+# once put ChipArtwork's 3s cross-compile in the slot the cold-build lane needed.
+head_step="$(head -1 "$TEST_ROOT/step-list")"
+[[ "$head_step" == *'swift build --build-tests --scratch-path'* ]] \
+    || fail "the run leads with '$head_step', not the cold-build lane the list calls its longest step"
 
 # The pool nests: each worker can be a whole `swift build`, and SwiftPM defaults to one
 # compile job per core. Uncapped, N workers ask for N x ncpu compile jobs on an ncpu
