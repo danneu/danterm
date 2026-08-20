@@ -292,7 +292,7 @@ import Testing
     @Test("testBellThrottling")
     func testBellThrottling() {
         // Intent: the first bell records the injected now as the bell's
-        //   lastNotificationTime; a second bell at that same instant is
+        //   live throttle state; a second bell at that same instant is
         //   throttled and leaves the recorded time alone; a bell one throttle
         //   interval later is delivered and moves the time forward.
         // Why it exists: pins per-pane per-kind throttling so a runaway shell
@@ -309,7 +309,7 @@ import Testing
 
         update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)), env: env)
         #expect(
-            model.lastNotificationTime[firstTabPaneId]?[.bell] == testEpoch,
+            model.pane(firstTabPaneId)?.live.lastNotificationTime[.bell] == testEpoch,
             "the first bell should record the injected now for bell"
         )
 
@@ -319,7 +319,7 @@ import Testing
             return false
         }, "a second bell at the same instant should be throttled (no sendNotification)")
         #expect(
-            model.lastNotificationTime[firstTabPaneId]?[.bell] == testEpoch,
+            model.pane(firstTabPaneId)?.live.lastNotificationTime[.bell] == testEpoch,
             "a throttled bell should leave the recorded time alone"
         )
 
@@ -330,7 +330,7 @@ import Testing
             return false
         }, "a bell one throttle interval later should be delivered")
         #expect(
-            model.lastNotificationTime[firstTabPaneId]?[.bell]
+            model.pane(firstTabPaneId)?.live.lastNotificationTime[.bell]
                 == testEpoch.addingTimeInterval(notificationThrottleInterval),
             "a delivered bell should record the clock's new now"
         )
@@ -775,7 +775,7 @@ import Testing
 
         update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)), env: env)
         #expect(
-            model.lastNotificationTime[firstTabPaneId]?[.bell] == testEpoch,
+            model.pane(firstTabPaneId)?.live.lastNotificationTime[.bell] == testEpoch,
             "the bell should record the injected now for bell"
         )
 
@@ -789,7 +789,7 @@ import Testing
             return false
         }, "desktop notification should not be throttled by bell")
         #expect(
-            model.lastNotificationTime[firstTabPaneId]?[.desktopNotification] == testEpoch,
+            model.pane(firstTabPaneId)?.live.lastNotificationTime[.desktopNotification] == testEpoch,
             "the notification should record the injected now for its own kind"
         )
 
@@ -803,7 +803,7 @@ import Testing
             return false
         }, "a second desktop notification at the same instant should be throttled")
         #expect(
-            model.lastNotificationTime[firstTabPaneId]?[.desktopNotification] == testEpoch,
+            model.pane(firstTabPaneId)?.live.lastNotificationTime[.desktopNotification] == testEpoch,
             "a throttled notification should leave the recorded time alone"
         )
 
@@ -818,7 +818,7 @@ import Testing
             return false
         }, "a notification one throttle interval later should be delivered")
         #expect(
-            model.lastNotificationTime[firstTabPaneId]?[.desktopNotification]
+            model.pane(firstTabPaneId)?.live.lastNotificationTime[.desktopNotification]
                 == testEpoch.addingTimeInterval(notificationThrottleInterval),
             "a delivered notification should record the clock's new now"
         )

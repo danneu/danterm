@@ -174,7 +174,7 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
 
         update(&model, .searchStarted(paneId: searchPane, needle: "hit"))
         update(&model, .paneBecameFirstResponder(paneId: searchPane))
-        #expect(model.searchState[searchPane]?.focusOwner == .terminal)
+        #expect(model.pane(searchPane)?.live.search?.focusOwner == .terminal)
         #expect(lightProjection(model) == baseline, "search")
     }
 

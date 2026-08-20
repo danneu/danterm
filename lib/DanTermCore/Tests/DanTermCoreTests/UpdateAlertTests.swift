@@ -338,11 +338,10 @@ import Testing
         #expect(!model.alerts[0].isUnread, "alert on newly focused pane should be marked read")
     }
 
-    @Test("testClosePaneRemovesAlertsAndCleansUpThrottle")
-    func testClosePaneRemovesAlertsAndCleansUpThrottle() {
-        // Intent: closePane removes the pane's alerts, search state, and
-        //   throttle bookkeeping.
-        // Why it exists: pins the full per-pane side-table teardown.
+    @Test("testClosePaneRemovesAlertsAndLiveState")
+    func testClosePaneRemovesAlertsAndLiveState() throws {
+        // Intent: closePane removes the pane's alerts and destroys its live state.
+        // Why it exists: pins global alert pruning and tree-owned state teardown.
         // Scenario: spec-first closePane cleanup.
         var model = makeModel()
         createTab(&model)
@@ -354,18 +353,47 @@ import Testing
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
-        model.searchState[paneA] = SearchModel(needle: "test")
-        model.lastNotificationTime[paneA] = [.bell: Date()]
+        model.updatePane(paneA) {
+            $0.live.search = SearchModel(needle: "test")
+            $0.live.lastNotificationTime = [.bell: testEpoch]
+        }
 
         update(&model, .closePane(paneId: paneA))
         #expect(model.alerts.isEmpty, "closing pane should remove its alerts")
-        #expect(model.searchState[paneA] == nil, "closing pane should clean up search state")
-        #expect(model.lastNotificationTime[paneA] == nil, "closing pane should clean up throttle data")
+        #expect(desiredSearchOverlays(in: model)[paneA] == nil,
+            "closing pane should remove its search overlay")
+        #expect(model.pane(paneA) == nil, "closing pane should destroy its live state")
+
+        let survivingTab = try #require(selectedTab(in: model))
+        let survivingTabId = survivingTab.id
+        let survivingPaneId = survivingTab.paneTree.focusedPaneId
+        let freshSessionId = SessionId()
+        var insertedFreshPane = false
+        model.updateTab(survivingTabId) { tab in
+            insertedFreshPane = tab.paneTree.split(
+                paneId: survivingPaneId,
+                direction: .horizontal,
+                newPane: PaneModel(id: paneA, session: SessionModel(id: freshSessionId)),
+                newSplitId: SplitId(),
+                focusNewPane: true
+            )
+        }
+        #expect(insertedFreshPane, "the fixture should recreate the pane as a fresh leaf")
+        model.isAppActive = false
+        let freshBellCommands = update(
+            &model,
+            .sessionBell(sessionId: freshSessionId),
+            env: makeTestEnv(now: testEpoch, idSequence: [UUID()])
+        )
+        #expect(hasEffect(freshBellCommands) {
+            if case .sendNotification = $0 { return true }
+            return false
+        }, "the fresh pane's first bell should not inherit the destroyed pane's throttle")
     }
 
     @Test("testCloseTabRemovesAlertsForAllPanes")
     func testCloseTabRemovesAlertsForAllPanes() {
-        // Intent: closeTab removes side-table state for every pane in the tab.
+        // Intent: closeTab prunes alerts and destroys each pane's live state.
         // Why it exists: pins the full per-tab cleanup.
         // Scenario: spec-first closeTab cleanup.
         var model = makeModel()
@@ -386,17 +414,21 @@ import Testing
             id: AlertId(), kind: .bell, paneId: paneB,
             title: "DanTerm", body: "b", createdAt: Date(), isUnread: true
         ), at: 0)
-        model.searchState[paneA] = SearchModel(needle: "a")
-        model.searchState[paneB] = SearchModel(needle: "b")
-        model.lastNotificationTime[paneA] = [.bell: Date()]
-        model.lastNotificationTime[paneB] = [.bell: Date()]
+        model.updatePane(paneA) {
+            $0.live.search = SearchModel(needle: "a")
+            $0.live.lastNotificationTime = [.bell: Date()]
+        }
+        model.updatePane(paneB) {
+            $0.live.search = SearchModel(needle: "b")
+            $0.live.lastNotificationTime = [.bell: Date()]
+        }
 
         update(&model, .closeTab(id: tabId))
         #expect(model.alerts.isEmpty, "closing tab should remove alerts for all its panes")
-        #expect(model.searchState[paneA] == nil, "closing tab should clean up paneA search state")
-        #expect(model.searchState[paneB] == nil, "closing tab should clean up paneB search state")
-        #expect(model.lastNotificationTime[paneA] == nil, "closing tab should clean up paneA throttle data")
-        #expect(model.lastNotificationTime[paneB] == nil, "closing tab should clean up paneB throttle data")
+        #expect(desiredSearchOverlays(in: model)[paneA] == nil)
+        #expect(desiredSearchOverlays(in: model)[paneB] == nil)
+        #expect(model.pane(paneA) == nil)
+        #expect(model.pane(paneB) == nil)
     }
 
     @Test("testSessionCreationFailedRemovesAlerts")
@@ -415,14 +447,17 @@ import Testing
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
-        model.searchState[paneA] = SearchModel(needle: "test")
-        model.lastNotificationTime[paneA] = [.bell: Date()]
+        model.updatePane(paneA) {
+            $0.live.search = SearchModel(needle: "test")
+            $0.live.lastNotificationTime = [.bell: Date()]
+        }
 
         let sessionId = model.pane(paneA)!.session!.id
         update(&model, .sessionCreationFailed(sessionId: sessionId))
         #expect(model.alerts.isEmpty, "sessionCreationFailed should remove pane's alerts")
-        #expect(model.searchState[paneA] == nil, "sessionCreationFailed should clean up search state")
-        #expect(model.lastNotificationTime[paneA] == nil, "sessionCreationFailed should clean up throttle data")
+        #expect(desiredSearchOverlays(in: model)[paneA] == nil)
+        #expect(model.pane(paneA) == nil,
+            "sessionCreationFailed should destroy the pane's live state")
     }
 
     @Test("testThrottleIsPerPanePerKind")

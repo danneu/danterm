@@ -519,7 +519,7 @@ func update(
         if paneId != tab.paneTree.focusedPaneId {
             updateSelectedTab(&model) { $0.paneTree.focus(paneId) }
         }
-        model.searchState[paneId]?.focusOwner = .terminal
+        model.updatePane(paneId) { $0.live.search?.focusOwner = .terminal }
 
         return []
 
@@ -533,11 +533,11 @@ func update(
         // the selected tab must not move this tab's focus or read its alerts.
         guard let tab = selectedTab(in: model),
               allPaneIds(tab.paneTree.root).contains(paneId),
-              model.searchState[paneId] != nil else { return [] }
+              model.pane(paneId)?.live.search != nil else { return [] }
         if paneId != tab.paneTree.focusedPaneId {
             updateSelectedTab(&model) { $0.paneTree.focus(paneId) }
         }
-        model.searchState[paneId]?.focusOwner = .field
+        model.updatePane(paneId) { $0.live.search?.focusOwner = .field }
 
         return []
 
@@ -765,8 +765,8 @@ func update(
                         message: "pane process failed to start"
                     ))
                     // Session teardown is reconcileSessionExistence's (these panes leave the
-                    // tree below); keep side-table cleanup via clearPaneSideTables.
-                    clearPaneSideTables(pid, in: &model)
+                    // tree below); the global alert feed still needs explicit pruning.
+                    removeAlertsForPane(pid, in: &model)
                 }
 
                 model.groups[gi].tabs.remove(at: ti)
@@ -778,9 +778,9 @@ func update(
                 return commands
             }
         }
-        // A pane in no tree cannot exist now, so this fallback is just defensive
-        // side-table cleanup -- no tree/pane removal needed.
-        clearPaneSideTables(paneId, in: &model)
+        // A pane in no tree cannot exist now, so this fallback only prunes the
+        // global alert feed; no tree/pane removal is needed.
+        removeAlertsForPane(paneId, in: &model)
         return []
 
     // MARK: - Lifecycle
@@ -1115,24 +1115,29 @@ func update(
         return [.sendStartSearch(paneId: tab.paneTree.focusedPaneId)]
 
     case .searchStarted(let paneId, let needle):
-        if model.searchState[paneId] == nil {
-            model.searchState[paneId] = SearchModel()
-        }
-        model.searchState[paneId]?.focusOwner = .field
-        if !needle.isEmpty {
-            model.searchState[paneId]?.needle = needle
+        guard model.pane(paneId) != nil else { return [] }
+        model.updatePane(paneId) { pane in
+            if pane.live.search == nil {
+                pane.live.search = SearchModel()
+            }
+            pane.live.search?.focusOwner = .field
+            if !needle.isEmpty {
+                pane.live.search?.needle = needle
+            }
         }
         return []
 
     case .searchNeedleChanged(let paneId, let needle):
-        guard model.searchState[paneId] != nil else { return [] }
-        model.searchState[paneId]?.needle = needle
-        model.searchState[paneId]?.status = nil
-        // The overlay re-renders from the searchState change via reconcilePaneChrome.
+        guard model.pane(paneId)?.live.search != nil else { return [] }
+        model.updatePane(paneId) {
+            $0.live.search?.needle = needle
+            $0.live.search?.status = nil
+        }
+        // The overlay re-renders from the live-search change via reconcilePaneChrome.
         return [.sendSearchNeedle(paneId: paneId, needle: needle)]
 
     case .searchNavigate(let paneId, let direction):
-        guard model.searchState[paneId] != nil else { return [] }
+        guard model.pane(paneId)?.live.search != nil else { return [] }
         return [.sendSearchNavigate(paneId: paneId, direction: direction)]
 
     case .navigateFocusedSearch(let direction):
@@ -1142,18 +1147,20 @@ func update(
         return update(&model, .searchNavigate(paneId: tab.paneTree.focusedPaneId, direction: direction), env: env)
 
     case .endSearch(let paneId):
-        guard model.searchState[paneId] != nil else { return [] }
-        model.searchState.removeValue(forKey: paneId)
-        // Clearing searchState drops the pane's key from the overlay projection, so
+        guard model.pane(paneId)?.live.search != nil else { return [] }
+        model.updatePane(paneId) { $0.live.search = nil }
+        // Clearing live search drops the pane's key from the overlay projection, so
         // reconcilePaneChrome's `remove` tears the overlay down (no .hideSearchOverlay).
         return [.sendEndSearch(paneId: paneId)]
 
     case .searchTotalReported(let paneId, let total):
-        guard model.searchState[paneId] != nil else { return [] }
+        guard model.pane(paneId)?.live.search != nil else { return [] }
         // Backends report the total first and the selection that goes with it second,
         // so a fresh total supersedes any standing selection rather than keeping an
         // index the new count may no longer contain.
-        model.searchState[paneId]?.status = total.map { .counted(total: $0) }
+        model.updatePane(paneId) {
+            $0.live.search?.status = total.map { .counted(total: $0) }
+        }
         // reconcilePaneChrome re-renders the overlay's match count from this change.
         return []
 
@@ -1161,10 +1168,12 @@ func update(
         // A selection is only meaningful against a standing total; one arriving
         // before any total is dropped, which is what keeps the impossible
         // "selected without total" pair out of the model.
-        guard let status = model.searchState[paneId]?.status else { return [] }
-        model.searchState[paneId]?.status = selected.map {
-            .matched(selected: $0, total: status.total)
-        } ?? .counted(total: status.total)
+        guard let status = model.pane(paneId)?.live.search?.status else { return [] }
+        model.updatePane(paneId) {
+            $0.live.search?.status = selected.map {
+                .matched(selected: $0, total: status.total)
+            } ?? .counted(total: status.total)
+        }
         // reconcilePaneChrome re-renders the overlay's match count from this change.
         return []
 
@@ -1539,7 +1548,7 @@ private func deleteGroupBody(
                     in: &model,
                     message: "pane closed before its process started"
                 ))
-                clearPaneSideTables(paneId, in: &model)
+                removeAlertsForPane(paneId, in: &model)
             }
         }
         model.groups.remove(at: idx)
@@ -1652,7 +1661,7 @@ private func closePaneBody(
         in: &model,
         message: "pane closed before its process started"
     )
-    clearPaneSideTables(paneId, in: &model)
+    removeAlertsForPane(paneId, in: &model)
     if model.todoPopover == .pane(paneId) {
         model.todoPopover = nil
     }
@@ -1904,8 +1913,8 @@ private func closeTabRemoval(_ model: inout AppModel, id: TabId) -> [Command] {
             message: "pane closed before its process started"
         ))
         // Session teardown is reconcileSessionExistence's (these panes leave the tree
-        // below); keep side-table cleanup + per-pane popover dismiss here.
-        clearPaneSideTables(pid, in: &model)
+        // below); keep global alert cleanup + per-pane popover dismiss here.
+        removeAlertsForPane(pid, in: &model)
         if model.todoPopover == .pane(pid) {
             model.todoPopover = nil
         }
@@ -1998,7 +2007,8 @@ private func throttledNotification(
     title: DisplayLine, subtitle: DisplayLine?, body: String, model: inout AppModel, now: Date
 ) -> [Command] {
     let shouldNotify: Bool
-    if let last = model.lastNotificationTime[paneId]?[kind] {
+    guard let pane = model.pane(paneId) else { return [] }
+    if let last = pane.live.lastNotificationTime[kind] {
         shouldNotify = now.timeIntervalSince(last) >= notificationThrottleInterval
     } else {
         shouldNotify = true
@@ -2006,7 +2016,7 @@ private func throttledNotification(
 
     guard shouldNotify else { return [] }
 
-    model.lastNotificationTime[paneId, default: [:]][kind] = now
+    model.updatePane(paneId) { $0.live.lastNotificationTime[kind] = now }
 
     return [.sendNotification(
         alertId: alertId, paneId: paneId, title: title, subtitle: subtitle, body: body

@@ -321,7 +321,7 @@ import Testing
     func alertClockSitesWriteTheInjectedNow() throws {
         // Intent: the two env.now() reads in the core -- the sessionBell arm and
         //   desktopAlertCommands -- write the injected instant into the alert's
-        //   createdAt and into lastNotificationTime[pane][kind].
+        //   createdAt and into the pane's live throttle state.
         // Why it exists: no other test in the suite asserts a createdAt against an
         //   injected clock, and the retired golden reached only the bell site.
         // Scenario: spec-first. One replay under a frozen clock raises a bell alert
@@ -335,7 +335,7 @@ import Testing
                 model.alerts.first { $0.kind == kind }, "the replay must raise a \(kind) alert")
             #expect(alert.createdAt == Self.replayNow, "\(kind) createdAt from the injected clock")
             #expect(
-                model.lastNotificationTime[alert.paneId]?[kind] == Self.replayNow,
+                model.pane(alert.paneId)?.live.lastNotificationTime[kind] == Self.replayNow,
                 "\(kind) lastNotificationTime from the injected clock"
             )
         }

@@ -185,6 +185,13 @@ struct SessionModel: Equatable {
     }
 }
 
+/// Groups state that exists only while its owning pane leaf is alive and never
+/// participates in snapshots or light-checkpoint projections.
+struct PaneLiveState: Equatable {
+    var search: SearchModel? = nil
+    var lastNotificationTime: [AlertKind: Date] = [:]
+}
+
 struct PaneModel: Equatable {
     let id: PaneId
     var session: SessionModel? = nil
@@ -200,6 +207,7 @@ struct PaneModel: Equatable {
     /// clear -- no layout event writes it.
     var gridOverride: PaneGridOverride? = nil
     var todos: [TodoItem] = []
+    var live = PaneLiveState()
 
     /// The command this pane is running, if any. The single place that turns the
     /// session's command state into the optional every close-impact and
@@ -532,8 +540,6 @@ struct AppModel: Equatable {
     var selectedTabId: TabId?
     var isAppActive: Bool = true  // ephemeral -- excluded from snapshots; gates focused-pane notification suppression
     var alerts: [AlertModel] = []  // newest first, capped at 100
-    var lastNotificationTime: [PaneId: [AlertKind: Date]] = [:]
-    var searchState: [PaneId: SearchModel] = [:]  // ephemeral — excluded from snapshots
     var showAllAlerts: Bool = false  // ephemeral — excluded from snapshots
     var alertsPopoverOpen: Bool = false  // ephemeral -- projected alerts-popover existence
     var themeBrowserOpen: Bool = false  // ephemeral -- projected theme-browser existence
@@ -853,9 +859,9 @@ func validateAndBuild(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> App
 /// `makeTestEnv` with a fixed id sequence / home to make restore reproducible.
 func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> (model: AppModel, paneSnapshots: [PaneId: PaneSnapshot])? {
     // Panes, sessions, groups, tabs, and splits share one UUID namespace. A leaf pane id
-    // colliding with any other domain's id is rejected -- sessions / searchState /
-    // lastNotificationTime / updatePane are all id-keyed, so a dup would
-    // reintroduce exactly the drift this refactor removes.
+    // colliding with any other domain's id is rejected -- session lookup and
+    // updatePane are id-keyed, so a duplicate would reintroduce exactly the
+    // drift this refactor removes.
     var allIds = Set<UUID>()
     // Walk-wide leaf-id uniqueness: a pane id may appear on at most one leaf. This
     // is the lone surviving duplicate check (subsumes the old within-tab and

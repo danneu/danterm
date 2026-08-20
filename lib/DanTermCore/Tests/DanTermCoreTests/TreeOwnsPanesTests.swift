@@ -146,7 +146,7 @@ import Testing
     }
 
     @Test("movePaneToTab carries the pane's payload to the target leaf")
-    func movePaneToTabCarriesPayload() {
+    func movePaneToTabCarriesPayload() throws {
         // Intent: movePaneToTab physically carries the moved pane's
         //   distinctive payload into the target tab's tree; the source tree no
         //   longer holds it and the pane is not duplicated.
@@ -164,6 +164,8 @@ import Testing
         model.updatePane(movable) {
             $0.session?.title = "Movable"
             $0.todos = [TodoItem(id: UUID(), text: "carry me", isDone: false)]
+            $0.live.search = SearchModel(needle: "find me")
+            $0.live.lastNotificationTime[.bell] = testEpoch
         }
 
         createTab(&model)
@@ -175,6 +177,18 @@ import Testing
         #expect(model.pane(movable)?.session?.title == "Movable")
         #expect(model.pane(movable)?.todos.count == 1)
         #expect(model.pane(movable)?.todos.first?.text == "carry me")
+        #expect(desiredSearchOverlays(in: model)[movable]?.needle == "find me")
+        model.isAppActive = false
+        let movedSessionId = try #require(model.pane(movable)?.session?.id)
+        let bellCommands = update(
+            &model,
+            .sessionBell(sessionId: movedSessionId),
+            env: makeTestEnv(now: testEpoch, idSequence: [UUID()])
+        )
+        #expect(hasEffect(bellCommands) {
+            if case .sendNotification = $0 { return true }
+            return false
+        } == false, "the moved pane should keep its standing bell throttle")
         // Lands in the target tree, leaves the source tree, appears exactly once.
         #expect(allPaneIds(tabById(targetTabId, in: model)!.paneTree.root).contains(movable), "moved pane should be in target tab")
         #expect(!allPaneIds(tabById(sourceTabId, in: model)!.paneTree.root).contains(movable), "moved pane should leave source tab")
@@ -182,7 +196,7 @@ import Testing
     }
 
     @Test("swapLeaves swaps full payloads between positions")
-    func swapLeavesSwapsFullPayloads() {
+    func swapLeavesSwapsFullPayloads() throws {
         // Intent: swapLeaves swaps WHOLE PaneModel payloads -- each pane's
         //   full content lands at the other's tree position.
         // Why it exists: pins the swap's payload-completeness so a regression
@@ -192,16 +206,20 @@ import Testing
         //   Dracula, B with /b + Nord) swap and each ends up with the other's
         //   full payload at the other's tree slot.
         let a = PaneId(), b = PaneId()
-        let paneA = PaneModel(
+        var paneA = PaneModel(
             id: a,
             session: SessionModel(id: SessionId(), title: "A", cwd: "/a"),
             theme: "Dracula"
         )
-        let paneB = PaneModel(
+        paneA.live.search = SearchModel(needle: "alpha")
+        paneA.live.lastNotificationTime[.bell] = testEpoch
+        var paneB = PaneModel(
             id: b,
             session: SessionModel(id: SessionId(), title: "B", cwd: "/b"),
             theme: "Nord"
         )
+        paneB.live.search = SearchModel(needle: "beta")
+        paneB.live.lastNotificationTime[.bell] = testEpoch
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
             first: .leaf(paneA), second: .leaf(paneB), ratio: 0.5
@@ -218,10 +236,34 @@ import Testing
         // First position now holds B's full payload; second holds A's.
         expectNoDifference(first, paneB)
         expectNoDifference(second, paneA)
+
+        let tabId = TabId()
+        var model = AppModel(
+            groups: [GroupModel(
+                id: GroupId(), name: "General",
+                tabs: [TabModel(
+                    id: tabId,
+                    paneTree: PaneTree(root: result, focusedPaneId: a)
+                )]
+            )],
+            selectedTabId: tabId,
+            isAppActive: false
+        )
+        #expect(desiredSearchOverlays(in: model)[a]?.needle == "alpha")
+        let swappedSessionId = try #require(paneA.session?.id)
+        let bellCommands = update(
+            &model,
+            .sessionBell(sessionId: swappedSessionId),
+            env: makeTestEnv(now: testEpoch, idSequence: [UUID()])
+        )
+        #expect(hasEffect(bellCommands) {
+            if case .sendNotification = $0 { return true }
+            return false
+        } == false, "the swapped pane should keep its standing bell throttle")
     }
 
     @Test("movePane(.splitRight) threads the moved pane's payload through insertAtLeaf")
-    func movePaneSplitRightThreadsPayloadThroughInsertAtLeaf() {
+    func movePaneSplitRightThreadsPayloadThroughInsertAtLeaf() throws {
         // Intent: moving a pane via .splitRight preserves the moved pane's
         //   full payload (cwd, theme, todos) at its new split position.
         // Why it exists: locks down the moveLeaf -> insertAtLeaf path -- the
@@ -241,6 +283,8 @@ import Testing
             $0.session?.cwd = "/src"
             $0.theme = "Dracula"
             $0.todos = [TodoItem(id: UUID(), text: "stay attached", isDone: false)]
+            $0.live.search = SearchModel(needle: "source")
+            $0.live.lastNotificationTime[.bell] = testEpoch
         }
 
         update(&model, .movePane(source: source, target: target, intent: .splitRight))
@@ -250,6 +294,18 @@ import Testing
         #expect(model.pane(source)?.theme == "Dracula")
         #expect(model.pane(source)?.todos.count == 1)
         #expect(model.pane(source)?.todos.first?.text == "stay attached")
+        #expect(desiredSearchOverlays(in: model)[source]?.needle == "source")
+        model.isAppActive = false
+        let movedSessionId = try #require(model.pane(source)?.session?.id)
+        let bellCommands = update(
+            &model,
+            .sessionBell(sessionId: movedSessionId),
+            env: makeTestEnv(now: testEpoch, idSequence: [UUID()])
+        )
+        #expect(hasEffect(bellCommands) {
+            if case .sendNotification = $0 { return true }
+            return false
+        } == false, "the rearranged pane should keep its standing bell throttle")
         #expect(model.allPaneIds.filter { $0 == source }.count == 1, "moved pane must not be duplicated")
 
         // splitRight -> horizontal split with target on the left, source on the right.
@@ -265,7 +321,7 @@ import Testing
     func sessionCreationFailedInSplitRemovesTabAndCleansSiblings() {
         // Intent: sessionCreationFailed for a pane in a SPLIT tab removes the
         //   whole tab, drops every sibling pane from pane()/allPaneIds, and
-        //   prunes id-keyed side tables; reconcileSessionExistence's pure
+        //   destroys their leaf-owned live state; reconcileSessionExistence's pure
         //   teardown set selects exactly the sibling panes that vanished.
         // Why it exists: Stage 8 moved session teardown into the reconciler,
         //   so this asserts the structural model change PLUS the pure
@@ -282,11 +338,15 @@ import Testing
         let paneB = selectedTab(in: model)!.paneTree.focusedPaneId
         createTab(&model)  // a second tab so removing the failing one doesn't terminate
 
-        // Seed id-keyed side tables for both panes.
-        model.searchState[paneA] = SearchModel(needle: "x")
-        model.searchState[paneB] = SearchModel(needle: "y")
-        model.lastNotificationTime[paneA] = [.bell: Date()]
-        model.lastNotificationTime[paneB] = [.bell: Date()]
+        // Seed live state for both panes.
+        model.updatePane(paneA) {
+            $0.live.search = SearchModel(needle: "x")
+            $0.live.lastNotificationTime = [.bell: Date()]
+        }
+        model.updatePane(paneB) {
+            $0.live.search = SearchModel(needle: "y")
+            $0.live.lastNotificationTime = [.bell: Date()]
+        }
 
         // Sessions live before the failure = every pane currently in the model.
         let liveSessionIds = Set(model.allPaneIds)
@@ -302,11 +362,8 @@ import Testing
         #expect(!model.allPaneIds.contains(paneB))
         #expect(tabById(failingTabId, in: model) == nil, "failing tab should be removed")
 
-        // id-keyed side tables pruned for every sibling.
-        #expect(model.searchState[paneA] == nil, "searchState should be pruned for paneA")
-        #expect(model.searchState[paneB] == nil, "searchState should be pruned for paneB")
-        #expect(model.lastNotificationTime[paneA] == nil, "lastNotificationTime should be pruned for paneA")
-        #expect(model.lastNotificationTime[paneB] == nil, "lastNotificationTime should be pruned for paneB")
+        #expect(desiredSearchOverlays(in: model)[paneA] == nil)
+        #expect(desiredSearchOverlays(in: model)[paneB] == nil)
 
         // reconcileSessionExistence tears down exactly the two siblings (now absent from
         // allPaneIds); the surviving second-tab pane is never selected.
@@ -321,7 +378,7 @@ import Testing
         //   structurally impossible under tree-owns-panes, but still defended
         //   against) emits no commands and leaves structure-only state unchanged.
         // Why it exists: pins the safe-no-op guard for a stray async failure
-        //   callback after the pane and its side tables were already cleaned up.
+        //   callback after the pane and its live state were already destroyed.
         // Scenario: spec-first defensive-noop -- a session-failed Msg arrives
         //   for an unknown pane id; the model and commands are byte-equal to
         //   before.

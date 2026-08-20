@@ -854,7 +854,7 @@ import Testing
 
     @Test("desiredSearchOverlays: keyed only while search is active; drops the key on endSearch")
     func desiredSearchOverlaysKeyedWhileActiveDropsOnEnd() {
-        // Intent: the overlay dict keys a pane only while its searchState
+        // Intent: the overlay dict keys a pane only while its live search
         //   exists; endSearch drops the key.
         // Why it exists: pins the appearance/disappearance contract the
         //   reconciler uses to show/hide the overlay.
@@ -867,7 +867,9 @@ import Testing
             "no active search -> no key")
 
         update(&model, .searchStarted(paneId: paneId, needle: "foo"))
-        model.searchState[paneId]?.status = .matched(selected: 2, total: 7)
+        model.updatePane(paneId) {
+            $0.live.search?.status = .matched(selected: 2, total: 7)
+        }
         #expect(
             desiredSearchOverlays(in: model)[paneId] ==
             SearchOverlayRender(needle: "foo", status: .matched(selected: 2, total: 7)),

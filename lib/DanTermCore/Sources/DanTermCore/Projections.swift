@@ -251,7 +251,7 @@ enum PaneFocusTarget: Equatable {
 /// Project the selected tab's model-declared pane focus target.
 func desiredPaneFocus(in model: AppModel) -> PaneFocusTarget? {
   guard let paneId = selectedTab(in: model)?.paneTree.focusedPaneId else { return nil }
-  if model.searchState[paneId]?.focusOwner == .field {
+  if model.pane(paneId)?.live.search?.focusOwner == .field {
     return .searchField(paneId)
   }
   return .terminal(paneId)
@@ -418,7 +418,7 @@ func desiredPaneToolbar(
 
 /// Per-pane search-overlay render the reconciler diffs and pushes to a
 /// PaneWrapperView's search overlay -- the needle plus the match counts the overlay
-/// displays, all from `model.searchState`. Equatable so the diff skips unchanged
+/// displays, all from each pane's live search. Equatable so the diff skips unchanged
 /// overlays.
 struct SearchOverlayRender: Equatable {
   let needle: String
@@ -426,13 +426,14 @@ struct SearchOverlayRender: Equatable {
 }
 
 /// Search-overlay projection: one `SearchOverlayRender` per pane *with active search*
-/// (keyed iff `model.searchState[paneId] != nil`). The key disappears the instant
+/// (keyed iff `pane.live.search != nil`). The key disappears the instant
 /// search ends, so `reconcilePaneChrome` diffs this with a non-default `remove` that
 /// tears the overlay down (disappear-but-host-survives) while the pane's wrapper lives on.
 func desiredSearchOverlays(in model: AppModel) -> [PaneId: SearchOverlayRender] {
   var result: [PaneId: SearchOverlayRender] = [:]
-  for (paneId, search) in model.searchState {
-    result[paneId] = SearchOverlayRender(needle: search.needle, status: search.status)
+  for pane in model.allPanes {
+    guard let search = pane.live.search else { continue }
+    result[pane.id] = SearchOverlayRender(needle: search.needle, status: search.status)
   }
   return result
 }

@@ -1,9 +1,9 @@
 // Swift Testing migration of the legacy `tests/UpdateSearchTests.swift`
 // harness suite. Pins the search-domain Msg paths: startSearch /
-// searchStarted (focus-field + searchState creation), needle changes
+// searchStarted (focus-field + live-search creation), needle changes
 // (stale match-status reset), searchNavigate, endSearch teardown, the
 // searchTotalReported / searchSelectionReported handlers (model-only, no
-// commands), and cleanup of searchState across closePane / closeTab /
+// commands), and cleanup of live search across closePane / closeTab /
 // sessionCreationFailed / deleteGroup.
 import Foundation
 import Testing
@@ -14,7 +14,7 @@ import Testing
     @Test("startSearch emits sendStartSearch for focused pane")
     func startSearchEmitsSendStartSearchForFocusedPane() {
         // Intent: startSearch emits sendStartSearch addressed to the
-        //   focused pane and does NOT create searchState (that arrives via
+        //   focused pane and does NOT create live search (that arrives via
         //   the backend's searchStarted callback).
         // Why it exists: pins the two-step search activation (command
         //   first, model state on the callback).
@@ -27,7 +27,8 @@ import Testing
             if case .sendStartSearch(let pid) = $0 { return pid == tab.paneTree.focusedPaneId }
             return false
         }, "expected sendStartSearch")
-        #expect(model.searchState.isEmpty, "should not create search state")
+        #expect(model.pane(tab.paneTree.focusedPaneId)?.live.search == nil,
+            "should not create search state")
     }
 
     @Test("navigateFocusedSearch forwards to the focused pane's active search")
@@ -66,7 +67,7 @@ import Testing
 
     @Test("searchStarted creates field-owned SearchModel")
     func searchStartedCreatesFieldOwnedSearchModel() {
-        // Intent: searchStarted installs searchState with the field as owner.
+        // Intent: searchStarted installs live search with the field as owner.
         // Why it exists: pins the model-owned focus policy on activation.
         // Scenario: spec-first backend start.
         var model = makeModel()
@@ -74,22 +75,38 @@ import Testing
         let tab = selectedTab(in: model)!
         let paneId = tab.paneTree.focusedPaneId
         let commands = update(&model, .searchStarted(paneId: paneId, needle: ""))
-        #expect(model.searchState[paneId] != nil, "search state should exist")
-        #expect(model.searchState[paneId]?.needle == "")
-        #expect(model.searchState[paneId]?.focusOwner == .field)
+        #expect(model.pane(paneId)?.live.search != nil, "search state should exist")
+        #expect(model.pane(paneId)?.live.search?.needle == "")
+        #expect(model.pane(paneId)?.live.search?.focusOwner == .field)
+        #expect(commands.isEmpty)
+    }
+
+    @Test("searchStarted for a pane outside the tree creates no overlay")
+    func searchStartedForMissingPaneCreatesNoOverlay() {
+        // Intent: searchStarted ignores a pane id that no tree leaf owns.
+        // Why it exists: live search state belongs to PaneModel, so an orphan
+        //   search overlay must be unrepresentable.
+        // Scenario: MODEL-5 deliberately narrows the defensive callback path.
+        var model = makeModel()
+        createTab(&model)
+        let missingPaneId = PaneId()
+
+        let commands = update(&model, .searchStarted(paneId: missingPaneId, needle: "orphan"))
+
+        #expect(desiredSearchOverlays(in: model)[missingPaneId] == nil)
         #expect(commands.isEmpty)
     }
 
     @Test("searchStarted with needle sets needle in model")
     func searchStartedWithNeedleSetsNeedle() {
-        // Intent: searchStarted carries the needle into searchState.
+        // Intent: searchStarted carries the needle into live search.
         // Why it exists: pins the needle propagation on activation.
         // Scenario: spec-first needle-on-start.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "hello"))
-        #expect(model.searchState[paneId]?.needle == "hello")
+        #expect(model.pane(paneId)?.live.search?.needle == "hello")
     }
 
     @Test("searchStarted when already active updates needle and reclaims field ownership")
@@ -104,8 +121,8 @@ import Testing
         update(&model, .searchStarted(paneId: paneId, needle: "first"))
         update(&model, .paneBecameFirstResponder(paneId: paneId))
         let commands = update(&model, .searchStarted(paneId: paneId, needle: "second"))
-        #expect(model.searchState[paneId]?.needle == "second")
-        #expect(model.searchState[paneId]?.focusOwner == .field)
+        #expect(model.pane(paneId)?.live.search?.needle == "second")
+        #expect(model.pane(paneId)?.live.search?.focusOwner == .field)
         #expect(commands.isEmpty)
     }
 
@@ -135,7 +152,7 @@ import Testing
 
         #expect(selectedTab(in: model)?.paneTree.focusedPaneId == paneB,
             "the field click did not focus its own pane")
-        #expect(model.searchState[paneB]?.focusOwner == .field)
+        #expect(model.pane(paneB)?.live.search?.focusOwner == .field)
         #expect(model.alerts[0].isUnread == false,
             "focusing a pane through its search field did not clear that pane's alerts")
         #expect(desiredPaneFocus(in: model) == .searchField(paneB),
@@ -183,10 +200,10 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: ""))
-        model.searchState[paneId]?.status = .matched(selected: 2, total: 5)
+        model.updatePane(paneId) { $0.live.search?.status = .matched(selected: 2, total: 5) }
         let commands = update(&model, .searchNeedleChanged(paneId: paneId, needle: "new"))
-        #expect(model.searchState[paneId]?.needle == "new")
-        #expect(model.searchState[paneId]?.status == nil, "status should be cleared")
+        #expect(model.pane(paneId)?.live.search?.needle == "new")
+        #expect(model.pane(paneId)?.live.search?.status == nil, "status should be cleared")
         #expect(hasEffect(commands) {
             if case .sendSearchNeedle(let pid, let n) = $0 { return pid == paneId && n == "new" }
             return false
@@ -213,7 +230,7 @@ import Testing
 
     @Test("endSearch removes state and leaves terminal as desired focus")
     func endSearchRemovesStateAndDesiresTerminal() {
-        // Intent: endSearch clears searchState, emits sendEndSearch, and lets
+        // Intent: endSearch clears live search, emits sendEndSearch, and lets
         //   the focus projection return to the terminal.
         // Why it exists: pins the cleanup + focus return.
         // Scenario: spec-first end search.
@@ -222,7 +239,7 @@ import Testing
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "test"))
         let commands = update(&model, .endSearch(paneId: paneId))
-        #expect(model.searchState[paneId] == nil, "search state should be removed")
+        #expect(model.pane(paneId)?.live.search == nil, "search state should be removed")
         #expect(hasEffect(commands) {
             if case .sendEndSearch(let pid) = $0 { return pid == paneId }
             return false
@@ -232,7 +249,7 @@ import Testing
 
     @Test("endSearch on non-searching pane is no-op")
     func endSearchOnNonSearchingPaneIsNoOp() {
-        // Intent: endSearch on a pane with no searchState is a no-op.
+        // Intent: endSearch on a pane with no live search is a no-op.
         // Why it exists: pins the absent-state guard.
         // Scenario: spec-first no-op end.
         var model = makeModel()
@@ -257,16 +274,16 @@ import Testing
         update(&model, .searchStarted(paneId: paneId, needle: "x"))
 
         let commands = update(&model, .searchTotalReported(paneId: paneId, total: 42))
-        #expect(model.searchState[paneId]?.status == .counted(total: 42))
+        #expect(model.pane(paneId)?.live.search?.status == .counted(total: 42))
         #expect(commands.isEmpty, "searchTotalReported emits no command")
 
         update(&model, .searchSelectionReported(paneId: paneId, selected: 3))
         update(&model, .searchTotalReported(paneId: paneId, total: 2))
-        #expect(model.searchState[paneId]?.status == .counted(total: 2),
+        #expect(model.pane(paneId)?.live.search?.status == .counted(total: 2),
             "a fresh total drops the selection it invalidated")
 
         update(&model, .searchTotalReported(paneId: paneId, total: nil))
-        #expect(model.searchState[paneId]?.status == nil)
+        #expect(model.pane(paneId)?.live.search?.status == nil)
     }
 
     @Test("a reported selection pairs with the standing total, and is dropped without one")
@@ -283,22 +300,22 @@ import Testing
         update(&model, .searchStarted(paneId: paneId, needle: "x"))
 
         let orphan = update(&model, .searchSelectionReported(paneId: paneId, selected: 3))
-        #expect(model.searchState[paneId]?.status == nil, "no total yet -> nothing to select into")
+        #expect(model.pane(paneId)?.live.search?.status == nil, "no total yet -> nothing to select into")
         #expect(orphan.isEmpty)
 
         update(&model, .searchTotalReported(paneId: paneId, total: 42))
         let commands = update(&model, .searchSelectionReported(paneId: paneId, selected: 3))
-        #expect(model.searchState[paneId]?.status == .matched(selected: 3, total: 42))
+        #expect(model.pane(paneId)?.live.search?.status == .matched(selected: 3, total: 42))
         #expect(commands.isEmpty, "searchSelectionReported emits no command")
 
         update(&model, .searchSelectionReported(paneId: paneId, selected: nil))
-        #expect(model.searchState[paneId]?.status == .counted(total: 42),
+        #expect(model.pane(paneId)?.live.search?.status == .counted(total: 42),
             "clearing the selection keeps the count")
     }
 
     @Test("closePane cleans up search state")
     func closePaneCleansUpSearchState() {
-        // Intent: closePane drops the pane's searchState.
+        // Intent: closePane destroys the pane's live search.
         // Why it exists: pins the per-pane teardown.
         // Scenario: spec-first closePane cleanup.
         var model = makeModel()
@@ -306,14 +323,15 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "test"))
-        #expect(model.searchState[paneId] != nil, "search state should exist before close")
+        #expect(model.pane(paneId)?.live.search != nil, "search state should exist before close")
         update(&model, .closePane(paneId: paneId))
-        #expect(model.searchState[paneId] == nil, "search state should be cleaned up")
+        #expect(desiredSearchOverlays(in: model)[paneId] == nil,
+            "the closed pane should have no search overlay")
     }
 
     @Test("closeTab cleans up search state for all panes")
     func closeTabCleansUpSearchStateForAllPanes() {
-        // Intent: closeTab clears searchState for every pane in the
+        // Intent: closeTab destroys live search for every pane in the
         //   closed tab.
         // Why it exists: pins the per-tab teardown.
         // Scenario: spec-first closeTab cleanup.
@@ -324,27 +342,29 @@ import Testing
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "test"))
         update(&model, .closeTab(id: tabId))
-        #expect(model.searchState[paneId] == nil, "search state should be cleaned up on tab close")
+        #expect(desiredSearchOverlays(in: model)[paneId] == nil,
+            "the closed tab's pane should have no search overlay")
     }
 
     @Test("sessionCreationFailed cleans up search state")
     func sessionCreationFailedCleansUpSearchState() {
         // Intent: sessionCreationFailed clears the failed pane's
-        //   searchState.
+        //   live search.
         // Why it exists: pins the failure-path teardown.
         // Scenario: spec-first failure cleanup.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        model.searchState[paneId] = SearchModel(needle: "test")
+        model.updatePane(paneId) { $0.live.search = SearchModel(needle: "test") }
         let sessionId = model.pane(paneId)!.session!.id
         update(&model, .sessionCreationFailed(sessionId: sessionId))
-        #expect(model.searchState[paneId] == nil, "search state should be cleaned up on session failure")
+        #expect(desiredSearchOverlays(in: model)[paneId] == nil,
+            "the failed pane should have no search overlay")
     }
 
     @Test("deleteGroup cleans up search state")
     func deleteGroupCleansUpSearchState() {
-        // Intent: deleteGroup clears side-table state for every pane in
+        // Intent: deleteGroup destroys live state for every pane in
         //   the deleted group's tabs.
         // Why it exists: pins the full per-group teardown.
         // Scenario: spec-first deleteGroup cleanup.
@@ -359,11 +379,15 @@ import Testing
             id: AlertId(), kind: .bell, paneId: group2PaneId,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
-        model.searchState[group2PaneId] = SearchModel(needle: "test")
-        model.lastNotificationTime[group2PaneId] = [.bell: Date()]
+        model.updatePane(group2PaneId) {
+            $0.live.search = SearchModel(needle: "test")
+            $0.live.lastNotificationTime = [.bell: Date()]
+        }
         update(&model, .deleteGroup(id: group2Id, moveTabs: false))
         #expect(!model.alerts.contains { $0.paneId == group2PaneId }, "alerts should be cleaned up on group delete")
-        #expect(model.searchState[group2PaneId] == nil, "search state should be cleaned up on group delete")
-        #expect(model.lastNotificationTime[group2PaneId] == nil, "throttle data should be cleaned up on group delete")
+        #expect(desiredSearchOverlays(in: model)[group2PaneId] == nil,
+            "the deleted group's pane should have no search overlay")
+        #expect(model.pane(group2PaneId) == nil,
+            "the deleted pane should not retain throttle data outside the tree")
     }
 }
