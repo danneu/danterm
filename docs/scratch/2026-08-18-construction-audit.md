@@ -1139,7 +1139,7 @@ rewrites.
 - [ ] **[REDUCE-2](#reduce-2)** (3x5, small) Let .startSearch open the pane's search state directly instead of round-tripping through the view
 - [ ] **[REDUCE-5](#reduce-5)** (3x5, small) Raise every pane alert through one function instead of duplicating the ritual in .sessionBell
 - [x] **[ROW-4](#row-4)** (3x5, small) Write each printed cell once: clearCellAndPair's store at the target column is immediately overwritten -- `c36da989`
-- [ ] **[WIRE-6](#wire-6)** (3x5, small) Chunk and base64 the sync payload from slices, without copying the bytes three times first _(after [PERSIST-6](#persist-6))_
+- [x] **[WIRE-6](#wire-6)** (3x5, small) Chunk and base64 the sync payload from slices, without copying the bytes three times first _(after [PERSIST-6](#persist-6))_ -- `39b4c78a`
 - [ ] **[IPC-4](#ipc-4)** (3x5, medium) Return one traits value from a single exhaustive switch instead of six parallel per-method enumerations _(after [IPC-3](#ipc-3))_
 - [x] **[STORE-2](#store-2)** (3x5, medium) Delete PackedRetainedRow's dead body and move the cell-word constants to the store that uses them _(after [STORE-1](#store-1))_ -- `863a81f4`
 - [x] **[PTY-3](#pty-3)** (3x5, large) Record every applied transition on the flight tape and delete the five parallel capture buffers _(after [XPORT-1](#xport-1))_ -- `63deec97..32296d30`
@@ -1148,7 +1148,7 @@ rewrites.
 - [ ] **[FRAME-3](#frame-3)** (2x5, small) Give TerminalDamage the predicates its consumers ask for, so no hot caller materializes a folded copy or a row array _(after [INTERACT-3](#interact-3), [FRAME-1](#frame-1))_
 - [ ] **[PANE-3](#pane-3)** (2x5, small) Record which button a press forwarded, replacing the two ad-hoc pairing booleans
 - [x] **[XPORT-4](#xport-4)** (2x5, small) Accumulate coalesced update payloads instead of rebuilding the merged signal per hop _(after [XPORT-1](#xport-1))_ -- `5739eb80..aada7838`
-- [ ] **[PERSIST-5](#persist-5)** (2x5, medium) Move the pure pane-tape stream policy into DanTermCore and leave only the socket write in Support _(after [PERSIST-6](#persist-6))_
+- [x] **[PERSIST-5](#persist-5)** (2x5, medium) Move the pure pane-tape stream policy into DanTermCore and leave only the socket write in Support _(after [PERSIST-6](#persist-6))_ -- `09f16a4e`
 
 ### W3. Wave 3 -- second-order dependents
 

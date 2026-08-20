@@ -179,7 +179,7 @@ not tape policy.
 - [x] PERSIST-5: pane-tape policy and its tests into DanTermCore, the wire
   funnel into `app/`, connection pins rehosted, the root round-trip target
   retargeted onto DanTermCore (I3, I4, I5; PO1, PO3, PO4).
-- [ ] Mark PERSIST-5 and WIRE-6 done in
+- [x] Mark PERSIST-5 and WIRE-6 done in
   `docs/scratch/2026-08-18-construction-audit.md`: check both checklist
   entries and append the implementing commit hashes, matching the existing
   done-entry convention.
