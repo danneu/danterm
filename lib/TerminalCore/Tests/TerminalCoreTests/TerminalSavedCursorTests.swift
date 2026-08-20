@@ -14,16 +14,24 @@ struct TerminalSavedCursorTests {
         // Scenario: a full-screen application saves a styled bottom-margin cursor,
         //   draws elsewhere, then restores the same state more than once.
         var terminal = try #require(Terminal(columns: 5, rows: 5))
-        terminal.feed(Array("\u{1B}[2;4r\u{1B}[?6h\u{1B}[1;31m\u{1B}[3;5HA\u{1B}7".utf8))
+        terminal.feed(Array("\u{1B}[2;4r\u{1B}[?6h\u{1B}[1;31m\u{1B}[1\"q\u{1B}[3;5HA\u{1B}7".utf8))
         #expect(terminal.geometry.cursor == TerminalCursor(row: 3, column: 4, isPendingWrap: true))
 
-        terminal.feed(Array("\u{1B}[?6l\u{1B}[m\u{1B}[5;1H\u{1B}8".utf8))
+        terminal.feed(Array("\u{1B}[?6l\u{1B}[m\u{1B}[0\"q\u{1B}[5;1H\u{1B}8".utf8))
         #expect(terminal.geometry.cursor == TerminalCursor(row: 3, column: 4, isPendingWrap: true))
-        #expect(terminal.currentStyle == TerminalStyle(foreground: .indexed(1), bold: true))
+        #expect(terminal.currentStyle == TerminalStyle(
+            foreground: .indexed(1),
+            bold: true,
+            protected: true
+        ))
 
-        terminal.feed(Array("\u{1B}[m\u{1B}[1;1H\u{1B}8".utf8))
+        terminal.feed(Array("\u{1B}[m\u{1B}[0\"q\u{1B}[1;1H\u{1B}8".utf8))
         #expect(terminal.geometry.cursor == TerminalCursor(row: 3, column: 4, isPendingWrap: true))
-        #expect(terminal.currentStyle == TerminalStyle(foreground: .indexed(1), bold: true))
+        #expect(terminal.currentStyle == TerminalStyle(
+            foreground: .indexed(1),
+            bold: true,
+            protected: true
+        ))
 
         terminal.feed(Array("B".utf8))
         #expect(terminal.geometry.cursor?.row == 3)

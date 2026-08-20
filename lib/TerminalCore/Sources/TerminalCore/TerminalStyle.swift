@@ -53,6 +53,14 @@ public struct TerminalStyle: Hashable, Sendable {
     /// Strikethrough records presentation intent independently of glyph shaping.
     public internal(set) var strikethrough: Bool
 
+    /// DECSCA character protection: the one attribute here that no renderer reads.
+    ///
+    /// It rides the pen because that is the only thing every cell writer already carries, so a
+    /// protected cell survives print, reflow, retained history, DECSC/DECRC and state
+    /// synchronization without a second per-cell channel. Only the selective erases
+    /// (DECSED/DECSEL) consult it, and SGR -- SGR 0 included -- never changes it.
+    public internal(set) var protected: Bool
+
     /// Creates a semantic style for public inspection and deterministic expectations.
     public init(
         foreground: TerminalColor = .default,
@@ -64,7 +72,8 @@ public struct TerminalStyle: Hashable, Sendable {
         underlineColor: TerminalColor = .default,
         reverse: Bool = false,
         hidden: Bool = false,
-        strikethrough: Bool = false
+        strikethrough: Bool = false,
+        protected: Bool = false
     ) {
         self.foreground = foreground
         self.background = background
@@ -76,5 +85,6 @@ public struct TerminalStyle: Hashable, Sendable {
         self.reverse = reverse
         self.hidden = hidden
         self.strikethrough = strikethrough
+        self.protected = protected
     }
 }

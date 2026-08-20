@@ -52,6 +52,21 @@ struct RenderTextRunCoalescingTests {
         #expect(gapAfterWide.textRuns.map { $0.cells.map(\.columnWidth) } == [[2], [1]])
     }
 
+    @Test("DECSCA protection is invisible to render planning")
+    func protectionDoesNotSplitARun() throws {
+        // Intent: cells that differ only in DECSCA protection draw as one run.
+        // Why it exists: protection rides `TerminalStyle` for storage reasons only. A planner
+        //   that compared whole styles would split every field boundary into its own run and
+        //   change the drawn output for a bit no renderer can express.
+        // Scenario: spec-first -- a form program protects its label and leaves the value
+        //   after it unprotected, in the same color.
+        let mixed = try plan("\u{1B}[1\"qAB\u{1B}[0\"qCD", columns: 10)
+        let plain = try plan("ABCD", columns: 10)
+
+        #expect(mixed.textRuns.count == 1)
+        #expect(mixed.textRuns == plain.textRuns)
+    }
+
     @Test("A style change resets the accumulated width for the runs that follow")
     func styleChangeResetsAccumulatedWidth() throws {
         // Intent: when a style change starts a new run, continuity for the run

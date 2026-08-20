@@ -514,6 +514,30 @@ struct CSIEraseTests {
         return terminal
     }
 
+    @Test("ED, EL and ECH blank protected cells and leave the pen armed")
+    func nonSelectiveErasesIgnoreProtection() throws {
+        // Intent: the bare erases treat a DECSCA-protected cell like any other cell, and none
+        //   of them disarms the pen.
+        // Why it exists: xterm's changelog records "ECH should not be masked by DECSCA"; only
+        //   the `?` forms are selective, so a protected field must not survive a plain clear.
+        // Scenario: a program protects a field, then clears the line, the display, or a run
+        //   of characters the ordinary way.
+        for sequence in ["\u{1B}[2K", "\u{1B}[2J", "\u{1B}[4X"] {
+            var terminal = try #require(Terminal(columns: 4, rows: 1))
+            terminal.feed(Array("\u{1B}[1\"qABCD".utf8))
+
+            terminal.feed(Array("\u{1B}[1;1H\(sequence)".utf8))
+
+            for column in 0..<4 {
+                let cell = terminal.cell(row: 0, column: column)
+                #expect(cell?.kind == .padding, "\(sequence) column \(column)")
+                #expect(cell?.style.protected == false, "\(sequence) column \(column)")
+            }
+            #expect(terminal.currentStyle.protected)
+            expectValidGrid(terminal)
+        }
+    }
+
     struct EraseLineFixture: Sendable {
         let sequence: String
         let cursorColumn: Int

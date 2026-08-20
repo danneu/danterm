@@ -62,7 +62,7 @@ struct TerminalStateSynchronizationTests {
         // Scenario: a cell and the live pen both carry every attribute plus an RGB
         //   foreground, background, and underline color.
         var source = try #require(Terminal(columns: 4, rows: 1))
-        source.feed(Array("\u{1B}[1;2;3;4:3;7;8;9;38;2;1;2;3;48;2;4;5;6;58;2;7;8;9mx".utf8))
+        source.feed(Array("\u{1B}[1\"q\u{1B}[1;2;3;4:3;7;8;9;38;2;1;2;3;48;2;4;5;6;58;2;7;8;9mx".utf8))
 
         let synchronization = source.stateSynchronization
         var resumed = try #require(Terminal(
@@ -72,6 +72,39 @@ struct TerminalStateSynchronizationTests {
         resumed.feed(synchronization.bytes)
 
         expectObservableState(resumed, equals: source, phase: "fully loaded style")
+    }
+
+    @Test("state bytes preserve DECSCA protection on cells, the pen, and the saved pen")
+    func reconstructsCharacterProtection() throws {
+        // Intent: protected cells in the viewport and in history, a protected live pen, and a
+        //   protected saved pen all survive the round trip.
+        // Why it exists: the writer's leading SGR 0 no longer clears protection, so every
+        //   style run has to state it -- a run that inherited it would replicate the wrong
+        //   cells the moment a resync landed mid-stream.
+        // Scenario: a replica resumes a form-drawing program that protects its field labels.
+        var source = try #require(Terminal(columns: 4, rows: 2))
+        source.feed(Array("\u{1B}[1\"qP\u{1B}[0\"qq\r\n".utf8))
+        source.feed(Array("x\r\n".utf8))
+        #expect(source.scrollbackRowCount == 1)
+        #expect(source.scrollbackRow(at: 0)?.cells[0].style.protected == true)
+        source.feed(Array("\u{1B}[1\"q\u{1B}[31mR\u{1B}7\u{1B}[0\"q\u{1B}[msT".utf8))
+
+        let synchronization = source.stateSynchronization
+        var resumed = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        resumed.feed(synchronization.bytes)
+
+        expectObservableState(resumed, equals: source, phase: "protection")
+
+        // The saved pen is only observable through a restore, so both terminals restore it and
+        // print with what came back.
+        let continuation = Array("\u{1B}8Z".utf8)
+        source.feed(continuation)
+        resumed.feed(continuation)
+        #expect(source.currentStyle.protected)
+        expectObservableState(resumed, equals: source, phase: "protection restored")
     }
 
     @Test("state bytes preserve live hyperlinks at the shared metadata cap")

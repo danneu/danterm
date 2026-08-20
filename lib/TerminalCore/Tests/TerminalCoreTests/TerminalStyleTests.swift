@@ -297,4 +297,154 @@ struct TerminalStyleTests {
         }
         #expect(bytewise == expected)
     }
+
+    @Test("DECSCA parameters arm, disarm, or leave the pen alone", arguments: [
+        ("\u{1B}[1\"q", true),
+        ("\u{1B}[\"q", false),
+        ("\u{1B}[0\"q", false),
+        ("\u{1B}[2\"q", false),
+    ])
+    func characterProtectionParameters(sequence: String, expected: Bool) throws {
+        var terminal = try #require(Terminal(columns: 2, rows: 1))
+
+        terminal.feed(Array(sequence.utf8))
+        #expect(terminal.currentStyle.protected == expected)
+    }
+
+    @Test("an unrecognized DECSCA parameter leaves protection as it was")
+    func characterProtectionIgnoresUnknownParameters() throws {
+        var terminal = try #require(Terminal(columns: 2, rows: 1))
+
+        terminal.feed(Array("\u{1B}[1\"q\u{1B}[3\"q".utf8))
+        #expect(terminal.currentStyle.protected)
+
+        terminal.feed(Array("\u{1B}[0\"q\u{1B}[99\"q".utf8))
+        #expect(terminal.currentStyle.protected == false)
+    }
+
+    @Test("every character cell printed under an armed pen is protected")
+    func characterProtectionRidesEveryPrintedCell() throws {
+        // Intent: narrow cells and both halves of a wide pair carry the pen's protection.
+        // Why it exists: a protected wide head with an unprotected tail would let a later
+        //   selective erase split the pair and leave a tail with no head.
+        // Scenario: a program arms DECSCA and draws a field holding a wide character.
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+
+        terminal.feed(Array("\u{1B}[1\"qa\u{754C}".utf8))
+
+        #expect(terminal.cell(row: 0, column: 0)?.style.protected == true)
+        #expect(terminal.cell(row: 0, column: 1)?.kind == .wideHead)
+        #expect(terminal.cell(row: 0, column: 1)?.style.protected == true)
+        #expect(terminal.cell(row: 0, column: 2)?.kind == .wideTail)
+        #expect(terminal.cell(row: 0, column: 2)?.style.protected == true)
+
+        terminal.feed(Array("\u{1B}[0\"qb".utf8))
+        #expect(terminal.cell(row: 0, column: 3)?.style.protected == false)
+
+        // A wide character that does not fit the margin lands on the next row, and both of its
+        // cells must still carry the pen the print started with.
+        var wrapping = try #require(Terminal(columns: 3, rows: 2))
+        wrapping.feed(Array("\u{1B}[1\"qab\u{754C}".utf8))
+        #expect(wrapping.cell(row: 0, column: 2)?.kind == .spacerHead)
+        #expect(wrapping.cell(row: 1, column: 0)?.kind == .wideHead)
+        #expect(wrapping.cell(row: 1, column: 0)?.style.protected == true)
+        #expect(wrapping.cell(row: 1, column: 1)?.style.protected == true)
+    }
+
+    @Test("SGR and DECSCA leave each other alone")
+    func characterProtectionIsIndependentOfRendition() throws {
+        // Intent: SGR 0 keeps protection armed, and DECSCA keeps the rendition attributes.
+        // Why it exists: protection is stored on the pen only because every cell writer
+        //   already carries the pen; DEC gives SGR no way to clear it, so the `sgr0` in a
+        //   prompt must not silently disarm a field the program protected.
+        // Scenario: a program arms protection, then resets its colors between fields.
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+
+        terminal.feed(Array("\u{1B}[1\"q\u{1B}[1;31m".utf8))
+        #expect(terminal.currentStyle.protected)
+        #expect(terminal.currentStyle.bold)
+
+        terminal.feed(Array("\u{1B}[0m".utf8))
+        #expect(terminal.currentStyle == TerminalStyle(protected: true))
+
+        terminal.feed(Array("\u{1B}[m".utf8))
+        #expect(terminal.currentStyle == TerminalStyle(protected: true))
+
+        terminal.feed(Array("\u{1B}[31m\u{1B}[0\"q".utf8))
+        #expect(terminal.currentStyle == TerminalStyle(foreground: .indexed(1)))
+    }
+
+    @Test("a combining mark keeps its base cell's protection")
+    func characterProtectionSurvivesClusterGrowth() throws {
+        var terminal = try #require(Terminal(columns: 2, rows: 1))
+
+        terminal.feed(Array("\u{1B}[1\"qe\u{1B}[0\"q\u{301}".utf8))
+
+        #expect(terminal.cell(row: 0, column: 0)?.scalars == ["e", "\u{301}"])
+        #expect(terminal.cell(row: 0, column: 0)?.style.protected == true)
+    }
+
+    @Test("DECALN fills unprotected cells and keeps the pen armed")
+    func alignmentFillIgnoresProtection() throws {
+        // Intent: `ESC # 8` writes ordinary `E`s over protected content and leaves DECSCA set.
+        // Why it exists: DECALN reduces the pen to its colors, and protection is not a
+        //   rendition, so that reduction must not reach it -- while the fill is plain text.
+        // Scenario: a program protects a field, then runs the alignment pattern.
+        var terminal = try #require(Terminal(columns: 3, rows: 2))
+        terminal.feed(Array("\u{1B}[1\"q\u{1B}[31mAB".utf8))
+
+        terminal.feed(Array("\u{1B}#8".utf8))
+
+        #expect(terminal.cell(row: 0, column: 0)?.scalars == ["E"])
+        #expect(terminal.cell(row: 0, column: 0)?.style.protected == false)
+        #expect(terminal.currentStyle == TerminalStyle(
+            foreground: .indexed(1),
+            protected: true
+        ))
+
+        terminal.feed(Array("Z".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.style.protected == true)
+    }
+
+    @Test("cell-moving operations carry protection with the cells they move")
+    func characterProtectionMovesWithCells() throws {
+        // Intent: ICH, DCH, IL, DL, a scroll into history, and a width reflow all keep a
+        //   protected run protected, and leave the cells they create unprotected.
+        // Why it exists: protection rides the interned style id, so every one of these paths
+        //   should be free -- this is the proof that none of them rebuilds a cell by hand.
+        // Scenario: a protected field is pushed around by editing, scrolling, and a resize.
+        var editing = try #require(Terminal(columns: 6, rows: 2))
+        editing.feed(Array("\u{1B}[1\"qAB\u{1B}[0\"q".utf8))
+        editing.feed(Array("\u{1B}[1;1H\u{1B}[2@".utf8))
+        #expect(editing.cell(row: 0, column: 0)?.style.protected == false)
+        #expect(editing.cell(row: 0, column: 2)?.scalars == ["A"])
+        #expect(editing.cell(row: 0, column: 2)?.style.protected == true)
+
+        editing.feed(Array("\u{1B}[1;1H\u{1B}[1P".utf8))
+        #expect(editing.cell(row: 0, column: 1)?.scalars == ["A"])
+        #expect(editing.cell(row: 0, column: 1)?.style.protected == true)
+
+        editing.feed(Array("\u{1B}[1;1H\u{1B}[1L".utf8))
+        #expect(editing.cell(row: 0, column: 1)?.style.protected == false)
+        #expect(editing.cell(row: 1, column: 1)?.style.protected == true)
+
+        editing.feed(Array("\u{1B}[1;1H\u{1B}[1M".utf8))
+        #expect(editing.cell(row: 0, column: 1)?.style.protected == true)
+
+        var scrolling = try #require(Terminal(columns: 4, rows: 1))
+        scrolling.feed(Array("\u{1B}[1\"qP\u{1B}[0\"q\r\nQ".utf8))
+        let retained = try #require(scrolling.scrollbackRow(at: 0))
+        #expect(retained.cells[0].scalars == ["P"])
+        #expect(retained.cells[0].style.protected)
+
+        var reflow = try #require(Terminal(columns: 4, rows: 2))
+        reflow.feed(Array("\u{1B}[1\"qab\u{754C}\u{1B}[0\"q".utf8))
+        reflow.resize(columns: 3, rows: 2)
+        let folded = try #require(reflow.scrollbackRow(at: 0))
+        #expect(folded.cells[0].scalars == ["a"])
+        #expect(folded.cells[0].style.protected)
+        #expect(reflow.cell(row: 0, column: 0)?.kind == .wideHead)
+        #expect(reflow.cell(row: 0, column: 0)?.style.protected == true)
+        #expect(reflow.cell(row: 0, column: 1)?.style.protected == true)
+    }
 }

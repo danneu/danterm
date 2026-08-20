@@ -1280,7 +1280,10 @@ public struct Terminal: Equatable, Sendable {
         appendColor(style.foreground, selector: 38, to: &parameters)
         appendColor(style.background, selector: 48, to: &parameters)
         appendColor(style.underlineColor, selector: 58, to: &parameters)
-        return "\u{1B}[\(parameters.joined(separator: ";"))m"
+        // The DECSCA is unconditional because the leading SGR 0 no longer clears protection, so
+        // the run has to state it rather than inherit it. That keeps this encoder stateless per
+        // run, which is what the saved-cursor and pending-wrap emitters rely on.
+        return "\u{1B}[\(parameters.joined(separator: ";"))m\u{1B}[\(style.protected ? 1 : 0)\"q"
     }
 
     private func hyperlinkSequence(_ hyperlink: TerminalHyperlink?) -> String {
@@ -5823,6 +5826,10 @@ public struct Terminal: Equatable, Sendable {
             guard sequence.final == 0x71, sequence.parameters.count <= 1 else { return }
             applyCursorStyle(sequence.parameters.first ?? 0)
             return
+        case 0x22:
+            guard sequence.final == 0x71, sequence.parameters.count <= 1 else { return }
+            applyCharacterProtection(sequence.parameters.first ?? 0)
+            return
         case 0:
             break
         default:
@@ -6100,9 +6107,32 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// DECSCA: arms or disarms the pen's protection for the selective erases.
+    ///
+    /// `Ps` 0 and 2 both disarm, which is what the VT420 manual and xterm do; anything else
+    /// outside 0...2 leaves the pen alone rather than guessing.
+    private mutating func applyCharacterProtection(_ parameter: UInt16) {
+        switch parameter {
+        case 0, 2:
+            currentStyle.protected = false
+        case 1:
+            currentStyle.protected = true
+        default:
+            break
+        }
+    }
+
+    /// SGR 0: clears every rendition attribute while leaving DECSCA protection armed.
+    ///
+    /// Protection lives on the pen for storage reasons only. It is not a rendition, and DEC gives
+    /// SGR no way to clear it, so `CSI 0 m` must not act as a hidden `CSI 0 " q`.
+    private mutating func resetRendition() {
+        currentStyle = TerminalStyle(protected: currentStyle.protected)
+    }
+
     private mutating func applySGR(_ sequence: CSISequence) {
         guard sequence.parameters.isEmpty == false else {
-            currentStyle = TerminalStyle()
+            resetRendition()
             return
         }
 
@@ -6176,7 +6206,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func applySimpleSGR(_ parameter: UInt16) {
         switch parameter {
         case 0:
-            currentStyle = TerminalStyle()
+            resetRendition()
         case 1:
             currentStyle.bold = true
         case 2:
@@ -6484,8 +6514,13 @@ public struct Terminal: Equatable, Sendable {
         // the charsets, and the hyperlink pen all survive.
         modes.isOriginMode = false
         scrollRegion = nil
+        // The fill and the pen carry protection differently, so they are derived apart: the `E`s
+        // are ordinary unprotected characters, while DECSCA survives the pen reduction the same
+        // way it survives SGR 0.
+        let styleId = backgroundEraseStyleId()
+        let wasProtected = currentStyle.protected
         currentStyle = backgroundEraseStyle
-        let styleId = currentStyleId()
+        currentStyle.protected = wasProtected
         for row in screen.rows.indices {
             screen.rows[row] = GridRow(cells: (0..<columnCount).map { _ in
                 GridCell(scalars: .single("E"), kind: .narrow, styleId: styleId)

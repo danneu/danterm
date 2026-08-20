@@ -15,7 +15,7 @@ struct TerminalResetTests {
         //   margins, modes, tabs, and a saved cursor over retained shell output.
         var terminal = try #require(Terminal(columns: 10, rows: 3))
         terminal.feed(Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ12345".utf8))
-        terminal.feed(Array("\u{1B}[31m\u{1B}7Z\u{200D}\u{1B}[2;3r\u{1B}[4;20h\u{1B}[?6h\u{1B}[?7l\u{1B}[3g\u{1B}H".utf8))
+        terminal.feed(Array("\u{1B}[31m\u{1B}[1\"q\u{1B}7Z\u{200D}\u{1B}[2;3r\u{1B}[4;20h\u{1B}[?6h\u{1B}[?7l\u{1B}[3g\u{1B}H".utf8))
         let screen = terminal.screenText
         let cursor = try #require(terminal.geometry.cursor)
         let history = (0..<terminal.scrollbackRowCount).compactMap(terminal.scrollbackRow(at:))
@@ -66,6 +66,7 @@ struct TerminalResetTests {
         var slotProbe = terminal
         slotProbe.feed(Array("\u{1B}8".utf8))
         #expect(slotProbe.currentStyle.foreground == .indexed(1))
+        #expect(slotProbe.currentStyle.protected)
 
         var repeatProbe = terminal
         repeatProbe.moveCursor(row: 0, column: 0)
@@ -88,7 +89,7 @@ struct TerminalResetTests {
         let lastHistory = try #require(terminal.scrollbackRow(at: historyCount - 1))
         #expect(lastHistory.isSoftWrapped)
 
-        terminal.feed(Array("\u{1B}[31m\u{1B}7\u{1B}[1;4;32;44m\u{1B}[2;3r\u{1B}[4;20h\u{1B}[?6h\u{1B}[?7l\u{1B}[3g\u{1B}H\u{1B}c".utf8))
+        terminal.feed(Array("\u{1B}[31m\u{1B}[1\"q\u{1B}7\u{1B}[1;4;32;44m\u{1B}[2;3r\u{1B}[4;20h\u{1B}[?6h\u{1B}[?7l\u{1B}[3g\u{1B}H\u{1B}c".utf8))
 
         #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
         #expect(terminal.screenText == "          \n          \n          ")
@@ -116,6 +117,7 @@ struct TerminalResetTests {
         var slotProbe = terminal
         slotProbe.feed(Array("\u{1B}8".utf8))
         #expect(slotProbe.currentStyle.foreground == .indexed(1))
+        #expect(slotProbe.currentStyle.protected)
 
         var insertProbe = terminal
         insertProbe.feed(Array("ABC\u{1B}[1GZ".utf8))
