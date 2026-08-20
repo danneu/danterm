@@ -184,6 +184,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         } else {
             runtime.send(.createTabInSelectedGroup())
         }
+        runtime.startIpcServer()
 
         #if DANTERM_TERMINAL_BENCHMARK
         let benchmarkRuntime = runtime

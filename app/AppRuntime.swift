@@ -198,6 +198,7 @@ class AppRuntime {
     private var rosterBaseline = PaneRoster(panes: [])
     private var ipcServer: IpcServer?
     private var ipcServerToken: AppRuntimeSchedulingToken?
+    private var ipcServerStartToken: AppRuntimeSchedulingToken?
     let schedulingLifecycle = AppRuntimeSchedulingLifecycle()
     private lazy var paneTapeBroker = PaneTapeBroker(
         schedulingLifecycle: schedulingLifecycle
@@ -213,7 +214,8 @@ class AppRuntime {
         ports: AppRuntimePorts,
         configStore: DanTermConfigStore = DanTermConfigStore(),
         startsApplicationServices: Bool = true,
-        tailnetOptIn: Bool = false
+        tailnetOptIn: Bool = false,
+        socketPath: URL = controlSocketPath()
     ) {
         self.ports = ports
         self.configStore = configStore
@@ -258,7 +260,7 @@ class AppRuntime {
         if startsApplicationServices {
             do {
                 let server = try IpcServer(
-                    socketPath: controlSocketPath(),
+                    socketPath: socketPath,
                     tailnetConfig: launchConfig.tailnet,
                     tailnetOptIn: tailnetOptIn,
                     runtimeDispatch: makeIpcDispatch()
@@ -271,12 +273,7 @@ class AppRuntime {
                 self.ipcServerToken = schedulingLifecycle.arm(.ipcServer) {
                     server.stop()
                 }
-                let startToken = schedulingLifecycle.arm(.deferredCallback, cancel: {})
-                Task { [weak self, weak server] in
-                    guard let self, let startToken else { return }
-                    guard self.schedulingLifecycle.run(startToken, action: {}) else { return }
-                    await server?.start()
-                }
+                self.ipcServerStartToken = schedulingLifecycle.arm(.deferredCallback, cancel: {})
             } catch {
                 self.ipcServer = nil
                 print("Failed to start DanTerm IPC server: \(error)")
@@ -583,6 +580,17 @@ class AppRuntime {
         ipcServer?.socketPath
     }
 
+    /// Starts request acceptance after the launch bootstrap branch has resolved.
+    func startIpcServer() {
+        guard let server = ipcServer, let startToken = ipcServerStartToken else { return }
+        ipcServerStartToken = nil
+        Task { [weak self, weak server] in
+            guard let self, let server else { return }
+            guard self.schedulingLifecycle.run(startToken, action: {}) else { return }
+            await server.start()
+        }
+    }
+
     /// Builds the IPC server's view of this runtime: main-actor closures over a weak self.
     ///
     /// Handing the server this instead of `self` is what keeps the runtime's last release on
@@ -639,6 +647,8 @@ class AppRuntime {
 
     /// Stops accepting IPC work while leaving the runtime available for explicit teardown.
     func stopIpcServer() {
+        schedulingLifecycle.cancel(ipcServerStartToken)
+        ipcServerStartToken = nil
         schedulingLifecycle.cancel(ipcServerToken)
         ipcServerToken = nil
         ipcServer = nil
