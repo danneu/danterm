@@ -67,6 +67,43 @@ test that would prove it -- and, from the vetting pass, what a second agent foun
 when it opened the cited code. Read the **Vetted** line first: where it carries a
 correction, the correction wins over the prose above it.
 
+### Select and launch the next wave
+
+When asked to pick a wave, check the tree, history, checklist, dependencies, and
+file ownership. Select only unfinished tasks that separate cleanly across
+worktrees; do not combine dependent or substantially overlapping work. Prefer
+current defects, then high-confidence work that unblocks later tasks. Report
+each task's category, reason, ownership, and merge risk.
+
+Launch only when asked. For each task, create a unique temporary prompt file,
+then open a background DanTerm tab in the explicit target group. Run every
+verifier from the `master` checkout; do not create a branch or worktree. Title
+it `STORE-2 (3x5 medium simplicity)` and give Claude only this verification
+prompt:
+
+```text
+/verify-issue Investigate <TASK-ID> in
+<absolute-path-to-this-audit>. Check it against the current tree. Report what
+work is justified, the ideal solution, behavioral tests, dependencies, and
+merge conflicts. Do not plan or implement. Stop for the user to take over.
+```
+
+Because PTY command delivery is length-limited, keep the prompt out of `--cmd`.
+Pass this command literally so the new tab reads the file:
+
+```sh
+danterm tab new \
+  --group <group-id> \
+  --cwd <master-checkout-path> \
+  --title 'STORE-2 (3x5 medium simplicity)' \
+  --cmd 'claude --model fable --effort high < /tmp/danterm-audit-STORE-2.prompt'
+```
+
+Remove the prompt file after Claude reads it. The audit agent launches only
+these read-only `/verify-issue` sessions. It does not prepare implementation
+worktrees or branches. The user takes over and tells a later implementation
+agent when and where to implement.
+
 **The working list is the [Plan of work](#plan-of-work)**, ordered into six
 waves by what blocks what. Tick the box there, and if the outcome needs a word,
 append it on the same line (`-- done 1a2b3c4`, `-- skip: not worth it`). That is
@@ -117,7 +154,7 @@ references are the requirement.
 |---|---|---|---|---|
 | 5 | [BUG-01](#bug-01) | ESC ( 0 (SCS, designate DEC Special Characte | **done** `e0d2e80c` | Implement SCS G0 designation so ESC ( 0 maps GL through the DEC Special Graphics table |
 | 5 | [BUG-02](#bug-02) | CSI ! p (DECSTR) | **pinned by a test** | Stop DECSTR from leaving the alternate screen |
-| 4 | [BUG-03](#bug-03) | CSI n B (CUD), CSI n A (CUU), CSI n E (CNL), | unpinned | Clamp CUU/CUD/CNL/CPL to the scroll margins even when origin mode is off |
+| 4 | [BUG-03](#bug-03) | CSI n B (CUD), CSI n A (CUU), CSI n E (CNL), | **done** `d86a7b2d` | Clamp CUU/CUD/CNL/CPL to the scroll margins even when origin mode is off |
 | 4 | [BUG-04](#bug-04) | CSI n P (DCH), CSI n @ (ICH) | **pinned by a test** | Stop suppressing ICH and DCH when the cursor row is outside the vertical scroll region |
 | 4 | [BUG-05](#bug-05) | Legacy (non-kitty) Ctrl+key text encoding | **pinned by a test** | Map Ctrl with / and the digits 2-8 to their C0 control bytes |
 | 4 | [BUG-06](#bug-06) | OSC 10 ; ? BEL and OSC 11 ; ? BEL (dynamic c | **pinned by a test** | Reply to an OSC query with the terminator the request used, not always ST |
@@ -1195,7 +1232,7 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 
 - [ ] **[INTERACT-4](#interact-4)** (3x5, small) Put the selection granularity inside `TerminalSelectionMutation.set` instead of beside it
 - [ ] **[IOS-4](#ios-4)** (3x5, small) Build the accessory key row from the key enum instead of matching two hand-numbered tag tables
-- [ ] **[PARSE-1](#parse-1)** (3x5, small) Clamp relative vertical cursor motion to the scroll region, not just to the screen
+- [x] **[PARSE-1](#parse-1)** (3x5, small) Clamp relative vertical cursor motion to the scroll region, not just to the screen -- `d86a7b2d`
 - [ ] **[PARSE-5](#parse-5)** (3x5, small) Reset the saved cursor as part of DECSTR
 - [ ] **[CHROME-3](#chrome-3)** (3x5, medium) Carry typed ids in sidebar menu items instead of bare UUIDs
 - [x] **[HIST-5](#hist-5)** (3x5, medium) Price the memory census by walking records, not by materializing every retained row **[decide first](#decisions-to-make-first)**
