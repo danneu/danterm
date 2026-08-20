@@ -38,6 +38,8 @@ public struct PaneInputSubmissionId: Hashable, Sendable {
 public enum PaneInputSubmissionFailure: Equatable, Sendable {
     /// The whole submission did not fit within the pane's shared pending-input bound.
     case bufferLimitExceeded
+    /// The tty stayed canonical until the bounded delivery wait expired.
+    case canonicalModeTimeout
     /// The process could not start, so no buffered bytes had a destination.
     case launchFailed(LaunchFailureReason)
     /// The process ended or its pane closed before all bytes crossed the descriptor.

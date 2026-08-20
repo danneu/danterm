@@ -15,6 +15,8 @@
 
 static int resize_pipe[2] = {-1, -1};
 
+static int disable_input_echo_and_canonical(void);
+
 static void handle_winch(int signal_number) {
     (void)signal_number;
     uint8_t marker = 1;
@@ -265,6 +267,9 @@ static int run_hold_probe(void) {
 
 static int run_stalled_probe(void) {
     ignore_teardown_signals();
+    if (disable_input_echo_and_canonical() < 0) {
+        return 111;
+    }
     printf("__READY__\n");
     fflush(stdout);
     for (;;) {
@@ -312,6 +317,68 @@ static int disable_input_echo_and_canonical(void) {
     attributes.c_cc[VMIN] = 1;
     attributes.c_cc[VTIME] = 0;
     return tcsetattr(STDIN_FILENO, TCSANOW, &attributes);
+}
+
+static int configure_canonical_input(tcflag_t set_input, tcflag_t clear_input) {
+    struct termios attributes;
+    if (tcgetattr(STDIN_FILENO, &attributes) < 0) {
+        return -1;
+    }
+    attributes.c_lflag |= ICANON;
+    attributes.c_lflag &= (tcflag_t)~ECHO;
+    attributes.c_iflag |= set_input;
+    attributes.c_iflag &= (tcflag_t)~clear_input;
+    return tcsetattr(STDIN_FILENO, TCSANOW, &attributes);
+}
+
+static int run_canonical_hold_probe(tcflag_t set_input, tcflag_t clear_input) {
+    if (configure_canonical_input(set_input, clear_input) < 0) {
+        return 105;
+    }
+    printf("__CANONICAL_READY__\n");
+    fflush(stdout);
+
+    char input[64];
+    if (fgets(input, sizeof(input), stdin) == NULL) {
+        return 106;
+    }
+    input[strcspn(input, "\r\n")] = '\0';
+    printf("__CANONICAL_INPUT__=%s\n", input);
+    fflush(stdout);
+    return 0;
+}
+
+static int run_raw_count_probe(size_t expected) {
+    if (disable_input_echo_and_canonical() < 0) {
+        return 107;
+    }
+    printf("__RAW_READY__\n");
+    fflush(stdout);
+
+    uint8_t bytes[4096];
+    size_t received = 0;
+    while (received < expected) {
+        size_t requested = sizeof(bytes);
+        if (requested > expected - received) {
+            requested = expected - received;
+        }
+        ssize_t result = read(STDIN_FILENO, bytes, requested);
+        if (result > 0) {
+            for (ssize_t index = 0; index < result; index++) {
+                if (bytes[index] != 'Z') {
+                    return 108;
+                }
+            }
+            received += (size_t)result;
+        } else if (result < 0 && errno == EINTR) {
+            continue;
+        } else {
+            return 109;
+        }
+    }
+    printf("__RAW_COUNT__=%zu\n", received);
+    fflush(stdout);
+    return 0;
 }
 
 static int run_synchronized_output_probe(void) {
@@ -542,6 +609,23 @@ int main(int argc, char *argv[]) {
     }
     if (strcmp(argv[1], "responsive-output") == 0) {
         return run_responsive_output_probe();
+    }
+    if (strcmp(argv[1], "canonical-hold") == 0) {
+        return run_canonical_hold_probe(ICRNL, IGNCR | INLCR);
+    }
+    if (strcmp(argv[1], "canonical-inlcr") == 0) {
+        return run_canonical_hold_probe(INLCR, IGNCR);
+    }
+    if (strcmp(argv[1], "canonical-igncr") == 0) {
+        return run_canonical_hold_probe(IGNCR | ICRNL, INLCR);
+    }
+    if (strcmp(argv[1], "raw-count") == 0) {
+        char *end = NULL;
+        unsigned long long expected = strtoull(argv[2], &end, 10);
+        if (end == argv[2] || *end != '\0' || expected > SIZE_MAX) {
+            return 110;
+        }
+        return run_raw_count_probe((size_t)expected);
     }
     return 65;
 }

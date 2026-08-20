@@ -1873,6 +1873,97 @@ struct TerminalPTYHostTests {
 /// counts. Two of these running at once would each see the other there.
 @Suite(.serialized)
 struct TerminalPTYHostChildProcessTests {
+    @Test("oversized canonical input times out without wedging later input", .timeLimit(.minutes(1)))
+    func oversizedCanonicalInputTimesOutWithoutWedge() async throws {
+        // Intent: a line the canonical queue cannot hold never reaches the master, and its
+        //   rejection leaves the queue able to accept the next short line.
+        // Why it exists: xnu otherwise accepts the write while silently discarding its tail
+        //   and every later byte offered to the full input queue.
+        // Scenario: a child stays canonical, an oversized run expires, then a probe line exits.
+        // The injected 50 ms wait is meant to expire; the 20 second waits below are hang guards.
+        let host = try makeHost(canonicalInputWait: .milliseconds(50))
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) canonical-hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__CANONICAL_READY__".utf8)))
+        let writeBaseline = host.inputWrites().count
+        let oversized = InputCompletionRecorder(expecting: 1)
+        let probe = InputCompletionRecorder(expecting: 1)
+
+        host.send([UInt8](repeating: 0x61, count: CanonicalInputDeliveryGate.capacity)) {
+            oversized.signal($0)
+        }
+
+        #expect(oversized.waitForAll(within: .seconds(20)))
+        #expect(oversized.results == [.rejected(.canonicalModeTimeout)])
+        #expect(host.inputWrites().count == writeBaseline)
+        host.send(Array("probe\n".utf8)) { probe.signal($0) }
+        #expect(probe.waitForAll(within: .seconds(20)))
+        #expect(probe.results == [.delivered])
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+        #expect(String(decoding: host.outputBytes(), as: UTF8.self).contains("__CANONICAL_INPUT__=probe"))
+    }
+
+    @Test("canonical input translation cannot disguise an oversized run", .timeLimit(.minutes(1)))
+    func canonicalInputTranslationCannotDisguiseOversizedRun() async throws {
+        let cases: [(String, [UInt8])] = [
+            (
+                "inlcr",
+                [UInt8](repeating: 0x61, count: CanonicalInputDeliveryGate.capacity - 1)
+                    + [0x0A, 0x62]
+            ),
+            (
+                "igncr",
+                [UInt8](repeating: 0x61, count: CanonicalInputDeliveryGate.capacity - 1)
+                    + [0x0D, 0x62]
+            ),
+        ]
+
+        for (mode, bytes) in cases {
+            let host = try makeHost(canonicalInputWait: .milliseconds(50))
+            await host.start(makeLaunchInput(
+                command: "exec \(try probeExecutable()) canonical-\(mode) \"$0\""
+            ))
+            #expect(await host.waitForOutput(containing: Array("__CANONICAL_READY__".utf8)))
+            let writeBaseline = host.inputWrites().count
+            let completion = InputCompletionRecorder(expecting: 1)
+
+            host.send(bytes) { completion.signal($0) }
+
+            #expect(completion.waitForAll(within: .seconds(20)))
+            #expect(completion.results == [.rejected(.canonicalModeTimeout)])
+            #expect(host.inputWrites().count == writeBaseline)
+            await host.close()
+        }
+    }
+
+    @Test("sub-capacity canonical input and large raw input keep their delivery behavior", .timeLimit(.minutes(1)))
+    func deliverableCanonicalAndRawInputAreUnchanged() async throws {
+        let canonical = try makeHost(canonicalInputWait: .milliseconds(50))
+        await canonical.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) canonical-hold \"$0\""
+        ))
+        #expect(await canonical.waitForOutput(containing: Array("__CANONICAL_READY__".utf8)))
+        let canonicalCompletion = InputCompletionRecorder(expecting: 1)
+        canonical.send(Array("short\n".utf8)) { canonicalCompletion.signal($0) }
+        #expect(canonicalCompletion.waitForAll(within: .seconds(20)))
+        #expect(canonicalCompletion.results == [.delivered])
+        #expect(await canonical.waitForResult() == .exited(.exited(0)))
+
+        let raw = try makeHost()
+        let byteCount = 2 * 1024 * 1024
+        await raw.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) raw-count \(byteCount)"
+        ))
+        #expect(await raw.waitForOutput(containing: Array("__RAW_READY__".utf8)))
+        let rawCompletion = InputCompletionRecorder(expecting: 1)
+        raw.send([UInt8](repeating: 0x5A, count: byteCount)) { rawCompletion.signal($0) }
+        #expect(rawCompletion.waitForAll(within: .seconds(30)))
+        #expect(rawCompletion.results == [.delivered])
+        #expect(await raw.waitForResult() == .exited(.exited(0)))
+        #expect(String(decoding: raw.outputBytes(), as: UTF8.self).contains("__RAW_COUNT__=\(byteCount)"))
+    }
+
     @Test("consumption fence pairs final frame damage with exit metadata", .timeLimit(.minutes(1)))
     func consumptionFencePairsFrameAndExitMetadata() async throws {
         // Intent: one synchronous consumer read returns terminal damage and the lifecycle
@@ -3658,6 +3749,7 @@ private func startChildlessHost(
 private func makeHost(
     flightTapeConfiguration: TerminalFlightRecorderConfiguration = .production,
     applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound,
+    canonicalInputWait: DispatchTimeInterval = TerminalPTYHost.defaultCanonicalInputWait,
     childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe(),
     resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle(),
     spawner: any TerminalPTYSpawning = SystemTerminalPTYSpawner()
@@ -3667,6 +3759,7 @@ private func makeHost(
         bootstrapExecutable: bootstrapExecutable(),
         flightTapeConfiguration: flightTapeConfiguration,
         applicationExitBound: applicationExitBound,
+        canonicalInputWait: canonicalInputWait,
         childExitProbe: childExitProbe,
         resourceLifecycle: resourceLifecycle,
         spawner: spawner

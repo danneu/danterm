@@ -347,6 +347,11 @@ public actor TerminalPTYHost {
     /// stop waiting and guarantee that nothing it owns runs afterward.
     static let defaultApplicationExitBound: DispatchTimeInterval = .seconds(2)
 
+    /// How long an oversized canonical input segment may wait for a lossless raw-mode path.
+    static let defaultCanonicalInputWait: DispatchTimeInterval = .seconds(5)
+
+    private static let canonicalInputRetryInterval: DispatchTimeInterval = .milliseconds(10)
+
     private static let forcedCensusRetryInterval: UInt32 = 1000
 
     /// The most bytes one read turn takes before it returns to the queue. See `readReady`
@@ -378,6 +383,8 @@ public actor TerminalPTYHost {
     private var readSource: (any DispatchSourceRead)?
     private var readSourceActivated = false
     private var writeSource: (any DispatchSourceWrite)?
+    private var canonicalInputRetrySource: (any DispatchSourceTimer)?
+    private var canonicalInputDeadline: DispatchTime?
     private var processSource: (any DispatchSourceProcess)?
     private var processSourceActivated = false
     private var childExitPollSource: (any DispatchSourceTimer)?
@@ -431,6 +438,7 @@ public actor TerminalPTYHost {
     private var pendingProcessStarted = false
     private var teardownFinished = false
     private let applicationExitBound: DispatchTimeInterval
+    private let canonicalInputWait: DispatchTimeInterval
     private var shutdownRequested = false
     private var quiescenceObservers: [@Sendable () -> Void] = []
     private var exitBoundSource: (any DispatchSourceTimer)?
@@ -486,6 +494,7 @@ public actor TerminalPTYHost {
             DispatchTime.now().uptimeNanoseconds
         },
         applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound,
+        canonicalInputWait: DispatchTimeInterval = TerminalPTYHost.defaultCanonicalInputWait,
         childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe(),
         resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle(),
         spawner: any TerminalPTYSpawning = SystemTerminalPTYSpawner()
@@ -505,6 +514,7 @@ public actor TerminalPTYHost {
         self.bootstrapExecutable = bootstrapExecutable
         recordsInteractionIntent = flightTapeConfiguration.recordsInteractionIntent
         self.applicationExitBound = applicationExitBound
+        self.canonicalInputWait = canonicalInputWait
         self.childExitProbe = childExitProbe
         self.resourceLifecycle = resourceLifecycle
         self.spawner = spawner
@@ -1850,10 +1860,16 @@ public actor TerminalPTYHost {
         let turnLimit = 64 * 1024
         var writtenThisTurn = 0
         while pendingInputOffset < pendingInput.count, writtenThisTurn < turnLimit {
+            guard prepareCurrentInputSpanForWrite() else { return }
+            guard let span = pendingInputSpans.first else {
+                assertionFailure("pending input has no submission span")
+                rejectPendingInput(because: .writeFailed(EIO))
+                return
+            }
             let result = pendingInput.withUnsafeBytes { rawBuffer -> Int in
                 guard let base = rawBuffer.baseAddress else { return 0 }
                 let remaining = min(
-                    pendingInput.count - pendingInputOffset,
+                    span.endOffset - pendingInputOffset,
                     turnLimit - writtenThisTurn
                 )
                 return Darwin.write(masterFD, base.advanced(by: pendingInputOffset), remaining)
@@ -1876,6 +1892,62 @@ public actor TerminalPTYHost {
         } else {
             installWriteSourceIfNeeded()
         }
+    }
+
+    /// Re-evaluates the current whole submission before any of its pending bytes cross.
+    private func prepareCurrentInputSpanForWrite() -> Bool {
+        guard let span = pendingInputSpans.first else { return true }
+        var attributes = termios()
+        guard tcgetattr(masterFD, &attributes) == 0 else {
+            let code = errno
+            rejectPendingInput(because: .writeFailed(code))
+            return false
+        }
+        guard attributes.c_lflag & tcflag_t(ICANON) != 0 else {
+            cancelCanonicalInputHold()
+            return true
+        }
+        let isOversized = CanonicalInputDeliveryGate.isOversized(
+            pendingInput[pendingInputOffset..<span.endOffset],
+            inputFlags: attributes.c_iflag
+        )
+        guard isOversized else {
+            cancelCanonicalInputHold()
+            return true
+        }
+
+        cancelWriteSource()
+        let now = DispatchTime.now()
+        if canonicalInputDeadline == nil {
+            canonicalInputDeadline = now + canonicalInputWait
+            installCanonicalInputRetryIfNeeded()
+        }
+        guard let deadline = canonicalInputDeadline, now < deadline else {
+            rejectCurrentInputSpan(because: .canonicalModeTimeout)
+            if pendingInputOffset < pendingInput.count { flushInput() }
+            return false
+        }
+        return false
+    }
+
+    /// Drops only the blocked head submission so later deliverable input can still proceed.
+    private func rejectCurrentInputSpan(because failure: PaneInputSubmissionFailure) {
+        guard let span = pendingInputSpans.popFirst() else { return }
+        let removedCount = span.endOffset - pendingInputOffset
+        pendingInput.removeSubrange(pendingInputOffset..<span.endOffset)
+        pendingInputSpans = Deque(pendingInputSpans.map {
+            PendingInputSpan(
+                endOffset: $0.endOffset - removedCount,
+                origin: $0.origin,
+                submissionId: $0.submissionId,
+                attribution: $0.attribution
+            )
+        })
+        cancelCanonicalInputHold()
+        if let submissionId = span.submissionId {
+            completeInput(submissionId, with: .rejected(failure))
+        }
+        if pendingInputOffset == pendingInput.count { clearPendingInput() }
     }
 
     /// Records the bytes one successful write transmitted, split at the boundaries of the
@@ -1909,6 +1981,7 @@ public actor TerminalPTYHost {
     /// Releases pending input without recording it: these bytes never crossed the boundary,
     /// so the tape must not claim they did.
     private func clearPendingInput() {
+        cancelCanonicalInputHold()
         pendingInput.removeAll(keepingCapacity: false)
         pendingInputOffset = 0
         pendingInputSpans.removeAll(keepingCapacity: false)
@@ -1971,6 +2044,34 @@ public actor TerminalPTYHost {
     private func cancelWriteSource() {
         writeSource?.cancel()
         writeSource = nil
+    }
+
+    private func installCanonicalInputRetryIfNeeded() {
+        guard canonicalInputRetrySource == nil else { return }
+        let source = DispatchSource.makeTimerSource(queue: queue)
+        source.schedule(
+            deadline: .now() + Self.canonicalInputRetryInterval,
+            repeating: Self.canonicalInputRetryInterval,
+            leeway: .milliseconds(1)
+        )
+        source.setEventHandler { [weak self] in
+            self?.assumeIsolated { owner in owner.canonicalInputRetryFired() }
+        }
+        retainUntilCancellation(source, descriptorBacked: false)
+        canonicalInputRetrySource = source
+        source.activate()
+    }
+
+    private func canonicalInputRetryFired() {
+        guard recordSystemCallback() else { return }
+        flushInput()
+        if pendingOwnerSemanticEvents.isEmpty == false { publishPendingUpdate() }
+    }
+
+    private func cancelCanonicalInputHold() {
+        canonicalInputRetrySource?.cancel()
+        canonicalInputRetrySource = nil
+        canonicalInputDeadline = nil
     }
 
     private func readSourceFired() {
@@ -2173,6 +2274,7 @@ public actor TerminalPTYHost {
         if replies.isEmpty == false {
             enqueueInput(replies, origin: nil, submissionId: nil, attribution: .reply)
         }
+        if pendingInputOffset < pendingInput.count { flushInput() }
         if terminal.hasPendingConsumerWork,
            consumerWorkWasSignaled == false
             || terminal.pendingConsumerWorkGeneration != previousConsumerWorkGeneration
@@ -2230,6 +2332,7 @@ public actor TerminalPTYHost {
         activateProcessSourceIfNeeded()
         cancelReadSource()
         cancelWriteSource()
+        cancelCanonicalInputHold()
         rejectPendingInput(because: .processEnded)
         completeMasterCloseIfPossible()
     }
@@ -2406,6 +2509,7 @@ public actor TerminalPTYHost {
         cancelSessionPoll()
         cancelProcessSource()
         cancelChildExitPoll()
+        cancelCanonicalInputHold()
         leaderPID = nil
         sessionID = nil
         teardownFinalizationRequested = true
