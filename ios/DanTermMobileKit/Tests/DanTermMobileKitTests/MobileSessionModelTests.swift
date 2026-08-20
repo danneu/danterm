@@ -657,6 +657,110 @@ func rosterWithoutTheSelectedPaneLeavesTheStreamAlone() throws {
     #expect(projection.selectedPaneId == session.pane)
 }
 
+@Test("New pane is offered only on a serving stream and permits one unanswered request")
+func newPaneAvailabilityTracksServingStateAndPendingRequest() throws {
+    // Intent: the affordance appears only when the phone can name its attached pane's tab,
+    //   disappears while its split request is unanswered, and a second tap sends nothing.
+    // Why it exists: the menu is rebuilt after it opens, so the model must prevent a stale
+    //   item or a repeated tap from opening two panes.
+    // Scenario: the user double-taps New pane, then the connection drops before the reply.
+    var session = Session()
+    #expect(session.model.projection(at: session.now).canCreatePane == false)
+    try session.reachServingStream()
+    #expect(session.model.projection(at: session.now).canCreatePane)
+
+    let effects = session.handle(.newPaneRequested)
+    #expect(requests(effects) == [
+        .paneSplit(target: .tab(tabId(101)), launch: nil, background: true),
+    ])
+    #expect(session.model.projection(at: session.now).canCreatePane == false)
+    #expect(session.handle(.newPaneRequested).isEmpty)
+
+    _ = session.handle(.connectionEnded(.transport(.peerClosed, phase: .established)))
+    #expect(session.model.projection(at: session.now).canCreatePane == false)
+    _ = session.handle(.retryTimerFired)
+    _ = session.handle(.attemptSucceeded(roster: roster(), serverVersion: "1.2.3"))
+    _ = session.handle(.paneAttached(pane: session.pane, cursor: nil))
+    #expect(session.model.projection(at: session.now).canCreatePane)
+
+    var missingTab = Session()
+    try missingTab.reachServingStream()
+    _ = missingTab.handle(.frameReceived(.notification(
+        method: Methods.rosterEvent,
+        params: roster(panes: [(202, "vim")]).jsonValue
+    )))
+    #expect(missingTab.model.projection(at: missingTab.now).canCreatePane == false)
+}
+
+@Test("A refused New pane request reports the Mac reason and keeps serving")
+func refusedNewPaneReoffersTheAffordance() throws {
+    // Intent: a matching split refusal clears the pending request, reports its exact
+    //   reason, and re-offers New pane without disconnecting the serving stream.
+    // Why it exists: autosplit refusal is a local layout answer, not a connection failure.
+    var session = Session()
+    try session.reachServingStream()
+    let requestId = try #require(sendRequestIds(session.handle(.newPaneRequested)).first)
+
+    let effects = session.handle(.frameReceived(.response(JsonRpcResponse(
+        id: requestId,
+        error: JsonRpcError(code: -1, message: "no pane is large enough to split")
+    ))))
+
+    #expect(effects == [.redraw])
+    let projection = session.model.projection(at: session.now)
+    #expect(projection.status.text.contains("no pane is large enough to split"))
+    #expect(projection.canCreatePane)
+}
+
+@Test("A successful New pane reply reconnects through the ordinary pane attach path")
+func successfulNewPaneAttachesToTheCreatedPane() throws {
+    // Intent: the pane id returned by autosplit becomes the preferred pane for the same
+    //   reconnect and attach flow used by a pane picked from the list.
+    // Why it exists: the split reply arrives before the phone can read the new pane, so it
+    //   must reconnect instead of changing the live tape subscription in place.
+    var session = Session()
+    try session.reachServingStream()
+    let requestId = try #require(sendRequestIds(session.handle(.newPaneRequested)).first)
+    let createdPane = paneId(202)
+
+    let replied = session.handle(.frameReceived(.response(JsonRpcResponse(
+        id: requestId,
+        result: .object(["pane": .object(["id": .string(createdPane.rawValue.uuidString)])])
+    ))))
+    #expect(replied.contains(.disconnect))
+    #expect(replied.contains(.connect(session.target)))
+
+    let connected = session.handle(.attemptSucceeded(
+        roster: roster(panes: [(201, "zsh"), (202, "new")]),
+        serverVersion: "1.2.3"
+    ))
+    #expect(connected.contains(.attachPane(
+        pane: createdPane,
+        resumesFromStoredCheckpoint: true
+    )))
+}
+
+@Test("A New pane success without a readable pane reports instead of attaching")
+func unreadableNewPaneReplyReoffersWithoutAttaching() throws {
+    // Intent: a successful response that does not name a readable pane attaches to
+    //   nothing, reports the malformed answer, and permits another request.
+    // Why it exists: treating a malformed success as pane selection would reconnect with
+    //   no valid destination and hide the protocol mismatch from the user.
+    var session = Session()
+    try session.reachServingStream()
+    let requestId = try #require(sendRequestIds(session.handle(.newPaneRequested)).first)
+
+    let effects = session.handle(.frameReceived(.response(JsonRpcResponse(
+        id: requestId,
+        result: .object(["pane": .object([:])])
+    ))))
+
+    #expect(effects == [.redraw])
+    let projection = session.model.projection(at: session.now)
+    #expect(projection.status.text.contains("unreadable pane"))
+    #expect(projection.canCreatePane)
+}
+
 // MARK: - Driving
 
 /// Drives one model with an explicit clock and explicit request ids.
@@ -736,6 +840,14 @@ private func resizeRequestIds(_ effects: [MobileSessionGeometryEffect]) -> [JSON
     }
 }
 
+/// Extracts ordinary request ids so a test can answer the exact request it caused.
+private func sendRequestIds(_ effects: [MobileSessionEffect]) -> [JSONValue] {
+    effects.compactMap { effect in
+        guard case .send(let requestId, _) = effect else { return nil }
+        return requestId
+    }
+}
+
 /// One streamed tape record carrying the recorder's resize event, which is how the tape
 /// states a pane's pinnedness mid-stream.
 private func tapeResizeNotification(
@@ -809,4 +921,9 @@ private func wireId(_ value: Int) -> String {
 
 private func paneId(_ value: Int) -> PaneId {
     PaneId(rawValue: UUID(uuidString: wireId(value))!)
+}
+
+/// Builds one reproducible tab id in the same wire namespace as the roster fixture.
+private func tabId(_ value: Int) -> TabId {
+    TabId(rawValue: UUID(uuidString: wireId(value))!)
 }

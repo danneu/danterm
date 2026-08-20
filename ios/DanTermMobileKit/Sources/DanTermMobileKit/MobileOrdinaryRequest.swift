@@ -2,7 +2,7 @@
 //
 // It exists so the compiler carries the claim-gesture contract. The session model's
 // ordinary effects carry this type rather than a bare `IpcRequest`, and this type can
-// only be built from the two forms that are not a resize -- so an ordinary branch cannot
+// only be built from the forms that are not a resize -- so an ordinary branch cannot
 // send a resize whatever it constructs. The claim and release gesture reaches a separate
 // entry point whose effect type carries the resize instead.
 import DanTermProtocol
@@ -10,7 +10,7 @@ import DanTermProtocol
 /// Wraps one request the phone sends on a serving stream, restricted by construction to
 /// the forms that are not a pane resize.
 ///
-/// The initializer is private and the file holds nothing else, so the two factories below
+/// The initializer is private and the file holds nothing else, so the factories below
 /// are the complete list of requests an ordinary session branch can produce.
 public struct MobileOrdinaryRequest: Equatable, Sendable {
     /// The wire request to send. Read by the interpreter, which adds only the JSON-RPC id.
@@ -23,6 +23,12 @@ public struct MobileOrdinaryRequest: Equatable, Sendable {
     /// Input for the pane the phone is showing.
     public static func paneInput(pane: PaneId, input: IpcPaneInput) -> MobileOrdinaryRequest {
         MobileOrdinaryRequest(.paneInput(pane: pane, input: input))
+    }
+
+    /// Asks the Mac to choose a splittable pane and direction within one tab. The phone
+    /// keeps this in the background so creating a pane never moves Mac keyboard focus.
+    public static func paneSplit(tab: TabId) -> MobileOrdinaryRequest {
+        MobileOrdinaryRequest(.paneSplit(target: .tab(tab), launch: nil, background: true))
     }
 
     /// The tape subscription the phone reads a pane through. The phone joins over a remote

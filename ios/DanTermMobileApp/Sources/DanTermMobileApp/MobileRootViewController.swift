@@ -89,7 +89,7 @@ final class MobileRootViewController: UIViewController {
             terminalInput.becomeFirstResponder()
         }
         bottomBar.onDismissKeyboard = { [weak self] in self?.terminalInput.resignFirstResponder() }
-        bottomBar.menuItems = { [weak self] in self?.geometryMenuItems() ?? [] }
+        bottomBar.menuItems = { [weak self] in self?.sessionMenuItems() ?? [] }
         // The input view covers the terminal so a tap anywhere on the grid raises the
         // keyboard, and the pill is added after both because it floats over them.
         // Everything else sits beside the terminal and takes its own space.
@@ -107,12 +107,19 @@ final class MobileRootViewController: UIViewController {
         configureConstraints()
     }
 
-    /// Names the geometry actions the model offers right now. It is asked when the menu
+    /// Names the session actions the model offers right now. It is asked when the menu
     /// opens, and each item carries an event rather than the request the facts imply at
     /// that instant -- the model builds the request when it handles the event.
-    private func geometryMenuItems() -> [TerminalBarMenuItem] {
-        let claim = session.projection.claim
+    private func sessionMenuItems() -> [TerminalBarMenuItem] {
+        let projection = session.projection
         var items: [TerminalBarMenuItem] = []
+        if projection.canCreatePane {
+            items.append(TerminalBarMenuItem(
+                title: "New pane",
+                systemImage: "rectangle.split.2x1"
+            ) { [weak self] in self?.session.dispatch(.newPaneRequested) })
+        }
+        let claim = projection.claim
         if claim.claim != nil {
             items.append(TerminalBarMenuItem(
                 title: "Claim",
@@ -205,7 +212,11 @@ final class MobileRootViewController: UIViewController {
         // so the terminal's extent -- and with it the grid a claim would name -- does not
         // move when an action appears or goes away. What the menu contains is asked for
         // again when it opens.
-        bottomBar.setMenuOffered(projection.claim.claim != nil || projection.claim.release != nil)
+        bottomBar.setMenuOffered(
+            projection.canCreatePane
+                || projection.claim.claim != nil
+                || projection.claim.release != nil
+        )
         // The latch is a session fact like any other: the highlight follows the
         // projection, so an input that spent the latch unlights the key with no Ctrl tap.
         bottomBar.setControlLatched(projection.isControlLatched)

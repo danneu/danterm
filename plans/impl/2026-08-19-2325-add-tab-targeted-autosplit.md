@@ -191,7 +191,7 @@ action from the phone and confirm it lands on the new pane.
 ## Commit progress
 
 - [x] 1. Add Mac autosplit protocol, resolution, measurement, and CLI support
-- [ ] 2. Add the iOS New pane request, state flow, and menu item
+- [x] 2. Add the iOS New pane request, state flow, and menu item
 
 ## Implementation notes
 

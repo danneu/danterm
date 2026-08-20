@@ -23,6 +23,8 @@ public struct MobileSessionProjection: Equatable, Sendable {
     public let panes: [PaneRosterItem]
     public let selectedPaneId: PaneId?
     public let claim: MobileClaimControl
+    /// Whether the serving stream can issue a tab-targeted split right now.
+    public let canCreatePane: Bool
     /// Whether the one-shot Ctrl latch is armed; the bar's Ctrl key renders it from here.
     public let isControlLatched: Bool
 }
@@ -54,6 +56,8 @@ public struct MobileSessionModel: Equatable, Sendable {
     /// The id of the tape subscription, which is the one request whose refusal ends the
     /// connection: the subscription is what the connection is for.
     private var tapeRequestId: JSONValue?
+    /// The unanswered tab-targeted split, which suppresses duplicate New pane gestures.
+    private var newPaneRequestId: JSONValue?
     /// The version reported by the handshake, held until the stream it describes starts.
     private var serverVersion: String?
     /// Input a smoke run drives into the first pane once the stream is serving.
@@ -97,6 +101,7 @@ public struct MobileSessionModel: Equatable, Sendable {
             panes: panes,
             selectedPaneId: selectedPaneId,
             claim: claimControl,
+            canCreatePane: canCreatePane,
             isControlLatched: inputMapper.isControlLatched
         )
     }
@@ -123,16 +128,19 @@ public struct MobileSessionModel: Equatable, Sendable {
         case .paneSelected(let pane):
             // The gesture names a pane inside the episode that produced the list, so it
             // never consults the fields: editing them cannot retarget or block it.
-            switch connectTarget.reuseTarget() {
-            case .connect:
-                preferredPaneId = pane
-                return reconnect(.userRequestedConnect, env: env)
-            case .reportDraft(let problem):
-                draftProblem = problem
-                return [.redraw]
-            case .ignore:
-                return []
-            }
+            return selectPane(pane, env: env)
+
+        case .newPaneRequested:
+            guard canCreatePane,
+                  let selectedPaneId,
+                  let tabId = panes.first(where: { $0.paneId == selectedPaneId })?.tabId
+            else { return [] }
+            let requestId = env.newRequestId()
+            newPaneRequestId = requestId
+            return [
+                .send(requestId: requestId, request: .paneSplit(tab: tabId)),
+                .redraw,
+            ]
 
         case .appForegrounded:
             return reconnect(.appForegrounded, env: env)
@@ -328,6 +336,34 @@ public struct MobileSessionModel: Equatable, Sendable {
         )
     }
 
+    /// New pane needs a live request channel, the attached pane's tab, and no prior split
+    /// still waiting for its answer.
+    private var canCreatePane: Bool {
+        guard status.connection == .ready,
+              newPaneRequestId == nil,
+              let selectedPaneId
+        else { return false }
+        return panes.contains { $0.paneId == selectedPaneId }
+    }
+
+    /// Routes a pane choice through the one reconnect path shared by the picker and a
+    /// successful New pane response.
+    private mutating func selectPane(
+        _ pane: PaneId,
+        env: MobileSessionEnv
+    ) -> [MobileSessionEffect] {
+        switch connectTarget.reuseTarget() {
+        case .connect:
+            preferredPaneId = pane
+            return reconnect(.userRequestedConnect, env: env)
+        case .reportDraft(let problem):
+            draftProblem = problem
+            return [.redraw]
+        case .ignore:
+            return []
+        }
+    }
+
     /// The gesture that names a server: the Go button, or the attempt made at launch.
     private mutating func connect(
         to draft: MobileTargetDraft,
@@ -405,6 +441,7 @@ public struct MobileSessionModel: Equatable, Sendable {
         status.noteStream(nil)
         status.noteRequestOutcome(nil)
         tapeRequestId = nil
+        newPaneRequestId = nil
         serverVersion = nil
         standingClaim = nil
     }
@@ -422,6 +459,20 @@ public struct MobileSessionModel: Equatable, Sendable {
     ) -> [MobileSessionEffect] {
         switch frame {
         case .response(let response):
+            if let pendingNewPaneRequestId = newPaneRequestId,
+               response.id == pendingNewPaneRequestId {
+                newPaneRequestId = nil
+                if let error = response.error {
+                    status.noteRequestOutcome(.refused(reason: error.message))
+                    return [.redraw]
+                }
+                guard let pane = response.result.flatMap(paneReference) else {
+                    status.noteRequestOutcome(.refused(reason: "Mac returned an unreadable pane"))
+                    return [.redraw]
+                }
+                status.noteRequestOutcome(.succeeded)
+                return selectPane(pane, env: env)
+            }
             if let error = response.error {
                 // `pending` is unwrapped first so a confirmed claim (pending nil) can
                 // never match a response that carries no id.
@@ -470,6 +521,15 @@ public struct MobileSessionModel: Equatable, Sendable {
             }
             return effects
         }
+    }
+
+    /// Reads the pane reference returned by `pane.split`, or refuses a success whose
+    /// result cannot name a typed pane.
+    private func paneReference(_ result: JSONValue) -> PaneId? {
+        guard let raw = result["pane"]?["id"]?.asString,
+              let uuid = UUID(uuidString: raw)
+        else { return nil }
+        return PaneId(rawValue: uuid)
     }
 
     /// Lifts one decoded record's JSON event into the engine's own event type and hands the

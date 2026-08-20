@@ -64,6 +64,8 @@ public enum MobileSessionEvent: Equatable, Sendable {
     case connectRequested(MobileTargetDraft)
     /// The user chose a pane to read.
     case paneSelected(PaneId)
+    /// The user asked the Mac to create a pane in the attached pane's tab.
+    case newPaneRequested
     case appForegrounded
     case appBackgrounded
     case networkPathChanged(usable: Bool)

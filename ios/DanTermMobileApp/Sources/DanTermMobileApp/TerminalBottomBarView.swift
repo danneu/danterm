@@ -1,7 +1,7 @@
 // The one row of controls between the terminal and the keyboard.
 //
 // It holds the terminal keys a software keyboard has no room for, the way into the pane
-// picker, the overflow menu the geometry actions live in, and keyboard dismissal. Its
+// picker, the overflow menu the session actions live in, and keyboard dismissal. Its
 // height is fixed by its own constraints and not by what it currently offers, so the
 // terminal above it -- and with it the grid a claim would name -- never moves when an
 // action appears or goes away.
