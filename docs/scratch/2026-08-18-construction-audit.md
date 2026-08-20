@@ -166,7 +166,7 @@ references are the requirement.
 | 3 | [BUG-12](#bug-12) | ESC 7 / ESC 8 (DECSC/DECRC), also CSI ? 1048 | **pinned by a test** | Keep DECSC's saved cursor visibility out of DECRC (do not save DECTCEM) |
 | 3 | [BUG-13](#bug-13) | ESC c (RIS) | **pinned by a test** | Reset the saved-cursor slot on RIS |
 | 3 | [BUG-14](#bug-14) | ESC # 8 (DECALN) | **done** `7b5d10f0` | Clear the character rendition on DECALN, keeping only the colours |
-| 3 | [BUG-15](#bug-15) | CSI Pm m (SGR) with more than 24 parameters  | unpinned | Truncate an over-long CSI parameter list instead of discarding the whole sequence |
+| 3 | [BUG-15](#bug-15) | CSI Pm m (SGR) with more than 24 parameters  | **done** `c9f2f6a5` | Truncate an over-long CSI parameter list instead of discarding the whole sequence |
 | 3 | [BUG-16](#bug-16) | DECSC / DECRC (ESC 7 / ESC 8), and the impli | **pinned by a test** | Carry the saved cursor through width reflow instead of only clamping it |
 | 3 | [BUG-17](#bug-17) | DECSC / DECRC (ESC 7 / ESC 8) across a row-c | unpinned | Displace the saved cursor by the same row delta as the live cursor on a height shrink |
 | 3 | [BUG-18](#bug-18) | printing a narrow or wide character over one | unpinned | Paint the vacated half of a wide pair with a background, not the default style |
@@ -565,6 +565,17 @@ currentStyle = TerminalStyle(foreground: TerminalCore.TerminalColor.indexed(1), 
 ### BUG-15. Truncate an over-long CSI parameter list instead of discarding the whole sequence
 
 `CSI Pm m (SGR) with more than 24 parameters -- and any other CSI with more than 24 parameters` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5
+
+**Done** in `c9f2f6a5`. Parameters past the cap are now ignored and the sequence
+dispatches with the first 24, the same shape the file already used for
+intermediates. The cap stays at 24.
+
+Correction to **What the references do** below: it is wrong about vte. vte drops
+an over-long sequence too -- `references/vte/src/parser.hh#params_overflow`
+transitions to `CSI_IGNORE` -- and xterm's
+`references/xterm/charproc.c#CASE_ESC_DIGIT` keeps folding post-overflow digits
+into the last retained parameter, so it is not a clean first-N truncation
+either. Truncation is DanTerm's own policy, argued in the commit's plan.
 
 **Problem.** The parser caps a CSI at 24 parameters. Past that it does not truncate the list, it throws the sequence away: `dispatchCSI` returns nil, so no action at all is dispatched. A 25-parameter SGR therefore leaves the previous pen in force rather than applying the attributes it can. Both references keep the parameters that fit and still execute the sequence.
 
