@@ -242,7 +242,7 @@ resolver); the PERSIST-2 entry in the construction audit.
 ## Commit progress
 - [x] 1. Protocol derives the control socket from an explicit identity and caches root
 - [x] 2. One launch-resolved instance-paths value threaded through the app and IPC server
-- [ ] 3. Lift the launch-recovery read into a testable app function
+- [x] 3. Lift the launch-recovery read into a testable app function
 - [ ] 4. Lint ambient identity resolution and update the docs
 
 ## Implementation notes
@@ -273,3 +273,16 @@ resolver); the PERSIST-2 entry in the construction audit.
   `dt.test`, both short, because the derived control socket must stay inside the
   104-byte Unix socket limit. That identity is deliberately not a real DanTerm
   identity, so no test can reach a production or development instance's files.
+
+- Commit 3 puts the lifted read in `app/LaunchRecovery.swift` and returns a
+  `LaunchRecovery` value carrying both answers -- crashed and restore -- because they
+  are independent and `main.swift` hands each to a separate delegate property. The
+  skip rule lives inside the function, so `main.swift` keeps no `if` and "nothing was
+  read" is an outcome the tests assert.
+- PO7 drives the writers as far as the app itself can be driven without a live
+  AppRuntime: the test builds a real `CheckpointCapture`, encodes it with the same
+  `encoder()` production hands the checkpoint queue, and writes it through
+  `CheckpointWriter` to the paths value, then writes the lock with
+  `writeSessionLockFile`. `AppRuntime.performLightCheckpoint` is private and needs a
+  full AppKit runtime, so calling it would have widened the commit rather than
+  strengthened the proof.

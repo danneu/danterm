@@ -92,36 +92,14 @@ do {
     initSnapshot = nil
 }
 
-// Session recovery: detect crash (stale lock file) and load last checkpoint.
-// Carries the merged *validated* restore so the recovered structure is decoded
-// and validated exactly once (here), not again at bootstrap.
-var lastSessionSnapshot: ValidatedAppRestore? = nil
-var previousSessionCrashed = false
-
-if initSnapshot == nil, launchPolicy.startup == .promptForRecovery {
-    // Crash detection: lock file exists = previous exit was unclean.
-    // Don't delete it here — writeSessionLockFile() in applicationDidFinishLaunching
-    // atomically overwrites it, so there's no gap where a startup crash would be
-    // mistaken for a clean exit on the next launch.
-    if readSessionLockFile(paths: launchInstancePaths) != nil {
-        previousSessionCrashed = true
-    }
-
-    // Load last session from split checkpoint files.
-    // Light has fresh structure; enriched has scrollback. Merge both when available.
-    let lightData = try? Data(contentsOf: launchInstancePaths.lightCheckpointFile)
-    let enrichedData = try? Data(contentsOf: launchInstancePaths.enrichedCheckpointFile)
-
-    if let ld = lightData, let ed = enrichedData,
-       let light = try? loadValidatedInitFile(from: ld),
-       let enriched = try? loadValidatedInitFile(from: ed) {
-        lastSessionSnapshot = mergeCheckpoints(light: light, enriched: enriched)
-    } else if let ld = lightData, let light = try? loadValidatedInitFile(from: ld) {
-        lastSessionSnapshot = light
-    } else if let ed = enrichedData, let enriched = try? loadValidatedInitFile(from: ed) {
-        lastSessionSnapshot = enriched
-    }
-}
+// Session recovery: detect the previous session's crash and load its checkpoints.
+// The restore comes back decoded and validated, so the recovered structure is
+// validated exactly once, at launch, and not again at bootstrap.
+let launchRecovery = readLaunchRecovery(
+    paths: launchInstancePaths,
+    startup: launchPolicy.startup,
+    hasInitSnapshot: initSnapshot != nil
+)
 
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
@@ -129,8 +107,8 @@ app.setActivationPolicy(.regular)
 let delegate = MainActor.assumeIsolated { () -> AppDelegate in
     let delegate = AppDelegate(instancePaths: launchInstancePaths)
     delegate.initSnapshot = initSnapshot
-    delegate.lastSessionSnapshot = lastSessionSnapshot
-    delegate.previousSessionCrashed = previousSessionCrashed
+    delegate.lastSessionSnapshot = launchRecovery.restore
+    delegate.previousSessionCrashed = launchRecovery.previousSessionCrashed
     delegate.launchPolicy = launchPolicy
     NSApp.delegate = delegate
     return delegate
