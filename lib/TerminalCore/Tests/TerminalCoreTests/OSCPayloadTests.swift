@@ -64,6 +64,10 @@ struct OSCPayloadTests {
     func explicitHyperlinkId() {
         #expect(OSCPayload.osc8ExplicitId(in: "foo=x:id=chosen:id=later") == "chosen")
         #expect(OSCPayload.osc8ExplicitId(in: "identity=nope") == nil)
+        // An empty value is no id, and first-wins still applies to it: a later
+        // non-empty field does not rescue the empty first one.
+        #expect(OSCPayload.osc8ExplicitId(in: "id=") == nil)
+        #expect(OSCPayload.osc8ExplicitId(in: "id=:id=later") == nil)
     }
 
     @Test("OSC 7 paths require a local host and complete percent escapes")

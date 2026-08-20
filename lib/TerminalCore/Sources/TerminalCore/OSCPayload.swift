@@ -110,11 +110,13 @@ enum OSCPayload {
         return String(decoding: [high, low, high, low], as: UTF8.self)
     }
 
+    /// Normalizes an empty `id=` value to no id, so the empty explicit id never
+    /// reaches the pen and cannot join unrelated runs of one URI.
     static func osc8ExplicitId(in params: String) -> String? {
         for field in params.split(separator: ":", omittingEmptySubsequences: false) {
             let pieces = field.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             if pieces.count == 2, pieces[0] == "id" {
-                return String(pieces[1])
+                return pieces[1].isEmpty ? nil : String(pieces[1])
             }
         }
         return nil

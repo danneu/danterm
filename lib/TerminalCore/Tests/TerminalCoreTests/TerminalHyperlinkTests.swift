@@ -29,6 +29,49 @@ struct TerminalHyperlinkTests {
             == TerminalHyperlink(uri: "https://malformed-params.test"))
     }
 
+    // Intent: an empty `id=` value behaves exactly as an absent `id` parameter,
+    // and leaves the URI alone.
+    // Why it exists: BUG-35 -- the decoder stored `""`, so the pen carried an
+    // empty explicit id that no OSC 8 writer ever asked for.
+    // Scenario: a run opened with `id=` and no other parameters.
+    @Test("an empty OSC 8 id value is no id at all")
+    func emptyExplicitIdIsAbsent() {
+        var terminal = Terminal(columns: 20, rows: 2)!
+
+        terminal.feed(osc8(params: "id=", uri: "http://a.test/x"))
+        terminal.feed(Array("ab".utf8))
+
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink
+            == TerminalHyperlink(uri: "http://a.test/x"))
+    }
+
+    // Intent: two empty-id opens of one URI are two links, the way two opens
+    // with no `id` parameter are.
+    // Why it exists: BUG-35 -- `dispatchOSC8` reuses a target when the explicit
+    // id and URI both match, so a stored `""` collapsed unrelated runs into one
+    // link that highlighted together on hover.
+    // Scenario: two runs of the same URI, each opened with `id=` and separated
+    // by a close.
+    @Test("empty OSC 8 ids do not join separate runs of one URI")
+    func emptyExplicitIdsDoNotShareATarget() {
+        var terminal = Terminal(columns: 20, rows: 2)!
+
+        terminal.feed(osc8(params: "id=", uri: "http://a.test/x"))
+        terminal.feed(Array("a".utf8))
+        terminal.feed(osc8(params: "", uri: ""))
+        terminal.feed(osc8(params: "id=", uri: "http://a.test/x"))
+        terminal.feed(Array("b".utf8))
+        #expect(terminal.retainedHyperlinkCount == 2)
+
+        var shared = Terminal(columns: 20, rows: 2)!
+        shared.feed(osc8(params: "id=7", uri: "http://a.test/x"))
+        shared.feed(Array("a".utf8))
+        shared.feed(osc8(params: "", uri: ""))
+        shared.feed(osc8(params: "id=7", uri: "http://a.test/x"))
+        shared.feed(Array("b".utf8))
+        #expect(shared.retainedHyperlinkCount == 1)
+    }
+
     @Test("OSC 8 is terminator- and chunk-invariant")
     func terminatorAndChunkInvariance() {
         let bodies = [
