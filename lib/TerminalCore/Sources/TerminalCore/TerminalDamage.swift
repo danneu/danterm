@@ -286,13 +286,29 @@ public struct TerminalDamage: Equatable, Sendable {
         return drained
     }
 
-    /// True once this already tells a consumer to redraw every viewport row.
+    /// True when a consumer that folds the shift away would find every row of
+    /// `0..<rowCount` damaged.
     ///
-    /// The scroll site uses this to stop paying per-scroll shift bookkeeping in
-    /// the flood regime: with every viewport row pending, a further translation
-    /// carries no information any consumer can act on, and full damage is the
-    /// same value spelled in one bit.
-    func coversViewport(rowCount: Int) -> Bool {
+    /// Coverage is a prefix question, never a count: a value whose damaged rows
+    /// number `rowCount` while a row of `0..<rowCount` stays clean is not
+    /// covering. The answer is a word scan that ORs the shift region in, so
+    /// asking costs no copy of the storage.
+    public func coversViewportFoldingShift(rowCount: Int) -> Bool {
+        isFull || bits.covers(rowCount: rowCount, orRegion: shift?.region)
+    }
+
+    /// True once row damage alone already tells a consumer to redraw every
+    /// viewport row.
+    ///
+    /// Deliberately blind to the shift, which is why it is not the predicate
+    /// above. The scroll site uses this to stop paying per-scroll shift
+    /// bookkeeping in the flood regime: with every viewport row pending, a
+    /// further translation carries no information any consumer can act on, and
+    /// full damage is the same value spelled in one bit. Folding the shift in
+    /// here would be wrong -- a whole-viewport scroll region plus one pending
+    /// row would "cover" trivially, so every second scroll would escalate to
+    /// `.full` and the translation path would disappear.
+    func coversViewportIgnoringShift(rowCount: Int) -> Bool {
         isFull || bits.covers(rowCount: rowCount)
     }
 
@@ -356,18 +372,23 @@ struct TerminalDamageRowBits: Sendable {
         }
     }
 
-    /// True when every row of `0..<rowCount` is set, read word at a time so the
-    /// scroll site's flood check costs one scan and no row loop.
-    func covers(rowCount: Int) -> Bool {
+    /// True when every row of `0..<rowCount` is set, counting the rows of
+    /// `region` as set too. Read word at a time, so both damage predicates cost
+    /// one scan, no row loop, and no copy of the storage.
+    func covers(rowCount: Int, orRegion region: Range<Int>? = nil) -> Bool {
         guard rowCount > 0, self.rowCount >= rowCount else { return false }
+        func word(_ index: Int) -> UInt64 {
+            guard let region else { return words[index] }
+            return words[index] | regionMask(region, word: index)
+        }
         let fullWords = rowCount >> 6
-        for index in 0..<fullWords where words[index] != .max {
+        for index in 0..<fullWords where word(index) != .max {
             return false
         }
         let remainder = rowCount & 63
         if remainder != 0 {
             let mask: UInt64 = (1 << UInt64(remainder)) &- 1
-            if words[fullWords] & mask != mask { return false }
+            if word(fullWords) & mask != mask { return false }
         }
         return true
     }

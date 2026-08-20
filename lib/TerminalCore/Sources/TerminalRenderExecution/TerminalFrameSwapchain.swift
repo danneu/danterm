@@ -154,7 +154,7 @@ public final class TerminalFrameSwapchain {
     /// Returns the store to attach, or nil when the publish coalesced into
     /// the pending presentation.
     public func publish(plan: RenderFramePlan, damage: TerminalDamage) -> TerminalFrameBackingStore? {
-        if damage.isFull || damage.expandingShift().damagedRowCount == plan.rowCount {
+        if damage.coversViewportFoldingShift(rowCount: plan.rowCount) {
             latestWholeFrameDamageGeneration = generation
         }
         for index in buffers.indices {

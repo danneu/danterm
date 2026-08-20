@@ -7565,7 +7565,7 @@ public struct Terminal: Equatable, Sendable {
         // delivery (the un-bumped advance makes the snapshot diff escalate and
         // early-return per action, exactly as it did before `T9`). The paced
         // regime never accumulates whole-viewport rows, so it never gets here.
-        if damage.coversViewport(rowCount: rowCount) {
+        if damage.coversViewportIgnoringShift(rowCount: rowCount) {
             recordPresentationFullDamage()
             return
         }

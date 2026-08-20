@@ -108,6 +108,61 @@ struct TerminalShiftDamageTests {
         #expect(TerminalDamage.none.expandingShift() == .none)
     }
 
+    @Test("viewport coverage folds the shift in and is decided by prefix, not by count")
+    func coversViewportFoldingShift() {
+        // Intent: the public coverage predicate is true exactly when a consumer that
+        //   folds the shift away would find every row of `0..<rowCount` damaged.
+        // Why it exists: the swapchain's whole-frame barrier asks this question on
+        //   every publish. A rows-only reading would miss a viewport-wide scroll, and
+        //   a count-based reading would call a value with a clean row inside the
+        //   viewport covering.
+        // Scenario: the value shapes the seam can produce -- empty, full, rows only,
+        //   a region that spans the viewport by itself, a region plus rows that cover
+        //   jointly, a region plus rows that leave a gap, and a viewport taller than
+        //   one storage word.
+        #expect(TerminalDamage.full.coversViewportFoldingShift(rowCount: 8))
+        #expect(TerminalDamage.none.coversViewportFoldingShift(rowCount: 8) == false)
+        #expect(TerminalDamage(rows: 0..<8, rowCount: 8).coversViewportFoldingShift(rowCount: 8))
+        #expect(TerminalDamage(rows: [0, 3], rowCount: 8).coversViewportFoldingShift(rowCount: 8) == false)
+
+        // Prefix coverage, not a row count: eight damaged rows with row 7 clean.
+        let miscounted = TerminalDamage(rows: [0, 1, 2, 3, 4, 5, 6, 8], rowCount: 16)
+        #expect(miscounted.damagedRowCount == 8)
+        #expect(miscounted.coversViewportFoldingShift(rowCount: 8) == false)
+
+        var regionAlone = TerminalDamage(rows: [], rowCount: 8)
+        regionAlone.recordShift(region: 0..<8, delta: -1)
+        #expect(regionAlone.coversViewportFoldingShift(rowCount: 8))
+
+        var jointlyCovering = TerminalDamage(rows: [], rowCount: 8)
+        jointlyCovering.recordShift(region: 0..<5, delta: -1)
+        jointlyCovering.formUnion(TerminalDamage(rows: [5, 6, 7], rowCount: 8))
+        #expect(jointlyCovering.shift != nil)
+        #expect(jointlyCovering.coversViewportFoldingShift(rowCount: 8))
+
+        var gapped = TerminalDamage(rows: [], rowCount: 8)
+        gapped.recordShift(region: 0..<4, delta: -1)
+        gapped.formUnion(TerminalDamage(rows: [5, 6, 7], rowCount: 8))
+        #expect(gapped.coversViewportFoldingShift(rowCount: 8) == false)
+
+        var tall = TerminalDamage(rows: [], rowCount: 130)
+        tall.recordShift(region: 0..<100, delta: -1)
+        #expect(tall.coversViewportFoldingShift(rowCount: 130) == false)
+        tall.formUnion(TerminalDamage(rows: Array(100..<130), rowCount: 130))
+        #expect(tall.coversViewportFoldingShift(rowCount: 130))
+        #expect(TerminalDamage(rows: (0..<130).filter { $0 != 64 }, rowCount: 130)
+            .coversViewportFoldingShift(rowCount: 130) == false)
+
+        // The fold equality is a cross-check on values built for the queried grid,
+        // not the contract: it must agree everywhere the live path can reach.
+        for value in [regionAlone, jointlyCovering, gapped, TerminalDamage(rows: [0, 3], rowCount: 8)] {
+            #expect(
+                value.coversViewportFoldingShift(rowCount: 8)
+                    == (value.expandingShift().damagedRowCount == 8)
+            )
+        }
+    }
+
     // The precondition this pins holds on every platform; only the instrument is
     // host-bound. An exit test spawns a child process to observe the trap, and the
     // testing library does not offer that on iOS, so the case is compiled where it

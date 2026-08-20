@@ -97,6 +97,60 @@ struct FrameSwapchainTests {
         #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage)
     }
 
+    @Test("a shift covering the viewport installs the barrier; a partial one does not")
+    func viewportWideShiftInstallsTheBarrier() throws {
+        // Intent: the whole-frame convergence barrier goes in exactly when the
+        //   published damage, with its shift folded in, covers every viewport row.
+        // Why it exists: a shift-carrying publish damages few rows outright, so a
+        //   rows-only reading of coverage would skip the barrier on every scroll and
+        //   leave a long-cold buffer able to surface pre-scroll setup later.
+        // Scenario: a settled swapchain takes a whole-viewport scroll (barrier), then
+        //   a DECSTBM region scroll that shifts only rows 2..<10 (no barrier).
+        let metrics = try metrics
+        var terminal = try #require(Terminal(columns: 40, rows: 12))
+        prefill(&terminal, rows: 12)
+        _ = terminal.drainDamage()
+        let swapchain = try #require(
+            BusyBox().makeSwapchain(columns: 40, rows: 12, metrics: metrics)
+        )
+
+        func settle() throws {
+            for _ in 0..<3 {
+                let plan = planFrame(for: terminal, presentation: blockCursor)
+                _ = try #require(swapchain.publish(plan: plan, damage: .none))
+            }
+        }
+        try settle()
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage)
+
+        terminal.feed(Array((line + "\r\n").utf8))
+        let scrolled = terminal.drainDamage()
+        #expect(scrolled.shift?.region == 0..<12)
+        #expect(scrolled.damagedRowCount < 12)
+        _ = try #require(swapchain.publish(
+            plan: planFrame(for: terminal, presentation: blockCursor),
+            damage: scrolled
+        ))
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage == false)
+        for _ in 0..<2 {
+            let plan = planFrame(for: terminal, presentation: blockCursor)
+            _ = try #require(swapchain.publish(plan: plan, damage: .none))
+        }
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage)
+
+        terminal.feed(Array("\u{1B}[3;10r\u{1B}[10;1H".utf8))
+        _ = terminal.drainDamage()
+        try settle()
+        terminal.feed(Array((line + "\r\n").utf8))
+        let regional = terminal.drainDamage()
+        #expect(regional.shift?.region == 2..<10)
+        _ = try #require(swapchain.publish(
+            plan: planFrame(for: terminal, presentation: blockCursor),
+            damage: regional
+        ))
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage)
+    }
+
     @Test("every presented buffer equals a from-scratch render across rotation")
     func rotationStaysByteIdentical() throws {
         // Intent: streaming publishes rotate the swapchain's buffers and every
