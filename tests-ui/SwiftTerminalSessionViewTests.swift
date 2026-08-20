@@ -1971,7 +1971,7 @@ func swiftTerminalSessionViewTests() {
             ],
             "a refused submission lost the reason it was refused: \(controller.completedResults)"
         )
-        try uiExpect(results == [.rejected, .rejected],
+        try uiExpect(results == [.rejected(.bufferLimitExceeded), .rejected(.launchFailed)],
                      "a refused submission did not reach the app as a rejection: \(results)")
         try uiExpect(controller.deliveredTextInputs.isEmpty,
                      "a refused submission was recorded as delivered: \(controller.deliveredTextInputs)")
