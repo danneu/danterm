@@ -14,7 +14,7 @@ public struct TerminalInputModes: Equatable, Sendable {
     public var applicationCursorKeys: Bool
     /// Selects SS3 keypad forms in legacy mode.
     public var applicationKeypad: Bool
-    /// Makes legacy Return emit CRLF instead of CR.
+    /// Makes every CR a legacy key emits carry a following LF.
     public var lineFeedNewLine: Bool
     /// Enables focus-in and focus-out reports.
     public var focusReporting: Bool
@@ -137,7 +137,24 @@ public func encodeTerminalKey(
     if modes.kittyKeyboardFlags != 0 {
         return encodeKittyKey(key, modifiers: modifiers)
     }
-    return encodeLegacyKey(key, modifiers: modifiers, modes: modes)
+    let bytes = encodeLegacyKey(key, modifiers: modifiers, modes: modes)
+    guard modes.lineFeedNewLine else { return bytes }
+    return lineFeedNewLineBytes(bytes)
+}
+
+/// Applies LNM (mode 20) as xterm does: as a rule over emitted bytes, not over key names.
+///
+/// xterm routes every legacy key's bytes through one output path that appends LF to each
+/// CR while LNM is set, so keypad Enter and Ctrl+M submit a line exactly like Return does.
+private func lineFeedNewLineBytes(_ bytes: [UInt8]) -> [UInt8] {
+    guard bytes.contains(0x0D) else { return bytes }
+    var result: [UInt8] = []
+    result.reserveCapacity(bytes.count + 1)
+    for byte in bytes {
+        result.append(byte)
+        if byte == 0x0D { result.append(0x0A) }
+    }
+    return result
 }
 
 /// Removes local-only modifier intent before any terminal protocol decision observes it.
@@ -317,17 +334,10 @@ private func encodeLegacyKey(
     switch key {
     case .returnKey:
         // Shift+Return is an explicit "insert a line feed" affordance, not the return
-        // key's newline semantics, so LNM does not apply to it: emitting CR LF would put
-        // a CR on the wire first and composers would submit. Programs that care about the
+        // key's newline semantics: it emits LF and no CR, so the LNM byte rule leaves it
+        // alone. Emitting a CR would make composers submit. Programs that care about the
         // distinction can negotiate the kitty protocol and get CSI 13;2u instead.
-        var bytes: [UInt8] =
-            if modifiers.contains(.shift) {
-                [0x0A]
-            } else if modes.lineFeedNewLine {
-                [0x0D, 0x0A]
-            } else {
-                [0x0D]
-            }
+        var bytes: [UInt8] = modifiers.contains(.shift) ? [0x0A] : [0x0D]
         if modifiers.contains(.alt) { bytes.insert(0x1B, at: 0) }
         return bytes
     case .tab:
@@ -451,10 +461,22 @@ private func encodeKittyKey(
          .keypad5, .keypad6, .keypad7, .keypad8, .keypad9,
          .keypadDecimal, .keypadDivide, .keypadMultiply, .keypadSubtract,
          .keypadAdd, .keypadEnter, .keypadEqual:
+        // A keypad key sends its legacy text only when that text is printable. Keypad
+        // Enter's text is CR, so sending it would be byte-identical to Return and defeat
+        // the disambiguation the flag was negotiated for; it sends its functional code.
         let (normal, _, functionalCode) = keypadEncoding(for: key)
-        guard modifiers.isEmpty == false else { return Array(normal.utf8) }
-        return csi("\(functionalCode);\(modifier)u")
+        if modifiers.isEmpty, isPrintableKeyText(normal) { return Array(normal.utf8) }
+        return csi(modifier == 1 ? "\(functionalCode)u" : "\(functionalCode);\(modifier)u")
     }
+}
+
+/// Decides whether a key's legacy text may stand in for its kitty functional code.
+///
+/// kitty drops the text of any key whose text begins with an ASCII control byte, so the
+/// enhanced protocol never re-sends a byte a legacy key already owns.
+private func isPrintableKeyText(_ text: String) -> Bool {
+    guard let first = text.unicodeScalars.first else { return false }
+    return first.value >= 0x20 && first.value != 0x7F
 }
 
 private func keypadEncoding(for key: TerminalInputKey) -> (String, Character, Int) {

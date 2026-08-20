@@ -124,6 +124,55 @@ struct TerminalKeyEncodingTests {
         }
     }
 
+    @Test("LNM adds LF after every CR a legacy key emits and changes nothing else")
+    func lnmFollowsEveryCarriageReturnWithLineFeed() {
+        // Intent: LNM is a rule about the bytes a legacy key emits, not about which
+        //   key was pressed. Every CR in the encoding gains an LF; bytes without CR
+        //   are identical with LNM on and off.
+        // Why it exists: LNM used to be read inside the Return case alone, so keypad
+        //   Enter and Ctrl+M sent a bare CR while Return sent CR LF. A line-oriented
+        //   program then hung on one Enter key and worked on the other.
+        // Scenario: a program sets mode 20 and reads lines; both Enter keys submit.
+        let rows: [(TerminalInputKey, TerminalKeyModifiers)] = [
+            (.tab, []), (.tab, [.alt]), (.escape, []), (.backspace, []),
+            (.up, []), (.f5, []),
+            (.character("a"), []), (.character("m"), [.control]),
+            (.returnKey, []), (.returnKey, [.alt]), (.returnKey, [.shift]),
+            (.keypadEnter, []), (.keypad5, []),
+        ]
+        for (key, modifiers) in rows {
+            let off = encodeTerminalKey(key, modifiers: modifiers, modes: .default)
+            let on = encodeTerminalKey(
+                key,
+                modifiers: modifiers,
+                modes: TerminalInputModes(lineFeedNewLine: true)
+            )
+            var expected: [UInt8] = []
+            for byte in off {
+                expected.append(byte)
+                if byte == 0x0D { expected.append(0x0A) }
+            }
+            #expect(on == expected)
+        }
+    }
+
+    @Test("under LNM keypad Enter matches Return in numeric mode and is untouched in application mode")
+    func lnmKeypadEnterMatchesReturn() {
+        let lnm = TerminalInputModes(lineFeedNewLine: true)
+        #expect(encodeTerminalKey(.keypadEnter, modifiers: [], modes: lnm) == [0x0D, 0x0A])
+        #expect(
+            encodeTerminalKey(.keypadEnter, modifiers: [], modes: lnm)
+                == encodeTerminalKey(.returnKey, modifiers: [], modes: lnm)
+        )
+        #expect(encodeTerminalKey(.character("M"), modifiers: [.control], modes: lnm) == [0x0D, 0x0A])
+
+        let applicationKeypadLNM = TerminalInputModes(applicationKeypad: true, lineFeedNewLine: true)
+        #expect(
+            encodeTerminalKey(.keypadEnter, modifiers: [], modes: applicationKeypadLNM)
+                == Array("\u{1B}OM".utf8)
+        )
+    }
+
     @Test("DECKPNM and DECKPAM cover the complete keypad table")
     func completeKeypadTable() {
         let cases: [(TerminalInputKey, String, Character)] = [
@@ -183,15 +232,46 @@ struct TerminalKeyEncodingTests {
         #expect(encodeTerminalKey(.up, modifiers: [.shift], modes: modes) == Array("\u{1B}[1;2A".utf8))
     }
 
+    @Test("Kitty flag 1 sends a keypad key's text only when that text is printable")
+    func kittyKeypadKeysWithControlTextUseFunctionalCodes() {
+        // Intent: under kitty flag 1 an unmodified keypad key sends its legacy text
+        //   only when the text is printable; keypad Enter, whose legacy text is CR,
+        //   sends its functional code instead.
+        // Why it exists: sending CR made keypad Enter byte-identical to Return, so a
+        //   program that negotiated disambiguation could not tell the two keys apart --
+        //   which is the whole point of the flag.
+        let quiet = TerminalInputModes(kittyKeyboardFlags: 1)
+        let legacyModesOn = TerminalInputModes(
+            applicationCursorKeys: true,
+            applicationKeypad: true,
+            lineFeedNewLine: true,
+            kittyKeyboardFlags: 1
+        )
+        for modes in [quiet, legacyModesOn] {
+            #expect(
+                encodeTerminalKey(.keypadEnter, modifiers: [], modes: modes)
+                    == Array("\u{1B}[57414u".utf8)
+            )
+            #expect(encodeTerminalKey(.keypad5, modifiers: [], modes: modes) == Array("5".utf8))
+        }
+        #expect(
+            encodeTerminalKey(.keypadEnter, modifiers: [.control], modes: quiet)
+                == Array("\u{1B}[57414;5u".utf8)
+        )
+        #expect(encodeTerminalKey(.returnKey, modifiers: [], modes: quiet) == [0x0D])
+    }
+
     @Test("Kitty flag 1 disambiguates modified keys and ignores application modes")
     func kittyFlagOneMatrix() {
         let modes = TerminalInputModes(
             applicationCursorKeys: true,
             applicationKeypad: true,
+            lineFeedNewLine: true,
             kittyKeyboardFlags: 1
         )
         let cases: [(TerminalInputKey, TerminalKeyModifiers, String)] = [
             (.escape, [], "\u{1B}[27u"),
+            (.returnKey, [], "\r"),
             (.returnKey, [.shift], "\u{1B}[13;2u"),
             (.tab, [.shift], "\u{1B}[9;2u"),
             (.backspace, [.control], "\u{1B}[127;5u"),
