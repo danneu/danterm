@@ -1090,7 +1090,7 @@ wave.
 - [ ] **[PERSIST-2](#persist-2)** (3x5, medium) Give the recovery directory one owner: a RecoveryPaths value threaded from launch
 - [x] **[PERSIST-6](#persist-6)** (3x5, medium) Publish the pane-tape record shape once in DanTermProtocol instead of writing keys on both sides -- `9967905a..b0ef4e7a`
 - [ ] **[RUNTIME-2](#runtime-2)** (3x5, medium) Give the theme browser a model slot so `reconcileThemeBrowser` owns its existence **[decide first](#decisions-to-make-first)**
-- [ ] **[UNI-1](#uni-1)** (3x5, medium) Store the packed scalar record as a palette index over 29 decoded entries, not a 16-bit bitfield
+- [x] **[UNI-1](#uni-1)** (3x5, medium) Store the packed scalar record as a palette index over 29 decoded entries, not a 16-bit bitfield -- `bd0e1c0b`
 - [ ] **[FRAME-1](#frame-1)** (3x5, large) Publish the frame plan row-indexed so a row copy and a clip stop scanning the whole viewport **[decide first](#decisions-to-make-first)**
 - [x] **[INTERACT-2](#interact-2)** (3x4, medium) Carry the normalized `TerminalViewportCell` into `TerminalPointerEvent` and decide link cancellation inside the policy **[decide first](#decisions-to-make-first)** -- `f6d6435f..c854be73`
 - [ ] **[RUNTIME-3](#runtime-3)** (3x4, medium) Stop opening nested modal run loops from inside an open send frame **[decide first](#decisions-to-make-first)**
