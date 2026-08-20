@@ -808,13 +808,6 @@ func update(
 
     // MARK: - Alerts
 
-    case .markAlertRead(let alertId):
-        // Marking the alert read updates the tab/group bell badges via reconcileSidebar.
-        if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
-            model.alerts[idx].isUnread = false
-        }
-        return []
-
     case .markAllAlertsRead:
         for i in model.alerts.indices { model.alerts[i].isUnread = false }
         return []   // bell badges reconcile via reconcileSidebar

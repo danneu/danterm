@@ -138,7 +138,6 @@ enum Msg {
     case launchInputCompleted(sessionId: SessionId, result: InputSubmissionResult)
 
     // Alerts
-    case markAlertRead(alertId: AlertId)
     case markAllAlertsRead
     case toggleAlertsPopover
     case alertsPopoverClosed

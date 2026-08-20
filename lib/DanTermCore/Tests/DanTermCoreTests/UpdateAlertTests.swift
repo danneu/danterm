@@ -1,6 +1,6 @@
 // Swift Testing migration of the legacy `tests/UpdateAlertTests.swift`
-// harness suite. Pins the alert-domain Msg paths: markAlertRead /
-// markAllAlertsRead, activateAlert (selection + focus + popover dismiss,
+// harness suite. Pins the alert-domain Msg paths: markAllAlertsRead,
+// activateAlert (selection + focus + popover dismiss,
 // stale-pane fail-closed, zoom clear), the alert-history cap, focus-mode
 // auto-clear vs manual mode, throttle isolation per pane per kind, alert +
 // throttle cleanup on closePane / closeTab / sessionCreationFailed,
@@ -37,46 +37,6 @@ import Testing
         _ = update(&model, .activateAlert(alertId: AlertId()))
         #expect(model.alertsPopoverOpen == false)
         #expect(update(&model, .alertsPopoverClosed).isEmpty)
-    }
-
-    @Test("testMarkAlertRead")
-    func testMarkAlertRead() {
-        // Intent: markAlertRead flips isUnread on the targeted alert.
-        // Why it exists: pins the bare mark-read mutation.
-        // Scenario: spec-first mark read.
-        var model = makeModel()
-        createTab(&model)
-        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
-
-        let alertId = AlertId()
-        model.alerts.insert(AlertModel(
-            id: alertId, kind: .bell, paneId: paneId,
-            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
-        ), at: 0)
-
-        update(&model, .markAlertRead(alertId: alertId))
-        #expect(model.alerts[0].isUnread == false)
-    }
-
-    @Test("testMarkAlertReadForStalePaneSkipsSidebarUpdate")
-    func testMarkAlertReadForStalePaneSkipsSidebarUpdate() {
-        // Intent: marking a stale-pane alert read still works but emits
-        //   no commands (badges reconcile from the model).
-        // Why it exists: pins the no-side-effect path for stale pane ids.
-        // Scenario: spec-first stale-pane mark.
-        var model = makeModel()
-        createTab(&model)
-        let stalePaneId = PaneId()
-
-        let alertId = AlertId()
-        model.alerts.insert(AlertModel(
-            id: alertId, kind: .bell, paneId: stalePaneId,
-            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
-        ), at: 0)
-
-        let commands = update(&model, .markAlertRead(alertId: alertId))
-        #expect(model.alerts[0].isUnread == false)
-        #expect(commands.isEmpty, "stale alert marks read but emits no commands (badges reconcile)")
     }
 
     @Test("testMarkAllAlertsRead")
