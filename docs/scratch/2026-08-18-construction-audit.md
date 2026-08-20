@@ -174,7 +174,7 @@ references are the requirement.
 | 3 | [BUG-20](#bug-20) | IRM on (CSI 4 h) followed by a double-width  | unpinned | Stop insert mode from erasing the wrap spacer a wide character just wrote |
 | 3 | [BUG-21](#bug-21) | CSI 0 K (EL 0) at column 0 of row 0, and CSI | unpinned | Sever history's incoming wrap claim for every erase that blanks all of row 0, not just ED |
 | 2 | [BUG-22](#bug-22) | ESC Z (DECID, obsolete form of CSI c / DA1) | unpinned | Reply to ESC Z (DECID) with the primary device attributes string |
-| 2 | [BUG-23](#bug-23) | Legacy Escape key with the Alt modifier | unpinned | Prefix Alt+Escape with ESC in legacy mode |
+| 2 | [BUG-23](#bug-23) | Legacy Escape key with the Alt modifier | **done** `9440fa34` | Prefix Alt+Escape with ESC in legacy mode |
 | 2 | [BUG-24](#bug-24) | ESC H (HTS) and CSI Ps g (TBC) | unpinned | Stop HTS and TBC from cancelling the pending-wrap flag |
 | 2 | [BUG-25](#bug-25) | CSI ? 2027 $ p (DECRQM for the grapheme-clus | unpinned | Report DECRQM ?2027 as permanently set instead of unrecognized |
 | 2 | [BUG-26](#bug-26) | A C1 control as a UTF-8 code point, e.g. U+0 | unpinned | Stop printing a cell for C1 code points decoded from UTF-8 |
@@ -772,6 +772,10 @@ either. Truncation is DanTerm's own policy, argued in the commit's plan.
 ### BUG-23. Prefix Alt+Escape with ESC in legacy mode
 
 `Legacy Escape key with the Alt modifier` &middot; severity 2 (pedantic but real) &middot; hunter confidence 5
+
+**Done** in `9440fa34`. The legacy encoder now applies the Meta ESC prefix
+at one site for the whole Alt-prefixable key family, so Alt+Escape sends
+ESC ESC, and a test pins it apart from plain Escape.
 
 **Problem.** `encodeLegacyKey` returns a bare `[0x1B]` for `.escape` and never looks at the modifier set, so the Alt (Meta) ESC prefix that every other key in the same function applies is skipped for this one key. Alt+Escape is therefore indistinguishable from Escape.
 
