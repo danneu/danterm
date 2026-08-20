@@ -19,6 +19,7 @@ func update(
     // reconcileTabState now decides once for all of them.
     defer {
         reconcileTabState(&model)
+        reconcileFocusedPaneAlerts(&model)
         reconcileTodoPopover(&model)
         reconcilePendingConfirmation(&model, env: env)
         reconcileSidebarRenameTarget(&model)
@@ -319,11 +320,6 @@ func update(
         }
         if let sgid = sourceGroupId { removeGroupIfEmpty(sgid, from: &model) }
 
-        // Mark alerts read for the moved pane (focus mode only)
-        if model.config.alertClearMode == .focus {
-            markAlertsReadForPane(paneId, in: &model)
-        }
-
         // Build commands: defocus old tab's panes, then select + focus the target tab.
         var commands: [Command] = []
         if let oldTabId = model.selectedTabId {
@@ -386,10 +382,6 @@ func update(
             let clamped = max(0, min(atIndex, model.groups[dstGroupIdx].tabs.count))
             model.groups[dstGroupIdx].tabs.insert(newTab, at: clamped)
             model.selectedTabId = newTab.id
-        }
-
-        if model.config.alertClearMode == .focus {
-            markAlertsReadForPane(paneId, in: &model)
         }
 
         return commands
@@ -515,9 +507,6 @@ func update(
             side: side
         ) else { return [] }
 
-        if model.config.alertClearMode == .focus {
-            markAlertsReadForPane(target, in: &model)
-        }
         updateSelectedTab(&model) { $0.paneTree.focus(target) }
         return []
 
@@ -528,9 +517,6 @@ func update(
         // corrupt this tab's focusedPaneId or clear the foreign pane's alerts.
         guard allPaneIds(tab.paneTree.root).contains(paneId) else { return [] }
         if paneId != tab.paneTree.focusedPaneId {
-            if model.config.alertClearMode == .focus {
-                markAlertsReadForPane(paneId, in: &model)
-            }
             updateSelectedTab(&model) { $0.paneTree.focus(paneId) }
         }
         model.searchState[paneId]?.focusOwner = .terminal
@@ -549,9 +535,6 @@ func update(
               allPaneIds(tab.paneTree.root).contains(paneId),
               model.searchState[paneId] != nil else { return [] }
         if paneId != tab.paneTree.focusedPaneId {
-            if model.config.alertClearMode == .focus {
-                markAlertsReadForPane(paneId, in: &model)
-            }
             updateSelectedTab(&model) { $0.paneTree.focus(paneId) }
         }
         model.searchState[paneId]?.focusOwner = .field
@@ -804,10 +787,6 @@ func update(
 
     case .appBecameActive:
         model.isAppActive = true
-        if model.config.alertClearMode == .focus,
-           let focusedPaneId = selectedTab(in: model)?.paneTree.focusedPaneId {
-            markAlertsReadForPane(focusedPaneId, in: &model)
-        }
         return []
 
     case .appResignedActive:
@@ -1111,14 +1090,6 @@ func update(
             return []
         }
         guard case .split = tab.paneTree.root else { return [] }
-        // The zoom moves focus, so it clears alerts on the same terms a focus
-        // move does -- and only in the selected tab, where the pane actually
-        // becomes visible.
-        if tab.id == model.selectedTabId,
-           target != tab.paneTree.focusedPaneId,
-           model.config.alertClearMode == .focus {
-            markAlertsReadForPane(target, in: &model)
-        }
         updateTab(tab.id, in: &model) { $0.paneTree.zoom(target) }
         return []
 
@@ -1682,10 +1653,6 @@ private func closePaneBody(
         model.todoPopover = nil
     }
 
-    if removal.focusMoved, model.config.alertClearMode == .focus,
-       tab.id == model.selectedTabId {
-        markAlertsReadForPane(paneTree.focusedPaneId, in: &model)
-    }
     updateTab(tab.id, in: &model) { tab in
         tab.paneTree = paneTree
     }
@@ -1722,9 +1689,6 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Command] {
         }
     }
     model.selectedTabId = id
-    if model.config.alertClearMode == .focus, let tab = selectedTab(in: model) {
-        markAlertsReadForPane(tab.paneTree.focusedPaneId, in: &model)
-    }
     // Selection is view-owned: reconcileSidebar reapplies it (replacing the deleted
     // .setSidebarSelection), and any cleared-alert bell badges update from the projection.
     // The selected tab's window chrome reconciles via reconcileWindowChrome.
@@ -1829,13 +1793,9 @@ func navigateToPane(
     guard let currentTab = tabForPane(paneId, in: model) else { return [] }
     let wasZoomed = currentTab.paneTree.isZoomed
     let oldFocusedPaneId = currentTab.paneTree.focusedPaneId
-    let focusChanged = paneId != oldFocusedPaneId
     let commands = update(&model, .selectTab(id: currentTab.id), env: env)
     updateTab(currentTab.id, in: &model) { tab in
         tab.paneTree.focus(paneId)
-    }
-    if focusChanged && model.config.alertClearMode == .focus {
-        markAlertsReadForPane(paneId, in: &model)
     }
     if wasZoomed, paneId != oldFocusedPaneId {
         updateSelectedTab(&model) { $0.paneTree.unzoom() }
@@ -1877,6 +1837,14 @@ private func markAlertsReadForPane(_ paneId: PaneId, in model: inout AppModel) -
         changed = true
     }
     return changed
+}
+
+/// Keeps the visible focused pane free of unread alerts under focus clear mode.
+private func reconcileFocusedPaneAlerts(_ model: inout AppModel) {
+    guard model.config.alertClearMode == .focus,
+          model.isAppActive,
+          let paneId = selectedTab(in: model)?.paneTree.focusedPaneId else { return }
+    markAlertsReadForPane(paneId, in: &model)
 }
 
 private func unreadAlertPaneIds(for paneIds: [PaneId], in model: AppModel) -> [PaneId] {

@@ -359,6 +359,7 @@ import Testing
         // Scenario: spec-first. One pane holds focus, an unread alert, and search
         //   state the terminal owns; the report names that same pane.
         var model = makeModel()
+        model.config.alertClearMode = .manual
         createTab(&model)
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.searchState[paneId] = SearchModel(needle: "hit", focusOwner: .terminal)
@@ -1210,6 +1211,30 @@ import Testing
         let callbackEffects = update(&model, .paneBecameFirstResponder(paneId: leftPaneId))
         #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == leftPaneId)
         #expect(callbackEffects.isEmpty)
+    }
+
+    @Test("focusDirection clears the target pane's alert in focus mode")
+    func focusDirectionClearsTargetPaneAlertInFocusMode() {
+        // Intent: directional focus marks the pane it reveals as read in focus
+        //   alert-clear mode.
+        // Why it exists: the shared reconcile pass replaces the directional
+        //   focus arm's route-specific alert handling.
+        // Scenario: spec-first -- the right pane holds focus and the left pane
+        //   has an unread alert before focus moves left.
+        var model = makeModel()
+        model.config.alertClearMode = .focus
+        createTab(&model)
+        let leftPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        update(&model, .splitFocusedPane(direction: .horizontal))
+        model.alerts = [AlertModel(
+            id: AlertId(), kind: .bell, paneId: leftPaneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        )]
+
+        update(&model, .focusDirection(direction: .horizontal, side: .first))
+
+        #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == leftPaneId)
+        #expect(model.alerts[0].isUnread == false)
     }
 
     @Test("testMovePaneSwapUpdatesVisibleTabChrome")

@@ -122,6 +122,37 @@ import Testing
         #expect(focusedAlert?.isUnread == false, "focused pane alert should be marked read")
     }
 
+    @Test("inactive focus changes preserve alerts until the app becomes active")
+    func inactiveFocusChangePreservesAlertUntilAppBecomesActive() {
+        // Intent: focus-mode reconciliation waits until the selected pane is
+        //   visible before it marks that pane's alerts read.
+        // Why it exists: the shared reconcile pass must not erase an alert
+        //   while DanTerm is inactive, including after a background focus move.
+        // Scenario: REDUCE-3 -- tab A has an unread alert, background work
+        //   selects it, and foregrounding DanTerm then acknowledges the alert.
+        var model = makeModel()
+        model.config.alertClearMode = .focus
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        let paneAId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        createTab(&model)
+        model.alerts = [AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneAId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        )]
+        model.isAppActive = false
+
+        update(&model, .selectTab(id: tabAId))
+
+        #expect(model.alerts[0].isUnread == true,
+                "a focus change while inactive must preserve the alert")
+
+        update(&model, .appBecameActive)
+
+        #expect(model.alerts[0].isUnread == false,
+                "foregrounding makes the focused pane visible and clears its alert")
+    }
+
     @Test("testActivateAlert")
     func testActivateAlert() {
         // Intent: activateAlert selects the alert's tab, marks the alert

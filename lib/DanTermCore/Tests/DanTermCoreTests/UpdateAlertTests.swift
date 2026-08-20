@@ -1127,6 +1127,7 @@ import Testing
         // Why it exists: pins the per-tab explicit clear.
         // Scenario: spec-first per-tab clear.
         var model = makeModel()
+        model.config.alertClearMode = .manual
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
         let tab1Pane = model.groups[0].tabs[0].paneTree.focusedPaneId
@@ -1233,6 +1234,7 @@ import Testing
         // Why it exists: pins the batch context-menu path.
         // Scenario: spec-first batch clear.
         var model = makeModel()
+        model.config.alertClearMode = .manual
         createTab(&model)
         createTab(&model)
         createTab(&model)
@@ -1310,6 +1312,7 @@ import Testing
         // Why it exists: pins the stale-id fail-closed.
         // Scenario: spec-first batch stale.
         var model = makeModel()
+        model.config.alertClearMode = .manual
         createTab(&model)
         let pane = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.alerts.insert(AlertModel(

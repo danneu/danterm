@@ -1286,6 +1286,35 @@ import Testing
         #expect(model.groups[0].tabs.count == 1)
     }
 
+    @Test("closing the selected tab clears the fallback pane's alert in focus mode")
+    func closeSelectedTabClearsFallbackPaneAlertInFocusMode() {
+        // Intent: closing the selected tab in focus mode marks the fallback
+        //   tab's focused-pane alert read.
+        // Why it exists: closeTabRemoval assigned the fallback selection
+        //   directly, so this route could leave the now-visible pane badged.
+        // Scenario: REDUCE-3 -- tab A has an unread focused-pane alert, tab B
+        //   is selected, and closing tab B returns focus to tab A.
+        var model = makeModel()
+        model.config.alertClearMode = .focus
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        let paneAId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        createTab(&model)
+        let tabBId = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: tabAId))
+        model.alerts = [AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneAId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        )]
+
+        update(&model, .selectTab(id: tabBId))
+        update(&model, .closeTab(id: tabBId))
+
+        #expect(model.selectedTabId == tabAId)
+        #expect(model.alerts[0].isUnread == false,
+                "the fallback pane is now visible, so its alert must be read")
+    }
+
     @Test("testCloseTabCrossGroupSelectsPrevious")
     func testCloseTabCrossGroupSelectsPrevious() {
         // Intent: closing the only tab in its group prunes that group and
