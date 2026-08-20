@@ -212,7 +212,7 @@ search-needle arms, the three timer arm sites and their cancel sites),
 ## Commit progress
 
 - [x] 1. refactor(runtime): give each scheduled timer one census-owned owner
-- [ ] 2. refactor(runtime): put the event monitor and the IPC server in owners
+- [x] 2. refactor(runtime): put the event monitor and the IPC server in owners
 - [ ] 3. refactor(pane): own the search debounce timer through the census
 
 ## Implementation notes
@@ -231,3 +231,12 @@ search-needle arms, the three timer arm sites and their cancel sites),
   checkout, `man/dispatch_source_create.3`), so dropping the last reference
   to a resumed timer that already fired is safe. The old code cancelled it from
   inside its own event handler.
+- The owner gained a read-only `handle` accessor in commit 2. The three timers
+  never needed one, but the IPC server does: `ipcSocketPath` and
+  `startIpcServer()` both talk to the live server mid-arm. Reading it through
+  the owner is what keeps the runtime from holding a second reference that
+  could outlive the arm.
+- `installSwitcherEventMonitor()` keeps its `schedulingLifecycle.isActive`
+  guard even though the owner now fails closed on its own (I3). The guard is
+  the cheaper answer: it never installs a monitor that would be removed one
+  line later.

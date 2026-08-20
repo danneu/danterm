@@ -33,6 +33,42 @@ struct IpcServerOwnershipTests {
         #expect(canConnectToIpcServer(at: fixture.socketURL) == false)
     }
 
+    @Test("application services arm one census entry each and retire on the calls that end them")
+    func applicationServicesCensus() throws {
+        // Intent: the switcher monitor and the IPC server are each one census entry, and
+        //   the calls that end them -- stopIpcServer, shutdown -- take those entries away
+        //   along with the native registration behind them.
+        // Why it exists: the census is the only window a test has onto runtime ownership,
+        //   so a handle that outlived its entry would otherwise be invisible.
+        // Scenario: a runtime starts application services, the caller stops IPC while the
+        //   runtime keeps running, and later shuts the whole runtime down.
+        let fixture = TemporaryInstancePaths()
+        defer { fixture.remove() }
+        let runtime = AppRuntime(
+            ports: RecordingAppRuntimePorts().value,
+            dialogSurfaces: RecordingDialogSurfaces().value,
+            instancePaths: fixture.paths,
+            configStore: DanTermConfigStore(url: fixture.absentConfigURL),
+            startsApplicationServices: true
+        )
+        defer { runtime.shutdown() }
+
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.ipcServer] == 1)
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.eventMonitor] == 1)
+        #expect(canConnectToIpcServer(at: fixture.socketURL))
+
+        runtime.stopIpcServer()
+
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.ipcServer] == nil)
+        #expect(runtime.ipcSocketPath == nil)
+        #expect(canConnectToIpcServer(at: fixture.socketURL) == false)
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.eventMonitor] == 1)
+
+        runtime.shutdown()
+
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus().isEmpty)
+    }
+
     @Test("runtime accepts IPC only after launch bootstrap completes")
     func runtimeDefersAcceptanceUntilExplicitStart() async throws {
         // Intent: runtime construction claims the socket, but request handling starts only

@@ -132,6 +132,11 @@ final class AppRuntimeScheduledOwner<Handle> {
     /// which is why guards read it instead of testing a separate handle field for nil.
     var isArmed: Bool { current != nil }
 
+    /// The live handle, or nil while unarmed. A caller that has to talk to the resource
+    /// mid-arm -- read a listening socket's path, start its accept loop -- reads it here,
+    /// so no second field can hold a handle the census has already retired.
+    var handle: Handle? { current?.handle }
+
     /// Retires any previous arm, then builds one handle and registers it. `build` receives
     /// the fire gate for the arm it is building, which the handle's own callback must call.
     /// A lifecycle that has shut down refuses the registration, and the offered handle is

@@ -140,8 +140,12 @@ class AppRuntime {
     // cross-file reconcile extension drives them. Given rather than found, so a
     // runtime handed surfaces that present nothing cannot reach the screen.
     let dialogSurfaces: DialogSurfaces
-    private var switcherEventMonitor: Any?
-    private var switcherEventMonitorToken: AppRuntimeSchedulingToken?
+    // One owned local NSEvent monitor. `Any` is the type AppKit hands back for a monitor.
+    private lazy var switcherEventMonitor = AppRuntimeScheduledOwner<Any>(
+        lifecycle: schedulingLifecycle,
+        category: .eventMonitor,
+        retire: { NSEvent.removeMonitor($0) }
+    )
     private var dragCoordinator: PaneDragCoordinator?
     // Session persistence uses two tiers of checkpoints:
     //   Light  -- model-owned recovery state (no scrollback), written in a fixed
@@ -183,8 +187,14 @@ class AppRuntime {
     // handed. A bootstrap reply must not advance it, or a change a pending sweep still
     // owes the existing subscribers would be swallowed by a newcomer's reply.
     private var rosterBaseline = PaneRoster(panes: [])
-    private var ipcServer: IpcServer?
-    private var ipcServerToken: AppRuntimeSchedulingToken?
+    // One owned IPC server; retiring it closes the control socket.
+    private lazy var ipcServer = AppRuntimeScheduledOwner<IpcServer>(
+        lifecycle: schedulingLifecycle,
+        category: .ipcServer,
+        retire: { $0.stop() }
+    )
+    // A token with no handle of its own: it gates the single deferred start callback, and
+    // the server that callback starts belongs to the owner above.
     private var ipcServerStartToken: AppRuntimeSchedulingToken?
     // Recovery data stays inert until the projected launch notice resolves to Restore.
     private var pendingLaunchRestore: ValidatedAppRestore?
@@ -267,17 +277,13 @@ class AppRuntime {
                     auditWriter: IpcAuditLogWriter(directory: instancePaths.ipcAuditDirectory),
                     runtimeDispatch: makeIpcDispatch()
                 )
-                self.ipcServer = server
+                self.ipcServer.arm { _ in server }
                 // Assigned rather than sent, like the config above: the Elm loop is not
                 // running yet, and a preferences pane opened before the first transition
                 // must not read a default as if it were this instance's verdict.
                 self.model.tailnetStatus = server.initialTailnetStatus
-                self.ipcServerToken = schedulingLifecycle.arm(.ipcServer) {
-                    server.stop()
-                }
                 self.ipcServerStartToken = schedulingLifecycle.arm(.deferredCallback, cancel: {})
             } catch {
-                self.ipcServer = nil
                 print("Failed to start DanTerm IPC server: \(error)")
             }
         }
@@ -375,10 +381,7 @@ class AppRuntime {
             matching: [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown],
             handler: eventHandler
         ) else { return }
-        switcherEventMonitor = monitor
-        switcherEventMonitorToken = schedulingLifecycle.arm(.eventMonitor) {
-            NSEvent.removeMonitor(monitor)
-        }
+        switcherEventMonitor.arm { _ in monitor }
     }
 
     private func normalizedSwitcherModifiers(from event: NSEvent) -> SwitcherModifiers {
@@ -579,12 +582,12 @@ class AppRuntime {
     }
 
     var ipcSocketPath: URL? {
-        ipcServer?.socketPath
+        ipcServer.handle?.socketPath
     }
 
     /// Starts request acceptance after the launch bootstrap branch has resolved.
     func startIpcServer() {
-        guard let server = ipcServer, let startToken = ipcServerStartToken else { return }
+        guard let server = ipcServer.handle, let startToken = ipcServerStartToken else { return }
         ipcServerStartToken = nil
         Task { [weak self, weak server] in
             guard let self, let server else { return }
@@ -651,9 +654,7 @@ class AppRuntime {
     func stopIpcServer() {
         schedulingLifecycle.cancel(ipcServerStartToken)
         ipcServerStartToken = nil
-        schedulingLifecycle.cancel(ipcServerToken)
-        ipcServerToken = nil
-        ipcServer = nil
+        ipcServer.cancel()
     }
 
     /// Transfers one pending IPC request out of the shutdown census before replying.
@@ -692,14 +693,10 @@ class AppRuntime {
             host.session.onPrimaryHistoryMutation = nil
         }
 
-        // Pane-owned scheduling -- each record's session subscription and its armed search
-        // debounce -- is registered in the census, so this one walk retires it.
+        // Every armed owner is registered in the census -- the runtime's timers, its event
+        // monitor and its IPC server, and each pane record's session subscription and armed
+        // search debounce -- so this one walk retires all of them.
         schedulingLifecycle.shutdown()
-
-        switcherEventMonitor = nil
-        switcherEventMonitorToken = nil
-        ipcServer = nil
-        ipcServerToken = nil
     }
 
     // MARK: - Command Performer
