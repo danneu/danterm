@@ -123,11 +123,7 @@ func hasEffect(_ commands: [Command], _ check: (Command) -> Bool) -> Bool {
 func pendingAppConfirmation() -> PendingConfirmation {
     PendingConfirmation(
         id: ConfirmationId(),
-        subject: .app,
-        tabTitle: nil,
-        impact: nil,
-        deleteGroup: nil,
-        quitAuthorized: false
+        kind: .quit
     )
 }
 
@@ -139,20 +135,94 @@ func pendingCloseConfirmation(
     guard let impact = closeImpact(for: subject, in: model) else {
         preconditionFailure("close-confirmation test subject must be live")
     }
-    let tabTitle: DisplayLine?
-    if case .tab(let tabId) = subject, let tab = tabById(tabId, in: model) {
-        tabTitle = DisplayLine(tabDisplayTitle(tab))
-    } else {
-        tabTitle = nil
+    let kind: ConfirmationKind
+    switch subject {
+    case .pane(let paneId):
+        kind = .closePane(paneId: paneId, impact: impact, quitAuthorized: quitAuthorized)
+    case .tab(let tabId):
+        guard let tab = tabById(tabId, in: model) else {
+            preconditionFailure("close-confirmation test tab must be live")
+        }
+        kind = .closeTab(
+            tabId: tabId,
+            title: DisplayLine(tabDisplayTitle(tab)),
+            impact: impact,
+            quitAuthorized: quitAuthorized
+        )
+    case .tabs(let tabIds):
+        kind = .closeTabs(tabIds: tabIds, impact: impact, quitAuthorized: quitAuthorized)
     }
     return PendingConfirmation(
         id: ConfirmationId(),
-        subject: subject,
-        tabTitle: tabTitle,
-        impact: impact,
-        deleteGroup: nil,
-        quitAuthorized: quitAuthorized
+        kind: kind
     )
+}
+
+enum TestConfirmationKind: Equatable {
+    case pane(PaneId)
+    case tab(TabId)
+    case tabs([TabId])
+    case deleteGroup(GroupId)
+    case app
+}
+
+func testConfirmationKind(_ pending: PendingConfirmation?) -> TestConfirmationKind? {
+    guard let pending else { return nil }
+    switch pending.kind {
+    case .quit:
+        return .app
+    case .closePane(let paneId, _, _):
+        return .pane(paneId)
+    case .closeTab(let tabId, _, _, _):
+        return .tab(tabId)
+    case .closeTabs(let tabIds, _, _):
+        return .tabs(tabIds)
+    case .deleteGroup(let groupId, _):
+        return .deleteGroup(groupId)
+    }
+}
+
+func pendingCloseImpact(_ pending: PendingConfirmation?) -> CloseImpact? {
+    guard let pending else { return nil }
+    switch pending.kind {
+    case .closePane(_, let impact, _),
+         .closeTab(_, _, let impact, _),
+         .closeTabs(_, let impact, _):
+        return impact
+    case .quit, .deleteGroup:
+        return nil
+    }
+}
+
+func pendingCloseSubject(_ pending: PendingConfirmation?) -> ConfirmationSubject? {
+    guard let pending else { return nil }
+    switch pending.kind {
+    case .closePane(let paneId, _, _):
+        return .pane(paneId)
+    case .closeTab(let tabId, _, _, _):
+        return .tab(tabId)
+    case .closeTabs(let tabIds, _, _):
+        return .tabs(tabIds)
+    case .quit, .deleteGroup:
+        return nil
+    }
+}
+
+func pendingQuitAuthorized(_ pending: PendingConfirmation?) -> Bool? {
+    guard let pending else { return nil }
+    switch pending.kind {
+    case .closePane(_, _, let authorized),
+         .closeTab(_, _, _, let authorized),
+         .closeTabs(_, _, let authorized):
+        return authorized
+    case .quit, .deleteGroup:
+        return nil
+    }
+}
+
+func pendingDeleteGroup(_ pending: PendingConfirmation?) -> DeleteGroupConfirmation? {
+    guard let pending, case .deleteGroup(_, let confirmation) = pending.kind else { return nil }
+    return confirmation
 }
 
 @discardableResult
@@ -161,7 +231,7 @@ func confirmPending(_ model: inout AppModel) -> [Command] {
         Issue.record("expected a pending confirmation")
         return []
     }
-    return update(&model, .confirmConfirmation(id: id))
+    return update(&model, .answerConfirmation(id: id, answer: .confirm))
 }
 
 @discardableResult
@@ -170,7 +240,7 @@ func cancelPending(_ model: inout AppModel) -> [Command] {
         Issue.record("expected a pending confirmation")
         return []
     }
-    return update(&model, .cancelConfirmation(id: id))
+    return update(&model, .answerConfirmation(id: id, answer: .cancel))
 }
 
 func sessionId(for paneId: PaneId, in model: AppModel) -> SessionId {

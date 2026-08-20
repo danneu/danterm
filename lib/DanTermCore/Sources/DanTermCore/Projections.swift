@@ -1164,8 +1164,8 @@ private let confirmationCancelChoice = ConfirmationChoice(title: "Cancel", answe
 /// Projects the single pending transaction into the shared non-modal panel.
 func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
   guard let pending = model.pendingConfirmation else { return nil }
-  switch pending.subject {
-  case .app:
+  switch pending.kind {
+  case .quit:
     let paneCount = model.allPaneIds.count
     let sessions = paneCount == 1 ? "1 terminal session" : "\(paneCount) terminal sessions"
     return ConfirmationProjection(
@@ -1179,12 +1179,11 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       confirm: ConfirmationChoice(title: "Quit", answer: .confirm, isDestructive: true),
       cancel: confirmationCancelChoice
     )
-  case .pane:
-    guard let impact = pending.impact else { return nil }
+  case .closePane(let paneId, let impact, let quitAuthorized):
     let copy = closeConfirmationCopy(
-      subject: pending.subject,
+      subject: .pane(paneId),
       impact: impact,
-      quitAuthorized: pending.quitAuthorized
+      quitAuthorized: quitAuthorized
     )
     return ConfirmationProjection(
       id: pending.id,
@@ -1194,15 +1193,12 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       confirm: ConfirmationChoice(title: "Close Pane", answer: .confirm, isDestructive: true),
       cancel: confirmationCancelChoice
     )
-  case .tab(let tabId):
-    guard tabById(tabId, in: model) != nil,
-          let tabTitle = pending.tabTitle,
-          let impact = pending.impact
-    else { return nil }
+  case .closeTab(let tabId, let tabTitle, let impact, let quitAuthorized):
+    guard tabById(tabId, in: model) != nil else { return nil }
     let copy = closeConfirmationCopy(
-      subject: pending.subject,
+      subject: .tab(tabId),
       impact: impact,
-      quitAuthorized: pending.quitAuthorized
+      quitAuthorized: quitAuthorized
     )
     return ConfirmationProjection(
       id: pending.id,
@@ -1212,17 +1208,16 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       confirm: ConfirmationChoice(title: "Close Tab", answer: .confirm, isDestructive: true),
       cancel: confirmationCancelChoice
     )
-  case .tabs(let tabIds):
-    guard let impact = pending.impact else { return nil }
+  case .closeTabs(let tabIds, let impact, let quitAuthorized):
     let copy = closeConfirmationCopy(
-      subject: pending.subject,
+      subject: .tabs(tabIds),
       impact: impact,
-      quitAuthorized: pending.quitAuthorized
+      quitAuthorized: quitAuthorized
     )
     let tabCount = tabIds.count
     return ConfirmationProjection(
       id: pending.id,
-      title: DisplayLine(pending.quitAuthorized
+      title: DisplayLine(quitAuthorized
         ? "Close \(tabCount) tabs and quit DanTerm?"
         : "Close \(tabCount) tabs?"),
       informativeText: copy.informativeText,
@@ -1231,9 +1226,8 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
         title: DisplayLine("Close \(tabCount) Tabs"), answer: .confirm, isDestructive: true),
       cancel: confirmationCancelChoice
     )
-  case .deleteGroup(let groupId):
-    guard let frozen = pending.deleteGroup,
-          let group = model.groups.first(where: { $0.id == groupId }),
+  case .deleteGroup(let groupId, let frozen):
+    guard let group = model.groups.first(where: { $0.id == groupId }),
           let destination = model.groups.first(where: {
             $0.id == frozen.destinationGroupId
           })

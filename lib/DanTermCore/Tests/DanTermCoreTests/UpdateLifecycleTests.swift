@@ -3,10 +3,9 @@
 // appResignedActive (isAppActive flag, alert auto-clear in focus mode,
 // manual mode preservation), activateAlert (tab + focus navigation, zoom
 // clear / preserve, stale-pane handling, popover dismissal), the quit
-// confirmation cycle (requestQuit -> confirmConfirmation / cancelConfirmation),
-// the close-tab(s) confirmation response shims, and the no-op guards while
-// either confirmation is pending. The terminate command and unified response
-// message pattern matches inside `commands[0]` convert to
+// confirmation cycle (requestQuit -> answerConfirmation), and the no-op guards
+// while either confirmation is pending. The terminate command pattern matches
+// inside `commands[0]` convert to
 // `Issue.record + return` to preserve the per-file failure-site count.
 import Foundation
 import Testing
@@ -286,7 +285,7 @@ import Testing
         createTab(&model)
         let commands = update(&model, .requestQuit)
         #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
-        #expect(model.pendingConfirmation?.subject == .app, "quit confirmation should be pending")
+        #expect(testConfirmationKind(model.pendingConfirmation) == .app, "quit confirmation should be pending")
     }
 
     @Test("testRequestQuitWithMultiplePanes")
@@ -301,7 +300,7 @@ import Testing
         createTab(&model)
         let commands = update(&model, .requestQuit)
         #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
-        #expect(model.pendingConfirmation?.subject == .app, "quit confirmation should be pending")
+        #expect(testConfirmationKind(model.pendingConfirmation) == .app, "quit confirmation should be pending")
     }
 
     @Test("testRequestQuitSetsPending")
@@ -315,7 +314,7 @@ import Testing
         let commands = update(&model, .requestQuit)
 
         #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
-        #expect(model.pendingConfirmation?.subject == .app, "quit confirmation should be pending")
+        #expect(testConfirmationKind(model.pendingConfirmation) == .app, "quit confirmation should be pending")
     }
 
     @Test("a repeated quit request replaces the transaction")
@@ -328,7 +327,7 @@ import Testing
         let commands = update(&model, .requestQuit)
 
         #expect(commands.isEmpty)
-        #expect(model.pendingConfirmation?.subject == .app)
+        #expect(testConfirmationKind(model.pendingConfirmation) == .app)
         #expect(model.pendingConfirmation?.id != firstId)
     }
 
@@ -437,7 +436,10 @@ import Testing
         // Scenario: spec-first cancel.
         var model = makeModel()
         createTab(&model)
-        let commands = update(&model, .cancelConfirmation(id: ConfirmationId()))
+        let commands = update(
+            &model,
+            .answerConfirmation(id: ConfirmationId(), answer: .cancel)
+        )
         #expect(commands.count == 0, "cancel should produce no commands")
     }
 
@@ -470,7 +472,7 @@ import Testing
         let commands = update(&model, .requestQuit)
 
         #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
-        #expect(model.pendingConfirmation?.subject == .app, "quit confirmation should be pending")
+        #expect(testConfirmationKind(model.pendingConfirmation) == .app, "quit confirmation should be pending")
     }
 
     @Test("a quit request replaces a pending close-tab transaction")
@@ -483,76 +485,7 @@ import Testing
         let commands = update(&model, .requestQuit)
 
         #expect(commands.isEmpty)
-        #expect(model.pendingConfirmation?.subject == .app)
+        #expect(testConfirmationKind(model.pendingConfirmation) == .app)
     }
 
-    @Test("testCloseTabConfirmationResponseConfirm")
-    func testCloseTabConfirmationResponseConfirm() {
-        // Intent: closeTabConfirmationResponse(isConfirm: true) returns
-        //   the unified confirm message.
-        // Why it exists: pins the dispatcher-side shim that converts an
-        //   NSAlert response into a Msg.
-        // Scenario: spec-first response confirm.
-        let id = ConfirmationId()
-        let msg = confirmationResponse(id: id, isConfirm: true)
-
-        if case .confirmConfirmation(let answerId) = msg {
-            #expect(answerId == id)
-        } else {
-            Issue.record("expected confirmConfirmation")
-            return
-        }
-    }
-
-    @Test("testCloseTabConfirmationResponseCancel")
-    func testCloseTabConfirmationResponseCancel() {
-        // Intent: closeTabConfirmationResponse(isConfirm: false) returns
-        //   the unified cancel message.
-        // Why it exists: pins the cancel branch of the shim.
-        // Scenario: spec-first response cancel.
-        let id = ConfirmationId()
-        let msg = confirmationResponse(id: id, isConfirm: false)
-
-        if case .cancelConfirmation(let answerId) = msg {
-            #expect(answerId == id)
-        } else {
-            Issue.record("expected cancelConfirmation")
-            return
-        }
-    }
-
-    @Test("testCloseTabsConfirmationResponseConfirm")
-    func testCloseTabsConfirmationResponseConfirm() {
-        // Intent: closeTabsConfirmationResponse(isConfirm: true) returns
-        //   the unified confirm message for batch alerts too.
-        // Why it exists: pins the dispatcher-side shim that converts an
-        //   NSAlert response into a Msg for batch tab close confirmations.
-        // Scenario: spec-first batch response confirm.
-        let id = ConfirmationId()
-        let msg = confirmationResponse(id: id, isConfirm: true)
-
-        if case .confirmConfirmation(let answerId) = msg {
-            #expect(answerId == id)
-        } else {
-            Issue.record("expected confirmConfirmation")
-            return
-        }
-    }
-
-    @Test("testCloseTabsConfirmationResponseCancel")
-    func testCloseTabsConfirmationResponseCancel() {
-        // Intent: closeTabsConfirmationResponse(isConfirm: false) returns
-        //   the unified cancel message for batch alerts too.
-        // Why it exists: pins the cancel branch of the batch confirmation shim.
-        // Scenario: spec-first batch response cancel.
-        let id = ConfirmationId()
-        let msg = confirmationResponse(id: id, isConfirm: false)
-
-        if case .cancelConfirmation(let answerId) = msg {
-            #expect(answerId == id)
-        } else {
-            Issue.record("expected cancelConfirmation")
-            return
-        }
-    }
 }

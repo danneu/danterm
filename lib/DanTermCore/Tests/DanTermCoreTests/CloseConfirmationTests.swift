@@ -4,6 +4,108 @@ import Testing
 @testable import DanTermCore
 
 struct CloseConfirmationTests {
+    // Intent: every request kind projects all of the answers its reducer accepts,
+    // and each projected answer performs its documented transaction result.
+    // Why it exists: the pending payload and answer message now share one typed
+    // transaction seam, so this table pins both halves together for all five kinds.
+    // Scenario: spec-first fixtures for pane, tab, batch, quit, and delete-group.
+    @Test("every confirmation request and projected answer completes its transaction")
+    func everyRequestAndProjectedAnswerCompletesTransaction() throws {
+        for scenario in ConfirmationScenario.allCases {
+            let initial = try confirmationFixture(for: scenario)
+            let projectedAnswers = [initial.projection.confirm.answer, initial.projection.cancel.answer]
+                + initial.projection.alternatives.map(\.answer)
+
+            for answer in projectedAnswers {
+                var fixture = try confirmationFixture(for: scenario)
+                let commands = update(
+                    &fixture.model,
+                    .answerConfirmation(id: fixture.projection.id, answer: answer)
+                )
+
+                #expect(fixture.model.pendingConfirmation == nil)
+                switch (fixture.target, answer) {
+                case (.pane(let paneId), .confirm):
+                    #expect(fixture.model.pane(paneId) == nil)
+                case (.tab(let tabId), .confirm):
+                    #expect(tabById(tabId, in: fixture.model) == nil)
+                case (.tabs(let tabIds), .confirm):
+                    #expect(tabIds.allSatisfy { tabById($0, in: fixture.model) == nil })
+                case (.quit, .confirm):
+                    #expect(commands.contains { if case .terminate = $0 { true } else { false } })
+                case (.deleteGroup(let groupId, let tabIds, let destinationId), .deleteGroup(true)):
+                    #expect(fixture.model.groups.contains { $0.id == groupId } == false)
+                    #expect(tabIds.allSatisfy { tabId in
+                        fixture.model.groups.first { $0.id == destinationId }?.tabs.contains {
+                            $0.id == tabId
+                        } == true
+                    })
+                case (.deleteGroup(let groupId, let tabIds, _), .deleteGroup(false)):
+                    #expect(fixture.model.groups.contains { $0.id == groupId } == false)
+                    #expect(tabIds.allSatisfy { tabById($0, in: fixture.model) == nil })
+                case (.pane(let paneId), .cancel):
+                    #expect(fixture.model.pane(paneId) != nil)
+                case (.tab(let tabId), .cancel):
+                    #expect(tabById(tabId, in: fixture.model) != nil)
+                case (.tabs(let tabIds), .cancel):
+                    #expect(tabIds.allSatisfy { tabById($0, in: fixture.model) != nil })
+                case (.quit, .cancel):
+                    #expect(commands.isEmpty)
+                case (.deleteGroup(let groupId, _, _), .cancel):
+                    #expect(fixture.model.groups.contains { $0.id == groupId })
+                default:
+                    Issue.record("projection offered an answer that does not belong to \(scenario)")
+                }
+            }
+        }
+    }
+
+    // Intent: only an answer accepted by the current kind and id can commit it.
+    // Why it exists: one shared answer message can represent choices that the
+    // current panel did not offer, so the reducer must reject those pairs.
+    // Scenario: spec-first mismatches in both directions plus an unknown id.
+    @Test("mismatched and stale confirmation answers are inert")
+    func mismatchedAndStaleAnswersAreInert() throws {
+        var closeModel = makeModel()
+        createTab(&closeModel)
+        createTab(&closeModel)
+        let closeTabId = closeModel.groups[0].tabs[0].id
+        setRunning(
+            "sleep 300",
+            in: closeModel.groups[0].tabs[0].paneTree.focusedPaneId,
+            model: &closeModel
+        )
+        _ = update(&closeModel, .requestCloseTab(id: closeTabId))
+        let closePending = try #require(closeModel.pendingConfirmation)
+
+        #expect(update(
+            &closeModel,
+            .answerConfirmation(id: closePending.id, answer: .deleteGroup(moveTabs: true))
+        ).isEmpty)
+        #expect(closeModel.pendingConfirmation == closePending)
+        #expect(tabById(closeTabId, in: closeModel) != nil)
+
+        var deleteModel = makeModel()
+        createTab(&deleteModel)
+        _ = update(&deleteModel, .createGroup(name: "Work"))
+        let workId = try #require(deleteModel.groups.first { $0.name == "Work" }?.id)
+        _ = update(&deleteModel, .requestDeleteGroup(id: workId))
+        let deletePending = try #require(deleteModel.pendingConfirmation)
+
+        #expect(update(
+            &deleteModel,
+            .answerConfirmation(id: deletePending.id, answer: .confirm)
+        ).isEmpty)
+        #expect(deleteModel.pendingConfirmation == deletePending)
+        #expect(deleteModel.groups.contains { $0.id == workId })
+
+        #expect(update(
+            &deleteModel,
+            .answerConfirmation(id: ConfirmationId(), answer: .cancel)
+        ).isEmpty)
+        #expect(deleteModel.pendingConfirmation == deletePending)
+    }
+
     @Test("confirmation projection follows every pending subject")
     func confirmationProjectionFollowsPendingSubject() throws {
         var model = makeModel()
@@ -132,7 +234,7 @@ struct CloseConfirmationTests {
         let commands = update(&model, .requestCloseTab(id: secondTabId))
 
         #expect(commands.isEmpty)
-        #expect(model.pendingConfirmation?.subject == .tab(secondTabId))
+        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(secondTabId))
         #expect(model.pendingConfirmation?.id != firstId)
     }
 
@@ -150,12 +252,12 @@ struct CloseConfirmationTests {
         _ = update(&model, .requestCloseTab(id: secondTabId))
         let replacement = try #require(model.pendingConfirmation)
 
-        #expect(update(&model, .confirmConfirmation(id: staleId)).isEmpty)
+        #expect(update(&model, .answerConfirmation(id: staleId, answer: .confirm)).isEmpty)
         #expect(model.pendingConfirmation == replacement)
         #expect(tabById(firstTabId, in: model) != nil)
         #expect(tabById(secondTabId, in: model) != nil)
 
-        #expect(update(&model, .cancelConfirmation(id: staleId)).isEmpty)
+        #expect(update(&model, .answerConfirmation(id: staleId, answer: .cancel)).isEmpty)
         #expect(model.pendingConfirmation == replacement)
     }
 
@@ -319,7 +421,7 @@ struct CloseConfirmationTests {
 
         #expect(commands.contains { if case .terminate = $0 { true } else { false } } == false)
         #expect(tabById(subjectTabId, in: model) != nil)
-        #expect(model.pendingConfirmation?.subject == .app)
+        #expect(testConfirmationKind(model.pendingConfirmation) == .app)
     }
 
     @Test("an app confirmation always terminates after new work starts")
@@ -404,7 +506,7 @@ struct CloseConfirmationTests {
         let commands = update(&model, .requestQuit)
 
         #expect(commands.isEmpty)
-        #expect(model.pendingConfirmation?.subject == .app)
+        #expect(testConfirmationKind(model.pendingConfirmation) == .app)
         #expect(desiredConfirmation(in: model)?.id == model.pendingConfirmation?.id)
     }
 
@@ -419,7 +521,7 @@ struct CloseConfirmationTests {
         _ = update(&model, .requestClosePane(paneId: paneId))
 
         #expect(closeConfirmation(in: model)?.subject == .tab(tabId))
-        #expect(model.pendingConfirmation?.quitAuthorized == true)
+        #expect(pendingQuitAuthorized(model.pendingConfirmation) == true)
     }
 
     @Test("pane and batch closes ask if they become app-emptying while open")
@@ -437,7 +539,7 @@ struct CloseConfirmationTests {
 
         #expect(paneCommands.contains { if case .terminate = $0 { true } else { false } } == false)
         #expect(paneModel.pane(subjectPaneId) != nil)
-        #expect(paneModel.pendingConfirmation?.subject == .app)
+        #expect(testConfirmationKind(paneModel.pendingConfirmation) == .app)
 
         var batchModel = makeModel()
         createTab(&batchModel)
@@ -452,7 +554,7 @@ struct CloseConfirmationTests {
 
         #expect(batchCommands.contains { if case .terminate = $0 { true } else { false } } == false)
         #expect(batchModel.hasAnyTab == false)
-        #expect(batchModel.pendingConfirmation?.subject == .app)
+        #expect(testConfirmationKind(batchModel.pendingConfirmation) == .app)
     }
 
     @Test("starting work in a covered pane refreshes tab and batch subjects")
@@ -633,16 +735,88 @@ private func setRunning(_ command: String, in paneId: PaneId, model: inout AppMo
     model.updatePane(paneId) { $0.session?.command = .running(command) }
 }
 
+private enum ConfirmationScenario: CaseIterable {
+    case pane
+    case tab
+    case tabs
+    case quit
+    case deleteGroup
+}
+
+private enum ConfirmationTarget {
+    case pane(PaneId)
+    case tab(TabId)
+    case tabs([TabId])
+    case quit
+    case deleteGroup(groupId: GroupId, tabIds: [TabId], destinationId: GroupId)
+}
+
+private func confirmationFixture(
+    for scenario: ConfirmationScenario
+) throws -> (model: AppModel, projection: ConfirmationProjection, target: ConfirmationTarget) {
+    var model = makeModel()
+    switch scenario {
+    case .pane:
+        createTab(&model)
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        _ = update(&model, .selectTab(id: tabId))
+        let firstPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+        _ = update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+        setRunning("sleep 300", in: paneId, model: &model)
+        _ = update(&model, .requestClosePane(paneId: paneId))
+        return (model, try #require(desiredConfirmation(in: model)), .pane(paneId))
+    case .tab:
+        createTab(&model)
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        setRunning("sleep 300", in: model.groups[0].tabs[0].paneTree.focusedPaneId, model: &model)
+        _ = update(&model, .requestCloseTab(id: tabId))
+        return (model, try #require(desiredConfirmation(in: model)), .tab(tabId))
+    case .tabs:
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let tabIds = Array(model.groups[0].tabs.prefix(2).map(\.id))
+        _ = update(&model, .requestCloseTabs(ids: tabIds))
+        return (model, try #require(desiredConfirmation(in: model)), .tabs(tabIds))
+    case .quit:
+        createTab(&model)
+        _ = update(&model, .requestQuit)
+        return (model, try #require(desiredConfirmation(in: model)), .quit)
+    case .deleteGroup:
+        createTab(&model)
+        _ = update(&model, .createGroup(name: "Work"))
+        let destinationId = model.groups[0].id
+        let work = try #require(model.groups.first { $0.name == "Work" })
+        _ = update(&model, .requestDeleteGroup(id: work.id))
+        return (
+            model,
+            try #require(desiredConfirmation(in: model)),
+            .deleteGroup(
+                groupId: work.id,
+                tabIds: work.tabs.map(\.id),
+                destinationId: destinationId
+            )
+        )
+    }
+}
+
 private func closeConfirmation(
     in model: AppModel
 ) -> (subject: ConfirmationSubject, copy: CloseConfirmationCopy)? {
-    guard let pending = model.pendingConfirmation, let impact = pending.impact else { return nil }
+    guard let pending = model.pendingConfirmation,
+          let subject = pendingCloseSubject(pending),
+          let impact = pendingCloseImpact(pending),
+          let quitAuthorized = pendingQuitAuthorized(pending)
+    else { return nil }
     return (
-        pending.subject,
+        subject,
         closeConfirmationCopy(
-            subject: pending.subject,
+            subject: subject,
             impact: impact,
-            quitAuthorized: pending.quitAuthorized
+            quitAuthorized: quitAuthorized
         )
     )
 }

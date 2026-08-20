@@ -113,11 +113,11 @@ enum Msg {
         background: Bool
     )
 
-    // Internal (confirmed close — do not send from UI directly)
+    // Internal confirmed close -- do not send from UI directly.
     case closeTab(id: TabId)
-    case confirmConfirmation(id: ConfirmationId)
-    case cancelConfirmation(id: ConfirmationId)
-    case chooseDeleteGroupConfirmation(id: ConfirmationId, moveTabs: Bool)
+
+    // User-visible confirmation responses
+    case answerConfirmation(id: ConfirmationId, answer: ConfirmationAnswer)
 
     // User-visible notices
     case noticeReported(NoticeSubject)

@@ -461,7 +461,7 @@ import Testing
         update(&model, .addTodo(owner: .tab(firstTabId), text: "pending"))
 
         _ = update(&model, .requestCloseTab(id: firstTabId))
-        #expect(model.pendingConfirmation?.subject == .tab(firstTabId))
+        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(firstTabId))
         #expect(desiredConfirmation(in: model)?.informativeText ==
             "This tab has 1 unfinished task.")
         #expect(model.groups[0].tabs.count == 2, "tab not yet removed")
@@ -480,7 +480,7 @@ import Testing
         update(&model, .addTodo(owner: .pane(firstTab.paneTree.focusedPaneId), text: "pane task"))
 
         _ = update(&model, .requestCloseTab(id: firstTab.id))
-        #expect(model.pendingConfirmation?.impact?.uncompletedTodoCount == 1,
+        #expect(pendingCloseImpact(model.pendingConfirmation)?.uncompletedTodoCount == 1,
             "expected confirmation with rollup pane todos")
     }
 
@@ -509,9 +509,9 @@ import Testing
         update(&model, .toggleTodoDone(owner: .pane(paneB), todoId: lastB))
 
         _ = update(&model, .requestCloseTab(id: firstTabId))
-        #expect(model.pendingConfirmation?.subject == .tab(firstTabId))
-        #expect(model.pendingConfirmation?.impact?.panes.count == 2)
-        #expect(model.pendingConfirmation?.impact?.uncompletedTodoCount == 4)
+        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(firstTabId))
+        #expect(pendingCloseImpact(model.pendingConfirmation)?.panes.count == 2)
+        #expect(pendingCloseImpact(model.pendingConfirmation)?.uncompletedTodoCount == 4)
     }
 
     @Test("confirming a tab with todos clears pending and closes")
@@ -526,7 +526,7 @@ import Testing
         let firstTabId = model.groups[0].tabs[0].id
         update(&model, .addTodo(owner: .tab(firstTabId), text: "pending"))
         update(&model, .requestCloseTab(id: firstTabId))
-        #expect(model.pendingConfirmation?.subject == .tab(firstTabId))
+        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(firstTabId))
 
         confirmPending(&model)
         #expect(model.pendingConfirmation == nil, "pending should clear")
@@ -548,9 +548,9 @@ import Testing
         update(&model, .addTodo(owner: .tab(firstTab.id), text: "tab task"))
 
         _ = update(&model, .requestClosePane(paneId: firstTab.paneTree.focusedPaneId))
-        #expect(model.pendingConfirmation?.subject == .tab(firstTab.id),
+        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(firstTab.id),
             "expected close-tab confirmation")
-        #expect(model.pendingConfirmation?.impact?.uncompletedTodoCount == 1)
+        #expect(pendingCloseImpact(model.pendingConfirmation)?.uncompletedTodoCount == 1)
         #expect(model.pane(firstTab.paneTree.focusedPaneId) != nil, "pane not yet removed")
     }
 
@@ -591,8 +591,8 @@ import Testing
         update(&model, .addTodo(owner: .pane(paneA), text: "pane task"))
 
         _ = update(&model, .requestClosePane(paneId: paneA))
-        #expect(model.pendingConfirmation?.subject == .tab(firstTab.id))
-        #expect(model.pendingConfirmation?.impact?.uncompletedTodoCount == 2,
+        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(firstTab.id))
+        #expect(pendingCloseImpact(model.pendingConfirmation)?.uncompletedTodoCount == 2,
             "expected close-tab rollup of 2")
     }
 
@@ -610,8 +610,8 @@ import Testing
         update(&model, .addTodo(owner: .pane(paneA), text: "pane only"))
 
         _ = update(&model, .requestClosePane(paneId: paneA))
-        #expect(model.pendingConfirmation?.subject == .tab(firstTab.id))
-        #expect(model.pendingConfirmation?.impact?.uncompletedTodoCount == 1,
+        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(firstTab.id))
+        #expect(pendingCloseImpact(model.pendingConfirmation)?.uncompletedTodoCount == 1,
             "expected close-tab confirmation with rollup 1")
     }
 }

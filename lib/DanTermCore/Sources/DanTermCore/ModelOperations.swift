@@ -744,10 +744,6 @@ func closeImpact(for subject: ConfirmationSubject, in model: AppModel) -> CloseI
     uncompletedTodoCount = tabs.reduce(into: 0) { total, tab in
       total += tabTodoRollup(tab.id, in: model).uncompleted
     }
-  case .app:
-    return nil
-  case .deleteGroup:
-    return nil
   }
 
   return CloseImpact(
@@ -763,32 +759,34 @@ func emitConfirmation(
   quitAuthorized: Bool = false,
   env: CoreEnv
 ) -> [Command] {
-  if subject == .app {
-    model.pendingConfirmation = PendingConfirmation(
-      id: ConfirmationId(rawValue: env.newId()),
-      subject: .app,
-      tabTitle: nil,
-      impact: nil,
-      deleteGroup: nil,
-      quitAuthorized: false
-    )
-    return []
-  }
-
   guard let impact = closeImpact(for: subject, in: model) else { return [] }
-  let tabTitle: DisplayLine?
-  if case .tab(let tabId) = subject, let tab = tabById(tabId, in: model) {
-    tabTitle = DisplayLine(tabDisplayTitle(tab))
-  } else {
-    tabTitle = nil
+  let kind: ConfirmationKind
+  switch subject {
+  case .pane(let paneId):
+    kind = .closePane(paneId: paneId, impact: impact, quitAuthorized: quitAuthorized)
+  case .tab(let tabId):
+    guard let tab = tabById(tabId, in: model) else { return [] }
+    kind = .closeTab(
+      tabId: tabId,
+      title: DisplayLine(tabDisplayTitle(tab)),
+      impact: impact,
+      quitAuthorized: quitAuthorized
+    )
+  case .tabs(let tabIds):
+    kind = .closeTabs(tabIds: tabIds, impact: impact, quitAuthorized: quitAuthorized)
   }
   model.pendingConfirmation = PendingConfirmation(
     id: ConfirmationId(rawValue: env.newId()),
-    subject: subject,
-    tabTitle: tabTitle,
-    impact: impact,
-    deleteGroup: nil,
-    quitAuthorized: quitAuthorized
+    kind: kind
+  )
+  return []
+}
+
+/// Replaces the confirmation transaction with a live quit request.
+func emitQuitConfirmation(_ model: inout AppModel, env: CoreEnv) -> [Command] {
+  model.pendingConfirmation = PendingConfirmation(
+    id: ConfirmationId(rawValue: env.newId()),
+    kind: .quit
   )
   return []
 }
@@ -804,11 +802,6 @@ func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncomplet
     uncompleted += pane.todos.count { !$0.isDone }
   }
   return (total, uncompleted)
-}
-
-/// Converts either confirmation UI response into the shared transaction message.
-func confirmationResponse(id: ConfirmationId, isConfirm: Bool) -> Msg {
-  isConfirm ? .confirmConfirmation(id: id) : .cancelConfirmation(id: id)
 }
 
 /// Builds alert body copy from the same impact value that opened the gate.
@@ -857,10 +850,6 @@ func closeConfirmationCopy(
     noun = "These tabs"
     verb = "have"
     fallback = "These tabs will be closed."
-  case .app:
-    preconditionFailure("app confirmations do not have frozen close copy")
-  case .deleteGroup:
-    preconditionFailure("delete-group confirmations do not have close copy")
   }
 
   let sentence: String

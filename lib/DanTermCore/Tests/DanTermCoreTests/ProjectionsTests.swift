@@ -335,7 +335,7 @@ import Testing
         _ = update(&model, .closePane(paneId: paneId))
 
         #expect(model.allPaneIds.count == 1, "non-last pane close removes one pane")
-        #expect(model.pendingConfirmation?.subject == .app, "non-last pane close keeps quit confirmation pending")
+        #expect(testConfirmationKind(model.pendingConfirmation) == .app, "non-last pane close keeps quit confirmation pending")
         #expect(desiredConfirmation(in: model)?.informativeText == "This will close 1 terminal session.",
             "projection reflects the decremented live pane count")
     }

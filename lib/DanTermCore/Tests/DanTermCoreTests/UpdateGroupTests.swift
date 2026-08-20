@@ -74,9 +74,9 @@ import Testing
         let destination = populatedModel.groups[0]
         _ = update(&populatedModel, .requestDeleteGroup(id: work.id))
         let pending = try #require(populatedModel.pendingConfirmation)
-        #expect(pending.subject == .deleteGroup(work.id))
-        #expect(pending.deleteGroup?.tabIds == work.tabs.map(\.id))
-        #expect(pending.deleteGroup?.destinationGroupId == destination.id)
+        #expect(testConfirmationKind(pending) == .deleteGroup(work.id))
+        #expect(pendingDeleteGroup(pending)?.tabIds == work.tabs.map(\.id))
+        #expect(pendingDeleteGroup(pending)?.destinationGroupId == destination.id)
         #expect(desiredConfirmation(in: populatedModel)?.title == "Delete group \"Work\"?")
         let deleteGroup = try #require(desiredConfirmation(in: populatedModel))
         #expect(deleteGroup.confirm.title == "Move to General")
@@ -107,10 +107,10 @@ import Testing
         _ = update(&model, .requestQuit)
         let replacement = try #require(model.pendingConfirmation)
 
-        #expect(update(&model, .chooseDeleteGroupConfirmation(id: staleId, moveTabs: true)).isEmpty)
+        #expect(update(&model, .answerConfirmation(id: staleId, answer: .deleteGroup(moveTabs: true))).isEmpty)
         #expect(model.pendingConfirmation == replacement)
         #expect(model.groups.contains { $0.id == workId })
-        #expect(update(&model, .chooseDeleteGroupConfirmation(id: staleId, moveTabs: false)).isEmpty)
+        #expect(update(&model, .answerConfirmation(id: staleId, answer: .deleteGroup(moveTabs: false))).isEmpty)
         #expect(model.pendingConfirmation == replacement)
     }
 
@@ -125,11 +125,11 @@ import Testing
         _ = update(&model, .createTab(inGroupId: workId))
         let currentIds = try #require(model.groups.first { $0.id == workId }?.tabs.map(\.id))
 
-        _ = update(&model, .chooseDeleteGroupConfirmation(id: firstId, moveTabs: false))
+        _ = update(&model, .answerConfirmation(id: firstId, answer: .deleteGroup(moveTabs: false)))
 
         #expect(model.groups.contains { $0.id == workId })
         #expect(model.pendingConfirmation?.id != firstId)
-        #expect(model.pendingConfirmation?.deleteGroup?.tabIds == currentIds)
+        #expect(pendingDeleteGroup(model.pendingConfirmation)?.tabIds == currentIds)
     }
 
     @Test("delete-group destination refreshes if the frozen group disappears")
@@ -143,12 +143,12 @@ import Testing
         let archiveId = model.groups[2].id
         _ = update(&model, .requestDeleteGroup(id: workId))
         let firstId = try #require(model.pendingConfirmation?.id)
-        #expect(model.pendingConfirmation?.deleteGroup?.destinationGroupId == generalId)
+        #expect(pendingDeleteGroup(model.pendingConfirmation)?.destinationGroupId == generalId)
 
         _ = update(&model, .deleteGroup(id: generalId, moveTabs: true))
 
         #expect(model.pendingConfirmation?.id != firstId)
-        #expect(model.pendingConfirmation?.deleteGroup?.destinationGroupId == archiveId)
+        #expect(pendingDeleteGroup(model.pendingConfirmation)?.destinationGroupId == archiveId)
         #expect(desiredConfirmation(in: model)?.confirm.title == "Move to Archive")
     }
 
@@ -166,7 +166,7 @@ import Testing
         let confirmationId = try #require(model.pendingConfirmation?.id)
         _ = update(&model, .reorderGroup(groupId: generalId, toIndex: 2))
 
-        _ = update(&model, .chooseDeleteGroupConfirmation(id: confirmationId, moveTabs: true))
+        _ = update(&model, .answerConfirmation(id: confirmationId, answer: .deleteGroup(moveTabs: true)))
 
         #expect(model.groups.contains { $0.id == workId } == false)
         #expect(workTabIds.allSatisfy { tabId in
@@ -188,7 +188,7 @@ import Testing
 
         let commands = update(
             &model,
-            .chooseDeleteGroupConfirmation(id: confirmationId, moveTabs: false)
+            .answerConfirmation(id: confirmationId, answer: .deleteGroup(moveTabs: false))
         )
 
         #expect(model.groups.contains { $0.id == work.id } == false)

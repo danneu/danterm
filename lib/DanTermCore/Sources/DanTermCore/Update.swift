@@ -804,7 +804,7 @@ func update(
         return []
 
     case .requestQuit:
-        return emitConfirmation(&model, subject: .app, env: env)
+        return emitQuitConfirmation(&model, env: env)
 
     // MARK: - Alerts
 
@@ -895,16 +895,8 @@ func update(
         markAlertsReadForPane(paneId, in: &model)
         return []   // bell badge reconciles via reconcileSidebar
 
-    case .confirmConfirmation(let id):
-        return confirmPendingConfirmation(&model, id: id, env: env)
-
-    case .cancelConfirmation(let id):
-        guard model.pendingConfirmation?.id == id else { return [] }
-        model.pendingConfirmation = nil
-        return []
-
-    case .chooseDeleteGroupConfirmation(let id, let moveTabs):
-        return chooseDeleteGroupConfirmation(&model, id: id, moveTabs: moveTabs, env: env)
+    case .answerConfirmation(let id, let answer):
+        return answerPendingConfirmation(&model, id: id, answer: answer, env: env)
 
     case .noticeReported(let subject):
         model.noticeQueue.append(PendingNotice(
@@ -1412,105 +1404,92 @@ private func reconcileSidebarRenameTarget(_ model: inout AppModel) {
 }
 
 /// Commits or refreshes the one pending transaction against the live model.
-private func confirmPendingConfirmation(
+private func answerPendingConfirmation(
     _ model: inout AppModel,
     id: ConfirmationId,
+    answer: ConfirmationAnswer,
     env: CoreEnv
 ) -> [Command] {
     guard let pending = model.pendingConfirmation, pending.id == id else { return [] }
-    if case .deleteGroup = pending.subject { return [] }
-    if pending.subject == .app {
+
+    if case .cancel = answer {
+        model.pendingConfirmation = nil
+        return []
+    }
+
+    switch (pending.kind, answer) {
+    case (.quit, .confirm):
         model.pendingConfirmation = nil
         return [.terminate]
-    }
-
-    if closeSubjectHasGrown(pending, in: model) {
-        model.pendingConfirmation = nil
-        switch pending.subject {
-        case .pane(let paneId):
+    case (.closePane(let paneId, _, let quitAuthorized), .confirm):
+        if closeSubjectHasGrown(pending.kind, in: model) {
+            model.pendingConfirmation = nil
             return update(&model, .requestClosePane(paneId: paneId), env: env)
-        case .tab(let tabId):
-            return update(&model, .requestCloseTab(id: tabId), env: env)
-        case .tabs(let tabIds):
-            return update(&model, .requestCloseTabs(ids: tabIds), env: env)
-        case .deleteGroup:
-            return []
-        case .app:
-            return []
         }
-    }
-
-    model.pendingConfirmation = nil
-    switch pending.subject {
-    case .pane(let paneId):
+        model.pendingConfirmation = nil
         return closePaneBody(
             &model,
             paneId: paneId,
-            quitAuthorized: pending.quitAuthorized,
+            quitAuthorized: quitAuthorized,
             env: env
         )
-    case .tab(let tabId):
+    case (.closeTab(let tabId, _, _, let quitAuthorized), .confirm):
+        if closeSubjectHasGrown(pending.kind, in: model) {
+            model.pendingConfirmation = nil
+            return update(&model, .requestCloseTab(id: tabId), env: env)
+        }
+        model.pendingConfirmation = nil
         return closeTabBody(
             &model,
             id: tabId,
-            quitAuthorized: pending.quitAuthorized,
+            quitAuthorized: quitAuthorized,
             env: env
         )
-    case .tabs(let tabIds):
+    case (.closeTabs(let tabIds, _, let quitAuthorized), .confirm):
+        if closeSubjectHasGrown(pending.kind, in: model) {
+            model.pendingConfirmation = nil
+            return update(&model, .requestCloseTabs(ids: tabIds), env: env)
+        }
+        model.pendingConfirmation = nil
         let normalized = normalizedLiveTabIds(tabIds, in: model)
         var commands: [Command] = []
         for tabId in normalized {
             commands.append(contentsOf: closeTabRemoval(&model, id: tabId))
         }
         guard model.hasAnyTab == false else { return commands }
-        if pending.quitAuthorized {
+        if quitAuthorized {
             return commands + [.terminate]
         }
-        return commands + emitConfirmation(&model, subject: .app, env: env)
-    case .deleteGroup:
-        return []
-    case .app:
-        return [.terminate]
-    }
-}
+        return commands + emitQuitConfirmation(&model, env: env)
+    case (.deleteGroup(let groupId, let frozen), .deleteGroup(let moveTabs)):
+        guard let group = model.groups.first(where: { $0.id == groupId }) else { return [] }
 
-/// Applies one delete-group choice only while its frozen transaction is current.
-private func chooseDeleteGroupConfirmation(
-    _ model: inout AppModel,
-    id: ConfirmationId,
-    moveTabs: Bool,
-    env: CoreEnv
-) -> [Command] {
-    guard let pending = model.pendingConfirmation,
-          pending.id == id,
-          case .deleteGroup(let groupId) = pending.subject,
-          let frozen = pending.deleteGroup,
-          let group = model.groups.first(where: { $0.id == groupId })
-    else { return [] }
+        let currentTabIds = group.tabs.map(\.id)
+        let currentTabSet = Set(currentTabIds)
+        let frozenTabSet = Set(frozen.tabIds)
+        guard currentTabSet.isSubset(of: frozenTabSet),
+              model.groups.contains(where: { $0.id == frozen.destinationGroupId })
+        else {
+            emitDeleteGroupConfirmation(&model, groupId: groupId, env: env)
+            return []
+        }
 
-    let currentTabIds = group.tabs.map(\.id)
-    let currentTabSet = Set(currentTabIds)
-    let frozenTabSet = Set(frozen.tabIds)
-    guard currentTabSet.isSubset(of: frozenTabSet),
-          model.groups.contains(where: { $0.id == frozen.destinationGroupId })
-    else {
-        emitDeleteGroupConfirmation(&model, groupId: groupId, env: env)
-        return []
-    }
-
-    model.pendingConfirmation = nil
-    if moveTabs {
-        guard let sourceIndex = model.groups.firstIndex(where: { $0.id == groupId }),
-              let destinationIndex = model.groups.firstIndex(where: {
-                $0.id == frozen.destinationGroupId
-              })
-        else { return [] }
-        let tabs = model.groups[sourceIndex].tabs
-        model.groups[destinationIndex].tabs.append(contentsOf: tabs)
-        model.groups.remove(at: sourceIndex)
+        model.pendingConfirmation = nil
+        if moveTabs {
+            guard let sourceIndex = model.groups.firstIndex(where: { $0.id == groupId }),
+                  let destinationIndex = model.groups.firstIndex(where: {
+                    $0.id == frozen.destinationGroupId
+                  })
+            else { return [] }
+            let tabs = model.groups[sourceIndex].tabs
+            model.groups[destinationIndex].tabs.append(contentsOf: tabs)
+            model.groups.remove(at: sourceIndex)
+            return []
+        }
+        return deleteGroupBody(&model, id: groupId, moveTabs: false, env: env)
+    default:
         return []
     }
-    return deleteGroupBody(&model, id: groupId, moveTabs: false, env: env)
 }
 
 /// Applies delete-group request policy before any panel exists.
@@ -1548,14 +1527,10 @@ private func emitDeleteGroupConfirmation(
     }
     model.pendingConfirmation = PendingConfirmation(
         id: ConfirmationId(rawValue: env.newId()),
-        subject: .deleteGroup(groupId),
-        tabTitle: nil,
-        impact: nil,
-        deleteGroup: DeleteGroupConfirmation(
+        kind: .deleteGroup(groupId: groupId, confirmation: DeleteGroupConfirmation(
             tabIds: model.groups[groupIndex].tabs.map(\.id),
             destinationGroupId: model.groups[destinationIndex].id
-        ),
-        quitAuthorized: false
+        ))
     )
 }
 
@@ -1573,7 +1548,7 @@ private func deleteGroupBody(
     if moveTabs == false,
        group.tabs.isEmpty == false,
        totalTabCount(model) == group.tabs.count {
-        return emitConfirmation(&model, subject: .app, env: env)
+        return emitQuitConfirmation(&model, env: env)
     }
     if moveTabs {
         guard let adjacentIndex = adjacentGroupIndex(
@@ -1604,10 +1579,23 @@ private func deleteGroupBody(
     return []
 }
 
-private func closeSubjectHasGrown(_ pending: PendingConfirmation, in model: AppModel) -> Bool {
-    guard let snapshot = pending.impact,
-          let current = closeImpact(for: pending.subject, in: model)
-    else { return false }
+private func closeSubjectHasGrown(_ kind: ConfirmationKind, in model: AppModel) -> Bool {
+    let subject: ConfirmationSubject
+    let snapshot: CloseImpact
+    switch kind {
+    case .closePane(let paneId, let impact, _):
+        subject = .pane(paneId)
+        snapshot = impact
+    case .closeTab(let tabId, _, let impact, _):
+        subject = .tab(tabId)
+        snapshot = impact
+    case .closeTabs(let tabIds, let impact, _):
+        subject = .tabs(tabIds)
+        snapshot = impact
+    case .quit, .deleteGroup:
+        return false
+    }
+    guard let current = closeImpact(for: subject, in: model) else { return false }
 
     for pane in current.panes {
         guard let prior = snapshot.panes.first(where: { $0.paneId == pane.paneId }) else {
@@ -1624,20 +1612,20 @@ private func closeSubjectHasGrown(_ pending: PendingConfirmation, in model: AppM
 /// Retracts or refreshes a transaction when its subject or frozen choices change.
 private func reconcilePendingConfirmation(_ model: inout AppModel, env: CoreEnv) {
     guard let pending = model.pendingConfirmation else { return }
-    switch pending.subject {
-    case .pane(let paneId):
+    switch pending.kind {
+    case .closePane(let paneId, _, _):
         if model.pane(paneId) == nil {
             model.pendingConfirmation = nil
         }
-    case .tab(let tabId):
+    case .closeTab(let tabId, _, _, _):
         if tabById(tabId, in: model) == nil {
             model.pendingConfirmation = nil
         }
-    case .tabs(let tabIds):
+    case .closeTabs(let tabIds, _, _):
         if tabIds.isEmpty || tabIds.contains(where: { tabById($0, in: model) == nil }) {
             model.pendingConfirmation = nil
         }
-    case .deleteGroup(let groupId):
+    case .deleteGroup(let groupId, let frozen):
         guard let group = model.groups.first(where: { $0.id == groupId }),
               model.groups.count > 1
         else {
@@ -1647,11 +1635,10 @@ private func reconcilePendingConfirmation(_ model: inout AppModel, env: CoreEnv)
         if group.tabs.isEmpty {
             model.groups.removeAll(where: { $0.id == groupId })
             model.pendingConfirmation = nil
-        } else if let frozen = pending.deleteGroup,
-                  model.groups.contains(where: { $0.id == frozen.destinationGroupId }) == false {
+        } else if model.groups.contains(where: { $0.id == frozen.destinationGroupId }) == false {
             emitDeleteGroupConfirmation(&model, groupId: groupId, env: env)
         }
-    case .app:
+    case .quit:
         break
     }
 }
@@ -1665,7 +1652,7 @@ private func closeTabBody(
     guard tabLocation(id, in: model) != nil else { return [] }
     if wouldQuitFromClose(model) {
         guard quitAuthorized else {
-            return emitConfirmation(&model, subject: .app, env: env)
+            return emitQuitConfirmation(&model, env: env)
         }
         return closeTabRemoval(&model, id: id) + [.terminate]
     }
@@ -1691,7 +1678,7 @@ private func closePaneBody(
     if removal.emptiedTree {
         if wouldQuitFromClose(model) {
             guard quitAuthorized else {
-                return emitConfirmation(&model, subject: .app, env: env)
+                return emitQuitConfirmation(&model, env: env)
             }
             return closeTabRemoval(&model, id: tab.id) + [.terminate]
         }

@@ -306,13 +306,6 @@ final class ConfirmationPanel: NSPanel, NSWindowDelegate {
     /// reserved key press both come through here, so the two cannot diverge.
     private func answer(_ choice: ConfirmationChoice) {
         guard let id = projection?.id else { return }
-        switch choice.answer {
-        case .confirm:
-            runtime?.send(.confirmConfirmation(id: id))
-        case .cancel:
-            runtime?.send(.cancelConfirmation(id: id))
-        case .deleteGroup(let moveTabs):
-            runtime?.send(.chooseDeleteGroupConfirmation(id: id, moveTabs: moveTabs))
-        }
+        runtime?.send(.answerConfirmation(id: id, answer: choice.answer))
     }
 }

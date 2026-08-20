@@ -1283,7 +1283,7 @@ import DanTermProtocol
 
         _ = try requireIpcReply(commands)
         #expect(hasEffect(commands, isTerminate))
-        #expect(model.pendingConfirmation?.subject == .app)
+        #expect(testConfirmationKind(model.pendingConfirmation) == .app)
     }
 
     @Test("remote quit is refused before instance authorization")

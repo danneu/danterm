@@ -505,13 +505,11 @@ struct JumpModeState: Equatable {
     let keyMap: [TabId: Character]
 }
 
-/// Identifies the exact user action a confirmation transaction can commit.
+/// Identifies the close targets that share impact and alert-copy logic.
 enum ConfirmationSubject: Equatable {
     case pane(PaneId)
     case tab(TabId)
     case tabs([TabId])
-    case deleteGroup(GroupId)
-    case app
 }
 
 /// Freezes the cost of a close by pane so later work cannot hide behind equal command text.
@@ -546,15 +544,25 @@ struct DeleteGroupConfirmation: Equatable {
     let destinationGroupId: GroupId
 }
 
+/// Carries exactly the data required by one kind of pending confirmation.
+enum ConfirmationKind: Equatable {
+    case quit
+    case closePane(paneId: PaneId, impact: CloseImpact, quitAuthorized: Bool)
+    case closeTab(
+        tabId: TabId,
+        title: DisplayLine,
+        impact: CloseImpact,
+        quitAuthorized: Bool
+    )
+    case closeTabs(tabIds: [TabId], impact: CloseImpact, quitAuthorized: Bool)
+    case deleteGroup(groupId: GroupId, confirmation: DeleteGroupConfirmation)
+}
+
 /// Keeps one confirmation atomic across model changes while its UI is open.
 /// This state is ephemeral and never serialized into AppModelSnapshot.
 struct PendingConfirmation: Equatable {
     let id: ConfirmationId
-    let subject: ConfirmationSubject
-    let tabTitle: DisplayLine?
-    let impact: CloseImpact?
-    let deleteGroup: DeleteGroupConfirmation?
-    let quitAuthorized: Bool
+    let kind: ConfirmationKind
 }
 
 /// The copy and launch semantics frozen when a user-visible notice is reported.

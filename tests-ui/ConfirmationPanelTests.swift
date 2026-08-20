@@ -235,14 +235,14 @@ func confirmationPanelTests() {
         fx.panel.sendEvent(try keyEvent(in: fx.panel, characters: "\r", keyCode: 36))
         try uiExpect(fx.runtime.sentMessages.count == 1,
                      "Return should have answered once, got \(fx.runtime.sentMessages)")
-        if case .confirmConfirmation = fx.runtime.sentMessages[0] {} else {
+        if case .answerConfirmation(_, .confirm) = fx.runtime.sentMessages[0] {} else {
             throw UITestFailure(message: "Return should confirm, got \(fx.runtime.sentMessages[0])")
         }
 
         fx.panel.sendEvent(try keyEvent(in: fx.panel, characters: "\u{1b}", keyCode: 53))
         try uiExpect(fx.runtime.sentMessages.count == 2,
                      "Escape should have answered once, got \(fx.runtime.sentMessages)")
-        if case .cancelConfirmation = fx.runtime.sentMessages[1] {} else {
+        if case .answerConfirmation(_, .cancel) = fx.runtime.sentMessages[1] {} else {
             throw UITestFailure(message: "Escape should cancel, got \(fx.runtime.sentMessages[1])")
         }
     }
@@ -291,13 +291,13 @@ func confirmationPanelTests() {
                      "expected one message per button, got \(fx.runtime.sentMessages)")
         let order = fx.panel.actionRow.buttonsInVisualOrder.map(\.title)
         try uiExpect(order == expected, "unexpected button order \(order)")
-        if case .chooseDeleteGroupConfirmation(projection.id, false) = fx.runtime.sentMessages[0] {} else {
+        if case .answerConfirmation(projection.id, .deleteGroup(moveTabs: false)) = fx.runtime.sentMessages[0] {} else {
             throw UITestFailure(message: "Close Tabs should keep no tabs, got \(fx.runtime.sentMessages[0])")
         }
-        if case .cancelConfirmation(projection.id) = fx.runtime.sentMessages[1] {} else {
+        if case .answerConfirmation(projection.id, .cancel) = fx.runtime.sentMessages[1] {} else {
             throw UITestFailure(message: "Cancel should cancel, got \(fx.runtime.sentMessages[1])")
         }
-        if case .chooseDeleteGroupConfirmation(projection.id, true) = fx.runtime.sentMessages[2] {} else {
+        if case .answerConfirmation(projection.id, .deleteGroup(moveTabs: true)) = fx.runtime.sentMessages[2] {} else {
             throw UITestFailure(message: "Move to General should move tabs, got \(fx.runtime.sentMessages[2])")
         }
     }
@@ -318,7 +318,7 @@ func confirmationPanelTests() {
 
         try uiExpect(fx.runtime.sentMessages.count == 1,
                      "Return should have answered once, got \(fx.runtime.sentMessages)")
-        if case .chooseDeleteGroupConfirmation(projection.id, true) = fx.runtime.sentMessages[0] {} else {
+        if case .answerConfirmation(projection.id, .deleteGroup(moveTabs: true)) = fx.runtime.sentMessages[0] {} else {
             throw UITestFailure(message: "Return should move tabs, got \(fx.runtime.sentMessages[0])")
         }
     }
