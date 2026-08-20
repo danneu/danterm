@@ -1131,7 +1131,7 @@ wave.
 - [x] **[FRAME-1](#frame-1)** (3x5, large) Publish the frame plan row-indexed so a row copy and a clip stop scanning the whole viewport **[decide first](#decisions-to-make-first)** -- `3bea76c5`
 - [x] **[INTERACT-2](#interact-2)** (3x4, medium) Carry the normalized `TerminalViewportCell` into `TerminalPointerEvent` and decide link cancellation inside the policy **[decide first](#decisions-to-make-first)** -- `f6d6435f..c854be73`
 - [x] **[RUNTIME-3](#runtime-3)** (3x4, medium) Stop opening nested modal run loops from inside an open send frame **[decide first](#decisions-to-make-first)**
-- [ ] **[BUILD-5](#build-5)** (2x5, small) Give the three manifest-discovery lists one owner so a new package root cannot be skipped
+- [x] **[BUILD-5](#build-5)** (2x5, small) Give the three manifest-discovery lists one owner so a new package root cannot be skipped -- `739c4b0e`
 - [ ] **[MODEL-6](#model-6)** (2x5, small) Drop the submission-to-request reverse index and derive it from the pending requests _(with [REDUCE-6](#reduce-6))_
 - [x] **[STORE-5](#store-5)** (2x5, small) Give a block one record-range accessor instead of five hand-copied index conversions -- `f01d901c`
 - [x] **[INTERACT-3](#interact-3)** (2x5, medium) Delete `TerminalDamageAccumulator`'s copy of the shift-composition rule and let it hold a `TerminalDamage` -- `d7f541e9`
