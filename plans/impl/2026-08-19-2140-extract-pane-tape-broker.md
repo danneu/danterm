@@ -186,7 +186,7 @@ Accepted risks:
 
 - [x] 1. test(runtime): pin pane-tape stream lifecycle behavior
 - [x] 2. refactor(runtime): extract the pane-tape broker
-- [ ] 3. chore(audit): mark RUNTIME-6 done
+- [x] 3. chore(audit): mark RUNTIME-6 done
 
 ## Implementation notes
 
