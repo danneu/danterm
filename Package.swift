@@ -13,6 +13,7 @@ let package = Package(
     dependencies: [
         .package(path: "lib/ChipArtwork"),
         .package(path: "lib/DanTermClient"),
+        .package(path: "lib/DanTermCore"),
         .package(path: "lib/DanTermProtocol"),
         .package(path: "lib/DanTermSupport"),
         .package(path: "lib/TerminalCore"),
@@ -75,15 +76,15 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
-        // Pairs the pane-tape producer, which is a Mac-host role, with the client's
-        // reader. Neither package can host this on its own: the producer is internal to
-        // DanTermSupport, and DanTermClient must not depend on the host layer.
+        // Pairs the pane-tape producer with the client's reader. Neither package can host
+        // this on its own: the producer is internal to DanTermCore, and DanTermClient must
+        // not depend on the host layer.
         .testTarget(
             name: "DanTermPaneTapeRoundTripTests",
             dependencies: [
                 .product(name: "DanTermClient", package: "DanTermClient"),
+                .product(name: "DanTermCore", package: "DanTermCore"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
-                .product(name: "DanTermSupport", package: "DanTermSupport"),
             ],
             path: "client-tests",
             swiftSettings: [

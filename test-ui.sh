@@ -113,9 +113,9 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/DanTermConfigPaths.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/FontAvailability.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/IpcConnection.swift" \
-        "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/PaneTapeRecords.swift" \
-        "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/PaneTapeFollow.swift" \
-        "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/PaneTapeStreamState.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneTapeRecords.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneTapeFollow.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneTapeStreamState.swift" \
         "$SCRIPT_DIR/app/DanTermConfigStore.swift" \
         "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalWheelNormalizer.swift" \
         "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalGridSizing.swift" \

@@ -2,7 +2,7 @@
 import Foundation
 import Testing
 import DanTermProtocol
-@testable import DanTermSupport
+@testable import DanTermCore
 
 struct PaneTapeFollowTests {
     private static let lifetimeId = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!

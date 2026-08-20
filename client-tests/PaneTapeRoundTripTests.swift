@@ -1,16 +1,16 @@
-// The pane-tape record shape, checked end to end: every record the Mac host's producer
-// builds goes out through the real wire encoder and must come back through the client's
-// reader as the value it was built from.
+// The pane-tape record shape, checked end to end: every record the producer builds goes out
+// through the real wire encoder and must come back through the client's reader as the value
+// it was built from.
 //
 // This is the only test target that links both ends, and that is the point. The producer
-// lives in the host layer and the reader in the client module, so nothing else can catch
-// the two drifting apart -- a renamed field would otherwise pass both sides' own tests
-// and fail only on a real device.
+// lives in DanTermCore and the reader in the client module, and neither package may depend
+// on the other, so nothing else can catch the two drifting apart -- a renamed field would
+// otherwise pass both sides' own tests and fail only on a real device.
 import Foundation
 import Testing
 import DanTermClient
 import DanTermProtocol
-@testable import DanTermSupport
+@testable import DanTermCore
 
 struct PaneTapeRoundTripTests {
     @Test("the start record round-trips its capture, format, geometry, and cursor")
@@ -392,7 +392,7 @@ struct PaneTapeRoundTripTests {
     /// reader-side tests stay about what reaches the wire.
     private func repairedContinuation(
         snapshot: PaneTapeSnapshot<JSONValue>,
-        synchronization: DanTermSupport.PaneTapeStateSynchronization
+        synchronization: DanTermCore.PaneTapeStateSynchronization
     ) -> PaneTapeContinuation<JSONValue> {
         let decision = decidePaneTapeContinuation(
             policy: .reconstructible(historyBudgetBytes: 4096),

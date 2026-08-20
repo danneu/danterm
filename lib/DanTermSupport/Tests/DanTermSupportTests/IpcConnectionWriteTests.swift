@@ -247,22 +247,22 @@ struct IpcConnectionWriteTests {
             Darwin.close(descriptors.peer)
         }
 
-        writePaneTapeRecords(
+        writeGroupedRecords(
             [eventRecord(sequence: 0), eventRecord(sequence: 1)],
             connection: connection,
-            subscriptionId: subscriptionId
+            stream: subscriptionId.uuidString
         )
-        writePaneTapeRecords(
-            [PaneTapeOutgoingRecord<JSONValue>.end(reason: .paneClosed)],
+        writeGroupedRecords(
+            [GroupedRecord(kind: "end")],
             connection: connection,
-            subscriptionId: subscriptionId
+            stream: subscriptionId.uuidString
         )
         // A sibling stream on the same socket must still be served after the `end`.
         let siblingId = UUID()
-        writePaneTapeRecords(
+        writeGroupedRecords(
             [eventRecord(sequence: 7)],
             connection: connection,
-            subscriptionId: siblingId
+            stream: siblingId.uuidString
         )
 
         var received: [(subscription: String, kinds: [String])] = []
@@ -303,19 +303,15 @@ struct IpcConnectionWriteTests {
             Darwin.close(descriptors.peer)
         }
 
-        writePaneTapeRecords(
+        writeGroupedRecords(
             [
-                .gap(PaneTapeGapRecord(
-                    droppedEventCount: 2,
-                    droppedFeedBytes: 3,
-                    droppedWriteBytes: 4
-                )),
+                GroupedRecord(kind: "gap"),
                 eventRecord(sequence: 5),
                 eventRecord(sequence: 6),
                 eventRecord(sequence: 7),
             ],
             connection: connection,
-            subscriptionId: subscriptionId
+            stream: subscriptionId.uuidString
         )
 
         let notification = try JSONDecoder().decode(
@@ -348,10 +344,10 @@ struct IpcConnectionWriteTests {
 
         // The write is queued, not performed here, so the reads below drain the socket while
         // the write queue is still filling it.
-        writePaneTapeRecords(
+        writeGroupedRecords(
             (0..<6).map { chunkyEventRecord(sequence: UInt64($0), payloadBytes: chunkBytes) },
             connection: connection,
-            subscriptionId: subscriptionId
+            stream: subscriptionId.uuidString
         )
 
         // Chunked reads, unlike the byte-at-a-time reader the small fixtures use: this batch
@@ -393,10 +389,10 @@ struct IpcConnectionWriteTests {
         }
 
         let flushed: Bool = await withCheckedContinuation { continuation in
-            writePaneTapeRecords(
+            writeGroupedRecords(
                 [eventRecord(sequence: 1), eventRecord(sequence: 2)],
                 connection: connection,
-                subscriptionId: UUID(),
+                stream: UUID().uuidString,
                 completion: { continuation.resume(returning: $0) }
             )
         }
@@ -404,14 +400,14 @@ struct IpcConnectionWriteTests {
         _ = try readIpcLine(from: descriptors.peer)
 
         let failed: Bool = await withCheckedContinuation { continuation in
-            writePaneTapeRecords(
+            writeGroupedRecords(
                 [
-                    probeEventRecord(sequence: 3, event: .encodable),
-                    probeEventRecord(sequence: 4, event: .refusesToEncode),
-                    probeEventRecord(sequence: 5, event: .encodable),
+                    ProbeRecord.encodable(sequence: 3),
+                    .refusesToEncode,
+                    .encodable(sequence: 5),
                 ],
                 connection: connection,
-                subscriptionId: UUID(),
+                stream: UUID().uuidString,
                 completion: { continuation.resume(returning: $0) }
             )
         }
@@ -655,16 +651,45 @@ private final class ConnectionCloseProbe: @unchecked Sendable {
     }
 }
 
-/// One tape record whose only interesting fact is its order on the socket.
-private func eventRecord(sequence: UInt64) -> PaneTapeOutgoingRecord<JSONValue> {
-    .event(PaneTapeEventRecord(
-        sequence: sequence,
-        elapsedNanoseconds: sequence,
-        originElapsedNanoseconds: nil,
-        byteOffset: nil,
-        byteLength: nil,
-        event: .object(["type": .string("feed")])
-    ))
+/// One record of a batched stream, reduced to the facts these tests read back off the wire:
+/// its kind, its place in the order, and how many bytes it adds to the line.
+///
+/// It states no real stream's vocabulary on purpose. What the batched write owes its caller
+/// -- one notification per group, records in the order they were handed over, a split at a
+/// record boundary -- is connection behavior, so pinning it through one stream's record type
+/// would tie this suite to that stream for nothing.
+private struct GroupedRecord: Encodable, Sendable {
+    let kind: String
+    var sequence: UInt64?
+    var payload: String?
+}
+
+/// Params shaped like any batched notification: the stream named once, then its group.
+private struct GroupedRecordsParams<Record: Encodable & Sendable>: Encodable, Sendable {
+    let subscription: String
+    let records: [Record]
+}
+
+/// Enqueues one group as a batched notification, standing in for any batching producer.
+private func writeGroupedRecords<Record: Encodable & Sendable>(
+    _ records: [Record],
+    connection: IpcConnection,
+    stream: String,
+    completion: (@MainActor @Sendable (Bool) -> Void)? = nil
+) {
+    connection.writeBatchedNotification(
+        method: Methods.paneTapeEvent,
+        batch: records,
+        params: { group in
+            GroupedRecordsParams(subscription: stream, records: Array(group))
+        },
+        completion: completion
+    )
+}
+
+/// One record whose only interesting fact is its order on the socket.
+private func eventRecord(sequence: UInt64) -> GroupedRecord {
+    GroupedRecord(kind: "event", sequence: sequence)
 }
 
 /// Reads whole lines off a descriptor in chunks, through the production framer.
@@ -705,52 +730,36 @@ private final class BufferedLineReader {
     }
 }
 
-/// One tape record big enough that a few of them pass the reader's line bound together.
+/// One record big enough that a few of them pass the reader's line bound together.
 private func chunkyEventRecord(
     sequence: UInt64,
     payloadBytes: Int
-) -> PaneTapeOutgoingRecord<JSONValue> {
-    .event(PaneTapeEventRecord(
+) -> GroupedRecord {
+    GroupedRecord(
+        kind: "event",
         sequence: sequence,
-        elapsedNanoseconds: sequence,
-        originElapsedNanoseconds: nil,
-        byteOffset: nil,
-        byteLength: payloadBytes,
-        event: .object([
-            "type": .string("feed"),
-            "base64": .string(String(repeating: "A", count: payloadBytes)),
-        ])
-    ))
+        payload: String(repeating: "A", count: payloadBytes)
+    )
 }
 
-/// A recorded event that either encodes or refuses to, so one batch can hold both.
-private enum ProbeEvent: Encodable, Sendable {
+/// A record that either encodes or refuses to, so one batch can hold both.
+private enum ProbeRecord: Encodable, Sendable {
     struct EncodeRefused: Error {}
 
-    case encodable
+    case encodable(sequence: UInt64)
     case refusesToEncode
 
-    func encode(to encoder: any Encoder) throws {
-        guard case .encodable = self else { throw EncodeRefused() }
-        var container = encoder.singleValueContainer()
-        try container.encode("probe")
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case sequence
     }
-}
 
-/// One tape record carrying a probe event, so a test can put a record that will not encode
-/// beside records that will.
-private func probeEventRecord(
-    sequence: UInt64,
-    event: ProbeEvent
-) -> PaneTapeOutgoingRecord<ProbeEvent> {
-    .event(PaneTapeEventRecord(
-        sequence: sequence,
-        elapsedNanoseconds: sequence,
-        originElapsedNanoseconds: nil,
-        byteOffset: nil,
-        byteLength: nil,
-        event: event
-    ))
+    func encode(to encoder: any Encoder) throws {
+        guard case .encodable(let sequence) = self else { throw EncodeRefused() }
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode("event", forKey: .kind)
+        try container.encode(sequence, forKey: .sequence)
+    }
 }
 
 /// Params that always fail to encode, so a test can reach the write queue's encode failure.

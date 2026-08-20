@@ -176,7 +176,7 @@ not tape policy.
 
 - [x] WIRE-6: sync payload as `Data` slices end to end; wire bytes
   byte-identical (I1, I2; PO1, PO2, PO5).
-- [ ] PERSIST-5: pane-tape policy and its tests into DanTermCore, the wire
+- [x] PERSIST-5: pane-tape policy and its tests into DanTermCore, the wire
   funnel into `app/`, connection pins rehosted, the root round-trip target
   retargeted onto DanTermCore (I3, I4, I5; PO1, PO3, PO4).
 - [ ] Mark PERSIST-5 and WIRE-6 done in
@@ -200,3 +200,20 @@ not tape policy.
   the keyed container rather than building a base64 `String`. That relies on
   the wire being JSON, whose default data strategy is the same alphabet and
   padding; the record type has one encoder, `encodeIpcLine`.
+- **PERSIST-5 rehost of the connection pins (PO4).** The four
+  `IpcConnectionWriteTests` pins now build their own neutral record type and
+  call `writeBatchedNotification` through a local helper, rather than keeping
+  the tape record types and only swapping the call. What they pin -- one
+  notification per group, records in the order handed over, a split at a record
+  boundary, one completion for the whole group -- is connection behavior, so
+  the suite states no stream's record vocabulary at all. That leaves
+  DanTermSupport with no reference to a pane-tape value anywhere, sources or
+  tests; only the protocol's `Methods.paneTapeEvent` method name remains, as it
+  did before.
+- **`test-ui.sh` source list.** The UI harness compiles a hand-written list of
+  production sources by path, and it names all three pane-tape files, so the
+  move had to repoint them. `scripts/tests/test-ui-harness_test.sh` matches on
+  the file name only, so it needed no change.
+- **Root package now depends on `lib/DanTermCore`.** The round-trip target is
+  the only consumer; the app target still reaches the same files through the
+  `app/DanTermCore` symlink, so nothing else in the graph changed.
