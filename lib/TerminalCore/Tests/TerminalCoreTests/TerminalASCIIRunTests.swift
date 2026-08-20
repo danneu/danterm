@@ -1,15 +1,13 @@
-// Behavioral pins for the bulk printable-ASCII run print path.
+// Behavioral pins for the bulk narrow-cell print paths.
 //
-// The engine prints a maximal run of printable ASCII with one pass of the bookkeeping the
-// per-character path pays per character (`research/33/T8`). That is sound only because a
-// printable ASCII scalar is narrow and grapheme-break-`.other` by construction from the
-// generated table, and only where the run's cut rules hold: row end, insert mode, an open
-// cluster the run's head would join, a wide-or-spacer cell about to be overwritten, and the
-// content-identity wrap.
+// The engine prints maximal runs of bulk-safe scalars with one pass of the bookkeeping the
+// per-character path pays per character (`research/33/T8`). The scalar classification is the
+// source of truth for eligibility. Both GL bytes and decoded scalars share the same cut rules:
+// row end, insert mode, an open cluster the run's head would join, a wide-or-spacer cell about to
+// be overwritten, and the content-identity wrap.
 //
-// Every test here must pass both before and after the bulk path exists. They were written
-// against the per-character engine on purpose: a test that only passed afterwards would be
-// pinning the new implementation's behavior rather than the behavior it had to preserve.
+// Equivalence tests pass on both paths. Token and predicate tests separately pin which scalars
+// take the bulk route.
 //
 // What does *not* belong here: proofs about how much bookkeeping collapsed. That is a count,
 // not a behavior, and `scripts/research/33/t8-bulk-ascii-runs.py` is what measures it.
@@ -43,6 +41,22 @@ struct TerminalASCIIRunTests {
                 "U+\(String(value, radix: 16, uppercase: true)) does not break as .other"
             )
             #expect(classification.properties.isEmojiModifier == false)
+        }
+    }
+
+    @Test("bulk-print eligibility follows the complete scalar classification")
+    func bulkPrintEligibilityPremise() {
+        // Intent: representative narrow scripts qualify, while every width, join, and emoji
+        //   exclusion fails the predicate.
+        // Why it exists: the record is the only statement of which decoded scalars may bypass
+        //   per-scalar grid classification.
+        // Scenario: box drawing, braille, Cyrillic, Greek, and Latin-1 are compared with each
+        //   excluded classification family.
+        for scalar: Unicode.Scalar in ["─", "⣿", "Ж", "Ω", "é"] {
+            #expect(terminalUnicodeClassification(for: scalar).isBulkPrintable)
+        }
+        for scalar: Unicode.Scalar in ["\u{0301}", "\u{200D}", "\u{FE0F}", "界", "\u{0D4E}", "©", "ᄀ", "🇦"] {
+            #expect(terminalUnicodeClassification(for: scalar).isBulkPrintable == false)
         }
     }
 
@@ -283,6 +297,30 @@ struct TerminalASCIIRunTests {
         )
     }
 
+    @Test("a scalar run straddling the content-identity wrap declines to scalar printing")
+    func scalarRunStraddlingIdentityWrapDeclines() throws {
+        // Intent: a decoded scalar run preserves identity wrap behavior and the complete terminal
+        //   state of byte-at-a-time replay.
+        // Why it exists: the shared bulk writer must decline before it would issue identities past
+        //   the counter boundary.
+        // Scenario: three box-drawing scalars begin with only one identity left before wrap.
+        var whole = try #require(Terminal(columns: 16, rows: 2))
+        whole.primeContentIdentityWrapForTesting()
+        whole.feed(Array("─│┌\r\n\r\n".utf8))
+
+        let shape = try #require(whole.scrollbackRecordContentIdentityShape(at: 0))
+        #expect(shape.runCount == 2)
+        #expect(shape.identifiedCellCount == 3)
+        expectValidGrid(whole)
+
+        var single = try #require(Terminal(columns: 16, rows: 2))
+        single.primeContentIdentityWrapForTesting()
+        for byte in Array("─│┌\r\n\r\n".utf8) {
+            single.feed([byte])
+        }
+        #expect(single == whole)
+    }
+
     // MARK: - Equivalence sweep
 
     /// One named byte stream the chunk sweep replays. A struct rather than a tuple so a failing
@@ -303,9 +341,19 @@ struct TerminalASCIIRunTests {
             input: "the quick brown fox jumps over it\r\n"
         ),
         Scenario(
+            name: "scalar runs wrapping the right margin",
+            columns: 7, rows: 4,
+            input: "─│┌┐└┘├┤┬┴┼─│┌┐\r\n"
+        ),
+        Scenario(
             name: "right margin with DECAWM off",
             columns: 7, rows: 4,
             input: "\u{1B}[?7lthe quick brown fox\r\nsecond line here\r\n"
+        ),
+        Scenario(
+            name: "scalar runs at the right margin with DECAWM off",
+            columns: 7, rows: 4,
+            input: "\u{1B}[?7l─│┌┐└┘├┤┬┴┼\r\n"
         ),
         Scenario(
             name: "right margin toggling DECAWM mid-line",
@@ -318,6 +366,11 @@ struct TerminalASCIIRunTests {
             input: "ab\u{754C}cd\u{754C}\r\n\u{1B}[HXYZWVUT\u{1B}[2;1HQRS"
         ),
         Scenario(
+            name: "scalar runs overwriting wide cells",
+            columns: 9, rows: 3,
+            input: "ab界cd界\r\n\u{1B}[H─│┌┐└┘├\u{1B}[2;1H┤┬┴"
+        ),
+        Scenario(
             name: "wide cell wrapping into a spacer then overwritten",
             columns: 5, rows: 3,
             input: "abcd\u{754C}efg\u{1B}[1;1Hxy\u{1B}[2;1Hzw"
@@ -328,14 +381,29 @@ struct TerminalASCIIRunTests {
             input: "abcdef\u{1B}[1;3H\u{1B}[4hXYZ\u{1B}[4lPQR\r\n"
         ),
         Scenario(
+            name: "scalar runs in insert mode",
+            columns: 10, rows: 3,
+            input: "abcdef\u{1B}[1;3H\u{1B}[4h─│┌\u{1B}[4l┐└┘\r\n"
+        ),
+        Scenario(
             name: "prepend clusters interrupting runs",
             columns: 8, rows: 3,
             input: "ab\u{0D4E}cd\u{0D4E}\u{0D4E}ef\r\n"
         ),
         Scenario(
+            name: "prepend clusters interrupting scalar runs",
+            columns: 8, rows: 3,
+            input: "─│\u{0D4E}┌┐\u{0D4E}\u{0D4E}└┘\r\n"
+        ),
+        Scenario(
             name: "combining marks interrupting runs",
             columns: 8, rows: 3,
             input: "abc\u{0301}de\u{0301}\u{0301}fg\r\n"
+        ),
+        Scenario(
+            name: "combining marks and variation selectors follow scalar runs",
+            columns: 8, rows: 3,
+            input: "─│\u{0301}┌┐\u{FE0F}└┘\r\n"
         ),
         Scenario(
             name: "runs scrolling off the bottom of the screen",
@@ -374,9 +442,19 @@ struct TerminalASCIIRunTests {
             input: "\u{1B})0ab\u{0E}lqk\u{0F}cd\u{0E}mjx\u{0F}ef\r\n"
         ),
         Scenario(
+            name: "locking shifts alternate GL and scalar runs",
+            columns: 8, rows: 3,
+            input: "\u{1B})0\u{0E}lq─│qk\u{0F}┌┐ab\r\n"
+        ),
+        Scenario(
             name: "single shifts mid-run",
             columns: 8, rows: 3,
             input: "\u{1B}*0\u{1B}+0ab\u{1B}Nqq\u{1B}Oq\u{1B}nrs\u{1B}oq\u{0F}tu\r\n"
+        ),
+        Scenario(
+            name: "REP follows a scalar run",
+            columns: 8, rows: 3,
+            input: "─│\u{1B}[2b┌┐\r\n"
         ),
     ]
 

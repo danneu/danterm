@@ -16,6 +16,12 @@ enum TerminalStreamAction: Equatable, Sendable {
     /// grid reducer translates each byte through the invoked character set, while `.print`
     /// carries an already-decoded scalar that no character set touches.
     case printASCIIRun(Range<Int>)
+    /// A maximal byte range of complete, valid UTF-8 scalars that are safe to stamp as narrow cells.
+    ///
+    /// Semantically this is one `.print` per decoded scalar. Unlike `printASCIIRun`, these scalars
+    /// never pass through GL character-set translation. The range contains no ASCII bytes and is
+    /// meaningful only while the chunk that produced the action remains borrowed by the caller.
+    case printScalarRun(Range<Int>)
     case print(Unicode.Scalar)
     case execute(UInt8)
     case escape(UInt8)
@@ -72,6 +78,46 @@ struct TerminalInputStream: Equatable, Sendable {
                 let start = index
                 repeat { index += 1 } while index < bytes.count && Self.isPrintableASCII(bytes[index])
                 return .printASCIIRun(start..<index)
+            }
+
+            if absorber.isGround, decoder.isIdle, byte >= 0x80 {
+                let start = index
+                var probeIndex = index
+                var runEnd = index
+                var probe = decoder
+                var firstNonBulkScalar: Unicode.Scalar?
+
+                while probeIndex < bytes.count, bytes[probeIndex] >= 0x80 {
+                    let scalarStart = probeIndex
+                    var consumedEveryByte = true
+                    var scalar: Unicode.Scalar?
+                    while probeIndex < bytes.count, scalar == nil {
+                        let result = probe.next(bytes[probeIndex])
+                        consumedEveryByte = consumedEveryByte && result.consumed
+                        if result.consumed { probeIndex += 1 }
+                        scalar = result.scalar
+                    }
+                    guard let scalar else { break }
+                    let encodedByteCount = TerminalScalars.utf8ByteCount(of: scalar)
+                    guard consumedEveryByte, probeIndex - scalarStart == encodedByteCount else {
+                        break
+                    }
+                    guard terminalUnicodeClassification(for: scalar).isBulkPrintable else {
+                        if scalarStart == start { firstNonBulkScalar = scalar }
+                        break
+                    }
+                    runEnd = probeIndex
+                }
+
+                if runEnd > start {
+                    index = runEnd
+                    return .printScalarRun(start..<runEnd)
+                }
+                if let firstNonBulkScalar {
+                    decoder = probe
+                    index = probeIndex
+                    return .print(firstNonBulkScalar)
+                }
             }
 
             guard absorber.isGround else {

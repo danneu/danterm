@@ -1800,7 +1800,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Reduces a byte chunk synchronously while retaining unfinished stream state.
     public mutating func feed(_ bytes: [UInt8]) {
-        // The buffer is what `.printASCIIRun` ranges index, and what the parser recognizes from;
+        // The buffer is what print-run ranges index, and what the parser recognizes from;
         // it is obtained once per feed rather than per token.
         bytes.withUnsafeBufferPointer { buffer in
             feedBuffer(buffer)
@@ -1849,6 +1849,8 @@ public struct Terminal: Equatable, Sendable {
         switch action {
         case let .printASCIIRun(range):
             printASCIIRun(bytes, range)
+        case let .printScalarRun(range):
+            printScalarRun(bytes, range)
         case let .print(scalar):
             print(scalar)
         case let .execute(control):
@@ -6746,7 +6748,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Prints a run of GL bytes, taking as much of it in bulk as the grid state allows.
     ///
-    /// The loop is the whole contract: `printBulkASCII` takes a prefix or declines, and whatever
+    /// The loop is the whole contract: `printBulkNarrow` takes a prefix or declines, and whatever
     /// it declines goes through `printGLByte` one character at a time. So the cut rules live in
     /// one place, every one of them costs a character rather than the run, and a rule this
     /// reducer does not know about cannot produce a wrong grid -- only a slower one.
@@ -6760,13 +6762,60 @@ public struct Terminal: Equatable, Sendable {
     ) {
         var index = range.lowerBound
         while index < range.upperBound {
-            let taken = printBulkASCII(bytes, from: index, limit: range.upperBound)
+            let charset = charsets[charsets.invokedSlot]
+            let taken: Int
+            if charset == .ascii {
+                taken = printBulkNarrow(runCount: range.upperBound - index) { offset in
+                    Unicode.Scalar(bytes[index + offset])
+                }
+            } else {
+                taken = printBulkNarrow(runCount: range.upperBound - index) { offset in
+                    charset.translate(bytes[index + offset])
+                }
+            }
             if taken == 0 {
                 printGLByte(bytes[index])
                 index += 1
             } else {
                 index += taken
             }
+        }
+    }
+
+    /// Prints already-decoded bulk-safe scalars without applying GL character-set translation.
+    private mutating func printScalarRun(
+        _ bytes: UnsafeBufferPointer<UInt8>,
+        _ range: Range<Int>
+    ) {
+        var index = range.lowerBound
+        while index < range.upperBound {
+            var scalarCount = 0
+            var scan = index
+            while scan < range.upperBound, scalarCount < columnCount {
+                if bytes[scan] & 0xC0 != 0x80 { scalarCount += 1 }
+                scan += 1
+            }
+
+            var decodedIndex = index
+            var decoder = UTF8Decoder()
+            let taken = printBulkNarrow(runCount: scalarCount) { _ in
+                while true {
+                    let result = decoder.next(bytes[decodedIndex])
+                    if result.consumed { decodedIndex += 1 }
+                    if let scalar = result.scalar { return scalar }
+                }
+            }
+            if taken == 0 {
+                while true {
+                    let result = decoder.next(bytes[decodedIndex])
+                    if result.consumed { decodedIndex += 1 }
+                    if let scalar = result.scalar {
+                        print(scalar)
+                        break
+                    }
+                }
+            }
+            index = decodedIndex
         }
     }
 
@@ -6812,21 +6861,20 @@ public struct Terminal: Equatable, Sendable {
     /// Everything `print`/`printNarrow` pay per character -- the Unicode classification, the
     /// cluster-join attempt, `invalidateInspection`, the style-id read, the wrap-spacer repair,
     /// and `rememberOpenCluster` -- is paid once here for the whole prefix. Two facts make that
-    /// sound, and both are pinned by `TerminalASCIIRunTests`: every scalar in 0x20...0x7E is
-    /// narrow and grapheme-break-`.other` in the generated table, so no character of a run can be
-    /// wide or be joined by the next one; and Prepend is the only class an `.other` scalar does
-    /// not break from, so one comparison decides whether the run's head could join an open
-    /// cluster.
+    /// sound, and both are pinned by `TerminalASCIIRunTests`: each supplier yields a scalar whose
+    /// classification is narrow, grapheme-break-`.other`, and free of emoji flags, so no character
+    /// of a run can be wide or be joined by the next one; and Prepend is the only class an `.other`
+    /// scalar does not break from, so one comparison decides whether the run's head could join an
+    /// open cluster.
     ///
     /// It declines, rather than handling, every state in which a character is not a plain
     /// same-row cell replacement: a latched pending wrap, insert mode, an open prepend cluster, a
     /// cell whose overwrite would have to clear a partner, and a content-identity range that
     /// would straddle the counter's wrap. Declining costs one character and then re-enters, so
     /// each of those is a cut in the run, not a fallback for the rest of it.
-    private mutating func printBulkASCII(
-        _ bytes: UnsafeBufferPointer<UInt8>,
-        from start: Int,
-        limit: Int
+    private mutating func printBulkNarrow(
+        runCount: Int,
+        scalar: (Int) -> Unicode.Scalar
     ) -> Int {
         // A pending single shift applies to exactly one character, so the run cannot carry it:
         // declining costs that one character and the rest of the run re-enters unshifted.
@@ -6844,7 +6892,7 @@ public struct Terminal: Equatable, Sendable {
         // Cut at the right margin, then before the first cell an overwrite cannot simply replace:
         // a wide pair blanks its other half and a wrap spacer retires the wrap it stands for,
         // which is `prepareDestination`'s job and not this one's.
-        let available = min(limit - start, columnCount - column)
+        let available = min(runCount, columnCount - column)
         let count = readingRowCells(row) { cells -> Int in
             var count = 0
             while count < available {
@@ -6878,27 +6926,14 @@ public struct Terminal: Equatable, Sendable {
             clearPreviousSpacer(beforeRow: row, column: column)
         }
 
-        // Translation belongs inside the run: a locking shift must not push a whole ncurses
-        // border onto the per-character path. The identity set keeps its own supplier so the
-        // overwhelmingly common case pays no charset branch per character.
-        let charset = charsets[charsets.invokedSlot]
-        if charset == .ascii {
-            writeNarrowCells(
-                row: row,
-                column: column,
-                count: count,
-                baseIdentity: baseIdentity,
-                breakClass: .other
-            ) { Unicode.Scalar(bytes[start + $0]) }
-        } else {
-            writeNarrowCells(
-                row: row,
-                column: column,
-                count: count,
-                baseIdentity: baseIdentity,
-                breakClass: .other
-            ) { charset.translate(bytes[start + $0]) }
-        }
+        writeNarrowCells(
+            row: row,
+            column: column,
+            count: count,
+            baseIdentity: baseIdentity,
+            breakClass: .other,
+            scalar: scalar
+        )
         rememberOpenCluster()
         return count
     }
@@ -6906,13 +6941,14 @@ public struct Terminal: Equatable, Sendable {
     /// The one writer of plain narrow cells: stamps `count` consecutive cells in a row, opens the
     /// cluster context on the last of them, and advances the cursor with the pending-wrap latch.
     ///
-    /// Both `printNarrow` (count 1) and `printBulkASCII` (a whole run) end here, and that is the
+    /// Both `printNarrow` (count 1) and `printBulkNarrow` (a whole run) end here, and that is the
     /// point: cell shape, cluster context, cursor advance and the wrap latch are the state machine
     /// the two paths must agree on, so they share it instead of each restating it. The caller owns
     /// everything that legitimately differs -- clearing the target cells, insert mode, identity
     /// allocation -- and must guarantee the target range is in-bounds and needs no clearing.
     ///
-    /// `scalar` is a non-escaping per-offset supplier so the bulk path reads straight from the fed
+    /// `scalar` is a non-escaping per-offset supplier called exactly once for each offset in
+    /// ascending order. That contract lets the scalar-run path decode sequentially from the fed
     /// chunk without materializing scalars; same-module specialization keeps it out of the hot
     /// loop's way.
     private mutating func writeNarrowCells(
@@ -6927,22 +6963,25 @@ public struct Terminal: Equatable, Sendable {
         let hyperlinkId = hyperlinkPen
         // The supplier runs inside the borrow, which is what lets it read scalars straight from
         // the fed chunk instead of materializing them into an array first.
+        var lastScalar: Unicode.Scalar?
         withRowCells(row) { cells in
             for offset in 0..<count {
+                let suppliedScalar = scalar(offset)
                 cells[column + offset] = GridCell(
-                    scalars: .single(scalar(offset)),
+                    scalars: .single(suppliedScalar),
                     kind: .narrow,
                     styleId: styleId,
                     hyperlinkId: hyperlinkId,
                     contentIdentity: baseIdentity + ContentIdentity(offset)
                 )
+                lastScalar = suppliedScalar
             }
         }
 
         clusterContext = ClusterContext(
             target: CellPosition(row: row, column: column + count - 1),
             previousClass: breakClass,
-            retainedUTF8ByteCount: TerminalScalars.utf8ByteCount(of: scalar(count - 1))
+            retainedUTF8ByteCount: TerminalScalars.utf8ByteCount(of: lastScalar!)
         )
         if column + count == columnCount {
             screen.rows[row].marginErased = false

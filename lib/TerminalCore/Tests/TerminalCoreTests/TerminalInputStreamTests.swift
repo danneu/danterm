@@ -5,6 +5,109 @@ import Testing
 
 /// Locks the stream boundary to chunk-invariant UTF-8 and bounded VT recognition.
 struct TerminalInputStreamTests {
+    @Test("ground-state bulk-safe Unicode is one scalar run")
+    func bulkSafeUnicodeFormsOneRun() {
+        // Intent: a complete row of bulk-safe decoded scalars produces one range action.
+        // Why it exists: this is the first failing test for widening run granularity beyond ASCII.
+        // Scenario: four box-drawing scalars arrive together in ground state.
+        let bytes = Array("┌──┐".utf8)
+        var stream = TerminalInputStream()
+        var index = 0
+        var actions: [TerminalStreamAction] = []
+
+        bytes.withUnsafeBufferPointer { buffer in
+            while let action = stream.nextAction(in: buffer, from: &index) {
+                actions.append(action)
+            }
+        }
+
+        #expect(actions == [.printScalarRun(0..<bytes.count)])
+        #expect(index == bytes.count)
+    }
+
+    @Test("ASCII and decoded scalar runs remain separate token kinds")
+    func mixedPrintRunsAlternate() {
+        // Intent: raw GL bytes and decoded scalars use distinct adjacent run actions.
+        // Why it exists: combining the actions would either skip or wrongly apply charset
+        //   translation.
+        // Scenario: ASCII surrounds two box-drawing scalars in one chunk.
+        let bytes = Array("ab─│cd".utf8)
+        var stream = TerminalInputStream()
+        var index = 0
+        var actions: [TerminalStreamAction] = []
+
+        bytes.withUnsafeBufferPointer { buffer in
+            while let action = stream.nextAction(in: buffer, from: &index) {
+                actions.append(action)
+            }
+        }
+
+        #expect(actions == [
+            .printASCIIRun(0..<2),
+            .printScalarRun(2..<8),
+            .printASCIIRun(8..<10),
+        ])
+    }
+
+    @Test("scalar runs exclude malformed replacement paths but admit encoded U+FFFD")
+    func scalarRunValidityBoundary() {
+        // Intent: only a real UTF-8 encoding of U+FFFD can enter a scalar run.
+        // Why it exists: malformed maximal-subpart replacement must retain its incremental decoder
+        //   consumption and byte re-offer behavior.
+        // Scenario: box drawing surrounds one invalid byte, then encoded U+FFFD precedes a box.
+        let box = Array("─".utf8)
+        let side = Array("│".utf8)
+        let malformed = box + [0xFF] + side
+        var malformedStream = TerminalInputStream()
+        var malformedIndex = 0
+        var malformedActions: [TerminalStreamAction] = []
+        malformed.withUnsafeBufferPointer { buffer in
+            while let action = malformedStream.nextAction(in: buffer, from: &malformedIndex) {
+                malformedActions.append(action)
+            }
+        }
+        #expect(malformedActions == [
+            .printScalarRun(0..<3),
+            .print("\u{FFFD}"),
+            .printScalarRun(4..<7),
+        ])
+
+        let encoded = Array("\u{FFFD}─".utf8)
+        var encodedStream = TerminalInputStream()
+        var encodedIndex = 0
+        var encodedActions: [TerminalStreamAction] = []
+        encoded.withUnsafeBufferPointer { buffer in
+            while let action = encodedStream.nextAction(in: buffer, from: &encodedIndex) {
+                encodedActions.append(action)
+            }
+        }
+        #expect(encodedActions == [.printScalarRun(0..<encoded.count)])
+    }
+
+    @Test("scalar runs preserve actions and pending state at every split")
+    func scalarRunChunkBoundaryInvariance() {
+        // Intent: scalar-level actions and retained decoder state do not depend on chunk boundaries.
+        // Why it exists: the parser probes ahead with a decoder copy while the real decoder stays
+        //   idle for an admitted run.
+        // Scenario: valid runs, malformed lead bytes, and lone continuations are replayed whole,
+        //   bytewise, and across every two-way split.
+        let fixtures: [[UInt8]] = [
+            Array("─│┌\u{FFFD}┐".utf8),
+            Array("─".utf8) + [0xFF] + Array("│".utf8),
+            Array("─".utf8) + [0x80] + Array("│".utf8),
+        ]
+
+        for bytes in fixtures {
+            let expected = run(chunks: [bytes])
+            #expect(run(chunks: bytes.map { [$0] }) == expected)
+            for offset in 0...bytes.count {
+                #expect(
+                    run(chunks: [Array(bytes[..<offset]), Array(bytes[offset...])]) == expected
+                )
+            }
+        }
+    }
+
     @Test("unknown ESC and unsupported charset designation swallow only their own bytes")
     func escapeRecoveryAndCharsetDesignationBoundaries() {
         // Intent: unknown single-byte ESC dispatch and unsupported SCS designation consume their
