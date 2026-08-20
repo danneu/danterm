@@ -1429,6 +1429,10 @@ extension Terminal {
             recordingWork: Bool = false
         ) -> Int {
             let offset = offsets[recordIndex]
+            let record = self.record(at: offset)
+            // Without wide cells every stored cell is one content unit, so the header proves
+            // the result without inspecting the range (`research/31/DD4`).
+            if record.hasWideCells == false { return range.count }
             var total = 0
             for cellOffset in range {
                 if recordingWork { Instrument.searchDistanceWork.record() }
@@ -2677,6 +2681,10 @@ extension Terminal {
                     retainedOffset: record.cellCount + index
                 )
                 let kind = cells[index].kind
+                assert(
+                    kind != .wideTail && kind != .spacerHead || record.hasWideCells,
+                    "a stored wide tail or spacer head requires an earlier wide head"
+                )
                 switch kind {
                 case .narrow, .wideHead, .padding:
                     contentUnits += 1

@@ -264,6 +264,71 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.recordCount == 0)
     }
 
+    @Test("Wide content totals and ranks survive eviction")
+    func wideContentTotalsAndRanksSurviveEviction() throws {
+        // Intent: the maintained content counts keep matching full cell-materialization oracles
+        //   while eviction trims and drops records that contain wide-cell pairs.
+        // Why it exists: the narrow-record count can use a header fast path only if the retained
+        //   wide-record walk remains correct through both forms of head eviction.
+        // Scenario: the fold suite's six-wide-cluster line shape repeatedly fills an 11-column
+        //   store past a small budget, then every retained record coordinate is recounted.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 13, width: 11)
+
+        func check(_ label: Comment) {
+            #expect(store.grandContentUnitTotal == store.independentContentUnitRecount(), label)
+            #expect(
+                store.contentBlockTotalsForTesting
+                    == store.independentContentBlockTotalsForTesting,
+                label
+            )
+            for recordIndex in 0..<store.closedRecordCount {
+                guard let summary = store.recordSummary(at: recordIndex) else { continue }
+                for offset in Set([0, summary.cellCount / 2, summary.cellCount]) {
+                    guard let coordinate = store.recordTextPosition(
+                        recordIndex: recordIndex,
+                        cellOffset: offset
+                    ) else { continue }
+                    #expect(
+                        store.contentRank(of: coordinate)
+                            == store.independentContentRank(of: coordinate),
+                        "\(label): record \(recordIndex), offset \(offset)"
+                    )
+                }
+            }
+        }
+
+        for index in 0..<200 {
+            var wrappedCells: [Terminal.GridCell] = []
+            for scalar in "界世界世界".unicodeScalars {
+                wrappedCells.append(
+                    Terminal.GridCell(scalars: TerminalScalars(scalar), kind: .wideHead)
+                )
+                wrappedCells.append(Terminal.GridCell(kind: .wideTail))
+            }
+            wrappedCells.append(Terminal.GridCell(kind: .spacerHead))
+            var wrapped = Terminal.GridRow(cells: wrappedCells)
+            wrapped.isSoftWrapped = true
+            store.admit(wrapped)
+            check("line \(index), wrapped row")
+
+            var endingCells = [
+                Terminal.GridCell(scalars: TerminalScalars("世"), kind: .wideHead),
+                Terminal.GridCell(kind: .wideTail),
+            ]
+            endingCells.append(contentsOf: "x\(index)".unicodeScalars.map { Self.narrow($0) })
+            endingCells.append(
+                contentsOf: repeatElement(
+                    Terminal.GridCell(),
+                    count: 11 - endingCells.count
+                )
+            )
+            store.admit(Terminal.GridRow(cells: endingCells))
+            check("line \(index), ending row")
+        }
+
+        #expect(store.evictedRowCount > 2, "the stimulus must exercise trim and drop eviction")
+    }
+
     @Test("Content ranks count projected cells and hard boundaries exactly")
     func contentRanksMatchSearchProjectionUnits() throws {
         // Intent: a narrow cell, wide pair and padding each advance rank once, while a forced

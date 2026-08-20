@@ -883,6 +883,41 @@ struct TerminalSearchTests {
         #expect(most <= Terminal.LogicalLineStore.blockSize * 4)
     }
 
+    @Test("closed-history distance work is independent of line length")
+    func closedHistoryDistanceWorkIsIndependentOfLineLength() throws {
+        // Intent: resolving between two retained matches does the same work for narrow-only
+        //   records regardless of how many cells each record contains.
+        // Why it exists: a record header proves that every narrow-only cell is one content unit,
+        //   so walking those cells makes nearest-match resolution scale with irrelevant length.
+        // Scenario: two 200-line histories place equal matches and the anchor at equal record
+        //   indices, but one history has 4-character lines and the other has 40-character lines.
+        func work(lineLength: Int) throws -> Int {
+            var terminal = try #require(Terminal(columns: 64, rows: 3))
+            for index in 0..<200 {
+                let prefix = index == 64 || index == 128 ? "hit" : "xxx"
+                let line = prefix + String(repeating: "x", count: lineLength - prefix.count)
+                terminal.feed(Array("\(line)\r\n".utf8))
+            }
+            _ = terminal.beginSearch("hit")
+            terminal.setSearchPositionForTesting(
+                TerminalTextPosition(row: 96, column: 0)
+            )
+
+            var selected: TerminalTextRange?
+            let spent = Instrument.searchDistanceWork.measure {
+                selected = terminal.activeSearchMatchRange
+            }
+            #expect(selected != nil)
+            return spent
+        }
+
+        let short = try work(lineLength: 4)
+        let long = try work(lineLength: 40)
+
+        #expect(short > 0, "the instrument must observe distance resolution")
+        #expect(long == short)
+    }
+
     @Test("closed-record index advance performs no display-row projection")
     func closedRecordIndexAdvanceAvoidsDisplayProjection() throws {
         // Intent: advancing the closed-history search index reads record content directly.
