@@ -111,9 +111,11 @@ func idealDamagedRows(
 }
 
 func glyphOccurrences(_ plan: RenderFramePlan, in rows: Set<Int>? = nil) -> Int {
-    plan.textRuns.reduce(0) { total, run in
-        guard let rows else { return total + run.cells.count }
-        return rows.contains(run.row) ? total + run.cells.count : total
+    plan.rows.reduce(0) { total, row in
+        total + row.textRuns.reduce(0) { runTotal, run in
+            guard let rows else { return runTotal + run.cells.count }
+            return rows.contains(run.row) ? runTotal + run.cells.count : runTotal
+        }
     }
 }
 
@@ -344,7 +346,10 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
                     newReaches: newReaches,
                     extraEraseIntervals: staleStrips
                 )
-                submittedGlyphs += glyphOccurrences(clipFramePlan(plan, to: shape.planDamage))
+                submittedGlyphs += glyphOccurrences(
+                    plan,
+                    in: Set(shape.planDamage.expandingShift().rowIndices)
+                )
                 for row in indices where row < viewportRows {
                     reachLedger[row] = newReaches[row]
                 }
@@ -361,16 +366,18 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
             }
             mirrorBlitRows += frameDamage
                 .expandingShift()
-                .withGlyphHalo(rowCount: plan.rows)
+                .withGlyphHalo(rowCount: plan.rowCount)
                 .damagedRowCount
         } else {
             pendingDisplayDamage.formUnion(
-                frameDamage.expandingShift().withGlyphHalo(rowCount: plan.rows)
+                frameDamage.expandingShift().withGlyphHalo(rowCount: plan.rowCount)
             )
             let drawingDamage = pendingDisplayDamage
             pendingDisplayDamage = .none
-            let drawn = drawingDamage.isFull ? plan : clipFramePlan(plan, to: drawingDamage)
-            submittedGlyphs += glyphOccurrences(drawn)
+            submittedGlyphs += glyphOccurrences(
+                plan,
+                in: drawingDamage.isFull ? nil : Set(drawingDamage.expandingShift().rowIndices)
+            )
         }
     }
 

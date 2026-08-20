@@ -56,58 +56,6 @@ struct RenderFramePlanningTests {
         #expect(admittedDecorated)
         #expect(invisiblePlan(decorated).decorationRuns.map(\.kinds) == [[.underlineCurly]])
 
-        let clipped = clipFramePlan(plainPlan, to: TerminalDamage(rows: [1]))
-        #expect(clipped.decorationRuns.isEmpty)
-    }
-    @Test("Damage clipping keeps only visible damaged rows and preserves full plans")
-    func damageClipping() throws {
-        var terminal = try #require(Terminal(columns: 4, rows: 3))
-        feed("A\r\n\u{1B}[41mB\r\n\u{1B}[4mC", to: &terminal)
-        let plan = planFrame(
-            for: terminal,
-            presentation: RenderPresentation(
-                theme: .dark,
-                isCursorVisible: true,
-                cursorShape: .block
-            )
-        )
-
-        let damage = TerminalDamage(rows: [1, 5])
-        let first = clipFramePlan(plan, to: damage)
-        let second = clipFramePlan(plan, to: damage)
-
-        #expect(first == second)
-        #expect(first.backgroundRuns.allSatisfy { $0.row == 1 })
-        #expect(first.overlayRuns.allSatisfy { $0.row == 1 })
-        #expect(first.textRuns.allSatisfy { $0.row == 1 })
-        #expect(first.decorationRuns.allSatisfy { $0.row == 1 })
-        #expect(first.cursor == nil)
-        #expect(clipFramePlan(plan, to: .full) == plan)
-        #expect(clipFramePlan(plan, to: .none).backgroundRuns.isEmpty)
-        #expect(clipFramePlan(plan, to: .none).textRuns.isEmpty)
-    }
-
-    @Test("Damage naming every viewport row preserves the complete frame plan")
-    func exhaustiveRowDamagePreservesPlan() throws {
-        var terminal = try #require(Terminal(columns: 4, rows: 3))
-        feed("A\r\n\u{1B}[41mB\r\n\u{1B}[4mC", to: &terminal)
-        let plan = invisiblePlan(terminal)
-
-        let clipped = clipFramePlan(plan, to: TerminalDamage(rows: Set(0..<plan.rows)))
-
-        #expect(clipped == plan)
-    }
-
-    @Test("Out-of-range damage cannot substitute for a missing viewport row")
-    func outOfRangeDamageDoesNotQualifyAsExhaustive() throws {
-        var terminal = try #require(Terminal(columns: 4, rows: 3))
-        feed("A\r\n\u{1B}[41mB\r\n\u{1B}[4mC", to: &terminal)
-        let plan = invisiblePlan(terminal)
-
-        let clipped = clipFramePlan(plan, to: TerminalDamage(rows: [0, 1, plan.rows]))
-
-        #expect(clipped != plan)
-        #expect(clipped.textRuns.allSatisfy { $0.row < 2 })
     }
 
     @Test("Frame planning preserves exact glyph payloads and canonical split keys")
@@ -128,7 +76,7 @@ struct RenderFramePlanningTests {
         )
 
         #expect(plan.columns == 10)
-        #expect(plan.rows == 1)
+        #expect(plan.rowCount == 1)
         #expect(plan.defaultBackground == RenderTheme.dark.defaultBackground)
         try #require(plan.textRuns.count == 4)
         #expect(plan.textRuns[0].startColumn == 0)

@@ -121,12 +121,14 @@ public struct TerminalBenchmarkMarkerScanner {
     ) -> TerminalBenchmarkMarkerScan {
         buffer.removeAll(keepingCapacity: true)
         var needsSeparator = false
-        for run in plan.textRuns {
-            if needsSeparator { buffer.append("\n") }
-            needsSeparator = true
-            guard rows == nil || rows!.contains(run.row) else { continue }
-            for cell in run.cells {
-                buffer.append(contentsOf: cell.scalars)
+        for row in plan.rows {
+            for run in row.textRuns {
+                if needsSeparator { buffer.append("\n") }
+                needsSeparator = true
+                guard rows == nil || rows!.contains(run.row) else { continue }
+                for cell in run.cells {
+                    buffer.append(contentsOf: cell.scalars)
+                }
             }
         }
         return searchBuffer()

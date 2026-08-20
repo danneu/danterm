@@ -15,8 +15,8 @@
 // globally even under RTLD_LOCAL, and a collision makes both arms run one arm's code.
 //
 // `PreparedDraw` mirrors the private one in TerminalDrawBenchmarkSupport: the bitmap context,
-// the plan, and the damage clip are all built in `init`, outside the timer, so a timed batch
-// contains `drawRenderFrame` and nothing else.
+// the plan, row restriction, and damage clip are all built in `init`, outside the timer, so a
+// timed batch contains `drawRenderFrame`, including its row selection, and nothing else.
 import CoreGraphics
 import Dispatch
 import Foundation
@@ -27,11 +27,12 @@ import TerminalRenderPlanning
 /// Holds the one prepared surface a batch redraws, so per-draw cost excludes all setup.
 private final class PreparedDraw {
     private let plan: RenderFramePlan
+    private let restrictedRows: [Int]?
     private let metrics: TerminalRenderMetrics
     private let context: CGContext
     private let storage: UnsafeMutableRawPointer
 
-    /// `clipRows <= 0` selects the full-frame scenario; a positive value clips to that many
+    /// `clipRows <= 0` selects the full-frame scenario; a positive value restricts to that many
     /// leading rows, which is the damage-scoped path the GUI benchmark cannot measure quietly.
     /// `textShaped` selects the all-ASCII workload, which is the only one of the two that
     /// reaches CoreText's glyph calls at all; the default sprite workload never does.
@@ -54,8 +55,9 @@ private final class PreparedDraw {
                 theme: .dark, isCursorVisible: false, cursorShape: .block))
         guard let metrics = TerminalRenderMetrics(displayScale: displayScale) else { return nil }
 
-        let damaged = Set(0..<min(max(clipRows, 0), full.rows))
-        self.plan = clipRows <= 0 ? full : clipFramePlan(full, to: TerminalDamage(rows: damaged))
+        let damaged = Array(0..<min(max(clipRows, 0), full.rowCount))
+        self.plan = full
+        self.restrictedRows = clipRows <= 0 ? nil : damaged
 
         guard let size = renderFrameSize(for: full, metrics: metrics) else { return nil }
         let byteCount = size.pixelWidth * size.pixelHeight * 4
@@ -92,7 +94,9 @@ private final class PreparedDraw {
 
     deinit { storage.deallocate() }
 
-    func draw() { drawRenderFrame(plan, metrics: metrics, in: context) }
+    func draw() {
+        drawRenderFrame(plan, rows: restrictedRows, metrics: metrics, in: context)
+    }
 
     /// Matches TerminalDrawBenchmarkSupport's generator exactly so both benchmarks draw the
     /// same corpus: dense, colour-varying, emphasis-alternating cells that defeat text-run

@@ -133,7 +133,7 @@ grep -q 'pendingRedrawSequence' "$ROOT/app/TerminalBenchmark.swift"
 # composed damage, so that rectangle measures buffer depth (research/33/F25).
 # A full-screen workload keeps the rectangle rule, which staleness cannot widen
 # past the whole grid.
-grep -q 'acceptsRedrawDraw = redrawDirtyRowCount == plan.rows' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'acceptsRedrawDraw = redrawDirtyRowCount == plan.rowCount' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'damageTopologyRecorder?.recordDrawIfTopologyMatches' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'reopenCompletedBlockIfRequested' "$ROOT/app/TerminalBenchmark.swift"
 # A block is opened only by a marker the frame itself wrote, and re-armed only

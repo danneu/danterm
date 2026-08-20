@@ -784,7 +784,7 @@ func swiftTerminalSessionViewTests() {
         let resizedRows = RenderFramePlan.rowsForTesting + 2
         controller.currentPlan = RenderFramePlan(
             defaultBackground: RenderTheme.dark.defaultBackground,
-            rows: resizedRows
+            rowCount: resizedRows
         )
         controller.emitFrameForTest(damage: .full)
 

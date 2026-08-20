@@ -14,10 +14,10 @@ two arms cancels what drift remains. Measured paired spread is ~0.7% against the
 benchmark's 3.98%. Background, evidence and limits: F14 and F21-F23 in
 docs/research/8-benchmark-variance-regression.md.
 
-Scope, deliberately narrow. This measures the cost of DRAWING an already-scoped plan. It
+Scope, deliberately narrow. This measures the cost of DRAWING a row-indexed plan, including
+selection of the restricted rows inside `drawRenderFrame`. It
 does not see damage *generation* -- which rows `setNeedsDisplay` and AppKit's dirty-rect
-coalescing mark -- nor `clipFramePlan`'s own cost, both of which sit outside the timed
-region. Those stay with the GUI benchmark.
+coalescing mark. That stays with the GUI benchmark.
 
 No decision rule is frozen for this instrument yet, so the report is statistics plus an
 optional caller-supplied threshold, never a verdict against a threshold this script invented.

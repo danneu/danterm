@@ -807,11 +807,11 @@ never demotes it, and interleaving cancels the drift that remains. Paired SD is
 ~0.7% against the GUI benchmark's 3.98% degraded and 1.49% at its best.
 
 **What it cannot see, which is the important part.** The timed region is
-`drawRenderFrame` on an already-clipped plan. So it does **not** cover damage
-*generation* -- which rows `setNeedsDisplay` and AppKit's dirty-rect coalescing
-mark -- nor `clipFramePlan`'s own cost. A change that dirties too much looks free
-here. Those questions stay with `benchmark-quick` on `incremental-mixed`, whose
-coarse verdict is still the only one that sees them.
+`drawRenderFrame` on a row-indexed plan, including selection of its restricted
+rows. It does **not** cover damage *generation* -- which rows `setNeedsDisplay`
+and AppKit's dirty-rect coalescing mark. A change that dirties too much looks
+free here. That question stays with `benchmark-quick` on `incremental-mixed`,
+whose coarse verdict is still the only one that sees it.
 
 **Its A/A precision is not its precision on a revision pair.** Against itself it
 holds ~0.7% paired SD and a mean within 0.1% of zero, but an A/A control cannot

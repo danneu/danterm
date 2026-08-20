@@ -219,50 +219,61 @@ public struct RenderPresentation: Equatable, Sendable {
     }
 }
 
+/// Owns every drawing run for one viewport row so publication and reuse share
+/// the same damage-sized unit.
+public struct RenderPlanRow: Equatable, Sendable {
+    /// Non-default background spans in canonical within-row order.
+    public let backgroundRuns: [RenderBackgroundRun]
+
+    /// Selection and active-find overlays in canonical within-row order.
+    public let overlayRuns: [RenderOverlayRun]
+
+    /// Glyph-bearing spans in canonical within-row order.
+    public let textRuns: [RenderTextRun]
+
+    /// Underline and strikethrough spans in canonical within-row order.
+    public let decorationRuns: [RenderDecorationRun]
+
+    init(
+        backgroundRuns: [RenderBackgroundRun],
+        overlayRuns: [RenderOverlayRun],
+        textRuns: [RenderTextRun],
+        decorationRuns: [RenderDecorationRun]
+    ) {
+        self.backgroundRuns = backgroundRuns
+        self.overlayRuns = overlayRuns
+        self.textRuns = textRuns
+        self.decorationRuns = decorationRuns
+    }
+}
+
 /// Isolates each executor pass so a complete frame can be replayed without
 /// consulting terminal state or carrying state between frames.
 public struct RenderFramePlan: Equatable, Sendable {
     /// Viewport width in terminal grid columns.
     public let columns: Int
 
-    /// Viewport height in terminal grid rows.
-    public let rows: Int
+    /// Viewport rows in canonical top-to-bottom order.
+    public let rows: [RenderPlanRow]
+
+    /// Viewport height derived from the only row storage.
+    public var rowCount: Int { rows.count }
 
     /// Concrete color used to clear the full viewport before drawing runs.
     public let defaultBackground: RenderColor
-
-    /// Non-default background spans in canonical row-major order.
-    public let backgroundRuns: [RenderBackgroundRun]
-
-    /// Selection and active-find overlays in canonical row-major order.
-    public let overlayRuns: [RenderOverlayRun]
-
-    /// Glyph-bearing spans in canonical row-major order.
-    public let textRuns: [RenderTextRun]
-
-    /// Underline and strikethrough spans in canonical row-major order.
-    public let decorationRuns: [RenderDecorationRun]
 
     /// Geometry and color metadata for the cursor requested by this frame.
     public let cursor: RenderCursor?
 
     init(
         columns: Int,
-        rows: Int,
         defaultBackground: RenderColor,
-        backgroundRuns: [RenderBackgroundRun],
-        overlayRuns: [RenderOverlayRun],
-        textRuns: [RenderTextRun],
-        decorationRuns: [RenderDecorationRun],
+        rows: [RenderPlanRow],
         cursor: RenderCursor?
     ) {
         self.columns = columns
-        self.rows = rows
         self.defaultBackground = defaultBackground
-        self.backgroundRuns = backgroundRuns
-        self.overlayRuns = overlayRuns
-        self.textRuns = textRuns
-        self.decorationRuns = decorationRuns
+        self.rows = rows
         self.cursor = cursor
     }
 }

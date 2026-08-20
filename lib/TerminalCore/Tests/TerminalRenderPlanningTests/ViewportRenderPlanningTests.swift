@@ -21,7 +21,7 @@ struct ViewportRenderPlanningTests {
             )
         )
 
-        #expect(plan.rows == 3)
+        #expect(plan.rowCount == 3)
         #expect(plan.textRuns.flatMap(\.cells).map { Array($0.scalars) } == [
             Array("a".unicodeScalars),
             Array("b".unicodeScalars),

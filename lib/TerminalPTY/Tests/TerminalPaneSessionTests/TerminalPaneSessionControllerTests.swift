@@ -1448,7 +1448,7 @@ struct TerminalPaneSessionControllerTests {
             if frame.plan.columns == 40 { resized = frame }
         }
         let frame = try #require(resized)
-        #expect(frame.plan.rows == 12)
+        #expect(frame.plan.rowCount == 12)
         #expect(frame.damage == .full)
 
         controller.tearDown()
@@ -1522,7 +1522,7 @@ struct TerminalPaneSessionControllerTests {
 
         let plan = try #require(controller.currentPlan)
         #expect(plan.columns == 42)
-        #expect(plan.rows == 7)
+        #expect(plan.rowCount == 7)
         #expect(plan.projectedText.contains("__CONTROLLER_LIVE__"))
         #expect(ended == [.exited(.exited(0))])
 

@@ -7,6 +7,33 @@ import TerminalRenderExecution
 import TerminalRenderPlanning
 
 struct ExecutorContractTests {
+    @Test("Row-restricted drawing matches the same rows of a whole-frame draw")
+    func rowRestrictedDrawingMatchesWholeFrame() throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        var terminal = try #require(Terminal(columns: 5, rows: 3))
+        terminal.feed(Array("plain\r\n\u{1B}[41;4mB\u{1B}[0m\r\n\u{4E2D}\u{1B}[2;1H".utf8))
+        terminal.setSelection(.init(
+            start: .init(row: 1, column: 0),
+            end: .init(row: 1, column: 1)
+        ))
+        let plan = planFrame(
+            for: terminal,
+            presentation: .init(theme: .dark, isCursorVisible: true, cursorShape: .block)
+        )
+        let restrictions: [Set<Int>] = [
+            Set(0..<plan.rowCount),
+            [],
+            [1],
+            [0, 1, plan.rowCount],
+        ]
+
+        for rows in restrictions {
+            let restricted = try renderRows(plan: plan, rows: rows, metrics: metrics)
+            let whole = try renderRows(plan: plan, rows: rows, metrics: metrics, unrestricted: true)
+            expectBitmap(restricted, matches: whole, "rows \(rows.sorted())")
+        }
+    }
+
     @Test("Damage-row redraw is pixel-identical to a fresh full frame")
     func damageRedrawMatchesFullFrame() throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
@@ -402,6 +429,37 @@ struct ExecutorContractTests {
         try drawSentinel(in: controlContext, size: size.pointSize)
         expectBitmap(subject.bitmap(), matches: control.bitmap())
     }
+}
+
+private func renderRows(
+    plan: RenderFramePlan,
+    rows: Set<Int>,
+    metrics: TerminalRenderMetrics,
+    unrestricted: Bool = false
+) throws -> Bitmap {
+    let size = try #require(renderFrameSize(for: plan, metrics: metrics))
+    let surface = try BitmapSurface(size: size, metrics: metrics)
+    let context = try #require(surface.context)
+    let validRows = rows.filter { plan.rowCount > $0 && $0 >= 0 }
+    for row in validRows {
+        context.addRect(CGRect(
+            x: 0,
+            y: CGFloat(row) * metrics.cellSize.height,
+            width: size.pointSize.width,
+            height: metrics.cellSize.height
+        ))
+    }
+    if validRows.isEmpty {
+        context.clip(to: .zero)
+    } else {
+        context.clip()
+    }
+    if unrestricted {
+        drawRenderFrame(plan, metrics: metrics, in: context)
+    } else {
+        drawRenderFrame(plan, rows: rows.sorted(), metrics: metrics, in: context)
+    }
+    return surface.bitmap()
 }
 
 private func applyTriangularClip(to context: CGContext, size: CGSize) {

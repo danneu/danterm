@@ -163,12 +163,14 @@ final class GlyphPreviewView: NSView {
             metrics: metrics,
             rowCount: layout.rows
         )
-        let visiblePlan = rows == 0..<layout.rows
-            ? plan
-            : clipFramePlan(plan, to: TerminalDamage(rows: Set(rows)))
         context.saveGState()
         context.clip(to: dirtyRect)
-        drawRenderFrame(visiblePlan, metrics: metrics, in: context)
+        drawRenderFrame(
+            plan,
+            rows: rows == 0..<layout.rows ? nil : Array(rows),
+            metrics: metrics,
+            in: context
+        )
         drawSectionHeadings(in: context, visibleRows: rows)
         drawReferenceGlyphs(in: context, visibleRows: rows)
         context.restoreGState()

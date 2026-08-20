@@ -188,7 +188,7 @@ benchmark-draw iterations="15":
     swift run --package-path lib/TerminalCore -c release TerminalDrawBenchmark {{iterations}}
 
 # Compare two draw-path revisions headlessly, interleaved in one process. Measures drawing
-# an already-scoped plan only -- not damage generation, which stays with benchmark-quick.
+# a row-indexed plan including row selection -- not damage generation, which stays with benchmark-quick.
 # Both parameters are positional (they have defaults, so `name=value` does not bind here):
 #   just benchmark-headless-draw                      # A/A control against this tree
 #   just benchmark-headless-draw 8                    # 8 rounds

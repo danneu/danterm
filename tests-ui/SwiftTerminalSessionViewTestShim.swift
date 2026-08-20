@@ -61,12 +61,12 @@ struct RenderTheme {
 
 struct RenderFramePlan {
     /// The fake viewport's row count, exposed so a test can enumerate every row without
-    /// restating the literal that `rows` and the initializer default already share.
+    /// restating the literal that `rowCount` and the initializer default already share.
     static let rowsForTesting = 10
 
     let defaultBackground: RenderColor
     let columns: Int
-    let rows: Int
+    let rowCount: Int
 
     /// The grid defaults to the fake viewport, and a test overrides it only to
     /// stand in for a resize -- the one trust-breaking input that reaches the
@@ -74,11 +74,11 @@ struct RenderFramePlan {
     init(
         defaultBackground: RenderColor,
         columns: Int = 10,
-        rows: Int = RenderFramePlan.rowsForTesting
+        rowCount: Int = RenderFramePlan.rowsForTesting
     ) {
         self.defaultBackground = defaultBackground
         self.columns = columns
-        self.rows = rows
+        self.rowCount = rowCount
     }
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure the prize damage clipping is playing for: full-frame vs clipped draw cost.
+"""Measure the prize damage restriction is playing for: full-frame vs restricted draw cost.
 
 `terminal-headless-draw-compare.py` varies the *checkout* at one fixed scenario.
 This varies the *scenario* on one checkout: it loads a full-frame arm and a
@@ -8,10 +8,10 @@ them is taken microseconds apart and the process-level drift that moves every
 headless draw measurement together cancels out.
 
 Scope, deliberately narrow -- inherited from the arm this reuses. The timed
-region is `drawRenderFrame` on an already-scoped plan under an already-built
-clip. It does NOT contain damage generation, `clipFramePlan`, CGContext clip
+region is `drawRenderFrame` on a complete row-indexed plan with an already-built
+row restriction. It does NOT contain damage generation, CGContext clip
 construction, or Core Animation replay. So it answers "how much drawing does
-clipping avoid", which is the ceiling on what the damage machinery can win --
+row restriction avoid", which is the ceiling on what the damage machinery can win --
 not whether the machinery pays for itself.
 
 No decision rule is frozen for this instrument. It reports statistics and its
@@ -152,7 +152,7 @@ def main():
         "note": (
             "medianRatio is full-frame per-draw cost divided by clipped per-draw cost: "
             "3.0 means clipping that many rows made the draw 3x cheaper. Timed region is "
-            "drawRenderFrame only -- no damage generation, no clipFramePlan, no clip "
+            "drawRenderFrame including row selection -- no damage generation, no clip "
             "construction, no Core Animation replay."
         ),
     }

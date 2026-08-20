@@ -83,9 +83,9 @@ public struct DrawBenchmarkSurface: Codable, Equatable, Sendable {
     public let cellPixelWidth: Int
     /// Cell height in device pixels at the measured display scale.
     public let cellPixelHeight: Int
-    /// Text runs in the plan actually handed to the executor, after any clipping.
+    /// Text runs selected for the executor after any row restriction.
     public let drawnRunCount: Int
-    /// Cells in the plan actually handed to the executor, after any clipping.
+    /// Cells selected for the executor after any row restriction.
     public let drawnCellCount: Int
 }
 
@@ -269,6 +269,7 @@ private final class PreparedDraw {
     /// reports the work it actually did rather than the work it was asked for.
     let surface: DrawBenchmarkSurface
     private let plan: RenderFramePlan
+    private let restrictedRows: [Int]?
     private let metrics: TerminalRenderMetrics
     private var context: CGContext?
     private let storage: UnsafeMutableRawPointer
@@ -277,10 +278,10 @@ private final class PreparedDraw {
         guard let metrics = TerminalRenderMetrics(displayScale: displayScale) else {
             throw DrawBenchmarkError.invalidMetrics
         }
-        let rows = Set(0..<min(4, plan.rows))
-        self.plan = scenario == .fullFrame
-            ? plan
-            : clipFramePlan(plan, to: TerminalDamage(rows: rows))
+        let rows = Array(0..<min(4, plan.rowCount))
+        let restriction: [Int]? = scenario == .fullFrame ? nil : rows
+        self.plan = plan
+        self.restrictedRows = restriction
         guard let size = renderFrameSize(for: plan, metrics: metrics) else {
             throw DrawBenchmarkError.invalidFrame
         }
@@ -328,8 +329,14 @@ private final class PreparedDraw {
             bitmapPixelHeight: size.pixelHeight,
             cellPixelWidth: metrics.cellWidthPixels,
             cellPixelHeight: metrics.cellHeightPixels,
-            drawnRunCount: self.plan.textRuns.count,
-            drawnCellCount: self.plan.textRuns.reduce(0) { $0 + $1.cells.count }
+            drawnRunCount: plan.rows.enumerated().reduce(0) { total, element in
+                total + (restriction == nil || restriction?.contains(element.offset) == true
+                    ? element.element.textRuns.count : 0)
+            },
+            drawnCellCount: plan.rows.enumerated().reduce(0) { total, element in
+                total + (restriction == nil || restriction?.contains(element.offset) == true
+                    ? element.element.textRuns.reduce(0) { $0 + $1.cells.count } : 0)
+            }
         )
         self.metrics = metrics
         self.context = context
@@ -343,6 +350,6 @@ private final class PreparedDraw {
 
     func draw() {
         guard let context else { return }
-        drawRenderFrame(plan, metrics: metrics, in: context)
+        drawRenderFrame(plan, rows: restrictedRows, metrics: metrics, in: context)
     }
 }

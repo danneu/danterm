@@ -124,11 +124,13 @@ public func makeBrowsingTerminal(
 /// to alter run boundaries without altering the cells those runs cover.
 public func planCellCoverage(_ plan: RenderFramePlan) -> UInt64 {
     var total: UInt64 = 0
-    for run in plan.textRuns {
-        total &+= UInt64(run.cells.count)
-    }
-    for run in plan.backgroundRuns {
-        total &+= UInt64(run.columnCount)
+    for row in plan.rows {
+        for run in row.textRuns {
+            total &+= UInt64(run.cells.count)
+        }
+        for run in row.backgroundRuns {
+            total &+= UInt64(run.columnCount)
+        }
     }
     return total
 }

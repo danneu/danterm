@@ -66,7 +66,7 @@ struct FrameBackingStoreTests {
         let initial = planFrame(for: terminal, presentation: blockCursor)
         let store = try #require(TerminalFrameBackingStore(
             columns: initial.columns,
-            rows: initial.rows,
+            rows: initial.rowCount,
             metrics: metrics
         ))
         store.renderFull(initial)
@@ -110,7 +110,7 @@ struct FrameBackingStoreTests {
         let plan = planFrame(for: terminal, presentation: blockCursor)
         let store = try #require(TerminalFrameBackingStore(
             columns: plan.columns,
-            rows: plan.rows,
+            rows: plan.rowCount,
             metrics: metrics
         ))
         store.renderFull(plan)
@@ -341,7 +341,7 @@ struct FrameBackingStoreTests {
         let plan = planFrame(for: terminal, presentation: blockCursor)
         let store = try #require(TerminalFrameBackingStore(
             columns: plan.columns,
-            rows: plan.rows,
+            rows: plan.rowCount,
             metrics: metrics
         ))
         store.renderFull(plan)
@@ -376,7 +376,7 @@ struct FrameBackingStoreTests {
         let plan = planFrame(for: terminal, presentation: blockCursor)
         let store = try #require(TerminalFrameBackingStore(
             columns: plan.columns,
-            rows: plan.rows,
+            rows: plan.rowCount,
             metrics: metrics
         ))
         store.renderFull(plan)
@@ -464,7 +464,7 @@ struct FrameBackingStoreTests {
         let initial = planFrame(for: terminal, presentation: blockCursor)
         let store = try #require(TerminalFrameBackingStore(
             columns: initial.columns,
-            rows: initial.rows,
+            rows: initial.rowCount,
             metrics: metrics
         ))
         store.renderFull(initial)
@@ -499,7 +499,7 @@ struct FrameBackingStoreTests {
         let current = planFrame(for: terminal, presentation: blockCursor)
         let store = try #require(TerminalFrameBackingStore(
             columns: current.columns,
-            rows: current.rows,
+            rows: current.rowCount,
             metrics: metrics
         ))
         store.renderFull(current)

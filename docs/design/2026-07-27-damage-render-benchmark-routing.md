@@ -90,9 +90,14 @@ the 3% question has a better instrument.
 
 | question | instrument | state |
 | --- | --- | --- |
-| damage *drawing* -- cost of `drawRenderFrame` on a clipped plan | `just benchmark-headless-draw` | healthy, ~0.5-1% on a revision pair |
+| damage *drawing* -- cost of `drawRenderFrame` with a row restriction, including row selection | `just benchmark-headless-draw` | healthy, ~0.5-1% on a revision pair; baseline reset 2026-08-20 when row selection moved inside the bracket |
 | damage *generation* -- which rows `setNeedsDisplay` and AppKit's dirty-rect coalescing mark | `just benchmark-quick` on `incremental-mixed` | **degraded, and staying that way** |
-| `clipFramePlan`'s own cost, and anything on the published-frame path outside `drawRenderFrame` | `just benchmark-quick` on `incremental-mixed` | **degraded, and staying that way** |
+| published-frame work outside `drawRenderFrame` | `just benchmark-quick` on `incremental-mixed` | **degraded, and staying that way** |
+
+The 2026-08-20 row-indexed frame-plan change deleted `clipFramePlan`. Its
+damage-clipped arm now retains the full plan and passes the damaged row set into
+the timed draw. Results before and after that change are not comparable because
+the bracket now includes O(damaged rows) selection that previously ran before it.
 
 **This decision accepts a coverage gap; it does not close one.** A change that
 alters which rows get marked dirty has no healthy directional instrument. Since

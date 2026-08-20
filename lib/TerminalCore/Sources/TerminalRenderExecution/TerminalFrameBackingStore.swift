@@ -122,8 +122,8 @@ public final class TerminalFrameBackingStore {
     /// Renders the complete plan, making every pixel current.
     public func renderFull(_ plan: RenderFramePlan) {
         precondition(
-            plan.columns == columns && plan.rows == rows,
-            "full render of a \(plan.columns)x\(plan.rows) plan into a \(columns)x\(rows) store"
+            plan.columns == columns && plan.rowCount == rows,
+            "full render of a \(plan.columns)x\(plan.rowCount) plan into a \(columns)x\(rows) store"
         )
         ioSurface.lock(options: [], seed: nil)
         defer { ioSurface.unlock(options: [], seed: nil) }
@@ -142,7 +142,7 @@ public final class TerminalFrameBackingStore {
     /// value cannot be realized exactly (full damage, grid mismatch, an
     /// out-of-range shift); the caller treats that as stale.
     public func apply(plan: RenderFramePlan, damage: TerminalDamage) -> Bool {
-        guard plan.columns == columns, plan.rows == rows else { return false }
+        guard plan.columns == columns, plan.rowCount == rows else { return false }
         guard damage.isFull == false else { return false }
         let indices = damage.rowIndices
         guard indices.allSatisfy({ $0 < rows }) else { return false }
@@ -202,7 +202,12 @@ public final class TerminalFrameBackingStore {
             ))
         }
         context.clip()
-        drawRenderFrame(clipFramePlan(plan, to: shape.planDamage), metrics: metrics, in: context)
+        drawRenderFrame(
+            plan,
+            rows: shape.planDamage.expandingShift().rowIndices,
+            metrics: metrics,
+            in: context
+        )
         context.restoreGState()
         for row in indices {
             rowReaches[row] = newReaches[row]

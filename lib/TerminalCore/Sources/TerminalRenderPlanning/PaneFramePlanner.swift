@@ -32,7 +32,7 @@ public struct PaneFramePlanner: Sendable {
     /// the previous frame of this stream is still reusable.
     ///
     /// The result is always a complete plan, never a clipped one: callers that
-    /// draw incrementally still narrow it themselves with `clipFramePlan(_:to:)`.
+    /// draw incrementally pass the resulting row restriction to the executor.
     public mutating func planFrame(
         for terminal: Terminal,
         presentation: RenderPresentation,

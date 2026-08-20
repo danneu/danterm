@@ -218,7 +218,7 @@ func renderIncrementalBitmap(
     // half: it cannot translate its backing store, so a carried shift folds into
     // region-wide row damage before clipping.
     damage.expandingShift().forEachRow { row in
-        guard current.rows > row else { return }
+        guard current.rowCount > row else { return }
         context.addRect(CGRect(
             x: 0,
             y: CGFloat(row) * metrics.cellSize.height,
@@ -227,7 +227,12 @@ func renderIncrementalBitmap(
         ))
     }
     context.clip()
-    drawRenderFrame(clipFramePlan(current, to: damage), metrics: metrics, in: context)
+    drawRenderFrame(
+        current,
+        rows: damage.expandingShift().rowIndices,
+        metrics: metrics,
+        in: context
+    )
     context.restoreGState()
     return surface.bitmap()
 }
@@ -245,14 +250,16 @@ func renderDirtyRectBitmap(
     let rows = terminalRows(
         intersecting: dirtyRect,
         metrics: metrics,
-        rowCount: current.rows
+        rowCount: current.rowCount
     )
-    let plan = rows == 0..<current.rows
-        ? current
-        : clipFramePlan(current, to: TerminalDamage(rows: Set(rows)))
     context.saveGState()
     context.clip(to: dirtyRect)
-    drawRenderFrame(plan, metrics: metrics, in: context)
+    drawRenderFrame(
+        current,
+        rows: rows == 0..<current.rowCount ? nil : Array(rows),
+        metrics: metrics,
+        in: context
+    )
     context.restoreGState()
     return surface.bitmap()
 }

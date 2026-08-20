@@ -132,8 +132,7 @@ struct RenderCorpusPlanningTests {
                 + "damage: \(damageDescription)"
             assertCanonical(completePlan, "\(context)")
 
-            let clippedPlan = clipFramePlan(completePlan, to: damage)
-            retainedPlan = overlay(clippedPlan, damage: damage, on: retainedPlan)
+            retainedPlan = overlay(completePlan, damage: damage, on: retainedPlan)
             if retainedPlan != completePlan {
                 Issue.record(Comment(rawValue: context))
                 retainedPlan = completePlan
@@ -185,56 +184,35 @@ struct RenderCorpusPlanningTests {
     }
 
     private func overlay(
-        _ clipped: RenderFramePlan,
+        _ complete: RenderFramePlan,
         damage: TerminalDamage,
         on retained: RenderFramePlan
     ) -> RenderFramePlan {
         guard damage.isFull == false,
-              retained.columns == clipped.columns,
-              retained.rows == clipped.rows,
-              retained.defaultBackground == clipped.defaultBackground
+              retained.columns == complete.columns,
+              retained.rowCount == complete.rowCount,
+              retained.defaultBackground == complete.defaultBackground
         else {
-            return clipped
+            return complete
         }
-        // This consumer overlays clipped rows without translating what it
+        // This consumer overlays damaged rows without translating what it
         // retained -- the view before research/33 T9's view half -- so the
-        // shift folds into region-wide row damage, exactly as `clipFramePlan`
-        // folds it for the drawer.
-        let rows = Set(damage.expandingShift().rowIndices)
-        // Each run array is a hoisted local with fully spelled-out closure signatures.
-        // Written as five inline `flatMap { row in cond ? a.filter { $0.row == row } : ... }`
-        // arguments, this one function cost ~1s of typecheck time: the solver had to infer
-        // both closures' parameter and result types through a ternary in each of five
-        // arguments at once. Keep the annotations.
-        let backgroundRuns: [RenderBackgroundRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderBackgroundRun] in
-            let source: [RenderBackgroundRun] = rows.contains(row) ? clipped.backgroundRuns : retained.backgroundRuns
-            return source.filter { (run: RenderBackgroundRun) -> Bool in run.row == row }
-        }
-        let overlayRuns: [RenderOverlayRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderOverlayRun] in
-            let source: [RenderOverlayRun] = rows.contains(row) ? clipped.overlayRuns : retained.overlayRuns
-            return source.filter { (run: RenderOverlayRun) -> Bool in run.row == row }
-        }
-        let textRuns: [RenderTextRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderTextRun] in
-            let source: [RenderTextRun] = rows.contains(row) ? clipped.textRuns : retained.textRuns
-            return source.filter { (run: RenderTextRun) -> Bool in run.row == row }
-        }
-        let decorationRuns: [RenderDecorationRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderDecorationRun] in
-            let source: [RenderDecorationRun] = rows.contains(row) ? clipped.decorationRuns : retained.decorationRuns
-            return source.filter { (run: RenderDecorationRun) -> Bool in run.row == row }
+        // shift folds into region-wide row damage before row selection.
+        let damagedRows = Set(damage.expandingShift().rowIndices)
+        let rows = retained.rows.indices.map { row in
+            damagedRows.contains(row) ? complete.rows[row] : retained.rows[row]
         }
         let retainedCursor: RenderCursor? = retained.cursor.flatMap { cursor in
-            rows.contains(cursor.row) ? nil : cursor
+            damagedRows.contains(cursor.row) ? nil : cursor
         }
-        let cursor: RenderCursor? = clipped.cursor ?? retainedCursor
+        let freshCursor: RenderCursor? = complete.cursor.flatMap { cursor in
+            damagedRows.contains(cursor.row) ? cursor : nil
+        }
         return RenderFramePlan(
             columns: retained.columns,
-            rows: retained.rows,
             defaultBackground: retained.defaultBackground,
-            backgroundRuns: backgroundRuns,
-            overlayRuns: overlayRuns,
-            textRuns: textRuns,
-            decorationRuns: decorationRuns,
-            cursor: cursor
+            rows: rows,
+            cursor: freshCursor ?? retainedCursor
         )
     }
 }

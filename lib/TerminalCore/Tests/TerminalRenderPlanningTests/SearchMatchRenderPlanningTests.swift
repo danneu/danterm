@@ -223,25 +223,4 @@ struct SearchMatchRenderPlanningTests {
         #expect(planFrame(for: terminal, presentation: presentation).overlayRuns.isEmpty)
     }
 
-    @Test("damage clipping keeps match runs on damaged rows and drops the rest")
-    func damageClippingFiltersMatchRuns() throws {
-        // Intent: `clipFramePlan` treats match runs like every other layer -- forwarded
-        //   for damaged rows, filtered out for undamaged ones.
-        // Why it exists: the clipped plan is the app's only render path, so a match-run
-        //   array that planning fills but clipping drops (or never forwards) would pass
-        //   every unclipped planning case while never reaching the screen.
-        var terminal = try #require(Terminal(columns: 6, rows: 2))
-        terminal.feed(Array("zzzzzz\r\nzzhitz".utf8))
-        let found = terminal.beginSearch("hit")
-        #expect(found)
-
-        let plan = planFrame(for: terminal, presentation: presentation)
-        #expect(plan.overlayRuns.map(\.row) == [1])
-
-        let damaged = TerminalDamage(rows: [1])
-        #expect(clipFramePlan(plan, to: damaged).overlayRuns == plan.overlayRuns)
-
-        let undamaged = TerminalDamage(rows: [0])
-        #expect(clipFramePlan(plan, to: undamaged).overlayRuns.isEmpty)
-    }
 }

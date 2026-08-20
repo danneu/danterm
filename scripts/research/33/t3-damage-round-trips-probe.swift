@@ -204,7 +204,7 @@ func measure(name: String, chunks: [[UInt8]], chunkLimit: Int) -> CorpusReport {
             pendingDisplayDamage = .full
         } else {
             spansBeforeHalo += spanCount(of: frameDamage.rows)
-            let haloed = terminalDamageRowsWithGlyphHalo(frameDamage.rows, rowCount: plan.rows)
+            let haloed = terminalDamageRowsWithGlyphHalo(frameDamage.rows, rowCount: plan.rowCount)
             pendingDisplayDamage.formUnion(TerminalDamage(rows: haloed))
             haloedRowInvalidations += haloed.count
         }

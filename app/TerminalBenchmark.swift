@@ -646,7 +646,7 @@ final class TerminalBenchmarkObserver {
         // `publishActivity` for why the write must not happen here.
         if activityPath != nil {
             observedDrawCount += 1
-            observeDamageTopology(damage, rowCount: plan.rows)
+            observeDamageTopology(damage, rowCount: plan.rowCount)
         }
         guard completed == false, let startNanoseconds else { return }
         stateRecorder?.observeDrawState()
@@ -675,7 +675,7 @@ final class TerminalBenchmarkObserver {
             localizedDrawDurations.append(drawDurationNanoseconds)
             acceptPendingWork()
             localizedDirtyRowCounts.append(
-                dirtyRowCount(for: dirtyRect, metrics: metrics, rowCount: plan.rows)
+                dirtyRowCount(for: dirtyRect, metrics: metrics, rowCount: plan.rowCount)
             )
             if let localizedDrawAcknowledgmentPrefix {
                 writeAcknowledgment(
@@ -686,7 +686,7 @@ final class TerminalBenchmarkObserver {
         let redrawDirtyRowCount = dirtyRowCount(
             for: dirtyRect,
             metrics: metrics,
-            rowCount: plan.rows
+            rowCount: plan.rowCount
         )
         // Two selection rules, one per stimulus family. A rendered-rectangle rule
         // cannot serve a partial-damage workload at all, for two reasons: the
@@ -717,10 +717,10 @@ final class TerminalBenchmarkObserver {
                 acceptsRedrawDraw = damageTopologyRecorder?.recordDrawIfTopologyMatches(
                     engineDamage: pendingEngineDamage,
                     clipDamage: damage,
-                    rowCount: plan.rows
+                    rowCount: plan.rowCount
                 ) == true
             } else {
-                acceptsRedrawDraw = redrawDirtyRowCount == plan.rows
+                acceptsRedrawDraw = redrawDirtyRowCount == plan.rowCount
             }
         }
         if let sequence = publishedRedrawSequence,
@@ -1072,9 +1072,8 @@ final class TerminalBenchmarkObserver {
     ///
     /// The whole plan is handed across in one concrete call so the traversal
     /// stays inside the scanner's module, where it specializes. Plan order is
-    /// used as-is because `FramePlanner` emits runs row-major and
-    /// `clipFramePlan` only filters, so the sort this used to perform could
-    /// never reorder anything.
+    /// used as-is because the row-indexed plan is already in traversal order,
+    /// so the sort this used to perform could never reorder anything.
     private func scanMarkers(_ plan: RenderFramePlan) -> TerminalBenchmarkMarkerScan {
         markerScanner.scan(plan)
     }

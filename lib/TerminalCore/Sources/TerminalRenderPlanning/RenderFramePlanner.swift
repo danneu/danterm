@@ -13,40 +13,6 @@ public func planFrame(
         .plan
 }
 
-/// Narrows a complete retained frame to the visible rows a damage pass must draw.
-///
-/// A carried shift is folded into region-wide row damage first. This serves the
-/// consumers that cannot realize a translation: the view's folded path (a stale
-/// mirror, research/33 T9), the dirty-rect fallback, and the benchmark
-/// topology's view-facing model. The mirror path never calls this with a
-/// shift-carrying value -- `TerminalFrameBackingStore.apply` realizes the
-/// translation and clips to shift-free row sets.
-public func clipFramePlan(
-    _ plan: RenderFramePlan,
-    to damage: TerminalDamage
-) -> RenderFramePlan {
-    guard damage.isFull == false else { return plan }
-    let rows = damage.expandingShift()
-    // One span anchored at row 0 covering the plan's height is exactly the
-    // whole viewport, so nothing below could be filtered out.
-    if rows.damagedRowCount == plan.rows,
-       rows.contains(row: 0),
-       rows.maximalContiguousSpanCount == 1
-    {
-        return plan
-    }
-    return RenderFramePlan(
-        columns: plan.columns,
-        rows: plan.rows,
-        defaultBackground: plan.defaultBackground,
-        backgroundRuns: plan.backgroundRuns.filter { rows.contains(row: $0.row) },
-        overlayRuns: plan.overlayRuns.filter { rows.contains(row: $0.row) },
-        textRuns: plan.textRuns.filter { rows.contains(row: $0.row) },
-        decorationRuns: plan.decorationRuns.filter { rows.contains(row: $0.row) },
-        cursor: plan.cursor.flatMap { rows.contains(row: $0.row) ? $0 : nil }
-    )
-}
-
 // Row rewrites for translated reuse: a run copied across a shift is identical
 // except for the row it names, and each run's payload arrays ride along by
 // reference. Fileprivate because only `FramePlanner.plan`'s reuse loop may
@@ -109,13 +75,10 @@ extension RenderDecorationRun {
 /// it remains a single frame-level record rather than a row-derived layer.
 struct RetainedFrameRows: Sendable {
     let columns: Int
-    let background: [[RenderBackgroundRun]]
-    let overlays: [[RenderOverlayRun]]?
-    let text: [[RenderTextRun]]
-    let decorations: [[RenderDecorationRun]]
+    let rows: [RenderPlanRow]
     let cursorStyle: ResolvedCursorStyle?
 
-    var rowCount: Int { background.count }
+    var rowCount: Int { rows.count }
 }
 
 /// Pairs a finished plan with the state a following frame needs to reuse its rows.
@@ -301,9 +264,10 @@ struct FramePlanner {
                 nil
             }
 
-        var background = [[RenderBackgroundRun]](repeating: [], count: rowCount)
-        var text = [[RenderTextRun]](repeating: [], count: rowCount)
-        var decorations = [[RenderDecorationRun]](repeating: [], count: rowCount)
+        let emptyRow = RenderPlanRow(
+            backgroundRuns: [], overlayRuns: [], textRuns: [], decorationRuns: []
+        )
+        var rows = [RenderPlanRow](repeating: emptyRow, count: rowCount)
 
         // The retained row viewport row `row` may copy instead of re-inspecting,
         // or nil to replan it. Identity for undamaged rows the shift does not
@@ -327,13 +291,6 @@ struct FramePlanner {
         let viewportTop = terminal.scrollProjection.topRow
         let viewportRows = viewportTop..<(viewportTop + rowCount)
         let searchMatchRanges = terminal.searchMatchRanges(in: viewportRows)
-        let overlaysActive = selectionRange != nil || searchMatchRanges.isEmpty == false
-        var overlays: [[RenderOverlayRun]]? =
-            if overlaysActive || reusable?.overlays != nil {
-                [[RenderOverlayRun]](repeating: [], count: rowCount)
-            } else {
-                nil
-            }
         var cursorStyle = reusable?.cursorStyle
 
         // Copy reusable rows before the traversal so the traversal can write each replanned row
@@ -342,15 +299,15 @@ struct FramePlanner {
         for row in 0..<rowCount {
             guard let reusable, let source = reuseSource(row) else { continue }
             if source == row {
-                background[row] = reusable.background[row]
-                overlays?[row] = reusable.overlays?[row] ?? []
-                text[row] = reusable.text[row]
-                decorations[row] = reusable.decorations[row]
+                rows[row] = reusable.rows[row]
             } else {
-                background[row] = reusable.background[source].map { $0.translated(to: row) }
-                overlays?[row] = (reusable.overlays?[source] ?? []).map { $0.translated(to: row) }
-                text[row] = reusable.text[source].map { $0.translated(to: row) }
-                decorations[row] = reusable.decorations[source].map { $0.translated(to: row) }
+                let sourceRow = reusable.rows[source]
+                rows[row] = RenderPlanRow(
+                    backgroundRuns: sourceRow.backgroundRuns.map { $0.translated(to: row) },
+                    overlayRuns: sourceRow.overlayRuns.map { $0.translated(to: row) },
+                    textRuns: sourceRow.textRuns.map { $0.translated(to: row) },
+                    decorationRuns: sourceRow.decorationRuns.map { $0.translated(to: row) }
+                )
             }
         }
 
@@ -542,21 +499,19 @@ struct FramePlanner {
             if let openOverlay { overlayRuns.append(openOverlay.finished(row: row)) }
             if let openText { textRuns.append(openText.finished(row: row)) }
             if let openDecoration { decorationRuns.append(openDecoration.finished(row: row)) }
-            background[row] = backgroundRuns
-            overlays?[row] = overlayRuns
-            text[row] = textRuns
-            decorations[row] = decorationRuns
+            rows[row] = RenderPlanRow(
+                backgroundRuns: backgroundRuns,
+                overlayRuns: overlayRuns,
+                textRuns: textRuns,
+                decorationRuns: decorationRuns
+            )
         }
 
         let resolvedCursorStyle = cursorStyle
         let plan = RenderFramePlan(
             columns: columnCount,
-            rows: rowCount,
             defaultBackground: presentation.theme.defaultBackground,
-            backgroundRuns: Array(background.joined()),
-            overlayRuns: overlays.map { Array($0.joined()) } ?? [],
-            textRuns: Array(text.joined()),
-            decorationRuns: Array(decorations.joined()),
+            rows: rows,
             cursor: cursorSpan.map {
                 RenderCursor(
                     row: $0.row,
@@ -571,10 +526,7 @@ struct FramePlanner {
             plan: plan,
             retained: RetainedFrameRows(
                 columns: columnCount,
-                background: background,
-                overlays: overlays,
-                text: text,
-                decorations: decorations,
+                rows: rows,
                 cursorStyle: resolvedCursorStyle
             )
         )

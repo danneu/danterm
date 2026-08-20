@@ -62,7 +62,7 @@ public func renderRowReaches(
     let cellHeight = cellHeightPixels
     let asciiLower = envelope?.inkTopOffsetPixels ?? -cellHeight
     let asciiUpper = envelope.map { cellHeight + $0.inkBottomOffsetPixels } ?? 2 * cellHeight
-    var reaches = [RenderRowReach?](repeating: nil, count: plan.rows)
+    var reaches = [RenderRowReach?](repeating: nil, count: plan.rowCount)
 
     func include(row: Int, lower: Int, upper: Int) {
         guard row >= 0, row < reaches.count else { return }
@@ -75,35 +75,37 @@ public func renderRowReaches(
         }
     }
 
-    for run in plan.textRuns {
-        var lower = Int.max
-        var upper = Int.min
-        for cell in run.cells {
-            if cell.scalars.count == 1, let scalar = cell.scalars.first {
-                if scalar.value >= 0x20, scalar.value <= 0x7E {
-                    lower = min(lower, asciiLower)
-                    upper = max(upper, asciiUpper)
+    for row in plan.rows {
+        for run in row.textRuns {
+            var lower = Int.max
+            var upper = Int.min
+            for cell in run.cells {
+                if cell.scalars.count == 1, let scalar = cell.scalars.first {
+                    if scalar.value >= 0x20, scalar.value <= 0x7E {
+                        lower = min(lower, asciiLower)
+                        upper = max(upper, asciiUpper)
+                    } else {
+                        lower = min(lower, -cellHeight)
+                        upper = max(upper, 2 * cellHeight)
+                    }
                 } else {
-                    lower = min(lower, -cellHeight)
-                    upper = max(upper, 2 * cellHeight)
+                    lower = min(lower, 0)
+                    upper = max(upper, cellHeight)
                 }
-            } else {
-                lower = min(lower, 0)
-                upper = max(upper, cellHeight)
+            }
+            if lower < upper {
+                include(row: run.row, lower: lower, upper: upper)
             }
         }
-        if lower < upper {
-            include(row: run.row, lower: lower, upper: upper)
+        for run in row.backgroundRuns {
+            include(row: run.row, lower: 0, upper: cellHeight)
         }
-    }
-    for run in plan.backgroundRuns {
-        include(row: run.row, lower: 0, upper: cellHeight)
-    }
-    for run in plan.overlayRuns {
-        include(row: run.row, lower: 0, upper: cellHeight)
-    }
-    for run in plan.decorationRuns {
-        include(row: run.row, lower: 0, upper: cellHeight)
+        for run in row.overlayRuns {
+            include(row: run.row, lower: 0, upper: cellHeight)
+        }
+        for run in row.decorationRuns {
+            include(row: run.row, lower: 0, upper: cellHeight)
+        }
     }
     if let cursor = plan.cursor {
         include(row: cursor.row, lower: 0, upper: cellHeight)

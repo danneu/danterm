@@ -544,7 +544,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     ) {
         guard let swapchain = surfaceSwapchain(
             columns: plan.columns,
-            rows: plan.rows,
+            rows: plan.rowCount,
             metrics: metrics
         ) else { return }
         presentAttempt(plan: plan, metrics: metrics, using: swapchain) {
@@ -649,7 +649,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             x: 0,
             y: 0,
             width: CGFloat(plan.columns) * metrics.cellSize.width,
-            height: CGFloat(plan.rows) * metrics.cellSize.height
+            height: CGFloat(plan.rowCount) * metrics.cellSize.height
         )
         TerminalBenchmarkObserver.shared?.observeCompletedDraw(
             plan,
@@ -1697,7 +1697,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             isFullDamage: frame.damage.isFull,
             damagedRowCount: frame.damage.damagedRowCount,
             deliveryCount: controller.fenceMetrics.delivery.count,
-            gridRows: frame.plan.rows
+            gridRows: frame.plan.rowCount
         )
         #if DANTERM_UI_TEST
         publishCountForTesting += 1

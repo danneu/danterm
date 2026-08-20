@@ -429,9 +429,9 @@ public func renderFrameSize(
     for plan: RenderFramePlan,
     metrics: TerminalRenderMetrics
 ) -> RenderFrameSize? {
-    guard plan.columns > 0, plan.rows > 0 else { return nil }
+    guard plan.columns > 0, plan.rowCount > 0 else { return nil }
     let width = metrics.cellWidthPixels.multipliedReportingOverflow(by: plan.columns)
-    let height = metrics.cellHeightPixels.multipliedReportingOverflow(by: plan.rows)
+    let height = metrics.cellHeightPixels.multipliedReportingOverflow(by: plan.rowCount)
     guard width.overflow == false, height.overflow == false,
           width.partialValue > 0, height.partialValue > 0
     else {
@@ -440,7 +440,7 @@ public func renderFrameSize(
 
     let pointSize = CGSize(
         width: metrics.cellSize.width * CGFloat(plan.columns),
-        height: metrics.cellSize.height * CGFloat(plan.rows)
+        height: metrics.cellSize.height * CGFloat(plan.rowCount)
     )
     guard pointSize.width.isFinite, pointSize.height.isFinite else { return nil }
     return RenderFrameSize(
@@ -478,9 +478,11 @@ public func terminalRows(
 }
 
 /// Executes every planned layer in fixed order while borrowing the caller's
-/// context without retaining or changing its state.
+/// context without retaining or changing its state. A restriction names rows
+/// in ascending plan order; invalid indices are ignored.
 public func drawRenderFrame(
     _ plan: RenderFramePlan,
+    rows restrictedRows: [Int]? = nil,
     metrics: TerminalRenderMetrics,
     in context: CGContext
 ) {
@@ -501,30 +503,43 @@ public func drawRenderFrame(
     context.setFillColor(plan.defaultBackground.cgColor(in: colorSpace))
     context.fill(CGRect(origin: .zero, size: frameSize.pointSize))
 
-    for run in plan.backgroundRuns {
-        context.setFillColor(run.color.cgColor(in: colorSpace))
-        context.fill(cellRect(
-            row: run.row,
-            startColumn: run.startColumn,
-            columnCount: run.columnCount,
-            metrics: metrics
-        ))
+    let rows = restrictedRows.map { restriction in
+        restriction.compactMap { row in
+            plan.rows.indices.contains(row) ? plan.rows[row] : nil
+        }
+    } ?? plan.rows
+
+    for row in rows {
+        for run in row.backgroundRuns {
+            context.setFillColor(run.color.cgColor(in: colorSpace))
+            context.fill(cellRect(
+                row: run.row,
+                startColumn: run.startColumn,
+                columnCount: run.columnCount,
+                metrics: metrics
+            ))
+        }
     }
 
-    for run in plan.overlayRuns {
-        context.setFillColor(run.color.cgColor(in: colorSpace))
-        context.fill(cellRect(
-            row: run.row,
-            startColumn: run.startColumn,
-            columnCount: run.columnCount,
-            metrics: metrics
-        ))
+    for row in rows {
+        for run in row.overlayRuns {
+            context.setFillColor(run.color.cgColor(in: colorSpace))
+            context.fill(cellRect(
+                row: run.row,
+                startColumn: run.startColumn,
+                columnCount: run.columnCount,
+                metrics: metrics
+            ))
+        }
     }
 
     // A block cursor is a cell presentation, not an overlay stroke. Repaint its
     // background after both highlight channels but before glyphs so selection and
     // search cannot hide it while the planned cursor-text foreground remains visible.
-    if let cursor = plan.cursor, cursor.shape == .block {
+    let cursor = plan.cursor.flatMap { cursor in
+        restrictedRows == nil || restrictedRows?.contains(cursor.row) == true ? cursor : nil
+    }
+    if let cursor, cursor.shape == .block {
         context.setFillColor(cursor.color.cgColor(in: colorSpace))
         context.fill(cellRect(
             row: cursor.row,
@@ -535,17 +550,17 @@ public func drawRenderFrame(
     }
 
     context.drawTextRuns(
-        plan.textRuns,
+        rows,
         metrics: metrics,
         colorSpace: colorSpace
     )
     context.textMatrix = originalTextMatrix
     context.drawDecorationRuns(
-        plan.decorationRuns,
+        rows,
         metrics: metrics,
         colorSpace: colorSpace
     )
-    if let cursor = plan.cursor {
+    if let cursor {
         context.drawCursor(cursor, metrics: metrics, colorSpace: colorSpace)
     }
 }
@@ -695,7 +710,7 @@ private extension CGContext {
     }
 
     func drawTextRuns(
-        _ runs: [RenderTextRun],
+        _ rows: [RenderPlanRow],
         metrics: TerminalRenderMetrics,
         colorSpace: CGColorSpace
     ) {
@@ -730,320 +745,322 @@ private extension CGContext {
         var mappedGlyphs: [CGGlyph] = []
         var positions: [CGPoint] = []
 
-        for run in runs {
-            // No hoisted buffer may carry one run's contents into the next: that
-            // would redraw the earlier run's geometry in this run's foreground
-            // color. Resetting here rather than at the end of the iteration keeps
-            // that true even if a `continue` is ever added to the loop body, and
-            // every buffer added to the loop must join this sweep.
-            characters.removeAll(keepingCapacity: true)
-            candidateCells.removeAll(keepingCapacity: true)
-            fallbackCells.removeAll(keepingCapacity: true)
-            symbolsCells.removeAll(keepingCapacity: true)
-            spriteRects.removeAll(keepingCapacity: true)
-            shadedSpriteRects.emptyValuesKeepingCapacity()
-            geometricShapeTriangles.removeAll(keepingCapacity: true)
-            powerlinePaths.removeAll(keepingCapacity: true)
-            branchDrawingGeometries.removeAll(keepingCapacity: true)
-            legacySpriteRects.emptyValuesKeepingCapacity()
-            boxDrawingStrokes.removeAll(keepingCapacity: true)
-            glyphs.removeAll(keepingCapacity: true)
-            mappedGlyphs.removeAll(keepingCapacity: true)
-            positions.removeAll(keepingCapacity: true)
+        for row in rows {
+            for run in row.textRuns {
+                // No hoisted buffer may carry one run's contents into the next: that
+                // would redraw the earlier run's geometry in this run's foreground
+                // color. Resetting here rather than at the end of the iteration keeps
+                // that true even if a `continue` is ever added to the loop body, and
+                // every buffer added to the loop must join this sweep.
+                characters.removeAll(keepingCapacity: true)
+                candidateCells.removeAll(keepingCapacity: true)
+                fallbackCells.removeAll(keepingCapacity: true)
+                symbolsCells.removeAll(keepingCapacity: true)
+                spriteRects.removeAll(keepingCapacity: true)
+                shadedSpriteRects.emptyValuesKeepingCapacity()
+                geometricShapeTriangles.removeAll(keepingCapacity: true)
+                powerlinePaths.removeAll(keepingCapacity: true)
+                branchDrawingGeometries.removeAll(keepingCapacity: true)
+                legacySpriteRects.emptyValuesKeepingCapacity()
+                boxDrawingStrokes.removeAll(keepingCapacity: true)
+                glyphs.removeAll(keepingCapacity: true)
+                mappedGlyphs.removeAll(keepingCapacity: true)
+                positions.removeAll(keepingCapacity: true)
 
-            let face = fonts.face(bold: run.bold, italic: run.italic)
-            let font = face.font
-            let colorKey = UInt32(run.foreground.red) << 16
-                | UInt32(run.foreground.green) << 8
-                | UInt32(run.foreground.blue)
-            let foreground: CGColor
-            if let cached = colors[colorKey] {
-                foreground = cached
-            } else {
-                foreground = run.foreground.cgColor(in: colorSpace)
-                colors[colorKey] = foreground
-            }
-            var column = run.startColumn
-            for cell in run.cells {
-                // Direct single-scalar family routing. A cell can only be a sprite when it is
-                // exactly one scalar, and every supported family occupies a scalar range
-                // disjoint from the others, so route to the single family whose range can
-                // contain the scalar instead of testing all eight in order. Exact membership
-                // and pattern decoding stay inside each family: a routed family that returns
-                // nil (a sparse gap inside its range, e.g. an unmapped Geometric or Powerline
-                // scalar, or a Geometric pattern with no representable triangle) falls through
-                // to the font path exactly as the former ordered chain did, because no other
-                // family's range could have matched it either. Multi-scalar and out-of-range
-                // cells skip classification entirely.
-                var classifiedAsSprite = false
-                if cell.scalars.count == 1, let scalar = cell.scalars.first {
-                    // Ordinary text is the overwhelming majority of cells and no family
-                    // claims a scalar below the floor, so reject it with one comparison
-                    // instead of eight range-membership tests.
-                    if scalar.value >= spriteClassificationMinimumScalar {
-                        switch scalar.value {
-                        case BoxDrawingSprite.coarseRange:
-                            if let pattern = BoxDrawingSprite.pattern(for: scalar) {
-                                BoxDrawingSprite.append(
-                                    pattern: pattern,
-                                    row: run.row,
-                                    column: column,
-                                    metrics: metrics,
-                                    rects: &spriteRects,
-                                    strokes: &boxDrawingStrokes
-                                )
-                                classifiedAsSprite = true
+                let face = fonts.face(bold: run.bold, italic: run.italic)
+                let font = face.font
+                let colorKey = UInt32(run.foreground.red) << 16
+                    | UInt32(run.foreground.green) << 8
+                    | UInt32(run.foreground.blue)
+                let foreground: CGColor
+                if let cached = colors[colorKey] {
+                    foreground = cached
+                } else {
+                    foreground = run.foreground.cgColor(in: colorSpace)
+                    colors[colorKey] = foreground
+                }
+                var column = run.startColumn
+                for cell in run.cells {
+                    // Direct single-scalar family routing. A cell can only be a sprite when it is
+                    // exactly one scalar, and every supported family occupies a scalar range
+                    // disjoint from the others, so route to the single family whose range can
+                    // contain the scalar instead of testing all eight in order. Exact membership
+                    // and pattern decoding stay inside each family: a routed family that returns
+                    // nil (a sparse gap inside its range, e.g. an unmapped Geometric or Powerline
+                    // scalar, or a Geometric pattern with no representable triangle) falls through
+                    // to the font path exactly as the former ordered chain did, because no other
+                    // family's range could have matched it either. Multi-scalar and out-of-range
+                    // cells skip classification entirely.
+                    var classifiedAsSprite = false
+                    if cell.scalars.count == 1, let scalar = cell.scalars.first {
+                        // Ordinary text is the overwhelming majority of cells and no family
+                        // claims a scalar below the floor, so reject it with one comparison
+                        // instead of eight range-membership tests.
+                        if scalar.value >= spriteClassificationMinimumScalar {
+                            switch scalar.value {
+                            case BoxDrawingSprite.coarseRange:
+                                if let pattern = BoxDrawingSprite.pattern(for: scalar) {
+                                    BoxDrawingSprite.append(
+                                        pattern: pattern,
+                                        row: run.row,
+                                        column: column,
+                                        metrics: metrics,
+                                        rects: &spriteRects,
+                                        strokes: &boxDrawingStrokes
+                                    )
+                                    classifiedAsSprite = true
+                                }
+                            case BlockElementSprite.coarseRange:
+                                if let pattern = BlockElementSprite.pattern(for: scalar) {
+                                    let shade = BlockElementSprite.shade(for: pattern)
+                                    BlockElementSprite.appendRects(
+                                        pattern: pattern,
+                                        row: run.row,
+                                        column: column,
+                                        metrics: metrics,
+                                        to: &shadedSpriteRects[shade, default: []]
+                                    )
+                                    classifiedAsSprite = true
+                                }
+                            case GeometricShapeSprite.coarseRange:
+                                if let pattern = GeometricShapeSprite.pattern(for: scalar),
+                                   let triangle = GeometricShapeSprite.triangle(
+                                       pattern: pattern,
+                                       row: run.row,
+                                       column: column,
+                                       metrics: metrics
+                                   )
+                                {
+                                    geometricShapeTriangles.append(triangle)
+                                    classifiedAsSprite = true
+                                }
+                            case BrailleSprite.coarseRange:
+                                if let pattern = BrailleSprite.pattern(for: scalar) {
+                                    let layout = brailleLayout ?? BrailleSpriteGeometry.layout(
+                                        cellWidthPixels: metrics.cellWidthPixels,
+                                        cellHeightPixels: metrics.cellHeightPixels
+                                    )
+                                    brailleLayout = layout
+                                    BrailleSprite.appendRects(
+                                        pattern: pattern,
+                                        row: run.row,
+                                        column: column,
+                                        metrics: metrics,
+                                        layout: layout,
+                                        to: &spriteRects
+                                    )
+                                    classifiedAsSprite = true
+                                }
+                            case PowerlineSprite.coarseRange:
+                                if let pattern = PowerlineSprite.pattern(for: scalar) {
+                                    powerlinePaths += PowerlineSprite.paths(
+                                        pattern: pattern,
+                                        row: run.row,
+                                        column: column,
+                                        metrics: metrics
+                                    )
+                                    classifiedAsSprite = true
+                                }
+                            case BranchDrawingSprite.coarseRange:
+                                if let pattern = BranchDrawingSprite.pattern(for: scalar) {
+                                    branchDrawingGeometries.append(BranchDrawingSprite.geometry(
+                                        pattern: pattern,
+                                        row: run.row,
+                                        column: column,
+                                        metrics: metrics
+                                    ))
+                                    classifiedAsSprite = true
+                                }
+                            // Coarse ranges spanning each multi-range family; the family returns nil
+                            // for the interior gaps, which then fall through to the font path.
+                            case LegacyComputingSupplementSprite.coarseRange:
+                                if let pattern = LegacyComputingSupplementSprite.pattern(for: scalar) {
+                                    LegacyComputingSupplementSprite.appendRects(
+                                        pattern: pattern,
+                                        row: run.row,
+                                        column: column,
+                                        metrics: metrics,
+                                        to: &spriteRects
+                                    )
+                                    classifiedAsSprite = true
+                                }
+                            case LegacyComputingSprite.coarseRange:
+                                if let pattern = LegacyComputingSprite.pattern(for: scalar) {
+                                    LegacyComputingSprite.appendRects(
+                                        pattern: pattern,
+                                        row: run.row,
+                                        column: column,
+                                        metrics: metrics,
+                                        to: &legacySpriteRects
+                                    )
+                                    classifiedAsSprite = true
+                                }
+                            default:
+                                break
                             }
-                        case BlockElementSprite.coarseRange:
-                            if let pattern = BlockElementSprite.pattern(for: scalar) {
-                                let shade = BlockElementSprite.shade(for: pattern)
-                                BlockElementSprite.appendRects(
-                                    pattern: pattern,
-                                    row: run.row,
-                                    column: column,
-                                    metrics: metrics,
-                                    to: &shadedSpriteRects[shade, default: []]
-                                )
-                                classifiedAsSprite = true
-                            }
-                        case GeometricShapeSprite.coarseRange:
-                            if let pattern = GeometricShapeSprite.pattern(for: scalar),
-                               let triangle = GeometricShapeSprite.triangle(
-                                   pattern: pattern,
-                                   row: run.row,
-                                   column: column,
-                                   metrics: metrics
-                               )
-                            {
-                                geometricShapeTriangles.append(triangle)
-                                classifiedAsSprite = true
-                            }
-                        case BrailleSprite.coarseRange:
-                            if let pattern = BrailleSprite.pattern(for: scalar) {
-                                let layout = brailleLayout ?? BrailleSpriteGeometry.layout(
-                                    cellWidthPixels: metrics.cellWidthPixels,
-                                    cellHeightPixels: metrics.cellHeightPixels
-                                )
-                                brailleLayout = layout
-                                BrailleSprite.appendRects(
-                                    pattern: pattern,
-                                    row: run.row,
-                                    column: column,
-                                    metrics: metrics,
-                                    layout: layout,
-                                    to: &spriteRects
-                                )
-                                classifiedAsSprite = true
-                            }
-                        case PowerlineSprite.coarseRange:
-                            if let pattern = PowerlineSprite.pattern(for: scalar) {
-                                powerlinePaths += PowerlineSprite.paths(
-                                    pattern: pattern,
-                                    row: run.row,
-                                    column: column,
-                                    metrics: metrics
-                                )
-                                classifiedAsSprite = true
-                            }
-                        case BranchDrawingSprite.coarseRange:
-                            if let pattern = BranchDrawingSprite.pattern(for: scalar) {
-                                branchDrawingGeometries.append(BranchDrawingSprite.geometry(
-                                    pattern: pattern,
-                                    row: run.row,
-                                    column: column,
-                                    metrics: metrics
-                                ))
-                                classifiedAsSprite = true
-                            }
-                        // Coarse ranges spanning each multi-range family; the family returns nil
-                        // for the interior gaps, which then fall through to the font path.
-                        case LegacyComputingSupplementSprite.coarseRange:
-                            if let pattern = LegacyComputingSupplementSprite.pattern(for: scalar) {
-                                LegacyComputingSupplementSprite.appendRects(
-                                    pattern: pattern,
-                                    row: run.row,
-                                    column: column,
-                                    metrics: metrics,
-                                    to: &spriteRects
-                                )
-                                classifiedAsSprite = true
-                            }
-                        case LegacyComputingSprite.coarseRange:
-                            if let pattern = LegacyComputingSprite.pattern(for: scalar) {
-                                LegacyComputingSprite.appendRects(
-                                    pattern: pattern,
-                                    row: run.row,
-                                    column: column,
-                                    metrics: metrics,
-                                    to: &legacySpriteRects
-                                )
-                                classifiedAsSprite = true
-                            }
-                        default:
-                            break
                         }
-                    }
-                    if classifiedAsSprite == false {
-                        // Printable ASCII is nearly every cell, and its glyph was resolved
-                        // once when the face was built, so it goes straight into the
-                        // submission buffers and never reaches the batched cmap call below.
-                        // Glyph zero keeps its existing meaning -- the face cannot map this
-                        // scalar -- and takes the same fallback path the batch would give it.
-                        if let glyph = face.asciiGlyph(scalar.value) {
-                            if glyph == 0 {
-                                fallbackCells.append((cell, column))
+                        if classifiedAsSprite == false {
+                            // Printable ASCII is nearly every cell, and its glyph was resolved
+                            // once when the face was built, so it goes straight into the
+                            // submission buffers and never reaches the batched cmap call below.
+                            // Glyph zero keeps its existing meaning -- the face cannot map this
+                            // scalar -- and takes the same fallback path the batch would give it.
+                            if let glyph = face.asciiGlyph(scalar.value) {
+                                if glyph == 0 {
+                                    fallbackCells.append((cell, column))
+                                } else {
+                                    mappedGlyphs.append(glyph)
+                                    positions.append(glyphOrigin(
+                                        row: run.row,
+                                        column: column,
+                                        metrics: metrics
+                                    ))
+                                }
+                            } else if scalar.value <= UInt16.max {
+                                characters.append(UniChar(scalar.value))
+                                candidateCells.append((cell, column))
                             } else {
-                                mappedGlyphs.append(glyph)
-                                positions.append(glyphOrigin(
-                                    row: run.row,
-                                    column: column,
-                                    metrics: metrics
-                                ))
+                                fallbackCells.append((cell, column))
                             }
-                        } else if scalar.value <= UInt16.max {
-                            characters.append(UniChar(scalar.value))
-                            candidateCells.append((cell, column))
-                        } else {
-                            fallbackCells.append((cell, column))
                         }
-                    }
-                } else {
-                    fallbackCells.append((cell, column))
-                }
-                column += cell.columnWidth
-            }
-
-            if spriteRects.isEmpty == false {
-                setFillColor(foreground)
-                fill(spriteRects)
-            }
-            if boxDrawingStrokes.isEmpty == false {
-                setStrokeColor(foreground)
-                for stroke in boxDrawingStrokes {
-                    drawBoxDrawingStroke(stroke, metrics: metrics)
-                }
-            }
-            for (shade, rects) in shadedSpriteRects where rects.isEmpty == false {
-                let alpha = CGFloat(shade.rawValue) / 255
-                setFillColor(foreground.copy(alpha: alpha) ?? foreground)
-                fill(rects)
-            }
-            if geometricShapeTriangles.isEmpty == false {
-                setFillColor(foreground)
-                setStrokeColor(foreground)
-                for triangle in geometricShapeTriangles {
-                    drawGeometricShapeTriangle(triangle, metrics: metrics)
-                }
-            }
-            if powerlinePaths.isEmpty == false {
-                setFillColor(foreground)
-                setStrokeColor(foreground)
-                for path in powerlinePaths {
-                    drawPowerlinePath(path, metrics: metrics)
-                }
-            }
-            for geometry in branchDrawingGeometries {
-                drawBranchDrawingGeometry(geometry, metrics: metrics, foreground: foreground)
-            }
-            for (alpha, rects) in legacySpriteRects where rects.isEmpty == false {
-                setFillColor(foreground.copy(alpha: CGFloat(alpha) / 255) ?? foreground)
-                fill(rects)
-            }
-            // Grown from the emptied hoisted buffer rather than freshly allocated:
-            // CoreText fills exactly `characters.count` elements, so the buffer
-            // needs that many zeroed slots and no more.
-            glyphs.append(contentsOf: repeatElement(CGGlyph(), count: characters.count))
-            if characters.isEmpty == false {
-                CTFontGetGlyphsForCharacters(
-                    font,
-                    &characters,
-                    &glyphs,
-                    characters.count
-                )
-            }
-            for (index, candidate) in candidateCells.enumerated() {
-                let glyph = glyphs[index]
-                guard glyph != 0 else {
-                    if let scalar = candidate.cell.scalars.first,
-                       candidate.cell.scalars.count == 1,
-                       bmpPrivateUseRange.contains(scalar.value),
-                       fonts.symbols?.bmpGlyph(scalar.value) != nil
-                    {
-                        symbolsCells.append(candidate)
                     } else {
-                        fallbackCells.append(candidate)
+                        fallbackCells.append((cell, column))
                     }
-                    continue
+                    column += cell.columnWidth
                 }
-                mappedGlyphs.append(glyph)
-                positions.append(glyphOrigin(
-                    row: run.row,
-                    column: candidate.column,
-                    metrics: metrics
-                ))
-            }
 
-            if mappedGlyphs.isEmpty == false {
-                setFillColor(foreground)
-                // The text matrix is not part of the graphics state, and both branches
-                // below leave it modified (see `CTFontDrawGlyphs` in `CTFont.h` for
-                // the wrapper), so it is re-set per submission rather than hoisted
-                // out of the run loop.
-                textMatrix = CGAffineTransform(scaleX: 1, y: -1)
-                if let directDrawFont = face.directDrawFont {
-                    // Same submission one level down: the wrapper's documented job is to
-                    // set the context's font, size and matrix from the CTFont and then
-                    // hand the arrays to CoreGraphics, and the face precomputed both
-                    // values it would derive. `directDrawFont` is nil exactly when there
-                    // is a matrix to apply, which this path cannot reproduce.
-                    setFont(directDrawFont)
-                    setFontSize(face.pointSize)
-                    showGlyphs(mappedGlyphs, at: positions)
-                } else {
-                    CTFontDrawGlyphs(
+                if spriteRects.isEmpty == false {
+                    setFillColor(foreground)
+                    fill(spriteRects)
+                }
+                if boxDrawingStrokes.isEmpty == false {
+                    setStrokeColor(foreground)
+                    for stroke in boxDrawingStrokes {
+                        drawBoxDrawingStroke(stroke, metrics: metrics)
+                    }
+                }
+                for (shade, rects) in shadedSpriteRects where rects.isEmpty == false {
+                    let alpha = CGFloat(shade.rawValue) / 255
+                    setFillColor(foreground.copy(alpha: alpha) ?? foreground)
+                    fill(rects)
+                }
+                if geometricShapeTriangles.isEmpty == false {
+                    setFillColor(foreground)
+                    setStrokeColor(foreground)
+                    for triangle in geometricShapeTriangles {
+                        drawGeometricShapeTriangle(triangle, metrics: metrics)
+                    }
+                }
+                if powerlinePaths.isEmpty == false {
+                    setFillColor(foreground)
+                    setStrokeColor(foreground)
+                    for path in powerlinePaths {
+                        drawPowerlinePath(path, metrics: metrics)
+                    }
+                }
+                for geometry in branchDrawingGeometries {
+                    drawBranchDrawingGeometry(geometry, metrics: metrics, foreground: foreground)
+                }
+                for (alpha, rects) in legacySpriteRects where rects.isEmpty == false {
+                    setFillColor(foreground.copy(alpha: CGFloat(alpha) / 255) ?? foreground)
+                    fill(rects)
+                }
+                // Grown from the emptied hoisted buffer rather than freshly allocated:
+                // CoreText fills exactly `characters.count` elements, so the buffer
+                // needs that many zeroed slots and no more.
+                glyphs.append(contentsOf: repeatElement(CGGlyph(), count: characters.count))
+                if characters.isEmpty == false {
+                    CTFontGetGlyphsForCharacters(
                         font,
-                        mappedGlyphs,
-                        positions,
-                        mappedGlyphs.count,
-                        self
+                        &characters,
+                        &glyphs,
+                        characters.count
                     )
                 }
-            }
-            if let symbolsFont = fonts.symbols?.font, symbolsCells.isEmpty == false {
-                let attributes: [NSAttributedString.Key: Any] = [
-                    kCTFontAttributeName as NSAttributedString.Key: symbolsFont,
-                    kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
-                    kCTLigatureAttributeName as NSAttributedString.Key: 0,
-                ]
-                for symbolsCell in symbolsCells {
-                    drawTextCell(
-                        symbolsCell.cell,
+                for (index, candidate) in candidateCells.enumerated() {
+                    let glyph = glyphs[index]
+                    guard glyph != 0 else {
+                        if let scalar = candidate.cell.scalars.first,
+                           candidate.cell.scalars.count == 1,
+                           bmpPrivateUseRange.contains(scalar.value),
+                           fonts.symbols?.bmpGlyph(scalar.value) != nil
+                        {
+                            symbolsCells.append(candidate)
+                        } else {
+                            fallbackCells.append(candidate)
+                        }
+                        continue
+                    }
+                    mappedGlyphs.append(glyph)
+                    positions.append(glyphOrigin(
                         row: run.row,
-                        column: symbolsCell.column,
-                        attributes: attributes,
+                        column: candidate.column,
                         metrics: metrics
-                    )
+                    ))
                 }
-            }
-            // Built inside the guard, not per run: only the fallback path reads
-            // these attributes, and a run produces fallback cells only for
-            // multi-scalar clusters, scalars above `UInt16.max`, or glyphs the
-            // font cannot map -- so the overwhelming majority of runs would
-            // build and tear down this boxed dictionary without ever reading it.
-            if fallbackCells.isEmpty == false {
-                let attributes: [NSAttributedString.Key: Any] = [
-                    kCTFontAttributeName as NSAttributedString.Key: font,
-                    kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
-                    kCTLigatureAttributeName as NSAttributedString.Key: 0,
-                ]
-                for fallback in fallbackCells {
-                    drawTextCell(
-                        fallback.cell,
-                        row: run.row,
-                        column: fallback.column,
-                        attributes: attributes,
-                        metrics: metrics
-                    )
+
+                if mappedGlyphs.isEmpty == false {
+                    setFillColor(foreground)
+                    // The text matrix is not part of the graphics state, and both branches
+                    // below leave it modified (see `CTFontDrawGlyphs` in `CTFont.h` for
+                    // the wrapper), so it is re-set per submission rather than hoisted
+                    // out of the run loop.
+                    textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+                    if let directDrawFont = face.directDrawFont {
+                        // Same submission one level down: the wrapper's documented job is to
+                        // set the context's font, size and matrix from the CTFont and then
+                        // hand the arrays to CoreGraphics, and the face precomputed both
+                        // values it would derive. `directDrawFont` is nil exactly when there
+                        // is a matrix to apply, which this path cannot reproduce.
+                        setFont(directDrawFont)
+                        setFontSize(face.pointSize)
+                        showGlyphs(mappedGlyphs, at: positions)
+                    } else {
+                        CTFontDrawGlyphs(
+                            font,
+                            mappedGlyphs,
+                            positions,
+                            mappedGlyphs.count,
+                            self
+                        )
+                    }
+                }
+                if let symbolsFont = fonts.symbols?.font, symbolsCells.isEmpty == false {
+                    let attributes: [NSAttributedString.Key: Any] = [
+                        kCTFontAttributeName as NSAttributedString.Key: symbolsFont,
+                        kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
+                        kCTLigatureAttributeName as NSAttributedString.Key: 0,
+                    ]
+                    for symbolsCell in symbolsCells {
+                        drawTextCell(
+                            symbolsCell.cell,
+                            row: run.row,
+                            column: symbolsCell.column,
+                            attributes: attributes,
+                            metrics: metrics
+                        )
+                    }
+                }
+                // Built inside the guard, not per run: only the fallback path reads
+                // these attributes, and a run produces fallback cells only for
+                // multi-scalar clusters, scalars above `UInt16.max`, or glyphs the
+                // font cannot map -- so the overwhelming majority of runs would
+                // build and tear down this boxed dictionary without ever reading it.
+                if fallbackCells.isEmpty == false {
+                    let attributes: [NSAttributedString.Key: Any] = [
+                        kCTFontAttributeName as NSAttributedString.Key: font,
+                        kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
+                        kCTLigatureAttributeName as NSAttributedString.Key: 0,
+                    ]
+                    for fallback in fallbackCells {
+                        drawTextCell(
+                            fallback.cell,
+                            row: run.row,
+                            column: fallback.column,
+                            attributes: attributes,
+                            metrics: metrics
+                        )
+                    }
                 }
             }
         }
@@ -1264,63 +1281,65 @@ private extension CGContext {
     }
 
     func drawDecorationRuns(
-        _ runs: [RenderDecorationRun],
+        _ rows: [RenderPlanRow],
         metrics: TerminalRenderMetrics,
         colorSpace: CGColorSpace
     ) {
-        for run in runs {
-            let runRect = cellRect(
-                row: run.row,
-                startColumn: run.startColumn,
-                columnCount: run.columnCount,
-                metrics: metrics
-            )
-            saveGState()
-            clip(to: runRect)
-            setBlendMode(.copy)
-            setFillColor(run.color.cgColor(in: colorSpace))
-            setStrokeColor(run.color.cgColor(in: colorSpace))
+        for row in rows {
+            for run in row.decorationRuns {
+                let runRect = cellRect(
+                    row: run.row,
+                    startColumn: run.startColumn,
+                    columnCount: run.columnCount,
+                    metrics: metrics
+                )
+                saveGState()
+                clip(to: runRect)
+                setBlendMode(.copy)
+                setFillColor(run.color.cgColor(in: colorSpace))
+                setStrokeColor(run.color.cgColor(in: colorSpace))
 
-            for kind in run.kinds {
-                switch kind {
-                case .underlineSingle:
-                    fillDecorationBar(
-                        in: runRect,
-                        top: CGFloat(run.row) * metrics.cellSize.height
-                            + metrics.underlineOffset,
-                        thickness: metrics.underlineThickness
-                    )
-                case .underlineDouble:
-                    let upperOffset = metrics.underlineOffset
-                        - metrics.underlineThickness * 2
-                    fillDecorationBar(
-                        in: runRect,
-                        top: CGFloat(run.row) * metrics.cellSize.height + upperOffset,
-                        thickness: metrics.underlineThickness
-                    )
-                    fillDecorationBar(
-                        in: runRect,
-                        top: CGFloat(run.row) * metrics.cellSize.height
-                            + metrics.underlineOffset,
-                        thickness: metrics.underlineThickness
-                    )
-                case .underlineCurly:
-                    strokeCurlyUnderline(in: runRect, metrics: metrics)
-                case .underlineDotted:
-                    fillPatternedUnderline(in: runRect, metrics: metrics, dashPixels: 1)
-                case .underlineDashed:
-                    fillPatternedUnderline(in: runRect, metrics: metrics, dashPixels: 3)
-                case .strikethrough:
-                    setFillColor(run.strikethroughColor.cgColor(in: colorSpace))
-                    fillDecorationBar(
-                        in: runRect,
-                        top: CGFloat(run.row) * metrics.cellSize.height
-                            + metrics.strikethroughOffset,
-                        thickness: metrics.underlineThickness
-                    )
+                for kind in run.kinds {
+                    switch kind {
+                    case .underlineSingle:
+                        fillDecorationBar(
+                            in: runRect,
+                            top: CGFloat(run.row) * metrics.cellSize.height
+                                + metrics.underlineOffset,
+                            thickness: metrics.underlineThickness
+                        )
+                    case .underlineDouble:
+                        let upperOffset = metrics.underlineOffset
+                            - metrics.underlineThickness * 2
+                        fillDecorationBar(
+                            in: runRect,
+                            top: CGFloat(run.row) * metrics.cellSize.height + upperOffset,
+                            thickness: metrics.underlineThickness
+                        )
+                        fillDecorationBar(
+                            in: runRect,
+                            top: CGFloat(run.row) * metrics.cellSize.height
+                                + metrics.underlineOffset,
+                            thickness: metrics.underlineThickness
+                        )
+                    case .underlineCurly:
+                        strokeCurlyUnderline(in: runRect, metrics: metrics)
+                    case .underlineDotted:
+                        fillPatternedUnderline(in: runRect, metrics: metrics, dashPixels: 1)
+                    case .underlineDashed:
+                        fillPatternedUnderline(in: runRect, metrics: metrics, dashPixels: 3)
+                    case .strikethrough:
+                        setFillColor(run.strikethroughColor.cgColor(in: colorSpace))
+                        fillDecorationBar(
+                            in: runRect,
+                            top: CGFloat(run.row) * metrics.cellSize.height
+                                + metrics.strikethroughOffset,
+                            thickness: metrics.underlineThickness
+                        )
+                    }
                 }
+                restoreGState()
             }
-            restoreGState()
         }
     }
 
