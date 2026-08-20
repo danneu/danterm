@@ -148,16 +148,21 @@ class AppRuntime {
     //            2s coalescing window after the persisted projection changes.
     //   Enriched -- model + primary history, driven by primary-history mutations,
     //               plus one final synchronous clean-exit write.
-    private var lightCheckpointTimer: DispatchSourceTimer?
-    private var lightCheckpointTimerToken: AppRuntimeSchedulingToken?
+    private lazy var lightCheckpointTimer = AppRuntimeScheduledOwner<DispatchSourceTimer>(
+        timerIn: schedulingLifecycle
+    )
     private var lightCheckpointBaseline: LightCheckpointProjection?
-    private var enrichedCheckpointTimer: DispatchSourceTimer?  // one owned enriched-checkpoint timer
-    private var enrichedCheckpointTimerToken: AppRuntimeSchedulingToken?
+    // One owned enriched-checkpoint timer.
+    private lazy var enrichedCheckpointTimer = AppRuntimeScheduledOwner<DispatchSourceTimer>(
+        timerIn: schedulingLifecycle
+    )
     private var recoveryPolicy = RecoveryCheckpointPolicy(
         window: UInt64(600 * NSEC_PER_SEC)
     )
-    private var coalescedReconcileTimer: DispatchSourceTimer?   // rate-limited whole-model sweep
-    private var coalescedReconcileTimerToken: AppRuntimeSchedulingToken?
+    // Rate-limited whole-model sweep.
+    private lazy var coalescedReconcileTimer = AppRuntimeScheduledOwner<DispatchSourceTimer>(
+        timerIn: schedulingLifecycle
+    )
     // The one channel a view reports a discovered fact through. Owned here because
     // the runtime is what opens a send frame and what dispatches a released fact,
     // and because it has to outlive every view that reports into it.
@@ -421,7 +426,7 @@ class AppRuntime {
         }
         switch reconcileDecision(
             for: msg,
-            coalescedSweepPending: coalescedReconcileTimer != nil
+            coalescedSweepPending: coalescedReconcileTimer.isArmed
         ) {
         case .reconcileNow:
             cancelCoalescedReconcile()
@@ -693,12 +698,6 @@ class AppRuntime {
 
         switcherEventMonitor = nil
         switcherEventMonitorToken = nil
-        lightCheckpointTimer = nil
-        lightCheckpointTimerToken = nil
-        enrichedCheckpointTimer = nil
-        enrichedCheckpointTimerToken = nil
-        coalescedReconcileTimer = nil
-        coalescedReconcileTimerToken = nil
         ipcServer = nil
         ipcServerToken = nil
     }
@@ -1000,12 +999,8 @@ class AppRuntime {
             // Follow teardown is not repeated here: application termination reaches
             // `applicationWillTerminate`, and `shutdown()` is its single owner.
             cancelCoalescedReconcile()
-            schedulingLifecycle.cancel(lightCheckpointTimerToken)
-            lightCheckpointTimerToken = nil
-            lightCheckpointTimer = nil
-            schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
-            enrichedCheckpointTimerToken = nil
-            enrichedCheckpointTimer = nil
+            lightCheckpointTimer.cancel()
+            enrichedCheckpointTimer.cancel()
             for host in paneHosts.values {
                 host.removeReplayFile()
             }
@@ -1098,31 +1093,16 @@ class AppRuntime {
     /// Arm one bounded light-checkpoint window after persisted state diverges. An existing
     /// window stays fixed so continuous message traffic cannot postpone the write.
     private func scheduleLightCheckpointIfNeeded() {
-        guard lightCheckpointTimer == nil,
+        guard lightCheckpointTimer.isArmed == false,
               schedulingLifecycle.isActive,
               currentLightCheckpointProjection() != lightCheckpointBaseline
         else { return }
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(
+        lightCheckpointTimer.armTimer(
             deadline: .now() + Self.checkpointCoalesceInterval,
             leeway: .milliseconds(200)
-        )
-        guard let token = schedulingLifecycle.arm(.timer, cancel: { timer.cancel() }) else {
-            timer.cancel()
-            return
+        ) { [weak self] in
+            self?.performLightCheckpoint(async: true)
         }
-        lightCheckpointTimerToken = token
-        timer.setEventHandler { [weak self] in
-            guard let self else { return }
-            self.lightCheckpointTimer?.cancel()
-            self.schedulingLifecycle.run(token) {
-                self.lightCheckpointTimer = nil
-                self.lightCheckpointTimerToken = nil
-                self.performLightCheckpoint(async: true)
-            }
-        }
-        timer.resume()
-        lightCheckpointTimer = timer
     }
 
     /// Defer the whole-model reconcile() sweep while cosmetic title/cwd/progress,
@@ -1130,52 +1110,33 @@ class AppRuntime {
     /// frequency. The timer reads the latest model when it fires. This is
     /// fixed-window coalescing; use Debouncer for trailing-edge debounce.
     private func scheduleCoalescedReconcile() {
-        guard coalescedReconcileTimer == nil,
+        guard coalescedReconcileTimer.isArmed == false,
               schedulingLifecycle.isActive
         else { return }
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + Self.reconcileCoalesceInterval)
-        guard let token = schedulingLifecycle.arm(.timer, cancel: { timer.cancel() }) else {
-            timer.cancel()
-            return
+        coalescedReconcileTimer.armTimer(
+            deadline: .now() + Self.reconcileCoalesceInterval
+        ) { [weak self] in
+            self?.sweepAndDispatchFollowUps()
         }
-        coalescedReconcileTimerToken = token
-        timer.setEventHandler { [weak self] in
-            guard let self else { return }
-            self.coalescedReconcileTimer?.cancel()
-            self.schedulingLifecycle.run(token) {
-                self.coalescedReconcileTimer = nil
-                self.coalescedReconcileTimerToken = nil
-                self.sweepAndDispatchFollowUps()
-            }
-        }
-        timer.resume()
-        coalescedReconcileTimer = timer
     }
 
     /// Cancel any deferred sweep because an inline reconcile will cover the latest model.
     private func cancelCoalescedReconcile() {
-        schedulingLifecycle.cancel(coalescedReconcileTimerToken)
-        coalescedReconcileTimerToken = nil
-        coalescedReconcileTimer = nil
+        coalescedReconcileTimer.cancel()
     }
 
     /// Close the current light-checkpoint window immediately. Called on appResignedActive
     /// so we do not lose the last 2s of state changes when the user switches away.
     func flushPendingCheckpoint() {
         guard schedulingLifecycle.isActive else { return }
-        schedulingLifecycle.cancel(lightCheckpointTimerToken)
-        lightCheckpointTimerToken = nil
-        lightCheckpointTimer = nil
+        lightCheckpointTimer.cancel()
         performLightCheckpoint(async: false)
     }
 
     /// Fences terminal owners before synchronously capturing the final enriched checkpoint.
     func prepareRecoveryForApplicationExit() {
         guard schedulingLifecycle.isActive else { return }
-        schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
-        enrichedCheckpointTimerToken = nil
-        enrichedCheckpointTimer = nil
+        enrichedCheckpointTimer.cancel()
         for host in paneHosts.values {
             host.session.fenceForApplicationExit()
         }
@@ -1194,28 +1155,14 @@ class AppRuntime {
         case .none:
             break
         case .schedule(let deadline):
-            schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
-            enrichedCheckpointTimerToken = nil
-            let timer = DispatchSource.makeTimerSource(queue: .main)
-            timer.schedule(deadline: DispatchTime(uptimeNanoseconds: deadline))
-            guard let token = schedulingLifecycle.arm(.timer, cancel: { timer.cancel() }) else {
-                timer.cancel()
-                return
-            }
-            enrichedCheckpointTimerToken = token
-            timer.setEventHandler { [weak self] in
+            enrichedCheckpointTimer.armTimer(
+                deadline: DispatchTime(uptimeNanoseconds: deadline)
+            ) { [weak self] in
                 guard let self else { return }
-                self.enrichedCheckpointTimer?.cancel()
-                self.schedulingLifecycle.run(token) {
-                    self.enrichedCheckpointTimer = nil
-                    self.enrichedCheckpointTimerToken = nil
-                    self.applyRecoveryAction(
-                        self.recoveryPolicy.deadlineReached(at: deadline)
-                    )
-                }
+                self.applyRecoveryAction(
+                    self.recoveryPolicy.deadlineReached(at: deadline)
+                )
             }
-            timer.resume()
-            enrichedCheckpointTimer = timer
         case .write(let revision):
             guard let callbackToken = schedulingLifecycle.arm(
                 .deferredCallback,
@@ -1238,9 +1185,7 @@ class AppRuntime {
                 }
             }
         case .cancel:
-            schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
-            enrichedCheckpointTimerToken = nil
-            enrichedCheckpointTimer = nil
+            enrichedCheckpointTimer.cancel()
         }
     }
 
