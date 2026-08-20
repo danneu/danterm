@@ -1101,7 +1101,7 @@ wave.
 - [ ] **[REDUCE-6](#reduce-6)** (2x4, small) Tie a pending IPC input request to its pane so pane teardown can reject it _(with [MODEL-6](#model-6))_
 - [ ] **[STORE-4](#store-4)** (2x4, small) State the open tail's scratch-table key base once, so a trimmed head cannot key it two ways **[decide first](#decisions-to-make-first)**
 - [x] **[MODEL-5](#model-5)** (2x4, medium) Move per-pane search and notification-throttle state into PaneModel so pane teardown prunes them **[decide first](#decisions-to-make-first)** -- `03203c2d`
-- [ ] **[MODEL-2](#model-2)** (2x3, medium) Make SidebarItemStore reject nothing, or report rejection, so a dropped row op cannot strand the outline **[decide first](#decisions-to-make-first)**
+- [x] **[MODEL-2](#model-2)** (2x3, medium) Make SidebarItemStore reject nothing, or report rejection, so a dropped row op cannot strand the outline **[decide first](#decisions-to-make-first)** -- `e8ee02f6..39c0546e`
 
 ### W2. Wave 2 -- the payoff: everything that was blocked on wave 1
 
