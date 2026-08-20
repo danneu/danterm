@@ -197,6 +197,36 @@ import Testing
         }
     }
 
+    @Test("single-group identity replacement updates the mounted tabs")
+    func singleGroupIdentityReplacementUpdatesMountedTabs() {
+        // Intent: applying the computed diff for a lone-group replacement mounts
+        //   the replacement group's tabs and removes the old group's tabs.
+        // Why it exists: MODEL-2 found that the diff emitted hidden group-row ops,
+        //   which the store refused and left the outline permanently stale.
+        // Scenario: single-group G1 with t1 is replaced by G2 with t2.
+        let oldGroup = GroupId()
+        let oldTab = TabId()
+        let oldModel = sidebarStoreModel([
+            (oldGroup, "Old", [oldTab]),
+        ], selected: oldTab)
+        let oldProjection = desiredSidebar(in: oldModel)
+        var store = seedSidebarStore(oldModel)
+
+        let newGroup = GroupId()
+        let newTab = TabId()
+        let newModel = sidebarStoreModel([
+            (newGroup, "New", [newTab]),
+        ], selected: newTab)
+        let newProjection = desiredSidebar(in: newModel)
+
+        store.apply(
+            computeSidebarRowOps(old: oldProjection, new: newProjection),
+            projection: newProjection)
+
+        #expect(store.displayedTabItem(newTab) != nil)
+        #expect(store.displayedTabItem(oldTab) == nil)
+    }
+
     @Test("later group to earlier group move keeps moved tab cache pointed at displayed item")
     func laterToEarlierGroupMoveKeepsCacheCurrent() throws {
         // Intent: moving a tab from a later group to an earlier group

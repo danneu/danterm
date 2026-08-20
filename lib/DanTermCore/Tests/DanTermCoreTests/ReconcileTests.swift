@@ -204,6 +204,44 @@ import Testing
         checkRowOps(single, multi, "mode flip reaches new")
     }
 
+    @Test("computeSidebarRowOps: single-group identity change rebuilds")
+    func computeSidebarRowOpsSingleGroupIdentityChangeRebuilds() {
+        // Intent: replacing the lone group rebuilds the promoted root tab rows.
+        // Why it exists: MODEL-2 found that hidden group-row ops could strand the
+        //   outline on the removed group's tabs.
+        // Scenario: a single-group sweep replaces G1 and its tab with G2 and its tab.
+        let old = sbProj(true, [sbGroup(GroupId(), "Old", first: true, [sbTab("old")])])
+        let new = sbProj(true, [sbGroup(GroupId(), "New", first: true, [sbTab("new")])])
+
+        #expect(computeSidebarRowOps(old: old, new: new) == [.reloadAll])
+        checkRowOps(old, new, "single-group identity change reaches new")
+    }
+
+    @Test("computeSidebarRowOps: single-group attr changes emit no group-row ops")
+    func computeSidebarRowOpsSingleGroupAttrChangesEmitNoGroupRowOps() {
+        // Intent: a single-group diff mutates only the promoted tab rows.
+        // Why it exists: group rows are absent in single-group mode, so their ops
+        //   are invalid even when the group's tab count or alert roll-up changes.
+        // Scenario: the lone group gains a tab, which changes its hidden attributes.
+        let group = GroupId()
+        let firstTab = sbTab("first")
+        let old = sbProj(true, [sbGroup(group, "Group", first: true, [firstTab])])
+        let new = sbProj(true, [
+            sbGroup(group, "Group", first: true, [firstTab, sbTabFull(TabId(), "second", bell: 1)]),
+        ])
+
+        let ops = computeSidebarRowOps(old: old, new: new)
+        let containsGroupRowOp = ops.contains { op in
+            switch op {
+            case .insertGroup, .removeGroup, .reloadGroup, .setGroupCollapsed:
+                true
+            case .reloadAll, .insertTab, .removeTab, .reloadTab:
+                false
+            }
+        }
+        #expect(containsGroupRowOp == false)
+    }
+
     @Test("computeSidebarRowOps: tab insert / remove / reorder / cross-group move")
     func computeSidebarRowOpsTabChurnReachesNew() {
         // Intent: a structure-insensitive diff covers tab insertion,

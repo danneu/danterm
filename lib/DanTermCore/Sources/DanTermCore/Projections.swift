@@ -728,12 +728,15 @@ private func sidebarSequenceOps<Id: Hashable>(
 }
 
 /// Diff two sidebar projections into a minimal ordered op list. A nil `old` (first
-/// run) or a single<->multi group-mode flip rebuilds wholesale (`reloadAll`); otherwise
-/// it diffs groups, then each surviving group's tabs, then reload + collapse ops. Pure
-/// and unit-tested via model-apply (apply the ops to a copy of `old` -> equals `new`),
-/// which catches NSOutlineView-invalid index ordering an exact-sequence assert would bless.
+/// run), a single<->multi group-mode flip, or a lone-group identity change rebuilds
+/// wholesale (`reloadAll`); otherwise it diffs the rows that the mode displays. Pure and
+/// unit-tested via model-apply (apply the ops to a copy of `old` -> equals `new`), which
+/// catches NSOutlineView-invalid index ordering an exact-sequence assert would bless.
 func computeSidebarRowOps(old: SidebarProjection?, new: SidebarProjection) -> [SidebarRowOp] {
   guard let old = old, old.isSingleGroupMode == new.isSingleGroupMode else {
+    return [.reloadAll]
+  }
+  if new.isSingleGroupMode, old.groups.map(\.id) != new.groups.map(\.id) {
     return [.reloadAll]
   }
 
@@ -742,10 +745,12 @@ func computeSidebarRowOps(old: SidebarProjection?, new: SidebarProjection) -> [S
   // Level 1: group rows (roots in multi-group mode). A removed group takes its tabs
   // with it; an inserted group brings its tabs (built from `new`/model), so neither
   // needs per-tab ops.
-  ops += sidebarSequenceOps(
-    old: old.groups.map(\.id), new: new.groups.map(\.id),
-    insert: { id, idx in .insertGroup(id: id, index: idx) },
-    remove: { idx in .removeGroup(index: idx) })
+  if !new.isSingleGroupMode {
+    ops += sidebarSequenceOps(
+      old: old.groups.map(\.id), new: new.groups.map(\.id),
+      insert: { id, idx in .insertGroup(id: id, index: idx) },
+      remove: { idx in .removeGroup(index: idx) })
+  }
 
   let oldGroupById = Dictionary(uniqueKeysWithValues: old.groups.map { ($0.id, $0) })
 
@@ -759,12 +764,14 @@ func computeSidebarRowOps(old: SidebarProjection?, new: SidebarProjection) -> [S
   }
 
   // Group reload-attrs (everything configureGroupCell draws except collapse, which the
-  // setGroupCollapsed op drives, and the tab list).
-  for newGroup in new.groups {
-    guard let oldGroup = oldGroupById[newGroup.id] else { continue }
-    if (oldGroup.name, oldGroup.unreadAlertCount, oldGroup.tabCount, oldGroup.isFirst)
-       != (newGroup.name, newGroup.unreadAlertCount, newGroup.tabCount, newGroup.isFirst) {
-      ops.append(.reloadGroup(id: newGroup.id))
+  // setGroupCollapsed op drives, and the tab list). Single-group mode has no group row.
+  if !new.isSingleGroupMode {
+    for newGroup in new.groups {
+      guard let oldGroup = oldGroupById[newGroup.id] else { continue }
+      if (oldGroup.name, oldGroup.unreadAlertCount, oldGroup.tabCount, oldGroup.isFirst)
+         != (newGroup.name, newGroup.unreadAlertCount, newGroup.tabCount, newGroup.isFirst) {
+        ops.append(.reloadGroup(id: newGroup.id))
+      }
     }
   }
 
