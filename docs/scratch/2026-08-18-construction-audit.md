@@ -1096,7 +1096,7 @@ wave.
 - [ ] **[RUNTIME-3](#runtime-3)** (3x4, medium) Stop opening nested modal run loops from inside an open send frame **[decide first](#decisions-to-make-first)**
 - [ ] **[BUILD-5](#build-5)** (2x5, small) Give the three manifest-discovery lists one owner so a new package root cannot be skipped
 - [ ] **[MODEL-6](#model-6)** (2x5, small) Drop the submission-to-request reverse index and derive it from the pending requests _(with [REDUCE-6](#reduce-6))_
-- [ ] **[STORE-5](#store-5)** (2x5, small) Give a block one record-range accessor instead of five hand-copied index conversions
+- [x] **[STORE-5](#store-5)** (2x5, small) Give a block one record-range accessor instead of five hand-copied index conversions -- `f01d901c`
 - [x] **[INTERACT-3](#interact-3)** (2x5, medium) Delete `TerminalDamageAccumulator`'s copy of the shift-composition rule and let it hold a `TerminalDamage` -- `d7f541e9`
 - [ ] **[REDUCE-6](#reduce-6)** (2x4, small) Tie a pending IPC input request to its pane so pane teardown can reject it _(with [MODEL-6](#model-6))_
 - [ ] **[STORE-4](#store-4)** (2x4, small) State the open tail's scratch-table key base once, so a trimmed head cannot key it two ways **[decide first](#decisions-to-make-first)**
@@ -1120,7 +1120,7 @@ of these before its wave-1 partner means writing code the partner immediately
 rewrites.
 
 - [x] **[FIND-1](#find-1)** (5x5, large) Narrow the closed-history index on needle append instead of rebuilding it per keystroke -- `0a46037b..4c36cbef`
-- [ ] **[MOBILE-4](#mobile-4)** (4x5, small) Signal replica state and surface geometry only when they change, not once per applied record
+- [x] **[MOBILE-4](#mobile-4)** (4x5, small) Signal replica state and surface geometry only when they change, not once per applied record -- `3e99c1a1`
 - [ ] **[DRAW-1](#draw-1)** (4x5, medium) Carry each row's ink reach in the retained row product instead of rescanning the whole plan per apply _(after [FRAME-1](#frame-1))_
 - [ ] **[FIND-2](#find-2)** (4x5, medium) Build the per-frame match snapshot once and pass it to all three search reads
 - [ ] **[IPC-1](#ipc-1)** (4x5, medium) Derive the IPC audit descriptor from the request's encoded params, not a third hand-written switch _(after [IPC-3](#ipc-3); with [IPC-4](#ipc-4))_
