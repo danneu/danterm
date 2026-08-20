@@ -14,6 +14,8 @@
 #include <unistd.h>
 
 static int resize_pipe[2] = {-1, -1};
+static volatile sig_atomic_t raw_launch_requested = 0;
+static volatile sig_atomic_t input_flush_requested = 0;
 
 static int disable_input_echo_and_canonical(void);
 
@@ -22,6 +24,16 @@ static void handle_winch(int signal_number) {
     uint8_t marker = 1;
     ssize_t ignored = write(resize_pipe[1], &marker, sizeof(marker));
     (void)ignored;
+}
+
+static void handle_raw_launch_request(int signal_number) {
+    (void)signal_number;
+    raw_launch_requested = 1;
+}
+
+static void handle_input_flush_request(int signal_number) {
+    (void)signal_number;
+    input_flush_requested = 1;
 }
 
 static void print_terminal_facts(const char *shell_argv0) {
@@ -348,6 +360,45 @@ static int run_canonical_hold_probe(tcflag_t set_input, tcflag_t clear_input) {
     return 0;
 }
 
+static int run_canonical_flush_probe(void) {
+    if (configure_canonical_input(ICRNL, IGNCR | INLCR) < 0) {
+        return 117;
+    }
+    struct sigaction action = {0};
+    action.sa_handler = handle_input_flush_request;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGUSR2, &action, NULL) < 0) {
+        return 118;
+    }
+    printf("__CANONICAL_READY__\n");
+    fflush(stdout);
+
+    char input[64];
+    for (;;) {
+        ssize_t result = read(STDIN_FILENO, input, sizeof(input) - 1);
+        if (result > 0) {
+            input[result] = '\0';
+            input[strcspn(input, "\r\n")] = '\0';
+            printf("__CANONICAL_INPUT__=%s\n", input);
+            fflush(stdout);
+            return 0;
+        }
+        if (result < 0 && errno == EINTR && input_flush_requested) {
+            input_flush_requested = 0;
+            if (tcflush(STDIN_FILENO, TCIFLUSH) < 0) {
+                return 119;
+            }
+            printf("__CANONICAL_FLUSHED__\n");
+            fflush(stdout);
+            continue;
+        }
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+        return 120;
+    }
+}
+
 static int run_raw_count_probe(size_t expected) {
     if (disable_input_echo_and_canonical() < 0) {
         return 107;
@@ -377,6 +428,50 @@ static int run_raw_count_probe(size_t expected) {
         }
     }
     printf("__RAW_COUNT__=%zu\n", received);
+    fflush(stdout);
+    return 0;
+}
+
+static int run_signaled_raw_launch_probe(size_t expected) {
+    struct sigaction action = {0};
+    action.sa_handler = handle_raw_launch_request;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGUSR1, &action, NULL) < 0) {
+        return 112;
+    }
+    printf("__CANONICAL_LAUNCH_READY__\n");
+    fflush(stdout);
+    while (!raw_launch_requested) {
+        pause();
+    }
+    if (disable_input_echo_and_canonical() < 0) {
+        return 113;
+    }
+
+    uint8_t bytes[4096];
+    size_t received = 0;
+    while (received < expected) {
+        size_t requested = sizeof(bytes);
+        if (requested > expected - received) {
+            requested = expected - received;
+        }
+        ssize_t result = read(STDIN_FILENO, bytes, requested);
+        if (result > 0) {
+            for (ssize_t index = 0; index < result; index++) {
+                size_t absolute_index = received + (size_t)index;
+                uint8_t expected_byte = absolute_index + 1 == expected ? '\n' : 'Z';
+                if (bytes[index] != expected_byte) {
+                    return 114;
+                }
+            }
+            received += (size_t)result;
+        } else if (result < 0 && errno == EINTR) {
+            continue;
+        } else {
+            return 115;
+        }
+    }
+    printf("__RAW_LAUNCH_COUNT__=%zu\n", received);
     fflush(stdout);
     return 0;
 }
@@ -613,6 +708,9 @@ int main(int argc, char *argv[]) {
     if (strcmp(argv[1], "canonical-hold") == 0) {
         return run_canonical_hold_probe(ICRNL, IGNCR | INLCR);
     }
+    if (strcmp(argv[1], "canonical-flush") == 0) {
+        return run_canonical_flush_probe();
+    }
     if (strcmp(argv[1], "canonical-inlcr") == 0) {
         return run_canonical_hold_probe(INLCR, IGNCR);
     }
@@ -626,6 +724,14 @@ int main(int argc, char *argv[]) {
             return 110;
         }
         return run_raw_count_probe((size_t)expected);
+    }
+    if (strcmp(argv[1], "signaled-raw-launch") == 0) {
+        char *end = NULL;
+        unsigned long long expected = strtoull(argv[2], &end, 10);
+        if (end == argv[2] || *end != '\0' || expected > SIZE_MAX) {
+            return 116;
+        }
+        return run_signaled_raw_launch_probe((size_t)expected);
     }
     return 65;
 }

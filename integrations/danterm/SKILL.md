@@ -379,7 +379,10 @@ side effect of a close.
 
 `--cmd` runs inside your login shell, so shell config is sourced, PATH matches
 your interactive panes, and shell integration reports cwd. The pane returns to
-a shell prompt when the command exits.
+a shell prompt when the command exits. A command can contain up to 8 MiB of
+UTF-8 input, including DanTerm's trailing newline. DanTerm waits for the login
+shell to accept an oversized canonical line through its lossless input mode;
+exceeding the 8 MiB bound returns an explicit buffer-limit error.
 
 By default, the user's current tab stays focused. Use `--foreground` only when
 the user asked to switch to the new tab.
@@ -872,7 +875,12 @@ arg when spaces or newlines must be preserved.
 Input submitted while the pane is spawning stays buffered in order. The
 command returns success only after every submission is handled by the pane
 owner; byte-producing submissions must cross the PTY master. Spawn, process,
-or write failure returns an error instead.
+or write failure returns an error instead. A byte-producing submission can use
+up to the shared 8 MiB pending-input bound. When a canonical-mode program cannot
+accept an oversized line losslessly, DanTerm waits up to the bounded delivery
+window for the tty to leave canonical mode, then returns a distinct timeout
+error without writing a partial line. Exceeding the shared bound returns the
+distinct buffer-limit error.
 
 | Token form | Meaning |
 |---|---|

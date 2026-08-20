@@ -1873,6 +1873,129 @@ struct TerminalPTYHostTests {
 /// counts. Two of these running at once would each see the other there.
 @Suite(.serialized)
 struct TerminalPTYHostChildProcessTests {
+    @Test("long launch input waits for a synthetic child to enter raw mode", .timeLimit(.minutes(1)))
+    func longLaunchInputWaitsForSyntheticRawMode() async throws {
+        // Intent: initial input held while the child is canonical crosses byte-exact after the
+        //   child opens a lossless raw-mode path.
+        // Why it exists: launch input used to cross immediately and xnu silently discarded the
+        //   tail and newline of any command longer than its canonical input queue.
+        // Scenario: a synthetic child stays canonical briefly, switches to raw, and verifies
+        //   every byte of a 4096-byte launch submission. The waits are hang guards.
+        let byteCount = 4096
+        let probe = try probeExecutable()
+        let spawner = ProgramReplacingTerminalPTYSpawner(
+            program: probe,
+            arguments: ["PTYProbe", "signaled-raw-launch", String(byteCount)]
+        )
+        let host = try makeHost(spawner: spawner)
+        let completion = InputCompletionRecorder(expecting: 1)
+        let canonicalReady = host.expectOutput(containing: Array("__CANONICAL_LAUNCH_READY__".utf8))
+
+        await host.start(
+            makeLaunchInput(command: String(repeating: "Z", count: byteCount - 1)),
+            onInitialInputCompletion: { completion.signal($0) }
+        )
+
+        guard canonicalReady.satisfied(within: .seconds(30)) else {
+            throw POSIXError(.ETIMEDOUT)
+        }
+        #expect(completion.results.isEmpty)
+        try spawner.requestRawMode()
+        #expect(completion.waitForAll(within: .seconds(30)))
+        #expect(completion.results == [.delivered])
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+        #expect(String(decoding: host.outputBytes(), as: UTF8.self).contains(
+            "__RAW_LAUNCH_COUNT__=\(byteCount)"
+        ))
+    }
+
+    @Test("zsh, bash, and fish execute long launch input byte-exact", .timeLimit(.minutes(1)))
+    func supportedShellsExecuteLongLaunchInputByteExact() async throws {
+        // Intent: every supported interactive shell reaches raw mode, receives the full launch
+        //   line, and executes it.
+        // Why it exists: the gate relies on each supported shell's real line editor to open the
+        //   lossless path that makes commands beyond the canonical capacity deliverable.
+        // Scenario: zsh, Bash, and fish each print a 4096-byte payload behind a marker that the
+        //   echoed command cannot contain. The 30 second waits are hang guards.
+        let payload = String(repeating: "Z", count: 4096)
+        let marker = "__LONG_LAUNCH_BYTE_EXACT__="
+        let shells = try ["zsh", "bash", "fish"].map { try findExecutable(named: $0) }
+
+        for shell in shells {
+            let command: String
+            if shell.hasSuffix("/fish") {
+                command = "set p \(shellQuote(payload)); set m LONG_LAUNCH_BYTE_EXACT; "
+                    + "printf '__%s__=%s\\n' $m $p; exit"
+            } else {
+                command = "p=\(shellQuote(payload)); m=LONG_LAUNCH_BYTE_EXACT; "
+                    + "printf '__%s__=%s\\n' \"$m\" \"$p\"; exit"
+            }
+            var input = makeLaunchInput(command: command)
+            input.accountShell = shell
+            input.executablePaths = [shell]
+            let host = try makeHost()
+            let exactOutput = host.expectOutput(containing: Array((marker + payload).utf8))
+
+            await host.start(input)
+
+            guard exactOutput.satisfied(within: .seconds(30)) else {
+                throw POSIXError(.ETIMEDOUT)
+            }
+            #expect(await host.waitForResult() == .exited(.exited(0)))
+            let output = String(decoding: host.outputBytes(), as: UTF8.self)
+            #expect(output.contains(marker + payload), "\(shell) did not deliver launch input byte-exact")
+        }
+    }
+
+    @Test("canonical input clearing leaves later short lines deliverable", .timeLimit(.minutes(1)))
+    func canonicalInputClearingLeavesLaterShortLinesDeliverable() async throws {
+        // Intent: the delivery gate keeps no stale occupancy state after the line discipline
+        //   clears bytes that already crossed the master.
+        // Why it exists: a gate that copied kernel occupancy would miss editing and flush events
+        //   and could keep withholding input after the tty was ready for a short line.
+        // Scenario: one child handles VKILL and another handles an out-of-band tcflush; each
+        //   then reads a short probe line. The 30 second waits are hang guards.
+        let probe = try probeExecutable()
+
+        let killSpawner = ProgramReplacingTerminalPTYSpawner(
+            program: probe,
+            arguments: ["PTYProbe", "canonical-hold", "probe"]
+        )
+        let killHost = try makeHost(spawner: killSpawner)
+        let killReady = killHost.expectOutput(containing: Array("__CANONICAL_READY__".utf8))
+        var noLaunchInput = makeLaunchInput(command: "")
+        noLaunchInput.launchCommand = nil
+        await killHost.start(noLaunchInput)
+        guard killReady.satisfied(within: .seconds(30)) else { throw POSIXError(.ETIMEDOUT) }
+
+        try submitAndAwait(Array("stale".utf8), to: killHost)
+        try submitAndAwait([0x15], to: killHost)
+        try submitAndAwait(Array("probe\n".utf8), to: killHost)
+        #expect(await killHost.waitForResult() == .exited(.exited(0)))
+        #expect(String(decoding: killHost.outputBytes(), as: UTF8.self).contains(
+            "__CANONICAL_INPUT__=probe"
+        ))
+
+        let flushSpawner = ProgramReplacingTerminalPTYSpawner(
+            program: probe,
+            arguments: ["PTYProbe", "canonical-flush", "probe"]
+        )
+        let flushHost = try makeHost(spawner: flushSpawner)
+        let flushReady = flushHost.expectOutput(containing: Array("__CANONICAL_READY__".utf8))
+        let flushed = flushHost.expectOutput(containing: Array("__CANONICAL_FLUSHED__".utf8))
+        await flushHost.start(noLaunchInput)
+        guard flushReady.satisfied(within: .seconds(30)) else { throw POSIXError(.ETIMEDOUT) }
+
+        try submitAndAwait(Array("stale".utf8), to: flushHost)
+        try flushSpawner.sendSignal(SIGUSR2)
+        guard flushed.satisfied(within: .seconds(30)) else { throw POSIXError(.ETIMEDOUT) }
+        try submitAndAwait(Array("probe\n".utf8), to: flushHost)
+        #expect(await flushHost.waitForResult() == .exited(.exited(0)))
+        #expect(String(decoding: flushHost.outputBytes(), as: UTF8.self).contains(
+            "__CANONICAL_INPUT__=probe"
+        ))
+    }
+
     @Test("oversized canonical input times out without wedging later input", .timeLimit(.minutes(1)))
     func oversizedCanonicalInputTimesOutWithoutWedge() async throws {
         // Intent: a line the canonical queue cannot hold never reaches the master, and its
@@ -3827,6 +3950,51 @@ private final class ControlledTerminalPTYSpawner: TerminalPTYSpawning {
     }
 }
 
+/// Replaces only the launched program so a real PTY can exercise a synthetic child's tty mode.
+private final class ProgramReplacingTerminalPTYSpawner: TerminalPTYSpawning, @unchecked Sendable {
+    let program: String
+    let arguments: [String]
+    private let production = SystemTerminalPTYSpawner()
+    private let leader = Mutex<pid_t?>(nil)
+
+    init(program: String, arguments: [String]) {
+        self.program = program
+        self.arguments = arguments
+    }
+
+    func spawn(
+        _ spec: PTYLaunchSpec,
+        bootstrapExecutable: String,
+        didLaunch: (SpawnedPTY) -> Bool
+    ) -> PTYSpawnOutcome {
+        production.spawn(
+            PTYLaunchSpec(
+                program: program,
+                arguments: arguments,
+                workingDirectory: spec.workingDirectory,
+                environment: spec.environment,
+                initialDimensions: spec.initialDimensions
+            ),
+            bootstrapExecutable: bootstrapExecutable,
+            didLaunch: { [self] spawned in
+                leader.withLock { $0 = spawned.leader }
+                return didLaunch(spawned)
+            }
+        )
+    }
+
+    func waitForDeliveryPermission() {}
+
+    func requestRawMode() throws {
+        try sendSignal(SIGUSR1)
+    }
+
+    func sendSignal(_ signal: Int32) throws {
+        guard let pid = leader.withLock({ $0 }) else { throw POSIXError(.ESRCH) }
+        guard kill(pid, signal) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+    }
+}
+
 private final class ControlledTerminalPTYResourceLifecycle: TerminalPTYResourceLifecycling {
     private struct GateResult: Sendable {
         let verdict: TerminalPTYLifecycleGateVerdict
@@ -4079,6 +4247,20 @@ private func makeLaunchInput(command: String) -> LaunchPolicyInput {
         launchCommand: command,
         initialDimensions: .init(columns: 80, rows: 24)
     )
+}
+
+private func findExecutable(named name: String) throws -> String {
+    let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+    return try #require(path.split(separator: ":").lazy
+        .map { URL(fileURLWithPath: String($0)).appending(path: name).path }
+        .first(where: FileManager.default.isExecutableFile(atPath:)))
+}
+
+private func submitAndAwait(_ bytes: [UInt8], to host: TerminalPTYHost) throws {
+    let completion = InputCompletionRecorder(expecting: 1)
+    host.send(bytes) { completion.signal($0) }
+    guard completion.waitForAll(within: .seconds(30)) else { throw POSIXError(.ETIMEDOUT) }
+    #expect(completion.results == [.delivered])
 }
 
 private func taggedInt(_ tag: String, in output: String) throws -> Int {

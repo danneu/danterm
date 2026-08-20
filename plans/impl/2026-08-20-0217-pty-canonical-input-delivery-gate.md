@@ -233,4 +233,4 @@ the CLI.
 
 - [x] 1. Gate oversized canonical-mode PTY input
 - [x] 2. Surface typed input rejection through pane state and IPC
-- [ ] 3. Prove long shell launch delivery and document the CLI contract
+- [x] 3. Prove long shell launch delivery and document the CLI contract
