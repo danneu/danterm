@@ -186,10 +186,11 @@ Purity is proven *structurally* and guarded *heuristically*:
     declares this, so an exemption is a written decision rather than an absence.
 
 **Coverage is the lint's own responsibility, not the gate's.** Run with no
-target, the lint sweeps every `lib/*/Sources/*` and `ios/*/Sources/*` module and
-checks each one, reading `scripts/core-purity-policy.conf` for the modules whose
+target, the lint discovers every first-party package through
+`scripts/manifest_targets.py`, then checks each `Sources/*/` module under those
+packages. It reads `scripts/core-purity-policy.conf` for the modules whose
 contract deviates. The floor for a module the policy never names is `portable`,
-so a new module is covered the day it is added. The gate used to name its
+so a new module is covered the day it is tracked. The gate used to name its
 targets by hand -- eleven of them against a tree of thirty-five modules -- which
 made "nobody remembered this module" and "this module is exempt" the same
 observation. A policy entry naming a module that no longer exists fails the

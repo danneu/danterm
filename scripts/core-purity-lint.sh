@@ -5,11 +5,11 @@
 # The sweep is the entry point the gate uses, and it is what makes coverage total.
 # The gate used to list eleven targets by hand while the tree held thirty-five
 # modules, so twenty-seven went unchecked and the step list gave no sign of it.
-# Now the lint enumerates lib/*/Sources/* and ios/*/Sources/* itself and reads
-# scripts/core-purity-policy.conf for the modules whose contract deviates from the
-# portable floor. A module nobody declares is checked anyway; a policy entry whose
-# module is gone fails, because an entry that checks nothing still reads as
-# coverage. See docs/design/2026-05-28-pure-core-support-split.md.
+# Now the lint derives every package from shared tracked-manifest discovery, then
+# visits each package's Sources/* directories. A module nobody names in policy is
+# checked anyway; a policy entry whose module is gone fails, because an entry that
+# checks nothing still reads as coverage. See
+# docs/design/2026-05-28-pure-core-support-split.md.
 #
 # Profiles, plus an opt-in import-free gate:
 #
@@ -71,7 +71,7 @@ POLICY_FILE="${CORE_PURITY_LINT_POLICY:-$SCRIPT_DIR/core-purity-policy.conf}"
 # twenty-seven it missed were silent. A policy entry naming a module that no longer
 # exists fails too -- an entry that checks nothing reads as coverage.
 run_sweep() {
-    local status=0 module rel spec profile rule
+    local status=0 manifest_list manifest package module rel spec profile rule
 
     while read -r rel _; do
         [[ -z "$rel" || "$rel" == \#* ]] && continue
@@ -81,34 +81,40 @@ run_sweep() {
         fi
     done < "$POLICY_FILE"
 
-    for module in "$SWEEP_ROOT"/lib/*/Sources/*/ "$SWEEP_ROOT"/ios/*/Sources/*/; do
-        [[ -d "$module" ]] || continue
-        module="${module%/}"
-        rel="${module#"$SWEEP_ROOT"/}"
-        spec="$(awk -v want="$rel" '$1 == want { $1 = ""; sub(/#.*/, ""); print; exit }' "$POLICY_FILE")"
-        read -r profile rule <<<"$spec"
-        [[ -n "$profile" ]] || profile="portable"
+    manifest_list="$(python3 "$SCRIPT_DIR/manifest_targets.py" --list --root "$SWEEP_ROOT")" \
+        || return 1
+    while IFS= read -r manifest; do
+        package="${manifest%/Package.swift}"
+        [[ "$package" == "Package.swift" ]] && package="."
+        for module in "$SWEEP_ROOT/$package"/Sources/*/; do
+            [[ -d "$module" ]] || continue
+            module="${module%/}"
+            rel="${module#"$SWEEP_ROOT"/}"
+            spec="$(awk -v want="$rel" '$1 == want { $1 = ""; sub(/#.*/, ""); print; exit }' "$POLICY_FILE")"
+            read -r profile rule <<<"$spec"
+            [[ -n "$profile" ]] || profile="portable"
 
-        case "$profile" in
-            ui) continue ;;
-            pure | portable) ;;
-            *)
-                echo "core-purity-lint: $rel declares unknown profile '$profile'" >&2
-                status=1
-                continue
-                ;;
-        esac
+            case "$profile" in
+                ui) continue ;;
+                pure | portable) ;;
+                *)
+                    echo "core-purity-lint: $rel declares unknown profile '$profile'" >&2
+                    status=1
+                    continue
+                    ;;
+            esac
 
-        case "$rule" in
-            "") "$0" --profile "$profile" "$module" || status=1 ;;
-            forbid-imports) "$0" --profile "$profile" --forbid-imports "$module" || status=1 ;;
-            allow=*) "$0" --profile "$profile" --allow-imports "${rule#allow=}" "$module" || status=1 ;;
-            *)
-                echo "core-purity-lint: $rel declares unknown import rule '$rule'" >&2
-                status=1
-                ;;
-        esac
-    done
+            case "$rule" in
+                "") "$0" --profile "$profile" "$module" || status=1 ;;
+                forbid-imports) "$0" --profile "$profile" --forbid-imports "$module" || status=1 ;;
+                allow=*) "$0" --profile "$profile" --allow-imports "${rule#allow=}" "$module" || status=1 ;;
+                *)
+                    echo "core-purity-lint: $rel declares unknown import rule '$rule'" >&2
+                    status=1
+                    ;;
+            esac
+        done
+    done <<< "$manifest_list"
 
     if [[ "$status" -eq 0 ]]; then
         echo "core-purity lint: every module checked (portable floor, policy in ${POLICY_FILE#"$SWEEP_ROOT"/})"

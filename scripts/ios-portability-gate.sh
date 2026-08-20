@@ -22,24 +22,19 @@
 # builds exactly one; no argument does the whole sweep, which is what a human running
 # this by hand wants. The pool composes the first two: it asks `--list` what to run and
 # makes a step per answer, so a newly pinned package gets a step without anyone adding
-# one. Discovery stays in this file either way -- a list of packages kept anywhere else
-# is a list that drifts away from the manifests, which is the failure this gate exists
-# to prevent.
+# one. First-party manifest discovery is shared with the other package gates.
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Test seam: the self-test points the gate at a fixture tree of tiny packages so it
 # can prove the mechanism -- that an unportable target in a pinned package fails --
 # without waiting on a full engine cross-compile. Nothing else sets this.
-REPO_ROOT="${IOS_PORTABILITY_GATE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+REPO_ROOT="${IOS_PORTABILITY_GATE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 cd "$REPO_ROOT"
 
 # Kept in sync with what the pinned manifests declare; the SDK supplies the
 # minimum, and the triple only has to be at or above it.
 TRIPLE="arm64-apple-ios26.5"
-
-# Packages the tree owns. `references/` and `docs/` hold external and throwaway
-# trees, so a manifest there is not ours to police.
-MANIFESTS=(Package.swift lib/*/Package.swift ios/*/Package.swift)
 
 UNPINNED_BY_DESIGN=(lib/DanTermSupport/Package.swift)
 
@@ -65,6 +60,17 @@ if [[ "$mode" == one ]]; then
     Only a package that pins iOS is built for it."
 fi
 
+pinned=()
+if [[ "$mode" != one ]]; then
+    manifest_list="$(python3 "$SCRIPT_DIR/manifest_targets.py" --list --root "$REPO_ROOT")" \
+        || fail "first-party manifest discovery failed."
+    while IFS= read -r manifest; do
+        if grep -q '\.iOS(' "$manifest"; then
+            pinned+=("$(dirname "$manifest")")
+        fi
+    done <<< "$manifest_list"
+fi
+
 for manifest in "${UNPINNED_BY_DESIGN[@]}"; do
     [[ -f "$manifest" ]] || fail "$manifest is missing; this check names a package that no longer exists."
     if grep -q '\.iOS(' "$manifest"; then
@@ -72,14 +78,6 @@ for manifest in "${UNPINNED_BY_DESIGN[@]}"; do
     (the control socket's producer end, the Mac's own filesystem and session), so
     nothing outside the Mac host links it. If that has genuinely changed, change this
     check deliberately -- do not let the pin appear by accident."
-    fi
-done
-
-pinned=()
-for manifest in "${MANIFESTS[@]}"; do
-    [[ -f "$manifest" ]] || continue
-    if grep -q '\.iOS(' "$manifest"; then
-        pinned+=("$(dirname "$manifest")")
     fi
 done
 

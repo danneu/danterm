@@ -49,6 +49,8 @@ def write_manifest(root: Path, package_dir: str, name: str, targets: list[str]) 
 
 
 def run(root: Path) -> subprocess.CompletedProcess[str]:
+    if not (root / ".git").is_dir():
+        initialize_repository(root)
     environment = dict(os.environ, MANIFEST_OWNERSHIP_LINT_ROOT=str(root))
     return subprocess.run(
         [sys.executable, str(LINT)],
@@ -59,6 +61,12 @@ def run(root: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def initialize_repository(root: Path) -> None:
+    """Tracks the fixture state so discovery exercises the same path as the gate."""
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+
+
 def fail(message: str, result: subprocess.CompletedProcess[str]) -> None:
     print(f"manifest_ownership_lint_test: {message}", file=sys.stderr)
     print(result.stdout + result.stderr, file=sys.stderr)
@@ -66,6 +74,8 @@ def fail(message: str, result: subprocess.CompletedProcess[str]) -> None:
 
 
 def check(name: str, root: Path, expect_ok: bool, expect_text: str | None = None) -> None:
+    if not (root / ".git").is_dir():
+        initialize_repository(root)
     result = run(root)
     if expect_ok and result.returncode != 0:
         fail(f"{name}: expected the lint to pass", result)
@@ -147,5 +157,38 @@ with tempfile.TemporaryDirectory() as raw:
         expect_ok=False,
         expect_text="not a string literal",
     )
+
+# A tracked manifest outside the old roots becomes the nearest owner. Manifests
+# under docs/ and manifests added after the fixture was tracked stay invisible.
+with tempfile.TemporaryDirectory() as raw:
+    root = Path(raw)
+    write_manifest(
+        root,
+        ".",
+        "Outer",
+        [
+            '.target(name: "Outer", path: "app"),',
+            '.target(name: "Tool", path: "tools/Tool/Sources/Tool"),',
+            '.target(name: "DocsOnly", path: "docs/DocsOnly/Sources/DocsOnly"),',
+            '.target(name: "Untracked", path: "scratch/Untracked/Sources/Untracked"),',
+        ],
+    )
+    write_manifest(root, "tools/Tool", "Tool", ['.target(name: "Tool", path: "Sources/Tool"),'])
+    write_manifest(root, "docs/DocsOnly", "DocsOnly", ['.target(name: "DocsOnly", path: "Sources/DocsOnly"),'])
+    initialize_repository(root)
+    write_manifest(root, "scratch/Untracked", "Untracked", ['.target(name: "Untracked", path: "Sources/Untracked"),'])
+    result = run(root)
+    report = result.stdout + result.stderr
+    if result.returncode == 0 or "tools/Tool/Package.swift owns" not in report:
+        fail("tracked package outside old roots: expected the nearest-owner failure", result)
+    if "docs/DocsOnly/Package.swift owns" in report or "scratch/Untracked/Package.swift owns" in report:
+        fail("excluded and untracked manifests must not become owners", result)
+
+with tempfile.TemporaryDirectory() as raw:
+    root = Path(raw)
+    write_manifest(root, "docs/DocsOnly", "DocsOnly", ['.target(name: "DocsOnly", path: "Sources/DocsOnly"),'])
+    result = run(root)
+    if result.returncode == 0 or "no first-party manifest found by tracked-file discovery" not in result.stderr:
+        fail("empty discovery: expected a clear failure", result)
 
 print("manifest_ownership_lint_test: ok")

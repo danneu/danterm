@@ -182,7 +182,9 @@ assert_import_allowlist TerminalCore,Testing trip "module outside list"      "im
 # sweep_module <module-path-under-root> <source-line>
 sweep_module() {
     local dir="$SWEEP_ROOT/$1"
+    local package="${1%%/Sources/*}"
     mkdir -p "$dir"
+    printf '%s\n' '// swift-tools-version: 6.2' > "$SWEEP_ROOT/$package/Package.swift"
     printf '%s\n' "$2" > "$dir/Module.swift"
 }
 
@@ -190,12 +192,16 @@ sweep_reset() {
     SWEEP_ROOT="$TMP/sweep-root"
     SWEEP_POLICY="$TMP/sweep-policy.conf"
     rm -rf "$SWEEP_ROOT"; mkdir -p "$SWEEP_ROOT"
+    git init -q "$SWEEP_ROOT"
     : > "$SWEEP_POLICY"
 }
 
 # assert_sweep <trip|pass> <description>
 assert_sweep() {
     local expect="$1" desc="$2" got
+    if [[ "${TRACK_SWEEP:-1}" == 1 ]]; then
+        git -C "$SWEEP_ROOT" add -A
+    fi
     if CORE_PURITY_LINT_ROOT="$SWEEP_ROOT" CORE_PURITY_LINT_POLICY="$SWEEP_POLICY" \
         "$LINT" >/dev/null 2>&1; then got="pass"; else got="trip"; fi
     [[ "$got" == "$expect" ]] || fail "[sweep] expected '$expect' got '$got' :: $desc"
@@ -248,5 +254,24 @@ sweep_reset
 sweep_module lib/Pkg/Sources/Clean "struct Cell {}"
 sweep_module ios/App/Sources/MobileClean "import Foundation"
 assert_sweep pass "a clean tree passes, iOS modules included"
+
+# A package outside the historical roots is still swept.
+sweep_reset
+sweep_module tools/Tool/Sources/Tool "import AppKit"
+assert_sweep trip "a tracked package outside lib and ios is swept"
+
+# Excluded and untracked package trees never enter the sweep.
+sweep_reset
+sweep_module tools/Tool/Sources/Tool "struct Tool {}"
+sweep_module docs/Spike/Sources/DocsOnly "import AppKit"
+git -C "$SWEEP_ROOT" add -A
+sweep_module scratch/Untracked/Sources/Untracked "import AppKit"
+TRACK_SWEEP=0 assert_sweep pass "excluded and untracked manifests stay outside the sweep"
+
+# A repository with no discovered first-party manifest fails instead of sweeping zero modules.
+sweep_reset
+sweep_module docs/Spike/Sources/DocsOnly "struct DocsOnly {}"
+git -C "$SWEEP_ROOT" add -A
+TRACK_SWEEP=0 assert_sweep trip "an empty first-party discovery fails"
 
 echo "core-purity lint self-test passed ($TOTAL assertions across pure + portable profiles, import gates, and the sweep)"

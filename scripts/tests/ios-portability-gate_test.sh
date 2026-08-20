@@ -69,7 +69,15 @@ import PackageDescription
 let package = Package(name: "DanTermSupport", platforms: [.macOS(.v26)])
 EOF
 
-run_gate() { IOS_PORTABILITY_GATE_ROOT="$TMP/root" bash "$GATE" >"$TMP/out" 2>&1; }
+track_fixture() {
+    [[ -d "$TMP/root/.git" ]] || git init -q "$TMP/root"
+    git -C "$TMP/root" add -A
+}
+
+run_gate() {
+    track_fixture
+    IOS_PORTABILITY_GATE_ROOT="$TMP/root" bash "$GATE" >"$TMP/out" 2>&1
+}
 
 # 1. Pinned and portable, test target included.
 write_package Portable '.macOS(.v26), .iOS(.v26)' "$PORTABLE_TEST"
@@ -88,6 +96,11 @@ grep -q 'building ios/IOSPortable' "$TMP/out" \
 # The gate pool asks for this list to make one step per pinned package, so it has to
 # be the same discovery the build uses -- a second list would be a list that drifts.
 run_gate_args() {
+    track_fixture
+    IOS_PORTABILITY_GATE_ROOT="$TMP/root" bash "$GATE" "$@" >"$TMP/out" 2>&1
+}
+
+run_gate_args_untracked() {
     IOS_PORTABILITY_GATE_ROOT="$TMP/root" bash "$GATE" "$@" >"$TMP/out" 2>&1
 }
 
@@ -95,6 +108,31 @@ run_gate_args --list || { cat "$TMP/out" >&2; fail "--list should succeed on a p
 if grep -q 'building ' "$TMP/out"; then fail "--list compiled something; it must only report"; fi
 [[ "$(sort "$TMP/out")" == "$(printf 'ios/IOSPortable\nlib/Portable')" ]] \
     || fail "--list did not name exactly the pinned packages: $(cat "$TMP/out")"
+
+# A tracked package outside lib/ and ios/ is part of the same discovery.
+write_package Tool '.macOS(.v26), .iOS(.v26)' "$PORTABLE_TEST"
+mkdir -p "$TMP/root/tools"
+mv "$TMP/root/lib/Tool" "$TMP/root/tools/Tool"
+run_gate_args --list || { cat "$TMP/out" >&2; fail "--list should discover tools/ packages"; }
+grep -q '^tools/Tool$' "$TMP/out" || fail "--list missed a tracked package outside the old roots"
+
+# A tracked docs package and an untracked ordinary package stay out of enumeration.
+write_package DocsOnly '.macOS(.v26), .iOS(.v26)' "$PORTABLE_TEST"
+mkdir -p "$TMP/root/docs"
+mv "$TMP/root/lib/DocsOnly" "$TMP/root/docs/DocsOnly"
+run_gate_args --list || { cat "$TMP/out" >&2; fail "--list should ignore docs packages"; }
+write_package Untracked '.macOS(.v26), .iOS(.v26)' "$PORTABLE_TEST"
+run_gate_args_untracked --list || { cat "$TMP/out" >&2; fail "--list should ignore untracked packages"; }
+if grep -qE 'DocsOnly|Untracked' "$TMP/out"; then
+    fail "--list enumerated an excluded or untracked package: $(cat "$TMP/out")"
+fi
+
+# The explicit hatch remains independent of discovery for both kinds of package.
+run_gate_args_untracked --package docs/DocsOnly \
+    || { cat "$TMP/out" >&2; fail "--package should build an excluded package named by hand"; }
+run_gate_args_untracked --package lib/Untracked \
+    || { cat "$TMP/out" >&2; fail "--package should build an untracked package named by hand"; }
+rm -rf "$TMP/root/docs/DocsOnly" "$TMP/root/lib/Untracked"
 
 # 7. `--package` builds the one package it is given, which is what a fanned-out gate
 # step runs. Splitting the loop across steps must not weaken any single package's check.
@@ -143,7 +181,7 @@ grep -q 'DanTermSupport carries Mac-host roles only' "$TMP/out" \
 if run_gate_args --list; then fail "--list must fail on an iOS pin on DanTermSupport"; fi
 
 # A gate that finds nothing to build is a gate that proves nothing.
-rm -rf "$TMP/root/lib/Portable" "$TMP/root/lib/Unpinned" "$TMP/root/ios/IOSPortable"
+rm -rf "$TMP/root/lib/Portable" "$TMP/root/lib/Unpinned" "$TMP/root/ios/IOSPortable" "$TMP/root/tools/Tool"
 sed -i '' 's/, \.iOS(\.v26)//' "$TMP/root/lib/DanTermSupport/Package.swift"
 if run_gate; then fail "the gate must fail when no package declares an iOS platform"; fi
 grep -q 'checking nothing' "$TMP/out" || fail "an empty pinned set should say so"
@@ -153,5 +191,12 @@ grep -q 'checking nothing' "$TMP/out" || fail "an empty pinned set should say so
 # have no iOS steps at all and would look like it passed.
 if run_gate_args --list; then fail "--list must fail when no package declares an iOS platform"; fi
 grep -q 'checking nothing' "$TMP/out" || fail "--list should say an empty pinned set proves nothing"
+
+# Discovery itself must also reject a repository with no first-party manifest.
+mkdir -p "$TMP/root/docs"
+mv "$TMP/root/lib/DanTermSupport" "$TMP/root/docs/DanTermSupport"
+if run_gate_args --list; then fail "--list must fail when discovery finds no first-party manifest"; fi
+grep -q 'no first-party manifest found by tracked-file discovery' "$TMP/out" \
+    || fail "an empty discovery should identify the failed invariant: $(cat "$TMP/out")"
 
 echo "ios portability gate self-test passed"

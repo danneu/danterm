@@ -33,7 +33,7 @@ from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from manifest_targets import LintError, declared_targets  # noqa: E402
+from manifest_targets import LintError, declared_targets, first_party_manifests  # noqa: E402
 
 # Test seam: the self-test points the lint at a fixture tree of tiny manifests, so
 # each verdict is proved without a compile. Nothing else sets this.
@@ -41,11 +41,6 @@ REPO_ROOT = Path(
     os.environ.get("MANIFEST_OWNERSHIP_LINT_ROOT")
     or Path(__file__).resolve().parent.parent
 ).resolve()
-
-# Packages the tree owns. `references/` holds external checkouts, so a manifest there
-# is not ours to police.
-MANIFEST_GLOBS = ("Package.swift", "lib/*/Package.swift", "ios/*/Package.swift")
-
 
 def owner_of(path: PurePosixPath, package_dirs: list[PurePosixPath]) -> PurePosixPath:
     """The deepest first-party package directory that contains path -- its nearest manifest."""
@@ -58,25 +53,14 @@ def owner_of(path: PurePosixPath, package_dirs: list[PurePosixPath]) -> PurePosi
 
 
 def main() -> int:
-    manifests: list[Path] = []
-    for glob in MANIFEST_GLOBS:
-        manifests.extend(sorted(REPO_ROOT.glob(glob)))
-    if not manifests:
-        print(
-            "manifest-ownership-lint: no first-party manifest found, so this check is "
-            "checking nothing. Either the tree moved or this script looks in the wrong place.",
-            file=sys.stderr,
-        )
-        return 1
-
-    package_dirs = [
-        PurePosixPath(manifest.parent.relative_to(REPO_ROOT).as_posix())
-        for manifest in manifests
-    ]
-
     complaints: list[str] = []
     checked = 0
     try:
+        manifests = first_party_manifests(REPO_ROOT)
+        package_dirs = [
+            PurePosixPath(manifest.parent.relative_to(REPO_ROOT).as_posix())
+            for manifest in manifests
+        ]
         for manifest, package_dir in zip(manifests, package_dirs):
             manifest_rel = manifest.relative_to(REPO_ROOT).as_posix()
             for target in declared_targets(manifest):

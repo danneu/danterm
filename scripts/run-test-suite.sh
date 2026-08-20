@@ -78,6 +78,7 @@ STEPS=(
     'python3 ./scripts/tests/gate_test_coverage_lint_test.py'
     './scripts/manifest-ownership-lint.py'
     'python3 ./scripts/tests/manifest_ownership_lint_test.py'
+    'python3 ./scripts/tests/manifest_targets_test.py'
     './scripts/tests/ios-portability-gate_test.sh'
     './scripts/tests/ios-app_test.sh'
     'swift test --package-path lib/TerminalHostTools --scratch-path lib/TerminalHostTools/.build-gate'

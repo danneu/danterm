@@ -1,6 +1,5 @@
-# Reads the target declarations out of a `Package.swift` as text, for the two gate
-# checks that reason about manifests: scripts/manifest-ownership-lint.py and
-# scripts/gate-test-coverage-lint.py.
+# Owns first-party manifest discovery and reads target declarations from those
+# manifests for the gate checks that reason about packages.
 #
 # It lives in its own module because both checks need the same answer to the same
 # question -- which targets does this manifest declare, and where does it say their
@@ -11,7 +10,10 @@
 
 from __future__ import annotations
 
+import argparse
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +22,32 @@ TARGET_KINDS = ("target", "executableTarget", "testTarget", "macro", "systemLibr
 
 class LintError(Exception):
     """A malformed input a check refuses to interpret, as opposed to a lint verdict."""
+
+
+def first_party_manifests(root: Path) -> list[Path]:
+    """Returns every tracked Package.swift outside external and throwaway trees."""
+    result = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z"],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors="replace").strip()
+        raise LintError(f"cannot list tracked files under {root}: {detail}")
+    manifests = [
+        root / relative
+        for raw in result.stdout.split(b"\0")
+        if raw
+        for relative in [Path(raw.decode(errors="surrogateescape"))]
+        if relative.name == "Package.swift"
+        and relative.parts[0] not in {"docs", "references"}
+    ]
+    if not manifests:
+        raise LintError(
+            "no first-party manifest found by tracked-file discovery, so this check "
+            "would be checking nothing"
+        )
+    return manifests
 
 
 @dataclass(frozen=True)
@@ -121,3 +149,23 @@ def declared_targets(manifest: Path) -> list[TargetDeclaration]:
             TargetDeclaration(kind=match.group(1), name=name_match.group(1), path=path)
         )
     return declarations
+
+
+def main() -> int:
+    """Lists discovered manifest paths for shell consumers."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--list", action="store_true", required=True)
+    parser.add_argument("--root", type=Path, required=True)
+    arguments = parser.parse_args()
+    root = arguments.root.resolve()
+    try:
+        for manifest in first_party_manifests(root):
+            print(manifest.relative_to(root).as_posix())
+    except LintError as error:
+        print(f"manifest-targets: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

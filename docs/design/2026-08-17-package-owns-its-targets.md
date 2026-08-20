@@ -41,6 +41,12 @@ ancestor manifest reaching *past* a nearer one -- the root declaring a target at
 `lib/DanTermProtocol/Sources/DanTermProtocol` while
 `lib/DanTermProtocol/Package.swift` stands between them.
 
+A first-party manifest is any tracked file whose basename is `Package.swift`,
+except one under `docs/` or `references/`. The discovery in
+`scripts/manifest_targets.py` owns this definition. Every gate that enumerates
+first-party packages or their `Sources/*/` modules derives its set from that
+discovery, so package location cannot make a tracked package invisible.
+
 **O2 -- Cross-package use goes through `.package(path:)` plus
 `.product(name:package:)`,** the form the root already used for
 `lib/TerminalCore` and `lib/TerminalPTY`, and the form `ios/DanTermMobileKit`
@@ -104,7 +110,8 @@ loudly instead of slipping past:
 
 - The ownership lint is `scripts/manifest-ownership-lint.py`; its self-test is
   `scripts/tests/manifest_ownership_lint_test.py`. Both share the manifest text
-  parser in `scripts/manifest_targets.py` with the coverage check.
+  parser and first-party manifest discovery in `scripts/manifest_targets.py`
+  with the coverage check.
 - The gate coverage check is `scripts/gate-test-coverage-lint.py`; its self-test
   is `scripts/tests/gate_test_coverage_lint_test.py`.
 - The iOS pin this rule protects is stated in `scripts/ios-portability-gate.sh`.

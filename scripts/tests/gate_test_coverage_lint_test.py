@@ -64,7 +64,15 @@ def write_steps(root: Path, steps: list[str]) -> None:
     runner.write_text("#!/usr/bin/env bash\nSTEPS=(\n" + body + ")\n")
 
 
+def initialize_repository(root: Path) -> None:
+    """Tracks the fixture state so discovery exercises the same path as the gate."""
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+
+
 def run(root: Path) -> subprocess.CompletedProcess[str]:
+    if not (root / ".git").is_dir():
+        initialize_repository(root)
     environment = dict(os.environ, GATE_TEST_COVERAGE_LINT_ROOT=str(root))
     return subprocess.run(
         [sys.executable, str(LINT)],
@@ -197,5 +205,36 @@ with tempfile.TemporaryDirectory() as raw:
         fail("computed path: expected the check to fail", result)
     if "not a string literal" not in result.stderr:
         fail("computed path: expected the report to name the literal requirement", result)
+
+# A tracked package outside the old roots must enter the estate, while excluded
+# and untracked manifests stay invisible.
+with tempfile.TemporaryDirectory() as raw:
+    root = Path(raw)
+    write_package(root, "Alpha", ["AlphaTests"])
+    write_package(root, "Tool", ["ToolTests"])
+    (root / "tools").mkdir()
+    (root / "lib/Tool").rename(root / "tools/Tool")
+    write_package(root, "DocsOnly", ["DocsOnlyTests"])
+    (root / "docs").mkdir()
+    (root / "lib/DocsOnly").rename(root / "docs/DocsOnly")
+    write_steps(root, ["swift test --package-path lib/Alpha"])
+    initialize_repository(root)
+    write_package(root, "Untracked", ["UntrackedTests"])
+    result = run(root)
+    report = result.stdout + result.stderr
+    if result.returncode == 0 or "tools/Tool declares ToolTests" not in report:
+        fail("tracked package outside old roots: expected its missing lane to fail", result)
+    if "DocsOnlyTests" in report or "UntrackedTests" in report:
+        fail("excluded and untracked manifests must not enter the estate", result)
+
+with tempfile.TemporaryDirectory() as raw:
+    root = Path(raw)
+    write_package(root, "DocsOnly", ["DocsOnlyTests"])
+    (root / "docs").mkdir()
+    (root / "lib/DocsOnly").rename(root / "docs/DocsOnly")
+    write_steps(root, [])
+    result = run(root)
+    if result.returncode == 0 or "no first-party manifest found by tracked-file discovery" not in result.stderr:
+        fail("empty discovery: expected a clear failure", result)
 
 print("gate_test_coverage_lint_test: ok")

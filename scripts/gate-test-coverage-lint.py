@@ -41,7 +41,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from manifest_targets import LintError, balanced_span, declared_targets  # noqa: E402
+from manifest_targets import (  # noqa: E402
+    LintError,
+    balanced_span,
+    declared_targets,
+    first_party_manifests,
+)
 
 # Test seam: the self-test points the check at a fixture tree of tiny manifests and a
 # synthetic step list, so it can prove each verdict without running the real gate.
@@ -50,10 +55,6 @@ REPO_ROOT = Path(
     os.environ.get("GATE_TEST_COVERAGE_LINT_ROOT")
     or Path(__file__).resolve().parent.parent
 ).resolve()
-
-# Packages the tree owns. `references/` holds external checkouts, so a manifest there
-# is not ours to police.
-MANIFEST_GLOBS = ("Package.swift", "lib/*/Package.swift", "ios/*/Package.swift")
 
 UNRESOLVED = "<unresolved>"
 
@@ -297,18 +298,8 @@ def verdict(package_rel: str, estate: list[str], lanes: list[Lane]) -> str | Non
 
 
 def main() -> int:
-    manifests: list[Path] = []
-    for glob in MANIFEST_GLOBS:
-        manifests.extend(sorted(REPO_ROOT.glob(glob)))
-    if not manifests:
-        print(
-            "gate-test-coverage-lint: no first-party manifest found, so this check is "
-            "checking nothing. Either the tree moved or this script looks in the wrong place.",
-            file=sys.stderr,
-        )
-        return 1
-
     try:
+        manifests = first_party_manifests(REPO_ROOT)
         steps = gate_steps()
         complaints: list[str] = []
         checked = 0
