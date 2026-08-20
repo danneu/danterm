@@ -1263,7 +1263,7 @@ only item with a placement reason: it edits the same snapshot construction as
 LOOKUP-1/LOOKUP-2, so it comes after them.
 
 - [ ] **[INTERACT-4](#interact-4)** (3x5, small) Put the selection granularity inside `TerminalSelectionMutation.set` instead of beside it
-- [ ] **[IOS-4](#ios-4)** (3x5, small) Build the accessory key row from the key enum instead of matching two hand-numbered tag tables
+- [x] **[IOS-4](#ios-4)** (3x5, small) Build the accessory key row from the key enum instead of matching two hand-numbered tag tables -- `e8acd9b7`
 - [x] **[PARSE-1](#parse-1)** (3x5, small) Clamp relative vertical cursor motion to the scroll region, not just to the screen -- `d86a7b2d`
 - [ ] **[PARSE-5](#parse-5)** (3x5, small) Reset the saved cursor as part of DECSTR
 - [ ] **[CHROME-3](#chrome-3)** (3x5, medium) Carry typed ids in sidebar menu items instead of bare UUIDs
@@ -5569,6 +5569,12 @@ _Scope: The iOS client (ios/DanTermMobileKit/Sources, ios/DanTermMobileApp)_
 ##### IOS-4. Build the accessory key row from the key enum instead of matching two hand-numbered tag tables
 
 `structural` &middot; impact 3, confidence 5 &middot; effort small &middot; wave 4 &middot; confirmed
+
+**Done** in `e8acd9b7`, as the ideal fix says. The row is one table keyed by
+`MobileAccessoryKey`, each button carries its own key in a `UIAction` closure,
+and the Ctrl latch button is found by `key == .control`. The tag literals, the
+`init?(tag:)` extension, and the failable tap recovery are gone. The kit enum is
+`CaseIterable`, so a new key fails to compile until the row says how to draw it.
 
 **Files.** `ios/DanTermMobileApp/Sources/DanTermMobileApp/TerminalBottomBarView.swift#terminalAccessoryEntries`, `ios/DanTermMobileApp/Sources/DanTermMobileApp/TerminalBottomBarView.swift#accessoryTapped`, `ios/DanTermMobileApp/Sources/DanTermMobileApp/TerminalBottomBarView.swift#configureViews`, `ios/DanTermMobileKit/Sources/DanTermMobileKit/MobileInputMapper.swift#MobileAccessoryKey`
 
