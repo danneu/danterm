@@ -258,7 +258,7 @@ struct PaneTapeRoundTripTests {
             let batch = repairedContinuation(
                 snapshot: evicted,
                 synchronization: .init(
-                    bytes: Array("state".utf8),
+                    bytes: Data("state".utf8),
                     dimensions: .init(columns: 62, rows: 19, pinned: pinned),
                     droppedHistoryRows: 0,
                     cursor: evicted.nextCursor
@@ -318,7 +318,7 @@ struct PaneTapeRoundTripTests {
             )
         )
         // Long enough to chunk, so the count has to survive multi-part assembly.
-        let bytes = [UInt8](repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
+        let bytes = Data(repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
         let batch = repairedContinuation(
             snapshot: evicted,
             synchronization: .init(

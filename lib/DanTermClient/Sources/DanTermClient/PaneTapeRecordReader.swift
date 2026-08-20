@@ -2,12 +2,14 @@
 // records a stream delivers. The record shape itself -- its keys, its typed family, and its
 // decode -- and the notification envelope that carries it are declared once in DanTermProtocol,
 // so nothing here spells a wire key.
+import Foundation
 import DanTermProtocol
 
 /// The complete state transfer a reader may apply atomically at its continuation cursor.
 public struct PaneTapeStateSynchronization: Equatable, Sendable {
-    /// Carries the complete terminal-state byte stream.
-    public let bytes: [UInt8]
+    /// Carries the complete terminal-state byte stream, in the one buffer the assembler
+    /// accumulated the parts into.
+    public let bytes: Data
     /// Gives the width at which the state must be applied.
     public let columns: Int
     /// Gives the height at which the state must be applied.
@@ -24,7 +26,7 @@ public struct PaneTapeStateSynchronization: Equatable, Sendable {
 
     /// Creates one complete state replacement.
     public init(
-        bytes: [UInt8],
+        bytes: Data,
         columns: Int,
         rows: Int,
         pinned: Bool,
@@ -44,7 +46,7 @@ public struct PaneTapeStateSynchronization: Equatable, Sendable {
 public struct PaneTapeSyncAssembler: Sendable {
     private var expectedPart = 1
     private var expectedCount: Int?
-    private var bytes: [UInt8] = []
+    private var bytes = Data()
     private var transfer: PaneTapeSyncRecord.Transfer?
 
     /// Starts an assembler with no partial transfer.
@@ -69,7 +71,7 @@ public struct PaneTapeSyncAssembler: Sendable {
             reset()
             return nil
         }
-        bytes.append(contentsOf: record.bytes)
+        bytes.append(record.bytes)
         expectedPart += 1
         guard record.part == record.parts else {
             if record.cursor != nil { reset() }

@@ -139,7 +139,9 @@ func paneTapeStateSynchronization(
         historyBudgetBytes: requirement.historyBudgetBytes
     )
     return .init(
-        bytes: synchronization.state.bytes,
+        // The one whole-payload copy on this path: the engine is Foundation-free and yields
+        // `[UInt8]`, and from here down the payload lives in this single buffer.
+        bytes: Data(synchronization.state.bytes),
         dimensions: paneTapeDimensions(synchronization.geometry),
         droppedHistoryRows: synchronization.state.droppedHistoryRows,
         cursor: paneTapeCursor(synchronization.cursor)

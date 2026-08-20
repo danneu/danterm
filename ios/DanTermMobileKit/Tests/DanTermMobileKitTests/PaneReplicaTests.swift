@@ -24,7 +24,7 @@ func completeSyncIsAtomic() throws {
     try replica.apply(.sync(PaneTapeSyncRecord(
         part: 1,
         parts: 2,
-        bytes: Array("first".utf8),
+        bytes: Data("first".utf8),
         transfer: PaneTapeSyncRecord.Transfer(
             columns: 8,
             rows: 2,
@@ -39,7 +39,7 @@ func completeSyncIsAtomic() throws {
     try replica.apply(.sync(PaneTapeSyncRecord(
         part: 2,
         parts: 2,
-        bytes: Array(" second".utf8),
+        bytes: Data(" second".utf8),
         transfer: nil,
         cursor: cursor
     )))
@@ -50,7 +50,7 @@ func completeSyncIsAtomic() throws {
 
 @Test("A gap freezes presented state until a complete replacement sync")
 func gapFreezesReplicaUntilRepair() throws {
-    var replica = try synchronizedReplica(bytes: Array("old".utf8), cursor: testCursor(sequence: 1))
+    var replica = try synchronizedReplica(bytes: Data("old".utf8), cursor: testCursor(sequence: 1))
     try replica.apply(.gap(PaneTapeGapRecord(
         droppedEventCount: 2,
         droppedFeedBytes: 4,
@@ -62,7 +62,7 @@ func gapFreezesReplicaUntilRepair() throws {
     try replica.apply(.sync(PaneTapeSyncRecord(
         part: 1,
         parts: 2,
-        bytes: Array("new".utf8),
+        bytes: Data("new".utf8),
         transfer: PaneTapeSyncRecord.Transfer(
             columns: 8,
             rows: 2,
@@ -82,7 +82,7 @@ func gapFreezesReplicaUntilRepair() throws {
     try replica.apply(.sync(PaneTapeSyncRecord(
         part: 2,
         parts: 2,
-        bytes: [],
+        bytes: Data(),
         transfer: nil,
         cursor: repairCursor
     )))
@@ -94,7 +94,7 @@ func gapFreezesReplicaUntilRepair() throws {
 @Test("Applied events advance the cursor and preserve observe-only behavior")
 func eventsAdvanceCursorWithoutOriginatingBytes() throws {
     let initial = testCursor(sequence: 3, feed: 5, write: 2)
-    var replica = try synchronizedReplica(bytes: [], cursor: initial)
+    var replica = try synchronizedReplica(bytes: Data(), cursor: initial)
     let queryAndText = Array("\u{1B}[6nhi".utf8)
 
     try replica.apply(eventRecord(
@@ -141,7 +141,7 @@ func eventsAdvanceCursorWithoutOriginatingBytes() throws {
 @Test("Malformed byte coordinates freeze the replica behind an explicit gap")
 func malformedByteCoordinatesCannotAdvanceExactState() throws {
     var replica = try synchronizedReplica(
-        bytes: Array("old".utf8),
+        bytes: Data("old".utf8),
         cursor: testCursor(sequence: 1, feed: 4)
     )
     try replica.apply(eventRecord(sequence: 1, event: .feed(Array("bad".utf8))))
@@ -152,7 +152,7 @@ func malformedByteCoordinatesCannotAdvanceExactState() throws {
 
 @Test("A sync restores state that visible text alone cannot prove")
 func syncRestoresModesAndHistory() throws {
-    let bytes = Array("1\r\n2\r\n3\u{1B}[?1h\u{1B}[?2004h\u{1B}[?1049hALT".utf8)
+    let bytes = Data("1\r\n2\r\n3\u{1B}[?1h\u{1B}[?2004h\u{1B}[?1049hALT".utf8)
     let replica = try synchronizedReplica(
         bytes: bytes,
         cursor: testCursor(sequence: 1),
@@ -168,7 +168,7 @@ func syncRestoresModesAndHistory() throws {
 @Test("Recorded mouse events mutate local replica interaction without emitting bytes")
 func mouseEventsApplyLocally() throws {
     var replica = try synchronizedReplica(
-        bytes: Array("abcd".utf8),
+        bytes: Data("abcd".utf8),
         cursor: testCursor(sequence: 1),
         columns: 8,
         rows: 2
@@ -197,7 +197,7 @@ func mouseEventsApplyLocally() throws {
 @Test("Resize and viewport events apply, while stream geometry stays authoritative")
 func geometryAndViewportEventsApply() throws {
     var replica = try synchronizedReplica(
-        bytes: Array("1\r\n2\r\n3\r\n4".utf8),
+        bytes: Data("1\r\n2\r\n3\r\n4".utf8),
         cursor: testCursor(sequence: 1),
         columns: 6,
         rows: 2
@@ -218,7 +218,7 @@ func pinnednessTracksStreamGeometry() throws {
     #expect(replica.pinned == nil)
 
     replica = try synchronizedReplica(
-        bytes: Array("live".utf8),
+        bytes: Data("live".utf8),
         cursor: testCursor(sequence: 1),
         columns: 6,
         rows: 2,
@@ -239,7 +239,7 @@ func pinnednessTracksStreamGeometry() throws {
     try replica.apply(.sync(PaneTapeSyncRecord(
         part: 1,
         parts: 1,
-        bytes: Array("repaired".utf8),
+        bytes: Data("repaired".utf8),
         transfer: PaneTapeSyncRecord.Transfer(
             columns: 10,
             rows: 3,
@@ -257,7 +257,7 @@ func detectedGapWithholdsPinnedness() throws {
     // Why it exists: the pinned bit the replica holds is only as trustworthy as its cursor.
     // Scenario: an out-of-order event arrives on a pinned pane.
     var replica = try synchronizedReplica(
-        bytes: Array("live".utf8),
+        bytes: Data("live".utf8),
         cursor: testCursor(sequence: 1),
         pinned: true
     )
@@ -270,7 +270,7 @@ func detectedGapWithholdsPinnedness() throws {
 @Test("Local primary-screen scrolling moves an exact replica viewport")
 func localViewportScrollMovesReplica() throws {
     var replica = try synchronizedReplica(
-        bytes: Array("one\r\ntwo\r\nthree\r\nfour".utf8),
+        bytes: Data("one\r\ntwo\r\nthree\r\nfour".utf8),
         cursor: testCursor(sequence: 1),
         columns: 8,
         rows: 2
@@ -289,7 +289,7 @@ func localViewportScrollToTopRow() throws {
     //   has to fall out of an ordinary absolute request rather than a separate flag the
     //   view keeps.
     var replica = try synchronizedReplica(
-        bytes: Array("one\r\ntwo\r\nthree\r\nfour".utf8),
+        bytes: Data("one\r\ntwo\r\nthree\r\nfour".utf8),
         cursor: testCursor(sequence: 1),
         columns: 8,
         rows: 2
@@ -314,7 +314,7 @@ func localViewportScrollGuardsScreenAndState() throws {
     // Why it exists: the chrome routes a gesture under the mode it last saw, so an
     //   absolute row can arrive just after the pane opened a full-screen application.
     var alternate = try synchronizedReplica(
-        bytes: Array("one\r\ntwo\r\nthree\r\nfour\u{1b}[?1049h".utf8),
+        bytes: Data("one\r\ntwo\r\nthree\r\nfour\u{1b}[?1049h".utf8),
         cursor: testCursor(sequence: 1),
         columns: 8,
         rows: 2
@@ -325,7 +325,7 @@ func localViewportScrollGuardsScreenAndState() throws {
     #expect(alternate.terminal == beforeAlternate)
 
     var gapped = try synchronizedReplica(
-        bytes: Array("one\r\ntwo\r\nthree\r\nfour".utf8),
+        bytes: Data("one\r\ntwo\r\nthree\r\nfour".utf8),
         cursor: testCursor(sequence: 1),
         columns: 8,
         rows: 2
@@ -343,7 +343,7 @@ func localViewportScrollGuardsScreenAndState() throws {
 @Test("Invalid authoritative geometry cannot advance exact replica state")
 func invalidResizeBecomesGap() throws {
     var replica = try synchronizedReplica(
-        bytes: Array("stable".utf8),
+        bytes: Data("stable".utf8),
         cursor: testCursor(sequence: 1),
         columns: 6,
         rows: 2
@@ -357,7 +357,7 @@ func invalidResizeBecomesGap() throws {
 @Test("A reconnect resumes from a stored cursor or repairs a foreign lifetime with a total gap")
 func reconnectResumeAndTotalLoss() throws {
     var replica = try synchronizedReplica(
-        bytes: Array("base".utf8),
+        bytes: Data("base".utf8),
         cursor: testCursor(sequence: 4)
     )
     let stored = replica.cursor
@@ -386,7 +386,7 @@ func reconnectResumeAndTotalLoss() throws {
     try replica.apply(.sync(PaneTapeSyncRecord(
         part: 1,
         parts: 1,
-        bytes: Array("fresh".utf8),
+        bytes: Data("fresh".utf8),
         transfer: PaneTapeSyncRecord.Transfer(
             columns: 8,
             rows: 2,
@@ -402,7 +402,7 @@ func reconnectResumeAndTotalLoss() throws {
 @Test("A reconnect start from a different recorder lifetime cannot bless stale state")
 func reconnectRejectsForeignStartCursor() throws {
     var replica = try synchronizedReplica(
-        bytes: Array("old".utf8),
+        bytes: Data("old".utf8),
         cursor: testCursor(sequence: 4)
     )
     let foreign = testCursor(
@@ -436,7 +436,7 @@ func cursorAnchorRequiresExactFollowingVisibleCursor() throws {
     // Scenario: four lines on a three-row window with the cursor moved two rows up, so a
     //   one-row scroll-back keeps the cursor visible while browsing.
     var replica = try synchronizedReplica(
-        bytes: Array("one\r\ntwo\r\nthree\r\nfour\u{1b}[A\u{1b}[A".utf8),
+        bytes: Data("one\r\ntwo\r\nthree\r\nfour\u{1b}[A\u{1b}[A".utf8),
         cursor: testCursor(sequence: 1),
         columns: 8,
         rows: 3
@@ -477,7 +477,7 @@ func cursorAnchorRequiresExactFollowingVisibleCursor() throws {
 func replicaMarksItsOwnFindingsAsDetected() throws {
     let base = testCursor(sequence: 4, feed: 3)
 
-    var foreignStart = try synchronizedReplica(bytes: Array("old".utf8), cursor: base)
+    var foreignStart = try synchronizedReplica(bytes: Data("old".utf8), cursor: base)
     try foreignStart.apply(startRecord(cursor: testCursor(
         sequence: 4,
         feed: 3,
@@ -489,19 +489,19 @@ func replicaMarksItsOwnFindingsAsDetected() throws {
     try statelessStart.apply(startRecord(cursor: base))
     #expect(statelessStart.state == .gap(.detected))
 
-    var skippedSequence = try synchronizedReplica(bytes: [], cursor: base)
+    var skippedSequence = try synchronizedReplica(bytes: Data(), cursor: base)
     try skippedSequence.apply(eventRecord(sequence: 9, event: .checkpoint))
     #expect(skippedSequence.state == .gap(.detected))
 
-    var degenerateResize = try synchronizedReplica(bytes: [], cursor: base)
+    var degenerateResize = try synchronizedReplica(bytes: Data(), cursor: base)
     try degenerateResize.apply(eventRecord(sequence: 4, event: .resize(columns: 1, rows: 0, pinned: false)))
     #expect(degenerateResize.state == .gap(.detected))
 
-    var unplaceableBytes = try synchronizedReplica(bytes: [], cursor: base)
+    var unplaceableBytes = try synchronizedReplica(bytes: Data(), cursor: base)
     try unplaceableBytes.apply(eventRecord(sequence: 4, event: .feed(Array("x".utf8))))
     #expect(unplaceableBytes.state == .gap(.detected))
 
-    var producerReported = try synchronizedReplica(bytes: [], cursor: base)
+    var producerReported = try synchronizedReplica(bytes: Data(), cursor: base)
     try producerReported.apply(.gap(.total))
     #expect(producerReported.state == .gap(.declared(.total)))
 }
@@ -520,7 +520,7 @@ private func startRecord(cursor: PaneTapeCursor) -> MobilePaneTapeRecord {
 }
 
 private func synchronizedReplica(
-    bytes: [UInt8],
+    bytes: Data,
     cursor: PaneTapeCursor,
     columns: Int = 8,
     rows: Int = 2,

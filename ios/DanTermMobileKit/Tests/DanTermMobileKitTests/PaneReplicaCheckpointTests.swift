@@ -16,7 +16,7 @@ struct PaneReplicaCheckpointTests {
         // Intent: make the continuation record a pure function of retained state and cursor.
         // Why it exists: an event suffix grows with the path taken to the current state.
         // Scenario: one replica receives "AB" in one event while another receives it in two.
-        var short = try checkpointReplica(bytes: [], cursor: checkpointCursor(sequence: 1))
+        var short = try checkpointReplica(bytes: Data(), cursor: checkpointCursor(sequence: 1))
         try short.apply(checkpointEvent(
             sequence: 1,
             byteOffset: 0,
@@ -24,7 +24,7 @@ struct PaneReplicaCheckpointTests {
             event: .feed(Array("AB".utf8))
         ))
 
-        var long = try checkpointReplica(bytes: [], cursor: checkpointCursor(sequence: 0))
+        var long = try checkpointReplica(bytes: Data(), cursor: checkpointCursor(sequence: 0))
         try long.apply(checkpointEvent(
             sequence: 0,
             byteOffset: 0,
@@ -59,7 +59,7 @@ struct PaneReplicaCheckpointTests {
         #expect(sourceState.bytes.count > PaneTapeSyncPolicy.defaultHistoryBudgetBytes)
 
         let replica = try checkpointReplica(
-            bytes: sourceState.bytes,
+            bytes: Data(sourceState.bytes),
             cursor: checkpointCursor(sequence: 1),
             columns: 80,
             rows: 24
@@ -84,7 +84,7 @@ struct PaneReplicaCheckpointTests {
             count: (Terminal.graphemeClusterByteLimit - 1) / mark.utf8.count
         )
         var replica = try checkpointReplica(
-            bytes: Array(("A" + admitted).utf8),
+            bytes: Data(("A" + admitted).utf8),
             cursor: checkpointCursor(sequence: 1, feed: Terminal.graphemeClusterByteLimit)
         )
         let atLimit = try #require(replica.checkpoint(for: paneId))
@@ -112,7 +112,7 @@ struct PaneReplicaCheckpointTests {
         let baselineLineCount = Terminal.scrollbackByteLimit / line.utf8.count + 128
         let baseline = Array(String(repeating: line, count: baselineLineCount).utf8)
         var replica = try checkpointReplica(
-            bytes: baseline,
+            bytes: Data(baseline),
             cursor: checkpointCursor(sequence: 1, feed: baseline.count),
             columns: columns,
             rows: 2
@@ -139,7 +139,7 @@ struct PaneReplicaCheckpointTests {
         // Scenario: history and an alternate screen coexist while a CSI is split at the fence.
         let prefix = Array("1\r\n2\r\n3\u{1B}[?1h\u{1B}[?2004h\u{1B}[?1049hALT\u{1B}[".utf8)
         var original = try checkpointReplica(
-            bytes: prefix,
+            bytes: Data(prefix),
             cursor: checkpointCursor(sequence: 4, feed: prefix.count),
             columns: 8,
             rows: 2
@@ -173,7 +173,7 @@ struct PaneReplicaCheckpointTests {
         // Scenario: a four-column row is full at the checkpoint fence, then both replicas print E.
         let prefix = Array("ABCD".utf8)
         var original = try checkpointReplica(
-            bytes: prefix,
+            bytes: Data(prefix),
             cursor: checkpointCursor(sequence: 1, feed: prefix.count),
             columns: 4,
             rows: 2
@@ -202,7 +202,7 @@ struct PaneReplicaCheckpointTests {
         // Why it exists: transient pointer ownership is not part of authoritative terminal bytes.
         // Scenario: restore happens after mouse-down, then a complete new selection succeeds.
         var original = try checkpointReplica(
-            bytes: Array("abcd".utf8),
+            bytes: Data("abcd".utf8),
             cursor: checkpointCursor(sequence: 1),
             columns: 8,
             rows: 2
@@ -214,7 +214,7 @@ struct PaneReplicaCheckpointTests {
         let checkpoint = try #require(original.checkpoint(for: paneId))
         var restored = try PaneReplica(checkpoint: checkpoint, for: paneId)
         var syncFresh = try checkpointReplica(
-            bytes: checkpoint.stateBytes,
+            bytes: Data(checkpoint.stateBytes),
             cursor: checkpoint.cursor,
             columns: checkpoint.columns,
             rows: checkpoint.rows
@@ -241,14 +241,14 @@ struct PaneReplicaCheckpointTests {
         // Why it exists: a partial replacement paired with an old or future cursor is unrecoverable.
         // Scenario: capture during a multipart sync and again after an explicit gap.
         var replica = try checkpointReplica(
-            bytes: Array("old".utf8),
+            bytes: Data("old".utf8),
             cursor: checkpointCursor(sequence: 1, feed: 3)
         )
         let exact = replica.checkpoint(for: paneId)
         try replica.apply(.sync(.init(
             part: 1,
             parts: 2,
-            bytes: Array("new".utf8),
+            bytes: Data("new".utf8),
             transfer: PaneTapeSyncRecord.Transfer(
                 columns: 8,
                 rows: 2,
@@ -269,7 +269,7 @@ struct PaneReplicaCheckpointTests {
         // Why it exists: a resumed phone must not guess a claim from geometry it happens to hold.
         // Scenario: a pinned pane is checkpointed, restored, then unpinned by a replayed event.
         var replica = try checkpointReplica(
-            bytes: Array("claimed".utf8),
+            bytes: Data("claimed".utf8),
             cursor: checkpointCursor(sequence: 1),
             pinned: true
         )
@@ -298,7 +298,7 @@ struct PaneReplicaCheckpointTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = PaneReplicaCheckpointStore(directory: directory)
         let current = try #require(
-            try checkpointReplica(bytes: Array("safe".utf8), cursor: checkpointCursor(sequence: 1))
+            try checkpointReplica(bytes: Data("safe".utf8), cursor: checkpointCursor(sequence: 1))
                 .checkpoint(for: paneId)
         )
         try store.save(current)
@@ -326,7 +326,7 @@ struct PaneReplicaCheckpointTests {
     ])
     func envelopeMutationIsRejected(key: String) throws {
         let replica = try checkpointReplica(
-            bytes: Array("safe".utf8),
+            bytes: Data("safe".utf8),
             cursor: checkpointCursor(sequence: 7, feed: 4, write: 2)
         )
         let checkpoint = try #require(replica.checkpoint(for: paneId))
@@ -414,7 +414,7 @@ struct PaneReplicaCheckpointTests {
     @Test("a restored foreign recorder cursor enters a gap and converges through fresh state")
     func foreignRecorderLifetimeRepairsAfterCheckpointRestore() throws {
         let replica = try checkpointReplica(
-            bytes: Array("old".utf8),
+            bytes: Data("old".utf8),
             cursor: checkpointCursor(sequence: 4)
         )
         var restored = try PaneReplica(
@@ -440,7 +440,7 @@ struct PaneReplicaCheckpointTests {
         try restored.apply(.sync(.init(
             part: 1,
             parts: 1,
-            bytes: Array("fresh".utf8),
+            bytes: Data("fresh".utf8),
             transfer: PaneTapeSyncRecord.Transfer(
                 columns: 8,
                 rows: 2,
@@ -456,7 +456,7 @@ struct PaneReplicaCheckpointTests {
 }
 
 private func checkpointReplica(
-    bytes: [UInt8],
+    bytes: Data,
     cursor: PaneTapeCursor,
     columns: Int = 8,
     rows: Int = 2,

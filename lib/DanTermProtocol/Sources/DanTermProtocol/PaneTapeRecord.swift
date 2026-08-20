@@ -236,8 +236,9 @@ public struct PaneTapeSyncRecord: Equatable, Sendable {
     public let part: Int
     /// Gives the complete transfer's part count.
     public let parts: Int
-    /// Carries this part's terminal-state bytes.
-    public let bytes: [UInt8]
+    /// Carries this part's terminal-state bytes as a slice of the one payload buffer the
+    /// producer serialized, so a part never owns a second copy of what it names.
+    public let bytes: Data
     /// Carries the whole-transfer facts on the first part, and nil on every later part.
     public let transfer: Transfer?
     /// Publishes the continuation position on the final part only.
@@ -247,7 +248,7 @@ public struct PaneTapeSyncRecord: Equatable, Sendable {
     public init(
         part: Int,
         parts: Int,
-        bytes: [UInt8],
+        bytes: Data,
         transfer: Transfer?,
         cursor: PaneTapeCursor?
     ) {
@@ -426,7 +427,10 @@ extension PaneTapeOutgoingRecord: Encodable where Event: Encodable {
             try container.encode(PaneTapeRecordKind.sync.rawValue, forKey: .kind)
             try container.encode(sync.part, forKey: .part)
             try container.encode(sync.parts, forKey: .parts)
-            try container.encode(Data(sync.bytes).base64EncodedString(), forKey: .base64)
+            // The wire is JSON, and JSONEncoder's default data strategy is base64 in the same
+            // alphabet and padding, so the payload's own encode writes the field the reader
+            // expects. Encoding the slice directly means no record ever holds a base64 copy.
+            try container.encode(sync.bytes, forKey: .base64)
             if let transfer = sync.transfer {
                 try encodeGeometry(
                     columns: transfer.columns,
@@ -588,7 +592,7 @@ public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord<JSONValue
         return .sync(PaneTapeSyncRecord(
             part: part,
             parts: parts,
-            bytes: Array(data),
+            bytes: data,
             transfer: transfer,
             cursor: cursor
         ))

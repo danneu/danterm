@@ -27,7 +27,7 @@ struct PaneTapeRecordTests {
         }
         #expect(sync.part == 2)
         #expect(sync.parts == 2)
-        #expect(sync.bytes == Array("state".utf8))
+        #expect(sync.bytes == Data("state".utf8))
         #expect(sync.cursor?.nextSequence == 41)
     }
 

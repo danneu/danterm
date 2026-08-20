@@ -32,7 +32,9 @@ extension PaneTapeCursorPlacement: Sendable where Event: Sendable {}
 /// Only the materialize phase holds one: it is what serializing the fenced terminal produces,
 /// and the decide phase below runs entirely without it.
 struct PaneTapeStateSynchronization: Equatable, Sendable {
-    let bytes: [UInt8]
+    /// The one owning buffer for the serialized state. Every sync record built from it names a
+    /// range of this buffer rather than holding its own copy.
+    let bytes: Data
     let dimensions: PaneTapeDimensions
     /// How many retained history rows these bytes leave out, oldest first. A replica cannot
     /// derive it -- the bytes look the same whether the source had more history or not -- so
@@ -423,11 +425,15 @@ private func makePaneTapeSynchronizationRecords<Event>(
     _ synchronization: PaneTapeStateSynchronization
 ) -> [PaneTapeOutgoingRecord<Event>] {
     let maximumPayloadBytes = IpcLineFramer.maxLineBytes / 4
-    let chunks = synchronization.bytes.isEmpty
-        ? [[]]
-        : stride(from: 0, to: synchronization.bytes.count, by: maximumPayloadBytes).map { start in
-            Array(synchronization.bytes[start..<min(start + maximumPayloadBytes, synchronization.bytes.count)])
-        }
+    let payload = synchronization.bytes
+    // Slices of one `Data`, not copies: the whole payload stays in the single buffer the
+    // engine boundary produced, and each record carries only a range header into it.
+    let chunks: [Data] = payload.isEmpty
+        ? [Data()]
+        : stride(from: payload.startIndex, to: payload.endIndex, by: maximumPayloadBytes)
+            .map { start in
+                payload[start..<min(start + maximumPayloadBytes, payload.endIndex)]
+            }
     return chunks.enumerated().map { index, bytes in
         // The transfer's whole-state facts ride the first part, and the position it leaves the
         // reader at rides the last, so a single-part transfer carries both.

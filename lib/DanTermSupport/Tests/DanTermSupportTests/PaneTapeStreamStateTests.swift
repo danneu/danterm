@@ -42,7 +42,7 @@ struct PaneTapeStreamStateTests {
         #expect(sync == [.sync(PaneTapeSyncRecord(
             part: 1,
             parts: 1,
-            bytes: Array("state".utf8),
+            bytes: Data("state".utf8),
             transfer: .init(columns: 100, rows: 30, pinned: false, droppedHistoryRows: 0),
             cursor: cursor(sequence: 6, feed: 6)
         ))])
@@ -161,7 +161,7 @@ struct PaneTapeStreamStateTests {
 
     @Test("sync chunks fit the IPC line bound and publish the cursor only on completion")
     func syncChunksAreAtomicAndBounded() throws {
-        let bytes = [UInt8](repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
+        let bytes = Data(repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
         let opening = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
             pane: pane(
@@ -194,6 +194,50 @@ struct PaneTapeStreamStateTests {
         }
     }
 
+    // Intent: the payload splits at the chunk bound, and each part publishes its own chunk
+    //   on the wire as standard padded base64.
+    // Why it exists: how the producer holds the payload is an implementation choice, but the
+    //   bytes it puts on the wire are the contract. Every other assertion here reads records
+    //   in memory, so a change to the payload's carrier could move a chunk boundary or change
+    //   the base64 spelling with nothing to catch it.
+    // Scenario: three payload shapes around the chunk bound -- empty, exactly one chunk, and
+    //   one that spans three chunk boundaries.
+    @Test("sync parts split at the chunk bound and carry each chunk as standard base64")
+    func syncPartsCarryTheirChunkAsBase64() throws {
+        let bound = IpcLineFramer.maxLineBytes / 4
+        for payloadCount in [0, bound, 3 * bound + 7] {
+            // A period that does not divide the chunk bound, so two chunks of one payload
+            // never hold the same bytes and a misplaced boundary cannot go unnoticed.
+            let payload = (0..<payloadCount).map { UInt8($0 % 251) }
+            let expectedChunks = payload.isEmpty
+                ? [[UInt8]()]
+                : stride(from: 0, to: payload.count, by: bound).map { start in
+                    Array(payload[start..<min(start + bound, payload.count)])
+                }
+            let records = openStream(
+                request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
+                pane: pane(retainedSequences: [], syncBytes: Data(payload))
+            ).records
+
+            #expect(records.allSatisfy { kind($0) == .sync })
+            #expect(records.compactMap { part($0)?.part } == Array(1...expectedChunks.count))
+            #expect(records.allSatisfy { part($0)?.parts == expectedChunks.count })
+            let carried = try #require(PaneTapeEventNotification<JSONValue>(
+                method: Methods.paneTapeEvent,
+                params: JSONDecoder().decode(
+                    JSONValue.self,
+                    from: JSONEncoder().encode(
+                        PaneTapeEventNotification(subscription: "s", records: records)
+                    )
+                )
+            ))
+            #expect(
+                carried.records.compactMap { $0.asObject?[PaneTapeRecordKey.base64]?.asString }
+                    == expectedChunks.map { Data($0).base64EncodedString() }
+            )
+        }
+    }
+
     // Intent: a synchronization that serialized to no bytes still ships exactly one part,
     //   carrying the transfer's facts and its continuation cursor.
     // Why it exists: a reader assembles a transfer by counting parts, so an empty state that
@@ -204,7 +248,7 @@ struct PaneTapeStreamStateTests {
     func emptySynchronizationShipsOnePart() {
         let opening = openStream(
             request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
-            pane: pane(retainedSequences: [], syncBytes: [])
+            pane: pane(retainedSequences: [], syncBytes: Data())
         )
 
         #expect(opening.records.count == 1)
@@ -254,7 +298,7 @@ struct PaneTapeStreamStateTests {
     func continuationDependsOnMode() {
         let evicted = snapshot(sequences: [4, 5], nextSequence: 6, droppedEventCount: 4)
         let synchronization = PaneTapeStateSynchronization(
-            bytes: Array("state".utf8),
+            bytes: Data("state".utf8),
             dimensions: .init(columns: 100, rows: 30, pinned: false),
             droppedHistoryRows: 0,
             cursor: evicted.nextCursor
@@ -279,7 +323,7 @@ struct PaneTapeStreamStateTests {
         #expect(Array(reconstructible.records.dropFirst()) == [.sync(PaneTapeSyncRecord(
             part: 1,
             parts: 1,
-            bytes: Array("state".utf8),
+            bytes: Data("state".utf8),
             transfer: .init(columns: 100, rows: 30, pinned: false, droppedHistoryRows: 0),
             cursor: cursor(sequence: 6, feed: 6)
         ))])
@@ -385,7 +429,7 @@ struct PaneTapeStreamStateTests {
     func resizeResyncsOnlyATruncatedReplica() {
         let resizing = snapshot(sequences: [4, 5, 6], nextSequence: 7, resizeSequences: [5])
         let synchronization = PaneTapeStateSynchronization(
-            bytes: Array("state".utf8),
+            bytes: Data("state".utf8),
             dimensions: .init(columns: 100, rows: 30, pinned: false),
             droppedHistoryRows: 9,
             cursor: cursor(sequence: 7, feed: 7)
@@ -423,7 +467,7 @@ struct PaneTapeStreamStateTests {
     @Test("only a resize resyncs, and a sync that omits nothing restores exact standing")
     func plainSuffixesPassThroughAndAWholeSyncRestoresCompleteness() {
         let truncatedSync = PaneTapeStateSynchronization(
-            bytes: Array("state".utf8),
+            bytes: Data("state".utf8),
             dimensions: .init(columns: 100, rows: 30, pinned: false),
             droppedHistoryRows: 9,
             cursor: cursor(sequence: 6, feed: 6)
@@ -439,7 +483,7 @@ struct PaneTapeStreamStateTests {
         #expect(passedThrough.replicaHistoryIsComplete == false)
 
         let wholeSync = PaneTapeStateSynchronization(
-            bytes: Array("state".utf8),
+            bytes: Data("state".utf8),
             dimensions: .init(columns: 100, rows: 30, pinned: false),
             droppedHistoryRows: 0,
             cursor: cursor(sequence: 7, feed: 7)
@@ -475,7 +519,7 @@ struct PaneTapeStreamStateTests {
             pane: pane(
                 retainedSequences: [],
                 droppedHistoryRows: 512,
-                syncBytes: [UInt8](repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
+                syncBytes: Data(repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
             )
         ).records
 
@@ -559,7 +603,7 @@ struct PaneTapeStreamStateTests {
     func openingStandingDecidesTheNextSuffix() {
         let resizing = snapshot(sequences: [8], nextSequence: 9, resizeSequences: [8])
         let resizeSync = PaneTapeStateSynchronization(
-            bytes: Array("state".utf8),
+            bytes: Data("state".utf8),
             dimensions: .init(columns: 100, rows: 30, pinned: false),
             droppedHistoryRows: 9,
             cursor: cursor(sequence: 9, feed: 9)
@@ -653,7 +697,7 @@ struct PaneTapeStreamStateTests {
         droppedHistoryRows: Int = 0,
         requested: PaneTapeCursorPlacement<JSONValue>? = nil,
         initial: PaneTapeDimensions = .init(columns: 80, rows: 24, pinned: false),
-        syncBytes: [UInt8] = Array("state".utf8),
+        syncBytes: Data = Data("state".utf8),
         syncDimensions: PaneTapeDimensions = .init(columns: 100, rows: 30, pinned: false)
     ) -> FencedPane {
         let nextSequence = retainedSequences.last.map { $0 + 1 } ?? 0
@@ -752,7 +796,9 @@ struct PaneTapeStreamStateTests {
         return event.sequence
     }
 
-    private func synchronizationBytes(_ records: [PaneTapeOutgoingRecord<JSONValue>]) -> [UInt8] {
-        records.flatMap { part($0)?.bytes ?? [] }
+    private func synchronizationBytes(_ records: [PaneTapeOutgoingRecord<JSONValue>]) -> Data {
+        records.reduce(into: Data()) { joined, record in
+            if let bytes = part(record)?.bytes { joined.append(bytes) }
+        }
     }
 }

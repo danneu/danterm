@@ -111,7 +111,7 @@ private let roundTripCases: [(PaneTapeOutgoingRecord<JSONValue>, PaneTapeRecord<
     let firstPart = PaneTapeSyncRecord(
         part: 1,
         parts: 2,
-        bytes: Array("state".utf8),
+        bytes: Data("state".utf8),
         transfer: PaneTapeSyncRecord.Transfer(
             columns: 80,
             rows: 24,
@@ -123,7 +123,7 @@ private let roundTripCases: [(PaneTapeOutgoingRecord<JSONValue>, PaneTapeRecord<
     let lastPart = PaneTapeSyncRecord(
         part: 2,
         parts: 2,
-        bytes: [],
+        bytes: Data(),
         transfer: nil,
         cursor: cursor
     )

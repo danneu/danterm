@@ -100,7 +100,7 @@ private func storedCheckpoint() throws -> PaneReplicaCheckpoint {
     try replica.apply(.sync(PaneTapeSyncRecord(
         part: 1,
         parts: 1,
-        bytes: Array("resume".utf8),
+        bytes: Data("resume".utf8),
         transfer: PaneTapeSyncRecord.Transfer(
             columns: 8,
             rows: 2,

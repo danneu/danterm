@@ -176,7 +176,11 @@ public struct PaneReplica: Sendable {
                 rows: synchronization.rows
             )
         }
-        replacement.feed(synchronization.bytes)
+        // Fed through the buffer the assembler already holds: the engine takes no Foundation
+        // type, and materializing an array here would duplicate the whole payload.
+        synchronization.bytes.withUnsafeBytes { raw in
+            replacement.feed(raw.bindMemory(to: UInt8.self))
+        }
         discardAuthority(from: &replacement)
         terminal = replacement
         cursor = synchronization.cursor
