@@ -4,8 +4,6 @@ import DanTermMobileKit
 import DanTermProtocol
 import Foundation
 import TerminalCore
-import TerminalRenderExecution
-import TerminalRenderPlanning
 import UIKit
 
 /// Everything the scroll chrome needs to describe this surface, read in one pass.
@@ -44,17 +42,19 @@ final class TerminalSurfaceView: UIView {
     private var replica = PaneReplica()
     private var replicaPaneId: PaneId?
     private var surface: MobileObserveSurface?
-    private var stores: [TerminalFrameBackingStore] = []
-    private var policy: MobilePresentationPolicy<Int>?
+    /// Owns this view's whole presentation path -- planner, buffers, and the
+    /// pending-drain bit -- for the life of the view, so a surface rebuild does
+    /// not lose a drain that arrived before the extent settled.
+    private let presenter = MobileFramePresenter()
     private let surfaceView = UIView()
     private var displayLink: CADisplayLink?
     private var displayLinkTarget: DisplayLinkTarget?
     /// The grid the replica currently runs at, remembered so a layout pass can refit it.
-    /// It is the grid asked for, not the one the stores hold: a request that arrives
+    /// It is the grid asked for, not the one the presenter holds: a request that arrives
     /// before this view has an extent has to be refitted at the first layout pass, or a
     /// checkpoint-restored quiet pane would stay blank waiting for a record.
     private var geometry: (columns: Int, rows: Int)?
-    /// What the current frame stores were fitted for. Compared before anything is built,
+    /// What the presenter is currently fitted for. Compared before anything is built,
     /// because constructing a surface is what resolves a font set at the fitted scale.
     private var fittedFor: (columns: Int, rows: Int, contentBox: MobileContentBox)?
     /// The extent this view answers for, paired with the metrics its display scale
@@ -123,19 +123,19 @@ final class TerminalSurfaceView: UIView {
         } else {
             replica = PaneReplica()
         }
-        stores = []
-        policy = nil
+        presenter.resetStream()
         geometry = nil
         fittedFor = nil
         surface = nil
         lastReportedReplicaState = nil
         lastReportedReplicaFacts = nil
+        // The replacement stream owns none of the pixels on screen, so the layer
+        // shows nothing until the new presenter draws its own first frame.
         surfaceView.layer.contents = nil
         displayLink?.isPaused = true
         if let terminal = replica.terminal {
             ensureSurfaces(columns: terminal.geometry.columns, rows: terminal.geometry.rows.count)
-            policy?.noteDamage()
-            displayLink?.isPaused = false
+            displayLink?.isPaused = presenter.needsTick == false
         }
         return replica.cursor
     }
@@ -163,8 +163,8 @@ final class TerminalSurfaceView: UIView {
         }
         guard replica.state == .exact, let terminal = replica.terminal else { return }
         ensureSurfaces(columns: terminal.geometry.columns, rows: terminal.geometry.rows.count)
-        policy?.noteDamage()
-        displayLink?.isPaused = policy?.needsTick == false
+        presenter.noteDrainPending()
+        displayLink?.isPaused = presenter.needsTick == false
     }
 
     /// Applies local primary-screen scroll without sending authoritative terminal bytes.
@@ -176,8 +176,8 @@ final class TerminalSurfaceView: UIView {
         case .toTopRow(let row): replica.scrollViewport(toTopRow: row)
         }
         guard replica.state == .exact else { return }
-        policy?.noteDamage()
-        displayLink?.isPaused = false
+        presenter.noteDrainPending()
+        displayLink?.isPaused = presenter.needsTick == false
     }
 
     /// Prevents local viewport scrolling while the remote pane uses its alternate screen.
@@ -263,50 +263,19 @@ final class TerminalSurfaceView: UIView {
         setNeedsLayout()
     }
 
+    /// The only place a frame is planned, rendered, or attached: records, local
+    /// scrolls, layout, and reset only report that a drain is pending.
     fileprivate func displayTick() {
-        guard var policy, let action = policy.nextAction else {
-            displayLink?.isPaused = true
-            return
+        let presented = presenter.tick(&replica)
+        if let presented {
+            surfaceView.layer.contents = presented.ioSurface
         }
-        var publishedFrame = false
-        switch action {
-        case .render(let surfaceId):
-            guard stores[surfaceId].ioSurface.isInUse == false else {
-                self.policy = policy
-                return
-            }
-            guard let frame = replica.drainPresentation() else {
-                displayLink?.isPaused = true
-                return
-            }
-            let presentation = frame.terminal.presentation
-            let plan = planFrame(
-                for: frame.terminal,
-                presentation: RenderPresentation(
-                    theme: .dark,
-                    isCursorVisible: presentation.isCursorVisible,
-                    cursorShape: presentation.cursorShape
-                )
-            )
-            stores[surfaceId].renderFull(plan)
-            policy.didRender(surfaceId: surfaceId)
-        case .publish(let surfaceId), .retryPublish(let surfaceId):
-            let store = stores[surfaceId]
-            if store.ioSurface.isInUse {
-                policy.didCoalescePublish(surfaceId: surfaceId)
-            } else {
-                surfaceView.layer.contents = store.ioSurface
-                policy.didPublish(surfaceId: surfaceId)
-                publishedFrame = true
-            }
-        }
-        self.policy = policy
-        displayLink?.isPaused = policy.needsTick == false
-        if publishedFrame { didPublishFrame?() }
+        displayLink?.isPaused = presenter.needsTick == false
+        if presented != nil { didPublishFrame?() }
     }
 
-    /// Allocates the frame stores one grid needs in this view, at the metrics the view
-    /// can actually draw it with. Idempotent: it returns without touching anything when
+    /// Fits the presenter to one grid, at the metrics the view can actually draw it
+    /// with. Idempotent: it returns without touching anything when
     /// neither the grid nor the box moved, so the record path and the layout pass may
     /// both call it.
     ///
@@ -327,22 +296,16 @@ final class TerminalSurfaceView: UIView {
             cellMetrics: cellMetrics
         ) else { return }
         // A box that moved without changing the drawn world -- an origin-only inset shift
-        // -- resolves an identical surface, and the existing stores still hold its pixels.
+        // -- resolves an identical surface, and the fitted buffers still hold its pixels.
         if surface == fitted {
             fittedFor = (columns, rows, box)
             return
         }
-        let newStores = (0..<3).compactMap { _ in
-            TerminalFrameBackingStore(columns: columns, rows: rows, metrics: fitted.metrics)
-        }
-        guard newStores.count == 3 else { return }
+        // The buffers this builds hold no pixels, so the presenter owes a full frame
+        // whether or not anything damaged the terminal.
+        guard presenter.fit(columns: columns, rows: rows, metrics: fitted.metrics) else { return }
         surface = fitted
-        stores = newStores
-        policy = MobilePresentationPolicy(surfaceIds: Array(stores.indices))
         fittedFor = (columns, rows, box)
-        // The stores are new and hold no pixels, so the replica has to redraw into them
-        // before anything can be published from them again.
-        policy?.noteDamage()
         displayLink?.isPaused = false
         setNeedsLayout()
     }

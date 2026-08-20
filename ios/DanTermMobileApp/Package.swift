@@ -18,8 +18,6 @@ let package = Package(
             dependencies: [
                 .product(name: "DanTermMobileKit", package: "DanTermMobileKit"),
                 .product(name: "TerminalCore", package: "TerminalCore"),
-                .product(name: "TerminalRenderPlanning", package: "TerminalCore"),
-                .product(name: "TerminalRenderExecution", package: "TerminalCore"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
                 .product(name: "DanTermClient", package: "DanTermClient"),
                 .product(name: "ChipArtwork", package: "ChipArtwork"),
