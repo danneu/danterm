@@ -2871,12 +2871,13 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    /// Walks the whole grid and reports exactly what its cell storage costs.
+    /// Walks live rows and retained records and reports exactly what their cell storage costs.
     ///
     /// Lives here rather than beside `TerminalMemoryCensus` because it needs `GridCell` and
     /// `GridRow`, which stay `private`. That split is the point: the census ships as reusable
     /// public evidence without widening the grid types, which is what forced doc 12's censuses to
-    /// be throwaway probes. O(cells) -- for measurement, not for a hot path.
+    /// be throwaway probes. O(stored cells plus retained side-table entries) -- for measurement,
+    /// not for a hot path.
     ///
     /// History is arena-denominated since doc 31 (`research/31/F6` `R16`, `research/31/DD11`): there is one region
     /// rather than a heap allocation per retained row, so the per-row leak proof `research/15/F4`
@@ -2925,11 +2926,23 @@ public struct Terminal: Equatable, Sendable {
         census.cellStorageBytes = arena.arenaBytesInUse
             + screens.flatMap({ $0 }).reduce(0) { $0 + $1.cells.count * stride }
 
-        for index in 0..<history.store.recordCount {
-            census.retainedStoredCellCount += history.store.recordSummary(at: index)?.cellCount ?? 0
+        history.store.forEachStoredCell { styleId, isSpilled in
+            census.retainedStoredCellCount += 1
+            census.cellCount += 1
+            if styleId != Self.defaultStyleId { census.styledCellCount += 1 }
+            if isSpilled {
+                census.multiScalarCellCount += 1
+                census.multiScalarAllocationCount += 1
+            }
+        }
+        history.store.forEachStyleId { styles.insert($0) }
+        history.store.forEachHyperlinkId { _ in census.hyperlinkCellCount += 1 }
+        history.store.forEachContentIdentity { identity in
+            census.contentIdentityCellCount += 1
+            identities.insert(identity)
         }
 
-        for row in history.store.allPaintedDisplayRows() + screens.flatMap({ $0 }) {
+        for row in screens.flatMap({ $0 }) {
             census.cellCount += row.cells.count
             for cell in row.cells {
                 if cell.styleId != Self.defaultStyleId { census.styledCellCount += 1 }

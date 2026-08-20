@@ -1850,6 +1850,27 @@ extension Terminal {
             }
         }
 
+        /// Visits every stored cell word retained by the arena without folding display rows.
+        ///
+        /// The callback receives only representation-level fields needed by storage accounting;
+        /// synthesized trailing fill and spacer cells do not occupy words and never enter it.
+        func forEachStoredCell(
+            _ body: (_ styleId: Terminal.StyleId, _ isSpilled: Bool) -> Void
+        ) {
+            for index in 0..<offsets.count {
+                let offset = offsets[index]
+                let record = self.record(at: offset)
+                let chunk = chunks[chunkIndex(of: offset)]
+                let cellsBase = chunkWordIndex(of: offset) + 1
+                chunk.withUnsafeBufferPointer { words in
+                    for cell in 0..<record.cellCount {
+                        let word = CellWord(raw: words[cellsBase + cell])
+                        body(word.styleId, word.isSpilled)
+                    }
+                }
+            }
+        }
+
         /// Visits every hyperlink id retained by the arena's compact per-record tables.
         ///
         /// A trimmed head keeps its table in place and advances the cells beneath its header, so
@@ -1873,6 +1894,51 @@ extension Terminal {
                     let cellOffset = OriginalCellOffset(value: u16(entry))
                     guard cellOffset >= retainedStart, cellOffset < retainedEnd else { continue }
                     body(Terminal.HyperlinkId(u16(entry + 2)))
+                }
+            }
+        }
+
+        /// Visits every content identity attached to a retained stored cell.
+        ///
+        /// Identity table coordinates predate a head trim, so the retained window is applied to
+        /// both the open-tail runs and the closed record's run or per-cell encoding.
+        func forEachContentIdentity(_ body: (Terminal.ContentIdentity) -> Void) {
+            for index in 0..<offsets.count {
+                let offset = offsets[index]
+                let record = self.record(at: offset)
+                let retainedStart = index == 0 ? headTrimmedCells : 0
+                let retainedEnd = retainedStart + record.cellCount
+                if record.isOpen {
+                    for run in openIdentityRuns {
+                        let start = max(run.start, retainedStart)
+                        let end = min(run.start + run.extent, retainedEnd)
+                        guard start < end else { continue }
+                        for cell in start..<end {
+                            body(run.base &+ Terminal.ContentIdentity(cell - run.start))
+                        }
+                    }
+                    continue
+                }
+                let base = offset + LogicalLineRecord.headerAndCells(record.cellCount)
+                    + record.hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
+                if record.identityPerCell {
+                    for cell in retainedStart..<retainedEnd {
+                        let value = u32(base + cell * LogicalLineRecord.identityCellBytes)
+                        if value != 0 { body(value) }
+                    }
+                    continue
+                }
+                for entryIndex in 0..<record.identityEntryCount {
+                    let entry = base + entryIndex * LogicalLineRecord.identityRunEntryBytes
+                    let runStart = u16(entry)
+                    let runEnd = runStart + u16(entry + 2)
+                    let start = max(runStart, retainedStart)
+                    let end = min(runEnd, retainedEnd)
+                    guard start < end else { continue }
+                    let identity = u32(entry + 4)
+                    for cell in start..<end {
+                        body(identity &+ Terminal.ContentIdentity(cell - runStart))
+                    }
                 }
             }
         }

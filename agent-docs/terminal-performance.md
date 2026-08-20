@@ -673,6 +673,9 @@ It reports cell bytes, bytes per cell, row allocations, and the content shape
 that sizes representation work -- styled cells, distinct styles, multi-scalar
 spills, hyperlink cells, and content identities.
 
+Retained per-cell census fields count stored arena cells, not cells synthesized
+by the width-dependent display fold, so those retained counts are width-free.
+
 Three traps. **Only a `--payload` run has an attributable footprint delta**: in a
 full-matrix run all payloads share one process and the allocator reuses pages a
 previous payload freed, so every delta after the first understates its payload.

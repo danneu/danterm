@@ -24,7 +24,8 @@
 ///
 /// Every count covers the whole grid -- scrollback plus the live screen plus, when the alternate
 /// screen is active, the retained primary screen -- because that is the set a process actually
-/// holds. Fields that exist to size a specific hypothesis say so.
+/// holds. Per-cell counts use stored cells for retained history, not cells synthesized when its
+/// records fold to display rows. Fields that exist to size a specific hypothesis say so.
 public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// Rows in the live screen. Equals the terminal's row count except under the alternate screen,
     /// where the retained primary screen is counted too and this exceeds it.
@@ -41,7 +42,8 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// does not move when the pane is resized.
     public var scrollbackRecordCount: Int
 
-    /// Cells physically stored across the whole grid; compact history rows may be narrower.
+    /// Cells physically stored across the whole grid; retained history counts arena cells rather
+    /// than width-dependent cells synthesized when records fold to display rows.
     ///
     /// Still a cell count after doc 28's packing, and deliberately so: a retained row stores
     /// the same *cells* it always did, in a different shape. What changed is what those cells
@@ -98,7 +100,8 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// cells all live in the one arena.
     public var rowStorageAllocationCount: Int
 
-    /// Cells whose style differs from the default. Sizes `research/15/H3`.
+    /// Cells whose style differs from the default. Retained history counts stored arena cells, not
+    /// synthesized trailing fill or spacer cells. Sizes `research/15/H3`.
     public var styledCellCount: Int
 
     /// Distinct styles resident across the grid -- the size a deduplicated style table would need.
@@ -112,11 +115,13 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// Class-backed scalar storage allocations, one per multi-scalar cell.
     public var multiScalarAllocationCount: Int
 
-    /// Cells carrying a hyperlink id. Sizes `research/15/H2`: `research/12/F3` found this zero across all
-    /// four fixture workloads.
+    /// Cells carrying a hyperlink id. Retained history counts stored arena cells, not cells
+    /// synthesized by its width-dependent fold. Sizes `research/15/H2`: `research/12/F3` found
+    /// this zero across all four fixture workloads.
     public var hyperlinkCellCount: Int
 
-    /// Cells carrying a content identity. Sizes `research/15/H4`.
+    /// Cells carrying a content identity. Retained history counts stored arena cells, not cells
+    /// synthesized by its width-dependent fold. Sizes `research/15/H4`.
     public var contentIdentityCellCount: Int
 
     /// Distinct content identities, which `research/12/F3` found to be near-unique per printed cell --

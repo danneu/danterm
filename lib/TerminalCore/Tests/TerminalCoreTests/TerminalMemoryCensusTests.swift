@@ -12,6 +12,22 @@ import Testing
 
 /// Keeps the census honest about what the grid actually holds, since findings are built on it.
 struct TerminalMemoryCensusTests {
+    @Test("census walks retained records without materializing display rows")
+    func censusMaterializesNoRetainedRows() throws {
+        // Intent: memory census reads retained storage directly without constructing display rows.
+        // Why it exists: allocating one row per retained display row perturbs the footprint that
+        //   the memory probe is measuring.
+        // Scenario: deep retained history is censused while the materialization instrument counts.
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        for line in 0..<1_000 { terminal.feed(Array("line \(line)\r\n".utf8)) }
+
+        let materializedRows = Instrument.retainedRowMaterialization.measure {
+            _ = terminal.memoryCensus
+        }
+
+        #expect(materializedRows == 0)
+    }
+
     @Test("census reports compact retained cells while terminal rows stay logically full width")
     func censusReportsCompactRetainedRows() throws {
         // Intent: history storage omits default padding while terminal-facing rows remain full
@@ -77,7 +93,130 @@ struct TerminalMemoryCensusTests {
         let retained = try #require(terminal.scrollbackRow(at: 0))
         #expect(retained.cells.last?.kind == .padding)
         #expect(retained.cells.last?.style.background == .indexed(1))
-        #expect(terminal.memoryCensus.cellCount == 8 + 8)
+        let census = terminal.memoryCensus
+        #expect(census.cellCount == 8 + 3)
+        // The retained cells are unstyled; the eight live blank cells carry the active red pen.
+        #expect(census.styledCellCount == 8)
+        #expect(census.distinctStyleCount == 2)
+    }
+
+    @Test("open retained tails contribute every stored census field")
+    func openRetainedTailCensus() throws {
+        // Intent: an open retained record contributes style, spill, hyperlink, and identity counts.
+        // Why it exists: open records keep hyperlink and identity tables outside the arena, so a
+        //   closed-record-only walk silently reads their counted terms as zero.
+        // Scenario: styled linked text with a multi-scalar cell soft-wraps into one-row history.
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+        terminal.feed(Array("\u{1B}[31m\u{1B}]8;;https://example.test\u{7}e\u{301}abcx".utf8))
+
+        let census = terminal.memoryCensus
+
+        #expect(census.retainedStoredCellCount == 4)
+        #expect(census.styledCellCount == 8)
+        #expect(census.hyperlinkCellCount == 5)
+        #expect(census.contentIdentityCellCount == 5)
+        #expect(census.multiScalarCellCount == 1)
+    }
+
+    @Test("stored census excludes deferred spacers and counts wide cells by storage")
+    func storedCellShapes() throws {
+        // Intent: retained census counts arena words, not cells synthesized by the display fold.
+        // Why it exists: deferred spacers and wide cells distinguish stored from painted counts.
+        // Scenario: a wide cluster wraps after two narrow cells in a three-column terminal.
+        var terminal = try #require(Terminal(columns: 3, rows: 1))
+        terminal.feed(Array("ab\u{754C}".utf8))
+
+        let census = terminal.memoryCensus
+
+        #expect(terminal.scrollbackRow(at: 0)?.cells.last?.kind == .spacerHead)
+        #expect(census.retainedStoredCellCount == 2)
+        #expect(census.cellCount == 3 + 2)
+
+        var wide = try #require(Terminal(columns: 3, rows: 1))
+        wide.feed(Array("\u{754C}\r\n".utf8))
+        #expect(wide.memoryCensus.retainedStoredCellCount == 2)
+    }
+
+    @Test("forced-split seams do not duplicate retained cell counts")
+    func forcedSplitSeamCensus() throws {
+        // Intent: a physical arena split keeps one stored count per retained cell word.
+        // Why it exists: the display fold repeats a seam head in both records, so painted rows
+        //   double-count it even though storage owns only one copy.
+        // Scenario: one never-terminated line crosses the small arena's physical boundary.
+        var terminal = try #require(
+            Terminal(columns: 16, rows: 1, scrollbackBudgetBytes: 1 << 14)
+        )
+        terminal.feed(Array("\u{1B}[31m\u{1B}]8;;https://example.test\u{7}".utf8))
+        terminal.feed(Array(String(repeating: "e\u{301}", count: 16 * 400).utf8))
+
+        let census = terminal.memoryCensus
+
+        #expect(census.scrollbackRecordCount > 1)
+        #expect(census.cellCount == 16 + census.retainedStoredCellCount)
+        #expect(census.styledCellCount == census.cellCount)
+        #expect(census.hyperlinkCellCount == census.cellCount)
+        #expect(census.contentIdentityCellCount == census.cellCount)
+        #expect(census.multiScalarCellCount == census.cellCount)
+    }
+
+    @Test("fragmented retained identities survive per-cell encoding")
+    func fragmentedRetainedIdentities() throws {
+        // Intent: retained identity counts include the fragmented shape encoded per stored cell.
+        // Why it exists: the arena chooses between run and per-cell tables, and reading only the
+        //   common run encoding makes fragmented output silently disappear from the census.
+        // Scenario: cursor skips split three printed identities across a five-cell retained row.
+        var terminal = try #require(Terminal(columns: 5, rows: 1))
+        terminal.feed(Array("a\u{1B}[1Cb\u{1B}[1Cc\r\n".utf8))
+
+        #expect(terminal.memoryCensus.contentIdentityCellCount == 3)
+    }
+
+    @Test("identity census clips closed runs to a head-trimmed record")
+    func headTrimmedIdentityRuns() {
+        // Intent: a head trim excludes identities before the retained window and keeps those after.
+        // Why it exists: closed side tables keep pre-trim coordinates, including runs that no
+        //   longer intersect the record and must not form an invalid decode range.
+        // Scenario: eviction trims the first display row from one two-row logical record.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        let row = { (base: Terminal.ContentIdentity, softWrapped: Bool) -> Terminal.GridRow in
+            var row = Terminal.GridRow(cells: (0..<4).map { offset in
+                Terminal.GridCell(
+                    scalars: TerminalScalars("x"),
+                    kind: .narrow,
+                    contentIdentity: base + Terminal.ContentIdentity(offset)
+                )
+            })
+            row.isSoftWrapped = softWrapped
+            return row
+        }
+        store.admit(row(100, true))
+        store.admit(row(200, false))
+
+        let evicted = store.evictOneDisplayRow()
+        #expect(evicted)
+        var identities: [Terminal.ContentIdentity] = []
+        store.forEachContentIdentity { identities.append($0) }
+
+        #expect(identities == [200, 201, 202, 203])
+    }
+
+    @Test("cell count stays stable when resize moves retained display rows")
+    func retainedCellCountIsWidthFree() throws {
+        // Intent: a resize can move display rows without changing whole-grid stored cell counts.
+        // Why it exists: a census based on painted rows changes its denominator on pane resize.
+        // Scenario: equal live-grid capacity and a blank top row let width and height change while
+        //   the retained display-row count moves but no stored content crosses the boundary.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("abcd\r\nefgh\r\nijkl\r\nmnop".utf8))
+        terminal.feed(Array("\u{1B}[1;1H\u{1B}[2K\u{1B}[2;1H".utf8))
+        let before = terminal.memoryCensus
+
+        terminal.resize(columns: 8, rows: 1)
+        let after = terminal.memoryCensus
+
+        #expect(after.scrollbackRowCount > before.scrollbackRowCount)
+        #expect(after.retainedStoredCellCount == before.retainedStoredCellCount)
+        #expect(after.cellCount == before.cellCount)
     }
 
     @Test("an untouched grid holds exactly one full screen of cells")
