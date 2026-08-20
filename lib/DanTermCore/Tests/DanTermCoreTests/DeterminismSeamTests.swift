@@ -170,8 +170,7 @@ import Testing
             reqId: splitReqId,
             caller: .local,
             request: .paneSplit(
-                pane: secondGroupPane,
-                direction: .vertical,
+                target: .pane(secondGroupPane, direction: .vertical),
                 launch: nil,
                 background: false
             )

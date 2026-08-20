@@ -68,7 +68,7 @@ public extension IpcRequest {
         let launch: LaunchSpec?
         let input: IpcAuditInputAccounting?
         switch self {
-        case .tabNew(_, let value, _), .paneSplit(_, _, let value, _):
+        case .tabNew(_, let value, _), .paneSplit(_, let value, _):
             launch = value
         default:
             launch = nil

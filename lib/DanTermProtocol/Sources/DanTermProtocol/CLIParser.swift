@@ -412,11 +412,16 @@ private func parsePaneInfoCommand(_ args: [String]) throws -> CLICommand {
 
 private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
     let parsed = try parsePaneSplitArgs(args)
-    guard let pane = parsed.pane else { throw CLIParseError(paneSplitUsage) }
+    let target: IpcPaneSplitTarget
+    switch parsed.target {
+    case .pane(let pane, let direction):
+        target = .pane(try paneId(pane), direction: direction)
+    case .tab(let tab):
+        target = .tab(try tabId(tab))
+    }
     return CLICommand(
         request: .paneSplit(
-            pane: try paneId(pane),
-            direction: parsed.direction,
+            target: target,
             launch: parsed.launch,
             background: parsed.foreground == false
         ),

@@ -770,6 +770,14 @@ struct CLIParserTests {
         #expect(command.params["background"] == .bool(true))
     }
 
+    @Test("pane split tab target omits direction")
+    func paneSplitTabTargetOmitsDirection() throws {
+        let command = try parseCLI(["pane", "split", "--tab", tabId])
+        #expect(command.params["tab"] == .string(tabId))
+        #expect(command.params["direction"] == nil)
+        #expect(command.params["background"] == .bool(true))
+    }
+
     @Test("tab new after selected defaults to background")
     func tabNewAfterSelectedDefaultsToBackground() throws {
         // Intent: explicit position choices do not opt into foreground focus.
@@ -903,7 +911,7 @@ private let groupRenameUsage = "usage: danterm group rename --group <group-id> <
 private let groupNewUsage = "usage: danterm group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
 private let groupCloseUsage = "usage: danterm group close --group <group-id> [--move-tabs]"
 private let tabNewUsageWithPositionFlags = "usage: danterm tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end]"
-private let paneSplitUsageWithFocusFlags = "usage: danterm pane split --pane <pane-id> -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
+private let paneSplitUsageWithFocusFlags = "usage: danterm pane split (--pane <pane-id> -h|-v | --tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
 private let paneTapeUsage = "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] [--sync-history-bytes <n>] [--format replay|inspect]"
 
 private let todoId = "44444444-4444-4444-8444-444444444444"

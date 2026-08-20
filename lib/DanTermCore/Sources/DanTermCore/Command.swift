@@ -78,6 +78,14 @@ enum Command {
     case ipcError(reqId: UUID, code: Int, message: String)
     case readDoctorPermissions(reqId: UUID)
     case readFocusInfo(reqId: UUID)
+    /// Asks AppKit for one tab's arranged geometry before pure dispatch chooses a split.
+    case resolveAutosplit(
+        reqId: UUID,
+        caller: IpcCallerIdentity,
+        tabId: TabId,
+        launch: LaunchSpec?,
+        background: Bool
+    )
     case readPaneText(reqId: UUID, paneId: PaneId, lineLimit: Int?)
     case readPaneRowStructure(reqId: UUID, paneId: PaneId)
     case streamPaneTape(

@@ -103,6 +103,14 @@ enum Msg {
     // IPC
     case ipcRequest(reqId: UUID, caller: IpcCallerIdentity, request: IpcRequest)
     case ipcRequestDecodeFailed(reqId: UUID, error: IpcRequestDecodeError)
+    case autosplitResolved(
+        reqId: UUID,
+        caller: IpcCallerIdentity,
+        tabId: TabId,
+        resolution: AutosplitResolution?,
+        launch: LaunchSpec?,
+        background: Bool
+    )
 
     // Internal (confirmed close — do not send from UI directly)
     case closeTab(id: TabId)

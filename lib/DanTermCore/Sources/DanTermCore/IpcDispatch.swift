@@ -218,26 +218,38 @@ private func dispatchIpc(
             "tab": .object(["id": .string(tabId.rawValue.uuidString)])
         ]))]
 
-    case .paneSplit(let paneId, let requestDirection, let launch, let background):
-        try requirePane(paneId, in: model)
-        let direction: SplitNodeModel.Direction = requestDirection == .horizontal
-            ? .horizontal
-            : .vertical
-        let before = Set(model.allPaneIds)
-        let commands = update(
-            &model,
-            .splitPane(paneId: paneId, direction: direction, launch: launch, background: background),
-            env: env
-        )
-        let newPaneId = model.allPaneIds.first(where: { !before.contains($0) })
-        let encoder = IpcEntityEncoder(home: env.homeDirectory())
-        return deferCreationReply(
-            commands,
-            requestId: reqId,
-            result: encoder.paneReference(newPaneId.flatMap(model.pane)),
-            paneId: newPaneId,
-            model: &model
-        )
+    case .paneSplit(let target, let launch, let background):
+        switch target {
+        case .tab(let tabId):
+            try requireTab(tabId, in: model)
+            return [.resolveAutosplit(
+                reqId: reqId,
+                caller: caller,
+                tabId: tabId,
+                launch: launch,
+                background: background
+            )]
+        case .pane(let paneId, let requestDirection):
+            try requirePane(paneId, in: model)
+            let direction: SplitNodeModel.Direction = requestDirection == .horizontal
+                ? .horizontal
+                : .vertical
+            let before = Set(model.allPaneIds)
+            let commands = update(
+                &model,
+                .splitPane(paneId: paneId, direction: direction, launch: launch, background: background),
+                env: env
+            )
+            let newPaneId = model.allPaneIds.first(where: { !before.contains($0) })
+            let encoder = IpcEntityEncoder(home: env.homeDirectory())
+            return deferCreationReply(
+                commands,
+                requestId: reqId,
+                result: encoder.paneReference(newPaneId.flatMap(model.pane)),
+                paneId: newPaneId,
+                model: &model
+            )
+        }
 
     case .paneClose(let paneId):
         try requirePane(paneId, in: model)

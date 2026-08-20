@@ -177,6 +177,7 @@ import DanTermProtocol
 
         for testCase in cases {
             let absentMessage = testCase.method.hasPrefix("todo.")
+                || testCase.method == IpcRequestMethod.paneSplit.rawValue
                 ? "pane or tab required"
                 : "\(testCase.entity) required"
             let probes: [(label: String, value: JSONValue?, message: String)] = [

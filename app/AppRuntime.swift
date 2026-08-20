@@ -881,6 +881,18 @@ class AppRuntime {
                 result: paneFocusInfoResult(paneFocusClaimant())
             )
 
+        case .resolveAutosplit(let reqId, let caller, let tabId, let launch, let background):
+            let resolution = tabContainers[tabId]
+                .flatMap { autosplitResolution(in: $0.currentArrangedPaneLayout()) }
+            send(.autosplitResolved(
+                reqId: reqId,
+                caller: caller,
+                tabId: tabId,
+                resolution: resolution,
+                launch: launch,
+                background: background
+            ))
+
         case .readPaneText(let reqId, let paneId, let lineLimit):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = paneSession(for: paneId) else {

@@ -255,6 +255,36 @@ struct IpcRequestTests {
         }
     }
 
+    @Test("pane.split accepts exactly one well-formed target")
+    func paneSplitAcceptsExactlyOneWellFormedTarget() throws {
+        let pane = "11111111-1111-4111-8111-111111111111"
+        let tab = "22222222-2222-4222-8222-222222222222"
+        let paneId = PaneId(rawValue: UUID(uuidString: pane)!)
+        let tabId = TabId(rawValue: UUID(uuidString: tab)!)
+
+        #expect(try IpcRequest.decode(
+            method: IpcRequestMethod.paneSplit.rawValue,
+            params: .object(["pane": .string(pane), "direction": .string("horizontal")])
+        ) == .paneSplit(target: .pane(paneId, direction: .horizontal), launch: nil, background: false))
+        #expect(try IpcRequest.decode(
+            method: IpcRequestMethod.paneSplit.rawValue,
+            params: .object(["tab": .string(tab)])
+        ) == .paneSplit(target: .tab(tabId), launch: nil, background: false))
+
+        let malformed: [([String: JSONValue], String)] = [
+            ([:], "pane or tab required"),
+            (["pane": .string(pane), "tab": .string(tab), "direction": .string("horizontal")], "exactly one of pane or tab required"),
+            (["pane": .string(pane)], "direction required with pane"),
+            (["tab": .string(tab), "direction": .string("horizontal")], "direction is not valid with tab"),
+        ]
+        for (params, message) in malformed {
+            let error = #expect(throws: IpcRequestDecodeError.self) {
+                try IpcRequest.decode(method: IpcRequestMethod.paneSplit.rawValue, params: .object(params))
+            }
+            #expect(error?.message == message)
+        }
+    }
+
     @Test("todo requests accept either owner and reject ambiguous targeting")
     func todoRequestsRequireExactlyOneOwner() throws {
         let pane = "11111111-1111-4111-8111-111111111111"
@@ -364,7 +394,7 @@ struct IpcRequestTests {
             RepresentativeCLICommand(try parseCLI(["group", "close", "--group", group]), removing: ["group"], expects: "group required"),
             RepresentativeCLICommand(try parseCLI(["pane", "focus", pane]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "info", "--pane", pane]), removing: ["pane"], expects: "pane required"),
-            RepresentativeCLICommand(try parseCLI(["pane", "split", "--pane", pane, "-h"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "split", "--pane", pane, "-h"]), removing: ["pane"], expects: "pane or tab required"),
             RepresentativeCLICommand(try parseCLI(["pane", "close", "--pane", pane]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "input", "--pane", pane, "--", "C-c"]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "read", "--pane", pane, "--lines", "20"]), removing: ["pane"], expects: "pane required"),

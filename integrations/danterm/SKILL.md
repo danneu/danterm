@@ -45,7 +45,7 @@ state and skips those rows when the app is unavailable.
     danterm tab close --tab <tab-id>
     danterm pane focus <pane-id>
     danterm pane info --pane <pane-id>
-    danterm pane split --pane <pane-id> -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
+    danterm pane split (--pane <pane-id> -h|-v | --tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm pane close --pane <pane-id>
     danterm pane input --pane <pane-id> [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
@@ -120,9 +120,11 @@ For agent commands:
   with it. Pass `--move-tabs` when the user wants those tabs kept.
 - `tab rename`: always pass `--tab <tab-id>`.
 - `tab close`: always pass `--tab <tab-id>`.
-- `pane split`: always pass `--pane <pane-id>`. The default opens in the
-  background. Pass `--foreground` only when the user asked to focus the new pane
-  within its tab.
+- `pane split`: pass `--pane <pane-id>` with `-h` or `-v` when the user names a
+  pane or direction. Pass `--tab <tab-id>` when the user asks for a new pane in
+  a tab without choosing either; DanTerm splits the largest usable pane along
+  its longer dimension. The default opens in the background. Pass `--foreground`
+  only when the user asked to focus the new pane within its tab.
 - `pane close`: always pass `--pane <pane-id>`.
 - `pane input` and `theme set`: always pass `--pane <pane-id>`.
 - Todos: always pass exactly one explicit owner, `--pane <pane-id>` or
@@ -278,7 +280,8 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "rename this tab to X" / "label this tab" | `tab rename --tab <tab-id>` |
 | "close this tab" / "close tab X" | `tab close --tab <tab-id>` |
 | "open a new tab" / "...and run X in it" | `tab new --group <group-id>` with optional `--cmd` / position flags |
-| "split the pane" / "...and run X in it" | `pane split --pane <pane-id>` with optional `--cmd` |
+| "split the pane" / "...and run X in it" | `pane split --pane <pane-id>` with `-h` or `-v` and optional `--cmd` |
+| "open a new pane in this tab" | `pane split --tab <tab-id>` with optional `--cmd` |
 | "close pane X" | `pane close --pane <pane-id>` |
 | "what's the build doing in the other pane?" | `pane read --pane <pane-id>` |
 | "make this pane fill the tab" / "restore the split" | `pane zoom --pane <pane-id> on` / `pane zoom --pane <pane-id> off` |
@@ -437,6 +440,16 @@ To navigate to a new pane that was split in another tab:
 
     NEW=$(danterm pane split --pane "$PANE_ID" -v --cmd 'just test' | jq -r '.pane.id')
     danterm pane focus "$NEW"
+
+When the caller knows the tab but has no pane or direction to name, let DanTerm
+choose from that tab's arranged layout:
+
+    NEW=$(danterm pane split --tab "$TAB_ID" | jq -r '.pane.id')
+
+This form chooses the largest pane that can hold another split and cuts its
+longer dimension. It measures the whole tab even when that tab is hidden or
+zoomed. It refuses the request when no pane can hold two minimum pane extents
+and the divider.
 
 ### Close a pane
 
@@ -752,7 +765,7 @@ convert or replay.
 
 Use this for interrupts, replies to prompts, or scripted interaction with an
 already-running program. For starting fresh commands in a new pane, prefer
-`tab new --group <group-id> --cmd` or `pane split --pane <pane-id> --cmd`.
+`tab new --group <group-id> --cmd` or `pane split --pane <pane-id> -h --cmd`.
 
     danterm pane input --pane "$PANE_ID" -- C-c
     danterm pane input --pane "$PANE_ID" -- "y" Enter
@@ -896,7 +909,7 @@ else prints nothing on success and exits 0.
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, isZoomed, cwd, processPhase, command, connection, agent, integration, gridOverride?}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `group new --name <name>` | Same JSON shape as `tab new`, naming the new group and its first tab |
-| `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |
+| `pane split (--pane <pane-id> -h|-v \| --tab <tab-id>)` | JSON: `{pane: {id}}` |
 | `todo list (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
@@ -918,7 +931,7 @@ a stale hook cannot mutate a replacement session.
 - Never `pane input` into your own pane (`$DANTERM_PANE`) without an explicit
   user request; you would be typing into your own input stream.
 - Split-then-`pane input` is safe while the pane process spawns. Prefer
-  `tab new --group <group-id> --cmd` and `pane split --pane <pane-id> --cmd`
+  `tab new --group <group-id> --cmd` and `pane split --pane <pane-id> -h --cmd`
   when the new program can flush terminal input at startup; `--cmd` supplies
   the command as launch input instead.
 - To launch Claude with an initial prompt, keep its stdout attached to the

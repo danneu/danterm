@@ -86,6 +86,16 @@ subview, or detaching and reattaching the content area, reopens the false-frame
 class. Either change must first establish a single model-owned producer for the
 content bounds.
 
+D6. **A core decision that needs current pixels uses a command and message
+round trip.**
+
+The core emits a command naming the model entity whose arranged geometry it
+needs. AppKit reads that entity's current model-derived layout, applies the pure
+decision function, and sends the result back as a message. The model never
+stores the rectangle. Autosplit is the first use: it measures the named tab
+without zoom, chooses the largest splittable pane and its longer axis, then
+re-enters the ordinary pane-split dispatch with the original request id.
+
 ## Consequences
 
 - Pane geometry and divider drag clamping are deterministic core behavior with

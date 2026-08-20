@@ -62,6 +62,11 @@ class SplitContainerView: NSView {
         paneLayout(in: PaneLayoutRect(bounds), tree: rootNode, zoomedPaneId: zoomedPaneId)
     }
 
+    /// Answers geometry questions about the whole arranged tab, independent of zoom.
+    func currentArrangedPaneLayout() -> PaneLayout {
+        paneLayout(in: PaneLayoutRect(bounds), tree: rootNode, zoomedPaneId: nil)
+    }
+
     private func applyModelLayout() {
         let layout = currentPaneLayout()
         reconcilePanes(with: layout)

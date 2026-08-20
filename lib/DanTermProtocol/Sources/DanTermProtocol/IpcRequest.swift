@@ -58,7 +58,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     case paneFocus = "pane.focus"
     /// Requests metadata for one explicitly named pane.
     case paneInfo = "pane.info"
-    /// Splits one explicitly named pane.
+    /// Splits one named pane or chooses a split within one named tab.
     case paneSplit = "pane.split"
     /// Closes one explicitly named pane.
     case paneClose = "pane.close"
@@ -169,6 +169,14 @@ public enum IpcTabTarget: Equatable, Sendable {
     case group(GroupId, position: IpcGroupTabPosition)
     /// Uses the referenced tab as both the group and insertion anchor.
     case afterTab(TabId)
+}
+
+/// Makes the pane-or-tab split target exclusive and couples pane targets to a direction.
+public enum IpcPaneSplitTarget: Equatable, Sendable {
+    /// Splits this exact pane along the caller-selected axis.
+    case pane(PaneId, direction: PaneSplitDirection)
+    /// Lets the Mac choose a pane and axis from this tab's arranged geometry.
+    case tab(TabId)
 }
 
 /// Names the accepted pane-zoom transitions before core dispatch.
@@ -305,8 +313,8 @@ public enum IpcRequest: Equatable, Sendable {
     case paneFocus(pane: PaneId)
     /// Inspects a structurally required pane.
     case paneInfo(pane: PaneId)
-    /// Splits a structurally required pane with decoded launch policy.
-    case paneSplit(pane: PaneId, direction: PaneSplitDirection, launch: LaunchSpec?, background: Bool)
+    /// Splits an explicit pane or asks the Mac to resolve a split within an explicit tab.
+    case paneSplit(target: IpcPaneSplitTarget, launch: LaunchSpec?, background: Bool)
     /// Closes a structurally required pane.
     case paneClose(pane: PaneId)
     /// Sends one decoded input form to a structurally required pane.
@@ -416,8 +424,13 @@ public enum IpcRequest: Equatable, Sendable {
              .themeSet(let pane, _), .agentAttach(let pane, _),
              .agentActivity(let pane, _, _), .agentDetach(let pane, _):
             return [IpcRequestTargetEntry(key: "pane", id: pane)]
-        case .paneSplit(let pane, _, _, _):
-            return [IpcRequestTargetEntry(key: "pane", id: pane)]
+        case .paneSplit(let target, _, _):
+            switch target {
+            case .pane(let pane, _):
+                return [IpcRequestTargetEntry(key: "pane", id: pane)]
+            case .tab(let tab):
+                return [IpcRequestTargetEntry(key: "tab", id: tab)]
+            }
         case .todoList(let owner), .todoAdd(let owner, _),
              .todoClearCompleted(let owner):
             return ownerTargetEntries(owner)
@@ -453,9 +466,11 @@ public enum IpcRequest: Equatable, Sendable {
             object = ["title": title.map(JSONValue.string) ?? .null]
         case .tabClose, .paneFocus, .paneInfo, .paneClose, .paneRows, .paneSnapshot:
             object = [:]
-        case .paneSplit(_, let direction, let launch, let background):
+        case .paneSplit(let target, let launch, let background):
             object = launchParams(launch, background: background)
-            object["direction"] = .string(direction == .horizontal ? "horizontal" : "vertical")
+            if case .pane(_, let direction) = target {
+                object["direction"] = .string(direction == .horizontal ? "horizontal" : "vertical")
+            }
         case .paneInput(_, let input):
             switch input {
             case .text(let text):
@@ -557,19 +572,10 @@ public enum IpcRequest: Equatable, Sendable {
         case .paneInfo:
             return .paneInfo(pane: try target("pane", object: object))
         case .paneSplit:
-            let pane: PaneId = try target("pane", object: object)
-            guard case .string(let rawDirection)? = object?["direction"] else {
-                throw invalid("invalid pane split params")
-            }
-            let direction: PaneSplitDirection
-            switch rawDirection {
-            case "horizontal": direction = .horizontal
-            case "vertical": direction = .vertical
-            default: throw invalid("invalid pane split params")
-            }
+            let target = try paneSplitTarget(object)
             let launch = try decodedLaunch(object?["launch"])
             let background = try optionalBool(object?["background"], name: "background")
-            return .paneSplit(pane: pane, direction: direction, launch: launch, background: background)
+            return .paneSplit(target: target, launch: launch, background: background)
         case .paneClose:
             return .paneClose(pane: try target("pane", object: object))
         case .paneInput:
@@ -741,6 +747,38 @@ private func optionalBool(_ value: JSONValue?, name: String) throws -> Bool {
     case .none, .some(.null): return false
     case .some(.bool(let value)): return value
     default: throw invalid("\(name) must be a boolean")
+    }
+}
+
+private func paneSplitTarget(_ object: [String: JSONValue]?) throws -> IpcPaneSplitTarget {
+    let hasPane = object?["pane"] != nil
+    let hasTab = object?["tab"] != nil
+    switch (hasPane, hasTab) {
+    case (false, false):
+        throw invalid("pane or tab required")
+    case (true, true):
+        throw invalid("exactly one of pane or tab required")
+    case (false, true):
+        guard object?["direction"] == nil else {
+            throw invalid("direction is not valid with tab")
+        }
+        let tab: TabId = try target("tab", object: object)
+        return .tab(tab)
+    case (true, false):
+        guard let directionValue = object?["direction"] else {
+            throw invalid("direction required with pane")
+        }
+        guard case .string(let rawDirection) = directionValue else {
+            throw invalid("invalid pane split params")
+        }
+        let direction: PaneSplitDirection
+        switch rawDirection {
+        case "horizontal": direction = .horizontal
+        case "vertical": direction = .vertical
+        default: throw invalid("invalid pane split params")
+        }
+        let pane: PaneId = try target("pane", object: object)
+        return .pane(pane, direction: direction)
     }
 }
 

@@ -51,8 +51,7 @@ struct IpcAuditDescriptorTests {
                 background: false
             ),
             .paneSplit(
-                pane: pane,
-                direction: .horizontal,
+                target: .pane(pane, direction: .horizontal),
                 launch: launch,
                 background: false
             ),
@@ -68,6 +67,13 @@ struct IpcAuditDescriptorTests {
         #expect(requests[1].auditDescriptor.target == [
             "pane": pane.rawValue.uuidString.lowercased(),
         ])
+
+        let tab = TabId(rawValue: UUID(uuidString: "44444444-4444-4444-8444-444444444444")!)
+        #expect(IpcRequest.paneSplit(
+            target: .tab(tab),
+            launch: launch,
+            background: true
+        ).auditDescriptor.target == ["tab": tab.rawValue.uuidString.lowercased()])
     }
 
     @Test("pane.resize records its method and pane, and both forms audit alike")

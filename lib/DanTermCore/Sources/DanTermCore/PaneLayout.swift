@@ -42,6 +42,36 @@ struct PaneLayout: Equatable {
     let hiddenPaneIds: Set<PaneId>
 }
 
+/// Names the pane and axis selected from one arranged tab layout.
+struct AutosplitResolution: Equatable {
+    let paneId: PaneId
+    let direction: SplitNodeModel.Direction
+}
+
+/// Chooses the largest pane that can hold two layout minima along its longer axis.
+func autosplitResolution(
+    in layout: PaneLayout,
+    metrics: PaneLayoutMetrics = .standard
+) -> AutosplitResolution? {
+    let threshold = metrics.minimumPaneExtent * 2 + metrics.dividerThickness
+    let candidates = layout.paneFrames.compactMap { paneId, frame -> (PaneId, PaneLayoutRect, SplitNodeModel.Direction)? in
+        guard frame.width > 0, frame.height > 0 else { return nil }
+        let direction: SplitNodeModel.Direction = frame.width >= frame.height ? .horizontal : .vertical
+        let extent = direction == .horizontal ? frame.width : frame.height
+        guard extent >= threshold else { return nil }
+        return (paneId, frame, direction)
+    }
+    let selected = candidates.sorted { lhs, rhs in
+        let lhsArea = lhs.1.width * lhs.1.height
+        let rhsArea = rhs.1.width * rhs.1.height
+        if lhsArea != rhsArea { return lhsArea > rhsArea }
+        if lhs.1.maxY != rhs.1.maxY { return lhs.1.maxY > rhs.1.maxY }
+        if lhs.1.minX != rhs.1.minX { return lhs.1.minX < rhs.1.minX }
+        return lhs.0.rawValue.uuidString < rhs.0.rawValue.uuidString
+    }.first
+    return selected.map { AutosplitResolution(paneId: $0.0, direction: $0.2) }
+}
+
 /// Derives every pane and divider rectangle from one model tree and one container rectangle.
 func paneLayout(
     in bounds: PaneLayoutRect,
