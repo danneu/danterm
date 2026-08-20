@@ -1266,7 +1266,7 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [x] **[IOS-4](#ios-4)** (3x5, small) Build the accessory key row from the key enum instead of matching two hand-numbered tag tables -- `e8acd9b7`
 - [x] **[PARSE-1](#parse-1)** (3x5, small) Clamp relative vertical cursor motion to the scroll region, not just to the screen -- `d86a7b2d`
 - [ ] **[PARSE-5](#parse-5)** (3x5, small) Reset the saved cursor as part of DECSTR
-- [ ] **[CHROME-3](#chrome-3)** (3x5, medium) Carry typed ids in sidebar menu items instead of bare UUIDs
+- [x] **[CHROME-3](#chrome-3)** (3x5, medium) Carry typed ids in sidebar menu items instead of bare UUIDs -- `db4b5a06`
 - [x] **[HIST-5](#hist-5)** (3x5, medium) Price the memory census by walking records, not by materializing every retained row **[decide first](#decisions-to-make-first)**
 - [x] **[PTY-1](#pty-1)** (3x5, medium) Cancel every retained dispatch source from the one registry that already holds them -- `dab5337f`
 - [ ] **[RUNTIME-4](#runtime-4)** (3x5, medium) Give each armed timer one owner instead of a handle field plus a token field
@@ -5056,6 +5056,29 @@ _Scope: Window chrome and auxiliary UI (sidebar, TODO/alerts popovers, preferenc
 ##### CHROME-3. Carry typed ids in sidebar menu items instead of bare UUIDs
 
 `structural` &middot; impact 3, confidence 5 &middot; effort medium &middot; wave 4 &middot; rescored
+
+**Done** in `db4b5a06`, at the scope the preparer's read demands: all nine
+handlers, `TabIdsBox`, and `SetTabColorsInfo` are gone, so the file carries one
+payload convention instead of two. Every item points at one
+`contextMenuItemFired(_:)`, and `menuItem(title:sends:timing:)` names the
+outcome at the call site.
+
+One departure from the ideal as written above. The payload holds the
+already-constructed `Msg` rather than an `Intent` enum. An intent enum would
+re-declare the sidebar's slice of `Msg` a second time and need a switch to
+translate it back, which is one more vocabulary to keep in step; `Msg` already
+carries the typed ids, so the id stays inside typed Swift from menu build to
+`send` with no translation table and no cast on an id at all. The only cast
+left is to the payload type, identical for every item. The exhaustive-switch
+obligation the ideal wanted is met by construction instead: there is nothing to
+switch on, because action and entity are one value.
+
+Two smaller shape choices. `SidebarMenuAction` is a struct, not an `NSObject`
+box -- `representedObject` is `Any?`, so the erasure the finding describes
+existed only because the code appended `.rawValue`. The rename asymmetry is a
+`Timing` value on the payload (`immediate` / `afterMenuTracking`) rather than a
+switch arm, so the main-queue hop is a stated property of those two items
+instead of a behavior hidden in one branch of a handler.
 
 **Files.** `app/SidebarView.swift#contextMenu`, `app/SidebarView.swift#contextNewTab`, `app/SidebarView.swift#contextRenameTab`, `app/SidebarView.swift#contextRenameGroup`
 
