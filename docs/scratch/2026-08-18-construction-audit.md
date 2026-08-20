@@ -159,13 +159,13 @@ references are the requirement.
 | 4 | [BUG-05](#bug-05) | Legacy (non-kitty) Ctrl+key text encoding | **pinned by a test** | Map Ctrl with / and the digits 2-8 to their C0 control bytes |
 | 4 | [BUG-06](#bug-06) | OSC 10 ; ? BEL and OSC 11 ; ? BEL (dynamic c | **pinned by a test** | Reply to an OSC query with the terminator the request used, not always ST |
 | 3 | [BUG-07](#bug-07) | SO (0x0E, LS1) and SI (0x0F, LS0), with ESC  | **done** `e0d2e80c` | Add G1 designation and SI/SO locking shifts so 0x0E/0x0F switch the active charset |
-| 3 | [BUG-08](#bug-08) | ESC # 8 (DECALN) | unpinned | Make DECALN reset the margins, origin mode, and rendition, and home the cursor |
+| 3 | [BUG-08](#bug-08) | ESC # 8 (DECALN) | **done** `7b5d10f0` | Make DECALN reset the margins, origin mode, and rendition, and home the cursor |
 | 3 | [BUG-09](#bug-09) | CSI n L (IL), CSI n M (DL) | **pinned by a test** | Move the cursor to column 0 on IL and DL |
 | 3 | [BUG-10](#bug-10) | CSI ? Ps J (DECSED) and CSI ? Ps K (DECSEL) | unpinned | Dispatch DECSED and DECSEL (CSI ? Ps J / CSI ? Ps K) as ED and EL |
 | 3 | [BUG-11](#bug-11) | OSC 7 ; file:///path ST (working directory r | **pinned by a test** | Accept OSC 7 file URIs with an empty host as local |
 | 3 | [BUG-12](#bug-12) | ESC 7 / ESC 8 (DECSC/DECRC), also CSI ? 1048 | **pinned by a test** | Keep DECSC's saved cursor visibility out of DECRC (do not save DECTCEM) |
 | 3 | [BUG-13](#bug-13) | ESC c (RIS) | **pinned by a test** | Reset the saved-cursor slot on RIS |
-| 3 | [BUG-14](#bug-14) | ESC # 8 (DECALN) | unpinned | Clear the character rendition on DECALN, keeping only the colours |
+| 3 | [BUG-14](#bug-14) | ESC # 8 (DECALN) | **done** `7b5d10f0` | Clear the character rendition on DECALN, keeping only the colours |
 | 3 | [BUG-15](#bug-15) | CSI Pm m (SGR) with more than 24 parameters  | unpinned | Truncate an over-long CSI parameter list instead of discarding the whole sequence |
 | 3 | [BUG-16](#bug-16) | DECSC / DECRC (ESC 7 / ESC 8), and the impli | **pinned by a test** | Carry the saved cursor through width reflow instead of only clamping it |
 | 3 | [BUG-17](#bug-17) | DECSC / DECRC (ESC 7 / ESC 8) across a row-c | unpinned | Displace the saved cursor by the same row delta as the live cursor on a height shrink |
@@ -385,6 +385,10 @@ probe below now yields the expected `┌─┐ab     `.
 
 `ESC # 8 (DECALN)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5
 
+**Done** in `7b5d10f0`, together with BUG-14 -- the two are halves of one
+defect. DECALN now turns off origin mode, drops the scroll region, reduces the
+pen to its colours, fills the active screen, and homes the cursor.
+
 **Problem.** DECALN fills the screen with 'E' but leaves every piece of positioning state as it found it. The references treat DECALN as a positioning reset as well as a fill: it clears origin mode, resets the top/bottom margins to the full screen, resets the character rendition, and homes the cursor to row 1 column 1. DanTerm does none of the four -- it fills with the *current* SGR pen and leaves the cursor, the margins, and DECOM untouched. That leaves the terminal in a state no application can predict after issuing the standard alignment test.
 
 **What DanTerm does.** `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#dispatchEscape(_ sequence: EscapeSequence)` handles intermediate 0x23 final 0x38 by rewriting every row with `GridCell(scalars: .single("E"), kind: .narrow, styleId: styleId)` where `styleId = currentStyleId()`, then calls `clearPendingMotionState()`. It never touches `scrollRegion`, `modes.isOriginMode`, `currentStyle`, or `screen.cursor`.
@@ -532,6 +536,10 @@ probe below now yields the expected `┌─┐ab     `.
 ### BUG-14. Clear the character rendition on DECALN, keeping only the colours
 
 `ESC # 8 (DECALN)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5
+
+**Done** in `7b5d10f0`, together with BUG-08 -- the two are halves of one
+defect. DECALN now fills in a colour-only pen and leaves that pen live, so
+output after it carries no leftover attributes.
 
 **Problem.** DECALN must reset the character attributes (bold, faint, italic, underline, blink, inverse, invisible, strikethrough) while leaving the foreground and background colours alone, then fill the screen with 'E' using that colour-only pen. DanTerm neither resets the pen nor filters it: it fills every cell with the full current pen and leaves the pen untouched afterwards, so every 'E' carries the leftover attributes and so does all output that follows.
 
