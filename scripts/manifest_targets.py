@@ -152,15 +152,28 @@ def declared_targets(manifest: Path) -> list[TargetDeclaration]:
 
 
 def main() -> int:
-    """Lists discovered manifest paths for shell consumers."""
+    """Lists discovered manifests, or every target they declare, for shell consumers.
+
+    `--list` prints one manifest path per line. `--targets` prints one
+    `<kind><TAB><path>` line per declared target, the path root-relative, in
+    manifest order -- so a shell check can visit the targets a manifest claims
+    rather than the directories that happen to sit under `Sources/`.
+    """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--list", action="store_true", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--list", action="store_true")
+    mode.add_argument("--targets", action="store_true")
     parser.add_argument("--root", type=Path, required=True)
     arguments = parser.parse_args()
     root = arguments.root.resolve()
     try:
         for manifest in first_party_manifests(root):
-            print(manifest.relative_to(root).as_posix())
+            if arguments.list:
+                print(manifest.relative_to(root).as_posix())
+                continue
+            package = manifest.parent.relative_to(root)
+            for target in declared_targets(manifest):
+                print(f"{target.kind}\t{(package / target.declared_path()).as_posix()}")
     except LintError as error:
         print(f"manifest-targets: {error}", file=sys.stderr)
         return 1

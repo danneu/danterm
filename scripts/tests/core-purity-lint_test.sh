@@ -179,13 +179,25 @@ assert_import_allowlist TerminalCore,Testing trip "module outside list"      "im
 # points the sweep at both, so a verdict is proven without touching the real tree.
 # ---------------------------------------------------------------------------
 
-# sweep_module <module-path-under-root> <source-line>
+# sweep_target <package-dir> <kind> <target-path-under-package> <source-line>
+#
+# Declares one target in the package's fixture manifest and writes its source. The
+# sweep reads declarations, not directories, so the manifest has to say the target
+# exists -- that is the property under test. The fixture manifest is only the
+# declaration lines; manifest_targets.py reads text and never runs it.
+sweep_target() {
+    local package="$1" kind="$2" rel="$3" source="$4"
+    local manifest="$SWEEP_ROOT/$package/Package.swift"
+    mkdir -p "$SWEEP_ROOT/$package/$rel"
+    [[ -f "$manifest" ]] || printf '%s\n' '// swift-tools-version: 6.2' > "$manifest"
+    printf '.%s(name: "%s", path: "%s")\n' "$kind" "${rel##*/}" "$rel" >> "$manifest"
+    printf '%s\n' "$source" > "$SWEEP_ROOT/$package/$rel/Module.swift"
+}
+
+# sweep_module <module-path-under-root> <source-line> -- a plain Sources/ target.
 sweep_module() {
-    local dir="$SWEEP_ROOT/$1"
     local package="${1%%/Sources/*}"
-    mkdir -p "$dir"
-    printf '%s\n' '// swift-tools-version: 6.2' > "$SWEEP_ROOT/$package/Package.swift"
-    printf '%s\n' "$2" > "$dir/Module.swift"
+    sweep_target "$package" target "${1#"$package"/}" "$2"
 }
 
 sweep_reset() {
@@ -259,6 +271,32 @@ assert_sweep pass "a clean tree passes, iOS modules included"
 sweep_reset
 sweep_module tools/Tool/Sources/Tool "import AppKit"
 assert_sweep trip "a tracked package outside lib and ios is swept"
+
+# The sweep visits what the manifests declare, not what sits under Sources/. A
+# target at any path is checked; a test target is not a module and may import
+# anything; a declared target with no directory is an entry that checks nothing.
+sweep_reset
+sweep_target . target cli "import AppKit"
+assert_sweep trip "a declared target outside Sources/ is swept"
+
+sweep_reset
+sweep_target lib/Pkg target TestSupport/Helper "import AppKit"
+assert_sweep trip "a declared support target outside Sources/ is swept"
+
+sweep_reset
+sweep_target lib/Pkg target Sources/Pkg "struct Cell {}"
+sweep_target lib/Pkg testTarget Tests/PkgTests "import AppKit"
+assert_sweep pass "a test target is outside the sweep"
+
+sweep_reset
+sweep_target lib/Pkg target Sources/Pkg "struct Cell {}"
+printf '.target(name: "Ghost", path: "Sources/Ghost")\n' >> "$SWEEP_ROOT/lib/Pkg/Package.swift"
+assert_sweep trip "a declared target with no directory fails"
+
+sweep_reset
+sweep_target . target cli "import AppKit"
+printf 'cli ui\n' > "$SWEEP_POLICY"
+assert_sweep pass "a root-package target is addressed by its bare path in policy"
 
 # Excluded and untracked package trees never enter the sweep.
 sweep_reset

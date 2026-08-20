@@ -187,14 +187,19 @@ Purity is proven *structurally* and guarded *heuristically*:
 
 **Coverage is the lint's own responsibility, not the gate's.** Run with no
 target, the lint discovers every first-party package through
-`scripts/manifest_targets.py`, then checks each `Sources/*/` module under those
-packages. It reads `scripts/core-purity-policy.conf` for the modules whose
-contract deviates. The floor for a module the policy never names is `portable`,
-so a new module is covered the day it is tracked. The gate used to name its
-targets by hand -- eleven of them against a tree of thirty-five modules -- which
-made "nobody remembered this module" and "this module is exempt" the same
-observation. A policy entry naming a module that no longer exists fails the
-sweep, because an entry that checks nothing still reads as coverage.
+`scripts/manifest_targets.py`, then checks every non-test target those
+manifests declare, at the path each declares -- `app`, `cli`, a `TestSupport/`
+helper, and the `Sources/*/` modules alike. It reads
+`scripts/core-purity-policy.conf` for the modules whose contract deviates. The
+floor for a module the policy never names is `portable`, so a new module is
+covered the day its manifest declares it, and a module that may draw with a
+platform toolkit is exempt only by a written `ui` line, never by sitting at a
+path the sweep does not look at. The gate used to name its targets by hand --
+eleven of them against a tree of thirty-five modules -- which made "nobody
+remembered this module" and "this module is exempt" the same observation. A
+policy entry naming a module that no longer exists fails the sweep, and so does
+a declared target with no directory, because an entry that checks nothing still
+reads as coverage.
 
 The lint's denylist is a regression guard, not the proof; the structural compile
 is the proof. The lint exists to keep it that way, and its failure message is the

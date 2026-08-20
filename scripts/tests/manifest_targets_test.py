@@ -55,4 +55,38 @@ with tempfile.TemporaryDirectory() as raw:
     if result.returncode == 0 or "no first-party manifest" not in result.stderr:
         sys.exit("manifest_targets_test: empty discovery did not fail clearly")
 
+with tempfile.TemporaryDirectory() as raw:
+    root = Path(raw)
+    (root / "Package.swift").write_text(
+        "// swift-tools-version: 6.2\n"
+        '.executableTarget(name: "cli", path: "cli")\n'
+        '.testTarget(name: "CLITests", path: "cli-tests")\n'
+    )
+    write_manifest(root, "lib/Pkg/Package.swift")
+    (root / "lib/Pkg/Package.swift").write_text(
+        "// swift-tools-version: 6.2\n"
+        '.target(name: "Pkg")\n'
+        '.target(name: "Helper", path: "TestSupport/Helper")\n'
+        '.testTarget(name: "PkgTests")\n'
+    )
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    result = subprocess.run(
+        [sys.executable, str(DISCOVERY), "--targets", "--root", str(root)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        sys.exit(result.stderr)
+    expected = [
+        "executableTarget\tcli",
+        "testTarget\tcli-tests",
+        "target\tlib/Pkg/Sources/Pkg",
+        "target\tlib/Pkg/TestSupport/Helper",
+        "testTarget\tlib/Pkg/Tests/PkgTests",
+    ]
+    if result.stdout.splitlines() != expected:
+        sys.exit(f"manifest_targets_test: wrong target listing: {result.stdout!r}")
+
 print("manifest_targets_test: ok")
