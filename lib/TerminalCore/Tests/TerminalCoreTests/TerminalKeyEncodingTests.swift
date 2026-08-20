@@ -82,6 +82,10 @@ struct TerminalKeyEncodingTests {
         #expect(encodeTerminalKey(.tab, modifiers: [.control], modes: .default) == [0x09])
         #expect(encodeTerminalKey(.tab, modifiers: [.alt], modes: .default) == [0x1B, 0x09])
         #expect(encodeTerminalKey(.tab, modifiers: [.shift], modes: .default) == Array("\u{1B}[Z".utf8))
+        #expect(
+            encodeTerminalKey(.tab, modifiers: [.alt, .shift], modes: .default)
+                == [0x1B, 0x1B, 0x5B, 0x5A]
+        )
 
         #expect(encodeTerminalKey(.backspace, modifiers: [], modes: .default) == [0x7F])
         #expect(encodeTerminalKey(.backspace, modifiers: [.control], modes: .default) == [0x08])
@@ -90,6 +94,32 @@ struct TerminalKeyEncodingTests {
             encodeTerminalKey(.backspace, modifiers: [.alt, .control], modes: .default)
                 == [0x1B, 0x08]
         )
+    }
+
+    @Test("legacy Alt+Escape prefixes Meta ESC under every mode")
+    func legacyAltEscapeSendsMetaPrefix() {
+        // Intent: in legacy mode Alt+Escape emits ESC ESC and plain Escape emits one
+        //   ESC, with the same bytes under every child-selected mode.
+        // Why it exists: the Escape case returned [0x1B] without reading the
+        //   modifiers, so Alt+Escape was byte-identical to Escape. Emacs reads ESC ESC
+        //   as its own prefix, and vim binds <M-Esc>; both saw a plain Escape.
+        // Scenario: pressing Option+Escape in a pane running Emacs starts the
+        //   ESC ESC prefix instead of cancelling.
+        let allModes = TerminalInputModes(
+            applicationCursorKeys: true,
+            applicationKeypad: true,
+            lineFeedNewLine: true
+        )
+        for modes in [
+            TerminalInputModes.default,
+            TerminalInputModes(applicationCursorKeys: true),
+            TerminalInputModes(applicationKeypad: true),
+            TerminalInputModes(lineFeedNewLine: true),
+            allModes,
+        ] {
+            #expect(encodeTerminalKey(.escape, modifiers: [.alt], modes: modes) == [0x1B, 0x1B])
+            #expect(encodeTerminalKey(.escape, modifiers: [], modes: modes) == [0x1B])
+        }
     }
 
     @Test("legacy Shift+Return encodes LF under every modifier and mode combination")
@@ -134,7 +164,7 @@ struct TerminalKeyEncodingTests {
         //   program then hung on one Enter key and worked on the other.
         // Scenario: a program sets mode 20 and reads lines; both Enter keys submit.
         let rows: [(TerminalInputKey, TerminalKeyModifiers)] = [
-            (.tab, []), (.tab, [.alt]), (.escape, []), (.backspace, []),
+            (.tab, []), (.tab, [.alt]), (.escape, []), (.escape, [.alt]), (.backspace, []),
             (.up, []), (.f5, []),
             (.character("a"), []), (.character("m"), [.control]),
             (.returnKey, []), (.returnKey, [.alt]), (.returnKey, [.shift]),
@@ -271,6 +301,7 @@ struct TerminalKeyEncodingTests {
         )
         let cases: [(TerminalInputKey, TerminalKeyModifiers, String)] = [
             (.escape, [], "\u{1B}[27u"),
+            (.escape, [.alt], "\u{1B}[27;3u"),
             (.returnKey, [], "\r"),
             (.returnKey, [.shift], "\u{1B}[13;2u"),
             (.tab, [.shift], "\u{1B}[9;2u"),

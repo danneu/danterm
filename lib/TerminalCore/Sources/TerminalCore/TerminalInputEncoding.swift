@@ -331,25 +331,29 @@ private func encodeLegacyKey(
     modifiers: TerminalKeyModifiers,
     modes: TerminalInputModes
 ) -> [UInt8] {
+    // Base bytes for the family whose Alt form is a Meta ESC prefix. The switch never
+    // applies the prefix itself: the single site below owns it, so a key added to the
+    // family cannot forget it. Keys that carry Alt as a CSI modifier parameter, and the
+    // keypad keys, return their finished bytes directly and never reach that site.
+    let base: [UInt8]
+
     switch key {
     case .returnKey:
         // Shift+Return is an explicit "insert a line feed" affordance, not the return
         // key's newline semantics: it emits LF and no CR, so the LNM byte rule leaves it
         // alone. Emitting a CR would make composers submit. Programs that care about the
         // distinction can negotiate the kitty protocol and get CSI 13;2u instead.
-        var bytes: [UInt8] = modifiers.contains(.shift) ? [0x0A] : [0x0D]
-        if modifiers.contains(.alt) { bytes.insert(0x1B, at: 0) }
-        return bytes
+        base = modifiers.contains(.shift) ? [0x0A] : [0x0D]
     case .tab:
-        var bytes = modifiers.contains(.shift) ? csi("Z") : [0x09]
-        if modifiers.contains(.alt) { bytes.insert(0x1B, at: 0) }
-        return bytes
+        base = modifiers.contains(.shift) ? csi("Z") : [0x09]
     case .backspace:
-        var bytes: [UInt8] = modifiers.contains(.control) ? [0x08] : [0x7F]
-        if modifiers.contains(.alt) { bytes.insert(0x1B, at: 0) }
-        return bytes
+        base = modifiers.contains(.control) ? [0x08] : [0x7F]
     case .escape:
-        return [0x1B]
+        base = [0x1B]
+    case .character(let scalar):
+        base = modifiers.contains(.control)
+            ? legacyControlBytes(for: scalar)
+            : Array(String(scalar).utf8)
     case .up, .down, .right, .left, .home, .end:
         let final: Character
         switch key {
@@ -385,12 +389,6 @@ private func encodeLegacyKey(
     case .f10: return tilde(21, modifiers: modifiers)
     case .f11: return tilde(23, modifiers: modifiers)
     case .f12: return tilde(24, modifiers: modifiers)
-    case .character(let scalar):
-        var bytes = modifiers.contains(.control)
-            ? legacyControlBytes(for: scalar)
-            : Array(String(scalar).utf8)
-        if modifiers.contains(.alt) { bytes.insert(0x1B, at: 0) }
-        return bytes
     case .keypad0, .keypad1, .keypad2, .keypad3, .keypad4,
          .keypad5, .keypad6, .keypad7, .keypad8, .keypad9,
          .keypadDecimal, .keypadDivide, .keypadMultiply, .keypadSubtract,
@@ -398,6 +396,9 @@ private func encodeLegacyKey(
         let (normal, application, _) = keypadEncoding(for: key)
         return modes.applicationKeypad ? Array("\u{1B}O\(application)".utf8) : Array(normal.utf8)
     }
+
+    guard modifiers.contains(.alt) else { return base }
+    return [0x1B] + base
 }
 
 private func legacyControlBytes(for scalar: Unicode.Scalar) -> [UInt8] {
