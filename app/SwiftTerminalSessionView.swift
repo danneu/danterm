@@ -208,12 +208,16 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// than re-derived, so clearing an override back to the grid the pane already ran at
     /// still reads as a change and still reaches the applied boundary.
     private var currentGridPinned: Bool?
-    private var controlClickIsActive = false
-    /// True between a forwarded right-button press and its release. AppKit consumes the
-    /// release that ends menu tracking, so a press the menu path never forwarded must not
-    /// be answered by a release either -- an unpaired press would latch the engine's button
-    /// owner and swallow the next right-click the terminal application does claim.
-    private var rightButtonForwarded = false
+    /// Which `TerminalMouseButton` each physical button's outstanding press was reported
+    /// as, entered only once that press actually reached the controller. A release is sent
+    /// only for a press in here and names the button that press carried, so a press the
+    /// view dropped -- the menu path never forwarded it, or no geometry was resolved yet --
+    /// is never answered by a release the engine cannot pair, and letting go of Control
+    /// mid-click cannot turn a `.right` press into a `.left` release.
+    ///
+    /// Keyed per physical button because AppKit can deliver a left press and a right press
+    /// before either release, and one slot would let the second press overwrite the first.
+    private var forwardedPressButtons: [PhysicalPointerButton: TerminalMouseButton] = [:]
     private var mouseTrackingArea: NSTrackingArea?
     private var lastPointerLocationInWindow: NSPoint?
     private var isPointerInside = false
@@ -772,8 +776,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     override func mouseDown(with event: NSEvent) {
         // A control-click only arrives here when the terminal claimed it: an unclaimed one
         // is answered by `menu(for:)`, and AppKit then delivers no mouse lifecycle at all.
-        controlClickIsActive = event.modifierFlags.contains(.control)
-        forwardPointerDown(event, button: controlClickIsActive ? .right : .left)
+        forwardPointerDown(
+            event,
+            physical: .left,
+            reportedAs: event.modifierFlags.contains(.control) ? .right : .left
+        )
         // The focus report rides this entry point because AppKit's window moves the
         // responder here and nowhere else: a control-click still arrives as a left
         // press and still takes focus, while a genuine right or middle press moves
@@ -786,8 +793,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     override func mouseUp(with event: NSEvent) {
-        forwardPointerUp(event, button: controlClickIsActive ? .right : .left)
-        controlClickIsActive = false
+        forwardPointerUp(event, physical: .left)
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -798,24 +804,21 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             super.rightMouseDown(with: event)
             return
         }
-        rightButtonForwarded = true
-        forwardPointerDown(event, button: .right)
+        forwardPointerDown(event, physical: .right, reportedAs: .right)
     }
 
     override func rightMouseUp(with event: NSEvent) {
-        guard rightButtonForwarded else { return }
-        rightButtonForwarded = false
-        forwardPointerUp(event, button: .right)
+        forwardPointerUp(event, physical: .right)
     }
 
     override func otherMouseDown(with event: NSEvent) {
         guard event.buttonNumber == 2 else { return }
-        forwardPointerDown(event, button: .middle)
+        forwardPointerDown(event, physical: .middle, reportedAs: .middle)
     }
 
     override func otherMouseUp(with event: NSEvent) {
         guard event.buttonNumber == 2 else { return }
-        forwardPointerUp(event, button: .middle)
+        forwardPointerUp(event, physical: .middle)
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -1739,10 +1742,25 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         )
     }
 
-    private func forwardPointerDown(_ event: NSEvent, button: TerminalMouseButton) {
+    /// The button the user physically pressed, which is not what the press is reported as:
+    /// a control-click enters through `.left` and is reported to the engine as `.right`.
+    /// Pairing a release with its press needs the physical identity, because that is what
+    /// AppKit's entry points distinguish.
+    private enum PhysicalPointerButton {
+        case left
+        case right
+        case middle
+    }
+
+    private func forwardPointerDown(
+        _ event: NSEvent,
+        physical: PhysicalPointerButton,
+        reportedAs button: TerminalMouseButton
+    ) {
         guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
         lastPointerLocationInWindow = event.locationInWindow
         isPointerInside = cell.isInsideGrid
+        forwardedPressButtons[physical] = button
         controller.sendPointer(
             .down(
                 button,
@@ -1755,7 +1773,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         )
     }
 
-    private func forwardPointerUp(_ event: NSEvent, button: TerminalMouseButton) {
+    private func forwardPointerUp(_ event: NSEvent, physical: PhysicalPointerButton) {
+        guard let button = forwardedPressButtons.removeValue(forKey: physical) else { return }
         guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
         lastPointerLocationInWindow = event.locationInWindow
         if cell.isInsideGrid == false {

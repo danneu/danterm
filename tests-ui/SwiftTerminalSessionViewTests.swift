@@ -1279,6 +1279,115 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(events == [.clickedToFocus], "a claimed control-click reported \(events)")
     }
 
+    uiTest("a press the view could not forward is never answered by a release") {
+        // Intent: a release reaches the engine only for a press from the same physical
+        //   button that reached it, on every one of the three buttons; the left click
+        //   still names its pane even when its press went nowhere.
+        // Why it exists: the view drops a press it cannot map to a cell, and before the
+        //   first layout pass there is no geometry to map with. A release forwarded on
+        //   its own is an event no press explains, which the flight tape and its replay
+        //   then carry as an unpaired `.up`.
+        // Scenario: spec-first -- the user clicks a pane in the instant between its
+        //   creation and its first layout, and lets go once it is on screen.
+        let point = NSPoint(x: 17, y: 125)
+
+        let leftController = TerminalPaneSessionController()
+        let leftPane = makeUnmountedPane(controller: leftController)
+        var events: [TerminalSessionEvent] = []
+        leftPane.onEvent = { events.append($0) }
+        leftPane.mouseDown(with: try makeMouseEvent(type: .leftMouseDown, location: point))
+        try uiExpect(events == [.clickedToFocus],
+                     "a click before layout did not name its pane: \(events)")
+        mountInTestWindow(leftPane, frame: leftPane.frame)
+        leftPane.mouseUp(with: try makeMouseEvent(type: .leftMouseUp, location: point))
+        try uiExpect(leftController.pointerEvents.isEmpty,
+                     "a left release outran its press: \(leftController.pointerEvents)")
+
+        let rightController = TerminalPaneSessionController()
+        rightController.claimsMouseButtons = true
+        let rightPane = makeUnmountedPane(controller: rightController)
+        rightPane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: point))
+        mountInTestWindow(rightPane, frame: rightPane.frame)
+        rightPane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
+        try uiExpect(rightController.pointerEvents.isEmpty,
+                     "a right release outran its press: \(rightController.pointerEvents)")
+
+        let middleController = TerminalPaneSessionController()
+        let middlePane = makeUnmountedPane(controller: middleController)
+        middlePane.otherMouseDown(with: try makeMiddleMouseEvent(
+            type: .otherMouseDown, location: point
+        ))
+        mountInTestWindow(middlePane, frame: middlePane.frame)
+        middlePane.otherMouseUp(with: try makeMiddleMouseEvent(
+            type: .otherMouseUp, location: point
+        ))
+        try uiExpect(middleController.pointerEvents.isEmpty,
+                     "a middle release outran its press: \(middleController.pointerEvents)")
+    }
+
+    uiTest("the middle button forwards its press and release as a pair") {
+        // Intent: a mounted pane forwards a middle-button click whole, so the empty
+        //   result in the pre-layout test above is the dropped press and not a path
+        //   that forwards nothing at all.
+        // Why it exists: the middle button enters through its own `otherMouseDown` /
+        //   `otherMouseUp` overrides behind a button-number guard, which neither the
+        //   left nor the right coverage exercises.
+        // Scenario: spec-first -- the user middle-clicks a pane to paste the primary
+        //   selection into a program that reads the mouse.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        let point = NSPoint(x: 17, y: 125)
+
+        pane.otherMouseDown(with: try makeMiddleMouseEvent(type: .otherMouseDown, location: point))
+        pane.otherMouseUp(with: try makeMiddleMouseEvent(type: .otherMouseUp, location: point))
+
+        try uiExpect(controller.pointerEvents == [
+            .down(.middle, cell: .init(column: 2, row: 2, offsetX: 0.125), modifiers: [], clickCount: 1),
+            .up(.middle, cell: .init(column: 2, row: 2, offsetX: 0.125), modifiers: []),
+        ], "the middle button was not delivered as a pair: \(controller.pointerEvents)")
+    }
+
+    uiTest("a release names the button its own press was reported as") {
+        // Intent: a control-click released after Control comes back up still reports
+        //   `.right`, and a left and a right button held together each pair with their
+        //   own press rather than with each other.
+        // Why it exists: the reported button is chosen by the modifiers at press time,
+        //   so re-deriving it at release time renames the gesture mid-click and leaves
+        //   the engine's `.right` owner pressed forever. Overlapping buttons need one
+        //   record each for the same reason.
+        // Scenario: spec-first -- the user control-clicks and lets go of Control before
+        //   the mouse, then presses left and right together over a program that claims
+        //   both buttons.
+        let point = NSPoint(x: 17, y: 125)
+        let cell = TerminalViewportCell(column: 2, row: 2, offsetX: 0.125)
+
+        let controlController = TerminalPaneSessionController()
+        controlController.claimsMouseButtons = true
+        let controlPane = makeMountedPane(controller: controlController)
+        controlPane.mouseDown(with: try makeMouseEvent(
+            type: .leftMouseDown, location: point, modifiers: [.control]
+        ))
+        controlPane.mouseUp(with: try makeMouseEvent(type: .leftMouseUp, location: point))
+        try uiExpect(controlController.pointerEvents == [
+            .down(.right, cell: cell, modifiers: [.control], clickCount: 1),
+            .up(.right, cell: cell, modifiers: []),
+        ], "releasing Control renamed the click: \(controlController.pointerEvents)")
+
+        let bothController = TerminalPaneSessionController()
+        bothController.claimsMouseButtons = true
+        let bothPane = makeMountedPane(controller: bothController)
+        bothPane.mouseDown(with: try makeMouseEvent(type: .leftMouseDown, location: point))
+        bothPane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: point))
+        bothPane.mouseUp(with: try makeMouseEvent(type: .leftMouseUp, location: point))
+        bothPane.rightMouseUp(with: try makeMouseEvent(type: .rightMouseUp, location: point))
+        try uiExpect(bothController.pointerEvents == [
+            .down(.left, cell: cell, modifiers: [], clickCount: 1),
+            .down(.right, cell: cell, modifiers: [], clickCount: 1),
+            .up(.left, cell: cell, modifiers: []),
+            .up(.right, cell: cell, modifiers: []),
+        ], "overlapping buttons crossed their releases: \(bothController.pointerEvents)")
+    }
+
     uiTest("only a click that takes key focus reports pane focus") {
         // Intent: the gesture that hands this pane key focus reports it, and no
         //   other button reports anything.
@@ -2306,6 +2415,41 @@ private func makeMouseEvent(
     return event
 }
 
+/// `NSEvent.mouseEvent(with:)` builds an other-button event whose `buttonNumber` is
+/// always zero, which the pane's middle-button guard rejects, so the middle button can
+/// only be driven through a CGEvent that carries the number -- the same detour the wheel
+/// helper above takes for its phase fields.
+///
+/// `location` is the same window-space point every other event helper here takes. A
+/// CGEvent's own space has its origin at the top left of the main display and
+/// `NSEvent(cgEvent:)` flips it back around that same display, so the flip is undone up
+/// front rather than left for each caller to reason about.
+private func makeMiddleMouseEvent(
+    type: CGEventType,
+    location: NSPoint
+) throws -> NSEvent {
+    let flipped = CGPoint(
+        x: location.x,
+        y: CGDisplayBounds(CGMainDisplayID()).height - location.y
+    )
+    guard let cgEvent = CGEvent(
+        mouseEventSource: nil,
+        mouseType: type,
+        mouseCursorPosition: flipped,
+        mouseButton: .center
+    ) else {
+        throw UITestFailure(message: "could not synthesize \(type)")
+    }
+    // A source-less CGEvent is born carrying whatever modifier keys are physically down
+    // right now, so the flags are stated rather than inherited: without this the test
+    // reads the keyboard of whoever is at the machine while the suite runs.
+    cgEvent.flags = []
+    guard let event = NSEvent(cgEvent: cgEvent) else {
+        throw UITestFailure(message: "could not bridge \(type)")
+    }
+    return event
+}
+
 private func makePointerExitEvent(
     location: NSPoint,
     modifiers: NSEvent.ModifierFlags = []
@@ -2371,9 +2515,18 @@ private func pumpRunLoop(untilTrue condition: () -> Bool, deadline: TimeInterval
 
 @MainActor
 private func makeMountedPane(controller: TerminalPaneSessionController) -> SwiftTerminalSessionView {
+    let pane = makeUnmountedPane(controller: controller)
+    mountInTestWindow(pane, frame: pane.frame)
+    return pane
+}
+
+/// A pane sized but not in a window, so it has resolved no geometry yet: the state a
+/// freshly created pane is in until its first layout pass, and the only way to test what
+/// an input that arrives before that resolution does.
+@MainActor
+private func makeUnmountedPane(controller: TerminalPaneSessionController) -> SwiftTerminalSessionView {
     let pane = SwiftTerminalSessionView(controller: controller)
     pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
-    mountInTestWindow(pane, frame: pane.frame)
     return pane
 }
 
