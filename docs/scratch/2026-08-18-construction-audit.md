@@ -1156,7 +1156,7 @@ wave.
 - [x] **[MODEL-3](#model-3)** (3x5, small) Collapse ContainerShape to layout plus zoomedLeaf; derive the structural fingerprint -- `63e0c675`
 - [x] **[PERSIST-4](#persist-4)** (3x5, small) Confine the IPC connection's descriptor to its write queue so a queued write cannot land on a reused fd -- `00b2ac04`
 - [x] **[MODEL-1](#model-1)** (3x5, medium) Replace PendingConfirmation's subject-plus-optional-payloads with one per-subject enum -- `ae7c437c`
-- [ ] **[PERSIST-2](#persist-2)** (3x5, medium) Give the recovery directory one owner: a RecoveryPaths value threaded from launch
+- [x] **[PERSIST-2](#persist-2)** (3x5, medium) Give the recovery directory one owner: a RecoveryPaths value threaded from launch -- `20b71992..b5ffcef2`
 - [x] **[PERSIST-6](#persist-6)** (3x5, medium) Publish the pane-tape record shape once in DanTermProtocol instead of writing keys on both sides -- `9967905a..b0ef4e7a`
 - [x] **[RUNTIME-2](#runtime-2)** (3x5, medium) Give the theme browser a model slot so `reconcileThemeBrowser` owns its existence **[decide first](#decisions-to-make-first)**
 - [x] **[UNI-1](#uni-1)** (3x5, medium) Store the packed scalar record as a palette index over 29 decoded entries, not a 16-bit bitfield -- `bd0e1c0b`
@@ -4122,6 +4122,21 @@ _Scope: Persistence, recovery, and the portable side-effect layer (lib/DanTermCo
 ##### PERSIST-2. Give the recovery directory one owner: a RecoveryPaths value threaded from launch
 
 `structural` &middot; impact 3, confidence 5 &middot; effort medium &middot; wave 1 &middot; rewritten
+
+**Done** in `20b71992..b5ffcef2`, which carry the plan under `plans/impl/`. The
+fix is wider than this item asked for. `RecoveryPaths` would have owned the
+recovery directory and left the control socket, the scrollback replay directory,
+the IPC audit directory, and the tailnet activation identity as four more ambient
+leaves -- the same pattern, re-admitted. So the delivered value is
+`DanTermSupport.DanTermInstancePaths`: one identity plus the three roots
+(Application Support, Caches, temporary), deriving every path the process keys by
+its identity. `app/LaunchInstancePaths.swift` builds it once at launch and hands
+it down, the free path functions are gone so a missed call site is a compile
+error, and `scripts/ambient-identity-lint.sh` keeps the shape by rejecting an
+ambient identity or root resolution outside three named seams. The launch-recovery
+read moved out of `app/main.swift` into `app/LaunchRecovery.swift`, so the flow
+this item said was untestable -- write both tiers and a lock, relaunch, detect the
+crash, merge -- is now driven end to end on a temporary root.
 
 **Files.** `lib/DanTermSupport/Sources/DanTermSupport/RecoveryStore.swift#recoveryDirectoryURL`, `lib/DanTermSupport/Sources/DanTermSupport/RecoveryStore.swift#lightCheckpointURL`, `lib/DanTermSupport/Sources/DanTermSupport/RecoveryStore.swift#sessionLockURL`, `app/main.swift`, `app/AppRuntime.swift`
 

@@ -89,8 +89,9 @@ Cross-cutting features are layered across all three. IPC: method semantics in
 core `update()`, envelope + line framing in `DanTermProtocol`, per-connection
 socket lifecycle in `DanTermSupport.IpcConnection`, accept loop in
 `app/IpcServer.swift`. Persistence: pure snapshot/restore codec in core, path
-resolution + file IO + session lock in `DanTermSupport.RecoveryStore`,
-checkpoint scheduling and on-disk write in `app`.
+derivation in `DanTermSupport.DanTermInstancePaths` with the file IO and the
+session lock in `DanTermSupport.RecoveryStore`, checkpoint scheduling and
+on-disk write in `app`.
 
 The core seams its four ambient inputs -- home directory, fresh ids,
 wall-clock time, and the process instance identity -- behind `CoreEnv`. Inject
@@ -101,6 +102,16 @@ this instance, so it is never re-derived at a leaf, and a test that does not
 inject one gets no privilege. `scripts/core-purity-lint.sh` enforces this; the
 worked example is in
 [docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md).
+
+The same identity also keys every filesystem path the process owns -- the
+control socket, the recovery directory with both checkpoint tiers, the session
+lock and the IPC audit log, and the scrollback replay directory. One
+`DanTermSupport.DanTermInstancePaths` value derives them all.
+`app/LaunchInstancePaths.swift` builds it once at launch and `app/main.swift`
+hands it down; nothing else in `app/`, `lib/`, `cli/`, or `tools/` may read
+`Bundle.main` or a user-domain root directory for a path.
+`scripts/ambient-identity-lint.sh` enforces that, and names the three files it
+allows.
 
 All entity IDs are phantom-typed wrappers (`TabId = TypedId<TabTag>`, and the
 same for panes, groups, splits) so the compiler rejects passing one where

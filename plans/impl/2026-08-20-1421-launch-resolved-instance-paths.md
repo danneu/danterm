@@ -243,7 +243,7 @@ resolver); the PERSIST-2 entry in the construction audit.
 - [x] 1. Protocol derives the control socket from an explicit identity and caches root
 - [x] 2. One launch-resolved instance-paths value threaded through the app and IPC server
 - [x] 3. Lift the launch-recovery read into a testable app function
-- [ ] 4. Lint ambient identity resolution and update the docs
+- [x] 4. Lint ambient identity resolution and update the docs
 
 ## Implementation notes
 
@@ -286,3 +286,37 @@ resolver); the PERSIST-2 entry in the construction audit.
   `writeSessionLockFile`. `AppRuntime.performLightCheckpoint` is private and needs a
   full AppKit runtime, so calling it would have widened the commit rather than
   strengthened the proof.
+
+- Commit 4's lint names its three allowlisted files by root-relative path instead of
+  by an in-source marker comment. A marker was the other option and matches
+  `core-purity: ambient-seam`, but `CoreEnvironment.swift` already carries that marker
+  on the exact line this lint must exempt, so a second marker would have stacked two
+  unrelated pragmas on one line. A path list also puts the whole policy in one place a
+  reader can check at a glance, and a stale entry fails the sweep the way
+  `core-purity-lint.sh` fails a stale policy line.
+- The lint matches the allowlist as a path suffix and takes its sweep root from
+  `AMBIENT_IDENTITY_LINT_ROOT`. Both exist so the self-test can stage a fixture tree
+  and prove the sweep, the allowlist, and the stale-entry check without the real
+  source, which is why the self-test asserts nothing about the repository itself --
+  the gate step does that.
+- `DanTermInstanceIdentity.init(bundle:)` loses its `.main` default in this commit.
+  With the default gone the ambient read cannot be spelled without naming the bundle,
+  so the lint reads a call site that says what it does. The zero-argument form is now
+  a compile error, and the lint still rejects it so the rule survives anyone
+  re-adding the default.
+- The two file headers the plan lists under "Docs to update" (`RecoveryStore.swift`
+  and `InstancePaths.swift`) were rewritten in commit 2, where their design changed.
+  This commit updates the remaining three: AGENTS.md, the pure/support split ADR, and
+  the construction audit's PERSIST-2 entry.
+
+## Follow Up
+
+- The plan's manual regression net is unrun: a `just launch-slot` instance must still
+  restore its session after a forced kill, and the `danterm` CLI with no `--socket`
+  from the dev Helpers path must still reach the production socket. Both need a live
+  GUI session, so the automated gate cannot stand in for them.
+- PERSIST-1 (decide crash recovery from the session lock's existence, not from
+  decoding it, with a throwing lock writer) is now a small swap on the new
+  `paths:`-taking signatures in
+  `lib/DanTermSupport/Sources/DanTermSupport/RecoveryStore.swift`. The plan sequenced
+  it directly after this one.

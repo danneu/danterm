@@ -58,8 +58,11 @@ public struct DanTermInstanceIdentity: Equatable, Sendable {
         self.bundleIdentifier = bundleIdentifier
     }
 
-    /// Resolves the current process identity at the common bundle boundary.
-    public init(bundle: Bundle = .main) {
+    /// Resolves the current process identity at the common bundle boundary. The bundle
+    /// is required rather than defaulted to `.main`: this is the ambient read, and
+    /// `scripts/ambient-identity-lint.sh` allows it in three named seams only, so a
+    /// caller has to spell it out to be seen.
+    public init(bundle: Bundle) {
         self.init(bundleIdentifier: bundle.bundleIdentifier ?? Self.productionBundleIdentifier)
     }
 

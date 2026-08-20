@@ -300,12 +300,41 @@ than folded into the list:
 
 - **Never re-derived at a leaf.** There is no "SHOWN live and
   discarded" case for a privilege check, so no `DanTermInstanceIdentity(bundle:)`
-  may appear inside a dispatch arm. The only ambient read is `CoreEnv.live`.
+  may appear inside a dispatch arm. `CoreEnv.live` is the only ambient read for
+  privilege.
 - **The default fails closed.** `.live` resolves `Bundle.main`, which inside a
   test harness is the harness bundle -- not a pool slot. A test that forgets to
   inject an identity therefore gets no privilege, which is the safe direction.
   This inverts the home seam's rationale, where the ambient default is the
   *correct* production value.
+
+#### The same identity keys the paths, and it is resolved once
+
+Privilege is not the only thing the identity answers. It also namespaces every
+filesystem path the process owns: the control socket, the recovery directory
+with both checkpoint tiers, the session lock and the IPC audit log, and the
+scrollback replay directory. Those used to be six leaves, each re-deriving the
+identity and each turning it into a path on its own. The lock, the checkpoints,
+and the audit log then shared a directory only because every leaf happened to
+take the same default -- and no test could redirect the checkpoint tiers at all,
+so the real recovery flow could not be exercised.
+
+One value now owns all of them: `DanTermSupport.DanTermInstancePaths` stores an
+identity plus the three roots (Application Support, Caches, temporary) and
+derives every path from them. It defaults nothing, and neither does anything in
+the chain that carries it. `app/LaunchInstancePaths.swift` builds it once from
+`Bundle.main` and the user-domain directories, `app/main.swift` hands it to the
+delegate, which hands it to the runtime, which composes what the IPC server
+needs. A test builds the same value on a temporary root and drives the whole
+flow without touching the user's real Application Support tree.
+
+`scripts/ambient-identity-lint.sh` holds that shape: resolving the running
+process into an identity or into a user-domain root is allowed in the launch
+resolver, in `CoreEnv.live`, and in `DanTermProtocol.userControlSocketPath` --
+which serves the bare executables (the `danterm` CLI and the identity tool) that
+own no launch-resolved value, and takes its identity as an explicit input. The
+lint names those three files and rejects the pattern everywhere else in `app/`,
+`lib/`, `cli/`, and `tools/`.
 
 ### Typed paths: stay `String` until path algebra arrives
 
