@@ -142,4 +142,4 @@ Decisive constraints:
 ## Commit progress
 
 - [x] 1. Refine closed-history search indexes on needle append
-- [ ] 2. Measure incremental needle entry in the occupancy probe
+- [x] 2. Measure incremental needle entry in the occupancy probe

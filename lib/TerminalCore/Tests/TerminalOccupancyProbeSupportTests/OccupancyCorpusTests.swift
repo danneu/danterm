@@ -12,6 +12,17 @@ import Testing
 
 /// Guards the corpus against silently drifting away from the stimulus doc 19 measured.
 struct OccupancyCorpusTests {
+    @Test("incremental needle entry reports one summed sample per iteration")
+    func incrementalNeedleSamples() throws {
+        let iterations = 2
+        let report = runOccupancyProbe(columns: 20, rows: 5, lines: 20, iterations: iterations)
+        let sample = try #require(report.samples.first {
+            $0.name == OccupancyCase.searchIncrementalNeedle.rawValue
+        })
+
+        #expect(sample.iterations == iterations)
+    }
+
     @Test("the corpus places a needle at the documented cadence and nowhere else")
     func needleCadence() {
         // Intent: NEEDLE_ appears on exactly every 97th line, so a search has matches to

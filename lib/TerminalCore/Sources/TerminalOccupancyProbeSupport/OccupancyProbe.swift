@@ -29,6 +29,7 @@ public enum OccupancyProbeDefaults {
 /// Names each measured case so a reader can map a row back to the job it prices.
 public enum OccupancyCase: String, Sendable, CaseIterable {
     case searchNewNeedle = "search: first press on a new needle"
+    case searchIncrementalNeedle = "search: type one needle incrementally"
     case searchHeldEnterQuiet = "search: held Enter, quiet pane"
     case searchHeldEnterStreaming = "search: Enter, output arriving between presses"
     case selectAll = "select-all (Cmd-A)"
@@ -63,6 +64,22 @@ public func runOccupancyProbe(
         })
     }
     samples.append(OccupancySample(name: OccupancyCase.searchNewNeedle.rawValue, milliseconds: newNeedle))
+
+    // Type the corpus's shared needle as a find field does. Each sample is the summed
+    // occupancy of the whole sequence: one required full scan followed by append refines.
+    let incrementalNeedle = "NEEDLE_"
+    var incremental: [Double] = []
+    for _ in 0..<iterations {
+        incremental.append(measureOccupancyMilliseconds {
+            for end in incrementalNeedle.indices.dropFirst() {
+                _ = terminal.beginSearch(String(incrementalNeedle[..<end]))
+            }
+            _ = terminal.beginSearch(incrementalNeedle)
+        })
+    }
+    samples.append(
+        OccupancySample(name: OccupancyCase.searchIncrementalNeedle.rawValue, milliseconds: incremental)
+    )
 
     // The reported symptom (`research/19/F9`): the needle is unchanged and only the selection moves.
     // Both halves of the job are measured together because `applySearch` pays both on every
