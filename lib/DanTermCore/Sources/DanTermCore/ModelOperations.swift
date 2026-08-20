@@ -967,11 +967,11 @@ indirect enum ContainerLayoutNode: Equatable {
   )
 }
 
-/// Layout and zoom inputs that can change a mounted container.
+/// Everything a mounted container presents: layout, zoom, and visibility.
 ///
-/// Two fields only: the structural fingerprint is not stored, because
-/// `sameContainerStructure` reads it out of `layout` in place. That makes a
-/// shape whose structure contradicts its own layout unrepresentable.
+/// The structural fingerprint is not stored, because `sameContainerStructure`
+/// reads it out of `layout` in place. That makes a shape whose structure
+/// contradicts its own layout unrepresentable.
 struct ContainerShape: Equatable {
   let layout: ContainerLayoutNode
   // focusedPaneId while zoomed; nil otherwise -- so a focus change in an unzoomed
@@ -979,6 +979,11 @@ struct ContainerShape: Equatable {
   // It also carries the zoom fact on its own: `PaneTree.zoomedPaneId` is nil iff
   // the tab is unzoomed.
   let zoomedLeaf: PaneId?
+  // True for the selected tab's container. Held here rather than passed beside
+  // the shapes so `computeContainerOps` diffs it like every other field: a
+  // `.setVisible` that changes nothing becomes unrepresentable, and the
+  // reconciler can read the last shown tab out of its own cache.
+  let visible: Bool
 }
 
 /// Drops pane payload while retaining every input to the pane layout function.
@@ -1017,11 +1022,13 @@ func sameContainerStructure(_ a: ContainerLayoutNode, _ b: ContainerLayoutNode) 
   }
 }
 
-/// The container shape for one tab.
-func containerShape(of tab: TabModel) -> ContainerShape {
+/// The container shape for one tab. The caller supplies the selection answer,
+/// so a shape is always a complete description of what its container presents.
+func containerShape(of tab: TabModel, visible: Bool) -> ContainerShape {
   ContainerShape(
     layout: containerLayoutNode(tab.paneTree.root),
-    zoomedLeaf: tab.paneTree.zoomedPaneId
+    zoomedLeaf: tab.paneTree.zoomedPaneId,
+    visible: visible
   )
 }
 

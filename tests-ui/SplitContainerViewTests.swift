@@ -59,6 +59,89 @@ func splitContainerViewTests() {
             "visibility changed model-owned geometry")
     }
 
+    uiTest("a hidden container lands model geometry from its own ops") {
+        // Intent: a hidden container that receives a tree update and then a zoom
+        //   lands every pane wrapper at its paneLayout frame, with no
+        //   ensureLaidOut() call anywhere in the sequence.
+        // Why it exists: the reconciler no longer relays out a container when it
+        //   hides one, so the tree, ratio, and zoom ops have to carry background
+        //   geometry on their own.
+        // Scenario: spec-first background split followed by a background zoom.
+        let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
+        let runtime = AppRuntime()
+        runtime.installTerminalSession(TerminalView(), paneId: paneA)
+        runtime.installTerminalSession(TerminalView(), paneId: paneB)
+        let splitRoot = SplitNodeModel.split(
+            id: splitId, direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.35)
+        let container = persistentContainer(root: .leaf(PaneModel(id: paneA)), runtime: runtime)
+        container.isHidden = true
+        container.rebuild()
+
+        container.setRootNode(splitRoot)
+
+        let wrapperA = try requireWrapper(runtime, paneA)
+        let wrapperB = try requireWrapper(runtime, paneB)
+        let split = paneLayout(
+            in: PaneLayoutRect(container.bounds), tree: splitRoot, zoomedPaneId: nil)
+        try uiExpect(wrapperA.frame == NSRect(split.paneFrames[paneA]!)
+            && wrapperB.frame == NSRect(split.paneFrames[paneB]!),
+            "a background split left a wrapper off its model frame")
+
+        container.setZoomedPane(paneA)
+
+        let zoomed = paneLayout(
+            in: PaneLayoutRect(container.bounds), tree: splitRoot, zoomedPaneId: paneA)
+        try uiExpect(wrapperA.frame == NSRect(zoomed.paneFrames[paneA]!),
+            "a background zoom left the zoomed wrapper off its model frame")
+        // The container itself is hidden, so ask the wrapper's own flag: the zoom
+        // op, not the container's visibility, has to hide the unzoomed sibling.
+        try uiExpect(wrapperB.isHidden,
+            "a background zoom left the unzoomed sibling showing")
+    }
+
+    uiTest("a selection switch lays out only the revealed container") {
+        // Intent: applying the hide/reveal pair a selection change emits leaves
+        //   the hidden container's panes untouched, while the revealed
+        //   container's panes land at paneLayout for its current bounds.
+        // Why it exists: the reconciler used to solve a layout for every mounted
+        //   tab on every sweep. Hiding a container must now cost no layout solve,
+        //   and revealing one must still repair geometry the hidden tab missed.
+        // Scenario: both containers are resized with the window, then selection
+        //   moves from the visible tab to the hidden one.
+        let paneA = PaneId(), paneB = PaneId()
+        let runtime = AppRuntime()
+        runtime.installTerminalSession(TerminalView(), paneId: paneA)
+        runtime.installTerminalSession(TerminalView(), paneId: paneB)
+        let rootA = SplitNodeModel.leaf(PaneModel(id: paneA))
+        let rootB = SplitNodeModel.leaf(PaneModel(id: paneB))
+        let selected = persistentContainer(root: rootA, runtime: runtime)
+        let background = persistentContainer(root: rootB, runtime: runtime)
+        background.isHidden = true
+        selected.rebuild()
+        background.rebuild()
+        let wrapperA = try requireWrapper(runtime, paneA)
+        let wrapperB = try requireWrapper(runtime, paneB)
+        let frameBeforeSwitch = wrapperA.frame
+
+        // Both containers autoresize with the window; neither has laid out at the
+        // narrower size yet when the sweep runs.
+        selected.frame.size.width = 400
+        background.frame.size.width = 400
+
+        selected.isHidden = true
+        background.isHidden = false
+        background.ensureLaidOut()
+
+        try uiExpect(wrapperA.frame == frameBeforeSwitch,
+            "hiding a container laid its panes out: \(wrapperA.frame) vs \(frameBeforeSwitch)")
+        let revealed = paneLayout(
+            in: PaneLayoutRect(background.bounds), tree: rootB, zoomedPaneId: nil)
+        try uiExpect(wrapperB.frame == NSRect(revealed.paneFrames[paneB]!),
+            "the revealed container did not land its pane at the model frame")
+    }
+
     uiTest("reapplying layout writes no pane frame and emits no ratio") {
         let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
         let runtime = AppRuntime()

@@ -970,7 +970,7 @@ func desiredContainerShapes(in model: AppModel) -> [TabId: ContainerShape] {
   var result: [TabId: ContainerShape] = [:]
   for group in model.groups {
     for tab in group.tabs {
-      result[tab.id] = containerShape(of: tab)
+      result[tab.id] = containerShape(of: tab, visible: tab.id == model.selectedTabId)
     }
   }
   return result
@@ -991,14 +991,17 @@ enum ContainerOp: Equatable {
 /// Diff old vs new container shapes into ops: `.remove` for tabs gone from `new`,
 /// `.build` for a tab absent in `old`, direct tree updates for surviving structural
 /// changes, ratio-only layout updates, zoom presentation updates, and `.setVisible`
-/// for every tab in `new`.
-/// Ordered remove -> build/tree/layout/zoom -> setVisible. Pure; unit-tested via model-apply
-/// (apply the ops to a presence/visibility map -> equals new's keys + visibility),
-/// which catches a dropped-hide regression an exact-sequence assert would bless.
+/// wherever visibility differs from the cached shape.
+///
+/// Removes come first; every other op follows its own tab, with `.setVisible`
+/// after the `.build` it settles. Visibility is diffed like every other field, so
+/// a sweep that changes nothing emits nothing. Pure; unit-tested both on the op
+/// script itself and via model-apply (apply the ops to a presence/visibility map
+/// -> equals new's keys + visibility), which catches a dropped-hide regression an
+/// exact-sequence assert would bless.
 func computeContainerOps(
   old: [TabId: ContainerShape],
-  new: [TabId: ContainerShape],
-  selectedTabId: TabId?
+  new: [TabId: ContainerShape]
 ) -> [ContainerOp] {
   var ops: [ContainerOp] = []
   for tabId in old.keys where new[tabId] == nil {
@@ -1006,7 +1009,10 @@ func computeContainerOps(
   }
   for (tabId, shape) in new {
     guard let oldShape = old[tabId] else {
+      // A freshly built container is mounted unhidden, so a new tab always needs
+      // its visibility written -- a new background tab has to end the sweep hidden.
       ops.append(.build(tabId: tabId))
+      ops.append(.setVisible(tabId: tabId, visible: shape.visible))
       continue
     }
     // Structure first: a tree edit is also a layout inequality, so the
@@ -1019,19 +1025,30 @@ func computeContainerOps(
     if oldShape.zoomedLeaf != shape.zoomedLeaf {
       ops.append(.setZoomedPane(tabId: tabId, paneId: shape.zoomedLeaf))
     }
-  }
-  for tabId in new.keys {
-    ops.append(.setVisible(tabId: tabId, visible: tabId == selectedTabId))
+    if oldShape.visible != shape.visible {
+      ops.append(.setVisible(tabId: tabId, visible: shape.visible))
+    }
   }
   return ops
+}
+
+/// The tab the last reconciled pass left showing, read out of the shape cache.
+///
+/// This is the reconciler's own record of what it displayed. Nothing derives the
+/// same fact from AppKit's `isHidden` flags, so the cache stays the single writer.
+func visibleTabId(in shapes: [TabId: ContainerShape]) -> TabId? {
+  shapes.first(where: { $0.value.visible })?.key
 }
 
 /// Does this container-op script strand the previously-visible tab -- i.e. is the
 /// visible container removed or hidden? This is the "view swap" condition.
 /// A pane TODO popover anchored to that container's wrapper button is physically
 /// orphaned when it holds; a tab popover is closed on view swap by policy.
-func containerOpsStrandVisible(ops: [ContainerOp], previouslyVisibleTabId: TabId?) -> Bool {
-  guard let visible = previouslyVisibleTabId else { return false }
+///
+/// Takes the cached shapes, not a tab id, so no caller can answer "what was
+/// visible" from anywhere but the reconciler's own cache.
+func containerOpsStrandVisible(ops: [ContainerOp], cachedShapes: [TabId: ContainerShape]) -> Bool {
+  guard let visible = visibleTabId(in: cachedShapes) else { return false }
   return ops.contains { op in
     switch op {
     case .remove(let tabId), .build(let tabId):
@@ -1045,11 +1062,13 @@ func containerOpsStrandVisible(ops: [ContainerOp], previouslyVisibleTabId: TabId
 }
 
 /// Reports whether a surviving visible tab's tree or zoom presentation changed.
+/// Reads the previously visible tab from the cached shapes for the same reason
+/// `containerOpsStrandVisible` does.
 func containerOpsEditVisibleTree(
   ops: [ContainerOp],
-  previouslyVisibleTabId: TabId?
+  cachedShapes: [TabId: ContainerShape]
 ) -> Bool {
-  guard let visible = previouslyVisibleTabId else { return false }
+  guard let visible = visibleTabId(in: cachedShapes) else { return false }
   return ops.contains { op in
     switch op {
     case .setTree(let tabId), .setZoomedPane(let tabId, _):

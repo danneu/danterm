@@ -7,8 +7,9 @@
 // guardSidebarRenameOps (suppress reload of edited row; structural ops clear
 // the active view session; nil target is a pass-through), advanceSidebarCache attribute
 // retention, the eager desiredContainerShapes projection, the
-// computeContainerOps model-apply suite (remove / build / tree / visibility-only
-// switch / no-op), containerOpsStrandVisible classification, ContainerShape
+// computeContainerOps suite (remove / build / tree / visibility-only switch /
+// no-op), asserted both on the op script and via model-apply,
+// containerOpsStrandVisible classification, ContainerShape
 // equality (ratio + leaf metadata carveouts; structural change /
 // zoom-toggle / direction / moved-leaf detected), direct tree updates, and
 // sessionsToTearDown. The model-apply helpers (sbTab / sbGroup / sbProj /
@@ -544,10 +545,13 @@ import Testing
     @Test("desiredContainerShapes: eager projection includes selected and background tabs")
     func desiredContainerShapesEagerProjectionIncludesBackgroundTabs() {
         // Intent: desiredContainerShapes covers every tab (selected,
-        //   same-group background, collapsed-group background) and is
-        //   independent of selectedTabId.
+        //   same-group background, collapsed-group background), and each
+        //   shape carries its own visibility -- so a selection change moves
+        //   `visible` between exactly two shapes and changes nothing else.
         // Why it exists: pins the eager-projection coverage net the
-        //   container reconciler relies on for hidden-mounting.
+        //   container reconciler relies on for hidden-mounting, and the
+        //   fact that visibility travels inside the diffed shape rather
+        //   than beside it.
         // Scenario: spec-first eager projection.
         let selectedPaneId = PaneId(), siblingPaneId = PaneId(), otherPaneId = PaneId()
         let selectedTabId = TabId(), siblingTabId = TabId(), otherTabId = TabId()
@@ -571,9 +575,9 @@ import Testing
             selectedTabId: selectedTabId
         )
         let expectedShapes = [
-            selectedTabId: containerShape(of: selectedTab),
-            siblingTabId: containerShape(of: siblingTab),
-            otherTabId: containerShape(of: otherTab),
+            selectedTabId: containerShape(of: selectedTab, visible: true),
+            siblingTabId: containerShape(of: siblingTab, visible: false),
+            otherTabId: containerShape(of: otherTab, visible: false),
         ]
         let expectedKeys = Set(expectedShapes.keys)
 
@@ -582,15 +586,18 @@ import Testing
         #expect(Set(initial.keys) == expectedKeys,
             "projection includes selected, same-group background, and collapsed-group background tabs")
         #expect(initial == expectedShapes,
-            "each projected shape matches the tab's container shape")
+            "each projected shape matches the tab's container shape, selected one visible")
 
         model.selectedTabId = otherTabId
         let afterSelectionChange = desiredContainerShapes(in: model)
 
         #expect(Set(afterSelectionChange.keys) == expectedKeys,
             "selection changes do not change projected tab keys")
-        #expect(afterSelectionChange == initial,
-            "selection changes do not change projected container shapes")
+        #expect(afterSelectionChange.mapValues(\.visible)
+            == [selectedTabId: false, siblingTabId: false, otherTabId: true],
+            "selection moves visibility to the newly selected tab and nowhere else")
+        #expect(afterSelectionChange[siblingTabId] == initial[siblingTabId],
+            "a tab untouched by the selection change keeps its whole shape")
     }
 
     // MARK: - computeContainerOps (model-apply, Stage 8)
@@ -603,8 +610,8 @@ import Testing
         // Scenario: spec-first remove.
         let a = TabId(), b = TabId(), pa = PaneId(), pb = PaneId()
         checkContainerOps(
-            old: [a: cShape(pa), b: cShape(pb)], oldVisible: [a: true, b: false],
-            new: [a: cShape(pa)], newSelected: a,
+            old: [a: cShape(pa, visible: true), b: cShape(pb)],
+            new: [a: cShape(pa, visible: true)],
             "removing tab B reaches new (A visible, B gone)")
     }
 
@@ -617,79 +624,130 @@ import Testing
         // Scenario: spec-first flat-container reconciliation.
         let a = TabId(), pa = PaneId(), pa2 = PaneId()
         checkContainerOps(
-            old: [a: cShape(pa)], oldVisible: [a: true],
-            new: [a: cSplitShape(pa, pa2)], newSelected: a,
+            old: [a: cShape(pa, visible: true)],
+            new: [a: cSplitShape(pa, pa2, visible: true)],
             "updating A reaches new with A still visible")
     }
 
     @Test("computeContainerOps: visibility-only selected-tab switch hides old, shows new")
     func computeContainerOpsVisibilityOnlySwitchHidesOldShowsNew() {
-        // Intent: a tab switch at identical shapes flips visibility
-        //   only (no rebuild).
-        // Why it exists: pins the visibility-only fast path -- the
-        //   dropped-hide regression net.
+        // Intent: a tab switch at identical shapes emits exactly one hide and
+        //   one show, and nothing else.
+        // Why it exists: pins the visibility-only fast path in both directions --
+        //   the dropped-hide regression net, and the guarantee that a switch
+        //   never touches the tab it leaves alone.
         // Scenario: spec-first visibility-only.
-        let a = TabId(), b = TabId(), pa = PaneId(), pb = PaneId()
-        checkContainerOps(
-            old: [a: cShape(pa), b: cShape(pb)], oldVisible: [a: true, b: false],
-            new: [a: cShape(pa), b: cShape(pb)], newSelected: b,
+        let a = TabId(), b = TabId(), c = TabId()
+        let pa = PaneId(), pb = PaneId(), pc = PaneId()
+        let old = [a: cShape(pa, visible: true), b: cShape(pb), c: cShape(pc)]
+        let new = [a: cShape(pa), b: cShape(pb, visible: true), c: cShape(pc)]
+        checkContainerOps(old: old, new: new,
             "switching A->B (identical shapes) hides A and shows B -- no rebuild")
+
+        let ops = computeContainerOps(old: old, new: new)
+        #expect(ops.count == 2
+            && ops.contains(.setVisible(tabId: a, visible: false))
+            && ops.contains(.setVisible(tabId: b, visible: true)),
+            "a selection change emits one hide, one show, and nothing for the untouched tab: \(ops)")
     }
 
-    @Test("computeContainerOps: no-op when the selected tab is unchanged (common eager path)")
-    func computeContainerOpsNoOpWhenSelectedUnchanged() {
-        // Intent: unchanged selection + shapes -> no ops.
-        // Why it exists: pins the common no-op fast path.
+    @Test("computeContainerOps: no-op when nothing changed (common eager path)")
+    func computeContainerOpsNoOpWhenNothingChanged() {
+        // Intent: an unchanged projection emits no ops at all, visibility
+        //   included.
+        // Why it exists: every reconcile sweep runs this diff, and an op that
+        //   fires with nothing changed makes the executor relay out every
+        //   mounted tab, hidden ones included, on every sweep.
         // Scenario: spec-first no-op.
         let a = TabId(), b = TabId(), pa = PaneId(), pb = PaneId()
+        let shapes = [a: cShape(pa, visible: true), b: cShape(pb)]
+        checkContainerOps(old: shapes, new: shapes,
+            "unchanged projection -> state unchanged (A visible, B hidden)")
+
+        #expect(computeContainerOps(old: shapes, new: shapes).isEmpty,
+            "an unchanged sweep must emit no container ops")
+    }
+
+    @Test("computeContainerOps: a newly mounted tab is built and then given its visibility")
+    func computeContainerOpsBuildIsFollowedByItsVisibility() {
+        // Intent: a tab the cache has never seen gets a build followed by a
+        //   `.setVisible` carrying its own visibility, whether it is the
+        //   selected tab or a background one.
+        // Why it exists: a freshly built container is mounted unhidden, so a
+        //   new background tab that skipped the visibility write would appear
+        //   on top of the selected tab.
+        // Scenario: spec-first new-tab mount.
+        let existing = TabId(), fresh = TabId()
+        let pe = PaneId(), pf = PaneId()
+        let old = [existing: cShape(pe, visible: true)]
         checkContainerOps(
-            old: [a: cShape(pa), b: cShape(pb)], oldVisible: [a: true, b: false],
-            new: [a: cShape(pa), b: cShape(pb)], newSelected: a,
-            "unchanged selection + shapes -> state unchanged (A visible, B hidden)")
+            old: old, new: [existing: cShape(pe, visible: true), fresh: cShape(pf)],
+            "mounting a background tab ends the sweep with it hidden")
+        checkContainerOps(
+            old: old, new: [existing: cShape(pe), fresh: cShape(pf, visible: true)],
+            "mounting a selected tab ends the sweep with only it visible")
+
+        let background = computeContainerOps(
+            old: old, new: [existing: cShape(pe, visible: true), fresh: cShape(pf)])
+        #expect(background == [.build(tabId: fresh), .setVisible(tabId: fresh, visible: false)],
+            "a new background tab is built and then hidden")
+
+        let selected = computeContainerOps(
+            old: old, new: [existing: cShape(pe), fresh: cShape(pf, visible: true)])
+        #expect(selected.firstIndex(of: .build(tabId: fresh))
+            .map { $0 < selected.firstIndex(of: .setVisible(tabId: fresh, visible: true))! } == true,
+            "a new selected tab is built before its visibility is written")
+        #expect(selected.contains(.setVisible(tabId: existing, visible: false)),
+            "the tab losing selection is hidden in the same sweep")
     }
 
     @Test("containerOpsStrandVisible flags only ops that strand the visible tab")
     func containerOpsStrandVisibleFlagsOnlyStrandingOps() {
         // Intent: containerOpsStrandVisible flags build/remove/hide of
-        //   the previously-visible tab, but not other ops or no-ops.
+        //   the previously-visible tab, but not other ops or no-ops -- and it
+        //   reads which tab that was from the cached shapes alone.
         // Why it exists: pins the stranding classifier the reconciler
         //   uses to decide whether to force-show a fallback.
         // Scenario: spec-first stranding classifier.
         let visible = TabId(), background = TabId()
+        let pv = PaneId(), pb = PaneId()
+        let cached = [visible: cShape(pv, visible: true), background: cShape(pb)]
 
         #expect(
-            containerOpsStrandVisible(ops: [.build(tabId: visible)], previouslyVisibleTabId: visible) == true,
+            containerOpsStrandVisible(ops: [.build(tabId: visible)], cachedShapes: cached) == true,
             "visible full build strands the visible container")
         #expect(
-            containerOpsStrandVisible(ops: [.remove(tabId: visible)], previouslyVisibleTabId: visible) == true,
+            containerOpsStrandVisible(ops: [.remove(tabId: visible)], cachedShapes: cached) == true,
             "visible remove strands the visible container")
         #expect(
             containerOpsStrandVisible(
                 ops: [.setVisible(tabId: visible, visible: false)],
-                previouslyVisibleTabId: visible) == true,
+                cachedShapes: cached) == true,
             "hiding the visible container strands it")
         #expect(
             containerOpsStrandVisible(
                 ops: [.build(tabId: background)],
-                previouslyVisibleTabId: visible
+                cachedShapes: cached
             ) == false,
             "background full build leaves the visible container mounted")
         #expect(
             containerOpsStrandVisible(
                 ops: [.setVisible(tabId: visible, visible: true)],
-                previouslyVisibleTabId: visible) == false,
+                cachedShapes: cached) == false,
             "showing the visible container is not a stranding op")
         #expect(
             containerOpsStrandVisible(
                 ops: [.setVisible(tabId: background, visible: true)],
-                previouslyVisibleTabId: visible) == false,
+                cachedShapes: cached) == false,
             "showing a background container is not a stranding op")
         #expect(
-            containerOpsStrandVisible(ops: [], previouslyVisibleTabId: visible) == false,
+            containerOpsStrandVisible(ops: [], cachedShapes: cached) == false,
             "no ops do not strand the visible container")
         #expect(
-            containerOpsStrandVisible(ops: [.remove(tabId: visible)], previouslyVisibleTabId: nil) == false,
-            "without a previously-visible tab there is no stranded container")
+            containerOpsStrandVisible(
+                ops: [.remove(tabId: visible)],
+                cachedShapes: [visible: cShape(pv), background: cShape(pb)]) == false,
+            "a cache showing nothing has no stranded container")
     }
 
     @Test("containerOpsEditVisibleTree flags tree and zoom updates only on the visible tab")
@@ -700,16 +758,16 @@ import Testing
         //   drags without dismissing pane-scoped popovers whose anchors survive.
         // Scenario: the incremental-container reconciliation performance fix.
         let visible = TabId(), background = TabId(), pane = PaneId()
+        let pv = PaneId(), pb = PaneId()
+        let cached = [visible: cShape(pv, visible: true), background: cShape(pb)]
 
         #expect(containerOpsEditVisibleTree(
-            ops: [.setTree(tabId: visible)],
-            previouslyVisibleTabId: visible))
+            ops: [.setTree(tabId: visible)], cachedShapes: cached))
         #expect(containerOpsEditVisibleTree(
-            ops: [.setZoomedPane(tabId: visible, paneId: pane)],
-            previouslyVisibleTabId: visible))
+            ops: [.setZoomedPane(tabId: visible, paneId: pane)], cachedShapes: cached))
         #expect(containerOpsEditVisibleTree(
             ops: [.setTree(tabId: background), .setVisible(tabId: visible, visible: true)],
-            previouslyVisibleTabId: visible) == false)
+            cachedShapes: cached) == false)
     }
 
     @Test("computeContainerOps uses a full build only when the cached tab is absent")
@@ -723,10 +781,10 @@ import Testing
         let old = cShape(pane)
         let new = cSplitShape(pane, sibling)
 
-        let clean = computeContainerOps(old: [:], new: [tabId: new], selectedTabId: tabId)
+        let clean = computeContainerOps(old: [:], new: [tabId: new])
         #expect(clean.contains(.build(tabId: tabId)))
 
-        let live = computeContainerOps(old: [tabId: old], new: [tabId: new], selectedTabId: tabId)
+        let live = computeContainerOps(old: [tabId: old], new: [tabId: new])
         #expect(live.contains(.build(tabId: tabId)) == false)
         #expect(live.contains(.setTree(tabId: tabId)))
     }
@@ -747,18 +805,15 @@ import Testing
         let hi = TabModel(id: tabId, paneTree: PaneTree(
             root: splitNode(sid, p1, p2, ratio: 0.8), focusedPaneId: p1))
 
+        let cached = [tabId: containerShape(of: lo, visible: true)]
         let ops = computeContainerOps(
-            old: [tabId: containerShape(of: lo)],
-            new: [tabId: containerShape(of: hi)],
-            selectedTabId: nil
+            old: cached,
+            new: [tabId: containerShape(of: hi, visible: true)]
         )
 
         #expect(ops.contains(.setLayout(tabId: tabId)))
         #expect(ops.contains { if case .setTree = $0 { true } else { false } } == false)
-        #expect(containerOpsEditVisibleTree(
-            ops: ops,
-            previouslyVisibleTabId: tabId
-        ) == false)
+        #expect(containerOpsEditVisibleTree(ops: ops, cachedShapes: cached) == false)
     }
 
     @Test("every structural discriminator emits a tree edit, never a layout-only op")
@@ -782,9 +837,8 @@ import Testing
         }
         func expectTreeEdit(_ old: SplitNodeModel, _ new: SplitNodeModel, _ what: String) {
             let ops = computeContainerOps(
-                old: [tabId: containerShape(of: tab(old))],
-                new: [tabId: containerShape(of: tab(new))],
-                selectedTabId: tabId
+                old: [tabId: containerShape(of: tab(old), visible: true)],
+                new: [tabId: containerShape(of: tab(new), visible: true)]
             )
             #expect(ops.contains(.setTree(tabId: tabId)), "\(what) is a tree edit")
             #expect(ops.contains(.setLayout(tabId: tabId)) == false,
@@ -848,7 +902,7 @@ import Testing
         let nodeB = SplitNodeModel.split(id: sid, direction: .horizontal, first: .leaf(leftB), second: .leaf(PaneModel(id: p2)), ratio: 0.5)
         let tabA = TabModel(id: TabId(), paneTree: PaneTree(root: nodeA, focusedPaneId: p1))
         let tabB = TabModel(id: TabId(), paneTree: PaneTree(root: nodeB, focusedPaneId: p1))
-        #expect(containerShape(of: tabA) == containerShape(of: tabB),
+        #expect(containerShape(of: tabA, visible: true) == containerShape(of: tabB, visible: true),
             "leaf payload (title/cwd/progress/todo/theme) is excluded -- a metadata edit must not rebuild")
     }
 
@@ -862,7 +916,7 @@ import Testing
         let p1 = PaneId(), p2 = PaneId(), p3 = PaneId(), sid = SplitId()
         let single = TabModel(id: TabId(), paneTree: PaneTree(root: .leaf(PaneModel(id: p1)), focusedPaneId: p1))
         let split = TabModel(id: TabId(), paneTree: PaneTree(root: splitNode(sid, p1, p2, ratio: 0.5), focusedPaneId: p1))
-        #expect(containerShape(of: single) != containerShape(of: split),
+        #expect(containerShape(of: single, visible: true) != containerShape(of: split, visible: true),
             "adding a leaf (single -> split) changes the shape")
         let splitV = TabModel(
             id: TabId(),
@@ -877,13 +931,13 @@ import Testing
                 focusedPaneId: p1
             )
         )
-        #expect(containerShape(of: split) != containerShape(of: splitV),
+        #expect(containerShape(of: split, visible: true) != containerShape(of: splitV, visible: true),
             "changing split direction changes the shape")
         let splitMoved = TabModel(id: TabId(), paneTree: PaneTree(root: splitNode(sid, p1, p3, ratio: 0.5), focusedPaneId: p1))
-        #expect(containerShape(of: split) != containerShape(of: splitMoved),
+        #expect(containerShape(of: split, visible: true) != containerShape(of: splitMoved, visible: true),
             "swapping a leaf id changes the shape")
         var zoomed = split; _ = zoomed.paneTree.zoom(p1)
-        #expect(containerShape(of: split) != containerShape(of: zoomed),
+        #expect(containerShape(of: split, visible: true) != containerShape(of: zoomed, visible: true),
             "zooming changes the shape")
     }
 
@@ -987,10 +1041,10 @@ private func checkRowOps(_ old: SidebarProjection?, _ new: SidebarProjection, _ 
 
 // MARK: - Container shape + op model-apply (Stage 8)
 
-private func cShape(_ p: PaneId) -> ContainerShape {
-    ContainerShape(layout: .leaf(p), zoomedLeaf: nil)
+private func cShape(_ p: PaneId, visible: Bool = false) -> ContainerShape {
+    ContainerShape(layout: .leaf(p), zoomedLeaf: nil, visible: visible)
 }
-private func cSplitShape(_ a: PaneId, _ b: PaneId) -> ContainerShape {
+private func cSplitShape(_ a: PaneId, _ b: PaneId, visible: Bool = false) -> ContainerShape {
     ContainerShape(
         layout: .split(
             id: SplitId(),
@@ -999,7 +1053,8 @@ private func cSplitShape(_ a: PaneId, _ b: PaneId) -> ContainerShape {
             second: .leaf(b),
             ratio: 0.5
         ),
-        zoomedLeaf: nil
+        zoomedLeaf: nil,
+        visible: visible
     )
 }
 private func splitNode(_ sid: SplitId, _ a: PaneId, _ b: PaneId, ratio: CGFloat) -> SplitNodeModel {
@@ -1011,7 +1066,9 @@ private func applyContainerOps(_ ops: [ContainerOp], to old: [TabId: Bool]) -> [
     for op in ops {
         switch op {
         case .remove(let t): state[t] = nil
-        case .build(let t): if state[t] == nil { state[t] = false }
+        // buildAndInsertContainer mounts a container unhidden, so a script that
+        // never writes visibility after a build leaves a background tab showing.
+        case .build(let t): state[t] = true
         case .setTree: break
         case .setLayout: break
         case .setZoomedPane: break
@@ -1021,13 +1078,12 @@ private func applyContainerOps(_ ops: [ContainerOp], to old: [TabId: Bool]) -> [
     return state
 }
 
+/// Applies the diffed script to the visibility state the cache describes and
+/// checks it reproduces exactly what `new` asks for.
 private func checkContainerOps(
-    old: [TabId: ContainerShape], oldVisible: [TabId: Bool],
-    new: [TabId: ContainerShape], newSelected: TabId?, _ name: String
+    old: [TabId: ContainerShape], new: [TabId: ContainerShape], _ name: String
 ) {
-    let ops = computeContainerOps(old: old, new: new, selectedTabId: newSelected)
-    let result = applyContainerOps(ops, to: oldVisible)
-    var expected: [TabId: Bool] = [:]
-    for t in new.keys { expected[t] = (t == newSelected) }
-    #expect(result == expected, "\(name)")
+    let ops = computeContainerOps(old: old, new: new)
+    let result = applyContainerOps(ops, to: old.mapValues(\.visible))
+    #expect(result == new.mapValues(\.visible), "\(name)")
 }

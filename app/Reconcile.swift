@@ -30,7 +30,9 @@ struct ReconcilerCaches {
     var paneToolbar: [PaneId: PaneToolbarRender] = [:]
     var searchOverlay: [PaneId: SearchOverlayRender] = [:]   // key present iff search active
     // The last container projection reconciled per tab. It includes layout inputs,
-    // so ratio-only changes reach hidden and visible containers alike.
+    // so ratio-only changes reach hidden and visible containers alike, and
+    // visibility, so this cache is the only record of which tab the last pass
+    // showed -- nothing re-derives that by scanning AppKit's isHidden flags.
     var containerShape: [TabId: ContainerShape] = [:]
     // Single-struct-compare cache: the last window chrome reconcileWindowChrome applied.
     // Its three hosts (window, chromeView, dock tile) persist across container edits,
@@ -126,18 +128,16 @@ extension AppRuntime {
     func reconcileContainers() {
         guard contentArea != nil else { return }
         let new = desiredContainerShapes(in: model)
-        let ops = computeContainerOps(old: caches.containerShape, new: new, selectedTabId: model.selectedTabId)
+        let ops = computeContainerOps(old: caches.containerShape, new: new)
 
-        let previouslyVisibleTabId = tabContainers.first(where: { !$0.value.isHidden })?.key
-        if containerOpsStrandVisible(ops: ops, previouslyVisibleTabId: previouslyVisibleTabId)
-            || containerOpsEditVisibleTree(
-                ops: ops,
-                previouslyVisibleTabId: previouslyVisibleTabId
-            ) {
+        // "What did the last pass show" comes from the shape cache, which owns the
+        // fact, rather than from scanning the containers' own isHidden flags.
+        if containerOpsStrandVisible(ops: ops, cachedShapes: caches.containerShape)
+            || containerOpsEditVisibleTree(ops: ops, cachedShapes: caches.containerShape) {
             cancelPaneDrag()
         }
 
-        // Apply ops (remove -> build/tree/layout/zoom -> setVisible).
+        // Apply ops (remove first, then each tab's build/tree/layout/zoom/visibility).
         for op in ops {
             switch op {
             case .remove(let tabId):
@@ -158,7 +158,10 @@ extension AppRuntime {
             case .setVisible(let tabId, let visible):
                 guard let container = tabContainers[tabId] else { break }
                 container.isHidden = !visible
-                container.ensureLaidOut()
+                // Only the reveal half lays out. A hidden container already carries
+                // model-derived geometry -- the tree, ratio, and zoom ops apply the
+                // layout themselves -- so hiding one costs no layout solve.
+                if visible { container.ensureLaidOut() }
             }
         }
         caches.containerShape = new
