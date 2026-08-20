@@ -1132,10 +1132,10 @@ wave.
 - [x] **[INTERACT-2](#interact-2)** (3x4, medium) Carry the normalized `TerminalViewportCell` into `TerminalPointerEvent` and decide link cancellation inside the policy **[decide first](#decisions-to-make-first)** -- `f6d6435f..c854be73`
 - [x] **[RUNTIME-3](#runtime-3)** (3x4, medium) Stop opening nested modal run loops from inside an open send frame **[decide first](#decisions-to-make-first)**
 - [x] **[BUILD-5](#build-5)** (2x5, small) Give the three manifest-discovery lists one owner so a new package root cannot be skipped -- `739c4b0e`
-- [ ] **[MODEL-6](#model-6)** (2x5, small) Drop the submission-to-request reverse index and derive it from the pending requests _(with [REDUCE-6](#reduce-6))_
+- [x] **[MODEL-6](#model-6)** (2x5, small) Drop the submission-to-request reverse index and derive it from the pending requests _(with [REDUCE-6](#reduce-6))_ -- `57ac0b1d`
 - [x] **[STORE-5](#store-5)** (2x5, small) Give a block one record-range accessor instead of five hand-copied index conversions -- `f01d901c`
 - [x] **[INTERACT-3](#interact-3)** (2x5, medium) Delete `TerminalDamageAccumulator`'s copy of the shift-composition rule and let it hold a `TerminalDamage` -- `d7f541e9`
-- [ ] **[REDUCE-6](#reduce-6)** (2x4, small) Tie a pending IPC input request to its pane so pane teardown can reject it _(with [MODEL-6](#model-6))_
+- [x] **[REDUCE-6](#reduce-6)** (2x4, small) Tie a pending IPC input request to its pane so pane teardown can reject it _(with [MODEL-6](#model-6))_ -- `57ac0b1d`
 - [x] **[STORE-4](#store-4)** (2x4, small) State the open tail's scratch-table key base once, so a trimmed head cannot key it two ways **[decide first](#decisions-to-make-first)** -- `e75a5f54`
 - [x] **[MODEL-5](#model-5)** (2x4, medium) Move per-pane search and notification-throttle state into PaneModel so pane teardown prunes them **[decide first](#decisions-to-make-first)** -- `03203c2d`
 - [x] **[MODEL-2](#model-2)** (2x3, medium) Make SidebarItemStore reject nothing, or report rejection, so a dropped row op cannot strand the outline **[decide first](#decisions-to-make-first)** -- `e8ee02f6..39c0546e`
