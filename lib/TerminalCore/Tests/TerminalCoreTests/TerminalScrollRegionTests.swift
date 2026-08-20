@@ -57,6 +57,113 @@ struct TerminalScrollRegionTests {
         #expect(bounded != plain)
     }
 
+    @Test("relative vertical motion clamps to margins from inside the region")
+    func relativeVerticalMotionClampsInsideRegion() throws {
+        // Intent: clamp every relative vertical CSI final to the active margin in
+        //   its direction, even when DECOM is off.
+        // Why it exists: BUG-03 let large relative moves escape a sticky-footer
+        //   region because they shared the DECOM-dependent absolute-position bound.
+        // Scenario: a TUI places its cursor inside rows 2 through 4, then sends a
+        //   large upward or downward relative move through each supported spelling.
+        let fixtures: [(sequence: String, row: Int, column: Int)] = [
+            ("\u{1B}[99A", 1, 2),
+            ("\u{1B}[99k", 1, 2),
+            ("\u{1B}[99F", 1, 0),
+            ("\u{1B}[99B", 3, 2),
+            ("\u{1B}[99e", 3, 2),
+            ("\u{1B}[99E", 3, 0),
+        ]
+
+        for fixture in fixtures {
+            var terminal = try #require(Terminal(columns: 4, rows: 6))
+            terminal.feed(Array("\u{1B}[2;4r\u{1B}[3;3H".utf8))
+
+            terminal.feed(Array(fixture.sequence.utf8))
+
+            #expect(terminal.geometry.cursor == TerminalCursor(
+                row: fixture.row,
+                column: fixture.column,
+                isPendingWrap: false
+            ))
+        }
+    }
+
+    @Test("relative vertical motion uses the margin in its travel direction")
+    func relativeVerticalMotionCrossesTowardRegion() throws {
+        // Intent: choose the clamp from the direction of travel rather than from
+        //   whether the cursor starts inside the active region.
+        // Why it exists: BUG-03 requires DEC's per-direction rule, which differs
+        //   from terminals that use margins only for an inside-region start.
+        // Scenario: the cursor starts above or below rows 2 through 4 and crosses
+        //   the whole region with one large relative move.
+        let fixtures: [(position: String, sequence: String, row: Int)] = [
+            ("\u{1B}[1;3H", "\u{1B}[99B", 3),
+            ("\u{1B}[6;3H", "\u{1B}[99A", 1),
+        ]
+
+        for fixture in fixtures {
+            var terminal = try #require(Terminal(columns: 4, rows: 6))
+            terminal.feed(Array(("\u{1B}[2;4r" + fixture.position).utf8))
+
+            terminal.feed(Array(fixture.sequence.utf8))
+
+            #expect(terminal.geometry.cursor?.row == fixture.row)
+        }
+    }
+
+    @Test("relative vertical motion away from the region reaches the screen edge")
+    func relativeVerticalMotionAwayFromRegionUsesScreenEdge() throws {
+        let fixtures: [(position: String, sequence: String, row: Int)] = [
+            ("\u{1B}[1;3H", "\u{1B}[99A", 0),
+            ("\u{1B}[6;3H", "\u{1B}[99B", 5),
+        ]
+
+        for fixture in fixtures {
+            var terminal = try #require(Terminal(columns: 4, rows: 6))
+            terminal.feed(Array(("\u{1B}[2;4r" + fixture.position).utf8))
+
+            terminal.feed(Array(fixture.sequence.utf8))
+
+            #expect(terminal.geometry.cursor?.row == fixture.row)
+        }
+    }
+
+    @Test("region-clamped relative motion clears pending state without changing content")
+    func relativeVerticalMotionPreservesGridAndClearsPendingState() throws {
+        // Intent: preserve the shared movement side effects while all six relative
+        //   vertical finals move through their region-aware entry point.
+        // Why it exists: BUG-03 reroutes four previously unproven finals, and a
+        //   specialized path could otherwise retain wrap or attachment state.
+        // Scenario: a cursor inside a sticky-footer region fills the last column,
+        //   moves to a margin, then receives a combining mark.
+        let fixtures: [(sequence: String, row: Int, column: Int)] = [
+            ("\u{1B}[99A", 1, 3),
+            ("\u{1B}[99k", 1, 3),
+            ("\u{1B}[99F", 1, 0),
+            ("\u{1B}[99B", 3, 3),
+            ("\u{1B}[99e", 3, 3),
+            ("\u{1B}[99E", 3, 0),
+        ]
+
+        for fixture in fixtures {
+            var terminal = try #require(Terminal(columns: 4, rows: 6))
+            terminal.feed(Array("\u{1B}[2;4r\u{1B}[3;3HAB".utf8))
+            let expectedRows = terminal.geometry.rows
+            let expectedScrollback = terminal.scrollbackRowCount
+
+            terminal.feed(Array((fixture.sequence + "\u{0301}").utf8))
+
+            #expect(terminal.geometry.cursor == TerminalCursor(
+                row: fixture.row,
+                column: fixture.column,
+                isPendingWrap: false
+            ))
+            #expect(terminal.geometry.rows == expectedRows)
+            #expect(terminal.scrollbackRowCount == expectedScrollback)
+            #expect(terminal.cell(row: 2, column: 3)?.scalars == ["B"])
+        }
+    }
+
     @Test("LF walks outside margins and scrolls only at the bottom margin")
     func lineFeedRegionMatrix() throws {
         var terminal = try labeledTerminal(columns: 2, rows: 4)

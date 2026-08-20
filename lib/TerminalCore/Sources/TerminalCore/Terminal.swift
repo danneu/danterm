@@ -5839,10 +5839,10 @@ public struct Terminal: Equatable, Sendable {
             replyToStatusQuery(sequence.parameters, isDECPrivate: false)
         case 0x41, 0x6B:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            movePositionedCursor(row: screen.cursor.row - amount, column: screen.cursor.column)
+            moveRelativeVerticalCursor(by: -amount, column: screen.cursor.column)
         case 0x42, 0x65:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            movePositionedCursor(row: screen.cursor.row + amount, column: screen.cursor.column)
+            moveRelativeVerticalCursor(by: amount, column: screen.cursor.column)
         case 0x43, 0x61:
             guard let amount = movementAmount(sequence.parameters) else { return }
             movePositionedCursor(row: screen.cursor.row, column: screen.cursor.column + amount)
@@ -5851,10 +5851,10 @@ public struct Terminal: Equatable, Sendable {
             movePositionedCursor(row: screen.cursor.row, column: screen.cursor.column - amount)
         case 0x45:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            movePositionedCursor(row: screen.cursor.row + amount, column: 0)
+            moveRelativeVerticalCursor(by: amount, column: 0)
         case 0x46:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            movePositionedCursor(row: screen.cursor.row - amount, column: 0)
+            moveRelativeVerticalCursor(by: -amount, column: 0)
         case 0x47, 0x60:
             guard sequence.parameters.count <= 1 else { return }
             movePositionedCursor(
@@ -6404,6 +6404,16 @@ public struct Terminal: Equatable, Sendable {
     private mutating func movePositionedCursor(row: Int, column: Int) {
         let rowRange = positioningRowRange
         screen.cursor.row = min(max(row, rowRange.lowerBound), rowRange.upperBound - 1)
+        screen.cursor.column = min(max(column, 0), columnCount - 1)
+        clearPendingMotionState()
+    }
+
+    private mutating func moveRelativeVerticalCursor(by delta: Int, column: Int) {
+        let row = screen.cursor.row
+        let region = activeScrollRegion
+        let lowerBound = delta < 0 && row >= region.lowerBound ? region.lowerBound : 0
+        let upperBound = delta > 0 && row < region.upperBound ? region.upperBound : rowCount
+        screen.cursor.row = min(max(row + delta, lowerBound), upperBound - 1)
         screen.cursor.column = min(max(column, 0), columnCount - 1)
         clearPendingMotionState()
     }
