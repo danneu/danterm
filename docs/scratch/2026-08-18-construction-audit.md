@@ -1111,7 +1111,7 @@ particular removes a live process-trapping bug, so it goes early inside the
 wave.
 
 - [x] **[MOBILE-1](#mobile-1)** (5x5, medium) Resolve cell metrics where the display scale changes, not on every applied tape record -- `76aed4ab`
-- [ ] **[HIST-2](#hist-2)** (4x5, small) Skip the per-cell content-unit walk when the record's hasWideCells bit proves the count
+- [x] **[HIST-2](#hist-2)** (4x5, small) Skip the per-cell content-unit walk when the record's hasWideCells bit proves the count -- `a52036c9`
 - [x] **[WIRE-1](#wire-1)** (4x5, small) Frame IPC lines by scanning for the newline, not by appending one byte at a time -- `cea20832`
 - [x] **[INTERACT-1](#interact-1)** (4x5, medium) Refresh the search index through one history-mutation funnel instead of seven hand-placed calls -- `f3134418`
 - [x] **[MOBILE-3](#mobile-3)** (4x5, medium) Decode each tape event once into a typed value instead of re-encoding and re-decoding it per record -- `40ca4c51`
