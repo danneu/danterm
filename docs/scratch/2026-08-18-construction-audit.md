@@ -1226,7 +1226,7 @@ rewrites.
 - [ ] **[HIST-3](#hist-3)** (3x4, medium) Carry the fold's result in DisplayRowCursor so a row is folded once, not three times _(after [STORE-5](#store-5))_
 - [ ] **[HIST-1](#hist-1)** (3x4, large) Give the open tail record one home: move its header and spills into the open scratch _(after [STORE-4](#store-4))_
 - [x] **[FRAME-3](#frame-3)** (2x5, small) Give TerminalDamage the predicates its consumers ask for, so no hot caller materializes a folded copy or a row array -- `2a68270f`, `13db5f73`
-- [ ] **[PANE-3](#pane-3)** (2x5, small) Record which button a press forwarded, replacing the two ad-hoc pairing booleans
+- [x] **[PANE-3](#pane-3)** (2x5, small) Record which button a press forwarded, replacing the two ad-hoc pairing booleans -- `fb48c350`
 - [x] **[XPORT-4](#xport-4)** (2x5, small) Accumulate coalesced update payloads instead of rebuilding the merged signal per hop _(after [XPORT-1](#xport-1))_ -- `5739eb80..aada7838`
 - [x] **[PERSIST-5](#persist-5)** (2x5, medium) Move the pure pane-tape stream policy into DanTermCore and leave only the socket write in Support _(after [PERSIST-6](#persist-6))_ -- `09f16a4e`
 
