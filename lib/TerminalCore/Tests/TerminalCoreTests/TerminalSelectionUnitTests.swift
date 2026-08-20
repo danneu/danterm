@@ -262,13 +262,9 @@ struct TerminalSelectionUnitTests {
             terminal: terminal,
             state: &state
         )
-        guard case let .set(selected) = decision.selectionMutation else {
-            Issue.record("double-click down must set a selection, got \(String(describing: decision.selectionMutation))")
-            return
-        }
         // Not "WX", which is what row 0 of the alternate screen displays.
-        #expect(selected == range(0, 0, 0, 2))
-        terminal.setSelection(selected)
+        #expect(decision.selectionMutation == .set(range(0, 0, 0, 2), granularity: .terminalToken))
+        applyTerminalPointerDecision(decision, to: &terminal)
         #expect(terminal.selectedText == "ab")
     }
 

@@ -1508,17 +1508,7 @@ public actor TerminalPTYHost {
                 attribution: .user(waitGeneration: waitGeneration)
             )
         }
-        switch decision.selectionMutation {
-        case .clear:
-            terminal.clearSelection()
-        case .set(let range):
-            terminal.setSelection(
-                range,
-                granularity: decision.selectionGranularity ?? .character
-            )
-        case nil:
-            break
-        }
+        applyTerminalPointerDecision(decision, to: &terminal)
         // Captured here, in the same owner step that applied the mutation, so output arriving
         // after the gesture completed cannot change what the subscriber is handed. Emptiness is
         // judged on the extracted string: a selection over blank cells is present and empty,
@@ -1530,8 +1520,6 @@ public actor TerminalPTYHost {
         {
             onSelectionCompleted(text)
         }
-        applyHoverMutation(decision.hoverMutation)
-        applyArmMutation(decision.armMutation)
         markFrameUpdatePendingIfNeeded()
         publishPendingUpdate()
         if let link = decision.openLink {
@@ -1542,32 +1530,9 @@ public actor TerminalPTYHost {
     private func applyLinkCancellation() {
         guard teardownFinished == false else { return }
         let cancellation = cancelTerminalLinkInteraction(state: &interactionState)
-        applyHoverMutation(cancellation.hoverMutation)
-        applyArmMutation(cancellation.armMutation)
+        applyTerminalLinkCancellation(cancellation, to: &terminal)
         markFrameUpdatePendingIfNeeded()
         publishPendingUpdate()
-    }
-
-    private func applyHoverMutation(_ mutation: TerminalHoverMutation?) {
-        switch mutation {
-        case .clear:
-            terminal.clearHoveredLink()
-        case .set(let link):
-            terminal.setHoveredLink(link)
-        case nil:
-            break
-        }
-    }
-
-    private func applyArmMutation(_ mutation: TerminalLinkArmMutation?) {
-        switch mutation {
-        case .clear:
-            terminal.clearArmedLink()
-        case .set(let link):
-            _ = terminal.setArmedLink(link)
-        case nil:
-            break
-        }
     }
 
     private func applyClearSelection() {

@@ -11,9 +11,13 @@ public enum TerminalPointerConsumption: Equatable, Sendable {
 }
 
 /// Describes the owner-side selection mutation computed by pointer policy.
+///
+/// The unit travels inside `set` because a settled range and the unit it settled with are one
+/// decision: a set without a unit, or a clear carrying one, would be a state no policy arm can
+/// produce and every consumer would have to invent a default for.
 public enum TerminalSelectionMutation: Equatable, Sendable {
     case clear
-    case set(TerminalTextRange)
+    case set(TerminalTextRange, granularity: TerminalSelectionGranularity)
 }
 
 /// Describes presentation-only hover work for the serialized terminal owner.
@@ -42,10 +46,8 @@ public struct TerminalPointerDecision: Equatable, Sendable {
     public let consumption: TerminalPointerConsumption
     /// Contains child input only for the report arm.
     public let inputBytes: [UInt8]
-    /// Carries a local selection update for the selection arm.
+    /// Carries a local selection update, unit included, for the selection arm.
     public let selectionMutation: TerminalSelectionMutation?
-    /// Carries the unit that a set mutation must settle with the range.
-    public let selectionGranularity: TerminalSelectionGranularity?
     /// Applies hover presentation independently from the event's byte-owning arm.
     public let hoverMutation: TerminalHoverMutation?
     /// Delivers a click-time-revalidated HTTP(S) target only on a matching link release.
@@ -149,7 +151,6 @@ public func decideTerminalPointer(
         consumption: decision.consumption,
         inputBytes: decision.inputBytes,
         selectionMutation: decision.selectionMutation,
-        selectionGranularity: decision.selectionGranularity,
         hoverMutation: .clear,
         openLink: nil,
         armMutation: .clear,
@@ -240,7 +241,6 @@ private func decidePointerArm(
                 consumption: .link,
                 inputBytes: [],
                 selectionMutation: nil,
-                selectionGranularity: nil,
                 hoverMutation: .clear,
                 openLink: link.hyperlink,
                 armMutation: .clear,
@@ -321,8 +321,7 @@ private func decidePointerArm(
                 )
                 return pointerDecision(
                     .selection,
-                    selectionMutation: .set(union(anchor, current)),
-                    selectionGranularity: drag.granularity,
+                    selectionMutation: .set(union(anchor, current), granularity: drag.granularity),
                     hoverMutation: dragHover
                 )
             }
@@ -345,8 +344,10 @@ private func decidePointerArm(
             }
             return pointerDecision(
                 .selection,
-                selectionMutation: .set(orderedRange(pressBoundary, currentBoundary)),
-                selectionGranularity: drag.granularity,
+                selectionMutation: .set(
+                    orderedRange(pressBoundary, currentBoundary),
+                    granularity: drag.granularity
+                ),
                 hoverMutation: dragHover
             )
         }
@@ -538,8 +539,9 @@ private func pointerDownDecision(
         state.selectionGestureCompletes = true
         return pointerDecision(
             .selection,
-            selectionMutation: granularity == .character ? .clear : .set(anchor),
-            selectionGranularity: granularity == .character ? nil : granularity
+            selectionMutation: granularity == .character
+                ? .clear
+                : .set(anchor, granularity: granularity)
         )
     }
 }
@@ -572,8 +574,9 @@ private func extensionDecision(
     }
     return pointerDecision(
         .selection,
-        selectionMutation: fixed == moving ? .clear : .set(orderedRange(fixed, moving)),
-        selectionGranularity: fixed == moving ? nil : granularity,
+        selectionMutation: fixed == moving
+            ? .clear
+            : .set(orderedRange(fixed, moving), granularity: granularity),
         hoverMutation: hoverMutation
     )
 }
@@ -582,7 +585,6 @@ private func pointerDecision(
     _ consumption: TerminalPointerConsumption,
     bytes: [UInt8] = [],
     selectionMutation: TerminalSelectionMutation? = nil,
-    selectionGranularity: TerminalSelectionGranularity? = nil,
     hoverMutation: TerminalHoverMutation? = nil,
     armMutation: TerminalLinkArmMutation? = nil,
     completedSelectionGesture: Bool = false
@@ -591,7 +593,6 @@ private func pointerDecision(
         consumption: consumption,
         inputBytes: bytes,
         selectionMutation: selectionMutation,
-        selectionGranularity: selectionGranularity,
         hoverMutation: hoverMutation,
         openLink: nil,
         armMutation: armMutation,

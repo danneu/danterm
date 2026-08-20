@@ -215,18 +215,16 @@ struct TerminalWezTermAdaptedTests {
             .move(cell: .init(column: to.column, row: to.row, offsetX: toOffsetX)),
             .up(.left, cell: .init(column: to.column, row: to.row)),
         ] {
-            switch decideTerminalPointer(event, terminal: terminal, state: &state)
-                .selectionMutation
-            {
+            let decision = decideTerminalPointer(event, terminal: terminal, state: &state)
+            switch decision.selectionMutation {
             case .clear:
                 policyRange = nil
-                terminal.clearSelection()
-            case let .set(range):
+            case let .set(range, _):
                 policyRange = range
-                terminal.setSelection(range)
             case nil:
                 break
             }
+            applyTerminalPointerDecision(decision, to: &terminal)
         }
         return (policyRange, terminal.selectedText)
     }

@@ -627,7 +627,8 @@ private struct EventCodingKey: CodingKey {
     }
 }
 
-/// Replays one neutral mouse event through the shared policy and applies only local selection.
+/// Replays one neutral mouse event through the shared policy and settles its terminal-local
+/// effects through the same applier the live host uses, so a replay matches a live snapshot.
 public func applyNeutralTerminalMouse(
     _ mouse: NeutralTerminalMouseEvent,
     terminal: inout Terminal,
@@ -647,33 +648,7 @@ public func applyNeutralTerminalMouse(
 
     guard let event = neutralPointerEvent(for: mouse) else { return [] }
     let decision = decideTerminalPointer(event, terminal: terminal, state: &interactionState)
-    switch decision.selectionMutation {
-    case .clear:
-        terminal.clearSelection()
-    case .set(let range):
-        terminal.setSelection(
-            range,
-            granularity: decision.selectionGranularity ?? .character
-        )
-    case nil:
-        break
-    }
-    switch decision.hoverMutation {
-    case .clear:
-        terminal.clearHoveredLink()
-    case .set(let link):
-        terminal.setHoveredLink(link)
-    case nil:
-        break
-    }
-    switch decision.armMutation {
-    case .clear:
-        terminal.clearArmedLink()
-    case .set(let link):
-        _ = terminal.setArmedLink(link)
-    case nil:
-        break
-    }
+    applyTerminalPointerDecision(decision, to: &terminal)
     return decision.inputBytes
 }
 
