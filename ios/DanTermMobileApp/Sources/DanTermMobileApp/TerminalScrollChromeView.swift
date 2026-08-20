@@ -60,10 +60,10 @@ final class TerminalScrollChromeView: UIScrollView, UIScrollViewDelegate {
 
     /// Re-reads the surface and hands the driver the engine's current truth.
     ///
-    /// Called for every replica change, every local scroll, and every layout pass. Which of
-    /// those actually moved the projection is the driver's question: while the user is
-    /// interacting it reflects nothing, and when idle it reconciles the chrome with the
-    /// engine, which is also how a remote viewport record reaches the indicator.
+    /// Called after every published frame, local scroll, layout pass, and pane attach.
+    /// Which of those actually moved the projection is the driver's question: while the
+    /// user is interacting it reflects nothing, and when idle it reconciles the chrome
+    /// with the engine, which is also how a remote viewport record reaches the indicator.
     func refresh() {
         let facts = surface?.scrollFacts
         // Before the reflection, because the offset a projection implies is only reachable

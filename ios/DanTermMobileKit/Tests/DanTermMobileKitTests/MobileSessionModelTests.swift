@@ -46,6 +46,45 @@ func backgroundingSavesAnAdvancedReplica() {
     ))
 }
 
+@Test("Replica transitions redraw, detected gaps end, and current facts control release")
+func replicaTransitionsAndSurfaceFactsDriveTheirOwnEffects() throws {
+    // Intent: every replica state transition redraws, a locally detected gap ends the
+    //   connection, and a facts report that withdraws pinnedness withdraws the release.
+    // Why it exists: the app shell reports state and replica-derived facts on separate
+    //   change-only callbacks, so each model input must still carry its whole behavior.
+    // Scenario: a serving stream synchronizes, declares a recoverable gap, repairs it,
+    //   then detects an irrecoverable gap after its pane is no longer known to be pinned.
+    var session = Session()
+    try session.reachServingStream()
+
+    let declaredLoss = PaneTapeGapRecord.Loss.exact(
+        droppedEventCount: 1,
+        droppedFeedBytes: 2,
+        droppedWriteBytes: 3
+    )
+    for state: PaneReplicaState in [
+        .awaitingSynchronization,
+        .exact,
+        .gap(.declared(declaredLoss)),
+        .exact,
+    ] {
+        #expect(session.handle(.replicaStateChanged(state)) == [.redraw])
+    }
+
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: true
+    )))
+    #expect(session.model.projection(at: session.now).claim.release != nil)
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: nil
+    )))
+    #expect(session.model.projection(at: session.now).claim.release == nil)
+
+    #expect(session.handle(.replicaStateChanged(.gap(.detected))).contains(.disconnect))
+}
+
 @Test("A claim sends the grid the surface draws now, and a release sends the fit form")
 func geometryGesturesSendTheCurrentGrid() throws {
     // Intent: the claim gesture's whole wire effect is one resize carrying the surface's

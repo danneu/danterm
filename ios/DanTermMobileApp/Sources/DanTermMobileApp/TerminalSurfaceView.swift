@@ -31,7 +31,12 @@ struct TerminalScrollFacts {
 final class TerminalSurfaceView: UIView {
     /// Signals that a new exact cursor can replace the saved continuation checkpoint.
     var didAdvanceReplica: (() -> Void)?
+    /// Signals a replica-state transition, including the first state after a reset.
     var didChangeReplicaState: ((PaneReplicaState) -> Void)?
+    /// Signals that pinnedness or alternate-screen activity changed after a record.
+    var didChangeReplicaFacts: (() -> Void)?
+    /// Signals that a newly rendered frame replaced the frame attached to the view.
+    var didPublishFrame: (() -> Void)?
     /// Signals that the extent or the safe area this view claims and draws inside settled
     /// at new values, so the session can be told the grid it now offers.
     var didLayout: (() -> Void)?
@@ -56,6 +61,14 @@ final class TerminalSurfaceView: UIView {
     /// resolves to. Replaced only in `refreshCellMetrics`, so the CoreText work it costs
     /// happens where its inputs move rather than once per applied record.
     private var cellMetrics: MobileCellMetrics?
+    private var lastReportedReplicaState: PaneReplicaState?
+    private var lastReportedReplicaFacts: ReportedReplicaFacts?
+
+    /// Groups the replica-derived model facts so one memo guards their shared callback.
+    private struct ReportedReplicaFacts: Equatable {
+        let pinned: Bool?
+        let isAlternateScreenActive: Bool
+    }
 
     /// How far the keyboard-riding bar has risen above this view's bottom, in points,
     /// measured by the placing controller. It is a presentation offset only: the grid,
@@ -115,6 +128,8 @@ final class TerminalSurfaceView: UIView {
         geometry = nil
         fittedFor = nil
         surface = nil
+        lastReportedReplicaState = nil
+        lastReportedReplicaFacts = nil
         surfaceView.layer.contents = nil
         displayLink?.isPaused = true
         if let terminal = replica.terminal {
@@ -131,7 +146,18 @@ final class TerminalSurfaceView: UIView {
         let previousSlack = anchorSlackPixels
         defer { invalidateLayoutOnAnchorMove(from: previousSlack) }
         try replica.apply(record)
-        didChangeReplicaState?(replica.state)
+        if replica.state != lastReportedReplicaState {
+            lastReportedReplicaState = replica.state
+            didChangeReplicaState?(replica.state)
+        }
+        let replicaFacts = ReportedReplicaFacts(
+            pinned: replica.pinned,
+            isAlternateScreenActive: isAlternateScreenActive
+        )
+        if replicaFacts != lastReportedReplicaFacts {
+            lastReportedReplicaFacts = replicaFacts
+            didChangeReplicaFacts?()
+        }
         if replica.state == .exact, replica.cursor != previousCursor {
             didAdvanceReplica?()
         }
@@ -242,6 +268,7 @@ final class TerminalSurfaceView: UIView {
             displayLink?.isPaused = true
             return
         }
+        var publishedFrame = false
         switch action {
         case .render(let surfaceId):
             guard stores[surfaceId].ioSurface.isInUse == false else {
@@ -270,10 +297,12 @@ final class TerminalSurfaceView: UIView {
             } else {
                 surfaceView.layer.contents = store.ioSurface
                 policy.didPublish(surfaceId: surfaceId)
+                publishedFrame = true
             }
         }
         self.policy = policy
         displayLink?.isPaused = policy.needsTick == false
+        if publishedFrame { didPublishFrame?() }
     }
 
     /// Allocates the frame stores one grid needs in this view, at the metrics the view

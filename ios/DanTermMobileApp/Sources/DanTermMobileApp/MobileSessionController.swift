@@ -72,11 +72,11 @@ final class MobileSessionController {
     func start() {
         surfaceView.didAdvanceReplica = { [weak self] in self?.dispatch(.replicaAdvanced) }
         surfaceView.didChangeReplicaState = { [weak self] state in
-            guard let self else { return }
-            dispatch(.replicaStateChanged(state))
-            surfaceDidLayout()
+            self?.dispatch(.replicaStateChanged(state))
         }
-        surfaceView.didLayout = { [weak self] in self?.surfaceDidLayout() }
+        surfaceView.didChangeReplicaFacts = { [weak self] in self?.reportSurfaceFacts() }
+        surfaceView.didPublishFrame = { [weak self] in self?.scrollChrome.refresh() }
+        surfaceView.didLayout = { [weak self] in self?.refreshChromeAndReportSurfaceFacts() }
         scrollChrome.surface = surfaceView
         scrollChrome.onScrollToTopRow = { [weak self] row in
             self?.dispatch(.scrolledToTopRow(row))
@@ -129,16 +129,19 @@ final class MobileSessionController {
         drain()
     }
 
-    /// Reports the surface's current facts. The extent decides whether a whole cell fits,
+    /// Refreshes the chrome and reports the surface's current facts after layout or attach.
+    /// The extent decides whether a whole cell fits,
     /// which is one of the facts the claim control projects from, so a layout pass is one
     /// of the things the session has to be told about. The report is a geometry event:
     /// while the model holds a standing claim, a rotated grid renews that claim, so this
     /// is one of the inputs allowed to produce a resize.
-    ///
-    /// The scroll chrome reads the same moment, because the projection it mirrors and the
-    /// grid it overlays both move for exactly these reasons.
-    private func surfaceDidLayout() {
+    private func refreshChromeAndReportSurfaceFacts() {
         scrollChrome.refresh()
+        reportSurfaceFacts()
+    }
+
+    /// Reports the model facts that record application can move without moving the chrome.
+    private func reportSurfaceFacts() {
         dispatch(.surfaceChanged(MobileSurfaceFacts(
             nativeGrid: surfaceView.nativeGrid,
             pinned: surfaceView.pinned,
@@ -188,6 +191,7 @@ final class MobileSessionController {
         case .attachPane(let pane, let resumesFromStoredCheckpoint):
             let stored = resumesFromStoredCheckpoint ? checkpointStore.load(for: pane) : nil
             let cursor = surfaceView.reset(checkpoint: stored, for: pane)
+            refreshChromeAndReportSurfaceFacts()
             dispatch(.paneAttached(pane: pane, cursor: cursor))
         case .beginStream(let requestId, let request):
             beginStream(requestId: requestId, request: request.request)
