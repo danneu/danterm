@@ -1825,6 +1825,193 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("signals merged behind one hop stay inside the retention bound", .timeLimit(.minutes(1)))
+    func mergedPendingSignalsStayInsideTheRetentionBound() async throws {
+        // Intent: several host signals collapsed behind one main hop deliver no more than
+        //   the retention count of discrete events, exactly one title, working directory,
+        //   and progress -- each the newest value at the newest position -- plus the
+        //   merged clipboard write, history generation, and lifecycle result.
+        // Why it exists: the boundary concatenated every signal it merged, so a stalled
+        //   main thread let untrusted child output grow this pane's pending payload with
+        //   no bound at all, and repeated titles piled up instead of coalescing.
+        // Scenario: a pane emits three bursts of bells, each burst re-stating the title,
+        //   the working directory, and progress, while the main hop has not run; a
+        //   checkpoint fence then takes the whole accumulation.
+        let cap = TerminalSemanticEventRetention.maximumDiscreteEventCount
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        var delivered: [PaneSemanticEvent] = []
+        var clipboardWrites: [String] = []
+        var historyMutations = 0
+        var endedResult: PaneProcessLifecycleResult?
+        controller.onSemanticEvents = { delivered.append(contentsOf: $0) }
+        controller.onClipboardWrite = { clipboardWrites.append($0) }
+        controller.onPrimaryHistoryMutation = { historyMutations += 1 }
+        controller.onSessionEnded = { endedResult = $0 }
+        controller.synchronizeState()
+        delivered.removeAll()
+        clipboardWrites.removeAll()
+        historyMutations = 0
+
+        for burst in 1...3 {
+            controller.stagePendingUpdateSignalForTesting(TerminalPTYUpdateSignal(
+                processStarted: false,
+                clipboardWrite: burst == 2 ? "clip-\(burst)" : nil,
+                semanticEvents: Array(repeating: .terminal(.bell), count: cap - 20) + [
+                    .terminal(.title("title-\(burst)")),
+                    .terminal(.workingDirectory("/cwd-\(burst)")),
+                    .terminal(.progress(.set(percent: UInt8(burst)))),
+                ],
+                // Only the middle burst reports a high generation and the exit, so a
+                // merge that took the newest field instead of the strongest would lose
+                // both to the quiet burst that follows.
+                primaryHistoryGeneration: burst == 2 ? 100_000 : 1,
+                result: burst == 2 ? .exited(.exited(0)) : nil
+            ))
+        }
+        controller.synchronizeState()
+
+        #expect(delivered.filter { $0 == .terminal(.bell) }.count == cap)
+        #expect(delivered.filter(isTitle).count == 1)
+        #expect(delivered.suffix(3) == [
+            .terminal(.title("title-3")),
+            .terminal(.workingDirectory("/cwd-3")),
+            .terminal(.progress(.set(percent: 3))),
+        ])
+        #expect(clipboardWrites == ["clip-2"])
+        // A merge that kept the newest generation rather than the strongest would report
+        // the quiet burst's generation, which is behind the pane's own, and say nothing.
+        #expect(historyMutations > 0)
+        #expect(endedResult == .exited(.exited(0)))
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("byte pressure keeps the value already retained", .timeLimit(.minutes(1)))
+    func bytePressureKeepsTheValueAlreadyRetained() async throws {
+        // Intent: when a newer replaceable value does not fit the retention byte ceiling,
+        //   the value already retained is delivered and the newer one is dropped.
+        // Why it exists: the bound has to outrank coalescing, otherwise a child could
+        //   push the pending payload past the ceiling one enormous title at a time.
+        // Scenario: three merged signals fill nearly the whole byte budget with command
+        //   marks, retain a one-character title, then offer a title too large to admit.
+        let cap = TerminalSemanticEventRetention.maximumDiscreteEventCount
+        let budget = TerminalSemanticEventRetention.maximumRetainedBytes
+        let filler = String(repeating: "f", count: budget / cap - 1)
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        var delivered: [PaneSemanticEvent] = []
+        controller.onSemanticEvents = { delivered.append(contentsOf: $0) }
+        controller.synchronizeState()
+        delivered.removeAll()
+
+        controller.stagePendingUpdateSignalForTesting(makeSemanticSignal(
+            Array(repeating: .terminal(.commandStarted(filler)), count: cap)
+        ))
+        controller.stagePendingUpdateSignalForTesting(makeSemanticSignal(
+            [.terminal(.title("A"))]
+        ))
+        controller.stagePendingUpdateSignalForTesting(makeSemanticSignal(
+            [.terminal(.title(String(repeating: "B", count: budget / cap)))]
+        ))
+        controller.synchronizeState()
+
+        #expect(delivered.filter(isTitle) == [.terminal(.title("A"))])
+        #expect(deliveredStringBytes(delivered) <= budget)
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("acknowledgements coalesce by wait generation", .timeLimit(.minutes(1)))
+    func acknowledgementsCoalesceByWaitGeneration() async throws {
+        // Intent: merged signals retain exactly one input acknowledgement per distinct
+        //   wait generation, counting the absent generation as one such value.
+        // Why it exists: acknowledgements are the pane's own facts, not terminal output,
+        //   so they must survive the bound -- but only one per generation can ever matter,
+        //   because retraction reads nothing but the generation.
+        // Scenario: two merged signals carry repeated acknowledgements with no generation,
+        //   repeated ones sharing a generation, and one carrying a second generation.
+        let first = PaneInputWaitGeneration(rawValue: 7)
+        let second = PaneInputWaitGeneration(rawValue: 9)
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        var delivered: [PaneSemanticEvent] = []
+        controller.onSemanticEvents = { delivered.append(contentsOf: $0) }
+        controller.synchronizeState()
+        delivered.removeAll()
+
+        controller.stagePendingUpdateSignalForTesting(makeSemanticSignal([
+            .userInputDelivered(waitGeneration: nil),
+            .userInputDelivered(waitGeneration: nil),
+            .userInputDelivered(waitGeneration: first),
+        ]))
+        controller.stagePendingUpdateSignalForTesting(makeSemanticSignal([
+            .userInputDelivered(waitGeneration: first),
+            .userInputDelivered(waitGeneration: nil),
+            .userInputDelivered(waitGeneration: second),
+        ]))
+        controller.synchronizeState()
+
+        #expect(delivered.count == 3)
+        #expect(delivered.contains(.userInputDelivered(waitGeneration: nil)))
+        #expect(delivered.contains(.userInputDelivered(waitGeneration: first)))
+        #expect(delivered.contains(.userInputDelivered(waitGeneration: second)))
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("a fence takes the accumulation behind a queued hop", .timeLimit(.minutes(1)))
+    func aFenceTakesTheAccumulationBehindAQueuedHop() async throws {
+        // Intent: a synchronous fence delivers everything accumulated behind a main hop
+        //   that has already been queued, exactly once, and that hop then delivers nothing.
+        // Why it exists: a checkpoint consume must not overtake urgent work already
+        //   signaled toward the main hop, and must not let the stale hop repeat it.
+        // Scenario: the child rings, writes the clipboard, and rings again while the main
+        //   queue has not run, then a checkpoint fence lands before the queued hop.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        var deliveries: [[PaneSemanticEvent]] = []
+        var clipboardWrites: [String] = []
+        controller.onSemanticEvents = { deliveries.append($0) }
+        controller.onClipboardWrite = { clipboardWrites.append($0) }
+        await drainMainQueue()
+        controller.synchronizeState()
+        deliveries.removeAll()
+        clipboardWrites.removeAll()
+
+        // A real update signal: the first staged turn schedules the main hop, and every
+        // later turn accumulates behind it because main has not run yet.
+        host.stageFixtureOutput(Array("\u{07}".utf8))
+        host.stageFixtureOutput(Array("\u{1B}]52;c;aGVsbG8=\u{07}\u{07}".utf8))
+        controller.synchronizeState()
+
+        #expect(deliveries.count == 1)
+        #expect(deliveries.first?.filter { $0 == .terminal(.bell) }.count == 2)
+        #expect(clipboardWrites == ["hello"])
+
+        await drainMainQueue()
+        #expect(deliveries.count == 1)
+        #expect(clipboardWrites == ["hello"])
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("capture disabled remains behaviorally inert", .timeLimit(.minutes(1)))
     func captureDisabledExposesNoRecording() async throws {
         // Intent: a pane on the production tape configuration completes a normal session
@@ -2309,6 +2496,40 @@ private func drainMainQueue() async {
     await withCheckedContinuation { continuation in
         DispatchQueue.main.async {
             continuation.resume()
+        }
+    }
+}
+
+/// One update signal that carries semantics and nothing else, so a retention test
+/// states only the payload the bound applies to.
+private func makeSemanticSignal(_ events: [PaneSemanticEvent]) -> TerminalPTYUpdateSignal {
+    TerminalPTYUpdateSignal(
+        processStarted: false,
+        clipboardWrite: nil,
+        semanticEvents: events,
+        primaryHistoryGeneration: 0,
+        result: nil
+    )
+}
+
+private func isTitle(_ event: PaneSemanticEvent) -> Bool {
+    if case .terminal(.title) = event { return true }
+    return false
+}
+
+/// Prices a delivered batch the way the retention ceiling does, so a test can say the
+/// payload stayed inside the budget without restating which events cost what.
+private func deliveredStringBytes(_ events: [PaneSemanticEvent]) -> Int {
+    events.reduce(0) { total, event in
+        switch event {
+        case let .terminal(.title(value)), let .terminal(.commandStarted(value)):
+            total + value.utf8.count
+        case let .terminal(.workingDirectory(value)):
+            total + (value?.utf8.count ?? 0)
+        case let .terminal(.desktopNotification(title, body)):
+            total + title.utf8.count + body.utf8.count
+        default:
+            total
         }
     }
 }

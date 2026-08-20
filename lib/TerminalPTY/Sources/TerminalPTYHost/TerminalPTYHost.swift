@@ -43,19 +43,32 @@ public struct TerminalPTYFrameState: Equatable, Sendable {
 /// lifecycle result -- reach the consumer without waiting on a delivery fence
 /// (research 33/D8). Deliberately carries no terminal and no damage: a payload
 /// that carried a frame would reopen the flood the consumer's deadline bounds.
+///
+/// The semantic payload is held as retention state, not as a plain array, because a
+/// consumer whose main hop stalls leaves an unknown number of signals accumulating
+/// into one value. The terminal half of that payload obeys the engine's own J6 bound
+/// through the shared retention surface, so untrusted child output cannot grow this
+/// pane's pending work without limit. The pane's input acknowledgements sit beside it:
+/// they are not terminal output, and one per wait generation is all the model can act on.
 package struct TerminalPTYUpdateSignal: Sendable {
     /// True only on the update turn that transitions the child into running.
-    package let processStarted: Bool
+    package private(set) var processStarted: Bool
     /// The newest completed OSC 52 write drained in the signaling owner turn.
-    package let clipboardWrite: String?
-    /// Ordered pane semantics drained in the signaling owner turn.
-    package let semanticEvents: [PaneSemanticEvent]
+    package private(set) var clipboardWrite: String?
     /// Monotonic primary-history generation at signal time, for payload-free
     /// mutation classification at the consumer.
-    package let primaryHistoryGeneration: UInt64
+    package private(set) var primaryHistoryGeneration: UInt64
     /// The reported child lifecycle result, so an exit is consumed immediately
     /// rather than at the deadline.
-    package let result: PaneProcessLifecycleResult?
+    package private(set) var result: PaneProcessLifecycleResult?
+
+    private var terminalEvents = TerminalSemanticEventRetention()
+    /// The newest position each distinct wait generation was acknowledged at.
+    private var acknowledgements: [PaneInputWaitGeneration?: UInt64] = [:]
+    /// The order the next admitted semantic takes. One counter covers both halves of
+    /// the channel, which is what keeps acknowledgements interleaved with terminal
+    /// meanings rather than racing them.
+    private var nextOrder: UInt64 = 0
 
     package init(
         processStarted: Bool,
@@ -66,24 +79,47 @@ package struct TerminalPTYUpdateSignal: Sendable {
     ) {
         self.processStarted = processStarted
         self.clipboardWrite = clipboardWrite
-        self.semanticEvents = semanticEvents
         self.primaryHistoryGeneration = primaryHistoryGeneration
         self.result = result
+        for event in semanticEvents { admit(event) }
     }
 
-    /// Coalesces this signal with one emitted later, preserving semantic order,
-    /// the newest clipboard write, and the newest generation and result.
-    package func merging(newer: TerminalPTYUpdateSignal) -> TerminalPTYUpdateSignal {
-        TerminalPTYUpdateSignal(
-            processStarted: processStarted || newer.processStarted,
-            clipboardWrite: newer.clipboardWrite ?? clipboardWrite,
-            semanticEvents: semanticEvents + newer.semanticEvents,
-            primaryHistoryGeneration: max(
-                primaryHistoryGeneration,
-                newer.primaryHistoryGeneration
-            ),
-            result: newer.result ?? result
-        )
+    /// Ordered pane semantics retained for this signal's consumer.
+    package var semanticEvents: [PaneSemanticEvent] {
+        var ordered = terminalEvents.retainedInStreamOrder.map {
+            (order: $0.order, event: PaneSemanticEvent.terminal($0.event))
+        }
+        ordered.append(contentsOf: acknowledgements.map {
+            (order: $0.value, event: PaneSemanticEvent.userInputDelivered(waitGeneration: $0.key))
+        })
+        ordered.sort { $0.order < $1.order }
+        return ordered.map(\.event)
+    }
+
+    /// Accumulates a signal emitted later into this one, keeping the strongest of each
+    /// scalar and admitting every semantic under the retention bound.
+    ///
+    /// In place on purpose: the boundary merges once per host turn while a main hop is
+    /// outstanding, and rebuilding the whole value each time made the retained payload
+    /// cost grow with the square of how long that hop was stalled.
+    package mutating func accumulate(_ newer: TerminalPTYUpdateSignal) {
+        processStarted = processStarted || newer.processStarted
+        clipboardWrite = newer.clipboardWrite ?? clipboardWrite
+        primaryHistoryGeneration = max(primaryHistoryGeneration, newer.primaryHistoryGeneration)
+        result = newer.result ?? result
+        for event in newer.semanticEvents { admit(event) }
+    }
+
+    /// Offers one semantic to whichever half of the channel owns it, and advances stream
+    /// order only for a semantic that was actually retained.
+    private mutating func admit(_ event: PaneSemanticEvent) {
+        switch event {
+        case let .terminal(terminalEvent):
+            guard terminalEvents.admit(terminalEvent, order: nextOrder) == .admitted else { return }
+        case let .userInputDelivered(waitGeneration):
+            acknowledgements[waitGeneration] = nextOrder
+        }
+        nextOrder &+= 1
     }
 }
 

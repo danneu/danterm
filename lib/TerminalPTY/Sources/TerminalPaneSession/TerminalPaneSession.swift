@@ -17,6 +17,16 @@ private final class TerminalPaneDeliveryBoundary: Sendable {
         /// Signals merged while a main hop is already scheduled, so coalescing
         /// the hop never drops an urgent payload.
         var pendingSignal: TerminalPTYUpdateSignal?
+
+        /// Folds one host signal into the pending one in place, so the retained
+        /// payload stays bounded however many signals a stalled hop collects.
+        mutating func accumulate(_ signal: TerminalPTYUpdateSignal) {
+            if pendingSignal == nil {
+                pendingSignal = signal
+            } else {
+                pendingSignal?.accumulate(signal)
+            }
+        }
     }
 
     private let state = Mutex(State())
@@ -27,7 +37,7 @@ private final class TerminalPaneDeliveryBoundary: Sendable {
     ) {
         let shouldSchedule = state.withLock { state in
             guard state.isStopped == false else { return false }
-            state.pendingSignal = state.pendingSignal.map { $0.merging(newer: signal) } ?? signal
+            state.accumulate(signal)
             guard state.isUpdateScheduled == false else { return false }
             state.isUpdateScheduled = true
             return true
@@ -55,7 +65,7 @@ private final class TerminalPaneDeliveryBoundary: Sendable {
     /// way to hold a controller in it deterministically.
     func stagePendingSignal(_ signal: TerminalPTYUpdateSignal) {
         state.withLock { state in
-            state.pendingSignal = state.pendingSignal.map { $0.merging(newer: signal) } ?? signal
+            state.accumulate(signal)
         }
     }
 
@@ -559,8 +569,10 @@ public final class TerminalPaneSessionController {
         if let clipboardWrite = signal.clipboardWrite {
             onClipboardWrite?(clipboardWrite)
         }
-        if signal.semanticEvents.isEmpty == false {
-            onSemanticEvents?(signal.semanticEvents)
+        // Read once: the signal builds this batch out of its retention state on demand.
+        let semanticEvents = signal.semanticEvents
+        if semanticEvents.isEmpty == false {
+            onSemanticEvents?(semanticEvents)
         }
         if signal.primaryHistoryGeneration > lastPrimaryHistoryGeneration {
             lastPrimaryHistoryGeneration = signal.primaryHistoryGeneration

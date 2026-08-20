@@ -15,7 +15,11 @@ import TerminalCore
 /// Opaque here on purpose: the host neither mints these nor reads meaning from
 /// one. A caller hands the value it holds to an input operation, and the host
 /// hands the same value back once that operation's bytes have crossed the PTY.
-public struct PaneInputWaitGeneration: Equatable, Sendable {
+///
+/// Hashable so a pending batch can retain one acknowledgement per distinct generation:
+/// retraction reads nothing but the generation, so a second acknowledgement carrying a
+/// generation already retained cannot change what the model does.
+public struct PaneInputWaitGeneration: Hashable, Sendable {
     public let rawValue: UInt64
 
     public init(rawValue: UInt64) {

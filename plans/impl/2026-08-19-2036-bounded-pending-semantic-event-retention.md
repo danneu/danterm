@@ -184,7 +184,7 @@ sequencing against them.
 
 ## Commit progress
 - [x] 1. Extract J6 semantic-event retention into one TerminalCore surface (D1, PO1)
-- [ ] 2. Bound the pending update signal's accumulation on that surface (D2, I1-I6, PO2-PO5)
+- [x] 2. Bound the pending update signal's accumulation on that surface (D2, I1-I6, PO2-PO5)
 
 ## Implementation notes
 
@@ -202,3 +202,21 @@ sequencing against them.
   surface's own `maximumRetainedBytes`, because the hyperlink admission
   arithmetic reads it too and one constant is what keeps the two halves of the
   budget from diverging.
+- `TerminalPTYUpdateSignal.semanticEvents` stays a readable property, now computed
+  from the retention state and the acknowledgement table rather than stored. The
+  alternative was a mutating take at the delivery site, which would have forced the
+  consumer to hold the signal in a `var` and copied the retained array anyway. A
+  computed read keeps every consumer unchanged and still means no new signal is built
+  until something delivers one.
+- The shared surface gained `retainedInStreamOrder`, and
+  `PendingTerminalSemanticEvent` became public, because the PTY signal has to
+  interleave input acknowledgements back into terminal stream order and only the
+  order each retained value ended up at can say where they go. `takeAll()` is now
+  that read plus a clear, so the engine's path is unchanged.
+- PO3's model-level half is already covered: `AgentWaitRetractionTests` asserts both
+  that one acknowledgement carrying the current generation retracts the wait and that
+  a repeat of it changes nothing. Adding a third test of the same reducer behavior
+  would have restated an existing assertion rather than pinning new behavior.
+- The count bound applies at construction too, not only at a merge: a signal admits
+  its whole event list through the retention surface in `init`. That is what keeps a
+  single oversized host drain from entering the boundary unbounded.

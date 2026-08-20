@@ -84,13 +84,24 @@ public struct TerminalSemanticEventRetention: Equatable, Sendable {
         }
     }
 
-    /// Removes everything retained and returns it in terminal stream order.
-    public mutating func takeAll() -> [TerminalSemanticEvent] {
+    /// Everything retained, in terminal stream order, each value still carrying the
+    /// order it was admitted at.
+    ///
+    /// An owner whose channel carries non-terminal semantics too reads this rather than
+    /// `takeAll()`: it has to interleave those values back into one order, and only the
+    /// order each retained value ended up at can tell it where.
+    public var retainedInStreamOrder: [PendingTerminalSemanticEvent] {
         var events = discrete
         if let title { events.append(title) }
         if let workingDirectory { events.append(workingDirectory) }
         if let progress { events.append(progress) }
         events.sort { $0.order < $1.order }
+        return events
+    }
+
+    /// Removes everything retained and returns it in terminal stream order.
+    public mutating func takeAll() -> [TerminalSemanticEvent] {
+        let events = retainedInStreamOrder
         title = nil
         workingDirectory = nil
         progress = nil
@@ -134,9 +145,11 @@ public enum TerminalSemanticEventAdmission: Equatable, Sendable {
 /// A coalescing value takes a fresh order on every admission, which is what makes a
 /// replaced title or working directory deliver at the newest value's position rather
 /// than the position of the value it replaced.
-struct PendingTerminalSemanticEvent: Equatable, Sendable {
-    var order: UInt64
-    var event: TerminalSemanticEvent
+public struct PendingTerminalSemanticEvent: Equatable, Sendable {
+    /// Position in the caller's stream order, so a caller can interleave its own
+    /// semantics back into one sequence.
+    public internal(set) var order: UInt64
+    public internal(set) var event: TerminalSemanticEvent
 
     var byteCost: Int {
         switch event {
