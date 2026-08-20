@@ -69,6 +69,23 @@ grep -q 'second-marker' "$TEST_ROOT/output" \
 grep -q '2 of 3 steps FAILED' "$TEST_ROOT/output" \
     || fail "failure count was not reported: $(cat "$TEST_ROOT/output")"
 
+# The iOS portability gate is one cross-compile per pinned package, and those builds
+# share nothing -- each writes its own scratch path. Run as a single looping step it was
+# the gate's whole critical path, so the pool expands it into one step per package.
+# The list has to come from the gate's own discovery: a package list written here would
+# drift from the manifests, and the drift would show up as a pinned package silently
+# getting no step at all.
+"$RUNNER" --list-steps >"$TEST_ROOT/step-list" 2>&1 \
+    || fail "--list-steps failed: $(cat "$TEST_ROOT/step-list")"
+if grep -qE '^\./scripts/ios-portability-gate\.sh$' "$TEST_ROOT/step-list"; then
+    fail "the gate still runs the iOS sweep as one looping step"
+fi
+expected_ios="$("$REPO_ROOT/scripts/ios-portability-gate.sh" --list | wc -l | tr -d ' ')"
+actual_ios="$(grep -cE '^\./scripts/ios-portability-gate\.sh --package ' "$TEST_ROOT/step-list" || true)"
+(( expected_ios > 0 )) || fail "the gate discovered no pinned packages to make steps from"
+[[ "$actual_ios" == "$expected_ios" ]] \
+    || fail "gate has $actual_ios iOS steps for $expected_ios pinned packages"
+
 # The pool nests: each worker can be a whole `swift build`, and SwiftPM defaults to one
 # compile job per core. Uncapped, N workers ask for N x ncpu compile jobs on an ncpu
 # machine, which saturates the desktop and makes the OS UI lag. These cases pin the two

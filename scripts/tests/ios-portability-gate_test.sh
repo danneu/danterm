@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 # Self-test for the iOS portability gate. It builds a fixture tree of tiny packages
-# instead of the engine, so the five claims below are proved in seconds:
+# instead of the engine, so the claims below are proved in seconds:
 #
 #   1. A pinned package whose every target compiles for iOS passes.
 #   2. A pinned package with a host-bound TARGET fails -- the case that matters,
 #      because SwiftPM would otherwise skip test targets and report success.
 #   3. An unpinned package is not built at all, so it may stay host-bound.
-#   4. An iOS pin on DanTermSupport fails, which is the check PO7 asks for.
+#   4. An iOS pin on DanTermSupport fails, which is the check the design asks for.
 #   5. A pinned package under ios/ is discovered and built.
+#   6. `--list` reports the pinned set and compiles nothing.
+#   7. `--package` builds the one package named and no other.
+#   8. `--package` refuses a package that declares no iOS platform.
+#   9. `--package` fails on a host-bound target, exactly as the sweep does.
 #
 # Claim 2 is the one a cheaper gate gets wrong: `Process()` in a pinned target has
 # to fail on the commit that adds it, and only a real compile against the iOS SDK
-# sees that.
+# sees that. Claims 6 through 9 are what let the gate pool run one step per package
+# without weakening any single package's check.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -79,6 +84,37 @@ run_gate || { cat "$TMP/out" >&2; fail "a portable ios/ package should pass"; }
 grep -q 'building ios/IOSPortable' "$TMP/out" \
     || fail "the gate should discover pinned packages under ios/"
 
+# 6. `--list` answers the discovery question on its own, without building anything.
+# The gate pool asks for this list to make one step per pinned package, so it has to
+# be the same discovery the build uses -- a second list would be a list that drifts.
+run_gate_args() {
+    IOS_PORTABILITY_GATE_ROOT="$TMP/root" bash "$GATE" "$@" >"$TMP/out" 2>&1
+}
+
+run_gate_args --list || { cat "$TMP/out" >&2; fail "--list should succeed on a portable tree"; }
+if grep -q 'building ' "$TMP/out"; then fail "--list compiled something; it must only report"; fi
+[[ "$(sort "$TMP/out")" == "$(printf 'ios/IOSPortable\nlib/Portable')" ]] \
+    || fail "--list did not name exactly the pinned packages: $(cat "$TMP/out")"
+
+# 7. `--package` builds the one package it is given, which is what a fanned-out gate
+# step runs. Splitting the loop across steps must not weaken any single package's check.
+run_gate_args --package lib/Portable \
+    || { cat "$TMP/out" >&2; fail "--package should build a portable pinned package"; }
+grep -q 'building lib/Portable' "$TMP/out" || fail "--package did not build the named package"
+if grep -q 'building ios/IOSPortable' "$TMP/out"; then
+    fail "--package built a package other than the one named"
+fi
+
+# 8. A package that is not pinned must be refused rather than built. Nothing should be
+# able to ask for an iOS build of a package that never claimed iOS.
+write_package NotPinned '.macOS(.v26)' "$PORTABLE_TEST"
+if run_gate_args --package lib/NotPinned; then
+    fail "--package accepted a package that declares no iOS platform"
+fi
+grep -q 'declares no iOS platform' "$TMP/out" \
+    || fail "the refusal should say the package is not pinned: $(cat "$TMP/out")"
+rm -rf "$TMP/root/lib/NotPinned"
+
 # 3. Unpinned packages are not built, so host-bound code in one is fine.
 write_package Unpinned '.macOS(.v26)' "$HOST_BOUND_TEST"
 run_gate || { cat "$TMP/out" >&2; fail "an unpinned package must not be built for iOS"; }
@@ -89,6 +125,14 @@ write_package Pinned '.macOS(.v26), .iOS(.v26)' "$HOST_BOUND_TEST"
 if run_gate; then fail "a pinned package with a host-bound test target must fail the gate"; fi
 grep -q 'Do not add an exemption' "$TMP/out" \
     || fail "the failure should say why an allowlist is not the fix"
+
+# 9. The same host-bound target fails when the gate is asked for that package alone.
+# This is the case the fan-out rests on: a per-package step is not a weaker check.
+if run_gate_args --package lib/Pinned; then
+    fail "--package passed a pinned package with a host-bound test target"
+fi
+grep -q 'Do not add an exemption' "$TMP/out" \
+    || fail "the --package failure should also say why an allowlist is not the fix"
 rm -rf "$TMP/root/lib/Pinned"
 
 # 4. PO7: pinning DanTermSupport is a gate failure, not something left to inspection.
@@ -96,11 +140,18 @@ sed -i '' 's/\[\.macOS(\.v26)\]/[.macOS(.v26), .iOS(.v26)]/' "$TMP/root/lib/DanT
 if run_gate; then fail "an iOS pin on DanTermSupport must fail the gate"; fi
 grep -q 'DanTermSupport carries Mac-host roles only' "$TMP/out" \
     || fail "the DanTermSupport failure should explain the role boundary"
+if run_gate_args --list; then fail "--list must fail on an iOS pin on DanTermSupport"; fi
 
 # A gate that finds nothing to build is a gate that proves nothing.
 rm -rf "$TMP/root/lib/Portable" "$TMP/root/lib/Unpinned" "$TMP/root/ios/IOSPortable"
 sed -i '' 's/, \.iOS(\.v26)//' "$TMP/root/lib/DanTermSupport/Package.swift"
 if run_gate; then fail "the gate must fail when no package declares an iOS platform"; fi
 grep -q 'checking nothing' "$TMP/out" || fail "an empty pinned set should say so"
+
+# --list carries the whole-tree claims too, because the gate pool calls it before it
+# calls anything else. If it reported an empty set quietly, the fanned-out gate would
+# have no iOS steps at all and would look like it passed.
+if run_gate_args --list; then fail "--list must fail when no package declares an iOS platform"; fi
+grep -q 'checking nothing' "$TMP/out" || fail "--list should say an empty pinned set proves nothing"
 
 echo "ios portability gate self-test passed"

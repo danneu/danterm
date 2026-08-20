@@ -16,6 +16,15 @@
 # It also states the other half of the claim: `DanTermSupport` is the Mac host's
 # side-effect layer and must NOT be pinned. That is asserted here rather than left
 # to inspection, so pinning it becomes a gate failure and a decision, not a slip.
+#
+# Three modes, because the gate pool wants one step per package rather than one step
+# that loops. `--list` reports the pinned set and builds nothing; `--package <path>`
+# builds exactly one; no argument does the whole sweep, which is what a human running
+# this by hand wants. The pool composes the first two: it asks `--list` what to run and
+# makes a step per answer, so a newly pinned package gets a step without anyone adding
+# one. Discovery stays in this file either way -- a list of packages kept anywhere else
+# is a list that drifts away from the manifests, which is the failure this gate exists
+# to prevent.
 set -euo pipefail
 
 # Test seam: the self-test points the gate at a fixture tree of tiny packages so it
@@ -36,6 +45,26 @@ UNPINNED_BY_DESIGN=(lib/DanTermSupport/Package.swift)
 
 fail() { echo "ios-portability-gate: $*" >&2; exit 1; }
 
+mode=sweep
+only=""
+case "${1:-}" in
+    --list) mode=list ;;
+    --package) mode=one; only="${2:-}"; [[ -n "$only" ]] || fail "--package needs a package path." ;;
+    "") ;;
+    *) fail "unknown argument: $1. Use --list, --package <path>, or no argument." ;;
+esac
+
+# A single-package run answers only for that package, so it makes none of the
+# whole-tree claims below -- the pool gets those from the `--list` call it already
+# makes before it builds anything.
+if [[ "$mode" == one ]]; then
+    manifest="$only/Package.swift"
+    [[ -f "$manifest" ]] || fail "$manifest does not exist."
+    grep -q '\.iOS(' "$manifest" \
+        || fail "$only declares no iOS platform, so there is nothing here to check.
+    Only a package that pins iOS is built for it."
+fi
+
 for manifest in "${UNPINNED_BY_DESIGN[@]}"; do
     [[ -f "$manifest" ]] || fail "$manifest is missing; this check names a package that no longer exists."
     if grep -q '\.iOS(' "$manifest"; then
@@ -46,9 +75,6 @@ for manifest in "${UNPINNED_BY_DESIGN[@]}"; do
     fi
 done
 
-SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
-[[ -n "$SDK" ]] || fail "no iphoneos SDK; install the iOS platform for this Xcode."
-
 pinned=()
 for manifest in "${MANIFESTS[@]}"; do
     [[ -f "$manifest" ]] || continue
@@ -57,8 +83,21 @@ for manifest in "${MANIFESTS[@]}"; do
     fi
 done
 
-(( ${#pinned[@]} > 0 )) || fail "no package declares an iOS platform, so this gate is
+if [[ "$mode" != one ]]; then
+    (( ${#pinned[@]} > 0 )) || fail "no package declares an iOS platform, so this gate is
     checking nothing. Either a pin was dropped or this script is looking in the wrong place."
+fi
+
+if [[ "$mode" == list ]]; then
+    printf '%s\n' "${pinned[@]}"
+    exit 0
+fi
+
+[[ "$mode" == one ]] && pinned=("$only")
+
+# Resolved after the list mode returns, so asking what is pinned never needs an iOS SDK.
+SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+[[ -n "$SDK" ]] || fail "no iphoneos SDK; install the iOS platform for this Xcode."
 
 status=0
 for package in "${pinned[@]}"; do

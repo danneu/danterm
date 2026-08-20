@@ -54,7 +54,6 @@ STEPS=(
     # since the last `just test` is re-type-checked, and therefore measured, during the
     # run that judges it.
     './scripts/type-check-budget-gate.sh swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate'
-    './scripts/ios-portability-gate.sh'
     'swift test --package-path ios/DanTermMobileKit --scratch-path ios/DanTermMobileKit/.build-gate'
     './scripts/test-terminal-pty.sh'
     './scripts/tests/terminal-capture-api-gate_test.sh'
@@ -152,6 +151,38 @@ if [[ -n "${RUN_TEST_SUITE_STEPS_FILE:-}" ]]; then
     while IFS= read -r line; do
         [[ -n "$line" ]] && STEPS+=("$line")
     done <"$RUN_TEST_SUITE_STEPS_FILE"
+elif [[ "${1:-}" != "--worker" ]]; then
+    # The iOS portability gate is one cross-compile per pinned package, and the packages
+    # share nothing -- each writes its own scratch path inside itself. Looping over them
+    # inside a single step hid that from the pool and made the sweep the gate's entire
+    # critical path: one worker held one token while six independent builds ran in
+    # series. One step per package lets them pack like everything else.
+    #
+    # The list comes from the gate's own discovery rather than from this file, because a
+    # package list written here is a list that drifts. The gate reads the manifests, so a
+    # newly pinned package gets a step by existing, which is the property the gate is for.
+    # Discovery only greps manifests and needs no SDK, so it costs nothing here; it fails
+    # loudly, before the header prints, if the pinned set is empty or DanTermSupport has
+    # picked up a pin.
+    #
+    # These go in front: they are the longest steps in the gate, and the list is ordered
+    # longest-first so the pool packs well.
+    ios_steps=()
+    while IFS= read -r package; do
+        [[ -n "$package" ]] && ios_steps+=("./scripts/ios-portability-gate.sh --package $package")
+    done < <(./scripts/ios-portability-gate.sh --list)
+    (( ${#ios_steps[@]} > 0 )) || {
+        echo "run-test-suite: the iOS portability gate reported no pinned packages." >&2
+        exit 1
+    }
+    STEPS=("${ios_steps[@]}" "${STEPS[@]}")
+fi
+
+# Report the assembled list and stop. The list is built rather than written down, so
+# this is how a reader -- and the self-test -- sees what the gate actually runs.
+if [[ "${1:-}" == "--list-steps" ]]; then
+    printf '%s\n' "${STEPS[@]}"
+    exit 0
 fi
 
 # Time waiting for the machine-wide budget is reported apart from time spent running,
