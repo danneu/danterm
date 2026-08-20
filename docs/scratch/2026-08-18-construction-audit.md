@@ -1097,7 +1097,7 @@ wave.
 - [ ] **[BUILD-5](#build-5)** (2x5, small) Give the three manifest-discovery lists one owner so a new package root cannot be skipped
 - [ ] **[MODEL-6](#model-6)** (2x5, small) Drop the submission-to-request reverse index and derive it from the pending requests _(with [REDUCE-6](#reduce-6))_
 - [ ] **[STORE-5](#store-5)** (2x5, small) Give a block one record-range accessor instead of five hand-copied index conversions
-- [ ] **[INTERACT-3](#interact-3)** (2x5, medium) Delete `TerminalDamageAccumulator`'s copy of the shift-composition rule and let it hold a `TerminalDamage`
+- [x] **[INTERACT-3](#interact-3)** (2x5, medium) Delete `TerminalDamageAccumulator`'s copy of the shift-composition rule and let it hold a `TerminalDamage` -- `840eda18`
 - [ ] **[REDUCE-6](#reduce-6)** (2x4, small) Tie a pending IPC input request to its pane so pane teardown can reject it _(with [MODEL-6](#model-6))_
 - [ ] **[STORE-4](#store-4)** (2x4, small) State the open tail's scratch-table key base once, so a trimmed head cannot key it two ways **[decide first](#decisions-to-make-first)**
 - [ ] **[MODEL-5](#model-5)** (2x4, medium) Move per-pane search and notification-throttle state into PaneModel so pane teardown prunes them **[decide first](#decisions-to-make-first)**
