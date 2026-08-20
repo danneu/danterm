@@ -6,6 +6,22 @@ import Cocoa
 func noticePanelTests() {
     print("NoticePanel")
 
+    // The assertion the headless app-test gave up when the reconcile sweep stopped
+    // building its own panel: the real panel renders a projection's words.
+    uiTest("configure renders the projection title and message into the labels") {
+        let runtime = AppRuntime()
+        let panel = NoticePanel(runtime: runtime)
+        defer { panel.orderOut(nil) }
+        let projection = makeNoticeProjection()
+
+        panel.configure(projection)
+
+        try uiExpect(panel.headingLabel.stringValue == projection.title.text,
+                     "heading was \(panel.headingLabel.stringValue)")
+        try uiExpect(panel.bodyLabel.stringValue == projection.message,
+                     "body was \(panel.bodyLabel.stringValue)")
+    }
+
     uiTest("message notice has one OK button that sends dismiss") {
         let runtime = AppRuntime()
         let panel = NoticePanel(runtime: runtime)

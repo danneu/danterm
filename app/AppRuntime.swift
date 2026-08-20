@@ -152,14 +152,10 @@ class AppRuntime {
     var todoPopoverDelegate: TodoPopoverDelegateAdapter?
     // internal (not private): the cross-file reconcileThemeBrowser extension reads it.
     var themeBrowserView: ThemeBrowserView?
-    // internal (not private): the cross-file reconcilePreferencesPanel extension reads it.
-    var preferencesPanel: PreferencesPanel?
-    // internal (not private): the cross-file reconcileConfirmation extension reads it.
-    var confirmationPanel: ConfirmationPanel?
-    // internal: the cross-file reconcileNotice extension owns its projection lifecycle.
-    var noticePanel: NoticePanel?
-    // internal (not private): the cross-file reconcileSwitcher extension reads it.
-    var switcherPanel: SwitcherPanel?
+    // The runtime's only route to a dialog window. internal (not private): the
+    // cross-file reconcile extension drives them. Given rather than found, so a
+    // runtime handed surfaces that present nothing cannot reach the screen.
+    let dialogSurfaces: DialogSurfaces
     private var switcherEventMonitor: Any?
     private var switcherEventMonitorToken: AppRuntimeSchedulingToken?
     private var dragCoordinator: PaneDragCoordinator?
@@ -214,14 +210,20 @@ class AppRuntime {
     // update instead of a visible flicker.
     private static let reconcileCoalesceInterval: TimeInterval = 0.075
 
+    /// `dialogSurfaces` has no default on purpose: presenting on screen is a
+    /// capability a caller grants, so a runtime built without naming it does not
+    /// exist. `startsApplicationServices` is now only about the switcher event
+    /// monitor and the IPC server -- presenting is the surfaces' business.
     init(
         ports: AppRuntimePorts,
+        dialogSurfaces: DialogSurfaces,
         configStore: DanTermConfigStore = DanTermConfigStore(),
         startsApplicationServices: Bool = true,
         tailnetOptIn: Bool = false,
         socketPath: URL = controlSocketPath()
     ) {
         self.ports = ports
+        self.dialogSurfaces = dialogSurfaces
         self.configStore = configStore
         // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
         self.model = AppModel(
@@ -249,10 +251,13 @@ class AppRuntime {
         // the main queue must be inert once the runtime is gone.
         outbox.setDispatcher { [weak self] msg in self?.dispatch(msg) }
 
-        // Build the MRU switcher panel eagerly — pay first-frame cost at
-        // launch instead of on every cmd-shift-i. Keep it offscreen until
-        // reconcileSwitcher orders it front (mruCycle becomes non-nil).
-        self.switcherPanel = startsApplicationServices ? SwitcherPanel() : nil
+        // Here, inside init, so no message can reach a dialog pass before its
+        // surface can build a window. A pass that applied to an unbound surface
+        // would advance its cache and leave the model claiming a dialog nobody
+        // can see.
+        for surface in dialogSurfaces.all {
+            surface.bind(runtime: self)
+        }
 
         // Install the local NSEvent monitor that drives ephemeral keyboard modes.
         // It reads model flags to know whether a mode is active, but never mutates
@@ -673,6 +678,12 @@ class AppRuntime {
 
         for command in update(&model, .runtimeWillShutdown) {
             perform(command)
+        }
+
+        // Nothing survives the runtime on screen: the surfaces reach the runtime
+        // weakly, so a dialog left up would answer into nothing.
+        for surface in dialogSurfaces.all {
+            surface.hide()
         }
 
         paneTapeBroker.shutdown()
@@ -1427,8 +1438,9 @@ class AppRuntime {
     // MARK: - Preferences Panel
 
     /// Show or re-focus the preferences panel. Projects the live JSON config into
-    /// the draft, then lets reconcile create/show from the model. The final
-    /// makeKeyAndOrderFront call re-raises an already-open normal-level panel.
+    /// the draft, then lets reconcile create/show from the model. The final raise
+    /// is what re-focuses a panel that was already open: reopening on an
+    /// unchanged projection leaves the dialog pass with nothing to do.
     func showPreferencesPanel() {
         send(.preferencesOpened(
             // Snapshot on each open: the pure core may not query CoreText or
@@ -1436,7 +1448,7 @@ class AppRuntime {
             installedFontFamilies: installedFontFamilyNames(),
             availableThemeNames: ThemeCatalog.shared.names
         ))
-        preferencesPanel?.makeKeyAndOrderFront(nil)
+        dialogSurfaces.preferences.raise()
     }
 
     /// Seeds and opens the valid v1 JSON file shared by both config menu entry points.
@@ -1565,14 +1577,6 @@ class AppRuntime {
         dismissTodoPopoverSilently()
         dismissAlertsPopoverSilently()
         model.todoPopover = nil  // session teardown bypasses the reconciler; clear directly
-        // Hide/destroy before resetting caches so nil keeps meaning "already hidden"
-        // for the first post-restore reconcile. Restored models carry no draft.
-        preferencesPanel?.close()
-        preferencesPanel = nil
-        confirmationPanel?.orderOut(nil)
-        confirmationPanel = nil
-        noticePanel?.orderOut(nil)
-        noticePanel = nil
         themeBrowserView?.removeFromSuperview()
         themeBrowserView = nil
 
@@ -1583,9 +1587,13 @@ class AppRuntime {
         for paneId in Array(paneHosts.keys) {
             tearDownSession(paneId)
         }
-        // The switcher panel persists across sessions; hide it before resetting
-        // caches.switcher so nil continues to mean the panel is already hidden.
-        switcherPanel?.orderOut(nil)
+        // Discard every dialog before resetting the caches, so nil continues to
+        // mean "already hidden" for the first post-restore sweep. Restored models
+        // carry no draft and no pending confirmation. A surface whose window
+        // outlives a session -- the switcher overlay -- only hides.
+        for surface in dialogSurfaces.all {
+            surface.discard()
+        }
         // Reset reconciler caches by re-init so the first post-restore reconcile is
         // a clean build, not a stale diff (restore/import can reuse pane IDs).
         caches = ReconcilerCaches()

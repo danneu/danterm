@@ -46,6 +46,7 @@ struct IpcServerOwnershipTests {
         let configURL = fixture.directoryURL.appendingPathComponent("absent-config.json")
         let runtime = AppRuntime(
             ports: RecordingAppRuntimePorts().value,
+            dialogSurfaces: RecordingDialogSurfaces().value,
             configStore: DanTermConfigStore(url: configURL),
             startsApplicationServices: true,
             socketPath: fixture.socketURL
@@ -78,6 +79,7 @@ struct IpcServerOwnershipTests {
         let ports = RecordingAppRuntimePorts()
         let runtime = AppRuntime(
             ports: ports.value,
+            dialogSurfaces: RecordingDialogSurfaces().value,
             configStore: DanTermConfigStore(
                 url: socket.directoryURL.appendingPathComponent("absent-config.json")
             ),
@@ -115,6 +117,7 @@ struct IpcServerOwnershipTests {
         let ports = RecordingAppRuntimePorts()
         let runtime = AppRuntime(
             ports: ports.value,
+            dialogSurfaces: RecordingDialogSurfaces().value,
             configStore: DanTermConfigStore(
                 url: socket.directoryURL.appendingPathComponent("absent-config.json")
             ),
@@ -155,6 +158,7 @@ struct IpcServerOwnershipTests {
         ports.failedSessionRequestNumbers = [1]
         let runtime = AppRuntime(
             ports: ports.value,
+            dialogSurfaces: RecordingDialogSurfaces().value,
             configStore: DanTermConfigStore(
                 url: socket.directoryURL.appendingPathComponent("absent-config.json")
             ),

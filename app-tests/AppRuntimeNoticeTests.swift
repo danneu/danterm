@@ -6,21 +6,6 @@ import Testing
 
 @MainActor
 struct AppRuntimeNoticeTests {
-    @Test("report and answer create and retire the projected panel")
-    func reconcileNoticePanel() throws {
-        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
-        defer { runtime.shutdown() }
-
-        runtime.send(.noticeReported(.message(title: "Import Failed", message: "Invalid file.")))
-
-        let projection = try #require(runtime.caches.notice)
-        #expect(runtime.noticePanel != nil)
-        #expect(runtime.noticePanel?.headingLabel.stringValue == "Import Failed")
-        runtime.send(.noticeAnswered(id: projection.id, answer: .dismiss))
-        #expect(runtime.caches.notice == nil)
-        #expect(runtime.noticePanel?.isVisible == false)
-    }
-
     @Test("Restore builds no pane before assent and commits recovered panes after the answer")
     func restoreAnswerBuildsAfterAssent() async throws {
         let fixture = RecordingAppRuntimePorts()

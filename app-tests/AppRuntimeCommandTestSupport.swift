@@ -235,12 +235,14 @@ final class RecordingTerminalSession: NSView, TerminalSession {
 @MainActor
 func makeCommandTestRuntime(
     _ fixture: RecordingAppRuntimePorts,
-    configStore: DanTermConfigStore? = nil
+    configStore: DanTermConfigStore? = nil,
+    dialogSurfaces: RecordingDialogSurfaces = RecordingDialogSurfaces()
 ) -> AppRuntime {
     let absentConfig = FileManager.default.temporaryDirectory
         .appendingPathComponent("danterm-no-config-\(UUID().uuidString)")
     return AppRuntime(
         ports: fixture.value,
+        dialogSurfaces: dialogSurfaces.value,
         configStore: configStore ?? DanTermConfigStore(url: absentConfig),
         startsApplicationServices: false
     )

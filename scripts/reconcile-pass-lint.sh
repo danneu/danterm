@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Reject a reconcile pass that originates a Msg.
+# Two rules over the reconcile sweep: a pass may not originate a Msg, and a pass
+# may not present a window of its own.
+#
+# Rule 1 -- no send().
 #
 # A view-discovered fact must travel back in the pass's return value, and the
 # runtime dispatches it after the sweep. A pass that calls send() instead
@@ -17,6 +20,16 @@
 #                   interaction handler, so only the executor half is fenced. The
 #                   markers below delimit it, and a missing marker fails: deleting
 #                   the fence must not be the way to pass.
+#
+# Rule 2 -- no window construction, no window ordering. Over the whole-file
+# regions only, because that is where the sweep lives.
+#
+# A pass presents by driving a presentation surface the runtime was given. Three
+# passes used to build their own NSPanel and order it front instead, which made
+# every headless app-test a presentation site: the sweep runs on every send(),
+# so `just test` put real dialogs on the developer's screen. Building a subview
+# inside a host the runtime was handed is still fine -- the rule is scoped to
+# windows, not to view construction.
 #
 # What this check CANNOT see is a send laundered through AppKit's own dispatch --
 # an outline mutation reaching delegate feedback, a field-editor teardown reaching
@@ -50,6 +63,14 @@ END_MARKER='reconcile-pass-lint: no-send end'
 # A send call that is not itself commented out. `sendNow(` and `sendText(` must
 # not match, so the call name is anchored on a non-identifier character.
 SEND_PATTERN='^(?![[:space:]]*//).*(^|[^A-Za-z0-9_])send\('
+# A window built in the sweep. Any `SomethingPanel(` / `SomethingWindow(`
+# initializer, plus NSAlert, which names neither. A view initializer such as
+# `ThemeBrowserView(` must not match: building a subview inside a handed host is
+# what every other pass does.
+WINDOW_BUILD_PATTERN='^(?![[:space:]]*//).*(^|[^A-Za-z0-9_])(NSAlert|[A-Z][A-Za-z0-9_]*(Panel|Window))\('
+# A window put on or taken off the screen. These belong to the live surface
+# implementations, which are the only things that own a window.
+WINDOW_ORDER_PATTERN='^(?![[:space:]]*//).*(^|[^A-Za-z0-9_])(makeKeyAndOrderFront|orderFront|orderFrontRegardless|orderOut|orderBack)\('
 
 status=0
 
@@ -58,6 +79,16 @@ for file in ${WHOLE_FILES[@]+"${WHOLE_FILES[@]}"}; do
     if rg --pcre2 -n "$SEND_PATTERN" "$file"; then
         echo "reconcile-pass-lint: $file drives reconcile passes and must not send()" >&2
         echo "  return the fact from the pass instead; the runtime dispatches it after the sweep" >&2
+        status=1
+    fi
+    if rg --pcre2 -n "$WINDOW_BUILD_PATTERN" "$file"; then
+        echo "reconcile-pass-lint: $file drives reconcile passes and must not build a window" >&2
+        echo "  drive an injected presentation surface; the live surface owns the panel" >&2
+        status=1
+    fi
+    if rg --pcre2 -n "$WINDOW_ORDER_PATTERN" "$file"; then
+        echo "reconcile-pass-lint: $file drives reconcile passes and must not order a window" >&2
+        echo "  apply/raise/hide through the surface instead" >&2
         status=1
     fi
 done

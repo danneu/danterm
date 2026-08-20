@@ -100,6 +100,41 @@ A pure projection or diff helper should have behavioral tests that prove the
 observable contract: unchanged projections do not require host mutation, and
 changed projections produce the expected delta.
 
+## Presentation Surfaces
+
+A pass renders into a host the runtime was given. This document assumed that
+throughout and stated it nowhere, which is how three passes became window
+factories: the confirmation, notice, and preferences passes each built their own
+`NSPanel` and called `makeKeyAndOrderFront`. Because the sweep runs on every
+`send()`, every headless app-test became a presentation site, and `just test`
+left real dialogs sitting on the developer's screen.
+
+The rule, said outright:
+
+- A pass may build a subview inside a host it was given -- a container, a pane
+  wrapper, a content area.
+- Otherwise a pass presents only by driving an injected presentation surface.
+- Window construction and window ordering belong to the live surface
+  implementations alone. No pass may construct or order a window.
+
+`AppRuntime` is given a `DialogSurfaces` value for its four dialog windows. Every
+surface carries `apply`, `hide`, and `discard`; the three that come forward when
+they open also carry `raise`, and the dialog pass is the overlay pass plus one
+`raise` on the closed-to-open transition. So one pass shape serves four dialogs
+whose presentation policies differ: the notice and confirmation panels center and
+take key focus when they open, preferences takes key focus without centering, and
+the switcher overlay -- which must never become key -- has no `raise` to call at
+all. Panel existence stays a projection of a model slot, exactly as the
+single-optional compares above require; what the surfaces move is who owns the
+window.
+
+The surfaces are one of the runtime's injected collaborators, in the sense of
+[docs/design/2026-08-17-test-seam-rule.md](2026-08-17-test-seam-rule.md): a
+runtime built for a test is given recording surfaces, so nothing it does can
+reach the screen whatever hosts a future test assigns it. `scripts/reconcile-pass-lint.sh`
+enforces the window half of the rule over the same files it fences against
+`send()`.
+
 ## Read-Only Model Rule
 
 The view reconciler is a read-only projection of `AppModel`. Pure projections
@@ -281,6 +316,9 @@ AppKit and session state.
 
 - `AGENTS.md`: Elm architecture and data flow
 - `app/Reconcile.swift`: reconciler template, pass ordering, `ReconcilerCaches`
+- `app/DialogSurfaces.swift`: the dialog presentation surfaces and their live
+  AppKit implementations
+- `scripts/reconcile-pass-lint.sh`: the no-send and no-window gates over the sweep
 - `lib/DanTermCore/Sources/DanTermCore/Projections.swift`: pure view projections
   + structural diff/op helpers
 - `lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift`: shared model

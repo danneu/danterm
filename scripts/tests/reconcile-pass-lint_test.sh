@@ -27,6 +27,40 @@ if "$LINT" --whole "$TMP/Sweep.swift" >/dev/null 2>&1; then
     fail "a send() in the sweep file should fail"
 fi
 
+# --- whole-file window rule ------------------------------------------------
+cat > "$TMP/Sweep.swift" <<'SWIFT'
+func reconcileThemeBrowser() {
+    let browser = ThemeBrowserView()
+    contentArea.addSubview(browser)
+    browser.apply(projection)
+}
+func reconcileDialog() {
+    surface.apply(projection)
+    surface.raise()
+}
+// A comment about noticePanel?.makeKeyAndOrderFront(nil) is not a call.
+SWIFT
+"$LINT" --whole "$TMP/Sweep.swift" >/dev/null \
+    || fail "building a subview in a handed host, and driving a surface, should pass"
+
+cat > "$TMP/Sweep.swift" <<'SWIFT'
+func reconcileNotice() {
+    noticePanel = NoticePanel(runtime: self)
+}
+SWIFT
+if "$LINT" --whole "$TMP/Sweep.swift" >/dev/null 2>&1; then
+    fail "constructing a panel in the sweep file should fail"
+fi
+
+cat > "$TMP/Sweep.swift" <<'SWIFT'
+func reconcileNotice() {
+    surface.panel.makeKeyAndOrderFront(nil)
+}
+SWIFT
+if "$LINT" --whole "$TMP/Sweep.swift" >/dev/null 2>&1; then
+    fail "ordering a window in the sweep file should fail"
+fi
+
 # --- marked-region rule ----------------------------------------------------
 region_file() {
     cat > "$TMP/View.swift" <<SWIFT

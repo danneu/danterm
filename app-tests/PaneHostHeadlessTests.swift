@@ -12,6 +12,7 @@ import Testing
             .appendingPathComponent("danterm-no-config-\(UUID().uuidString)")
         let runtime = AppRuntime(
             ports: .live(terminalBackend: SwiftTerminalBackend()),
+            dialogSurfaces: RecordingDialogSurfaces().value,
             configStore: DanTermConfigStore(url: absentConfig),
             startsApplicationServices: false
         )

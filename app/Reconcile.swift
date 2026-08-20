@@ -49,12 +49,12 @@ struct ReconcilerCaches {
     // == last focused-pane theme content applied.
     var themeBrowser: ThemeBrowserProjection? = nil
     // Single-optional MRU switcher cache (the windowChrome template, plus a hide
-    // transition): the last switcher projection reconcileSwitcher applied. nil == no MRU
-    // cycle == panel ordered out. The panel persists across container edits, so this
-    // cache needs no cross-pass invalidation.
+    // transition): the last switcher projection applied to the switcher surface.
+    // nil == no MRU cycle == overlay hidden. The overlay persists across container
+    // edits, so this cache needs no cross-pass invalidation.
     var switcher: SwitcherProjection? = nil
-    // Single-optional confirmation cache. Unlike switcher, the panel is
-    // destroyed on teardown, so nil after ReconcilerCaches() re-init correctly
+    // Single-optional confirmation cache. Unlike switcher, the surface discards
+    // its panel on teardown, so nil after ReconcilerCaches() re-init correctly
     // means "no panel, nothing shown".
     var confirmation: ConfirmationProjection? = nil
     // Single-optional FIFO-head notice cache. The panel survives between queued notices.
@@ -82,10 +82,29 @@ extension AppRuntime {
         reconcilePaneFocus()                 // after chrome creates any desired search field
         reconcileSidebar(tally: alertTally)
         reconcileWindowChrome(tally: alertTally)
-        reconcileSwitcher(tally: alertTally)      // single-optional MRU projection; nil (no mruCycle) -> orderOut
-        reconcileConfirmation()
-        reconcileNotice()
-        reconcilePreferencesPanel()
+        // The four dialogs, each through the surface the runtime was given. The
+        // switcher goes through the overlay pass: it re-applies on every step of
+        // a cycle and never comes forward to key.
+        reconcileOverlay(
+            desiredSwitcher(in: model, tally: alertTally),
+            cache: &caches.switcher,
+            surface: dialogSurfaces.switcher
+        )
+        reconcileDialog(
+            desiredConfirmation(in: model),
+            cache: &caches.confirmation,
+            surface: dialogSurfaces.confirmation
+        )
+        reconcileDialog(
+            desiredNotice(in: model),
+            cache: &caches.notice,
+            surface: dialogSurfaces.notice
+        )
+        reconcileDialog(
+            desiredPreferencesPanel(in: model),
+            cache: &caches.preferencesPanel,
+            surface: dialogSurfaces.preferences
+        )
         reconcileAlertsPopover()
         reconcileTodoPopover()
         syncPaneVisibility()  // existing occlusion pass; stays last
@@ -250,96 +269,41 @@ extension AppRuntime {
         caches.windowChrome = new
     }
 
-    /// Show/redraw or hide the MRU switcher panel from one diffed `SwitcherProjection?`.
-    /// The windowChrome single-struct-compare template, plus a hide transition: a `nil`
-    /// projection (no `model.mruCycle`, or every frozen tab gone) orders the panel out;
-    /// a non-nil one renders the rows + centers + orders front. Replaces the deleted
-    /// `.showSwitcherOverlay` / `.hideSwitcherOverlay` effects -- the `mruCycle` mutation
-    /// in the cycle handlers now drives this. Render + center + orderFront on each non-nil
-    /// change is idempotent (matching the old per-step `.showSwitcherOverlay`); the `nil`
-    /// transition is what hides the panel on cycle end/cancel. The panel persists across
-    /// container rebuilds, so no cross-pass invalidation.
-    func reconcileSwitcher(tally: UnreadAlertTally) {
-        let new = desiredSwitcher(in: model, tally: tally)
-        guard caches.switcher != new else { return }
-        if let proj = new {
-            // Non-activating: orderFront, never makeKeyAndOrderFront -- key would steal
-            // first responder from the focused terminal pane.
-            switcherPanel?.apply(rows: proj.rows, cursorIndex: proj.cursorIndex)
-            switcherPanel?.centerOnScreen(of: window)
-            switcherPanel?.orderFront(nil)
+    /// The single-optional presentation pass: diff against the pass cache, apply
+    /// on any change, hide when the projection goes away.
+    ///
+    /// The surface is the pass's only route to the screen. No window is built or
+    /// ordered here, so a runtime given surfaces that present nothing puts
+    /// nothing on screen, whatever hosts it also holds.
+    private func reconcileOverlay<Projection: Equatable>(
+        _ new: Projection?,
+        cache: inout Projection?,
+        surface: any OverlaySurface<Projection>
+    ) {
+        guard cache != new else { return }
+        if let new {
+            surface.apply(new)
         } else {
-            switcherPanel?.orderOut(nil)  // nil == no cycle == hide
+            surface.hide()
         }
-        caches.switcher = new
+        cache = new
     }
 
-    /// Show, refresh, or hide the non-modal confirmation panel from one
-    /// diffed `ConfirmationProjection?`. Unlike reconcileSwitcher, the panel
-    /// must take key focus on appear so Esc/Enter activate its buttons, but only
-    /// on the nil -> non-nil transition. Later pane-count refreshes reconfigure
-    /// the copy without re-centering a dragged panel or stealing key focus from
-    /// the terminal pane the user is closing underneath it.
-    func reconcileConfirmation() {
-        let new = desiredConfirmation(in: model)
-        guard caches.confirmation != new else { return }
-        let wasShowing = caches.confirmation != nil
-        if let proj = new {
-            if confirmationPanel == nil {
-                confirmationPanel = ConfirmationPanel(runtime: self)
-            }
-            confirmationPanel?.configure(proj)
-            if !wasShowing {
-                confirmationPanel?.center(on: window)
-                confirmationPanel?.makeKeyAndOrderFront(nil)
-            }
-        } else {
-            confirmationPanel?.orderOut(nil)
-        }
-        caches.confirmation = new
-    }
-
-    /// Shows, refreshes, or hides the oldest queued user-visible notice.
-    func reconcileNotice() {
-        let new = desiredNotice(in: model)
-        guard caches.notice != new else { return }
-        let wasShowing = caches.notice != nil
-        if let projection = new {
-            if noticePanel == nil {
-                noticePanel = NoticePanel(runtime: self)
-            }
-            noticePanel?.configure(projection)
-            if wasShowing == false {
-                noticePanel?.center(on: window)
-                noticePanel?.makeKeyAndOrderFront(nil)
-            }
-        } else {
-            noticePanel?.orderOut(nil)
-        }
-        caches.notice = new
-    }
-
-    /// Create/show, render, or hide the preferences panel from one diffed
-    /// `PreferencesPanelProjection?`. Mirrors reconcileConfirmation: nil
-    /// means no draft and orders the panel out; non-nil lazily creates the panel,
-    /// renders the form, and brings it key/front only on the open transition so
-    /// per-keystroke projection changes do not steal key focus.
-    func reconcilePreferencesPanel() {
-        let new = desiredPreferencesPanel(in: model)
-        guard caches.preferencesPanel != new else { return }
-        let wasOpen = caches.preferencesPanel != nil
-        if let proj = new {
-            if preferencesPanel == nil {
-                preferencesPanel = PreferencesPanel(runtime: self)
-            }
-            preferencesPanel?.apply(proj)
-            if !wasOpen {
-                preferencesPanel?.makeKeyAndOrderFront(nil)
-            }
-        } else {
-            preferencesPanel?.orderOut(nil)
-        }
-        caches.preferencesPanel = new
+    /// The overlay pass plus one raise on the closed-to-open transition, which is
+    /// what every dialog that takes key focus needs and nothing else does. A
+    /// refresh while the dialog is open re-applies without raising, so a
+    /// projection change cannot pull first responder off the pane underneath.
+    ///
+    /// What "raise" means belongs to the surface: centering and key focus for the
+    /// notice and confirmation panels, key focus alone for preferences.
+    private func reconcileDialog<Projection: Equatable>(
+        _ new: Projection?,
+        cache: inout Projection?,
+        surface: any DialogSurface<Projection>
+    ) {
+        let opening = cache == nil && new != nil
+        reconcileOverlay(new, cache: &cache, surface: surface)
+        if opening { surface.raise() }
     }
 
     /// Creates, refreshes, or silently closes the model-projected alerts popover.
