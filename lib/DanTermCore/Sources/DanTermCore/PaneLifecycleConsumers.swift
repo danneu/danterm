@@ -2,6 +2,36 @@
 import Foundation
 import DanTermProtocol
 
+/// Gives every PTY rejection a stable external discriminator for pane inspection.
+func inputSubmissionFailureReason(_ failure: InputSubmissionFailure) -> String {
+    switch failure {
+    case .bufferLimitExceeded: "bufferLimitExceeded"
+    case .canonicalModeTimeout: "canonicalModeTimeout"
+    case .launchFailed: "launchFailed"
+    case .processEnded: "processEnded"
+    case .writeFailed: "writeFailed"
+    case .encodingFailed: "encodingFailed"
+    }
+}
+
+/// Turns a typed PTY rejection into the actionable error returned by `pane input`.
+func inputSubmissionFailureMessage(_ failure: InputSubmissionFailure) -> String {
+    switch failure {
+    case .bufferLimitExceeded:
+        "pane input exceeded the 8 MiB pending-input limit"
+    case .canonicalModeTimeout:
+        "pane input timed out waiting for the tty to leave canonical mode"
+    case .launchFailed:
+        "pane input was not delivered because the pane process failed to launch"
+    case .processEnded:
+        "pane input was not delivered because the pane process ended"
+    case .writeFailed(let code):
+        "pane input failed to write to the PTY (errno \(code))"
+    case .encodingFailed:
+        "pane input could not be encoded for the terminal"
+    }
+}
+
 /// Encodes every lifecycle with an explicit discriminator so pane inspection
 /// never relies on missing keys to distinguish current states.
 func paneLifecycleInspectionFields(_ session: SessionModel?) -> [String: JSONValue] {

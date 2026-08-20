@@ -290,7 +290,8 @@ struct AppRuntimeIpcCommandTests {
 
         let response = try wire.readResponse()
         #expect(response.error?.code == -32603)
-        #expect(response.error?.message == "pane input was not delivered")
+        #expect(response.error?.message ==
+            "pane input was not delivered because the pane process ended")
         #expect(runtime.model.pendingInputRequests.isEmpty)
         #expect(runtime.model.pendingInputSubmissions.isEmpty)
     }

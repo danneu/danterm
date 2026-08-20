@@ -46,10 +46,27 @@ enum InputSubmissionTag {}
 /// Prevents one input submission identity from being confused with another entity ID.
 typealias InputSubmissionId = TypedId<InputSubmissionTag>
 
-/// Restates PTY delivery as the only distinction the pure reply reducer needs.
+/// Preserves why PTY delivery failed across the app and IPC boundaries.
+enum InputSubmissionFailure: Equatable {
+    case bufferLimitExceeded
+    case canonicalModeTimeout
+    case launchFailed
+    case processEnded
+    case writeFailed(Int32)
+    case encodingFailed
+}
+
+/// Restates one PTY submission's exactly-once terminal result in the pure model.
 enum InputSubmissionResult: Equatable {
     case delivered
-    case rejected
+    case rejected(InputSubmissionFailure)
+}
+
+/// Makes launch input's pending and terminal states queryable with its owning session.
+enum LaunchInputState: Equatable {
+    case pending
+    case delivered
+    case rejected(InputSubmissionFailure)
 }
 
 /// Holds a creation reply until the identified session reaches a terminating spawn edge.
@@ -173,6 +190,7 @@ struct SessionModel: Equatable {
     var agent: AgentLifecycle = .none
     var lastCommand: String?
     var lastAgentSession: AgentSession?
+    var launchInput: LaunchInputState?
     /// Counts the wait generations minted for this session. It is per session
     /// because retraction is too: input to one pane can only name that pane's
     /// wait, so generations never have to be unique across panes.

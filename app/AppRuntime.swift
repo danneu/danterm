@@ -727,13 +727,16 @@ class AppRuntime {
                 break
             }
             guard let session = paneSession(for: paneId) else {
-                send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
+                send(.inputSubmissionCompleted(
+                    id: submissionId,
+                    result: .rejected(.processEnded)
+                ))
                 break
             }
             session.sendText(text, waitGeneration: waitGeneration) { [weak self] result in
                 self?.send(.inputSubmissionCompleted(
                     id: submissionId,
-                    result: result == .delivered ? .delivered : .rejected
+                    result: Self.inputSubmissionResult(result)
                 ))
             }
 
@@ -743,13 +746,16 @@ class AppRuntime {
                 break
             }
             guard let session = paneSession(for: paneId) else {
-                send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
+                send(.inputSubmissionCompleted(
+                    id: submissionId,
+                    result: .rejected(.processEnded)
+                ))
                 break
             }
             session.sendInputText(text, waitGeneration: waitGeneration) { [weak self] result in
                 self?.send(.inputSubmissionCompleted(
                     id: submissionId,
-                    result: result == .delivered ? .delivered : .rejected
+                    result: Self.inputSubmissionResult(result)
                 ))
             }
 
@@ -763,7 +769,10 @@ class AppRuntime {
                 break
             }
             guard let session = paneSession(for: paneId) else {
-                send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
+                send(.inputSubmissionCompleted(
+                    id: submissionId,
+                    result: .rejected(.processEnded)
+                ))
                 break
             }
             session.sendInputKey(
@@ -773,7 +782,7 @@ class AppRuntime {
             ) { [weak self] result in
                 self?.send(.inputSubmissionCompleted(
                     id: submissionId,
-                    result: result == .delivered ? .delivered : .rejected
+                    result: Self.inputSubmissionResult(result)
                 ))
             }
 
@@ -795,7 +804,10 @@ class AppRuntime {
                 break
             }
             guard let session = paneSession(for: paneId) else {
-                send(.inputSubmissionCompleted(id: submissionId, result: .rejected))
+                send(.inputSubmissionCompleted(
+                    id: submissionId,
+                    result: .rejected(.processEnded)
+                ))
                 break
             }
             session.sendInputWheel(
@@ -806,7 +818,7 @@ class AppRuntime {
             ) { [weak self] result in
                 self?.send(.inputSubmissionCompleted(
                     id: submissionId,
-                    result: result == .delivered ? .delivered : .rejected
+                    result: Self.inputSubmissionResult(result)
                 ))
             }
 
@@ -1576,6 +1588,20 @@ class AppRuntime {
         }
     }
 
+    private static func inputSubmissionResult(
+        _ result: TerminalInputSubmissionResult
+    ) -> InputSubmissionResult {
+        switch result {
+        case .delivered: .delivered
+        case .rejected(.bufferLimitExceeded): .rejected(.bufferLimitExceeded)
+        case .rejected(.canonicalModeTimeout): .rejected(.canonicalModeTimeout)
+        case .rejected(.launchFailed): .rejected(.launchFailed)
+        case .rejected(.processEnded): .rejected(.processEnded)
+        case .rejected(.writeFailed(let code)): .rejected(.writeFailed(code))
+        case .rejected(.encodingFailed): .rejected(.encodingFailed)
+        }
+    }
+
     /// Build one pane's whole runtime record: a backend session with its pane-scoped event
     /// translation armed, wrapped in the record that owns both for the pane's lifetime. Both
     /// callers -- the create-session command and restore staging -- get a finished record, so
@@ -1598,6 +1624,19 @@ class AppRuntime {
         gridOverride: PaneGridOverride?,
         replayFile: URL? = nil
     ) -> PaneHost? {
+        let onLaunchInputCompletion: (@MainActor @Sendable (
+            TerminalInputSubmissionResult
+        ) -> Void)?
+        if command != nil || launchCommand != nil {
+            onLaunchInputCompletion = { [weak self] result in
+                self?.send(.launchInputCompleted(
+                    sessionId: sessionId,
+                    result: Self.inputSubmissionResult(result)
+                ))
+            }
+        } else {
+            onLaunchInputCompletion = nil
+        }
         let request = TerminalSessionRequest(
             workingDirectory: workingDirectory,
             command: command,
@@ -1608,7 +1647,8 @@ class AppRuntime {
             themeName: themeName,
             fontSize: fontSize,
             fontFamily: fontFamily,
-            gridOverride: gridOverride
+            gridOverride: gridOverride,
+            onLaunchInputCompletion: onLaunchInputCompletion
         )
         guard let session = ports.createTerminalSession(request) else {
             if let replayFile { try? FileManager.default.removeItem(at: replayFile) }

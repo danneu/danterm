@@ -1074,7 +1074,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     ) {
         guard let key = Self.terminalKey(for: key) else {
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { onCompletion(.rejected) }
+                MainActor.assumeIsolated { onCompletion(.rejected(.encodingFailed)) }
             }
             return
         }
@@ -1159,7 +1159,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     ) -> TerminalInputSubmissionResult {
         switch result {
         case .delivered: .delivered
-        case .rejected: .rejected
+        case .rejected(.bufferLimitExceeded): .rejected(.bufferLimitExceeded)
+        case .rejected(.canonicalModeTimeout): .rejected(.canonicalModeTimeout)
+        case .rejected(.launchFailed): .rejected(.launchFailed)
+        case .rejected(.processEnded): .rejected(.processEnded)
+        case .rejected(.writeFailed(let code)): .rejected(.writeFailed(code))
         }
     }
 

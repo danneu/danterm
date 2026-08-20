@@ -52,6 +52,22 @@ import Testing
         ])
     }
 
+    @Test("launch input is carried as a tracked submission")
+    func launchInputIsTracked() throws {
+        var reducer = PaneProcessLifecycleReducer()
+        var input = lifecycleInput()
+        input.launchCommand = "printf launch"
+        let launch = PaneInputSubmissionId(rawValue: 41)
+        let firstSpec = try resolveLaunchPlan(input).get().attempts[0]
+
+        #expect(reducer.handle(.trackInitialInput(launch)).isEmpty)
+        #expect(reducer.handle(.start(input)) == [.spawn(firstSpec)])
+        #expect(reducer.handle(.spawnSucceeded) == [
+            .activateIO,
+            .writeInput(Array("printf launch\n".utf8), origin: nil, submissionId: launch),
+        ])
+    }
+
     @Test("input submitted before start is delivered behind launch input")
     func idleInputIsBufferedUntilStartAndSpawn() throws {
         var reducer = PaneProcessLifecycleReducer()

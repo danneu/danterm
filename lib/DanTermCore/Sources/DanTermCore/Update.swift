@@ -106,7 +106,11 @@ func update(
         let launchTitle = launch?.title?.singleLineName
         let pane = PaneModel(
             id: paneId,
-            session: SessionModel(id: sessionId, title: launchTitle ?? "Terminal")
+            session: SessionModel(
+                id: sessionId,
+                title: launchTitle ?? "Terminal",
+                launchInput: launch?.cmd == nil ? nil : .pending
+            )
         )
 
         // The leaf owns the pane content directly -- no separate dict write.
@@ -221,7 +225,10 @@ func update(
         var newPane = PaneModel(
             id: newPaneId,
             session: SessionModel(
-                id: newSessionId, title: launch?.title?.singleLineName ?? "Terminal")
+                id: newSessionId,
+                title: launch?.title?.singleLineName ?? "Terminal",
+                launchInput: launch?.cmd == nil ? nil : .pending
+            )
         )
         newPane.theme = theme
         newPane.fontSizeSteps = fontSizeSteps
@@ -934,7 +941,7 @@ func update(
         case .delivered:
             model.pendingInputRequests.removeValue(forKey: requestId)
             return [.ipcReply(reqId: requestId, result: .object(["ok": .bool(true)]))]
-        case .rejected:
+        case .rejected(let failure):
             model.pendingInputRequests.removeValue(forKey: requestId)
             for pendingId in request.remaining {
                 model.pendingInputSubmissions.removeValue(forKey: pendingId)
@@ -942,9 +949,21 @@ func update(
             return [.ipcError(
                 reqId: requestId,
                 code: -32603,
-                message: "pane input was not delivered"
+                message: inputSubmissionFailureMessage(failure)
             )]
         }
+
+    case .launchInputCompleted(let sessionId, let result):
+        model.updateSession(sessionId) { session in
+            guard session.launchInput == .pending else { return }
+            switch result {
+            case .delivered:
+                session.launchInput = .delivered
+            case .rejected(let failure):
+                session.launchInput = .rejected(failure)
+            }
+        }
+        return []
 
     // MARK: - Group Management
 

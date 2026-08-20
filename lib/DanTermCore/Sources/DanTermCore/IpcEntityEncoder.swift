@@ -201,6 +201,9 @@ struct IpcEntityEncoder {
             object["processPhase"] = .string(
                 pane.session?.processPhase.rawValue ?? SessionProcessPhase.spawning.rawValue
             )
+            if let launchInput = pane.session?.launchInput {
+                object["launchInput"] = launchInputJSON(launchInput)
+            }
         }
         if let cwd {
             object["cwd"] = .string(cwd)
@@ -217,6 +220,25 @@ struct IpcEntityEncoder {
             ])
         }
         return object
+    }
+
+    /// Encodes launch delivery with explicit state and a stable typed rejection reason.
+    private func launchInputJSON(_ state: LaunchInputState) -> JSONValue {
+        switch state {
+        case .pending:
+            return .object(["state": .string("pending")])
+        case .delivered:
+            return .object(["state": .string("delivered")])
+        case .rejected(let failure):
+            var object: [String: JSONValue] = [
+                "state": .string("rejected"),
+                "reason": .string(inputSubmissionFailureReason(failure)),
+            ]
+            if case .writeFailed(let code) = failure {
+                object["errno"] = .number(Double(code))
+            }
+            return .object(object)
+        }
     }
 
     private func todo(_ item: TodoItem) -> JSONValue {

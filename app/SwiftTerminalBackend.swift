@@ -60,6 +60,16 @@ final class SwiftTerminalBackend {
                 localeFallbackEnabled: request.localeFallbackEnabled
             )
         )
+        let onLaunchInputCompletion: (@MainActor @Sendable (
+            PaneInputSubmissionResult
+        ) -> Void)?
+        if let completion = request.onLaunchInputCompletion {
+            onLaunchInputCompletion = { result in
+                completion(Self.inputResult(result))
+            }
+        } else {
+            onLaunchInputCompletion = nil
+        }
         let controller: TerminalPaneSessionController
         do {
             #if DANTERM_TERMINAL_CHARACTERIZATION
@@ -67,13 +77,15 @@ final class SwiftTerminalBackend {
                 configuration: configuration,
                 bootstrapExecutable: bootstrapExecutable,
                 theme: theme,
-                recordsCompleteTape: recordingDirectory != nil
+                recordsCompleteTape: recordingDirectory != nil,
+                onLaunchInputCompletion: onLaunchInputCompletion
             )
             #else
             controller = try TerminalPaneSessionController(
                 configuration: configuration,
                 bootstrapExecutable: bootstrapExecutable,
-                theme: theme
+                theme: theme,
+                onLaunchInputCompletion: onLaunchInputCompletion
             )
             #endif
         } catch {
@@ -101,6 +113,19 @@ final class SwiftTerminalBackend {
             gridOverride: request.gridOverride
         )
         #endif
+    }
+
+    private static func inputResult(
+        _ result: PaneInputSubmissionResult
+    ) -> TerminalInputSubmissionResult {
+        switch result {
+        case .delivered: .delivered
+        case .rejected(.bufferLimitExceeded): .rejected(.bufferLimitExceeded)
+        case .rejected(.canonicalModeTimeout): .rejected(.canonicalModeTimeout)
+        case .rejected(.launchFailed): .rejected(.launchFailed)
+        case .rejected(.processEnded): .rejected(.processEnded)
+        case .rejected(.writeFailed(let code)): .rejected(.writeFailed(code))
+        }
     }
 
     /// Runs the bounded process teardown after the final checkpoint is captured.

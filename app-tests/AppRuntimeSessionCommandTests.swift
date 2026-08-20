@@ -38,6 +38,32 @@ struct AppRuntimeSessionCommandTests {
         #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.subscription] == 1)
     }
 
+    @Test("launch input completion preserves the PTY rejection reason in the model")
+    func launchInputCompletionPreservesReason() throws {
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let groupId = try #require(runtime.model.groups.first?.id)
+
+        runtime.send(.createTab(
+            inGroupId: groupId,
+            position: .atGroupEnd,
+            launch: LaunchSpec(cmd: "printf ready", cwd: nil, title: nil),
+            background: false
+        ))
+
+        let completion = try #require(fixture.sessionRequests.first?.onLaunchInputCompletion)
+        let paneId = try #require(selectedTab(in: runtime.model)?.paneTree.focusedPaneId)
+        let sessionId = try #require(runtime.model.pane(paneId)?.session?.id)
+        #expect(runtime.model.pane(owning: sessionId)?.session?.launchInput == .pending)
+
+        completion(.rejected(.canonicalModeTimeout))
+
+        #expect(runtime.model.pane(owning: sessionId)?.session?.launchInput == .rejected(
+            .canonicalModeTimeout
+        ))
+    }
+
     @Test("a restored pane's session request carries the grid it was claimed at")
     func restoredPaneRequestsItsClaimedGrid() throws {
         // Intent: the grid a restored pane is claimed at rides its session request,

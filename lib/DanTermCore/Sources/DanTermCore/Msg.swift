@@ -131,6 +131,7 @@ enum Msg {
     case sessionProcessStarted(sessionId: SessionId)
     case sessionProcessExited(sessionId: SessionId)
     case inputSubmissionCompleted(id: InputSubmissionId, result: InputSubmissionResult)
+    case launchInputCompleted(sessionId: SessionId, result: InputSubmissionResult)
 
     // Alerts
     case markAlertRead(alertId: AlertId)

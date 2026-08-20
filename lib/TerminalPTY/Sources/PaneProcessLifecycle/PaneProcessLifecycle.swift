@@ -81,6 +81,8 @@ public enum PaneProcessLifecyclePhase: Equatable, Sendable {
 
 /// Explicit inputs serialized by the future pane owner before reduction.
 public enum PaneProcessLifecycleEvent: Equatable, Sendable {
+    /// Gives launch input the same exactly-once result identity as later pane input.
+    case trackInitialInput(PaneInputSubmissionId)
     case start(LaunchPolicyInput)
     case spawnSucceeded
     case spawnFailed(SpawnFailure)
@@ -121,7 +123,11 @@ public struct PaneProcessLifecycleReducer: Sendable {
     /// One bound shared by input waiting before spawn and input waiting on descriptor writes.
     public static let pendingInputByteLimit = 8 * 1024 * 1024
 
-    private var storage: Storage = .idle(.init(pendingInput: [], pendingInputByteCount: 0))
+    private var storage: Storage = .idle(.init(
+        initialInputSubmissionId: nil,
+        pendingInput: [],
+        pendingInputByteCount: 0
+    ))
 
     /// Coarse lifecycle state used by the host to gate ownership-sensitive work.
     public var phase: PaneProcessLifecyclePhase {
@@ -166,11 +172,21 @@ public struct PaneProcessLifecycleReducer: Sendable {
         context: PreStartContext
     ) -> [PaneProcessLifecycleCommand] {
         switch event {
+        case .trackInitialInput(let submissionId):
+            guard context.initialInputSubmissionId == nil else { return [] }
+            var next = context
+            next.initialInputSubmissionId = submissionId
+            storage = .idle(next)
+            return []
         case .start(let input):
             switch resolveLaunchPlan(input) {
             case .success(let plan):
                 var pendingInput = plan.initialInput.map {
-                    [PendingInputSubmission(id: nil, bytes: $0, origin: nil)]
+                    [PendingInputSubmission(
+                        id: context.initialInputSubmissionId,
+                        bytes: $0,
+                        origin: nil
+                    )]
                 } ?? []
                 var pendingInputByteCount = plan.initialInput?.count ?? 0
                 var commands: [PaneProcessLifecycleCommand] = []
@@ -201,7 +217,13 @@ public struct PaneProcessLifecycleReducer: Sendable {
             case .failure(let error):
                 storage = .finished
                 let failure = launchFailure(for: error)
-                return context.pendingInput.compactMap {
+                let trackedLaunch = context.initialInputSubmissionId.map {
+                    [PaneProcessLifecycleCommand.completeInput(
+                        $0,
+                        .rejected(.launchFailed(failure))
+                    )]
+                } ?? []
+                return trackedLaunch + context.pendingInput.compactMap {
                     $0.id.map { .completeInput($0, .rejected(.launchFailed(failure))) }
                 } + [.report(.launchFailed(failure)), .finishTeardown]
             }
@@ -437,6 +459,7 @@ private struct SpawnContext: Sendable {
 
 /// Input can reach the serialized owner before its already-enqueued start event is reduced.
 private struct PreStartContext: Sendable {
+    var initialInputSubmissionId: PaneInputSubmissionId?
     var pendingInput: [PendingInputSubmission]
     var pendingInputByteCount: Int
 }

@@ -404,7 +404,8 @@ public final class TerminalPaneSessionController {
         bootstrapExecutable: String,
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
-        theme: RenderTheme = .dark
+        theme: RenderTheme = .dark,
+        onLaunchInputCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
     ) throws {
         self.init(
             host: try Self.makeHost(
@@ -417,7 +418,8 @@ public final class TerminalPaneSessionController {
             launchInput: configuration.launchInput,
             initialGridPinned: configuration.initialGridPinned,
             isVisible: isVisible,
-            theme: theme
+            theme: theme,
+            onLaunchInputCompletion: onLaunchInputCompletion
         )
     }
 
@@ -431,7 +433,8 @@ public final class TerminalPaneSessionController {
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
         theme: RenderTheme = .dark,
-        recordsCompleteTape: Bool
+        recordsCompleteTape: Bool,
+        onLaunchInputCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
     ) throws {
         self.init(
             host: try Self.makeHost(
@@ -444,7 +447,8 @@ public final class TerminalPaneSessionController {
             launchInput: configuration.launchInput,
             initialGridPinned: configuration.initialGridPinned,
             isVisible: isVisible,
-            theme: theme
+            theme: theme,
+            onLaunchInputCompletion: onLaunchInputCompletion
         )
     }
     #else
@@ -454,7 +458,8 @@ public final class TerminalPaneSessionController {
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
         theme: RenderTheme = .dark,
-        recordsCompleteTape: Bool
+        recordsCompleteTape: Bool,
+        onLaunchInputCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
     ) throws {
         self.init(
             host: try Self.makeHost(
@@ -467,7 +472,8 @@ public final class TerminalPaneSessionController {
             launchInput: configuration.launchInput,
             initialGridPinned: configuration.initialGridPinned,
             isVisible: isVisible,
-            theme: theme
+            theme: theme,
+            onLaunchInputCompletion: onLaunchInputCompletion
         )
     }
     #endif
@@ -478,6 +484,7 @@ public final class TerminalPaneSessionController {
         initialGridPinned: Bool = false,
         isVisible: Bool = true,
         theme: RenderTheme = .dark,
+        onLaunchInputCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil,
         fenceClock: @escaping () -> UInt64 = {
             DispatchTime.now().uptimeNanoseconds
         },
@@ -534,7 +541,13 @@ public final class TerminalPaneSessionController {
                 }
             }
         )
-        host.submitStart(launchInput)
+        if let onLaunchInputCompletion {
+            host.submitStart(launchInput) { result in
+                Self.deliverInputCompletion(onLaunchInputCompletion, result)
+            }
+        } else {
+            host.submitStart(launchInput)
+        }
     }
 
     /// The main-actor end of the host's update signal: delivers the urgent

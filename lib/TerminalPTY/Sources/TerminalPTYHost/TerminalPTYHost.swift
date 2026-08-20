@@ -530,7 +530,17 @@ public actor TerminalPTYHost {
     }
 
     /// Starts the pure launch plan and returns after scheduling its system spawn.
-    public func start(_ input: LaunchPolicyInput) {
+    public func start(
+        _ input: LaunchPolicyInput,
+        onInitialInputCompletion: (@Sendable (PaneInputSubmissionResult) -> Void)? = nil
+    ) {
+        if let onInitialInputCompletion {
+            let submissionId = registerInputSubmission(
+                attribution: .pane,
+                onCompletion: onInitialInputCompletion
+            )
+            process(.trackInitialInput(submissionId))
+        }
         guard input.initialDimensions == initialDimensions else {
             var invalidInput = input
             invalidInput.initialDimensions = .init(columns: 0, rows: 0)
@@ -541,9 +551,18 @@ public actor TerminalPTYHost {
     }
 
     /// Enqueues launch before synchronous pane submissions without requiring a Task hop.
-    nonisolated public func submitStart(_ input: LaunchPolicyInput) {
+    nonisolated public func submitStart(
+        _ input: LaunchPolicyInput,
+        onInitialInputCompletion: (@Sendable (PaneInputSubmissionResult) -> Void)? = nil
+    ) {
         queueClosingResizeRun().async { [weak self] in
-            self?.assumeIsolated { owner in owner.start(input) }
+            guard let self else {
+                onInitialInputCompletion?(.rejected(.processEnded))
+                return
+            }
+            self.assumeIsolated { owner in
+                owner.start(input, onInitialInputCompletion: onInitialInputCompletion)
+            }
         }
     }
 
@@ -1796,6 +1815,17 @@ public actor TerminalPTYHost {
         attribution: PaneInputAttribution,
         onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void = { _ in }
     ) {
+        let submissionId = registerInputSubmission(
+            attribution: attribution,
+            onCompletion: onCompletion
+        )
+        process(.sendInput(bytes, origin: origin, submissionId: submissionId))
+    }
+
+    private func registerInputSubmission(
+        attribution: PaneInputAttribution,
+        onCompletion: @escaping @Sendable (PaneInputSubmissionResult) -> Void
+    ) -> PaneInputSubmissionId {
         let submissionId = PaneInputSubmissionId(rawValue: nextInputSubmissionRawValue)
         nextInputSubmissionRawValue &+= 1
         precondition(inputSubmissions[submissionId] == nil, "input submission identity wrapped")
@@ -1803,12 +1833,11 @@ public actor TerminalPTYHost {
             attribution: attribution,
             completion: onCompletion
         )
-        process(.sendInput(bytes, origin: origin, submissionId: submissionId))
+        return submissionId
     }
 
-    /// Who chose the bytes of one write the reducer released. The reducer forwards the pane's
-    /// launch line with no submission of its own, and that line is the pane's own business,
-    /// so an absent submission is the pane rather than an unknown.
+    /// Who chose the bytes of one write the reducer released. Launch input is pane-owned,
+    /// while an absent identity covers terminal replies that need no completion result.
     private func writeAttribution(
         of submissionId: PaneInputSubmissionId?
     ) -> TerminalFlightRecordingWriteAttribution {

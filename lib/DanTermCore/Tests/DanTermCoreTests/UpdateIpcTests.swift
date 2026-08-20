@@ -2613,7 +2613,7 @@ import DanTermProtocol
         #expect(try requireIpcReply(second)["ok"]?.asBool == true)
     }
 
-    @Test("pane.input rejects once when any submission is undeliverable")
+    @Test("pane.input preserves each host rejection reason in its IPC error")
     func paneInputRejectsOnceWhenAnySubmissionFails() throws {
         var model = makeModel()
         createTab(&model)
@@ -2637,15 +2637,113 @@ import DanTermProtocol
 
         let failed = update(
             &model,
-            .inputSubmissionCompleted(id: submissions[0], result: .rejected)
+            .inputSubmissionCompleted(
+                id: submissions[0],
+                result: .rejected(.canonicalModeTimeout)
+            )
         )
         let late = update(
             &model,
             .inputSubmissionCompleted(id: submissions[1], result: .delivered)
         )
 
-        #expect(try requireIpcError(failed).code == -32603)
+        #expect(try requireIpcError(failed) == .init(
+            code: -32603,
+            message: "pane input timed out waiting for the tty to leave canonical mode"
+        ))
         #expect(late.isEmpty)
+    }
+
+    @Test("pane.input keeps canonical timeout, process exit, and write failure distinct")
+    func paneInputKeepsHostFailuresDistinct() throws {
+        let cases: [(InputSubmissionFailure, String)] = [
+            (
+                .canonicalModeTimeout,
+                "pane input timed out waiting for the tty to leave canonical mode"
+            ),
+            (
+                .processEnded,
+                "pane input was not delivered because the pane process ended"
+            ),
+            (
+                .writeFailed(EIO),
+                "pane input failed to write to the PTY (errno \(EIO))"
+            ),
+        ]
+
+        for (failure, message) in cases {
+            var model = makeModel()
+            createTab(&model)
+            let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+            let requestId = UUID()
+            let request = try IpcRequest.decode(
+                method: IpcRequestMethod.paneInput.rawValue,
+                params: .object([
+                    "pane": .string(paneId.rawValue.uuidString),
+                    "text": .string("probe"),
+                ])
+            )
+            let commands = update(
+                &model,
+                .ipcRequest(reqId: requestId, caller: .local, request: request)
+            )
+            let submissionId = try #require(commands.compactMap { command -> InputSubmissionId? in
+                guard case .sendText(_, _, let id, _) = command else { return nil }
+                return id
+            }.first)
+
+            let rejected = update(
+                &model,
+                .inputSubmissionCompleted(id: submissionId, result: .rejected(failure))
+            )
+
+            #expect(try requireIpcError(rejected) == .init(code: -32603, message: message))
+        }
+    }
+
+    @Test("pane.info exposes a rejected launch input with its typed reason")
+    func paneInfoExposesRejectedLaunchInput() throws {
+        var model = makeModel()
+        let commands = update(
+            &model,
+            .createTabInSelectedGroup(
+                position: .afterSelected,
+                launch: LaunchSpec(cmd: "printf ready", cwd: nil, title: nil),
+                background: false
+            )
+        )
+        let sessionId = try #require(commands.compactMap { command -> SessionId? in
+            guard case .createSession(let id, _, _, _, _) = command else { return nil }
+            return id
+        }.first)
+        let paneId = try #require(model.pane(owning: sessionId)?.id)
+
+        let pending = try requireIpcReply(sendIpc(
+            &model,
+            method: IpcRequestMethod.paneInfo.rawValue,
+            params: .object(["pane": .string(paneId.rawValue.uuidString)])
+        ))
+        #expect(pending["pane"]?["launchInput"] == .object([
+            "state": .string("pending"),
+        ]))
+
+        _ = update(
+            &model,
+            .launchInputCompleted(
+                sessionId: sessionId,
+                result: .rejected(.writeFailed(EIO))
+            )
+        )
+        let rejected = try requireIpcReply(sendIpc(
+            &model,
+            method: IpcRequestMethod.paneInfo.rawValue,
+            params: .object(["pane": .string(paneId.rawValue.uuidString)])
+        ))
+        #expect(rejected["pane"]?["launchInput"] == .object([
+            "state": .string("rejected"),
+            "reason": .string("writeFailed"),
+            "errno": .number(Double(EIO)),
+        ]))
     }
 
     @Test("pane.input input array emits ordered Effects via the key path")

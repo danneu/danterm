@@ -41,10 +41,20 @@ struct TerminalSessionState: Equatable {
     let background: CGColor
 }
 
-/// Restates whether one app-submitted input item crossed the PTY boundary.
+/// Preserves why an app-submitted input item could not cross the PTY boundary.
+enum TerminalInputSubmissionFailure: Equatable {
+    case bufferLimitExceeded
+    case canonicalModeTimeout
+    case launchFailed
+    case processEnded
+    case writeFailed(Int32)
+    case encodingFailed
+}
+
+/// Restates one app-submitted input item's terminal PTY result.
 enum TerminalInputSubmissionResult: Equatable {
     case delivered
-    case rejected
+    case rejected(TerminalInputSubmissionFailure)
 }
 
 /// Retains only the terminal owner needed to disarm one recorder append edge safely.
@@ -128,6 +138,8 @@ struct TerminalSessionRequest {
     /// pane's rectangle. Carried on the request rather than pushed after mount so a
     /// restored claimed pane's child never observes a grid nobody asked for.
     let gridOverride: PaneGridOverride?
+    /// Reports the initial interactive command after all of its bytes cross the PTY or fail.
+    let onLaunchInputCompletion: (@MainActor @Sendable (TerminalInputSubmissionResult) -> Void)?
 }
 
 /// Stable per-pane terminal owner mounted and reparented by the AppKit reconciler.
