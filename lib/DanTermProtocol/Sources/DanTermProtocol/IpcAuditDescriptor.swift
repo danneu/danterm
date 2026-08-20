@@ -62,7 +62,9 @@ public struct IpcAuditRequestDescriptor: Codable, Equatable, Sendable {
 public extension IpcRequest {
     /// Projects this request into the sole content shape admitted to the audit writer.
     var auditDescriptor: IpcAuditRequestDescriptor {
-        let target = auditTarget
+        let target = Dictionary(uniqueKeysWithValues: targetEntries.map { entry in
+            (entry.key, entry.auditValue)
+        })
         let launch: LaunchSpec?
         let input: IpcAuditInputAccounting?
         switch self {
@@ -86,49 +88,5 @@ public extension IpcRequest {
             cwd: launch?.cwd,
             input: input
         )
-    }
-
-    private var auditTarget: [String: String] {
-        switch self {
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus, .quit,
-             .groupNew:
-            return [:]
-        case .groupRename(let group, _), .groupClose(let group, _):
-            return ["group": auditId(group)]
-        case .tabNew(let target, _, _):
-            switch target {
-            case .group(let group, _): return ["group": auditId(group)]
-            case .afterTab(let tab): return ["afterTabId": auditId(tab)]
-            }
-        case .tabRename(let tab, _), .tabClose(let tab):
-            return ["tab": auditId(tab)]
-        case .paneFocus(let pane), .paneInfo(let pane), .paneClose(let pane),
-             .paneInput(let pane, _), .paneRead(let pane, _), .paneRows(let pane),
-             .paneZoom(let pane, _), .paneResize(let pane, _),
-             .paneTape(let pane, _, _, _),
-             .paneSnapshot(let pane), .themeSet(let pane, _),
-             .agentAttach(let pane, _), .agentActivity(let pane, _, _),
-             .agentDetach(let pane, _):
-            return ["pane": auditId(pane)]
-        case .paneSplit(let pane, _, _, _):
-            return ["pane": auditId(pane)]
-        case .todoList(let owner), .todoAdd(let owner, _),
-             .todoClearCompleted(let owner):
-            return auditOwner(owner)
-        case .todoEdit(let owner, let todoId, _), .todoSetDone(let owner, let todoId, _),
-             .todoDelete(let owner, let todoId):
-            return auditOwner(owner).merging(["todoId": auditId(todoId)]) { _, new in new }
-        }
-    }
-}
-
-private func auditId<Tag>(_ id: TypedId<Tag>) -> String {
-    id.rawValue.uuidString.lowercased()
-}
-
-private func auditOwner(_ owner: TodoOwner) -> [String: String] {
-    switch owner {
-    case .pane(let pane): return ["pane": auditId(pane)]
-    case .tab(let tab): return ["tab": auditId(tab)]
     }
 }

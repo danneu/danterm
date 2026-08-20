@@ -84,8 +84,6 @@ struct IpcLivenessTests {
             params: .object([:])
         ) == .ping)
         #expect(IpcRequest.ping.params.isEmpty)
-        #expect(IpcRequest.ping.targetParameterKeys.isEmpty)
-        #expect(IpcRequestMethod.ping.isTargeting == false)
         #expect(IpcRequestMethod.ping.requiresLocalCaller == false)
         #expect(IpcRequestMethod.ping.terminatesInstance == false)
     }

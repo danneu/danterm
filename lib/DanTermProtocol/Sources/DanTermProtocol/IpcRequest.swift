@@ -1,6 +1,13 @@
 // The exhaustive typed request catalog shared by the CLI and app daemon.
 import Foundation
 
+/// Forces every IPC method to state all policies that consumers derive from the catalog.
+private struct IpcRequestMethodTraits {
+    let terminatesInstance: Bool
+    let requiresLocalCaller: Bool
+    let producesAuditRecord: Bool
+}
+
 /// Carries the authenticated caller facts with each request through pure dispatch.
 public enum IpcCallerIdentity: Equatable, Sendable {
     /// Identifies a caller connected through the Mac-local control socket.
@@ -99,53 +106,12 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     /// only from an explicit `--socket`, and reads a closed connection as
     /// success, because a working quit takes the socket down with it.
     public var terminatesInstance: Bool {
-        switch self {
-        case .quit:
-            return true
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus,
-             .groupNew, .groupRename, .groupClose,
-             .tabNew, .tabRename, .tabClose,
-             .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
-             .agentAttach, .agentActivity, .agentDetach,
-             .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
-             .todoDelete, .todoClearCompleted:
-            return false
-        }
-    }
-
-    /// Makes target classification exhaustive when a method joins the catalog.
-    public var isTargeting: Bool {
-        switch self {
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus, .quit,
-             .groupNew:
-            return false
-        case .groupRename, .groupClose,
-             .tabNew, .tabRename, .tabClose,
-             .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
-             .agentAttach, .agentActivity, .agentDetach,
-             .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
-             .todoDelete, .todoClearCompleted:
-            return true
-        }
+        traits.terminatesInstance
     }
 
     /// Makes remote authority classification exhaustive when a method joins the catalog.
     public var requiresLocalCaller: Bool {
-        switch self {
-        case .quit:
-            return true
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus,
-             .groupNew, .groupRename, .groupClose,
-             .tabNew, .tabRename, .tabClose,
-             .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
-             .agentAttach, .agentActivity, .agentDetach,
-             .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
-             .todoDelete, .todoClearCompleted:
-            return false
-        }
+        traits.requiresLocalCaller
     }
 
     /// Makes durable-audit classification exhaustive when a method joins the catalog.
@@ -155,10 +121,24 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     /// accounting still counts pings, so a connection that only ever pinged stays
     /// distinguishable from one that was admitted and never read.
     public var producesAuditRecord: Bool {
+        traits.producesAuditRecord
+    }
+
+    private var traits: IpcRequestMethodTraits {
         switch self {
         case .ping:
-            return false
-        case .quit, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus,
+            return IpcRequestMethodTraits(
+                terminatesInstance: false,
+                requiresLocalCaller: false,
+                producesAuditRecord: false
+            )
+        case .quit:
+            return IpcRequestMethodTraits(
+                terminatesInstance: true,
+                requiresLocalCaller: true,
+                producesAuditRecord: true
+            )
+        case .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus,
              .groupNew, .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
@@ -166,7 +146,11 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
              .agentAttach, .agentActivity, .agentDetach,
              .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
              .todoDelete, .todoClearCompleted:
-            return true
+            return IpcRequestMethodTraits(
+                terminatesInstance: false,
+                requiresLocalCaller: false,
+                producesAuditRecord: true
+            )
         }
     }
 }
@@ -236,6 +220,24 @@ public enum IpcAgentActivity: String, Equatable, Sendable {
     case waiting
     /// Reports that the attached agent is attached but inactive.
     case idle
+}
+
+/// Keeps one named request target available to both wire and audit projections.
+struct IpcRequestTargetEntry: Equatable, Sendable {
+    let key: String
+    let id: UUID
+
+    /// Erases only the phantom tag after the typed id has selected its wire key.
+    init<Tag>(key: String, id: TypedId<Tag>) {
+        self.key = key
+        self.id = id.rawValue
+    }
+
+    /// Preserves the existing UUID spelling in JSON-RPC params.
+    var wireValue: JSONValue { .string(id.uuidString) }
+
+    /// Applies durable audit redaction at the projection boundary.
+    var auditValue: String { id.uuidString.lowercased() }
 }
 
 /// Reports the stable JSON-RPC error produced while decoding a request catalog case.
@@ -390,94 +392,94 @@ public enum IpcRequest: Equatable, Sendable {
         }
     }
 
-    /// Names every target key this request can carry.
-    public var targetParameterKeys: [String] {
+    /// Owns the ordered id-bearing entries shared by wire encoding and audit records.
+    var targetEntries: [IpcRequestTargetEntry] {
         switch self {
         case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus, .quit,
              .groupNew:
             return []
-        case .groupRename, .groupClose:
-            return ["group"]
+        case .groupRename(let group, _), .groupClose(let group, _):
+            return [IpcRequestTargetEntry(key: "group", id: group)]
         case .tabNew(let target, _, _):
             switch target {
-            case .group: return ["group"]
-            case .afterTab: return ["afterTabId"]
+            case .group(let group, _):
+                return [IpcRequestTargetEntry(key: "group", id: group)]
+            case .afterTab(let tab):
+                return [IpcRequestTargetEntry(key: "afterTabId", id: tab)]
             }
-        case .tabRename, .tabClose:
-            return ["tab"]
-        case .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
-             .agentAttach, .agentActivity, .agentDetach:
-            return ["pane"]
-        case .todoList, .todoAdd, .todoEdit, .todoSetDone,
-             .todoDelete, .todoClearCompleted:
-            return ["pane", "tab"]
+        case .tabRename(let tab, _), .tabClose(let tab):
+            return [IpcRequestTargetEntry(key: "tab", id: tab)]
+        case .paneFocus(let pane), .paneInfo(let pane), .paneClose(let pane),
+             .paneInput(let pane, _), .paneRead(let pane, _), .paneRows(let pane),
+             .paneZoom(let pane, _), .paneResize(let pane, _),
+             .paneTape(let pane, _, _, _), .paneSnapshot(let pane),
+             .themeSet(let pane, _), .agentAttach(let pane, _),
+             .agentActivity(let pane, _, _), .agentDetach(let pane, _):
+            return [IpcRequestTargetEntry(key: "pane", id: pane)]
+        case .paneSplit(let pane, _, _, _):
+            return [IpcRequestTargetEntry(key: "pane", id: pane)]
+        case .todoList(let owner), .todoAdd(let owner, _),
+             .todoClearCompleted(let owner):
+            return ownerTargetEntries(owner)
+        case .todoEdit(let owner, let todoId, _),
+             .todoSetDone(let owner, let todoId, _),
+             .todoDelete(let owner, let todoId):
+            return ownerTargetEntries(owner) + [IpcRequestTargetEntry(key: "todoId", id: todoId)]
         }
     }
 
     /// Encodes this typed request into its JSON-RPC parameter object.
     public var params: [String: JSONValue] {
+        var object: [String: JSONValue]
         switch self {
         case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus, .quit:
-            return [:]
+            object = [:]
         case .groupNew(let name, let launch, let background):
-            var object = launchParams(launch, background: background)
+            object = launchParams(launch, background: background)
             object["name"] = .string(name)
-            return object
-        case .groupRename(let group, let name):
-            return ["group": idValue(group), "name": .string(name)]
-        case .groupClose(let group, let moveTabs):
-            return ["group": idValue(group), "moveTabs": .bool(moveTabs)]
+        case .groupRename(_, let name):
+            object = ["name": .string(name)]
+        case .groupClose(_, let moveTabs):
+            object = ["moveTabs": .bool(moveTabs)]
         case .tabNew(let target, let launch, let background):
-            var object = launchParams(launch, background: background)
+            object = launchParams(launch, background: background)
             switch target {
-            case .group(let group, let position):
-                object["group"] = idValue(group)
+            case .group(_, let position):
                 object["position"] = .string(position == .afterSelected ? "afterSelected" : "atGroupEnd")
-            case .afterTab(let tab):
+            case .afterTab:
                 object["position"] = .string("afterTab")
-                object["afterTabId"] = idValue(tab)
             }
-            return object
-        case .tabRename(let tab, let title):
-            return ["tab": idValue(tab), "title": title.map(JSONValue.string) ?? .null]
-        case .tabClose(let tab):
-            return ["tab": idValue(tab)]
-        case .paneFocus(let pane), .paneInfo(let pane), .paneClose(let pane),
-             .paneRows(let pane):
-            return ["pane": idValue(pane)]
-        case .paneSplit(let pane, let direction, let launch, let background):
-            var object = launchParams(launch, background: background)
-            object["pane"] = idValue(pane)
+        case .tabRename(_, let title):
+            object = ["title": title.map(JSONValue.string) ?? .null]
+        case .tabClose, .paneFocus, .paneInfo, .paneClose, .paneRows, .paneSnapshot:
+            object = [:]
+        case .paneSplit(_, let direction, let launch, let background):
+            object = launchParams(launch, background: background)
             object["direction"] = .string(direction == .horizontal ? "horizontal" : "vertical")
-            return object
-        case .paneInput(let pane, let input):
+        case .paneInput(_, let input):
             switch input {
             case .text(let text):
-                return ["pane": idValue(pane), "text": .string(text)]
+                object = ["text": .string(text)]
             case .events(let events):
-                return ["pane": idValue(pane), "input": .array(events.map(inputEventJSON))]
+                object = ["input": .array(events.map(inputEventJSON))]
             }
-        case .paneRead(let pane, let lineLimit):
-            var object = ["pane": idValue(pane)]
+        case .paneRead(_, let lineLimit):
+            object = [:]
             if let lineLimit { object["lines"] = .number(Double(lineLimit)) }
-            return object
-        case .paneZoom(let pane, let state):
-            return ["pane": idValue(pane), "state": .string(state.rawValue)]
-        case .paneResize(let pane, let resize):
+        case .paneZoom(_, let state):
+            object = ["state": .string(state.rawValue)]
+        case .paneResize(_, let resize):
             switch resize {
             case .grid(let columns, let rows):
-                return [
-                    "pane": idValue(pane),
+                object = [
                     "columns": .number(Double(columns)),
                     "rows": .number(Double(rows)),
                 ]
             case .fit:
-                return ["pane": idValue(pane), "fit": .bool(true)]
+                object = ["fit": .bool(true)]
             }
-        case .paneTape(let pane, let follow, let start, let policy):
-            var object = [
-                "pane": idValue(pane),
+        case .paneTape(_, let follow, let start, let policy):
+            object = [
                 "start": paneTapeStartJSON(start),
                 "mode": .string(policy.mode.rawValue),
             ]
@@ -485,29 +487,25 @@ public enum IpcRequest: Equatable, Sendable {
             if case .reconstructible(let budget) = policy, let budget {
                 object["syncHistoryBytes"] = .number(Double(budget))
             }
-            return object
-        case .paneSnapshot(let pane):
-            return ["pane": idValue(pane)]
-        case .themeSet(let pane, let themeName):
-            return ["pane": idValue(pane), "themeName": themeName.map(JSONValue.string) ?? .null]
-        case .agentAttach(let pane, let session), .agentDetach(let pane, let session):
-            return agentParams(pane: pane, session: session)
-        case .agentActivity(let pane, let session, let activity):
-            var object = agentParams(pane: pane, session: session)
+        case .themeSet(_, let themeName):
+            object = ["themeName": themeName.map(JSONValue.string) ?? .null]
+        case .agentAttach(_, let session), .agentDetach(_, let session):
+            object = agentParams(session: session)
+        case .agentActivity(_, let session, let activity):
+            object = agentParams(session: session)
             object["state"] = .string(activity.rawValue)
-            return object
-        case .todoList(let owner), .todoClearCompleted(let owner):
-            return ownerParams(owner)
-        case .todoAdd(let owner, let text):
-            return ownerParams(owner).merging(["text": .string(text)]) { _, new in new }
-        case .todoEdit(let owner, let todoId, let text):
-            return ownerParams(owner).merging([
-                "todoId": idValue(todoId), "text": .string(text),
-            ]) { _, new in new }
+        case .todoList, .todoClearCompleted:
+            object = [:]
+        case .todoAdd(_, let text), .todoEdit(_, _, let text):
+            object = ["text": .string(text)]
         // `isDone` stays out of params on purpose: the wire method carries it.
-        case .todoSetDone(let owner, let todoId, _), .todoDelete(let owner, let todoId):
-            return ownerParams(owner).merging(["todoId": idValue(todoId)]) { _, new in new }
+        case .todoSetDone, .todoDelete:
+            object = [:]
         }
+        for entry in targetEntries {
+            object[entry.key] = entry.wireValue
+        }
+        return object
     }
 
     /// Decodes untrusted wire params into the one typed catalog consumed by core dispatch.
@@ -710,10 +708,10 @@ private func todoOwnerAndId(_ object: [String: JSONValue]?) throws -> (TodoOwner
     return (owner, TodoId(rawValue: todoId))
 }
 
-private func ownerParams(_ owner: TodoOwner) -> [String: JSONValue] {
+private func ownerTargetEntries(_ owner: TodoOwner) -> [IpcRequestTargetEntry] {
     switch owner {
-    case .pane(let pane): return ["pane": idValue(pane)]
-    case .tab(let tab): return ["tab": idValue(tab)]
+    case .pane(let pane): return [IpcRequestTargetEntry(key: "pane", id: pane)]
+    case .tab(let tab): return [IpcRequestTargetEntry(key: "tab", id: tab)]
     }
 }
 
@@ -900,18 +898,14 @@ private func agentSession(_ object: [String: JSONValue]?) throws -> IpcAgentSess
     return IpcAgentSession(kind: kind, id: id)
 }
 
-private func idValue<Tag>(_ id: TypedId<Tag>) -> JSONValue {
-    .string(id.rawValue.uuidString)
-}
-
 private func launchParams(_ launch: LaunchSpec?, background: Bool) -> [String: JSONValue] {
     var object: [String: JSONValue] = ["background": .bool(background)]
     if let launch { object["launch"] = launch.jsonValue }
     return object
 }
 
-private func agentParams(pane: PaneId, session: IpcAgentSession) -> [String: JSONValue] {
-    ["pane": idValue(pane), "kind": .string(session.kind), "id": .string(session.id)]
+private func agentParams(session: IpcAgentSession) -> [String: JSONValue] {
+    ["kind": .string(session.kind), "id": .string(session.id)]
 }
 
 private func inputEventJSON(_ event: InputEvent) -> JSONValue {

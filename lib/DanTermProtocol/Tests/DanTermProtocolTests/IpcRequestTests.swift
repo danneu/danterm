@@ -124,10 +124,11 @@ struct IpcRequestTests {
         // Why it exists: separate CLI and daemon parameter transcriptions can drift
         //   while their independent tests remain green.
         // Scenario: one representative invocation for every client request method.
-        let commands = try representativeCLICommands()
+        let fixtures = try representativeCLICommands()
 
-        #expect(Set(commands.map(\.method)) == Set(IpcRequestMethod.allCases.map(\.rawValue)))
-        for command in commands {
+        #expect(Set(fixtures.map(\.command.method)) == Set(IpcRequestMethod.allCases.map(\.rawValue)))
+        for fixture in fixtures {
+            let command = fixture.command
             let decoded = try IpcRequest.decode(
                 method: command.method,
                 params: .object(command.params)
@@ -136,24 +137,41 @@ struct IpcRequestTests {
         }
     }
 
-    @Test("every catalog method declared as targeting rejects its absent target")
+    @Test("every audit target agrees with the request's wire params")
+    func everyAuditTargetAgreesWithWireParams() throws {
+        // Intent: every durable target key and id is the same entity sent on the wire.
+        // Why it exists: the audit and wire projections were independent switches, so
+        //   either could drift while its own focused tests stayed green.
+        // Scenario: every representative request compares its audit target to params.
+        for fixture in try representativeCLICommands() {
+            for (key, value) in fixture.command.request.auditDescriptor.target {
+                let wireValue = try #require(fixture.command.params[key]?.asString)
+                #expect(value == wireValue.lowercased())
+            }
+        }
+    }
+
+    @Test("every targeting catalog fixture rejects its absent target")
     func everyTargetingCatalogMethodRejectsAbsentTarget() throws {
-        // Intent: targeting classification drives the missing-target proof.
-        // Why it exists: a new targeting method must join the proof when it joins
-        //   the exhaustive catalog, without a second hand-maintained method list.
-        // Scenario: remove the declared target from otherwise-valid CLI params.
-        for command in try representativeCLICommands()
-        where command.request.method.isTargeting {
+        // Intent: each distinct target form pins its own missing-target decode error.
+        // Why it exists: test-only production metadata could omit a target and make
+        //   the proof skip the request instead of catching the missing decision.
+        // Scenario: each targeting fixture removes its declared target keys.
+        for fixture in try representativeCLICommands() {
+            #expect(
+                fixture.command.request.auditDescriptor.target.isEmpty
+                    == (fixture.missingTarget == nil)
+            )
+            guard let missingTarget = fixture.missingTarget else { continue }
+
+            let command = fixture.command
             var params = command.params
-            let targetKeys = command.request.targetParameterKeys
-            let targetKey = try #require(targetKeys.first)
-            for key in targetKeys { params.removeValue(forKey: key) }
+            for key in missingTarget.keys { params.removeValue(forKey: key) }
 
             let error = #expect(throws: IpcRequestDecodeError.self) {
                 try IpcRequest.decode(method: command.method, params: .object(params))
             }
-            let expected = targetKeys.count == 1 ? "\(targetKey) required" : "pane or tab required"
-            #expect(error?.message == expected)
+            #expect(error?.message == missingTarget.message)
         }
     }
 
@@ -288,58 +306,91 @@ struct IpcRequestTests {
         #expect(absent?.message == "invalid name")
     }
 
-    private func representativeCLICommands() throws -> [CLICommand] {
-        let pane = "11111111-1111-4111-8111-111111111111"
-        let tab = "22222222-2222-4222-8222-222222222222"
-        let group = "33333333-3333-4333-8333-333333333333"
-        let todo = "44444444-4444-4444-8444-444444444444"
+    private struct MissingTargetExpectation {
+        let keys: [String]
+        let message: String
+    }
+
+    private struct RepresentativeCLICommand {
+        let command: CLICommand
+        let missingTarget: MissingTargetExpectation?
+
+        init(
+            _ command: CLICommand,
+            removing keys: [String] = [],
+            expects message: String? = nil
+        ) {
+            self.command = command
+            missingTarget = message.map { MissingTargetExpectation(keys: keys, message: $0) }
+        }
+    }
+
+    private func representativeCLICommands() throws -> [RepresentativeCLICommand] {
+        let pane = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        let tab = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        let group = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        let todo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 
         return [
-            CLICommand(request: .doctorPermissions, outputMode: .none),
-            CLICommand(request: .ping, outputMode: .none),
+            RepresentativeCLICommand(CLICommand(request: .doctorPermissions, outputMode: .none)),
+            RepresentativeCLICommand(CLICommand(request: .ping, outputMode: .none)),
             // Built by the phone client rather than by a CLI verb, like the two above.
             // It still belongs here: the catalog proof is what stops a method from
             // joining the enum without a decode that round trips.
-            CLICommand(request: .roster, outputMode: .none),
-            try parseCLI(["ls"]),
-            try parseCLI(["focus"]),
-            try parseCLI(["tailnet", "status"]),
-            try parseCLI(["quit"]),
-            try parseCLI(["tab", "new", "--group", group], currentDirectory: "/caller"),
-            try parseCLI(["tab", "rename", "--tab", tab, "work"]),
-            try parseCLI(["tab", "close", "--tab", tab]),
-            try parseCLI(["group", "new", "--name", "notes"], currentDirectory: "/caller"),
-            try parseCLI(["group", "rename", "--group", group, "notes"]),
-            try parseCLI(["group", "close", "--group", group]),
-            try parseCLI(["pane", "focus", pane]),
-            try parseCLI(["pane", "info", "--pane", pane]),
-            try parseCLI(["pane", "split", "--pane", pane, "-h"]),
-            try parseCLI(["pane", "close", "--pane", pane]),
-            try parseCLI(["pane", "input", "--pane", pane, "--", "C-c"]),
-            try parseCLI(["pane", "read", "--pane", pane, "--lines", "20"]),
-            try parseCLI(["pane", "rows", "--pane", pane]),
-            try parseCLI(["pane", "zoom", "--pane", pane, "on"]),
-            try parseCLI(["pane", "resize", "--pane", pane, "60x20"]),
-            try parseCLI(["pane", "tape", "--pane", pane, "--follow"]),
-            try parseCLI(["pane", "snapshot", "--pane", pane]),
-            try parseCLI(["theme", "set", "--pane", pane, "Tokyo Night"]),
-            try parseCLI(["agent", "attach", "--pane", pane, "--kind", "codex", "--id", "thread-1"]),
-            try parseCLI(["agent", "activity", "--pane", pane, "--kind", "codex", "--id", "thread-1", "--state", "working"]),
-            try parseCLI(["agent", "detach", "--pane", pane, "--kind", "codex", "--id", "thread-1"]),
-            try parseCLI(["todo", "list", "--pane", pane]),
-            try parseCLI(["todo", "add", "--pane", pane, "write", "test"]),
-            try parseCLI(["todo", "edit", "--pane", pane, todo, "write", "test"]),
-            try parseCLI(["todo", "done", "--pane", pane, todo]),
-            try parseCLI(["todo", "open", "--pane", pane, todo]),
-            try parseCLI(["todo", "delete", "--pane", pane, todo]),
-            try parseCLI(["todo", "clear-completed", "--pane", pane]),
-            try parseCLI(["todo", "list", "--tab", tab]),
-            try parseCLI(["todo", "add", "--tab", tab, "write", "test"]),
-            try parseCLI(["todo", "edit", "--tab", tab, todo, "write", "test"]),
-            try parseCLI(["todo", "done", "--tab", tab, todo]),
-            try parseCLI(["todo", "open", "--tab", tab, todo]),
-            try parseCLI(["todo", "delete", "--tab", tab, todo]),
-            try parseCLI(["todo", "clear-completed", "--tab", tab]),
+            RepresentativeCLICommand(CLICommand(request: .roster, outputMode: .none)),
+            RepresentativeCLICommand(try parseCLI(["ls"])),
+            RepresentativeCLICommand(try parseCLI(["focus"])),
+            RepresentativeCLICommand(try parseCLI(["tailnet", "status"])),
+            RepresentativeCLICommand(try parseCLI(["quit"])),
+            RepresentativeCLICommand(
+                try parseCLI(["tab", "new", "--group", group], currentDirectory: "/caller"),
+                removing: ["group"], expects: "group required"
+            ),
+            RepresentativeCLICommand(
+                CLICommand(
+                    request: .tabNew(
+                        target: .afterTab(TabId(rawValue: UUID(uuidString: tab)!)),
+                        launch: LaunchSpec(cmd: nil, cwd: "/caller", title: nil),
+                        background: false
+                    ),
+                    outputMode: .none
+                ),
+                removing: ["afterTabId"], expects: "position=afterTab requires afterTabId"
+            ),
+            RepresentativeCLICommand(try parseCLI(["tab", "rename", "--tab", tab, "work"]), removing: ["tab"], expects: "tab required"),
+            RepresentativeCLICommand(try parseCLI(["tab", "close", "--tab", tab]), removing: ["tab"], expects: "tab required"),
+            RepresentativeCLICommand(try parseCLI(["group", "new", "--name", "notes"], currentDirectory: "/caller")),
+            RepresentativeCLICommand(try parseCLI(["group", "rename", "--group", group, "notes"]), removing: ["group"], expects: "group required"),
+            RepresentativeCLICommand(try parseCLI(["group", "close", "--group", group]), removing: ["group"], expects: "group required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "focus", pane]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "info", "--pane", pane]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "split", "--pane", pane, "-h"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "close", "--pane", pane]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "input", "--pane", pane, "--", "C-c"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "read", "--pane", pane, "--lines", "20"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "rows", "--pane", pane]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "zoom", "--pane", pane, "on"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "resize", "--pane", pane, "60x20"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "tape", "--pane", pane, "--follow"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "snapshot", "--pane", pane]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["theme", "set", "--pane", pane, "Tokyo Night"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["agent", "attach", "--pane", pane, "--kind", "codex", "--id", "thread-1"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["agent", "activity", "--pane", pane, "--kind", "codex", "--id", "thread-1", "--state", "working"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["agent", "detach", "--pane", pane, "--kind", "codex", "--id", "thread-1"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "list", "--pane", pane]), removing: ["pane"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "add", "--pane", pane, "write", "test"]), removing: ["pane"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "edit", "--pane", pane, todo, "write", "test"]), removing: ["pane"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "done", "--pane", pane, todo]), removing: ["pane"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "open", "--pane", pane, todo]), removing: ["pane"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "delete", "--pane", pane, todo]), removing: ["pane"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "clear-completed", "--pane", pane]), removing: ["pane"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "list", "--tab", tab]), removing: ["tab"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "add", "--tab", tab, "write", "test"]), removing: ["tab"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "edit", "--tab", tab, todo, "write", "test"]), removing: ["tab"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "done", "--tab", tab, todo]), removing: ["tab"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "open", "--tab", tab, todo]), removing: ["tab"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "delete", "--tab", tab, todo]), removing: ["tab"], expects: "pane or tab required"),
+            RepresentativeCLICommand(try parseCLI(["todo", "clear-completed", "--tab", tab]), removing: ["tab"], expects: "pane or tab required"),
         ]
     }
 }
