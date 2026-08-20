@@ -36,14 +36,54 @@ func preferencesPanelTests() {
         try uiExpect(!titles.contains("Open Config File..."), "an immediate action should not imply another step")
     }
 
-    uiTest("the absent font warning collapses its grid row") {
+    uiTest("a warning row expands only for its own warning") {
+        // Intent: each of the three warning rows collapses and expands on its own
+        //   warning, and on no other row's.
+        // Why it exists: the rows used to be addressed by literal grid index, so
+        //   inserting or reordering a form row silently pointed a warning at the
+        //   wrong row. Finding each row from its own label is what rules that out.
+        // Scenario: spec-first; the configured font family is not installed, but
+        //   both themes resolve.
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        guard let grid = fx.panel.contentView?.subviews.compactMap({ $0 as? NSGridView }).first else {
-            throw UITestFailure(message: "expected settings grid")
-        }
+        let grid = try settingsGrid(in: fx.panel)
+        let theme = try row(in: grid, containing: fx.panel.themeWarningLabel)
+        let fontFamily = try row(in: grid, containing: fx.panel.fontFamilyWarningLabel)
+        let remoteTheme = try row(in: grid, containing: fx.panel.remoteThemeWarningLabel)
 
-        try uiExpect(grid.row(at: 3).isHidden, "a hidden warning must not reserve vertical space")
+        try uiExpect(theme.isHidden && fontFamily.isHidden && remoteTheme.isHidden,
+                     "a hidden warning must not reserve vertical space")
+
+        fx.panel.apply(makeProjection(warning: "Font \"Fira Codee\" is not installed."))
+
+        try uiExpect(!fontFamily.isHidden, "the projected font warning should expand its own row")
+        try uiExpect(theme.isHidden, "the theme row should stay collapsed")
+        try uiExpect(remoteTheme.isHidden, "the remote theme row should stay collapsed")
+    }
+
+    uiTest("only the rows that start a section carry top padding") {
+        // Intent: section spacing belongs to the row that starts the section, and
+        //   to no other row.
+        // Why it exists: the padding used to be applied to four literal row
+        //   indices, so inserting a row above them moved the section breaks onto
+        //   unrelated rows without failing anything.
+        // Scenario: spec-first.
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        let grid = try settingsGrid(in: fx.panel)
+        let sectionStarts: Set<String> = ["Clear Alerts", "Remote Theme", "Config file", "Tailnet"]
+
+        for label in rowLabels(in: grid) {
+            let padded = try row(in: grid, containing: label).topPadding > 0
+            let shouldPad = sectionStarts.contains(label.stringValue)
+            try uiExpect(padded == shouldPad,
+                         "row '\(label.stringValue)': expected top padding \(shouldPad), got \(padded)")
+        }
+        for view: NSView in [fx.panel.themeWarningLabel, fx.panel.fontFamilyWarningLabel,
+                             fx.panel.remoteThemeWarningLabel, fx.panel.copyOnSelectCheckbox] {
+            try uiExpect(try row(in: grid, containing: view).topPadding == 0,
+                         "a row inside a section should carry no top padding")
+        }
     }
 
     uiTest("theme names are picker-only") {
@@ -91,9 +131,7 @@ func preferencesPanelTests() {
         defer { fx.panel.close() }
         fx.panel.apply(makeProjection(themeText: "Monokai Remastered", remoteThemeText: "Purplepeter"))
         fx.panel.contentView?.layoutSubtreeIfNeeded()
-        guard let grid = fx.panel.contentView?.subviews.compactMap({ $0 as? NSGridView }).first else {
-            throw UITestFailure(message: "expected settings grid")
-        }
+        let grid = try settingsGrid(in: fx.panel)
         let labels = rowLabels(in: grid)
         try uiExpect(labels.count >= 5, "expected the form's row labels, found \(labels.count)")
 
@@ -146,9 +184,9 @@ func preferencesPanelTests() {
     uiTest("theme fallback warnings show inline and collapse when resolved") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        guard let grid = fx.panel.contentView?.subviews.compactMap({ $0 as? NSGridView }).first else {
-            throw UITestFailure(message: "expected settings grid")
-        }
+        let grid = try settingsGrid(in: fx.panel)
+        let localRow = try row(in: grid, containing: fx.panel.themeWarningLabel)
+        let remoteRow = try row(in: grid, containing: fx.panel.remoteThemeWarningLabel)
         let localWarning = "Theme \"Missing Local\" is not available -- using the built-in dark theme."
         let remoteWarning = "Theme \"Missing Remote\" is not available -- using the built-in dark theme."
 
@@ -156,12 +194,12 @@ func preferencesPanelTests() {
         let visibleTitles = descendantControlTitles(in: fx.panel.contentView)
         try uiExpect(visibleTitles.contains(localWarning), "expected local fallback warning")
         try uiExpect(visibleTitles.contains(remoteWarning), "expected remote fallback warning")
-        try uiExpect(!grid.row(at: 1).isHidden, "local warning row should expand")
-        try uiExpect(!grid.row(at: 8).isHidden, "remote warning row should expand")
+        try uiExpect(!localRow.isHidden, "local warning row should expand")
+        try uiExpect(!remoteRow.isHidden, "remote warning row should expand")
 
         fx.panel.apply(makeProjection())
-        try uiExpect(grid.row(at: 1).isHidden, "resolved local warning row should collapse")
-        try uiExpect(grid.row(at: 8).isHidden, "resolved remote warning row should collapse")
+        try uiExpect(localRow.isHidden, "resolved local warning row should collapse")
+        try uiExpect(remoteRow.isHidden, "resolved remote warning row should collapse")
     }
 
     uiTest("the font-family combo box lists the projected choices in order") {
@@ -435,6 +473,19 @@ private func descendantControlTitles(in view: NSView?) -> [String] {
         ownTitle = []
     }
     return ownTitle + view.subviews.flatMap { descendantControlTitles(in: $0) }
+}
+
+private func settingsGrid(in panel: PreferencesPanel) throws -> NSGridView {
+    try uiRequire(
+        panel.contentView?.subviews.compactMap({ $0 as? NSGridView }).first,
+        "expected settings grid"
+    )
+}
+
+/// Find a form row from a view it holds, never from a row number, so the
+/// assertion follows the row when the form is reordered.
+private func row(in grid: NSGridView, containing view: NSView) throws -> NSGridRow {
+    try uiRequire(grid.cell(for: view)?.row, "expected a grid row holding \(view)")
 }
 
 /// The right-aligned form labels in the grid's first column, in row order.

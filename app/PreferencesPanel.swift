@@ -16,7 +16,9 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
     // Terminal appearance settings
     private let themeField = NSTextField()
     private let themeBrowseButton = NSButton()
-    private let themeWarningLabel = NSTextField(labelWithString: "")
+    // The UI harness finds each warning's grid row from its label, so all three
+    // labels have to be reachable from the harness.
+    let themeWarningLabel = NSTextField(labelWithString: "")
     private var themeWarningRow: NSGridRow?
     // The UI harness drives the paired controls to prove a step updates the
     // visible text and commits one settings change.
@@ -33,7 +35,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
     let copyOnSelectCheckbox = NSButton()
     private let remoteThemeField = NSTextField()
     private let browseButton = NSButton()
-    private let remoteThemeWarningLabel = NSTextField(labelWithString: "")
+    let remoteThemeWarningLabel = NSTextField(labelWithString: "")
     private var remoteThemeWarningRow: NSGridRow?
 
     // Tailnet listener: read-only, because the listener is frozen at launch and an
@@ -75,27 +77,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         let remoteThemeControls = makeHStack([remoteThemeField, browseButton])
         themeControls.distribution = .fill
         remoteThemeControls.distribution = .fill
-        let grid = NSGridView(views: [
-            formRow("Theme", themeControls),
-            [NSGridCell.emptyContentView, themeWarningLabel],
-            formRow("Font Family", fontFamilyCombo),
-            [NSGridCell.emptyContentView, fontFamilyWarningLabel],
-            formRow("Font Size", makeHStack([fontSizeField, fontSizeStepper])),
-            formRow("Clear Alerts", alertClearModePopup),
-            [NSGridCell.emptyContentView, copyOnSelectCheckbox],
-            formRow("Remote Theme", remoteThemeControls),
-            [NSGridCell.emptyContentView, remoteThemeWarningLabel],
-            formRow("Config file", makeHStack([
-                makeButton("Open Config File", action: #selector(openConfigFile(_:))),
-                makeButton("Reload Config", action: #selector(reloadConfig(_:))),
-            ])),
-            // The tailnet section goes last so the row indices above it, which the
-            // warning rows and the UI harness both address by number, stay put.
-            formRow("Tailnet", tailnetConfiguredField),
-            formRow("Endpoint", tailnetEndpointField),
-            formRow("Listener", tailnetStatusField),
-            [NSGridCell.emptyContentView, tailnetNoteLabel],
-        ])
+        let grid = NSGridView(numberOfColumns: 2, rows: 0)
         grid.translatesAutoresizingMaskIntoConstraints = false
         grid.column(at: 0).xPlacement = .trailing
         grid.column(at: 1).xPlacement = .fill
@@ -104,28 +86,28 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         // rows containing taller controls (text fields, popups).
         grid.rowAlignment = .firstBaseline
         grid.rowSpacing = 8
-        grid.row(at: 5).topPadding = 8
-        grid.row(at: 7).topPadding = 8
-        grid.row(at: 9).topPadding = 4
-        grid.row(at: 10).topPadding = 8
-        themeWarningRow = grid.row(at: 1)
-        themeWarningRow?.isHidden = true
-        fontFamilyWarningRow = grid.row(at: 3)
-        fontFamilyWarningRow?.isHidden = true
-        remoteThemeWarningRow = grid.row(at: 8)
-        remoteThemeWarningRow?.isHidden = true
 
-        // State the control column's width on the cells themselves, so the grid
-        // has no surplus to hand column 0. Every row is constrained, not one
-        // chosen row, so reordering or removing a row cannot silently drop it.
-        for row in 0..<grid.numberOfRows {
-            guard let content = grid.cell(atColumnIndex: 1, rowIndex: row).contentView,
-                  content !== NSGridCell.emptyContentView
-            else { continue }
-            content.widthAnchor.constraint(
-                greaterThanOrEqualToConstant: preferencesControlColumnWidth
-            ).isActive = true
-        }
+        addRow(to: grid, formRow("Theme", themeControls))
+        themeWarningRow = addWarningRow(to: grid, themeWarningLabel)
+        addRow(to: grid, formRow("Font Family", fontFamilyCombo))
+        fontFamilyWarningRow = addWarningRow(to: grid, fontFamilyWarningLabel)
+        addRow(to: grid, formRow("Font Size", makeHStack([fontSizeField, fontSizeStepper])))
+        addRow(to: grid, formRow("Clear Alerts", alertClearModePopup), topPadding: 8)
+        addRow(to: grid, [NSGridCell.emptyContentView, copyOnSelectCheckbox])
+        addRow(to: grid, formRow("Remote Theme", remoteThemeControls), topPadding: 8)
+        remoteThemeWarningRow = addWarningRow(to: grid, remoteThemeWarningLabel)
+        addRow(
+            to: grid,
+            formRow("Config file", makeHStack([
+                makeButton("Open Config File", action: #selector(openConfigFile(_:))),
+                makeButton("Reload Config", action: #selector(reloadConfig(_:))),
+            ])),
+            topPadding: 4
+        )
+        addRow(to: grid, formRow("Tailnet", tailnetConfiguredField), topPadding: 8)
+        addRow(to: grid, formRow("Endpoint", tailnetEndpointField))
+        addRow(to: grid, formRow("Listener", tailnetStatusField))
+        addRow(to: grid, [NSGridCell.emptyContentView, tailnetNoteLabel])
 
         // Configure terminal appearance controls.
         themeField.isEditable = false
@@ -147,17 +129,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         fontFamilyCombo.isEditable = true
         fontFamilyCombo.completes = true
         fontFamilyCombo.numberOfVisibleItems = 12
-
-        configureWarningLabel(themeWarningLabel)
-        configureWarningLabel(fontFamilyWarningLabel)
-        configureWarningLabel(remoteThemeWarningLabel)
-        // NSGridView gives a wrapping label no width to wrap against, so it would
-        // otherwise stretch the panel to one long line. Wrap at the control
-        // column so a warning never widens the form past the row it explains.
-        for label in [themeWarningLabel, fontFamilyWarningLabel, remoteThemeWarningLabel] {
-            label.preferredMaxLayoutWidth = preferencesControlColumnWidth
-            label.isHidden = true
-        }
 
         fontSizeField.delegate = self
         fontSizeField.placeholderString = configFontSizeText(DanTermConfig.default.resolvedFontSize)
@@ -220,6 +191,43 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
             grid.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -padding),
             grid.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -padding),
         ])
+    }
+
+    /// Append one row to the form and hand back the row it created. Every row in
+    /// the form goes through here, so a row handle is only ever the return value
+    /// of the call that built the row -- no statement names a row by position,
+    /// and inserting or reordering a row cannot silently retarget another one.
+    /// A non-zero `topPadding` marks a row that starts a new section.
+    @discardableResult
+    private func addRow(
+        to grid: NSGridView,
+        _ views: [NSView],
+        topPadding: CGFloat = 0
+    ) -> NSGridRow {
+        let row = grid.addRow(with: views)
+        row.topPadding = topPadding
+        // State the control column's width on the cell itself, so the grid has no
+        // surplus to hand column 0. Applying it here means a row added later
+        // cannot miss it.
+        if let control = views.dropFirst().first, control !== NSGridCell.emptyContentView {
+            control.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: preferencesControlColumnWidth
+            ).isActive = true
+        }
+        return row
+    }
+
+    /// Append a full-width warning row that stays collapsed until `apply(_:)`
+    /// projects its warning. The label wraps at the control column: NSGridView
+    /// gives a wrapping label no width to wrap against, so an unconstrained
+    /// warning would stretch the panel to one long line.
+    private func addWarningRow(to grid: NSGridView, _ label: NSTextField) -> NSGridRow {
+        configureWarningLabel(label)
+        label.preferredMaxLayoutWidth = preferencesControlColumnWidth
+        label.isHidden = true
+        let row = addRow(to: grid, [NSGridCell.emptyContentView, label])
+        row.isHidden = true
+        return row
     }
 
     /// Build a [label, control] row for the grid.
