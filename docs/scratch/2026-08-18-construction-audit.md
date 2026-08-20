@@ -1093,7 +1093,7 @@ wave.
 - [x] **[UNI-1](#uni-1)** (3x5, medium) Store the packed scalar record as a palette index over 29 decoded entries, not a 16-bit bitfield -- `bd0e1c0b`
 - [x] **[FRAME-1](#frame-1)** (3x5, large) Publish the frame plan row-indexed so a row copy and a clip stop scanning the whole viewport **[decide first](#decisions-to-make-first)** -- `3bea76c5`
 - [x] **[INTERACT-2](#interact-2)** (3x4, medium) Carry the normalized `TerminalViewportCell` into `TerminalPointerEvent` and decide link cancellation inside the policy **[decide first](#decisions-to-make-first)** -- `f6d6435f..c854be73`
-- [ ] **[RUNTIME-3](#runtime-3)** (3x4, medium) Stop opening nested modal run loops from inside an open send frame **[decide first](#decisions-to-make-first)**
+- [x] **[RUNTIME-3](#runtime-3)** (3x4, medium) Stop opening nested modal run loops from inside an open send frame **[decide first](#decisions-to-make-first)**
 - [ ] **[BUILD-5](#build-5)** (2x5, small) Give the three manifest-discovery lists one owner so a new package root cannot be skipped
 - [ ] **[MODEL-6](#model-6)** (2x5, small) Drop the submission-to-request reverse index and derive it from the pending requests _(with [REDUCE-6](#reduce-6))_
 - [x] **[STORE-5](#store-5)** (2x5, small) Give a block one record-range accessor instead of five hand-copied index conversions -- `f01d901c`
