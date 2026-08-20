@@ -102,33 +102,59 @@ struct PaneReplicaCheckpointTests {
         #expect(try flooded.encoded().count == atLimit.encoded().count)
     }
 
+    // Intent: make checkpoint size independent of event churn after retained history is full.
+    // Why it exists: deleting the suffix is useful only if old events really leave the record.
+    // Scenario: a replica is fed until the engine evicts rows, then receives more identical rows.
     @Test("checkpoint state plateaus after retained scrollback saturates")
     func checkpointStopsGrowingAfterScrollbackSaturates() throws {
-        // Intent: make checkpoint size independent of event churn after retained history is full.
-        // Why it exists: deleting the suffix is useful only if old events really leave the record.
-        // Scenario: a replica starts beyond the engine budget, then receives more identical rows.
         let columns = 1_024
+        let chunkRows = 64
         let line = String(repeating: "x", count: columns - 2) + "\r\n"
-        let baselineLineCount = Terminal.scrollbackByteLimit / line.utf8.count + 128
-        let baseline = Array(String(repeating: line, count: baselineLineCount).utf8)
+        let chunk = Array(String(repeating: line, count: chunkRows).utf8)
         var replica = try checkpointReplica(
-            bytes: Data(baseline),
-            cursor: checkpointCursor(sequence: 1, feed: baseline.count),
+            bytes: Data(chunk),
+            cursor: checkpointCursor(sequence: 1, feed: chunk.count),
             columns: columns,
             rows: 2
         )
+
+        // Feed until the retained row count stops rising, which is the moment the engine
+        // evicts one old row for each new one. Finding that moment beats naming a row count
+        // in advance: the test spends only what saturation costs, and it cannot stop short of
+        // saturation if the engine's budget changes. The chunk cap is a runaway guard -- ten
+        // times the depth the budget holds today -- not a size the proof depends on.
+        var fedChunks = 1
+        var retainedRows = replica.terminal?.scrollbackRowCount ?? 0
+        var plateauRows: Int?
+        while fedChunks < 640, plateauRows == nil {
+            try replica.apply(checkpointEvent(
+                sequence: UInt64(fedChunks),
+                byteOffset: chunk.count * fedChunks,
+                byteLength: chunk.count,
+                event: .feed(chunk)
+            ))
+            fedChunks += 1
+            let nextRetainedRows = replica.terminal?.scrollbackRowCount ?? 0
+            if nextRetainedRows == retainedRows { plateauRows = nextRetainedRows }
+            retainedRows = nextRetainedRows
+        }
+        let retainedAtPlateau = try #require(plateauRows, "retained history never stopped growing")
+        #expect(retainedAtPlateau < fedChunks * chunkRows)
         let saturated = try #require(replica.checkpoint(for: paneId))
 
-        let churn = Array(String(repeating: line, count: 128).utf8)
         try replica.apply(checkpointEvent(
-            sequence: 1,
-            byteOffset: baseline.count,
-            byteLength: churn.count,
-            event: .feed(churn)
+            sequence: UInt64(fedChunks),
+            byteOffset: chunk.count * fedChunks,
+            byteLength: chunk.count,
+            event: .feed(chunk)
         ))
         let churned = try #require(replica.checkpoint(for: paneId))
 
-        #expect(churned.stateBytes == saturated.stateBytes)
+        // The count is the reading a failure needs; the whole-array comparison is bound to a
+        // Bool first so a failure reports one word instead of dumping two megabyte arrays.
+        #expect(churned.stateBytes.count == saturated.stateBytes.count)
+        let stateMatchesSaturated = churned.stateBytes == saturated.stateBytes
+        #expect(stateMatchesSaturated)
         #expect(try churned.encoded().count == saturated.encoded().count)
     }
 
