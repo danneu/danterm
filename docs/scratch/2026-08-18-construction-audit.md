@@ -1214,7 +1214,7 @@ rewrites.
 - [x] **[PTY-3](#pty-3)** (3x5, large) Record every applied transition on the flight tape and delete the five parallel capture buffers _(after [XPORT-1](#xport-1))_ -- `63deec97..32296d30`
 - [ ] **[HIST-3](#hist-3)** (3x4, medium) Carry the fold's result in DisplayRowCursor so a row is folded once, not three times _(after [STORE-5](#store-5))_
 - [ ] **[HIST-1](#hist-1)** (3x4, large) Give the open tail record one home: move its header and spills into the open scratch _(after [STORE-4](#store-4))_
-- [ ] **[FRAME-3](#frame-3)** (2x5, small) Give TerminalDamage the predicates its consumers ask for, so no hot caller materializes a folded copy or a row array _(after [INTERACT-3](#interact-3), [FRAME-1](#frame-1))_
+- [x] **[FRAME-3](#frame-3)** (2x5, small) Give TerminalDamage the predicates its consumers ask for, so no hot caller materializes a folded copy or a row array -- `2a68270f`, `13db5f73`
 - [ ] **[PANE-3](#pane-3)** (2x5, small) Record which button a press forwarded, replacing the two ad-hoc pairing booleans
 - [x] **[XPORT-4](#xport-4)** (2x5, small) Accumulate coalesced update payloads instead of rebuilding the merged signal per hop _(after [XPORT-1](#xport-1))_ -- `5739eb80..aada7838`
 - [x] **[PERSIST-5](#persist-5)** (2x5, medium) Move the pure pane-tape stream policy into DanTermCore and leave only the socket write in Support _(after [PERSIST-6](#persist-6))_ -- `09f16a4e`
@@ -6715,6 +6715,41 @@ _How this list was built: I grepped the whole tree (excluding .build and .claude
 ##### FRAME-3. Give TerminalDamage the predicates its consumers ask for, so no hot caller materializes a folded copy or a row array
 
 `simplification` &middot; impact 2, confidence 5 &middot; effort small &middot; wave 2 &middot; rescored
+
+**Done** in `2a68270f` and `13db5f73`, past the ideal as written. The public
+value gained the fold-aware coverage predicate and `publish` calls it, so no
+scroll publish folds a copy to ask. The apply seam did better than the spans
+this entry asked for: it carries the `TerminalDamage` value itself end to end.
+`renderApplyShape` takes the damage and walks it, `drawRenderFrame`'s row
+restriction is a damage value rather than `[Int]?`, and `apply` passes
+`planDamage` straight through. The damage -> array -> damage -> array round trip
+FRAME-1 created is gone rather than shortened, and `rowIndices` is off the hot
+path entirely.
+
+Three things the entry did not foresee. The Correction above is wrong that half
+of this arrives free from INTERACT-3: the internal `coversViewport(rowCount:)`
+is rows-only *on purpose*, because `Terminal.swift#recordScrollDamage`'s flood
+fast path would escalate every second scroll to `.full` under a shift-aware
+reading, and the translation path would vanish. The two predicates are two
+questions, so the internal one stayed and was renamed to keep them apart.
+
+The Verification above also mis-states the contract it asks for.
+`covers(rowCount:)` is prefix coverage over `0..<rowCount` with `.full` true --
+not `expandingShift().damagedRowCount == rowCount`, which is false for `.full`
+(its bits are sized 0) and which can also be true for a value whose rows number
+`rowCount` while leaving a row of `0..<rowCount` clean. The count equality holds
+only for non-full damage sized to the queried grid, which is every value the
+live path publishes, so the barrier is unchanged where it runs.
+
+`drawRenderFrame`'s restriction had two more callers than the entry's Files list
+names -- `TerminalDrawBenchmarkSupport.swift#draw` and
+`GlyphPreview/main.swift` -- and both migrated with the seam. The new signature
+carries two pieces of contract the entry did not: a `precondition` that the
+restriction is shift-free, and `.full` meaning every row rather than no rows.
+Both are documented at the declaration.
+
+Unmeasurable, as the entry itself says. No benchmark was run and no directional
+claim rests on one.
 
 **Files.** `lib/TerminalCore/Sources/TerminalCore/TerminalDamage.swift`, `lib/TerminalCore/Sources/TerminalRenderExecution/TerminalFrameSwapchain.swift`, `lib/TerminalCore/Sources/TerminalRenderExecution/TerminalFrameBackingStore.swift`
 
