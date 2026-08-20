@@ -1196,7 +1196,7 @@ rewrites.
 - [x] **[WIRE-2](#wire-2)** (4x5, large) Carry a tape record as its typed event, not as a JSONValue decoded from its own encoding _(after [PERSIST-6](#persist-6))_ -- `c0e4c026..c4d7ef21`
 - [x] **[MOBILE-6](#mobile-6)** (4x4, small) Store the start record's stated pinnedness in the replica instead of keeping the checkpoint's -- resolved by docs: the premise is wrong, and the fix would be a regression -- `e4db38c8`
 - [x] **[UNI-2](#uni-2)** (4x4, large) Derive the bulk-print run predicate from the scalar record instead of from a printable-ASCII byte range _(after [UNI-1](#uni-1))_
-- [ ] **[CHROME-2](#chrome-2)** (3x5, small) Make the confirmation projection carry each button's answer instead of inferring it from button visibility _(after [MODEL-2](#model-2))_
+- [x] **[CHROME-2](#chrome-2)** (3x5, small) Make the confirmation projection carry each button's answer instead of inferring it from button visibility -- `55f4eb4d` + `ae7c437c`
 - [ ] **[IOS-1](#ios-1)** (3x5, small) Let the replica report pinnedness instead of re-decoding tape JSON in the session model
 - [ ] **[PERSIST-1](#persist-1)** (3x5, small) Decide crash recovery from the lock file's existence, not from decoding it
 - [x] **[PTY-4](#pty-4)** (3x5, small) Read the PTY through one loop instead of one per drain reason _(after [XPORT-1](#xport-1))_ -- `7448dd16`
