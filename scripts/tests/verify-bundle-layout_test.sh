@@ -14,7 +14,7 @@ fail() {
 
 # shellcheck source=../lib/bundle-layout-tool.sh
 source "$ROOT_DIR/scripts/lib/bundle-layout-tool.sh"
-bundle_layout_tool_init "$ROOT_DIR" "$TEST_ROOT/swift-build"
+bundle_layout_tool_init "$ROOT_DIR"
 
 bundle_layout_tool release > "$TEST_ROOT/release.json"
 bundle_layout_tool development > "$TEST_ROOT/development.json"

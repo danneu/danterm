@@ -19,7 +19,7 @@ fail() {
 
 # shellcheck source=../lib/bundle-layout-tool.sh
 source "$ROOT_DIR/scripts/lib/bundle-layout-tool.sh"
-bundle_layout_tool_init "$ROOT_DIR" "$TEST_ROOT/layout-tool-build"
+bundle_layout_tool_init "$ROOT_DIR"
 bundle_layout_tool release > "$TEST_ROOT/release.json"
 
 # Distinct exit codes give each product distinct bytes, which the layout verifier

@@ -14,6 +14,9 @@ build/
 .build-gate/
 # The root app/CLI tests are an independent parallel gate step and need their own SwiftPM build tree.
 .build-app-tests/
+# The cached tree the bundle contract tests build DanTermBundleLayoutTool into. It is
+# kept between runs on purpose; scripts/lib/bundle-layout-tool.sh says why.
+.build-bundle-layout-tool/
 # iOS cross-compile trees: one per pinned package for scripts/ios-portability-gate.sh,
 # plus the per-module trees and logs of docs/research/35-ios-remote-client/ios-cross-compile.sh.
 .build-ios-*/

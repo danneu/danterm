@@ -10,7 +10,8 @@ default:
 clean:
     find . -maxdepth 3 \( -name references -o -name .git \) -prune -o \
         -type d \( -name .spm-build -o -name .build -o -name .build-gate \
-        -o -name .build-app-tests \) -prune -exec rm -rf {} +
+        -o -name .build-app-tests -o -name .build-bundle-layout-tool \) \
+        -prune -exec rm -rf {} +
 
 # Link cached external prerequisites from the primary checkout into this worktree.
 provision-worktree:

@@ -9,7 +9,7 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
 
 # shellcheck source=../lib/bundle-layout-tool.sh
 source "$ROOT_DIR/scripts/lib/bundle-layout-tool.sh"
-bundle_layout_tool_init "$ROOT_DIR" "$TEST_ROOT/layout-tool-build"
+bundle_layout_tool_init "$ROOT_DIR"
 bundle_layout_tool development > "$TEST_ROOT/development-layout.json"
 
 fail() {

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Behavioral test for `just clean`: it must remove every build tree the gate creates.
 #
-# The scratch paths are chosen in scripts/run-test-suite.sh, so this test reads them
-# from there rather than restating them. A gate step that picks a new scratch path
-# fails here until clean removes it too.
+# The scratch paths are chosen in scripts/run-test-suite.sh and in the helpers its steps
+# source, so this test reads them from there rather than restating them. A gate step
+# that picks a new scratch path fails here until clean removes it too.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -25,13 +25,15 @@ cp "$ROOT_DIR/justfile" "$WORK/justfile"
 # The default SwiftPM trees are implied by every `swift build`/`swift test` step
 # that names no scratch path; the rest are declared by the gate itself.
 SCRATCH_PATHS=(.spm-build .build)
-# A scratch path written as a shell variable is a throwaway directory the step makes
-# with `mktemp -d` and deletes itself, so it is never a tree in the checkout for clean
-# to remove. Only the literal paths belong in this list.
+# A path anchored at a repository-root variable is a tree in the checkout, so strip
+# that leading segment and keep the rest. A path that is only a variable is a throwaway
+# directory the step makes with `mktemp -d` and deletes itself, so clean never sees it.
 while IFS= read -r path; do
+    path="${path#\$*/}"
     [[ "$path" == *'$'* ]] && continue
     SCRATCH_PATHS+=("$path")
-done < <(grep -o -- '--scratch-path [^ ]*' "$ROOT_DIR/scripts/run-test-suite.sh" \
+done < <(grep -h -o -- '--scratch-path [^ ]*' \
+    "$ROOT_DIR/scripts/run-test-suite.sh" "$ROOT_DIR"/scripts/lib/*.sh \
     | awk '{print $2}' | tr -d "\"'")
 
 # Nested packages build into their own default tree when tested directly, which
