@@ -26,5 +26,7 @@
       "Bash(/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/apps/DanTerm Dev \\(1\\).app/Contents/Helpers/danterm *)"
     ]
   },
-  "autoMemoryEnabled": false
+  "prefersReducedMotion": true,
+  "autoMemoryEnabled": false,
+  "outputStyle": "Concise"
 }
