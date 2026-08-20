@@ -302,22 +302,23 @@ public func settleAllocator() -> UInt64 {
 
 /// Feeds one payload to a fresh terminal and reports what it cost.
 ///
-/// The terminal is held until after the census and the closing footprint read, so neither can race
-/// its deallocation.
+/// The terminal is held until after the closing samples and census, so none can race its
+/// deallocation.
 /// - Parameter chunkBytes: feed the payload in slices of this size instead of one call. Defaults to
 ///   a PTY-sized read, because `Terminal.feed` materializes one action per input token for the whole
 ///   call: a single 600 KB feed builds a ~600,000-element array, tens of MB of transient LARGE
 ///   allocations that land in the footprint delta and get misattributed to *holding* a terminal.
 ///   Pass nil for the single-shot behavior, which is a feed-cost measurement, not a resident one.
-/// - Parameter whileResident: run after the census, while the terminal is still alive. External
-///   instruments (`vmmap`, `heap`) must observe the process in that window or they measure a
-///   terminal that has already been freed, which is a different question and an easy mistake.
+/// - Parameter whileResident: run after the closing samples and before the census, while the
+///   terminal is still alive. External instruments (`vmmap`, `heap`) must observe the process in
+///   that window or they measure a terminal that has already been freed, which is a different
+///   question and an easy mistake.
 public func measure(
     payload: MemoryProbePayload,
     columns: Int,
     rows: Int,
     chunkBytes: Int? = defaultFeedChunkBytes,
-    whileResident: ((TerminalMemoryCensus) -> Void)? = nil
+    whileResident: (() -> Void)? = nil
 ) -> MemoryProbePayloadReport? {
     let releasedBefore = settleAllocator()
     let heapBefore = mallocHeapSnapshot()
@@ -340,13 +341,13 @@ public func measure(
         }
     }
 
-    let census = terminal.memoryCensus
     // Settled with the terminal still alive, so what goes back is free pages the feed churned
     // through and never the grid's own storage.
     let releasedAfter = settleAllocator()
     let heapAfter = mallocHeapSnapshot()
     let after = processPhysicalFootprintBytes()
-    whileResident?(census)
+    whileResident?()
+    let census = terminal.memoryCensus
     withExtendedLifetime(terminal) {}
 
     return MemoryProbePayloadReport(
@@ -378,7 +379,7 @@ public func runMatrix(
     lineCount: Int = MemoryProbeMatrix.scrollbackLineCount,
     only: String? = nil,
     chunkBytes: Int? = defaultFeedChunkBytes,
-    whileResident: ((TerminalMemoryCensus) -> Void)? = nil
+    whileResident: (() -> Void)? = nil
 ) -> MemoryProbeReport {
     let reports = MemoryProbeMatrix
         .payloads(columns: columns, lineCount: lineCount, named: only)

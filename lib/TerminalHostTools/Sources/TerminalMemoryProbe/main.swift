@@ -77,7 +77,7 @@ func captureVmmapSummary() {
     }
 }
 
-let residentHook: ((TerminalMemoryCensus) -> Void)? = wantsVmmap ? { _ in captureVmmapSummary() } : nil
+let residentHook: (() -> Void)? = wantsVmmap ? { captureVmmapSummary() } : nil
 
 let report: MemoryProbeReport
 if let selectedPayload {

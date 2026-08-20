@@ -181,4 +181,4 @@ Store reads to build on (`lib/TerminalCore/Sources/TerminalCore/LogicalLineStore
 ## Commit progress
 
 - [x] 1. Count retained census fields by walking stored records
-- [ ] 2. Sample probe memory before census and close HIST-5
+- [x] 2. Sample probe memory before census and close HIST-5
