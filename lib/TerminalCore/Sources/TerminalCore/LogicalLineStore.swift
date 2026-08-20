@@ -51,16 +51,25 @@ extension Terminal {
             var contentCount: Int = 0
         }
 
-        /// A hyperlink id stamped at one cell offset within the record.
+        /// A side-table key measured from the record's cell base before any head trim.
+        private struct OriginalCellOffset: Sendable, Equatable, Comparable {
+            var value: Int
+
+            static func < (lhs: Self, rhs: Self) -> Bool { lhs.value < rhs.value }
+            static func + (lhs: Self, rhs: Int) -> Self { Self(value: lhs.value + rhs) }
+            static func - (lhs: Self, rhs: Self) -> Int { lhs.value - rhs.value }
+        }
+
+        /// A hyperlink id stamped at one original cell offset within the record.
         private struct HyperlinkEntry: Sendable, Equatable {
-            var offset: Int
+            var offset: OriginalCellOffset
             var id: Terminal.HyperlinkId
         }
 
-        /// One contiguous `contentIdentity` run, keyed by cell offset within the record
+        /// One contiguous `contentIdentity` run, keyed by original cell offset within the record
         /// (`research/31/D3` Decision 6, `research/31/DD17`) rather than by column within a display row.
         private struct IdentityRun: Sendable, Equatable {
-            var start: Int
+            var start: OriginalCellOffset
             var extent: Int
             var base: Terminal.ContentIdentity
         }
@@ -1194,12 +1203,13 @@ extension Terminal {
                 }
             }
 
-            openHyperlinks.removeAll { $0.offset >= newCellCount }
-            while let last = openIdentityRuns.last, last.start >= newCellCount {
+            let keyEnd = originalCellOffset(recordIndex: index, retainedOffset: newCellCount)
+            openHyperlinks.removeAll { $0.offset >= keyEnd }
+            while let last = openIdentityRuns.last, last.start >= keyEnd {
                 openIdentityRuns.removeLast()
             }
-            if var last = openIdentityRuns.last, last.start + last.extent > newCellCount {
-                last.extent = newCellCount - last.start
+            if var last = openIdentityRuns.last, last.start + last.extent > keyEnd {
+                last.extent = keyEnd - last.start
                 openIdentityRuns[openIdentityRuns.count - 1] = last
             }
             openPreviousIdentity = nil
@@ -1848,7 +1858,7 @@ extension Terminal {
             for index in 0..<offsets.count {
                 let offset = offsets[index]
                 let record = self.record(at: offset)
-                let retainedStart = index == 0 ? headTrimmedCells : 0
+                let retainedStart = originalCellOffset(recordIndex: index, retainedOffset: 0)
                 let retainedEnd = retainedStart + record.cellCount
                 if record.isOpen {
                     for entry in openHyperlinks
@@ -1860,7 +1870,7 @@ extension Terminal {
                 let base = offset + LogicalLineRecord.headerAndCells(record.cellCount)
                 for entryIndex in 0..<record.hyperlinkCount {
                     let entry = base + entryIndex * LogicalLineRecord.hyperlinkEntryBytes
-                    let cellOffset = u16(entry)
+                    let cellOffset = OriginalCellOffset(value: u16(entry))
                     guard cellOffset >= retainedStart, cellOffset < retainedEnd else { continue }
                     body(Terminal.HyperlinkId(u16(entry + 2)))
                 }
@@ -2334,6 +2344,16 @@ extension Terminal {
 
         // MARK: - Cell decoding
 
+        /// Converts a retained-relative offset into the original key used by every side table.
+        private func originalCellOffset(
+            recordIndex: Int,
+            retainedOffset: Int
+        ) -> OriginalCellOffset {
+            OriginalCellOffset(
+                value: retainedOffset + (recordIndex == 0 ? headTrimmedCells : 0)
+            )
+        }
+
         private func cell(recordIndex: Int, cellOffset: Int) -> Terminal.GridCell {
             let offset = offsets[recordIndex]
             return cell(
@@ -2355,7 +2375,10 @@ extension Terminal {
         ) -> Terminal.GridCell {
             let word = cellWord(recordAt: offset, cell: cellOffset)
             let sequence = firstRecordSequence + recordIndex
-            let keyOffset = cellOffset + (recordIndex == 0 ? headTrimmedCells : 0)
+            let keyOffset = originalCellOffset(
+                recordIndex: recordIndex,
+                retainedOffset: cellOffset
+            )
 
             var cell = Terminal.GridCell()
             cell.kind = word.kind
@@ -2375,7 +2398,7 @@ extension Terminal {
         private func hyperlinkId(
             record: LogicalLineRecord,
             at offset: Int,
-            keyOffset: Int
+            keyOffset: OriginalCellOffset
         ) -> Terminal.HyperlinkId? {
             if record.isOpen {
                 var low = 0
@@ -2394,7 +2417,7 @@ extension Terminal {
             while low <= high {
                 let mid = (low + high) / 2
                 let entry = base + mid * LogicalLineRecord.hyperlinkEntryBytes
-                let column = u16(entry)
+                let column = OriginalCellOffset(value: u16(entry))
                 if column == keyOffset { return Terminal.HyperlinkId(u16(entry + 2)) }
                 if column < keyOffset { low = mid + 1 } else { high = mid - 1 }
             }
@@ -2404,7 +2427,7 @@ extension Terminal {
         private func contentIdentity(
             record: LogicalLineRecord,
             at offset: Int,
-            keyOffset: Int
+            keyOffset: OriginalCellOffset
         ) -> Terminal.ContentIdentity? {
             if record.isOpen {
                 var low = 0
@@ -2425,8 +2448,8 @@ extension Terminal {
             let base = offset + LogicalLineRecord.headerAndCells(record.cellCount)
                 + record.hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
             if record.identityPerCell {
-                guard keyOffset < record.identityEntryCount else { return nil }
-                let value = u32(base + keyOffset * LogicalLineRecord.identityCellBytes)
+                guard keyOffset.value < record.identityEntryCount else { return nil }
+                let value = u32(base + keyOffset.value * LogicalLineRecord.identityCellBytes)
                 return value == 0 ? nil : value
             }
             var low = 0
@@ -2434,7 +2457,7 @@ extension Terminal {
             while low <= high {
                 let mid = (low + high) / 2
                 let entry = base + mid * LogicalLineRecord.identityRunEntryBytes
-                let start = u16(entry)
+                let start = OriginalCellOffset(value: u16(entry))
                 if keyOffset < start {
                     high = mid - 1
                     continue
@@ -2554,7 +2577,10 @@ extension Terminal {
             swap(&chunk, &chunks[chunkAt])
 
             for index in 0..<cells.count {
-                let cellOffset = record.cellCount + index
+                let cellOffset = originalCellOffset(
+                    recordIndex: offsets.count - 1,
+                    retainedOffset: record.cellCount + index
+                )
                 let kind = cells[index].kind
                 switch kind {
                 case .narrow, .wideHead, .padding:
@@ -2618,33 +2644,39 @@ extension Terminal {
         /// header. The tables' position is `header + cellCount * 8`, which a later head trim
         /// leaves invariant: the trim moves the header forward by exactly the bytes it drops.
         private mutating func flushOpenTables(into record: inout LogicalLineRecord, at offset: Int) {
+            let recordIndex = offsets.count - 1
+            let originalCellCount = originalCellOffset(
+                recordIndex: recordIndex,
+                retainedOffset: record.cellCount
+            ).value
             let perCell = openIdentityRuns.count * LogicalLineRecord.identityRunEntryBytes
-                > record.cellCount * LogicalLineRecord.identityCellBytes
+                > originalCellCount * LogicalLineRecord.identityCellBytes
             record.hyperlinkCount = openHyperlinks.count
             record.identityPerCell = perCell
-            record.identityEntryCount = perCell ? record.cellCount : openIdentityRuns.count
+            record.identityEntryCount = perCell ? originalCellCount : openIdentityRuns.count
 
             var at = offset + LogicalLineRecord.headerAndCells(record.cellCount)
             for entry in openHyperlinks {
-                setU16(entry.offset, at: at)
+                setU16(entry.offset.value, at: at)
                 setU16(Int(entry.id), at: at + 2)
                 at += LogicalLineRecord.hyperlinkEntryBytes
             }
             if perCell {
-                for index in 0..<record.cellCount {
+                for index in 0..<originalCellCount {
                     setU32(0, at: at + index * LogicalLineRecord.identityCellBytes)
                 }
                 for run in openIdentityRuns {
-                    for step in 0..<run.extent where run.start + step < record.cellCount {
+                    for step in 0..<run.extent where (run.start + step).value < originalCellCount {
                         setU32(
                             run.base &+ Terminal.ContentIdentity(step),
-                            at: at + (run.start + step) * LogicalLineRecord.identityCellBytes
+                            at: at + (run.start + step).value
+                                * LogicalLineRecord.identityCellBytes
                         )
                     }
                 }
             } else {
                 for run in openIdentityRuns {
-                    setU16(run.start, at: at)
+                    setU16(run.start.value, at: at)
                     setU16(run.extent, at: at + 2)
                     setU32(run.base, at: at + 4)
                     at += LogicalLineRecord.identityRunEntryBytes
@@ -2661,7 +2693,10 @@ extension Terminal {
             for index in 0..<record.hyperlinkCount {
                 let entry = linkBase + index * LogicalLineRecord.hyperlinkEntryBytes
                 openHyperlinks.append(
-                    HyperlinkEntry(offset: u16(entry), id: Terminal.HyperlinkId(u16(entry + 2)))
+                    HyperlinkEntry(
+                        offset: OriginalCellOffset(value: u16(entry)),
+                        id: Terminal.HyperlinkId(u16(entry + 2))
+                    )
                 )
             }
 
@@ -2672,7 +2707,7 @@ extension Terminal {
                     let entry = identityBase + index * LogicalLineRecord.identityRunEntryBytes
                     openIdentityRuns.append(
                         IdentityRun(
-                            start: u16(entry),
+                            start: OriginalCellOffset(value: u16(entry)),
                             extent: u16(entry + 2),
                             base: u32(entry + 4)
                         )
@@ -2690,11 +2725,18 @@ extension Terminal {
                     continue
                 }
                 if let previous = openPreviousIdentity, value == previous &+ 1,
-                   let open = openIdentityRuns.last, open.start + open.extent == index
+                   let open = openIdentityRuns.last, open.start + open.extent
+                       == OriginalCellOffset(value: index)
                 {
                     openIdentityRuns[openIdentityRuns.count - 1].extent += 1
                 } else {
-                    openIdentityRuns.append(IdentityRun(start: index, extent: 1, base: value))
+                    openIdentityRuns.append(
+                        IdentityRun(
+                            start: OriginalCellOffset(value: index),
+                            extent: 1,
+                            base: value
+                        )
+                    )
                 }
                 openPreviousIdentity = value
             }
@@ -2879,9 +2921,18 @@ extension Terminal {
         /// makes "close the open record at its current end" a move that always fits.
         private func projectedTableBytes(addingCells cells: Int) -> Int {
             let openCells = openRecordCellCount + cells
+            let originalCells: Int
+            if openTailRecord() != nil {
+                originalCells = originalCellOffset(
+                    recordIndex: offsets.count - 1,
+                    retainedOffset: openCells
+                ).value
+            } else {
+                originalCells = openCells
+            }
             let runBytes = (openIdentityRuns.count + cells)
                 * LogicalLineRecord.identityRunEntryBytes
-            let perCellBytes = openCells * LogicalLineRecord.identityCellBytes
+            let perCellBytes = originalCells * LogicalLineRecord.identityCellBytes
             return (openHyperlinks.count + cells) * LogicalLineRecord.hyperlinkEntryBytes
                 + min(runBytes, perCellBytes)
                 + LogicalLineRecord.cellBytes  // the record's own 8-byte alignment slack

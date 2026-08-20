@@ -52,6 +52,26 @@ struct TerminalLogicalLineStoreTests {
         return row
     }
 
+    /// A full row whose cells carry one hyperlink and caller-supplied identities.
+    private static func attributedRow(
+        width: Int,
+        seed: Int,
+        softWrapped: Bool,
+        hyperlinkId: Terminal.HyperlinkId = 7,
+        identity: (Int) -> Terminal.ContentIdentity?
+    ) -> Terminal.GridRow {
+        var row = Terminal.GridRow(cells: (0..<width).map { column in
+            let value = UInt32(97 + (seed &+ column) % 26)
+            return narrow(
+                Unicode.Scalar(value)!,
+                hyperlinkId: hyperlinkId,
+                contentIdentity: identity(column)
+            )
+        })
+        row.isSoftWrapped = softWrapped
+        return row
+    }
+
     /// A hard-ended row of `count` narrow cells padded out to `width`, which is the shape the
     /// live grid hands admission for a line that ends before the right margin.
     private static func shortRow(
@@ -1370,6 +1390,187 @@ struct TerminalLogicalLineStoreTests {
                     == (column % 2 == 0 ? Terminal.ContentIdentity(1_000 + column * 13) : nil)
             )
         }
+    }
+
+    @Test("Cells appended after an open-head trim keep their side-table values")
+    func cellsAppendedAfterOpenHeadTrimKeepSideTableValues() throws {
+        // Intent: side-table keys remain ordered and identify each retained cell after the sole
+        //   open record loses one display row and then grows again.
+        // Why it exists: open scratch entries used retained offsets after a head trim, while
+        //   readers queried original offsets. New keys then collided with surviving entries.
+        // Scenario: STORE-4 trims one of two soft-wrapped rows from the open head, appends a
+        //   third row, and reads all retained cells through the open-record path.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        for row in 0..<2 {
+            store.admit(Self.attributedRow(
+                width: 4,
+                seed: row * 4,
+                softWrapped: true,
+                identity: { Terminal.ContentIdentity(1_000 + row * 4 + $0) }
+            ))
+        }
+
+        let evicted = store.evictOneDisplayRow()
+        #expect(evicted)
+        store.admit(Self.attributedRow(
+            width: 4,
+            seed: 8,
+            softWrapped: true,
+            identity: { Terminal.ContentIdentity(1_008 + $0) }
+        ))
+
+        let cells = try #require(store.recordCells(at: 0))
+        #expect(cells.count == 8)
+        #expect(cells.allSatisfy { $0.hyperlinkId == 7 })
+        #expect(cells.map(\.contentIdentity) == (1_004..<1_012).map(Terminal.ContentIdentity.init))
+    }
+
+    @Test("Closing a trimmed open head keeps its side-table runs readable")
+    func closingTrimmedOpenHeadKeepsSideTableRunsReadable() throws {
+        // Intent: closing an open record after a head trim preserves every retained hyperlink
+        //   and contiguous identity through the closed-record side-table reader.
+        // Why it exists: fixing only the open scratch would leave the flush free to encode a
+        //   retained-base key that the closed reader interprets as original-base.
+        // Scenario: STORE-4 repeats the open-head trim, appends once while open, then admits a
+        //   hard-ended row that closes the record with the identity-run encoding.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        for row in 0..<2 {
+            store.admit(Self.attributedRow(
+                width: 4,
+                seed: row * 4,
+                softWrapped: true,
+                identity: { Terminal.ContentIdentity(1_000 + row * 4 + $0) }
+            ))
+        }
+        let evicted = store.evictOneDisplayRow()
+        #expect(evicted)
+        for row in 2..<4 {
+            store.admit(Self.attributedRow(
+                width: 4,
+                seed: row * 4,
+                softWrapped: row == 2,
+                identity: { Terminal.ContentIdentity(1_000 + row * 4 + $0) }
+            ))
+        }
+
+        let cells = try #require(store.recordCells(at: 0))
+        #expect(store.recordSummary(at: 0)?.isOpen == false)
+        #expect(cells.allSatisfy { $0.hyperlinkId == 7 })
+        #expect(cells.map(\.contentIdentity) == (1_004..<1_016).map(Terminal.ContentIdentity.init))
+    }
+
+    @Test("Per-cell identities survive closing and reopening a trimmed open head")
+    func perCellIdentitiesSurviveClosingAndReopeningTrimmedOpenHead() throws {
+        // Intent: the per-cell identity encoding uses the original span before and after a tail
+        //   truncation reloads it into the open scratch.
+        // Why it exists: the per-cell table is positional, so original-base run keys are not
+        //   enough. Its encoded length, write bounds, and reload positions must share that base.
+        // Scenario: STORE-4 alternates identity and nil, trims the sole open record, closes it,
+        //   truncates its final row to reopen it, and admits that row again.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        func row(_ row: Int, softWrapped: Bool) -> Terminal.GridRow {
+            Self.attributedRow(
+                width: 4,
+                seed: row * 4,
+                softWrapped: softWrapped,
+                identity: { column in
+                    let offset = row * 4 + column
+                    return offset.isMultiple(of: 2)
+                        ? Terminal.ContentIdentity(2_000 + offset)
+                        : nil
+                }
+            )
+        }
+        func expected(_ offsets: Range<Int>) -> [Terminal.ContentIdentity?] {
+            offsets.map { offset in
+                offset.isMultiple(of: 2) ? Terminal.ContentIdentity(2_000 + offset) : nil
+            }
+        }
+
+        store.admit(row(0, softWrapped: true))
+        store.admit(row(1, softWrapped: true))
+        let evicted = store.evictOneDisplayRow()
+        #expect(evicted)
+        store.admit(row(2, softWrapped: false))
+
+        var cells = try #require(store.recordCells(at: 0))
+        #expect(store.recordSummary(at: 0)?.isOpen == false)
+        #expect(cells.allSatisfy { $0.hyperlinkId == 7 })
+        #expect(cells.map(\.contentIdentity) == expected(4..<12))
+
+        let handedBack = store.truncateTail(displayRows: 1)
+        let rowToReadmit = try #require(handedBack.first)
+        store.admit(rowToReadmit)
+
+        cells = try #require(store.recordCells(at: 0))
+        #expect(cells.allSatisfy { $0.hyperlinkId == 7 })
+        #expect(cells.map(\.contentIdentity) == expected(4..<12))
+    }
+
+    @Test("A trimmed per-cell table is reserved before a region seam closes it")
+    func trimmedPerCellTableIsReservedBeforeRegionSeamClosesIt() throws {
+        // Intent: seam placement reserves the original-sized per-cell table before it closes a
+        //   trimmed open head, and the record after the seam remains intact.
+        // Why it exists: once flush writes the original span, pricing only retained cells can
+        //   admit one row too many and leave too little room for the forced-split tables.
+        // Scenario: STORE-4 positions a sole open record 328 bytes before a 64 KiB chunk end,
+        //   trims its first row, and grows fragmented identities until the fifth row must start
+        //   the forced-split successor.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 4)
+        for seed in 0..<1_630 {
+            store.admit(Self.shortRow(width: 4, count: 4, seed: seed))
+        }
+        store.admit(Self.shortRow(width: 4, count: 0, seed: 0))
+
+        func attributed(_ row: Int, softWrapped: Bool) -> Terminal.GridRow {
+            Self.attributedRow(
+                width: 4,
+                seed: row * 4,
+                softWrapped: softWrapped,
+                identity: { column in
+                    let offset = row * 4 + column
+                    return offset.isMultiple(of: 2)
+                        ? Terminal.ContentIdentity(3_000 + offset)
+                        : nil
+                }
+            )
+        }
+        func expected(_ offsets: Range<Int>) -> [Terminal.ContentIdentity?] {
+            offsets.map { offset in
+                offset.isMultiple(of: 2) ? Terminal.ContentIdentity(3_000 + offset) : nil
+            }
+        }
+
+        store.admit(attributed(0, softWrapped: true))
+        store.admit(attributed(1, softWrapped: true))
+        for _ in 0..<1_631 {
+            let evicted = store.evictOneDisplayRow()
+            #expect(evicted)
+        }
+        #expect(store.recordCount == 1)
+        let trimmed = store.evictOneDisplayRow()
+        #expect(trimmed)
+
+        store.admit(attributed(2, softWrapped: true))
+        store.admit(attributed(3, softWrapped: true))
+        store.admit(attributed(4, softWrapped: true))
+
+        #expect(store.recordCount == 2)
+        #expect(store.recordSummary(at: 0)?.isForcedSplit == true)
+        var first = try #require(store.recordCells(at: 0))
+        #expect(first.allSatisfy { $0.hyperlinkId == 7 })
+        #expect(first.map(\.contentIdentity) == expected(4..<16))
+
+        store.admit(attributed(5, softWrapped: false))
+        store.admit(Self.shortRow(width: 4, count: 3, seed: 90))
+
+        first = try #require(store.recordCells(at: 0))
+        let successor = try #require(store.recordCells(at: 1))
+        let following = try #require(store.recordCells(at: 2))
+        #expect(first.map(\.contentIdentity) == expected(4..<16))
+        #expect(successor.allSatisfy { $0.hyperlinkId == 7 })
+        #expect(successor.map(\.contentIdentity) == expected(16..<24))
+        #expect(following.count == 3)
     }
 
     @Test("A wide cell's two columns share one identity and both read it back")
