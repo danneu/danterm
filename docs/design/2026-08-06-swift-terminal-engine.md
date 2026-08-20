@@ -129,7 +129,7 @@ Status values:
 | id | Decision | Status |
 |---|---|---|
 | C1 | The core is a synchronous state machine over bytes plus explicit inputs, producing output bytes, damage, and semantic effects. PTY IO, scheduling, rendering, and AppKit live outside it. | live |
-| C2 | Supported surface: primary and alternate screens; cursor movement, wrapping, tabs, margins, scrolling regions; insertion, deletion, erasure, background-color erase; saved cursor and modes; 7-bit GL character sets; 16-color, 256-color, and RGB presentation; bold, dim, italic, underline and underline color, reverse, hidden, strike; cursor style and the requested blink preference; synchronized updates; device, cursor, and mode queries needed for feature detection. | live |
+| C2 | Supported surface: primary and alternate screens; cursor movement, wrapping, tabs, margins, scrolling regions; insertion, deletion, erasure, background-color erase; DECSCA character protection with the selective erases DECSED and DECSEL that honor it; saved cursor and modes; 7-bit GL character sets; 16-color, 256-color, and RGB presentation; bold, dim, italic, underline and underline color, reverse, hidden, strike; cursor style and the requested blink preference; synchronized updates; device, cursor, and mode queries needed for feature detection. | live |
 | C3 | Unknown, malformed, canceled, or truncated sequences never poison subsequent input. | live |
 | C4 | Input chunk boundaries do not change behavior. | live |
 | C5 | Alternate-screen content never enters normal scrollback. | live |

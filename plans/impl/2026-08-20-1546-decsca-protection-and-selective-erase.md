@@ -261,7 +261,7 @@ sees the new one.
 
 ## Commit progress
 - [x] 1. carry DECSCA protection on the pen and every cell
-- [ ] 2. honor protection in DECSED and DECSEL
+- [x] 2. honor protection in DECSED and DECSEL
 - [ ] 3. adopt the libvterm protection fixtures and re-adjudicate the manifests
 
 ## Implementation notes
@@ -279,6 +279,14 @@ sees the new one.
   clause allows: the `E`s intern `backgroundEraseStyle` directly, and the pen is
   rebuilt from its colors plus the protection bit it already had. Assigning the
   pen first and stamping from it would have stamped protected `E`s.
+- The selective fill is a per-column survivor mask computed before the write, as
+  the plan's discretion clause allows. It decides per wide pair, always blanks a
+  spacer head, and is the single fact `eraseCells` reports back, so the margin
+  flag, the spacer retirement and the row-level resets all read the same answer.
+- The history sever runs *before* the erase does, so it cannot consult what the
+  fill blanked. `rowIsFullyErasable` asks the mask the same question ahead of
+  time instead. Reordering the sever after the fill would change the bare
+  erases' behavior, which is out of this plan's scope.
 - `styleSequence` appends an unconditional `CSI 0 " q` or `CSI 1 " q` after
   every SGR it writes. That is what keeps the encoder stateless per run now that
   the leading SGR 0 no longer clears protection, and it costs 5 bytes per style

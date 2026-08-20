@@ -277,8 +277,12 @@ struct CSIEraseTests {
             "\u{1B}[4J",
             "\u{1B}[22J",
             "\u{1B}[1;2X",
-            "\u{1B}[?K",
             "\u{1B}[1:2K",
+            "\u{1B}[?1;2K",
+            "\u{1B}[?3K",
+            "\u{1B}[?1;2J",
+            "\u{1B}[?4J",
+            "\u{1B}[?22J",
         ]
     )
     func invalidEraseIsNoOp(sequence: String) throws {
@@ -537,6 +541,310 @@ struct CSIEraseTests {
             expectValidGrid(terminal)
         }
     }
+
+    @Test(
+        "DECSEL and DECSED blank their region except the protected cells in it",
+        arguments: [
+            // DECSEL over the whole row; both islands stand and the run between them goes.
+            SelectiveEraseFixture(sequence: "\u{1B}[1;1H\u{1B}[?2K", survivors: [2, 3, 6]),
+            // DECSEL 0 from column 4: erasing continues past the island at column 6.
+            SelectiveEraseFixture(sequence: "\u{1B}[1;5H\u{1B}[?K", survivors: [0, 1, 2, 3, 6]),
+            SelectiveEraseFixture(sequence: "\u{1B}[1;5H\u{1B}[?1K", survivors: [2, 3, 5, 6, 7]),
+            SelectiveEraseFixture(sequence: "\u{1B}[1;1H\u{1B}[?2J", survivors: [2, 3, 6]),
+            SelectiveEraseFixture(sequence: "\u{1B}[1;5H\u{1B}[?J", survivors: [0, 1, 2, 3, 6]),
+            SelectiveEraseFixture(sequence: "\u{1B}[1;5H\u{1B}[?1J", survivors: [2, 3, 5, 6, 7]),
+        ]
+    )
+    func selectiveEraseSkipsProtectedCells(fixture: SelectiveEraseFixture) throws {
+        // Intent: DECSED/DECSEL blank exactly what ED/EL would, minus the DECSCA-protected
+        //   cells, and keep going past a protected run rather than stopping at it.
+        // Why it exists: this is the whole point of the family -- a program protects a field
+        //   and clears around it, so both halves have to be right: the field survives and
+        //   everything else in the region goes.
+        // Scenario: a form with two protected fields on one line is cleared from various
+        //   cursor positions.
+        var terminal = try makeProtectedIslandTerminal()
+
+        terminal.feed(Array(fixture.sequence.utf8))
+
+        for column in 0..<8 {
+            let cell = try #require(terminal.cell(row: 0, column: column))
+            if fixture.survivors.contains(column) {
+                #expect(cell.kind == .narrow, "column \(column)")
+                #expect(cell.scalars.first == Self.islandRow[column], "column \(column)")
+            } else {
+                #expect(cell.kind == .padding, "column \(column)")
+                // Every erase writes unprotected blanks, selective or not.
+                #expect(cell.style.protected == false, "column \(column)")
+            }
+        }
+        expectValidGrid(terminal)
+    }
+
+    @Test("DECSED 3 clears retained history the way ED 3 does")
+    func selectiveEraseDisplayModeThreeClearsHistory() throws {
+        // Intent: `CSI ? 3 J` empties scrollback exactly as `CSI 3 J` does.
+        // Why it exists: xterm names the sequence "Selective Erase Saved Lines" and clears the
+        //   same region ED 3 clears; Windows Terminal and vte make it a no-op, and we follow
+        //   xterm, Ghostty and libvterm instead.
+        // Scenario: a program with a protected field on screen clears the scrollback.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("one\r\ntwo\r\n\u{1B}[1\"qthree".utf8))
+        #expect(terminal.scrollbackRowCount > 0)
+
+        terminal.feed(Array("\u{1B}[?3J".utf8))
+
+        #expect(terminal.scrollbackRowCount == 0)
+        #expect(terminal.cell(row: 1, column: 0)?.style.protected == true)
+        expectValidGrid(terminal)
+    }
+
+    @Test("a selective erase decides a wide pair as one cell")
+    func selectiveEraseKeepsWidePairsWhole() throws {
+        // Intent: DECSEL keeps or blanks both halves of a double-width character together.
+        // Why it exists: deciding per cell could leave a head without its tail, a grid shape
+        //   no print can produce. libvterm leaves the tail unprotected and is the outlier here.
+        // Scenario: the cursor sits on the tail half of a protected wide glyph when the line
+        //   is selectively erased.
+        var protectedPair = try #require(Terminal(columns: 6, rows: 1))
+        protectedPair.feed(Array("\u{1B}[1\"q\u{754C}\u{1B}[0\"qab".utf8))
+
+        protectedPair.feed(Array("\u{1B}[1;2H\u{1B}[?K".utf8))
+
+        #expect(protectedPair.cell(row: 0, column: 0)?.kind == .wideHead)
+        #expect(protectedPair.cell(row: 0, column: 1)?.kind == .wideTail)
+        #expect(protectedPair.cell(row: 0, column: 2)?.kind == .padding)
+        expectValidGrid(protectedPair)
+
+        var unprotectedPair = try #require(Terminal(columns: 6, rows: 1))
+        unprotectedPair.feed(Array("\u{754C}ab".utf8))
+
+        unprotectedPair.feed(Array("\u{1B}[1;2H\u{1B}[?K".utf8))
+
+        #expect(unprotectedPair.cell(row: 0, column: 0)?.kind == .padding)
+        #expect(unprotectedPair.cell(row: 0, column: 1)?.kind == .padding)
+        expectValidGrid(unprotectedPair)
+    }
+
+    @Test(
+        "with nothing protected a selective erase leaves the terminal identical to the bare form",
+        arguments: ["", "0", "1", "2", "3"], ["J", "K"]
+    )
+    func selectiveEraseMatchesTheBareFormWhenNothingIsProtected(
+        parameter: String,
+        final: String
+    ) throws {
+        // Intent: the `?` prefix changes nothing at all when no cell in the region is
+        //   protected -- grid, styles, cursor, pending wrap, soft-wrap flags and history all
+        //   compare equal, and a mode neither form accepts is a no-op in both.
+        // Why it exists: DECSED/DECSEL are ED/EL plus a skip rule, so every row-level side
+        //   effect has to keep deriving from the cells actually blanked. A side effect wired
+        //   to the sequence instead of to the blanking would show up here as a difference.
+        // Scenario: an ordinary session -- text over several rows, scrollback behind it, the
+        //   cursor mid-row with pending wrap armed -- receives each erase in both spellings.
+        var selective = try makeParityTerminal()
+        var bare = try makeParityTerminal()
+
+        selective.feed(Array("\u{1B}[?\(parameter)\(final)".utf8))
+        bare.feed(Array("\u{1B}[\(parameter)\(final)".utf8))
+
+        #expect(selective == bare)
+        expectValidGrid(selective)
+    }
+
+    @Test("a selective erase blanks a wrap spacer standing in its region")
+    func selectiveEraseBlanksAWrapSpacer() throws {
+        // Intent: the spacer head a wrapped wide character leaves at the margin is blanked by
+        //   a selective erase whatever the pen's protection was when the character printed.
+        // Why it exists: the spacer is a wrap artifact, not a character the program wrote. If
+        //   it could survive a selective erase, DECSEL could produce a spacer on a row that no
+        //   longer wraps -- a grid shape ED/EL cannot make.
+        // Scenario: a protected wide glyph is printed at the right margin, so it wraps and
+        //   leaves a spacer behind, and the row it left is then selectively erased.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("\u{1B}[1;4H\u{1B}[1\"q\u{754C}".utf8))
+        #expect(terminal.cell(row: 0, column: 3)?.kind == .spacerHead)
+
+        terminal.feed(Array("\u{1B}[1;4H\u{1B}[?K".utf8))
+
+        #expect(terminal.cell(row: 0, column: 3)?.kind == .padding)
+        expectValidGrid(terminal)
+    }
+
+    @Test("DECSEL 0 ends the row's wrap and the pending wrap even when the margin cell survives")
+    func selectiveEraseLineRightEndsTheWrapDespiteAProtectedMargin() throws {
+        // Intent: EL 0's line-structure effects are unconditional under the `?` form too -- the
+        //   row stops claiming a soft wrap and the deferred wrap is disarmed, whether or not the
+        //   margin cell was blanked.
+        // Why it exists: the wrap point is the margin column itself. A protected cell standing
+        //   there is text the program means to keep, not a statement that the line continues,
+        //   and leaving pending wrap armed would push the next character onto the wrong row.
+        // Scenario: a program protects a full-width line, then clears from the margin rightward.
+        var wrapped = try #require(Terminal(columns: 4, rows: 2))
+        wrapped.feed(Array("\u{1B}[1\"qABCDE".utf8))
+        #expect(wrapped.geometry.rows[0].isSoftWrapped)
+
+        wrapped.feed(Array("\u{1B}[1;4H\u{1B}[?K".utf8))
+
+        #expect(wrapped.cell(row: 0, column: 3)?.scalars.first == "D")
+        #expect(wrapped.geometry.rows[0].isSoftWrapped == false)
+        expectValidGrid(wrapped)
+
+        var pending = try #require(Terminal(columns: 4, rows: 2))
+        pending.feed(Array("\u{1B}[1\"qABCD".utf8))
+
+        // No cursor motion in between, so the pending wrap DECSEL 0 has to clear is still armed.
+        pending.feed(Array("\u{1B}[?KX".utf8))
+
+        #expect(pending.cell(row: 0, column: 3)?.scalars.first == "X")
+        #expect(pending.cell(row: 1, column: 0)?.kind == .padding)
+        expectValidGrid(pending)
+    }
+
+    @Test("a wrap claim whose margin cell a selective erase spared still names real content")
+    func selectiveEraseKeepsTheWrapClaimWhoseMarginSurvived() throws {
+        // Intent: `GridRow.marginErased` records what was blanked, so a protected margin cell
+        //   surviving DECSEL 2 leaves the row's claim witnessed and the line stays fused; the
+        //   bare EL 2 blanks the margin and the readers split the line.
+        // Why it exists: the stale-claim gate exists because an erased margin no longer names
+        //   content. A selective erase that spared the margin has not destroyed anything, so
+        //   wiring the flag to the sequence rather than to the blanking would split a line that
+        //   is still whole.
+        // Scenario: a protected character sits at the right margin of a soft-wrapped row that
+        //   an application blanks and rewrites, then the rows scroll off.
+        var kept = try makeProtectedMarginWrapTerminal(erase: "\u{1B}[?2K")
+        #expect(kept.primaryHistoryText == "cccc     Zdddd")
+
+        var severed = try makeProtectedMarginWrapTerminal(erase: "\u{1B}[2K")
+        #expect(severed.primaryHistoryText == "cccc\ndddd")
+    }
+
+    @Test("a spacer is retired by the wide head below it going away, not by the erase itself")
+    func selectiveEraseKeepsTheSpacerAboveAProtectedHead() throws {
+        // Intent: the spacer repair fires only when the column-0 wide head it heads was blanked,
+        //   both for a spacer on the live row above and for one at the history seam.
+        // Why it exists: the repair's region is the head's row, not the spacer's. Retiring a
+        //   spacer whose head survived would leave the wide character with no room at the margin
+        //   above it -- the inverse of the corruption the repair was written to prevent.
+        // Scenario: a protected wide glyph wrapped off the right margin, and the row it landed
+        //   on is selectively erased.
+        var live = try #require(Terminal(columns: 4, rows: 2))
+        live.feed(Array("\u{1B}[1;4H\u{1B}[1\"q\u{754C}".utf8))
+
+        live.feed(Array("\u{1B}[2;1H\u{1B}[?2K".utf8))
+
+        #expect(live.cell(row: 0, column: 3)?.kind == .spacerHead)
+        #expect(live.cell(row: 1, column: 0)?.kind == .wideHead)
+        #expect(live.cell(row: 1, column: 1)?.kind == .wideTail)
+        expectValidGrid(live)
+
+        var seam = try #require(Terminal(columns: 4, rows: 2))
+        seam.feed(Array("\u{1B}[1;4H\u{1B}[1\"q\u{754C}".utf8))
+        seam.feed(Array("\u{1B}[2;1H\n".utf8))
+        #expect(seam.scrollbackRowCount == 1)
+
+        seam.feed(Array("\u{1B}[1;1H\u{1B}[?2K".utf8))
+
+        #expect(seam.cell(row: 0, column: 0)?.kind == .wideHead)
+        #expect(seam.scrollbackRowCount == seam.independentScrollbackRowRecount)
+        expectValidGrid(seam)
+    }
+
+    @Test("a selective erase that spares a cell in row 0 leaves history's logical line open")
+    func selectiveEraseWithAProtectedRowZeroKeepsHistorysWrapClaim() throws {
+        // Intent: DECSED 2 severs history's claim on live row 0 only when row 0 is blanked in
+        //   full, which is the rule the sever already states for the bare erases.
+        // Why it exists: the claim says history's last retained row continues into live row 0.
+        //   A protected cell standing there is exactly that continuation still on screen, so
+        //   severing would split one real logical line in two.
+        // Scenario: a wrapped line straddles the history/live seam and the program has
+        //   protected one character of the part that is still live.
+        var kept = try makeSeamTerminal()
+        kept.feed(Array("\u{1B}[1;3H\u{1B}[1\"qZ\u{1B}[0\"q".utf8))
+
+        kept.feed(Array("\u{1B}[?2J".utf8))
+
+        #expect(kept.scrollbackRow(at: 2)?.isSoftWrapped == true)
+        expectValidGrid(kept)
+
+        var severed = try makeSeamTerminal()
+        severed.feed(Array("\u{1B}[1;3HZ".utf8))
+
+        severed.feed(Array("\u{1B}[?2J".utf8))
+
+        #expect(severed.scrollbackRow(at: 2)?.isSoftWrapped == false)
+        expectValidGrid(severed)
+    }
+
+    @Test("a row a selective erase did not fully blank keeps its wrap flag and prompt mark")
+    func selectiveEraseKeepsTheStructureOfARowItDidNotClear() throws {
+        // Intent: the whole-row structural resets -- the soft-wrap flag and the semantic prompt
+        //   stamp -- happen only for a row DECSED actually blanked in full.
+        // Why it exists: those resets say "this row holds nothing any more". A row still
+        //   showing a protected field holds something, and dropping its prompt mark would move
+        //   the prompt boundary the shell integration reports.
+        // Scenario: a prompt row carries a protected character when the program clears the
+        //   display.
+        var kept = try #require(Terminal(columns: 6, rows: 2))
+        kept.feed(Array("\u{1B}]133;A\u{7}ABCDE\u{1B}[1\"qF\u{1B}[0\"qG".utf8))
+        #expect(kept.geometry.rows[0].isSoftWrapped)
+
+        kept.feed(Array("\u{1B}[?2J".utf8))
+
+        #expect(kept.geometry.rows[0].isSoftWrapped)
+        #expect(kept.semanticPromptRowsForTesting[0].stamp == .prompt)
+        expectValidGrid(kept)
+
+        var cleared = try #require(Terminal(columns: 6, rows: 2))
+        cleared.feed(Array("\u{1B}]133;A\u{7}ABCDEFG".utf8))
+
+        cleared.feed(Array("\u{1B}[?2J".utf8))
+
+        #expect(cleared.geometry.rows[0].isSoftWrapped == false)
+        #expect(cleared.semanticPromptRowsForTesting[0].stamp == .none)
+        expectValidGrid(cleared)
+    }
+
+    /// One row holding two protected islands -- columns 2..3 and column 6 -- inside plain text,
+    /// which is the shape every selective-erase region case is measured against.
+    private func makeProtectedIslandTerminal() throws -> Terminal {
+        var terminal = try #require(Terminal(columns: 10, rows: 1))
+        terminal.feed(Array("AB\u{1B}[1\"qCD\u{1B}[0\"qEF\u{1B}[1\"qG\u{1B}[0\"qH".utf8))
+        for column in 0..<8 {
+            #expect(terminal.cell(row: 0, column: column)?.style.protected == [2, 3, 6].contains(column))
+        }
+        return terminal
+    }
+
+    /// An ordinary unprotected session: scrollback behind the viewport, text on every live row,
+    /// and the cursor left at the margin with pending wrap armed.
+    private func makeParityTerminal() throws -> Terminal {
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        terminal.feed(Array("one\r\ntwo\r\nthree\r\nfour-line\r\nfive".utf8))
+        #expect(terminal.scrollbackRowCount > 0)
+        terminal.feed(Array("\u{1B}[2;1Habcdefgh".utf8))
+        return terminal
+    }
+
+    /// The Ink repaint transient with one protected character at the margin of the wrapped row,
+    /// erased by `erase` and then rewritten and scrolled off.
+    private func makeProtectedMarginWrapTerminal(erase: String) throws -> Terminal {
+        var terminal = try #require(Terminal(columns: 10, rows: 3))
+        terminal.feed(Array("AAAAAAAAA\u{1B}[1\"qZ\u{1B}[0\"qBB".utf8))
+        terminal.feed(Array("\u{1B}[H\(erase)cccc".utf8))
+        terminal.feed(Array("\u{1B}[2;1H\u{1B}[2Kdddd".utf8))
+        terminal.feed(Array("\u{1B}[3;1H\n\n".utf8))
+        return terminal
+    }
+
+    struct SelectiveEraseFixture: Sendable {
+        let sequence: String
+        /// Columns whose original character is still standing after the erase.
+        let survivors: [Int]
+    }
+
+    /// The characters `makeProtectedIslandTerminal` prints, by column.
+    private static let islandRow: [Unicode.Scalar] = ["A", "B", "C", "D", "E", "F", "G", "H"]
 
     struct EraseLineFixture: Sendable {
         let sequence: String
