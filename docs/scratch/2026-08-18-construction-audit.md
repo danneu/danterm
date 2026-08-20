@@ -186,7 +186,7 @@ references are the requirement.
 | 2 | [BUG-32](#bug-32) | CSI ! p (DECSTR) followed by ESC 8 (DECRC) | **pinned by a test** | Reset the saved-cursor slot to the default rendition on DECSTR |
 | 2 | [BUG-33](#bug-33) | a zero-width combining mark (for example U+0 | unpinned | Attach a combining mark to the cell left of the cursor when no cluster is open |
 | 1 | [BUG-34](#bug-34) | Keypad Enter in numeric keypad mode while LN | unpinned | Apply LNM to keypad Enter, not only to the main Return key |
-| 1 | [BUG-35](#bug-35) | OSC 8 ; id= ; uri ST (hyperlink open with an | unpinned | Treat an empty OSC 8 id= as no id rather than as an id whose value is the empty string |
+| 1 | [BUG-35](#bug-35) | OSC 8 ; id= ; uri ST (hyperlink open with an | **done** `419319cb` | Treat an empty OSC 8 id= as no id rather than as an id whose value is the empty string |
 
 <a id="bug-01"></a>
 
@@ -1051,6 +1051,9 @@ currentStyle = TerminalStyle(foreground: TerminalCore.TerminalColor.indexed(1), 
 ### BUG-35. Treat an empty OSC 8 id= as no id rather than as an id whose value is the empty string
 
 `OSC 8 ; id= ; uri ST (hyperlink open with an explicitly empty id parameter)` &middot; severity 1 (cosmetic) &middot; hunter confidence 4
+
+**Done** in `419319cb`. The parser now normalizes an empty explicit id to no
+id, and tests pin both the parser result and the separate-link behavior.
 
 **Problem.** `OSC 8;id=;http://a.test` yields explicitId == "" rather than nil. Because DanTerm reuses an existing target whenever both explicitId and uri match, two runs of text that are separated by an intervening close both land on the same hyperlink id, so they are treated as one wrapped link. With no id at all they would correctly be two separate links.
 
