@@ -1119,7 +1119,7 @@ the pointer-event cell (PANE-3), and the run loop (FEED-1, ROW-4). Doing any
 of these before its wave-1 partner means writing code the partner immediately
 rewrites.
 
-- [ ] **[FIND-1](#find-1)** (5x5, large) Narrow the closed-history index on needle append instead of rebuilding it per keystroke
+- [x] **[FIND-1](#find-1)** (5x5, large) Narrow the closed-history index on needle append instead of rebuilding it per keystroke -- `0a46037b..4c36cbef`
 - [ ] **[MOBILE-4](#mobile-4)** (4x5, small) Signal replica state and surface geometry only when they change, not once per applied record
 - [ ] **[DRAW-1](#draw-1)** (4x5, medium) Carry each row's ink reach in the retained row product instead of rescanning the whole plan per apply _(after [FRAME-1](#frame-1))_
 - [ ] **[FIND-2](#find-2)** (4x5, medium) Build the per-frame match snapshot once and pass it to all three search reads
