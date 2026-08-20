@@ -121,6 +121,42 @@ struct TerminalLogicalLineStoreTests {
         }
     }
 
+    @Test("Width changes rebuild every retained block after a partial head eviction")
+    func widthChangeRebuildsBlocksAfterPartialHeadEviction() throws {
+        // Intent: a width change rebuilds row totals and addresses from every retained record,
+        //   including the partial first block and the final partial block.
+        // Why it exists: the block-to-record mapping clamps both ends. Previous coverage changed
+        //   width only while every retained record occupied one block with an untrimmed head.
+        // Scenario: two blocks are retained, one record retires from the first block, and every
+        //   reflowed row is checked against a record-by-record recount.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 8)
+        for line in 0..<(Terminal.LogicalLineStore.blockSize + 2) {
+            store.admit(Self.shortRow(width: 8, count: 7, seed: line))
+        }
+        #expect(store.recordCount == Terminal.LogicalLineStore.blockSize + 2)
+
+        let evicted = store.evictOneDisplayRow()
+        #expect(evicted)
+        #expect(store.recordCount == Terminal.LogicalLineStore.blockSize + 1)
+
+        _ = store.setWidth(3)
+
+        var expectedAddresses: [Terminal.LogicalLineStore.DisplayRowCursor] = []
+        for recordIndex in 0..<store.recordCount {
+            let summary = try #require(store.recordSummary(at: recordIndex))
+            for rowWithinRecord in 0..<summary.displayRowCount {
+                expectedAddresses.append(
+                    .init(recordIndex: recordIndex, rowWithinRecord: rowWithinRecord)
+                )
+            }
+        }
+        #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount())
+        #expect(store.grandDisplayRowTotal == expectedAddresses.count)
+        for (displayRow, expected) in expectedAddresses.enumerated() {
+            #expect(store.locate(displayRow: displayRow) == expected)
+        }
+    }
+
     @Test("Display and content totals agree with independent recounts after every mutation")
     func maintainedTotalsAndContentRanksAgreeWithRecountsAfterEveryMutation() {
         // Intent: the row index and width-free content ranks match independent arena recounts

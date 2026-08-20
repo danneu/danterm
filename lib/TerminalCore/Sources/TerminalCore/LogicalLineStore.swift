@@ -228,6 +228,28 @@ extension Terminal {
         /// re-establish the identity by hand.
         private var firstBlockNumber: Int { firstRecordSequence / Self.blockSize }
 
+        /// Resolves one retained record through the ring's absolute block numbering.
+        private func blockIndex(containingRecordAt recordIndex: Int) -> Int? {
+            guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
+            let sequence = firstRecordSequence + recordIndex
+            let blockIndex = sequence / Self.blockSize - firstBlockNumber
+            guard blockIndex >= 0, blockIndex < blocks.count else { return nil }
+            return blockIndex
+        }
+
+        /// Gives the retained records owned by one block, including a partially evicted head.
+        private func recordIndices(inBlockAt blockIndex: Int) -> Range<Int> {
+            precondition(blockIndex >= 0 && blockIndex < blocks.count)
+            let blockNumber = firstBlockNumber + blockIndex
+            let first = max(firstRecordSequence, blockNumber * Self.blockSize)
+                - firstRecordSequence
+            let end = min(
+                offsets.count,
+                (blockNumber + 1) * Self.blockSize - firstRecordSequence
+            )
+            return first..<end
+        }
+
         /// Content units removed from the head, on the same monotone-origin rule as
         /// `evictedRowCount`.
         private var evictedContentUnitCount = 0
@@ -1248,15 +1270,8 @@ extension Terminal {
         private mutating func recomputeIndex() {
             var rowStart = evictedRowCount
             for blockIndex in 0..<blocks.count {
-                let blockNumber = firstBlockNumber + blockIndex
-                let first = max(firstRecordSequence, blockNumber * Self.blockSize)
-                    - firstRecordSequence
-                let end = min(
-                    offsets.count,
-                    (blockNumber + 1) * Self.blockSize - firstRecordSequence
-                )
                 var rows = 0
-                for recordIndex in first..<end {
+                for recordIndex in recordIndices(inBlockAt: blockIndex) {
                     rows += displayRowCount(recordIndex: recordIndex)
                 }
                 blocks.modifyElement(at: blockIndex) { block in
@@ -1296,6 +1311,8 @@ extension Terminal {
         /// Recounts each current block independently of its cached content total.
         var independentContentBlockTotalsForTesting: [Int] {
             (0..<blocks.count).map { blockIndex in
+                // Keep this arithmetic separate from `recordIndices(inBlockAt:)`, so the oracle
+                // checks the maintained totals against an independent block mapping.
                 let blockNumber = firstBlockNumber + blockIndex
                 let first = max(firstRecordSequence, blockNumber * Self.blockSize)
                     - firstRecordSequence
@@ -1316,14 +1333,9 @@ extension Terminal {
             let relativeOffset = coordinate.cellOffset - retainedStart
             let record = self.record(at: offsets[index])
             guard relativeOffset >= 0, relativeOffset <= record.cellCount else { return nil }
-            let sequence = firstRecordSequence + index
-            let blockIndex = sequence / Self.blockSize - firstBlockNumber
-            guard blockIndex >= 0, blockIndex < blocks.count else { return nil }
+            guard let blockIndex = blockIndex(containingRecordAt: index) else { return nil }
             var rank = blocks[blockIndex].contentStart - evictedContentUnitCount
-            let blockFirst = max(
-                firstRecordSequence,
-                (firstBlockNumber + blockIndex) * Self.blockSize
-            ) - firstRecordSequence
+            let blockFirst = recordIndices(inBlockAt: blockIndex).lowerBound
             for earlier in blockFirst..<index {
                 Instrument.searchDistanceWork.record()
                 rank += contentContribution(recordIndex: earlier, recordingWork: true)
@@ -1472,9 +1484,7 @@ extension Terminal {
             // than a row somewhere else, so say nothing instead of scanning from the head.
             guard let blockIndex = found else { return nil }
 
-            let blockNumber = firstBlockNumber + blockIndex
-            let firstSequence = max(firstRecordSequence, blockNumber * Self.blockSize)
-            var recordIndex = firstSequence - firstRecordSequence
+            var recordIndex = recordIndices(inBlockAt: blockIndex).lowerBound
             var remaining = target - blocks[blockIndex].rowStart
             while recordIndex < offsets.count {
                 let rows = displayRowCount(recordIndex: recordIndex)
@@ -2118,14 +2128,9 @@ extension Terminal {
 
         /// The record's first display row, counted from the oldest retained one.
         private func firstDisplayRow(ofRecord recordIndex: Int) -> Int {
-            let sequence = firstRecordSequence + recordIndex
-            let blockIndex = sequence / Self.blockSize - firstBlockNumber
-            guard blockIndex >= 0, blockIndex < blocks.count else { return 0 }
+            guard let blockIndex = blockIndex(containingRecordAt: recordIndex) else { return 0 }
             var total = blocks[blockIndex].rowStart - evictedRowCount
-            let blockFirst = max(
-                firstRecordSequence,
-                (firstBlockNumber + blockIndex) * Self.blockSize
-            ) - firstRecordSequence
+            let blockFirst = recordIndices(inBlockAt: blockIndex).lowerBound
             for index in blockFirst..<recordIndex {
                 total += displayRowCount(recordIndex: index)
             }
@@ -2991,9 +2996,9 @@ extension Terminal {
 
         /// Applies a tail-side delta to the block that owns a specific retained record.
         private mutating func addContentUnits(_ units: Int, toBlockContaining recordIndex: Int) {
-            let sequence = firstRecordSequence + recordIndex
-            let blockIndex = sequence / Self.blockSize - firstBlockNumber
-            precondition(blockIndex >= 0 && blockIndex < blocks.count)
+            guard let blockIndex = blockIndex(containingRecordAt: recordIndex) else {
+                preconditionFailure("record has no retained index block")
+            }
             blocks.modifyElement(at: blockIndex) { $0.contentCount += units }
         }
 
