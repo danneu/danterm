@@ -532,7 +532,7 @@
     {
       "path": "t/90vttest_01-movement-1.test",
       "licenseNotice": "LICENSE.libvterm.txt",
-      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "DanTerm now implements DECALN, pinned directly by CSIEraseTests; this full-session recording has not been ported, so it stays outside the adopted fixture set." }]
+      "cases": [{ "name": "Output", "disposition": "adopted", "rationale": "Fixtures/libvterm/vttest-movement-1.json adopts the full-session interaction of DECALN, the erase operations that clear it back out, and the border drawn by relative cursor motion with IND, RI, and NEL." }]
     },
     {
       "path": "t/90vttest_01-movement-2.test",

@@ -1,0 +1,291 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/90vttest_01-movement-1.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Output",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": {
+    "columns": 80,
+    "rows": 25
+  },
+  "events": [
+    {
+      "type": "feed",
+      "text": "\u001b#8"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[9;10H\u001b[1J"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[18;60H\u001b[0J\u001b[1K"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[9;71H\u001b[0K"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[10;10H\u001b[1K\u001b[10;71H\u001b[0K\u001b[11;10H\u001b[1K\u001b[11;71H\u001b[0K\u001b[12;10H\u001b[1K\u001b[12;71H\u001b[0K\u001b[13;10H\u001b[1K\u001b[13;71H\u001b[0K\u001b[14;10H\u001b[1K\u001b[14;71H\u001b[0K\u001b[15;10H\u001b[1K\u001b[15;71H\u001b[0K\u001b[16;10H\u001b[1K\u001b[16;71H\u001b[0K"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[17;30H\u001b[2K"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[24;1f*\u001b[1;1f*\u001b[24;2f*\u001b[1;2f*\u001b[24;3f*\u001b[1;3f*\u001b[24;4f*\u001b[1;4f*\u001b[24;5f*\u001b[1;5f*\u001b[24;6f*\u001b[1;6f*\u001b[24;7f*\u001b[1;7f*\u001b[24;8f*\u001b[1;8f*\u001b[24;9f*\u001b[1;9f*\u001b[24;10f*\u001b[1;10f*\u001b[24;11f*\u001b[1;11f*\u001b[24;12f*\u001b[1;12f*\u001b[24;13f*\u001b[1;13f*\u001b[24;14f*\u001b[1;14f*\u001b[24;15f*\u001b[1;15f*\u001b[24;16f*\u001b[1;16f*\u001b[24;17f*\u001b[1;17f*\u001b[24;18f*\u001b[1;18f*\u001b[24;19f*\u001b[1;19f*\u001b[24;20f*\u001b[1;20f*\u001b[24;21f*\u001b[1;21f*\u001b[24;22f*\u001b[1;22f*\u001b[24;23f*\u001b[1;23f*\u001b[24;24f*\u001b[1;24f*\u001b[24;25f*\u001b[1;25f*\u001b[24;26f*\u001b[1;26f*\u001b[24;27f*\u001b[1;27f*\u001b[24;28f*\u001b[1;28f*\u001b[24;29f*\u001b[1;29f*\u001b[24;30f*\u001b[1;30f*\u001b[24;31f*\u001b[1;31f*\u001b[24;32f*\u001b[1;32f*\u001b[24;33f*\u001b[1;33f*\u001b[24;34f*\u001b[1;34f*\u001b[24;35f*\u001b[1;35f*\u001b[24;36f*\u001b[1;36f*\u001b[24;37f*\u001b[1;37f*\u001b[24;38f*\u001b[1;38f*\u001b[24;39f*\u001b[1;39f*\u001b[24;40f*\u001b[1;40f*\u001b[24;41f*\u001b[1;41f*\u001b[24;42f*\u001b[1;42f*\u001b[24;43f*\u001b[1;43f*\u001b[24;44f*\u001b[1;44f*\u001b[24;45f*\u001b[1;45f*\u001b[24;46f*\u001b[1;46f*\u001b[24;47f*\u001b[1;47f*\u001b[24;48f*\u001b[1;48f*\u001b[24;49f*\u001b[1;49f*\u001b[24;50f*\u001b[1;50f*\u001b[24;51f*\u001b[1;51f*\u001b[24;52f*\u001b[1;52f*\u001b[24;53f*\u001b[1;53f*\u001b[24;54f*\u001b[1;54f*\u001b[24;55f*\u001b[1;55f*\u001b[24;56f*\u001b[1;56f*\u001b[24;57f*\u001b[1;57f*\u001b[24;58f*\u001b[1;58f*\u001b[24;59f*\u001b[1;59f*\u001b[24;60f*\u001b[1;60f*\u001b[24;61f*\u001b[1;61f*\u001b[24;62f*\u001b[1;62f*\u001b[24;63f*\u001b[1;63f*\u001b[24;64f*\u001b[1;64f*\u001b[24;65f*\u001b[1;65f*\u001b[24;66f*\u001b[1;66f*\u001b[24;67f*\u001b[1;67f*\u001b[24;68f*\u001b[1;68f*\u001b[24;69f*\u001b[1;69f*\u001b[24;70f*\u001b[1;70f*\u001b[24;71f*\u001b[1;71f*\u001b[24;72f*\u001b[1;72f*\u001b[24;73f*\u001b[1;73f*\u001b[24;74f*\u001b[1;74f*\u001b[24;75f*\u001b[1;75f*\u001b[24;76f*\u001b[1;76f*\u001b[24;77f*\u001b[1;77f*\u001b[24;78f*\u001b[1;78f*\u001b[24;79f*\u001b[1;79f*\u001b[24;80f*\u001b[1;80f*"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[2;2H"
+    },
+    {
+      "type": "feed",
+      "text": "+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD+\u001b[1D\u001bD"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[23;79H"
+    },
+    {
+      "type": "feed",
+      "text": "+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM+\u001b[1D\u001bM"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[2;1H"
+    },
+    {
+      "type": "feed",
+      "text": "*\u001b[2;80H*\u001b[10D\u001bE*\u001b[3;80H*\u001b[10D\u001bE*\u001b[4;80H*\u001b[10D\u001bE*\u001b[5;80H*\u001b[10D\u001bE*\u001b[6;80H*\u001b[10D\u001bE*\u001b[7;80H*\u001b[10D\u001bE*\u001b[8;80H*\u001b[10D\u001bE*\u001b[9;80H*\u001b[10D\u001bE*\u001b[10;80H*\u001b[10D\u001bE*\u001b[11;80H*\u001b[10D\u001bE*\u001b[12;80H*\u001b[10D\u001bE*\u001b[13;80H*\u001b[10D\u001bE*\u001b[14;80H*\u001b[10D\u001bE*\u001b[15;80H*\u001b[10D\u001bE*\u001b[16;80H*\u001b[10D\u001bE*\u001b[17;80H*\u001b[10D\u001bE*\u001b[18;80H*\u001b[10D\u001bE*\u001b[19;80H*\u001b[10D\u001bE*\u001b[20;80H*\u001b[10D\u001bE*\u001b[21;80H*\u001b[10D\u001bE*\u001b[22;80H*\u001b[10D\u001bE*\u001b[23;80H*\u001b[10D\u001bE"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[2;10H\u001b[42D\u001b[2C"
+    },
+    {
+      "type": "feed",
+      "text": "+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C+\u001b[0C\u001b[2D\u001b[1C"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[23;70H\u001b[42C\u001b[2D"
+    },
+    {
+      "type": "feed",
+      "text": "+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b+\u001b[1D\u001b[1C\u001b[0D\b"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1;1H"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[10A"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1A"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[0A"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[24;80H"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[10B"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1B"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[0B"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[10;12H"
+    },
+    {
+      "type": "feed",
+      "text": "                                                          "
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1B\u001b[58D"
+    },
+    {
+      "type": "feed",
+      "text": "                                                          "
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1B\u001b[58D"
+    },
+    {
+      "type": "feed",
+      "text": "                                                          "
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1B\u001b[58D"
+    },
+    {
+      "type": "feed",
+      "text": "                                                          "
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1B\u001b[58D"
+    },
+    {
+      "type": "feed",
+      "text": "                                                          "
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1B\u001b[58D"
+    },
+    {
+      "type": "feed",
+      "text": "                                                          "
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1B\u001b[58D"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[5A\u001b[1CThe screen should be cleared,  and have an unbroken bor-"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[12;13Hder of *'s and +'s around the edge,   and exactly in the"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[13;13Hmiddle  there should be a frame of E's around this  text"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[14;13Hwith  one (1) free position around it.    Push <RETURN>"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportContains": [
+          "********************************************************************************\n*++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*\n*+                                                                            +*\n*+                                                                            +*\n*+                                                                            +*\n*+                                                                            +*\n*+                                                                            +*\n*+                                                                            +*\n*+        EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE        +*\n*+        E                                                          E        +*\n*+        E The screen should be cleared,  and have an unbroken bor- E        +*\n*+        E der of *'s and +'s around the edge,   and exactly in the E        +*\n*+        E middle  there should be a frame of E's around this  text E        +*\n*+        E with  one (1) free position around it.    Push <RETURN>  E        +*\n*+        E                                                          E        +*\n*+        EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE        +*\n*+                                                                            +*\n*+                                                                            +*\n*+                                                                            +*\n*+                                                                            +*\n*+                                                                            +*\n*+                                                                            +*\n*++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*\n********************************************************************************\n"
+        ],
+        "cellScalars": [
+          {
+            "row": 0,
+            "column": 0,
+            "scalars": "*"
+          },
+          {
+            "row": 0,
+            "column": 79,
+            "scalars": "*"
+          },
+          {
+            "row": 1,
+            "column": 0,
+            "scalars": "*"
+          },
+          {
+            "row": 1,
+            "column": 1,
+            "scalars": "+"
+          },
+          {
+            "row": 1,
+            "column": 78,
+            "scalars": "+"
+          },
+          {
+            "row": 1,
+            "column": 79,
+            "scalars": "*"
+          },
+          {
+            "row": 8,
+            "column": 9,
+            "scalars": ""
+          },
+          {
+            "row": 8,
+            "column": 10,
+            "scalars": "E"
+          },
+          {
+            "row": 8,
+            "column": 69,
+            "scalars": "E"
+          },
+          {
+            "row": 8,
+            "column": 70,
+            "scalars": ""
+          },
+          {
+            "row": 13,
+            "column": 66,
+            "scalars": ">"
+          },
+          {
+            "row": 13,
+            "column": 67,
+            "scalars": " "
+          },
+          {
+            "row": 15,
+            "column": 10,
+            "scalars": "E"
+          },
+          {
+            "row": 22,
+            "column": 0,
+            "scalars": "*"
+          },
+          {
+            "row": 22,
+            "column": 79,
+            "scalars": "*"
+          },
+          {
+            "row": 23,
+            "column": 79,
+            "scalars": "*"
+          },
+          {
+            "row": 24,
+            "column": 0,
+            "scalars": ""
+          },
+          {
+            "row": 24,
+            "column": 79,
+            "scalars": ""
+          }
+        ],
+        "cursor": {
+          "row": 13,
+          "column": 67,
+          "pendingWrap": false
+        }
+      }
+    }
+  ]
+}

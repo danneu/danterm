@@ -33,7 +33,7 @@ struct TerminalFixtureTests {
                 + ["windows-terminal/osc52-unicode"]
         )
         let names = try Self.chunkInvariantFixtureNames()
-        #expect(names.count == 67)
+        #expect(names.count == 68)
         #expect(Set(names) == expected)
     }
 
@@ -461,7 +461,7 @@ struct TerminalFixtureTests {
         "state-pen", "state-putglyph", "state-query", "state-rep",
         "state-rep-edge", "state-reset", "state-reset-erase", "state-save",
         "state-selection", "state-tabstops", "state-wrapping", "state-wrapping-bottom",
-        "vttest-movement-2", "vttest-movement-3", "vttest-movement-4", "vttest-screen-1",
+        "vttest-movement-1", "vttest-movement-2", "vttest-movement-3", "vttest-movement-4", "vttest-screen-1",
         "vttest-screen-2", "vttest-screen-3", "vttest-screen-4",
     ]
 
