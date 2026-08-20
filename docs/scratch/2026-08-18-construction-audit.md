@@ -1204,7 +1204,7 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [ ] **[UNI-4](#uni-4)** (3x5, medium) Let the canonical-caseless tables answer "this scalar is unaffected" without a binary search or an allocation
 - [ ] **[XPORT-3](#xport-3)** (3x5, medium) Give pending-input spans absolute byte coordinates so a partial write never rewrites the queue
 - [ ] **[IOS-2](#ios-2)** (3x4, medium) Make an authorized attempt carry its target so a Go tap can never be dropped against a stale one
-- [ ] **[REDUCE-3](#reduce-3)** (3x4, medium) Repair the focused pane's alerts in one pass instead of copying the rule into nine arms **[decide first](#decisions-to-make-first)**
+- [x] **[REDUCE-3](#reduce-3)** (3x4, medium) Repair the focused pane's alerts in one pass instead of copying the rule into nine arms **[decide first](#decisions-to-make-first)**
 - [ ] **[CHROME-4](#chrome-4)** (2x5, small) Build the preferences grid from declared rows so warning rows and padding stop being addressed by literal index
 - [ ] **[DRAW-3](#draw-3)** (2x5, small) Lower RenderColor straight into the context as components, deleting both the per-run CGColor allocation and the memo dictionary
 - [ ] **[FEED-3](#feed-3)** (2x5, small) Store tab stops as a column bitset instead of a Set<Int>, so HT is a word scan rather than an allocation
