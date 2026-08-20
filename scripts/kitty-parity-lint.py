@@ -41,12 +41,9 @@ from pathlib import Path
 import re
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# `.claude` holds agent worktrees (`.claude/worktrees/<name>`), which are full checkouts of
-# this same repository. Without skipping it, a lint run from the main checkout also reads
-# every in-progress worktree -- so a mistyped citation or a not-yet-recorded hash in someone
-# else's branch fails `just test` here, for a file that is not on this branch.
-SKIP_DIRS = {".git", ".claude", "references"}
+from parity_sources import swift_sources  # noqa: E402
 
 CITATION_RE = re.compile(r"//\s*Adapted from (kitty_tests/[\w./-]+)#([\w]+)\s*$")
 # A line that means to be a citation but does not parse as one. Without this, a
@@ -69,23 +66,6 @@ class Citation:
     commit: str | None
     body_hash: str | None
     has_divergence: bool
-
-
-def swift_sources(root: Path) -> list[Path]:
-    """Every tracked-ish Swift file under `root`, skipping vendored, build, and worktree trees.
-
-    The skip test runs on each path's components *below `root`*, never its absolute ones.
-    Linting a checkout that itself lives under a skipped name -- which is exactly what an
-    agent worktree at `.claude/worktrees/<name>` is -- must lint that checkout normally
-    rather than skip every file in it and report a vacuous pass.
-    """
-    found: list[Path] = []
-    for path in sorted(root.rglob("*.swift")):
-        relative = path.relative_to(root)
-        if any(part in SKIP_DIRS or part.startswith(".build") for part in relative.parts):
-            continue
-        found.append(path)
-    return found
 
 
 def parse_citations(path: Path) -> tuple[list[Citation], list[int]]:

@@ -176,6 +176,30 @@ cp -R "$BASE" "$CASE/.claude/worktrees/self"
 edit_file "$CASE/.claude/worktrees/self/$SWIFT_REL" 's/body sha256:[0-9a-f]+/body sha256:deadbeefdead/'
 expect_fail "$CASE/.claude/worktrees/self" "a bad citation in a directly-linted worktree should still fail"
 
+# --- Build products are not source. ---
+# `.build` holds tens of thousands of Swift files from SwiftPM checkouts. The walk prunes
+# it, so this case also proves the pruning did not stop at the top level.
+CASE="$TMP/build-products-ignored"
+cp -R "$BASE" "$CASE"
+mkdir -p "$CASE/.build/checkouts/other-package/Sources"
+cat > "$CASE/.build/checkouts/other-package/Sources/Vendored.swift" <<'EOF'
+// Adapted from kitty_tests/datatypes.py#no_such_test_at_all
+EOF
+expect_pass "$CASE" "a Swift file under .build should not be linted"
+
+# --- A new file is linted before it is committed. ---
+# This is why discovery walks the tree instead of asking git for tracked files: the file
+# whose citation most needs checking is the one still being written.
+CASE="$TMP/untracked-file-linted"
+cp -R "$BASE" "$CASE"
+git -C "$CASE" init --quiet
+git -C "$CASE" add -A
+git -C "$CASE" -c user.name=test -c user.email=test@example.com commit --quiet -m baseline
+cat > "$CASE/lib/TerminalCore/Tests/TerminalCoreTests/Untracked.swift" <<'EOF'
+// Adapted from kitty_tests/datatypes.py#test_rewrap_narrower.
+EOF
+expect_fail "$CASE" "a malformed citation in an uncommitted file should still fail"
+
 # --- The gate case: no checkout means exit 0 with a printed reason. ---
 CASE="$TMP/references-absent"
 cp -R "$BASE" "$CASE"
