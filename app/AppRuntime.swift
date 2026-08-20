@@ -220,7 +220,7 @@ class AppRuntime {
         configStore: DanTermConfigStore = DanTermConfigStore(),
         startsApplicationServices: Bool = true,
         tailnetOptIn: Bool = false,
-        socketPath: URL = controlSocketPath()
+        socketPath: URL = userControlSocketPath(identity: DanTermInstanceIdentity())
     ) {
         self.ports = ports
         self.dialogSurfaces = dialogSurfaces

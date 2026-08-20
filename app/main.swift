@@ -36,7 +36,7 @@ func writeTerminalCharacterizationPathProbe(to path: String) throws {
         "temporary": danTermTemporaryDirectoryURL(fileManager: fileManager).path,
         "config": DanTermConfigPaths.configFilePath(),
         "recovery": recoveryDirectoryURL().path,
-        "socket": controlSocketPath().path,
+        "socket": userControlSocketPath(identity: DanTermInstanceIdentity()).path,
         "replay": scrollbackReplayDirectoryURL().path,
         "displayScale": NSScreen.main?.backingScaleFactor ?? 1.0,
     ]

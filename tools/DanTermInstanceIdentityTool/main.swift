@@ -16,7 +16,7 @@ let payload: [String: Any] = [
     "bundleId": identity.bundleIdentifier,
     "displayName": identity.displayName,
     "executableName": identity.executableName,
-    "socketPath": controlSocketPath(identity: identity).path,
+    "socketPath": userControlSocketPath(identity: identity).path,
 ]
 let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
 FileHandle.standardOutput.write(data)

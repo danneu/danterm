@@ -185,7 +185,7 @@ actor IpcServer {
     private var connections: [UUID: ConnectionState] = [:]
 
     init(
-        socketPath: URL = controlSocketPath(),
+        socketPath: URL = userControlSocketPath(identity: DanTermInstanceIdentity()),
         appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev",
         livenessBound: IpcLivenessBound = .standard,
         tailnetConfig: DanTermTailnetConfig? = nil,

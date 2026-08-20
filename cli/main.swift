@@ -171,7 +171,7 @@ struct DanTermCLI {
             let target = try selectConnectionTarget(
                 explicit: invocation.target,
                 environment: environment,
-                fallback: controlSocketPath().path,
+                fallback: userControlSocketPath(identity: .production).path,
                 method: command.request.method
             )
             // Every tape capture is a record stream, finite or followed alike, so none of them
@@ -408,7 +408,7 @@ struct DanTermCLI {
         guard let target = try? selectConnectionTarget(
             explicit: nil,
             environment: environment,
-            fallback: controlSocketPath().path,
+            fallback: userControlSocketPath(identity: .production).path,
             method: .doctorPermissions
         ) else { return .unavailable }
         let command = CLICommand(request: .doctorPermissions, outputMode: .none)
