@@ -1268,7 +1268,7 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [ ] **[PARSE-5](#parse-5)** (3x5, small) Reset the saved cursor as part of DECSTR
 - [ ] **[CHROME-3](#chrome-3)** (3x5, medium) Carry typed ids in sidebar menu items instead of bare UUIDs
 - [x] **[HIST-5](#hist-5)** (3x5, medium) Price the memory census by walking records, not by materializing every retained row **[decide first](#decisions-to-make-first)**
-- [ ] **[PTY-1](#pty-1)** (3x5, medium) Cancel every retained dispatch source from the one registry that already holds them
+- [x] **[PTY-1](#pty-1)** (3x5, medium) Cancel every retained dispatch source from the one registry that already holds them -- `dab5337f`
 - [ ] **[RUNTIME-4](#runtime-4)** (3x5, medium) Give each armed timer one owner instead of a handle field plus a token field
 - [ ] **[UNI-4](#uni-4)** (3x5, medium) Let the canonical-caseless tables answer "this scalar is unaffected" without a binary search or an allocation
 - [ ] **[XPORT-3](#xport-3)** (3x5, medium) Give pending-input spans absolute byte coordinates so a partial write never rewrites the queue
@@ -5201,6 +5201,28 @@ _Scope: Process lifecycle and the engine/app session boundary (lib/TerminalPTY, 
 ##### PTY-1. Cancel every retained dispatch source from the one registry that already holds them
 
 `structural` &middot; impact 3, confidence 5 &middot; effort medium &middot; wave 4 &middot; rewritten
+
+**Done** in `dab5337f`, as the sharper ideal says. `finishTeardown` and
+`exitBoundElapsed` both walk `retainedSources` -- every entry, activate then
+cancel -- and `closeMaster` stays a separate call for its seal, pending-input
+rejection, and descriptor-join barrier, keeping its position last in the forced
+path. A source registered by later code is cancelled by both paths with no edit
+to either.
+
+Two departures from the ideal as written above. The entry carries no activation
+flag: `dispatch_activate` on an already-active object is a no-op
+(`references/libdispatch/src/queue.c#_dispatch_lane_resume`), so the walk can
+activate uniformly and the host's own `readSourceActivated` /
+`processSourceActivated` bookkeeping and the resume-before-cancel dance in
+`cancelReadSource` / `cancelProcessSource` are gone rather than moved. The
+typed field is cleared by a `SourceSlot` tag plus one `forgetSource(_:)` switch
+instead of a stored closure, which would have put a retain cycle on the actor in
+the registry.
+
+The typed handle clears at cancel time, never at cancellation acknowledgement:
+`scheduleGrace` and `armExitBound` replace a source whose predecessor may still
+be in the registry, and clearing on acknowledgement would let the predecessor
+clear its successor's handle.
 
 **Files.** `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift#exitBoundElapsed`, `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift#finishTeardown`, `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift#retainUntilCancellation`
 
