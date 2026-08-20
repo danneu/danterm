@@ -57,36 +57,39 @@ export KILLALL_ARGV_LOG="$TEST_ROOT/killall-argv.log"
 export LAYOUT_VERIFY_LOG="$TEST_ROOT/layout-verify.log"
 export DEVELOPMENT_LAYOUT_PLAN="$TEST_ROOT/development-layout.json"
 export REAL_LAYOUT_VERIFIER="$BUILD_ROOT/scripts/verify-bundle-layout.sh"
+export BUILD_ROOT
 cat > "$FAKE_BIN/swift" <<'SHIM'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$SWIFT_ARGV_LOG"
+configuration=debug
+if [[ " $* " == *" --configuration release "* ]]; then
+    configuration=release
+fi
 case " $* " in
-    *" --show-bin-path "*)
-        case " $* " in
-            *"/TerminalPTY "*)
-                bin_path="$TEST_ROOT/bootstrap-bin"
-                mkdir -p "$bin_path"
-                cp /usr/bin/true "$bin_path/PTYSessionBootstrap"
-                ;;
-            *)
-                bin_path="$TEST_ROOT/app-bin"
-                mkdir -p "$bin_path"
-                printf '#!/bin/sh\n# gui\nexit 0\n' > "$bin_path/DanTerm"
-                printf '#!/bin/sh\n# cli\nexit 0\n' > "$bin_path/DanTermCLI"
-                printf '#!/bin/sh\n# identity\nexit 0\n' > "$bin_path/DanTermInstanceIdentityTool"
-                cat > "$bin_path/DanTermBundleLayoutTool" <<'TOOL'
+    *"/TerminalPTY "*)
+        bin_path="$BUILD_ROOT/.spm-build/TerminalPTY/$configuration"
+        mkdir -p "$bin_path"
+        cp /usr/bin/true "$bin_path/PTYSessionBootstrap"
+        ;;
+    *)
+        bin_path="$BUILD_ROOT/.spm-build/$configuration"
+        mkdir -p "$bin_path"
+        printf '#!/bin/sh\n# gui\nexit 0\n' > "$bin_path/DanTerm"
+        printf '#!/bin/sh\n# cli\nexit 0\n' > "$bin_path/DanTermCLI"
+        printf '#!/bin/sh\n# identity\nexit 0\n' > "$bin_path/DanTermInstanceIdentityTool"
+        cat > "$bin_path/DanTermBundleLayoutTool" <<'TOOL'
 #!/usr/bin/env bash
 [[ "$1" == "development" ]] || exit 2
 cat "$DEVELOPMENT_LAYOUT_PLAN"
 TOOL
-                chmod +x "$bin_path/DanTerm" "$bin_path/DanTermCLI" \
-                    "$bin_path/DanTermInstanceIdentityTool" \
-                    "$bin_path/DanTermBundleLayoutTool"
-                ;;
-        esac
-        printf '%s\n' "$bin_path"
+        chmod +x "$bin_path/DanTerm" "$bin_path/DanTermCLI" \
+            "$bin_path/DanTermInstanceIdentityTool" \
+            "$bin_path/DanTermBundleLayoutTool"
         ;;
 esac
+if [[ " $* " == *" --show-bin-path "* ]]; then
+    printf '%s\n' "$bin_path"
+fi
 SHIM
 chmod +x "$FAKE_BIN/swift"
 
@@ -164,32 +167,32 @@ for vendored in bash-preexec.sh bash-preexec.LICENSE bash-preexec.PROVENANCE; do
         "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/shell-integration/vendor/$vendored" \
         || fail "debug bundle did not preserve vendor/$vendored"
 done
-[[ $(wc -l < "$TEST_ROOT/debug.swift-argv") -eq 4 ]] \
-    || fail "debug build did not make four SwiftPM build/bin-path calls"
+[[ $(wc -l < "$TEST_ROOT/debug.swift-argv") -eq 2 ]] \
+    || fail "debug build did not make exactly two SwiftPM build calls"
+if grep -q -- '--show-bin-path' "$TEST_ROOT/debug.swift-argv"; then
+    fail "debug build made a redundant SwiftPM bin-path call"
+fi
 if grep -q -- '--configuration' "$TEST_ROOT/debug.swift-argv"; then
     fail "default build unexpectedly selected an explicit SwiftPM configuration"
 fi
 
 # Intent: --release selects release configuration for both application and helper artifacts.
-# Why it exists: a missed build or bin-path call can copy stale debug output into the dev bundle.
+# Why it exists: a mismatched product directory can copy stale debug output into the dev bundle.
 # Scenario: a developer requests an optimized DanTerm Dev build for interactive performance work.
 run_build release --release
-[[ $(wc -l < "$TEST_ROOT/release.swift-argv") -eq 4 ]] \
-    || fail "release build did not make four SwiftPM build/bin-path calls"
-[[ $(grep -c -- '--configuration release' "$TEST_ROOT/release.swift-argv") -eq 4 ]] \
-    || fail "--release was not mapped onto every SwiftPM build/bin-path call"
+[[ $(wc -l < "$TEST_ROOT/release.swift-argv") -eq 2 ]] \
+    || fail "release build did not make exactly two SwiftPM build calls"
+[[ $(grep -c -- '--configuration release' "$TEST_ROOT/release.swift-argv") -eq 2 ]] \
+    || fail "--release was not mapped onto both SwiftPM build calls"
+if grep -q -- '--show-bin-path' "$TEST_ROOT/release.swift-argv"; then
+    fail "release build made a redundant SwiftPM bin-path call"
+fi
 grep -q -- "--package-path $BUILD_ROOT --build-path .* --configuration release$" \
     "$TEST_ROOT/release.swift-argv" \
     || fail "app and CLI build did not select release configuration"
-grep -q -- "--package-path $BUILD_ROOT --build-path .* --show-bin-path --configuration release$" \
-    "$TEST_ROOT/release.swift-argv" \
-    || fail "app and CLI bin-path lookup did not select release configuration"
 grep -q -- "--package-path $BUILD_ROOT/lib/TerminalPTY .* --product PTYSessionBootstrap --configuration release$" \
     "$TEST_ROOT/release.swift-argv" \
     || fail "PTYSessionBootstrap build did not select release configuration"
-grep -q -- "--package-path $BUILD_ROOT/lib/TerminalPTY .* --show-bin-path --configuration release$" \
-    "$TEST_ROOT/release.swift-argv" \
-    || fail "PTYSessionBootstrap bin-path lookup did not select release configuration"
 
 # Intent: a launcher can produce the canonical signed bundle without replacing or
 #   terminating the user's installed slot-zero application.

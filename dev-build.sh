@@ -39,20 +39,25 @@ APP_PATH="$BUILD_DIR/DanTerm Dev.app"
 INSTALL_APP="$HOME/Applications/DanTerm Dev.app"
 LSREGISTER="${DANTERM_DEV_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister}"
 LIB_DIR="$SCRIPT_DIR/lib"
+BUILD_CONFIGURATION="${SWIFT_CONFIGURATION:-debug}"
 
 # Build with SwiftPM (incremental — only recompiles changed files).
 echo "Compiling..."
 swift_build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build"
-BIN_PATH=$(swift_build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build" \
-    --show-bin-path)
+BIN_PATH="$SCRIPT_DIR/.spm-build/$BUILD_CONFIGURATION"
+if [[ ! -d "$BIN_PATH" ]]; then
+    echo "Error: SwiftPM did not create the $BUILD_CONFIGURATION app product directory: $BIN_PATH" >&2
+    exit 1
+fi
 swift_build \
     --package-path "$LIB_DIR/TerminalPTY" \
     --build-path "$SCRIPT_DIR/.spm-build/TerminalPTY" \
     --product PTYSessionBootstrap
-BOOTSTRAP_BIN_PATH=$(swift_build \
-    --package-path "$LIB_DIR/TerminalPTY" \
-    --build-path "$SCRIPT_DIR/.spm-build/TerminalPTY" \
-    --show-bin-path)
+BOOTSTRAP_BIN_PATH="$SCRIPT_DIR/.spm-build/TerminalPTY/$BUILD_CONFIGURATION"
+if [[ ! -d "$BOOTSTRAP_BIN_PATH" ]]; then
+    echo "Error: SwiftPM did not create the $BUILD_CONFIGURATION bootstrap product directory: $BOOTSTRAP_BIN_PATH" >&2
+    exit 1
+fi
 
 LAYOUT_PLAN="$BUILD_DIR/bundle-layout-development.json"
 mkdir -p "$(dirname "$LAYOUT_PLAN")"
