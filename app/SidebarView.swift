@@ -1016,21 +1016,17 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        let newTabItem = NSMenuItem(title: "New Tab", action: #selector(contextNewTab(_:)), keyEquivalent: "")
-        newTabItem.target = self
-        newTabItem.representedObject = groupId.rawValue
-        menu.addItem(newTabItem)
+        menu.addItem(menuItem(title: "New Tab", sends: .createTab(inGroupId: groupId)))
 
         menu.addItem(NSMenuItem.separator())
 
-        let renameItem = NSMenuItem(title: "Rename Group", action: #selector(contextRenameGroup(_:)), keyEquivalent: "")
-        renameItem.target = self
-        renameItem.representedObject = groupId.rawValue
-        menu.addItem(renameItem)
+        menu.addItem(menuItem(
+            title: "Rename Group",
+            sends: .beginSidebarRename(target: .group(groupId)),
+            timing: .afterMenuTracking))
 
-        let deleteItem = NSMenuItem(title: "Delete Group", action: #selector(contextDeleteGroup(_:)), keyEquivalent: "")
-        deleteItem.target = self
-        deleteItem.representedObject = groupId.rawValue
+        let deleteItem = menuItem(
+            title: "Delete Group", sends: .requestDeleteGroup(id: groupId))
         deleteItem.isEnabled = appliedProjection?.canDeleteGroups ?? false
         menu.addItem(deleteItem)
 
@@ -1106,22 +1102,16 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         menu.autoenablesItems = false
 
         // Rename Tab — singular-only, always targets the clicked row.
-        let renameItem = NSMenuItem(
+        menu.addItem(menuItem(
             title: "Rename Tab",
-            action: #selector(contextRenameTab(_:)), keyEquivalent: "")
-        renameItem.target = self
-        renameItem.representedObject = tabId.rawValue
-        menu.addItem(renameItem)
+            sends: .beginSidebarRename(target: .tab(tabId)),
+            timing: .afterMenuTracking))
 
         // Clear Custom Title — show if any selected tab has one.
         if targetTabs.contains(where: \.hasCustomTitle) {
-            let item = NSMenuItem(
+            menu.addItem(menuItem(
                 title: "Clear Custom Title\(suffix)",
-                action: #selector(contextClearCustomTitles(_:)),
-                keyEquivalent: "")
-            item.target = self
-            item.representedObject = TabIdsBox(ids: targetIds)
-            menu.addItem(item)
+                sends: .clearCustomTitles(tabIds: targetIds)))
         }
 
         // Color submenu
@@ -1141,22 +1131,16 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let colorSubmenu = NSMenu()
         colorSubmenu.autoenablesItems = false
         if anyHasColor {
-            let clearItem = NSMenuItem(
+            // The reducer resolves toggle-off against its current domain state.
+            colorSubmenu.addItem(menuItem(
                 title: "Clear Color",
-                action: #selector(contextSetTabColors(_:)),
-                keyEquivalent: "")
-            clearItem.target = self
-            clearItem.representedObject = SetTabColorsInfo(tabIds: targetIds, color: nil)
-            colorSubmenu.addItem(clearItem)
+                sends: .requestSetTabColors(tabIds: targetIds, requested: nil)))
             colorSubmenu.addItem(NSMenuItem.separator())
         }
         for color in TabColor.allCases {
-            let item = NSMenuItem(
+            let item = menuItem(
                 title: color.rawValue.capitalized,
-                action: #selector(contextSetTabColors(_:)),
-                keyEquivalent: "")
-            item.target = self
-            item.representedObject = SetTabColorsInfo(tabIds: targetIds, color: color)
+                sends: .requestSetTabColors(tabIds: targetIds, requested: color))
             item.image = color.swatchImage
             // Checkmark only when all selected tabs share this color.
             if allSameColor && sharedColor == color {
@@ -1171,13 +1155,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let anyHasAlerts = targetTabs.contains { $0.unreadAlertCount > 0 }
         if anyHasAlerts {
             menu.addItem(NSMenuItem.separator())
-            let item = NSMenuItem(
+            menu.addItem(menuItem(
                 title: "Clear Alerts\(suffix)",
-                action: #selector(contextClearAlerts(_:)),
-                keyEquivalent: "")
-            item.target = self
-            item.representedObject = TabIdsBox(ids: targetIds)
-            menu.addItem(item)
+                sends: .clearAlertsForTabs(tabIds: targetIds)))
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -1187,88 +1167,48 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let totalTabs = projection.groups.reduce(0) { $0 + $1.tabs.count }
         let isAllLiveTabs = totalTabs > 0 && targetIds.count == totalTabs
         if !isAllLiveTabs {
-            let item = NSMenuItem(
+            // The reducer extracts the tabs and projects one inline-rename request.
+            menu.addItem(menuItem(
                 title: "Move to New Group\(suffix)",
-                action: #selector(contextExtractTabs(_:)),
-                keyEquivalent: "")
-            item.target = self
-            item.representedObject = TabIdsBox(ids: targetIds)
-            menu.addItem(item)
+                sends: .extractTabsToNewGroupInteractively(
+                    tabIds: targetIds, groupName: "New group")))
         }
 
         // Close — the "Tab" noun is dropped so the suffix doesn't read
-        // redundantly ("Close (3 tabs)" vs. "Close Tab (3 tabs)").
-        let closeItem = NSMenuItem(
-            title: "Close\(suffix)",
-            action: #selector(contextCloseTabs(_:)), keyEquivalent: "")
-        closeItem.target = self
-        closeItem.representedObject = TabIdsBox(ids: targetIds)
-        menu.addItem(closeItem)
+        // redundantly ("Close (3 tabs)" vs. "Close Tab (3 tabs)"). The whole
+        // batch goes through one confirmation flow, so mixed simple and
+        // confirmation-needed tabs are handled uniformly.
+        menu.addItem(menuItem(
+            title: "Close\(suffix)", sends: .requestCloseTabs(ids: targetIds)))
 
         return menu
     }
 
-    @objc private func contextNewTab(_ sender: NSMenuItem) {
-        guard let rawId = sender.representedObject as? UUID else { return }
-        runtime?.send(.createTab(inGroupId: GroupId(rawValue: rawId)))
+    /// Builds one context-menu item from the outcome it names, so the action and
+    /// the entity it targets are one value. The payload holds the constructed
+    /// `Msg`, which keeps every id typed from here to `send`.
+    private func menuItem(
+        title: String,
+        sends msg: Msg,
+        timing: SidebarMenuAction.Timing = .immediate
+    ) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: title, action: #selector(contextMenuItemFired(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = SidebarMenuAction(msg: msg, timing: timing)
+        return item
     }
 
-    // The hop off menu tracking stays: the model's begin drives a reconcile pass
-    // that installs a field editor, and AppKit is still tearing the menu down.
-    @objc private func contextRenameGroup(_ sender: NSMenuItem) {
-        guard let rawId = sender.representedObject as? UUID else { return }
-        let groupId = GroupId(rawValue: rawId)
-        DispatchQueue.main.async { [weak self] in
-            self?.runtime?.send(.beginSidebarRename(target: .group(groupId)))
+    @objc private func contextMenuItemFired(_ sender: NSMenuItem) {
+        guard let action = sender.representedObject as? SidebarMenuAction else { return }
+        switch action.timing {
+        case .immediate:
+            runtime?.send(action.msg)
+        case .afterMenuTracking:
+            DispatchQueue.main.async { [weak self] in
+                self?.runtime?.send(action.msg)
+            }
         }
-    }
-
-    @objc private func contextDeleteGroup(_ sender: NSMenuItem) {
-        guard let rawId = sender.representedObject as? UUID else { return }
-        runtime?.send(.requestDeleteGroup(id: GroupId(rawValue: rawId)))
-    }
-
-    /// Ask the reducer to resolve toggle-off against its current domain state.
-    @objc private func contextSetTabColors(_ sender: NSMenuItem) {
-        guard let info = sender.representedObject as? SetTabColorsInfo,
-              !info.tabIds.isEmpty else { return }
-        runtime?.send(.requestSetTabColors(
-            tabIds: info.tabIds, requested: info.color))
-    }
-
-    @objc private func contextRenameTab(_ sender: NSMenuItem) {
-        guard let rawId = sender.representedObject as? UUID else { return }
-        let tabId = TabId(rawValue: rawId)
-        DispatchQueue.main.async { [weak self] in
-            self?.runtime?.send(.beginSidebarRename(target: .tab(tabId)))
-        }
-    }
-
-    @objc private func contextClearCustomTitles(_ sender: NSMenuItem) {
-        guard let box = sender.representedObject as? TabIdsBox,
-              !box.ids.isEmpty else { return }
-        runtime?.send(.clearCustomTitles(tabIds: box.ids))
-    }
-
-    @objc private func contextClearAlerts(_ sender: NSMenuItem) {
-        guard let box = sender.representedObject as? TabIdsBox,
-              !box.ids.isEmpty else { return }
-        runtime?.send(.clearAlertsForTabs(tabIds: box.ids))
-    }
-
-    /// Close the selected tab batch through one confirmation flow so mixed
-    /// simple and confirmation-needed tabs are handled uniformly.
-    @objc private func contextCloseTabs(_ sender: NSMenuItem) {
-        guard let box = sender.representedObject as? TabIdsBox else { return }
-        runtime?.send(.requestCloseTabs(ids: box.ids))
-    }
-
-    /// Ask the reducer to extract the tabs and project one inline-rename request.
-    @objc private func contextExtractTabs(_ sender: NSMenuItem) {
-        guard let box = sender.representedObject as? TabIdsBox,
-              !box.ids.isEmpty else { return }
-        runtime?.send(.extractTabsToNewGroupInteractively(
-            tabIds: box.ids, groupName: "New group"))
     }
 
     // MARK: - Cell Factories
@@ -1401,16 +1341,19 @@ extension SidebarView: NSTextFieldDelegate {
 
 // MARK: - Helpers
 
-private class SetTabColorsInfo: NSObject {
-    let tabIds: [TabId]
-    let color: TabColor?
-    init(tabIds: [TabId], color: TabColor?) {
-        self.tabIds = tabIds
-        self.color = color
+/// The outcome one sidebar context-menu item carries: the message it sends and
+/// when it sends it. Holding the already-constructed `Msg` keeps every id typed
+/// from menu build to `send`, so an item cannot name an entity of a different
+/// kind than its action targets.
+private struct SidebarMenuAction {
+    /// `afterMenuTracking` hops one main-queue turn. The rename items need it:
+    /// the model's rename begin drives a reconcile pass that installs a field
+    /// editor, and AppKit is still tearing the menu down.
+    enum Timing {
+        case immediate
+        case afterMenuTracking
     }
-}
 
-private class TabIdsBox: NSObject {
-    let ids: [TabId]
-    init(ids: [TabId]) { self.ids = ids }
+    let msg: Msg
+    let timing: Timing
 }

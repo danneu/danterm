@@ -105,13 +105,15 @@ The current high-risk sites are safe for these specific reasons:
   Ghostty owner. Callback hops either run through that owner or capture resolved
   values before dispatching.
 - Field-editor undo in sidebar rename, preferences fields, and search
-  (`app/SidebarView.swift:1367-1434`, `app/PreferencesPanel.swift:94-118`,
+  (the `NSTextFieldDelegate` conformance in `app/SidebarView.swift`,
+  `app/PreferencesPanel.swift:94-118`,
   `app/SearchOverlayView.swift:86`) uses `NSTextField` / `NSSearchField` edit
   sessions rather than a standalone undo-enabled `NSTextView`.
 - Context menus are safe in three shapes. `SidebarView` menus target the
-  long-lived sidebar and carry model ids or id boxes in `representedObject`;
-  tab actions re-resolve/filter live ids through `currentModel` and core update
-  paths (`app/SidebarView.swift:787-807,847-995,1040-1078`). Group "New Tab" is
+  long-lived sidebar, and every item carries one payload in `representedObject`:
+  the `Msg` that item sends plus whether the send hops off menu tracking
+  (`SidebarMenuAction` in `app/SidebarView.swift`). Tab actions re-resolve or
+  filter live ids through `currentModel` and core update paths. Group "New Tab" is
   not a fail-closed stale-id example: a stale group id follows `createTab`'s
   existing fallback to the selected tab's group
   (`lib/DanTermCore/Sources/DanTermCore/Update.swift:51-60`,
