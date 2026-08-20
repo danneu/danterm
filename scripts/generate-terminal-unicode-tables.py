@@ -71,6 +71,33 @@ GRAPHEME_CLASS_VALUES = {
     "InCB_Consonant": 17,
 }
 
+# Swift case names for the two enums the emitted palette spells out. The class
+# names key off the table above so the raw values are still stated once.
+GRAPHEME_CLASS_CASE_NAMES = {
+    "Other": "other",
+    "Control": "control",
+    "Prepend": "prepend",
+    "CR": "cr",
+    "LF": "lf",
+    "Regional_Indicator": "regionalIndicator",
+    "SpacingMark": "spacingMark",
+    "L": "l",
+    "V": "v",
+    "T": "t",
+    "LV": "lv",
+    "LVT": "lvt",
+    "ZWJ": "zwj",
+    "ZWNJ": "zwnj",
+    "Extended_Pictographic": "extendedPictographic",
+    "InCB_Extend": "indicConjunctBreakExtend",
+    "InCB_Linker": "indicConjunctBreakLinker",
+    "InCB_Consonant": "indicConjunctBreakConsonant",
+}
+GRAPHEME_CLASS_CASES = {
+    value: GRAPHEME_CLASS_CASE_NAMES[name] for name, value in GRAPHEME_CLASS_VALUES.items()
+}
+CELL_WIDTH_CASES = {0: "zero", 1: "narrow", 2: "wide"}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -413,51 +440,167 @@ enum GeneratedCanonicalCaselessTables {{
 '''
 
 
-def packed_two_stage_tables(
+# One scalar's fully decoded classification: cell width, the three emoji flags,
+# and the folded grapheme class. Distinct values of this tuple form the palette.
+ClassificationRecord = tuple[int, bool, bool, bool, int]
+
+ELEMENT_BYTES = {"UInt8": 1, "UInt16": 2}
+
+
+def index_element_type(largest: int, what: str) -> str:
+    """Picks the narrowest emitted element type that can hold every index.
+
+    A Unicode revision that outgrows UInt16 stops the generator here rather than
+    silently truncating an index in the emitted table.
+    """
+    if largest <= 0xFF:
+        return "UInt8"
+    if largest <= 0xFFFF:
+        return "UInt16"
+    raise RuntimeError(f"packed Unicode table {what} {largest} exceeds UInt16")
+
+
+class PackedClassificationTables:
+    """The whole emitted layout: a record palette behind two index stages.
+
+    The block shift and the two index element types live here and nowhere else,
+    so the emitted Swift derives its shift, mask, and array types from the same
+    values the packer used.
+    """
+
+    def __init__(
+        self,
+        palette: list[ClassificationRecord],
+        stage_one: list[int],
+        stage_two: list[int],
+        shift: int,
+    ):
+        self.palette = palette
+        self.stage_one = stage_one
+        self.stage_two = stage_two
+        self.shift = shift
+        self.stage_one_type = index_element_type(max(stage_one), "block index")
+        self.stage_two_type = index_element_type(len(palette) - 1, "palette index")
+
+    @property
+    def byte_size(self) -> int:
+        return (
+            len(self.stage_one) * ELEMENT_BYTES[self.stage_one_type]
+            + len(self.stage_two) * ELEMENT_BYTES[self.stage_two_type]
+        )
+
+
+def classification_records(
     zero_width: list[tuple[int, int]],
     wide: list[tuple[int, int]],
     pictographic: list[tuple[int, int]],
     emoji_modifiers: list[tuple[int, int]],
     emoji_variation_bases: list[tuple[int, int]],
     grapheme_classes: bytearray,
-) -> tuple[list[int], list[int]]:
-    records = [1 | (grapheme_classes[value] << 5) for value in range(MAX_SCALAR + 1)]
+) -> list[ClassificationRecord]:
+    """Builds one fully decoded record per scalar: width, three emoji flags, class."""
+    widths = bytearray([1]) * (MAX_SCALAR + 1)
     for lower, upper in wide:
-        for value in range(lower, upper + 1):
-            records[value] = (records[value] & ~0b11) | 2
+        widths[lower : upper + 1] = bytes([2]) * (upper - lower + 1)
     for lower, upper in zero_width:
-        for value in range(lower, upper + 1):
-            records[value] = (records[value] & ~0b11) | 0
-    for ranges, bit in (
-        (pictographic, 1 << 2),
-        (emoji_modifiers, 1 << 3),
-        (emoji_variation_bases, 1 << 4),
-    ):
+        widths[lower : upper + 1] = bytes([0]) * (upper - lower + 1)
+    flags = [bytearray(MAX_SCALAR + 1) for _ in range(3)]
+    for target, ranges in zip(flags, (pictographic, emoji_modifiers, emoji_variation_bases)):
         for lower, upper in ranges:
-            for value in range(lower, upper + 1):
-                records[value] |= bit
+            target[lower : upper + 1] = bytes([1]) * (upper - lower + 1)
+    # Slice assignment past the end would grow the array instead of raising, so a
+    # range above MAX_SCALAR would silently add scalars rather than fail.
+    for table in [widths, *flags]:
+        if len(table) != MAX_SCALAR + 1:
+            raise RuntimeError("a parsed range reaches past the last Unicode scalar")
+    return [
+        (
+            widths[value],
+            bool(flags[0][value]),
+            bool(flags[1][value]),
+            bool(flags[2][value]),
+            grapheme_classes[value],
+        )
+        for value in range(MAX_SCALAR + 1)
+    ]
 
-    block_size = 1 << 8
-    stage_one: list[int] = []
-    stage_two: list[int] = []
-    block_indexes: dict[tuple[int, ...], int] = {}
-    for start in range(0, len(records), block_size):
-        block = tuple(records[start : start + block_size])
-        index = block_indexes.get(block)
+
+def packed_classification_tables(
+    records: list[ClassificationRecord],
+) -> PackedClassificationTables:
+    """Packs the records into the smallest two-stage layout over the shift range.
+
+    Every scalar's record is one of a few dozen distinct values, so the stages
+    carry palette indexes and the shift is chosen by measuring emitted bytes
+    rather than fixed by hand.
+    """
+    palette: list[ClassificationRecord] = []
+    palette_indexes: dict[ClassificationRecord, int] = {}
+    indexed: list[int] = []
+    for record in records:
+        index = palette_indexes.get(record)
         if index is None:
-            index = len(stage_two) // block_size
-            block_indexes[block] = index
-            stage_two.extend(block)
-        stage_one.append(index)
-    if len(block_indexes) > 0x10000:
-        raise RuntimeError("packed Unicode table exceeds UInt16 stage-one indexes")
-    return stage_one, stage_two
+            index = len(palette)
+            palette_indexes[record] = index
+            palette.append(record)
+        indexed.append(index)
+    # No shift can shrink the palette, so an oversized one fails here and says so
+    # rather than surfacing as "no shift fits" once the search comes up empty.
+    index_element_type(len(palette) - 1, "palette index")
+
+    smallest: PackedClassificationTables | None = None
+    for shift in range(4, 13):
+        block_size = 1 << shift
+        stage_one: list[int] = []
+        stage_two: list[int] = []
+        block_indexes: dict[tuple[int, ...], int] = {}
+        for start in range(0, len(indexed), block_size):
+            block = tuple(indexed[start : start + block_size])
+            index = block_indexes.get(block)
+            if index is None:
+                index = len(stage_two) // block_size
+                block_indexes[block] = index
+                stage_two.extend(block)
+            stage_one.append(index)
+        try:
+            index_element_type(max(stage_one), "block index")
+        except RuntimeError:
+            # Too many distinct blocks to index at this shift alone; a smaller
+            # block dedupes better, so keep searching rather than failing.
+            continue
+        candidate = PackedClassificationTables(palette, stage_one, stage_two, shift)
+        if smallest is None or candidate.byte_size < smallest.byte_size:
+            smallest = candidate
+    if smallest is None:
+        raise RuntimeError("no block shift packs the Unicode table into UInt16 indexes")
+    return smallest
 
 
-def production_source(
-    packed_stage_one: list[int],
-    packed_stage_two: list[int],
-) -> str:
+def palette_array(palette: list[ClassificationRecord]) -> str:
+    """Emits the palette as explicit struct literals, one per distinct record.
+
+    The reference tables rebuild their structs at runtime because struct
+    literals at codespace scale exhaust swift-frontend memory; the palette holds
+    a few dozen entries, so spelling them out costs nothing and leaves the
+    lookup with no raw-value decode and therefore no failure path.
+    """
+    lines = []
+    for width, pictographic, modifier, variation_base, grapheme_class in palette:
+        lines.append("        TerminalUnicodeClassification(")
+        lines.append("            properties: TerminalUnicodeProperties(")
+        lines.append(f"                cellWidth: .{CELL_WIDTH_CASES[width]},")
+        lines.append(f"                isExtendedPictographic: {str(pictographic).lower()},")
+        lines.append(f"                isEmojiModifier: {str(modifier).lower()},")
+        lines.append(f"                isEmojiVariationBase: {str(variation_base).lower()}")
+        lines.append("            ),")
+        lines.append(
+            f"            graphemeBreakClass: .{GRAPHEME_CLASS_CASES[grapheme_class]}"
+        )
+        lines.append("        ),")
+    return "\n".join(lines)
+
+
+def production_source(packed: PackedClassificationTables) -> str:
     hashes = ", ".join(
         f"{name} {FILES[name][1]}"
         for name in (
@@ -500,44 +643,36 @@ func graphemeBreakClass(for scalar: Unicode.Scalar) -> GraphemeBreakClass {{
     terminalUnicodeClassification(for: scalar).graphemeBreakClass
 }}
 
-/// Decodes every terminal property from one generated two-stage table lookup.
+/// Reads every terminal property for a scalar out of the generated tables.
 func terminalUnicodeClassification(for scalar: Unicode.Scalar) -> TerminalUnicodeClassification {{
-    let record = GeneratedPackedUnicodeTables.record(for: scalar.value)
-    guard let width = TerminalCellWidth(rawValue: UInt8(record & 0b11)) else {{
-        preconditionFailure("Generated cell width is invalid")
-    }}
-    guard let result = GraphemeBreakClass(rawValue: UInt8(record >> 5)) else {{
-        preconditionFailure("Generated grapheme class is invalid")
-    }}
-    return TerminalUnicodeClassification(
-        properties: TerminalUnicodeProperties(
-            cellWidth: width,
-            isExtendedPictographic: record & (1 << 2) != 0,
-            isEmojiModifier: record & (1 << 3) != 0,
-            isEmojiVariationBase: record & (1 << 4) != 0
-        ),
-        graphemeBreakClass: result
-    )
+    GeneratedPackedUnicodeTables.classification(for: scalar.value)
 }}
 
-/// Keeps width and segmentation consumers on the same decoded scalar record.
-struct TerminalUnicodeClassification {{
+/// Keeps width and segmentation consumers on the same generated scalar record.
+struct TerminalUnicodeClassification: Sendable {{
     let properties: TerminalUnicodeProperties
     let graphemeBreakClass: GraphemeBreakClass
 }}
 
+// The two stages hold palette indexes, so the only classifications this table
+// can produce are the ones the generator emitted. That is why the lookup has no
+// raw-value decode and no failure path.
 private enum GeneratedPackedUnicodeTables {{
-    static let stageOne: [UInt16] = [
-{integer_array(packed_stage_one)}
+    static let palette: [TerminalUnicodeClassification] = [
+{palette_array(packed.palette)}
     ]
 
-    static let stageTwo: [UInt16] = [
-{integer_array(packed_stage_two)}
+    static let stageOne: [{packed.stage_one_type}] = [
+{integer_array(packed.stage_one)}
     ]
 
-    static func record(for value: UInt32) -> UInt16 {{
-        let block = Int(stageOne[Int(value >> 8)])
-        return stageTwo[(block << 8) | Int(value & 0xFF)]
+    static let stageTwo: [{packed.stage_two_type}] = [
+{integer_array(packed.stage_two)}
+    ]
+
+    static func classification(for value: UInt32) -> TerminalUnicodeClassification {{
+        let block = Int(stageOne[Int(value >> {packed.shift})])
+        return palette[Int(stageTwo[(block << {packed.shift}) | Int(value & 0x{(1 << packed.shift) - 1:X})])]
     }}
 }}
 '''
@@ -790,13 +925,15 @@ def main() -> None:
         parse_incb_ranges(data["DerivedCoreProperties.txt"]),
         pictographic,
     )
-    packed_stage_one, packed_stage_two = packed_two_stage_tables(
-        zero_width,
-        wide,
-        pictographic,
-        emoji_modifiers,
-        emoji_variation_bases,
-        classes,
+    packed = packed_classification_tables(
+        classification_records(
+            zero_width,
+            wide,
+            pictographic,
+            emoji_modifiers,
+            emoji_variation_bases,
+            classes,
+        )
     )
     reference_classes, reference_variation_bases = reference_grapheme_properties(
         data["GraphemeBreakProperty.txt"],
@@ -827,13 +964,7 @@ def main() -> None:
     conformance_corpus_directory.mkdir(parents=True, exist_ok=True)
     normalization_corpus = conformance_corpus_directory / "NormalizationTest-17.0.0.txt"
     case_folding_corpus = conformance_corpus_directory / "CaseFolding-17.0.0.txt"
-    production.write_text(
-        production_source(
-            packed_stage_one,
-            packed_stage_two,
-        ),
-        encoding="utf-8",
-    )
+    production.write_text(production_source(packed), encoding="utf-8")
     reference.write_text(
         reference_source(
             reference_ranges(zero_width, reference_wide, pictographic, emoji_modifiers)
