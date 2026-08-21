@@ -1224,7 +1224,7 @@ rewrites.
 - [ ] **[RUNTIME-1](#runtime-1)** (4x5, medium) Make the restore commit a Msg so `update()` is the only writer of `model` _(after [RUNTIME-3](#runtime-3))_
 - [x] **[WIRE-3](#wire-3)** (4x5, medium) Encode a delivered tape batch as one notification off the main actor, not one per record _(after [PERSIST-6](#persist-6))_ -- `d95481da..9b467dd1`
 - [ ] **[FEED-1](#feed-1)** (4x5, large) Represent the viewport as a rotating row ring so a scroll advances a head index instead of moving every row _(after [FEED-2](#feed-2))_
-- [ ] **[MOBILE-2](#mobile-2)** (4x5, large) Feed the drained damage into the frame stores instead of re-rendering the whole grid every tick _(after [MOBILE-1](#mobile-1))_
+- [x] **[MOBILE-2](#mobile-2)** (4x5, large) Feed the drained damage into the frame stores instead of re-rendering the whole grid every tick _(after [MOBILE-1](#mobile-1))_ -- `99f1fc2c`
 - [x] **[WIRE-2](#wire-2)** (4x5, large) Carry a tape record as its typed event, not as a JSONValue decoded from its own encoding _(after [PERSIST-6](#persist-6))_ -- `c0e4c026..c4d7ef21`
 - [x] **[MOBILE-6](#mobile-6)** (4x4, small) Store the start record's stated pinnedness in the replica instead of keeping the checkpoint's -- resolved by docs: the premise is wrong, and the fix would be a regression -- `e4db38c8`
 - [x] **[UNI-2](#uni-2)** (4x4, large) Derive the bulk-print run predicate from the scalar record instead of from a printable-ASCII byte range _(after [UNI-1](#uni-1))_
@@ -1232,7 +1232,7 @@ rewrites.
 - [ ] **[IOS-1](#ios-1)** (3x5, small) Let the replica report pinnedness instead of re-decoding tape JSON in the session model
 - [ ] **[PERSIST-1](#persist-1)** (3x5, small) Decide crash recovery from the lock file's existence, not from decoding it
 - [x] **[PTY-4](#pty-4)** (3x5, small) Read the PTY through one loop instead of one per drain reason _(after [XPORT-1](#xport-1))_ -- `7448dd16`
-- [ ] **[RECON-1](#recon-1)** (3x5, small) Make container visibility a diffed field of ContainerShape instead of an unconditional per-tab op _(after [MODEL-3](#model-3))_
+- [x] **[RECON-1](#recon-1)** (3x5, small) Make container visibility a diffed field of ContainerShape instead of an unconditional per-tab op _(after [MODEL-3](#model-3))_ -- `075ac8a6`
 - [ ] **[REDUCE-2](#reduce-2)** (3x5, small) Let .startSearch open the pane's search state directly instead of round-tripping through the view
 - [ ] **[REDUCE-5](#reduce-5)** (3x5, small) Raise every pane alert through one function instead of duplicating the ritual in .sessionBell
 - [x] **[ROW-4](#row-4)** (3x5, small) Write each printed cell once: clearCellAndPair's store at the target column is immediately overwritten -- `c36da989`
@@ -1271,7 +1271,7 @@ reducer and projection churn above it has stopped.
 - [ ] **[LOOKUP-4](#lookup-4)** (2x5, small) Answer pane-membership and layout questions with a tree walk instead of materializing pane-id arrays and sets _(after [RECON-1](#recon-1))_
 - [ ] **[RECON-4](#recon-4)** (2x5, medium) Key the sidebar projection's tabs by id so row lookups stop being linear scans with intermediate arrays
 - [ ] **[LOOKUP-1](#lookup-1)** (3x3, large) Split AppModel into a persisted value and an ephemeral value so checkpoint change-detection stops rebuilding a DTO
-- [ ] **[RUNTIME-5](#runtime-5)** (2x4, small) Derive the previously visible tab from the reconcile cache, not from `isHidden` _(after [RECON-1](#recon-1))_
+- [x] **[RUNTIME-5](#runtime-5)** (2x4, small) Derive the previously visible tab from the reconcile cache, not from `isHidden` _(after [RECON-1](#recon-1))_ -- `075ac8a6`
 - [ ] **[CHROME-5](#chrome-5)** (2x4, medium) Extract the theme list (filter, selection, cell vending) shared by the browser and the picker sheet
 - [ ] **[FIND-4](#find-4)** (2x4, medium) Answer "does this projection row have content" without materializing a painted GridRow _(after [FIND-2](#find-2))_
 - [ ] **[FIND-5](#find-5)** (2x4, medium) Carry each suffix match's content ordinal out of the scan that already counts it _(after [FIND-2](#find-2))_
@@ -1302,7 +1302,7 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [ ] **[XPORT-3](#xport-3)** (3x5, medium) Give pending-input spans absolute byte coordinates so a partial write never rewrites the queue
 - [ ] **[IOS-2](#ios-2)** (3x4, medium) Make an authorized attempt carry its target so a Go tap can never be dropped against a stale one
 - [x] **[REDUCE-3](#reduce-3)** (3x4, medium) Repair the focused pane's alerts in one pass instead of copying the rule into nine arms **[decide first](#decisions-to-make-first)**
-- [ ] **[CHROME-4](#chrome-4)** (2x5, small) Build the preferences grid from declared rows so warning rows and padding stop being addressed by literal index
+- [x] **[CHROME-4](#chrome-4)** (2x5, small) Build the preferences grid from declared rows so warning rows and padding stop being addressed by literal index -- `8f0f10a4`
 - [ ] **[DRAW-3](#draw-3)** (2x5, small) Lower RenderColor straight into the context as components, deleting both the per-run CGColor allocation and the memo dictionary
 - [ ] **[FEED-3](#feed-3)** (2x5, small) Store tab stops as a column bitset instead of a Set<Int>, so HT is a word scan rather than an allocation
 - [ ] **[INTERACT-6](#interact-6)** (2x5, small) Key pointer-owner and wheel-remainder storage by their enums instead of by hand-written slots
