@@ -50,6 +50,23 @@ FILES = {
 }
 MAX_SCALAR = 0x10FFFF
 
+# Every artifact one run writes, keyed by the name main() knows it by. This is the
+# single source of truth for the set: main() derives its paths from it, and
+# scripts/generated-unicode-tables-lint.py hashes exactly these files. A new
+# artifact added here is covered by the lint without touching the lint, which is
+# the point -- a hand-maintained second copy of this list would silently stop
+# guarding whatever was added to only one of them.
+GENERATED_ARTIFACTS = {
+    "production": "lib/TerminalCore/Sources/TerminalCore/UnicodeProperties.generated.swift",
+    "reference": "lib/TerminalCore/Tests/TerminalCoreTests/UnicodeReference.generated.swift",
+    "grapheme_reference": "lib/TerminalCore/Tests/TerminalCoreTests/GraphemeReference.generated.swift",
+    "grapheme_corpus": "lib/TerminalCore/Tests/TerminalCoreTests/GraphemeBreakCorpus.generated.swift",
+    "canonical_caseless": "lib/TerminalCore/Sources/TerminalCore/CanonicalCaseless.generated.swift",
+    "combining_class_reference": "lib/TerminalCore/Tests/TerminalCoreTests/CanonicalCombiningClassReference.generated.swift",
+    "normalization_corpus": "lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/unicode/NormalizationTest-17.0.0.txt",
+    "case_folding_corpus": "lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/unicode/CaseFolding-17.0.0.txt",
+}
+
 GRAPHEME_CLASS_VALUES = {
     "Other": 0,
     "Control": 1,
@@ -1119,31 +1136,15 @@ def main() -> None:
     )
 
     repo_root = Path(__file__).resolve().parents[1]
-    production = repo_root / "lib/TerminalCore/Sources/TerminalCore/UnicodeProperties.generated.swift"
-    reference = repo_root / "lib/TerminalCore/Tests/TerminalCoreTests/UnicodeReference.generated.swift"
-    grapheme_reference = (
-        repo_root
-        / "lib/TerminalCore/Tests/TerminalCoreTests/GraphemeReference.generated.swift"
-    )
-    grapheme_corpus = (
-        repo_root
-        / "lib/TerminalCore/Tests/TerminalCoreTests/GraphemeBreakCorpus.generated.swift"
-    )
-    canonical_caseless = (
-        repo_root
-        / "lib/TerminalCore/Sources/TerminalCore/CanonicalCaseless.generated.swift"
-    )
-    combining_class_reference = (
-        repo_root
-        / "lib/TerminalCore/Tests/TerminalCoreTests/CanonicalCombiningClassReference.generated.swift"
-    )
-    conformance_corpus_directory = (
-        repo_root
-        / "lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/unicode"
-    )
-    conformance_corpus_directory.mkdir(parents=True, exist_ok=True)
-    normalization_corpus = conformance_corpus_directory / "NormalizationTest-17.0.0.txt"
-    case_folding_corpus = conformance_corpus_directory / "CaseFolding-17.0.0.txt"
+    production = repo_root / GENERATED_ARTIFACTS["production"]
+    reference = repo_root / GENERATED_ARTIFACTS["reference"]
+    grapheme_reference = repo_root / GENERATED_ARTIFACTS["grapheme_reference"]
+    grapheme_corpus = repo_root / GENERATED_ARTIFACTS["grapheme_corpus"]
+    canonical_caseless = repo_root / GENERATED_ARTIFACTS["canonical_caseless"]
+    combining_class_reference = repo_root / GENERATED_ARTIFACTS["combining_class_reference"]
+    normalization_corpus = repo_root / GENERATED_ARTIFACTS["normalization_corpus"]
+    case_folding_corpus = repo_root / GENERATED_ARTIFACTS["case_folding_corpus"]
+    normalization_corpus.parent.mkdir(parents=True, exist_ok=True)
     production.write_text(production_source(packed), encoding="utf-8")
     reference.write_text(
         reference_source(
@@ -1190,14 +1191,8 @@ def main() -> None:
         data["CaseFolding.txt"],
         encoding="utf-8",
     )
-    print(f"generated {production.relative_to(repo_root)}")
-    print(f"generated {reference.relative_to(repo_root)}")
-    print(f"generated {grapheme_reference.relative_to(repo_root)}")
-    print(f"generated {grapheme_corpus.relative_to(repo_root)}")
-    print(f"generated {canonical_caseless.relative_to(repo_root)}")
-    print(f"generated {combining_class_reference.relative_to(repo_root)}")
-    print(f"generated {normalization_corpus.relative_to(repo_root)}")
-    print(f"generated {case_folding_corpus.relative_to(repo_root)}")
+    for relative_path in GENERATED_ARTIFACTS.values():
+        print(f"generated {relative_path}")
 
 
 if __name__ == "__main__":
