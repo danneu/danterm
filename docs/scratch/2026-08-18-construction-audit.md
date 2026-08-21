@@ -1229,7 +1229,7 @@ rewrites.
 - [x] **[MOBILE-6](#mobile-6)** (4x4, small) Store the start record's stated pinnedness in the replica instead of keeping the checkpoint's -- resolved by docs: the premise is wrong, and the fix would be a regression -- `e4db38c8`
 - [x] **[UNI-2](#uni-2)** (4x4, large) Derive the bulk-print run predicate from the scalar record instead of from a printable-ASCII byte range _(after [UNI-1](#uni-1))_
 - [x] **[CHROME-2](#chrome-2)** (3x5, small) Make the confirmation projection carry each button's answer instead of inferring it from button visibility -- `55f4eb4d` + `ae7c437c`
-- [ ] **[IOS-1](#ios-1)** (3x5, small) Let the replica report pinnedness instead of re-decoding tape JSON in the session model
+- [x] **[IOS-1](#ios-1)** (3x5, small) Let the replica report pinnedness instead of re-decoding tape JSON in the session model -- `40ca4c51`, `e4db38c8`
 - [x] **[PERSIST-1](#persist-1)** (3x5, small) Decide crash recovery from the lock file's existence, not from decoding it -- `1706f20b`
 - [x] **[PTY-4](#pty-4)** (3x5, small) Read the PTY through one loop instead of one per drain reason _(after [XPORT-1](#xport-1))_ -- `7448dd16`
 - [x] **[RECON-1](#recon-1)** (3x5, small) Make container visibility a diffed field of ContainerShape instead of an unconditional per-tab op _(after [MODEL-3](#model-3))_ -- `075ac8a6`
@@ -5564,6 +5564,8 @@ _Scope: The iOS client (ios/DanTermMobileKit/Sources, ios/DanTermMobileApp)_
 **Sharper ideal.** Make `PaneReplica` the single owner of the bit rather than making the event carry a post-apply snapshot: read the statement from the replica, as a `static func pinnedStatement(in: PaneTapeRecord) -> Bool?` built on the typed event (the finding's own fallback) or as a reported post-apply bit. This has no precondition in `applyStart`. An earlier version of this paragraph also required `applyStart` to store `start.pinned` in `heldPinned`; that restated MOBILE-6's wrong premise -- `start.pinned` is the bit at the record's own initial geometry, which on a resume is the recorder's birth grid and not the grid at the cursor -- and it is struck. The event-carried variant as written loses two behaviors the current code has: a `.start` record's pinnedness, and any statement made while the replica is not exact (`pinned` is nil there by design, documented on `PaneReplica#pinned`, so a claim that the tape says is released would stop being released behind a gap).
 
 **Conflicts with.** [MOBILE-3](#mobile-3), [IOS-3](#ios-3)
+
+**Resolved.** The duplicate parser went with MOBILE-3 (`40ca4c51`): `MobileSessionModel#take` decodes each event once into `NeutralTerminalRecordingEvent`, and `pinnedStatement` matches the typed `.resize` case, so a key or type-name rename is a compile error in both readers. The event-carried variant stays rejected for the reasons above, and the two readers stay on purpose: the replica answers the bit at its cursor, the model answers what a record stated, ordered against the claim response at the decode point (which MOBILE-5 moving the replica off the main actor will make more necessary, not less). `e4db38c8` stated the start-record contract the model's `.start` arm is read against. Left open, small: that arm still returns `start.pinned` under a comment calling the opening contract a pinnedness source; unreachable behind a confirmed claim, worth a nil arm, a two-source comment, and model-level tests for the start and sync arms when next in the file.
 
 <a id="ios-2"></a>
 
