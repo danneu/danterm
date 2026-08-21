@@ -140,23 +140,66 @@ struct TerminalCellStyleTests {
         expectValidGrid(terminal)
     }
 
-    @Test("overwriting half a styled wide pair leaves the vacated cell default styled")
-    func structuralWideClearRemainsDefaultStyled() throws {
-        // Intent: distinguish ordinary overwrite cleanup from BCE erasure.
-        // Why it exists: structural clearing must not inherit either the old
-        //   wide cell's style or the current pen used for the replacement.
-        // Scenario: colored narrow output overwrites the tail of a differently
-        //   colored wide glyph.
-        let green = TerminalStyle(foreground: .indexed(2))
+    @Test("printing over either half of a wide pair vacates its partner with the erase pen")
+    func structuralWideClearUsesBackgroundEraseStyle() throws {
+        // Intent: print cleanup paints a vacated wide-cell partner with the
+        //   current colors and no other presentation attributes.
+        // Why it exists: overwriting either half of a wide pair must agree
+        //   with the terminal's BCE erase, shift, and row-reveal paths.
+        // Scenario: narrow and wide prints under a decorated green-on-blue pen
+        //   sever both sides of red wide pairs.
+        let eraseStyle = TerminalStyle(foreground: .indexed(2), background: .indexed(4))
+        let decoratedPen = "\u{1B}[1;2;3;4:3;7;8;9;32;44m"
+
+        var narrowOverTail = try #require(Terminal(columns: 4, rows: 1))
+        narrowOverTail.feed(Array("\u{1B}[31m\u{754C}\(decoratedPen)".utf8))
+        narrowOverTail.moveCursor(row: 0, column: 1)
+        narrowOverTail.feed(Array("X".utf8))
+        #expect(narrowOverTail.cell(row: 0, column: 0)?.kind == .padding)
+        #expect(narrowOverTail.cell(row: 0, column: 0)?.style == eraseStyle)
+
+        var narrowOverHead = try #require(Terminal(columns: 4, rows: 1))
+        narrowOverHead.feed(Array("A\u{1B}[31m\u{754C}\(decoratedPen)".utf8))
+        narrowOverHead.moveCursor(row: 0, column: 1)
+        narrowOverHead.feed(Array("X".utf8))
+        #expect(narrowOverHead.cell(row: 0, column: 2)?.kind == .padding)
+        #expect(narrowOverHead.cell(row: 0, column: 2)?.style == eraseStyle)
+
+        var wideOverTail = try #require(Terminal(columns: 5, rows: 1))
+        wideOverTail.feed(Array("\u{1B}[31m\u{754C}\(decoratedPen)".utf8))
+        wideOverTail.moveCursor(row: 0, column: 1)
+        wideOverTail.feed(Array("\u{754C}".utf8))
+        #expect(wideOverTail.cell(row: 0, column: 0)?.kind == .padding)
+        #expect(wideOverTail.cell(row: 0, column: 0)?.style == eraseStyle)
+
+        var wideOverHead = try #require(Terminal(columns: 5, rows: 1))
+        wideOverHead.feed(Array("AA\u{1B}[31m\u{754C}\(decoratedPen)".utf8))
+        wideOverHead.moveCursor(row: 0, column: 1)
+        wideOverHead.feed(Array("\u{754C}".utf8))
+        #expect(wideOverHead.cell(row: 0, column: 3)?.kind == .padding)
+        #expect(wideOverHead.cell(row: 0, column: 3)?.style == eraseStyle)
+
+        expectValidGrid(narrowOverTail)
+        expectValidGrid(narrowOverHead)
+        expectValidGrid(wideOverTail)
+        expectValidGrid(wideOverHead)
+    }
+
+    @Test("print cleanup follows the reset pen instead of the overwritten cell")
+    func structuralWideClearUsesCurrentResetPen() throws {
+        // Intent: a vacated partner takes the current erase pen, even when the
+        //   pair being replaced carries a nondefault color.
+        // Why it exists: preserving the old cell's paint is a plausible but
+        //   incompatible alternative to the terminal's BCE rule.
+        // Scenario: a default-pen narrow print overwrites a red wide tail.
         var terminal = try #require(Terminal(columns: 4, rows: 1))
-        terminal.feed(Array("\u{1B}[31m\u{754C}\u{1B}[32m".utf8))
+        terminal.feed(Array("\u{1B}[31m\u{754C}\u{1B}[m".utf8))
         terminal.moveCursor(row: 0, column: 1)
 
         terminal.feed(Array("X".utf8))
 
         #expect(terminal.cell(row: 0, column: 0)?.kind == .padding)
         #expect(terminal.cell(row: 0, column: 0)?.style == TerminalStyle())
-        #expect(terminal.cell(row: 0, column: 1)?.style == green)
         expectValidGrid(terminal)
     }
 
@@ -252,9 +295,28 @@ struct TerminalCellStyleTests {
         #expect(upgrade.cell(row: 1, column: 1)?.style == red)
 
         var downgrade = try #require(Terminal(columns: 4, rows: 1))
-        downgrade.feed(Array("\u{1B}[31m\u{00A9}\u{FE0F}\u{1B}[32m\u{FE0E}".utf8))
+        downgrade.feed(Array(
+            "\u{1B}[31m\u{00A9}\u{FE0F}\u{1B}[1;2;3;4:3;7;8;9;32;44m\u{FE0E}".utf8
+        ))
         #expect(downgrade.cell(row: 0, column: 0)?.style == red)
-        #expect(downgrade.cell(row: 0, column: 1)?.style == TerminalStyle())
+        #expect(downgrade.cell(row: 0, column: 1)?.style == TerminalStyle(
+            foreground: .indexed(2),
+            background: .indexed(4)
+        ))
+
+        var neighborUpgrade = try #require(Terminal(columns: 4, rows: 1))
+        neighborUpgrade.moveCursor(row: 0, column: 2)
+        neighborUpgrade.feed(Array("\u{1B}[31m\u{754C}".utf8))
+        neighborUpgrade.moveCursor(row: 0, column: 1)
+        neighborUpgrade.feed(Array(
+            "\u{1B}[34m#\u{1B}[1;2;3;4:3;7;8;9;32;44m\u{FE0F}".utf8
+        ))
+        #expect(neighborUpgrade.cell(row: 0, column: 1)?.style == TerminalStyle(foreground: .indexed(4)))
+        #expect(neighborUpgrade.cell(row: 0, column: 2)?.kind == .wideTail)
+        #expect(neighborUpgrade.cell(row: 0, column: 3)?.style == TerminalStyle(
+            foreground: .indexed(2),
+            background: .indexed(4)
+        ))
     }
 
     @Test("reflow synthesizes coherent styled wide tails and spacer heads")

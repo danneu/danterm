@@ -7153,11 +7153,16 @@ public struct Terminal: Equatable, Sendable {
         }
 
         invalidateInspection(inViewportRows: row..<(row + 1))
+        let replacementStyleId = backgroundEraseStyleId()
         // The run's own destination preparation: the boundary halves `prepareDestination` looks
         // for cannot be here, because the cut above already stopped at the first wide cell, so the
         // spacer retirement is all that is left of it. Columns above 1 never had a spacer.
         if column <= 1 {
-            clearPreviousSpacer(beforeRow: row, column: column)
+            clearPreviousSpacer(
+                beforeRow: row,
+                column: column,
+                replacementStyleId: replacementStyleId
+            )
         }
 
         writeNarrowCells(
@@ -7358,11 +7363,16 @@ public struct Terminal: Equatable, Sendable {
         let styleId = screen.rows[target.row].cells[target.column].styleId
         let hyperlinkId = screen.rows[target.row].cells[target.column].hyperlinkId
         let contentIdentity = screen.rows[target.row].cells[target.column].contentIdentity
+        let replacementStyleId = backgroundEraseStyleId()
         var destination = target
 
         if target.column == columnCount - 1 {
             if modes.isAutoWrapMode {
-                clearCellAndPair(row: target.row, column: target.column)
+                clearCellAndPair(
+                    row: target.row,
+                    column: target.column,
+                    replacementStyleId: replacementStyleId
+                )
                 screen.rows[target.row].cells[target.column] = GridCell(
                     kind: .spacerHead,
                     styleId: styleId,
@@ -7376,16 +7386,42 @@ public struct Terminal: Equatable, Sendable {
                 screen.cursor.column = 0
                 destination = screen.cursor
                 invalidateInspection(inViewportRows: destination.row..<(destination.row + 1))
-                clearCellAndPair(row: destination.row, column: 0, clearsPreviousSpacer: false)
-                clearCellAndPair(row: destination.row, column: 1, clearsPreviousSpacer: false)
+                clearCellAndPair(
+                    row: destination.row,
+                    column: 0,
+                    replacementStyleId: replacementStyleId,
+                    clearsPreviousSpacer: false
+                )
+                clearCellAndPair(
+                    row: destination.row,
+                    column: 1,
+                    replacementStyleId: replacementStyleId,
+                    clearsPreviousSpacer: false
+                )
             } else {
                 destination.column = columnCount - 2
-                clearCellAndPair(row: target.row, column: target.column)
-                clearCellAndPair(row: destination.row, column: destination.column)
-                clearCellAndPair(row: destination.row, column: destination.column + 1)
+                clearCellAndPair(
+                    row: target.row,
+                    column: target.column,
+                    replacementStyleId: replacementStyleId
+                )
+                clearCellAndPair(
+                    row: destination.row,
+                    column: destination.column,
+                    replacementStyleId: replacementStyleId
+                )
+                clearCellAndPair(
+                    row: destination.row,
+                    column: destination.column + 1,
+                    replacementStyleId: replacementStyleId
+                )
             }
         } else {
-            clearCellAndPair(row: target.row, column: target.column + 1)
+            clearCellAndPair(
+                row: target.row,
+                column: target.column + 1,
+                replacementStyleId: replacementStyleId
+            )
         }
 
         screen.rows[destination.row].cells[destination.column] = GridCell(
@@ -7409,11 +7445,16 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func downgradeClusterToNarrow(at target: CellPosition) {
+        let replacementStyleId = backgroundEraseStyleId()
         screen.rows[target.row].cells[target.column].kind = .narrow
-        screen.rows[target.row].cells[target.column + 1] = GridCell()
+        screen.rows[target.row].cells[target.column + 1] = GridCell(styleId: replacementStyleId)
 
         if target.column == 0 {
-            clearPreviousSpacer(beforeRow: target.row, column: target.column)
+            clearPreviousSpacer(
+                beforeRow: target.row,
+                column: target.column,
+                replacementStyleId: replacementStyleId
+            )
         }
 
         if screen.cursor.column == columnCount - 1 {
@@ -7448,6 +7489,7 @@ public struct Terminal: Equatable, Sendable {
         breakClass: GraphemeBreakClass
     ) {
         let contentIdentity = allocateContentIdentity()
+        let replacementStyleId = backgroundEraseStyleId()
         invalidateInspection(inViewportRows: screen.cursor.row..<(screen.cursor.row + 1))
         if modes.isInsertMode {
             moveAndFillCells(
@@ -7458,7 +7500,8 @@ public struct Terminal: Equatable, Sendable {
         }
         prepareDestination(
             row: screen.cursor.row,
-            columns: screen.cursor.column..<(screen.cursor.column + 1)
+            columns: screen.cursor.column..<(screen.cursor.column + 1),
+            replacementStyleId: replacementStyleId
         )
         writeNarrowCells(
             row: screen.cursor.row,
@@ -7474,13 +7517,15 @@ public struct Terminal: Equatable, Sendable {
         breakClass: GraphemeBreakClass
     ) {
         let contentIdentity = allocateContentIdentity()
+        let replacementStyleId = backgroundEraseStyleId()
         invalidateInspection(inViewportRows: screen.cursor.row..<(screen.cursor.row + 1))
         var preservesWrappedSpacer = false
         if screen.cursor.column == columnCount - 1 {
             if modes.isAutoWrapMode {
                 prepareDestination(
                     row: screen.cursor.row,
-                    columns: screen.cursor.column..<(screen.cursor.column + 1)
+                    columns: screen.cursor.column..<(screen.cursor.column + 1),
+                    replacementStyleId: replacementStyleId
                 )
                 screen.rows[screen.cursor.row].cells[screen.cursor.column] = GridCell(
                     kind: .spacerHead,
@@ -7511,6 +7556,7 @@ public struct Terminal: Equatable, Sendable {
         prepareDestination(
             row: screen.cursor.row,
             columns: screen.cursor.column..<(screen.cursor.column + 2),
+            replacementStyleId: replacementStyleId,
             clearsPreviousSpacer: preservesWrappedSpacer == false
         )
         let styleId = currentStyleId()
@@ -8007,8 +8053,8 @@ public struct Terminal: Equatable, Sendable {
     private mutating func prepareDestination(
         row: Int,
         columns: Range<Int>,
-        clearsPreviousSpacer: Bool = true,
-        replacementStyleId: StyleId = Terminal.defaultStyleId
+        replacementStyleId: StyleId,
+        clearsPreviousSpacer: Bool = true
     ) {
         // Checking the two boundary columns is enough only because wide pairs are consistent -- a
         // `.wideHead` is always followed by its `.wideTail` -- so a partner the range severs can
@@ -8040,15 +8086,15 @@ public struct Terminal: Equatable, Sendable {
     private mutating func clearCellAndPair(
         row: Int,
         column: Int,
-        clearsPreviousSpacer: Bool = true,
-        replacementStyleId: StyleId = Terminal.defaultStyleId
+        replacementStyleId: StyleId,
+        clearsPreviousSpacer: Bool = true
     ) {
         guard screen.rows.indices.contains(row), screen.rows[row].cells.indices.contains(column) else { return }
         prepareDestination(
             row: row,
             columns: column..<(column + 1),
-            clearsPreviousSpacer: clearsPreviousSpacer,
-            replacementStyleId: replacementStyleId
+            replacementStyleId: replacementStyleId,
+            clearsPreviousSpacer: clearsPreviousSpacer
         )
         screen.rows[row].cells[column] = GridCell(styleId: replacementStyleId)
     }
