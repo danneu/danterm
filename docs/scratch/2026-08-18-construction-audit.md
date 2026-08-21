@@ -1323,7 +1323,7 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [ ] **[MODEL-4](#model-4)** (2x5, small) Group the sidebar group row's reload attributes into one Equatable value
 - [ ] **[MODEL-7](#model-7)** (2x5, small) Make PaneTree.remove non-mutating and return an outcome that cannot be misread as a live tree
 - [ ] **[PANE-2](#pane-2)** (2x5, small) Type the container's leaf cache as the wrapper it needs, so a missing wrapper is retried, not cached
-- [ ] **[PANE-4](#pane-4)** (2x5, small) Give the pane toolbar one projection argument instead of thirteen optional parameters and two model mirrors
+- [x] **[PANE-4](#pane-4)** (2x5, small) Give the pane toolbar one projection argument instead of thirteen optional parameters and two model mirrors -- `938ca61e`
 - [ ] **[PARSE-4](#parse-4)** (2x5, small) Parse the SGR 38/48/58 color grammar once instead of once per separator style
 - [ ] **[PERSIST-3](#persist-3)** (2x5, small) Graft scrollback through one leaf-mapping traversal instead of re-listing snapshot fields
 - [ ] **[RECON-6](#recon-6)** (2x5, small) Compute the pane roster only when someone is subscribed, instead of on every send
