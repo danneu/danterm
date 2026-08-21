@@ -1233,7 +1233,7 @@ rewrites.
 - [x] **[PERSIST-1](#persist-1)** (3x5, small) Decide crash recovery from the lock file's existence, not from decoding it -- `1706f20b`
 - [x] **[PTY-4](#pty-4)** (3x5, small) Read the PTY through one loop instead of one per drain reason _(after [XPORT-1](#xport-1))_ -- `7448dd16`
 - [x] **[RECON-1](#recon-1)** (3x5, small) Make container visibility a diffed field of ContainerShape instead of an unconditional per-tab op _(after [MODEL-3](#model-3))_ -- `075ac8a6`
-- [ ] **[REDUCE-2](#reduce-2)** (3x5, small) Let .startSearch open the pane's search state directly instead of round-tripping through the view
+- [x] **[REDUCE-2](#reduce-2)** (3x5, small) Let .startSearch open the pane's search state directly instead of round-tripping through the view -- `346918dc`
 - [ ] **[REDUCE-5](#reduce-5)** (3x5, small) Raise every pane alert through one function instead of duplicating the ritual in .sessionBell
 - [x] **[ROW-4](#row-4)** (3x5, small) Write each printed cell once: clearCellAndPair's store at the target column is immediately overwritten -- `c36da989`
 - [x] **[WIRE-6](#wire-6)** (3x5, small) Chunk and base64 the sync payload from slices, without copying the bytes three times first _(after [PERSIST-6](#persist-6))_ -- `39b4c78a`
@@ -3130,6 +3130,24 @@ _Scope: The pure Elm reducer and its message/command vocabulary (lib/DanTermCore
 ##### REDUCE-2. Let .startSearch open the pane's search state directly instead of round-tripping through the view
 
 `structural` &middot; impact 3, confidence 5 &middot; effort small &middot; wave 2 &middot; rewritten
+
+**Done** in `346918dc`, which carries the plan under `plans/impl/`. The
+Correction below is what was built, with one change of address: MODEL-5 landed
+first, so the arm writes `pane.live.search` rather than the flat
+`model.searchState` dictionary. Two things the Correction states are off, and
+the plan corrected them before implementation.
+
+First, `UpdateSearchTests#searchStartedWhileActiveUpdatesNeedleAndOwner` does
+not pin "Cmd-F keeps the typed needle". It sends a non-empty needle and asserts
+the needle is replaced, which exercises the dead branch. The behavior was held
+up only by the arm's `if !needle.isEmpty` guard against the production payload
+`""`, so the new re-entry test is fresh coverage, not a migration of an existing
+one.
+
+Second, not every `.searchStarted` call site is an activation of the focused
+pane. `UpdateSearchTests#searchFieldFocusReportAdoptsItsPane` opens search on
+pane B while pane A holds focus, on purpose, so `.startSearch` cannot stand in
+for it -- that fixture is now built from pane state instead.
 
 **Files.** `lib/DanTermCore/Sources/DanTermCore/Update.swift#update`, `lib/DanTermCore/Sources/DanTermCore/Command.swift#Command`, `lib/DanTermCore/Sources/DanTermCore/Msg.swift#Msg`, `app/SwiftTerminalSessionView.swift#startSearch`, `lib/DanTermCore/Sources/DanTermCore/TerminalBackendBoundary.swift`
 
