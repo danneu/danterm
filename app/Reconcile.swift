@@ -25,9 +25,8 @@ struct ReconcilerCaches {
     // paneConfig also rides the terminal session the PaneHost owns, so the cache
     // needs no cross-pass invalidation.
     var paneConfig: [PaneId: PaneConfigKey] = [:]
-    // Pane toolbar and search overlay state rides the runtime-owned PaneHost, so
-    // structural container edits do not invalidate either cache.
-    var paneToolbar: [PaneId: PaneToolbarRender] = [:]
+    // Search overlay state rides the runtime-owned PaneHost, so structural
+    // container edits do not invalidate this cache.
     var searchOverlay: [PaneId: SearchOverlayRender] = [:]   // key present iff search active
     // The last container projection reconciled per tab. It includes layout inputs,
     // so ratio-only changes reach hidden and visible containers alike, and
@@ -194,42 +193,24 @@ extension AppRuntime {
         })
     }
 
-    /// Push each pane's toolbar render and search overlay to its PaneWrapperView,
-    /// each diffed against its cache. Replaces the deleted `.refreshPaneToolbar`,
+    /// Push each pane's toolbar render and search overlay to its PaneWrapperView.
+    /// The wrapper owns toolbar equality while search remains diffed here. Replaces
+    /// the deleted `.refreshPaneToolbar`,
     /// `.showSearchOverlay`, and `.hideSearchOverlay` effects (and the imperative
-    /// toolbar refreshes in `send()`); the executors (`updateToolbar`,
-    /// `showSearchOverlay`, `hideSearchOverlay`) are unchanged -- only the computation
-    /// and triggering moved into the pure projections + this pass.
+    /// toolbar refreshes in `send()`); the executors (`applyToolbarRender`,
+    /// `showSearchOverlay`, `hideSearchOverlay`) receive the projection computed
+    /// by this pass.
     ///
-    /// Toolbar: keyed over all live panes, so a key leaves only when its pane is gone
-    /// (the container pass already destroyed the wrapper) -- the default no-op `remove`
-    /// just prunes the cache. Search overlay: keyed iff search is active, so the key
-    /// disappears on `.endSearch` while the wrapper survives -- a non-default `remove`
-    /// tears the overlay down (the disappear-but-host-survives discipline).
+    /// Every desired toolbar render is offered on each reconcile. A missing
+    /// wrapper consumes nothing, and the wrapper skips an equal render only after
+    /// it applied one. Search overlay is keyed iff search is active, so the key
+    /// disappears on `.endSearch` while the wrapper survives -- a non-default
+    /// `remove` tears the overlay down (the disappear-but-host-survives discipline).
     func reconcilePaneChrome(tally: UnreadAlertTally) {
-        applyDiff(
-            desiredPaneToolbar(
-                in: model,
-                tally: tally
-            ),
-            &caches.paneToolbar,
-            apply: { paneId, render in
-            findPaneWrapper(for: paneId)?.updateToolbar(
-                label: render.label,
-                progress: render.progress,
-                isRemote: render.isRemote,
-                remoteLabel: render.remoteLabel,
-                agentLabel: render.agentLabel,
-                chipTooltip: render.chipTooltip,
-                chipKind: render.chipKind,
-                unreadAlertCount: render.unreadAlertCount,
-                totalTodoCount: render.totalTodoCount,
-                uncompletedTodoCount: render.uncompletedTodoCount,
-                isZoomed: render.isZoomed,
-                hasSplits: render.hasSplits,
-                isGridClaimed: render.isGridClaimed
-            )
-        })
+        offerPaneToolbarRenders(
+            desiredPaneToolbar(in: model, tally: tally),
+            wrapperFor: { paneId in findPaneWrapper(for: paneId) }
+        )
         applyDiff(desiredSearchOverlays(in: model), &caches.searchOverlay, apply: { paneId, render in
             let search = SearchModel(needle: render.needle, status: render.status)
             findPaneWrapper(for: paneId)?.showSearchOverlay(search: search, runtime: self)

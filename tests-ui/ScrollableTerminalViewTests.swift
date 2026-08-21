@@ -218,7 +218,7 @@ private func makeGutterFixture(
         scrollPosition: .init(total: 24, offset: 0, length: 24), background: background)
     let wrapper = PaneWrapperView(
         paneId: paneId, terminalView: terminal,
-        isZoomed: false, hasSplits: false, runtime: AppRuntime(model: model))
+        runtime: AppRuntime(model: model))
     wrapper.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
     wrapper.layoutSubtreeIfNeeded()
 

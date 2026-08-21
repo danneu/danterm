@@ -1,7 +1,8 @@
-// UI-harness tests for PaneWrapperView's unified pane context menu
-// (makePaneMenu): composition per entry point, item enablement from model
-// state, action routing, and menu-lifetime retention of the ephemeral wrapper.
+// UI-harness tests for PaneWrapperView's whole toolbar rendering and unified
+// pane context menu: replacement semantics, menu composition and routing, and
+// menu-lifetime retention of the ephemeral wrapper.
 import Cocoa
+import DanTermProtocol
 
 @MainActor
 func paneWrapperViewTests() {
@@ -179,6 +180,27 @@ func paneWrapperViewTests() {
         try uiExpect(unzoomItem.isEnabled, "Unzoom Pane should be enabled while zoomed")
     }
 
+    uiTest("an unrendered wrapper exposes neutral zoom affordances") {
+        // Intent: wrapper construction claims no zoom or split fact before its
+        //   first toolbar render.
+        // Why it exists: constructor booleans used to make a wrapper look
+        //   rendered before reconciliation had applied a projection.
+        // Scenario: spec-first staged host construction before reconciliation.
+        let model = makeSinglePaneModel(hasSplits: true)
+        let wrapper = PaneWrapperView(
+            paneId: model.paneId,
+            terminalView: TerminalView(),
+            runtime: AppRuntime(model: model.model)
+        )
+        wrapper.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
+        wrapper.layoutSubtreeIfNeeded()
+
+        let zoomButton = try paneZoomButton(in: wrapper)
+        try uiExpect(zoomButtonWidth(zoomButton) < 1, "an unrendered wrapper should collapse zoom")
+        let zoomItem = try onlyItem(wrapper.makePaneMenu(), titled: "Zoom Pane")
+        try uiExpect(!zoomItem.isEnabled, "an unrendered wrapper should disable Zoom Pane")
+    }
+
     uiTest("persistent wrapper zoom affordances follow toolbar projection") {
         // Intent: one wrapper changes its menu and its zoom button as the tab
         //   moves through single-pane, split, zoomed, and single-pane states.
@@ -196,29 +218,110 @@ func paneWrapperViewTests() {
             zoomButtonWidth(zoomButton) < 1,
             "a lone pane should collapse the button below one point, got \(zoomButton.frame.width)")
 
-        fx.wrapper.updateToolbar(
-            label: "Terminal", isZoomed: false, hasSplits: true)
+        fx.wrapper.applyToolbarRender(paneToolbarRender(hasSplits: true))
         let split = try onlyItem(fx.wrapper.makePaneMenu(), titled: "Zoom Pane")
         try uiExpect(split.isEnabled, "projected splits should enable Zoom Pane")
         try uiExpect(
             zoomButtonWidth(zoomButton) >= 15,
             "a split pane should show the button at at least 15 points, got \(zoomButton.frame.width)")
 
-        fx.wrapper.updateToolbar(
-            label: "Terminal", isZoomed: true, hasSplits: true)
+        fx.wrapper.applyToolbarRender(paneToolbarRender(isZoomed: true, hasSplits: true))
         let unzoom = try onlyItem(fx.wrapper.makePaneMenu(), titled: "Unzoom Pane")
         try uiExpect(unzoom.isEnabled, "projected zoom should enable Unzoom Pane")
         try uiExpect(
             zoomButtonWidth(zoomButton) >= 15,
             "zoomed toolbar should keep the button at at least 15 points, got \(zoomButton.frame.width)")
 
-        fx.wrapper.updateToolbar(
-            label: "Terminal", isZoomed: false, hasSplits: false)
+        fx.wrapper.applyToolbarRender(paneToolbarRender())
         let zoom = try onlyItem(fx.wrapper.makePaneMenu(), titled: "Zoom Pane")
         try uiExpect(!zoom.isEnabled, "projected single-pane state should disable Zoom Pane")
         try uiExpect(
             zoomButtonWidth(zoomButton) < 1,
             "closing back down to one pane should collapse the button again")
+    }
+
+    uiTest("a neutral whole render clears every populated toolbar field") {
+        // Intent: applying one complete render replaces every toolbar field,
+        //   including nil, false, and zero values in the next render.
+        // Why it exists: partial-update defaults could preserve stale chrome
+        //   whenever a caller omitted the field that needed to clear.
+        // Scenario: spec-first whole-render replacement.
+        let fx = makePaneMenuFixture(isZoomed: false, hasSplits: false)
+        fx.wrapper.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
+        fx.wrapper.applyToolbarRender(paneToolbarRender(
+            label: "busy",
+            progress: .indeterminate,
+            isRemote: true,
+            remoteLabel: "remote",
+            agentLabel: "agent",
+            chipTooltip: "agent session 123",
+            chipKind: .agent,
+            unreadAlertCount: 4,
+            totalTodoCount: 5,
+            uncompletedTodoCount: 3,
+            isZoomed: true,
+            hasSplits: true,
+            isGridClaimed: true
+        ))
+
+        fx.wrapper.applyToolbarRender(paneToolbarRender())
+        fx.wrapper.layoutSubtreeIfNeeded()
+
+        let descendants = paneWrapperDescendants(of: fx.wrapper)
+        let visibleText = descendants.compactMap { view -> String? in
+            guard let field = view as? NSTextField, !field.isHidden else { return nil }
+            return field.stringValue
+        }
+        try uiExpect(visibleText.contains("Terminal"), "the neutral label should replace the populated label")
+        for stale in ["busy", "remote", "agent", "4", "3"] {
+            try uiExpect(!visibleText.contains(stale), "neutral render left visible toolbar text \(stale)")
+        }
+        guard let progress = descendants.compactMap({ $0 as? ProgressIndicatorView }).first else {
+            throw UITestFailure(message: "missing progress indicator")
+        }
+        try uiExpect(progress.isHidden, "neutral render should hide progress")
+        guard let chip = descendants.compactMap({ $0 as? ChipView }).first else {
+            throw UITestFailure(message: "missing pane chip")
+        }
+        try uiExpect(chip.kind == .terminal, "neutral render should restore the terminal chip")
+        try uiExpect(chip.toolTip == nil, "neutral render should clear the chip tooltip")
+        let zoomButton = try paneZoomButton(in: fx.wrapper)
+        try uiExpect(zoomButtonWidth(zoomButton) < 1, "neutral render should collapse zoom")
+        let zoomItem = try onlyItem(fx.wrapper.makePaneMenu(), titled: "Zoom Pane")
+        try uiExpect(!zoomItem.isEnabled, "neutral render should disable zoom")
+        let releaseButton = descendants.compactMap { $0 as? PaneToolbarButton }
+            .first { $0.toolTip == "Release Claimed Size" }
+        try uiExpect(releaseButton?.isHidden == true, "neutral render should hide grid take-back")
+    }
+
+    uiTest("a render offered before its wrapper exists is retried unchanged") {
+        // Intent: a reconcile with no wrapper does not record the desired
+        //   toolbar render as applied.
+        // Why it exists: the runtime cache used to advance even when optional
+        //   wrapper lookup failed, so the later wrapper never received the
+        //   unchanged value.
+        // Scenario: spec-first session host appears after the chrome pass.
+        let model = makeSinglePaneModel(cwd: nil, hasSplits: false)
+        let runtime = AppRuntime(model: model.model)
+        let desired = desiredPaneToolbar(in: runtime.model)
+        var wrapper: PaneWrapperView?
+
+        offerPaneToolbarRenders(desired) { _ in wrapper }
+        wrapper = PaneWrapperView(
+            paneId: model.paneId,
+            terminalView: TerminalView(),
+            runtime: runtime
+        )
+        offerPaneToolbarRenders(desired) { _ in wrapper }
+
+        guard let wrapper else {
+            throw UITestFailure(message: "missing wrapper after construction")
+        }
+        let visibleText = paneWrapperDescendants(of: wrapper).compactMap { view -> String? in
+            guard let field = view as? NSTextField, !field.isHidden else { return nil }
+            return field.stringValue
+        }
+        try uiExpect(visibleText.contains("Terminal"), "the retried render should reach the new wrapper")
     }
 
     uiTest("the zoom button states which direction the next click goes") {
@@ -242,7 +345,7 @@ func paneWrapperViewTests() {
             zoomButton.layer?.backgroundColor != accent,
             "a split pane's button should not wear the accent fill")
 
-        fx.wrapper.updateToolbar(label: "Terminal", isZoomed: true, hasSplits: true)
+        fx.wrapper.applyToolbarRender(paneToolbarRender(isZoomed: true, hasSplits: true))
         try uiExpect(zoomButton.toolTip == "Unzoom Pane", "got \(zoomButton.toolTip ?? "nil")")
         try uiExpect(
             zoomButton.image?.accessibilityDescription == "Unzoom pane",
@@ -251,7 +354,7 @@ func paneWrapperViewTests() {
             zoomButton.layer?.backgroundColor == accent,
             "a zoomed pane's button should wear the accent fill")
 
-        fx.wrapper.updateToolbar(label: "Terminal", isZoomed: false, hasSplits: true)
+        fx.wrapper.applyToolbarRender(paneToolbarRender(hasSplits: true))
         try uiExpect(zoomButton.toolTip == "Zoom Pane", "the tooltip should flip back")
         try uiExpect(
             zoomButton.image?.accessibilityDescription == "Zoom pane",
@@ -281,7 +384,7 @@ func paneWrapperViewTests() {
             releaseButton.frame.width < 1,
             "an unclaimed pane should collapse the button below one point, got \(releaseButton.frame.width)")
 
-        fx.wrapper.updateToolbar(label: "Terminal", isGridClaimed: true)
+        fx.wrapper.applyToolbarRender(paneToolbarRender(isGridClaimed: true))
         releaseButton.superview?.needsLayout = true
         releaseButton.superview?.layoutSubtreeIfNeeded()
 
@@ -298,7 +401,7 @@ func paneWrapperViewTests() {
         }
         try uiExpect(sawClear, "the take-back click should clear this pane's override")
 
-        fx.wrapper.updateToolbar(label: "Terminal", isGridClaimed: false)
+        fx.wrapper.applyToolbarRender(paneToolbarRender())
         releaseButton.superview?.needsLayout = true
         releaseButton.superview?.layoutSubtreeIfNeeded()
 
@@ -326,8 +429,8 @@ func paneWrapperViewTests() {
 
         autoreleasepool {
             let wrapper = PaneWrapperView(
-                paneId: model.paneId, terminalView: terminal,
-                isZoomed: false, hasSplits: true, runtime: runtime)
+                paneId: model.paneId, terminalView: terminal, runtime: runtime)
+            wrapper.applyToolbarRender(paneToolbarRender(hasSplits: true))
             observer = wrapper
             menu = wrapper.makePaneMenu(includeClipboard: true)
         }
@@ -515,8 +618,8 @@ private func makePaneMenuFixture(
         }
     }
     let wrapper = PaneWrapperView(
-        paneId: paneId, terminalView: terminal,
-        isZoomed: isZoomed, hasSplits: hasSplits, runtime: runtime)
+        paneId: paneId, terminalView: terminal, runtime: runtime)
+    wrapper.applyToolbarRender(paneToolbarRender(isZoomed: isZoomed, hasSplits: hasSplits))
     return PaneMenuFixture(wrapper: wrapper, runtime: runtime, terminal: terminal, paneId: paneId)
 }
 
@@ -533,7 +636,7 @@ private func paneZoomButton(in wrapper: PaneWrapperView) throws -> PaneToolbarBu
 }
 
 /// Lays the toolbar out before reading the button's width, so the assertion
-/// sees the constraint the last `updateToolbar` set rather than the old frame.
+/// sees the constraint the last render set rather than the old frame.
 @MainActor
 private func zoomButtonWidth(_ button: PaneToolbarButton) -> CGFloat {
     button.superview?.needsLayout = true
@@ -549,4 +652,38 @@ private func onlyItem(_ menu: NSMenu, titled title: String) throws -> NSMenuItem
     let matches = menu.items.filter { $0.title == title }
     try uiExpect(matches.count == 1, "expected exactly one \"\(title)\" item, got \(matches.count)")
     return matches[0]
+}
+
+/// Supplies neutral values for fields a test does not exercise while keeping
+/// the `PaneToolbarRender` initializer exhaustive in one shared UI fixture.
+func paneToolbarRender(
+    label: DisplayLine = "Terminal",
+    progress: ProgressState? = nil,
+    isRemote: Bool = false,
+    remoteLabel: DisplayLine? = nil,
+    agentLabel: DisplayLine? = nil,
+    chipTooltip: DisplayLine? = nil,
+    chipKind: ChipKind = .terminal,
+    unreadAlertCount: Int = 0,
+    totalTodoCount: Int = 0,
+    uncompletedTodoCount: Int = 0,
+    isZoomed: Bool = false,
+    hasSplits: Bool = false,
+    isGridClaimed: Bool = false
+) -> PaneToolbarRender {
+    PaneToolbarRender(
+        label: label,
+        progress: progress,
+        isRemote: isRemote,
+        remoteLabel: remoteLabel,
+        agentLabel: agentLabel,
+        chipTooltip: chipTooltip,
+        chipKind: chipKind,
+        unreadAlertCount: unreadAlertCount,
+        totalTodoCount: totalTodoCount,
+        uncompletedTodoCount: uncompletedTodoCount,
+        isZoomed: isZoomed,
+        hasSplits: hasSplits,
+        isGridClaimed: isGridClaimed
+    )
 }

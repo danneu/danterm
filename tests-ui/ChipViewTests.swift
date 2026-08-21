@@ -16,7 +16,7 @@ func chipViewTests() {
     print("ChipView")
 
     uiTest("the toolbar chip follows the pane's agent kind") {
-        // Intent: whatever kind the projection hands updateToolbar is the kind
+        // Intent: whatever kind the projection hands the wrapper is the kind
         //   the pane's chip shows.
         // Why it exists: the chip is the only thing identifying a pane at a
         //   glance, so a stale or ignored kind is a silent wrong answer rather
@@ -24,7 +24,7 @@ func chipViewTests() {
         let wrapper = makeChipWrapper()
 
         for kind in ChipKind.allCases {
-            wrapper.updateToolbar(label: "t", chipKind: kind)
+            wrapper.applyToolbarRender(paneToolbarRender(label: "t", chipKind: kind))
             let chip = try onlyChipView(in: wrapper)
             try uiExpect(chip.kind == kind, "expected \(kind), got \(chip.kind)")
         }
@@ -38,8 +38,9 @@ func chipViewTests() {
         //   Spec-first.
         let wrapper = makeChipWrapper()
 
-        wrapper.updateToolbar(
-            label: "t", agentLabel: nil, chipTooltip: "claude session abc123", chipKind: .claude)
+        wrapper.applyToolbarRender(paneToolbarRender(
+            label: "t", agentLabel: nil,
+            chipTooltip: "claude session abc123", chipKind: .claude))
 
         try uiExpect(try onlyChipView(in: wrapper).kind == .claude, "chip should be claude")
         try uiExpect(
@@ -55,8 +56,9 @@ func chipViewTests() {
         //   *an* agent; only the text can say which one. Spec-first.
         let wrapper = makeChipWrapper()
 
-        wrapper.updateToolbar(
-            label: "t", agentLabel: "aider", chipTooltip: "aider session abc123", chipKind: .agent)
+        wrapper.applyToolbarRender(paneToolbarRender(
+            label: "t", agentLabel: "aider",
+            chipTooltip: "aider session abc123", chipKind: .agent))
 
         try uiExpect(try onlyChipView(in: wrapper).kind == .agent, "chip should be the generic agent")
         try uiExpect(
@@ -72,8 +74,9 @@ func chipViewTests() {
         //   the session id would have become unreachable for claude and codex.
         let wrapper = makeChipWrapper()
 
-        wrapper.updateToolbar(
-            label: "t", agentLabel: nil, chipTooltip: "claude session abc123", chipKind: .claude)
+        wrapper.applyToolbarRender(paneToolbarRender(
+            label: "t", agentLabel: nil,
+            chipTooltip: "claude session abc123", chipKind: .claude))
 
         let chip = try onlyChipView(in: wrapper)
         try uiExpect(
@@ -84,13 +87,14 @@ func chipViewTests() {
     uiTest("detaching an agent clears the chip tooltip and the text fallback") {
         // Intent: going from attached back to a plain shell leaves no trace of
         //   the departed session.
-        // Why it exists: updateToolbar is a diffed push, so a field only ever
+        // Why it exists: toolbar renders replace whole values, so a field only ever
         //   cleared on the attach path would strand the old value forever.
         let wrapper = makeChipWrapper()
-        wrapper.updateToolbar(
-            label: "t", agentLabel: "aider", chipTooltip: "aider session abc123", chipKind: .agent)
+        wrapper.applyToolbarRender(paneToolbarRender(
+            label: "t", agentLabel: "aider",
+            chipTooltip: "aider session abc123", chipKind: .agent))
 
-        wrapper.updateToolbar(label: "t", agentLabel: nil, chipTooltip: nil, chipKind: .terminal)
+        wrapper.applyToolbarRender(paneToolbarRender(label: "t"))
 
         let chip = try onlyChipView(in: wrapper)
         try uiExpect(chip.toolTip == nil, "tooltip should clear, got \(String(describing: chip.toolTip))")
@@ -110,7 +114,7 @@ private func makeChipWrapper() -> PaneWrapperView {
     model.selectedTabId = tab.id
     return PaneWrapperView(
         paneId: paneId, terminalView: TerminalView(),
-        isZoomed: false, hasSplits: false, runtime: AppRuntime(model: model))
+        runtime: AppRuntime(model: model))
 }
 
 /// The single ChipView under a view, found by walking rather than by name so the

@@ -352,9 +352,9 @@ func desiredFocusBorders(in model: AppModel, tally: UnreadAlertTally) -> [PaneId
   return result
 }
 
-/// Pane-toolbar render the reconciler diffs and pushes to a PaneWrapperView's
-/// toolbar. Live lifecycle fields come only from the pane owner's immutable
-/// snapshot. Equatable lets the diff skip panes whose inputs are unchanged.
+/// Pane-toolbar render the reconciler offers whole to a PaneWrapperView. Live
+/// lifecycle fields come only from the pane owner's immutable snapshot.
+/// Equatable lets each wrapper skip a value it already applied.
 ///
 /// Every string here is already composed. The view receives no raw model value
 /// and no domain object, so no untrusted terminal-reported text -- a title, a
@@ -401,10 +401,9 @@ func desiredPaneToolbar(
   )
 }
 
-/// Pane-toolbar projection: one `PaneToolbarRender` per live pane. Keyed over every
-/// pane (`allPanes`) so a key leaves only when its pane is gone -- at which point the
-/// container pass has already torn down the host wrapper -- so `reconcilePaneChrome`
-/// diffs this with the default no-op `remove`.
+/// Pane-toolbar projection: one `PaneToolbarRender` per live pane. The reconciler
+/// offers every value on each pass, including an unchanged value whose wrapper did
+/// not exist on an earlier pass.
 func desiredPaneToolbar(
   in model: AppModel,
   tally: UnreadAlertTally

@@ -44,8 +44,6 @@ final class PaneHost {
         self.wrapper = PaneWrapperView(
             paneId: paneId,
             terminalView: session,
-            isZoomed: false,
-            hasSplits: false,
             runtime: runtime
         )
     }

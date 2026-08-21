@@ -6,6 +6,17 @@ import ChipArtwork
 import Cocoa
 import DanTermProtocol
 
+/// Offers every desired toolbar render without recording whether a wrapper was
+/// present. The wrapper itself owns the last value it successfully applied.
+func offerPaneToolbarRenders(
+    _ renders: [PaneId: PaneToolbarRender],
+    wrapperFor: (PaneId) -> PaneWrapperView?
+) {
+    for (paneId, render) in renders {
+        wrapperFor(paneId)?.applyToolbarRender(render)
+    }
+}
+
 class PaneWrapperView: NSView {
     /// Names the zoom button for the view tests. Its tooltip states the direction
     /// of the next click, so it is not a handle anything can match on.
@@ -30,8 +41,9 @@ class PaneWrapperView: NSView {
     private let releaseGridClaimButton: PaneToolbarButton
     private var releaseGridClaimWidthConstraint: NSLayoutConstraint?
     private let todoButton: TodoToolbarButton
-    private var isZoomed: Bool
-    private var hasSplits: Bool
+    /// The last render this wrapper applied. Nil is the explicit pre-render
+    /// state used while a newly constructed host waits for reconciliation.
+    private var lastToolbarRender: PaneToolbarRender?
     private weak var runtime: AppRuntime?
     /// Destination for the context menu's copy actions (cwd, pane id, agent session id).
     /// Defaults to the system pasteboard so a test can assign a scratch board and neither
@@ -63,15 +75,13 @@ class PaneWrapperView: NSView {
     /// close cannot miss one.
     private var contextMenuOutline: PaneContextMenuOutlineView?
 
-    init(paneId: PaneId, terminalView: any TerminalSession, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
+    init(paneId: PaneId, terminalView: any TerminalSession, runtime: AppRuntime?) {
         self.paneId = paneId
         self.terminalSession = terminalView
         // Terminal view wrapped in scroll view for native scrollbar support
         self.scrollWrapper = ScrollableTerminalView(terminalSession: terminalView)
         self.toolbar = NSView()
         self.toolbarLabel = NonHitTestingLabel.make(truncating: .byTruncatingMiddle)
-        self.isZoomed = isZoomed
-        self.hasSplits = hasSplits
         self.runtime = runtime
         self.alertBadge = NSTextField.makeBadge()
         self.progressIndicator = ProgressIndicatorView()
@@ -344,16 +354,20 @@ class PaneWrapperView: NSView {
         scrollWrapper.setFocusRing(focused: focused, hasBell: hasBell)
     }
 
-    /// Every string arrives composed by `desiredPaneToolbar`; this method only
-    /// reads values out into labels. Composing text here would put untrusted
+    /// Applies one complete toolbar projection and skips only a value this
+    /// wrapper has already applied. Every string arrives composed by
+    /// `desiredPaneToolbar`; composing text here would put untrusted
     /// terminal-reported values back together inside the view.
-    func updateToolbar(label: DisplayLine, progress: ProgressState? = nil, isRemote: Bool = false, remoteLabel: DisplayLine? = nil, agentLabel: DisplayLine? = nil, chipTooltip: DisplayLine? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0, isZoomed: Bool? = nil, hasSplits: Bool? = nil, isGridClaimed: Bool? = nil) {
-        toolbarLabel.stringValue = label.text
-        applyProgressState(progress)
-        remoteAccessory.isHidden = !isRemote
-        remoteSessionLabel.stringValue = remoteLabel?.text ?? ""
-        remoteSessionLabel.isHidden = remoteLabel == nil
-        let expanded = remoteLabel != nil
+    func applyToolbarRender(_ render: PaneToolbarRender) {
+        guard render != lastToolbarRender else { return }
+        lastToolbarRender = render
+
+        toolbarLabel.stringValue = render.label.text
+        applyProgressState(render.progress)
+        remoteAccessory.isHidden = !render.isRemote
+        remoteSessionLabel.stringValue = render.remoteLabel?.text ?? ""
+        remoteSessionLabel.isHidden = render.remoteLabel == nil
+        let expanded = render.remoteLabel != nil
         if expanded != remoteExpanded {
             remoteExpanded = expanded
             if expanded {
@@ -364,27 +378,20 @@ class PaneWrapperView: NSView {
                 NSLayoutConstraint.activate(compactRemoteConstraints)
             }
         }
-        paneChip.kind = chipKind
+        paneChip.kind = render.chipKind
         // The chip's tooltip carries the session id, so it survives the pill
         // being hidden for an agent the chip can name on its own.
-        paneChip.toolTip = chipTooltip?.text
-        agentAccessory.isHidden = agentLabel == nil
-        agentSessionLabel.stringValue = agentLabel?.text ?? ""
-        alertBadge.updateBadge(count: unreadAlertCount)
-        todoButton.update(totalCount: totalTodoCount, uncompletedCount: uncompletedTodoCount)
-        if let isZoomed {
-            self.isZoomed = isZoomed
-        }
-        if let hasSplits {
-            self.hasSplits = hasSplits
-        }
-        if isZoomed != nil || hasSplits != nil {
-            applyZoomButtonPresentation()
-        }
-        if let isGridClaimed {
-            releaseGridClaimButton.isHidden = !isGridClaimed
-            releaseGridClaimWidthConstraint?.constant = isGridClaimed ? 16 : 0
-        }
+        paneChip.toolTip = render.chipTooltip?.text
+        agentAccessory.isHidden = render.agentLabel == nil
+        agentSessionLabel.stringValue = render.agentLabel?.text ?? ""
+        alertBadge.updateBadge(count: render.unreadAlertCount)
+        todoButton.update(
+            totalCount: render.totalTodoCount,
+            uncompletedCount: render.uncompletedTodoCount
+        )
+        applyZoomButtonPresentation()
+        releaseGridClaimButton.isHidden = !render.isGridClaimed
+        releaseGridClaimWidthConstraint?.constant = render.isGridClaimed ? 16 : 0
     }
 
     /// One button carries both directions, so everything the user reads off it --
@@ -393,6 +400,8 @@ class PaneWrapperView: NSView {
     /// the button is the exit from a non-default state; on a merely split pane it
     /// is quiet chrome rather than permanent color on every toolbar.
     private func applyZoomButtonPresentation() {
+        let isZoomed = lastToolbarRender?.isZoomed ?? false
+        let hasSplits = lastToolbarRender?.hasSplits ?? false
         let visible = isZoomed || hasSplits
         zoomButton.isHidden = !visible
         zoomWidthConstraint?.constant = visible ? 16 : 0
@@ -528,6 +537,8 @@ class PaneWrapperView: NSView {
 
         menu.addItem(.separator())
 
+        let isZoomed = lastToolbarRender?.isZoomed ?? false
+        let hasSplits = lastToolbarRender?.hasSplits ?? false
         let zoom = wrapperItem(isZoomed ? "Unzoom Pane" : "Zoom Pane", #selector(zoomPaneAction))
         zoom.isEnabled = hasSplits || isZoomed
         menu.addItem(zoom)

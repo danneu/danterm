@@ -44,9 +44,9 @@ func singleLineLabelTests() {
 
     uiTest("the pane toolbar label and both accessories lay out one line and truncate") {
         let wrapper = makeSingleLinePaneWrapper()
-        wrapper.updateToolbar(
+        wrapper.applyToolbarRender(paneToolbarRender(
             label: "one", isRemote: true, remoteLabel: "one", agentLabel: "one",
-            chipTooltip: "one", chipKind: .agent)
+            chipTooltip: "one", chipKind: .agent))
         wrapper.frame = NSRect(x: 0, y: 0, width: 600, height: 300)
         wrapper.layoutSubtreeIfNeeded()
 
@@ -158,7 +158,7 @@ private func makeSingleLinePaneWrapper() -> PaneWrapperView {
     model.selectedTabId = tab.id
     return PaneWrapperView(
         paneId: paneId, terminalView: TerminalView(),
-        isZoomed: false, hasSplits: false, runtime: AppRuntime(model: model))
+        runtime: AppRuntime(model: model))
 }
 
 private func requireField(_ field: NSTextField?) throws -> NSTextField {
