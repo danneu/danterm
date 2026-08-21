@@ -4,6 +4,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/lint-rationale.sh
+source "$SCRIPT_DIR/lib/lint-rationale.sh"
+
 ROOT_DIR="${1:-$SCRIPT_DIR/..}"
 HOST="$ROOT_DIR/lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift"
 HOST_SUITE="$ROOT_DIR/lib/TerminalPTY/Tests/TerminalPTYHostTests/TerminalPTYHostTests.swift"
@@ -16,8 +19,47 @@ FIXTURE_OUTPUT='stageFixtureOutput|deliverOutputForTesting'
 # The one declaration `#if DEBUG` is allowed to guard in this package.
 GUARDED_DECL='stageFixtureOutput'
 
+# The same explanation for every way this gate can fail. All three failures are one
+# rule: test-only surface belongs outside the production host, and the host's own suite
+# has to cross a real PTY.
+rationale() {
+    lint_rationale <<'EOF'
+terminal-pty-host-test-seam lint FAILED.
+
+Three plans in a row moved test-only surface off TerminalPTYHost --
+spawn delays, injected write failures, held cancellations -- because
+each seam made the production host describe a state only a test could
+reach. This gate keeps them off. It checks three things:
+
+  * The named seams are gone from the host. If you need one back, the
+    test needs a different injection point, not the host.
+  * The host's own suite does not stage fixture output. That suite
+    exists to prove the read path across a real PTY, and applying
+    output directly bypasses exactly what it is testing. A consumer
+    suite asserting against a known screen may stage output; this one
+    may not.
+  * lib/TerminalPTY/Sources holds exactly one `#if DEBUG` region, and
+    it encloses stageFixtureOutput. Dropping the guard ships the
+    fixture stager. Adding a second region is test-only surface
+    accreting onto the host again -- and nothing in the gate builds
+    this package in release configuration, so this lint is the only
+    thing that sees it.
+
+See docs/design/2026-08-17-test-seam-rule.md.
+EOF
+}
+
+# For a path this lint cannot read. The rule's rationale would only mislead here:
+# nothing was checked, so nothing was violated.
+setup_fail() {
+    echo "terminal-pty-host-test-seam-lint: $1" >&2
+    echo "  this lint checked nothing. Point it at the moved path or update it here." >&2
+    exit 1
+}
+
 fail() {
     echo "terminal-pty-host-test-seam-lint: $1" >&2
+    rationale
     exit 1
 }
 
@@ -29,10 +71,11 @@ scan() {
     if matches="$(rg -n "$pattern" "$file")"; then
         echo "terminal-pty-host-test-seam-lint: $label:" >&2
         echo "$matches" >&2
+        rationale
         exit 1
     else
         status=$?
-        [[ "$status" == "1" ]] || fail "could not scan: $file"
+        [[ "$status" == "1" ]] || setup_fail "could not scan: $file"
     fi
 }
 
@@ -44,7 +87,7 @@ scan "$HOST_SUITE" "$FIXTURE_OUTPUT" "host suite applies output directly instead
 # region is test-only surface accreting onto the host again -- which is how the names banned
 # above got here. Nothing in the gate builds this package in release configuration, so a
 # deleted guard has no other check.
-[[ -d "$SOURCES" ]] || fail "could not scan: $SOURCES"
+[[ -d "$SOURCES" ]] || setup_fail "could not scan: $SOURCES"
 # shellcheck disable=SC2016 # $0 in the awk program is awk's field, not a shell expansion.
 counts="$(
     find "$SOURCES" -name '*.swift' -print0 \

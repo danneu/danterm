@@ -11,6 +11,10 @@
 # SwiftPM build directory, no shared port/socket. Steps that genuinely must run in
 # sequence belong in a single STEPS entry joined with `&&`, which keeps them on one
 # worker. See scripts/tests/run-test-suite_test.sh for the contract this upholds.
+#
+# A lint added here owes its reader an explanation on the failure path, not only in its
+# own header comment: stderr is all that whoever trips the gate sees. scripts/lib/lint-rationale.sh
+# is the shared shape, and each lint's self-test is where that explanation is pinned.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -88,6 +92,7 @@ LINT_STEPS=(
     './scripts/terminal-scalar-append-lint.sh'
     './scripts/terminal-benchmark-draw-path-lint.sh'
     './scripts/usage-single-source-lint.sh'
+    './scripts/agents-md-budget-lint.sh'
 )
 
 # Ordered longest-measured-first. With a bounded pool this is list scheduling: putting
@@ -182,6 +187,7 @@ STEPS=(
     './scripts/tests/terminal-scalar-append-lint_test.sh'
     './scripts/tests/terminal-benchmark-draw-path-lint_test.sh'
     './scripts/tests/usage-single-source-lint_test.sh'
+    './scripts/tests/agents-md-budget-lint_test.sh'
     'python3 ./scripts/tests/terminal_benchmark_workloads_test.py'
     'python3 ./scripts/tests/terminal_benchmark_plan_calibration_test.py'
     'python3 ./scripts/tests/terminal_benchmark_candidate_screen_test.py'

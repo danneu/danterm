@@ -45,4 +45,14 @@ if "$LINT" "$TMP/controller-bypass" >/dev/null 2>&1; then
     fail "a second controller production-fence entry should fail"
 fi
 
+# A rule violation has to explain the rule. "expected one, found two" alone reads as
+# an arbitrary count, and the cheapest way to satisfy it is to delete the wrong call.
+message="$("$LINT" "$TMP/second-sync" 2>&1 || true)"
+for expected in "accounting choke points" "performAccountedFence"; do
+    case "$message" in
+        *"$expected"*) ;;
+        *) fail "the violation message should explain '$expected': $message" ;;
+    esac
+done
+
 echo "terminal fence accounting lint self-test passed"

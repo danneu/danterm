@@ -3,6 +3,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/lint-rationale.sh
+source "$SCRIPT_DIR/lib/lint-rationale.sh"
+
 ROOT="${1:-$SCRIPT_DIR/..}"
 HOST="$ROOT/lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift"
 CONTROLLER="$ROOT/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalPaneSession.swift"
@@ -12,13 +15,40 @@ if [[ -d "$ROOT/app" ]]; then
     CALLER_ROOTS+=("$ROOT/app")
 fi
 
-fail() {
+# For a source file this lint cannot read. The rule's rationale would only mislead
+# here: nothing was checked, so nothing was violated.
+setup_fail() {
     echo "terminal-fence-accounting-lint: $1" >&2
+    echo "  this lint checked nothing. Point it at the moved file or update the path here." >&2
     exit 1
 }
 
-[[ -f "$HOST" ]] || fail "missing host source: $HOST"
-[[ -f "$CONTROLLER" ]] || fail "missing controller source: $CONTROLLER"
+fail() {
+    echo "terminal-fence-accounting-lint: $1" >&2
+    lint_rationale <<'EOF'
+terminal-fence-accounting lint FAILED: the production owner-queue fence
+no longer runs through its two accounting choke points.
+
+Every synchronous fence a pane takes on the host's owner queue is
+counted, and the controller's own total has to equal the host's
+independent census. That equality is the only thing that can prove no
+fence escaped: a second entry point, or a counted path that stops being
+counted, makes the two numbers disagree for a reason no test can name.
+So the shape is pinned rather than the behavior -- one counted path in
+the host, one performProductionFence call in the controller, and that
+call inside performAccountedFence where the timing is charged.
+
+If you need a new fence, route it through performAccountedFence and give
+it an operation value that carries its payload type. Do not add a second
+call site, and do not reach past the choke point for one of the host's
+fencedSnapshot / fencedFrameState / beginCloseAndSnapshot entry points --
+those are the bypass this lint exists to catch.
+EOF
+    exit 1
+}
+
+[[ -f "$HOST" ]] || setup_fail "missing host source: $HOST"
+[[ -f "$CONTROLLER" ]] || setup_fail "missing controller source: $CONTROLLER"
 
 sync_count="$(rg -c '^[[:space:]]*queue\.sync[[:space:]]*\{' "$HOST" || true)"
 [[ "$sync_count" == "1" ]] \

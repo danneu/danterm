@@ -107,4 +107,21 @@ if "$LINT" "$TMP/no-suite" >/dev/null 2>&1; then
     fail "a missing host suite should fail"
 fi
 
+# A rule violation has to explain the rule and where it is written down.
+write_host
+printf 'var spawnReportDelay: Double?\n' >> "$host_dir/TerminalPTYHost.swift"
+message="$("$LINT" "$TMP/allowed" 2>&1 || true)"
+for expected in "test-seam-rule" "test-only surface"; do
+    case "$message" in
+        *"$expected"*) ;;
+        *) fail "the violation message should explain '$expected': $message" ;;
+    esac
+done
+
+# A path the lint cannot read is not a violation of the rule, so it must not print the
+# rule's rationale -- nothing was checked.
+case "$("$LINT" "$TMP/no-suite" 2>&1 || true)" in
+    *"test-only surface"*) fail "an unreadable path should not print the rule rationale" ;;
+esac
+
 echo "TerminalPTY host test-seam lint self-test passed"

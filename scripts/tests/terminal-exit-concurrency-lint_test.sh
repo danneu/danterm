@@ -28,4 +28,16 @@ do
     fi
 done
 
+# The violation has to explain what a suspension point costs on this path. A bare
+# "concurrency bridge found" reads as a style rule, and the obvious way to satisfy a
+# style rule is to move the Task one call up.
+printf 'Task { @MainActor in }\n' > "$TMP/denied/Adapter.swift"
+message="$("$LINT" "$TMP/denied" 2>&1 || true)"
+for expected in "recovery fence" "Dispatch boundary"; do
+    case "$message" in
+        *"$expected"*) ;;
+        *) fail "the violation message should explain '$expected': $message" ;;
+    esac
+done
+
 echo "terminal exit concurrency lint self-test passed"
