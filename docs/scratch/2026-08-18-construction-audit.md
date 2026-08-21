@@ -167,8 +167,8 @@ references are the requirement.
 | 3 | [BUG-13](#bug-13) | ESC c (RIS) | **pinned by a test** | Reset the saved-cursor slot on RIS |
 | 3 | [BUG-14](#bug-14) | ESC # 8 (DECALN) | **done** `7b5d10f0` | Clear the character rendition on DECALN, keeping only the colours |
 | 3 | [BUG-15](#bug-15) | CSI Pm m (SGR) with more than 24 parameters  | **done** `c9f2f6a5` | Truncate an over-long CSI parameter list instead of discarding the whole sequence |
-| 3 | [BUG-16](#bug-16) | DECSC / DECRC (ESC 7 / ESC 8), and the impli | **pinned by a test** | Carry the saved cursor through width reflow instead of only clamping it |
-| 3 | [BUG-17](#bug-17) | DECSC / DECRC (ESC 7 / ESC 8) across a row-c | unpinned | Displace the saved cursor by the same row delta as the live cursor on a height shrink |
+| 3 | [BUG-16](#bug-16) | DECSC / DECRC (ESC 7 / ESC 8), and the impli | **done** `e94488ec` | Carry the saved cursor through width reflow instead of only clamping it |
+| 3 | [BUG-17](#bug-17) | DECSC / DECRC (ESC 7 / ESC 8) across a row-c | **done** `e94488ec` | Displace the saved cursor by the same row delta as the live cursor on a height shrink |
 | 3 | [BUG-18](#bug-18) | printing a narrow or wide character over one | unpinned | Paint the vacated half of a wide pair with a background, not the default style |
 | 3 | [BUG-19](#bug-19) | DECAWM off (CSI ? 7 l) followed by a double- | **pinned by a test** | Leave the cursor at the last column after a wide char printed there with DECAWM off |
 | 3 | [BUG-20](#bug-20) | IRM on (CSI 4 h) followed by a double-width  | unpinned | Stop insert mode from erasing the wrap spacer a wide character just wrote |
@@ -612,6 +612,19 @@ either. Truncation is DanTerm's own policy, argued in the commit's plan.
 
 `DECSC / DECRC (ESC 7 / ESC 8), and the implicit save in CSI ?1049h / CSI ?1048h, across a width change` &middot; severity 3 (observable, narrow) &middot; hunter confidence 4 &middot; **pinned by a deliberate test**
 
+**Done** in `e94488ec`, together with [BUG-17](#bug-17) -- the two are the same
+defect on the two resize axes, and one tracking serves both. The saved cursor
+is no longer clamped into the new rectangle. A resize now runs in two stages:
+the live cursor alone decides the new layout (the row delta, and which trailing
+blank rows are trimmed or kept), and the saved cursor is then mapped through
+that completed transformation -- displaced by the same row delta on a height
+change, or reflowed through the same attachment code path on a width change,
+with its pending-wrap flag re-derived. `#reconstructLogicalLines` now takes a
+list of tracked cursors and resolves each through a shared `reflowDestination`,
+so both cursors cannot take different paths. A saved row that leaves the active
+area takes the live cursor's off-screen policy, and a saved position on a
+never-written blank row keeps its offset below the content.
+
 **Problem.** A width change reflows the live grid, but the saved-cursor slot is not one of the anchors the reflow follows. `Terminal.swift#capturedAnchorAddresses` captures selection start/end, search position, hover start/end, arm start/end, and the browsing top -- the saved cursor is absent. After the rebuild, `#clampScreenCursorState` only clamps `screen.savedCursor.position` into the new rectangle. So a saved position keeps its old row and column while the text under it has moved, and DECRC restores onto different characters.
 
 **What DanTerm does.** `Terminal.swift#resizeWidth` rebuilds every live row through `#reconstructLogicalLines` and `#pack`, restating the captured anchors via `#restateAnchors`. `Terminal.swift#capturedAnchorAddresses` never captures `screen.savedCursor.position`, and `Terminal.swift#clampScreenCursorState` applies only `clampPosition(&screen.savedCursor.position, in: screen.rows)`. The saved slot therefore survives a reflow as a raw row/column pair.
@@ -620,7 +633,7 @@ either. Truncation is DanTerm's own policy, argued in the commit's plan.
 
 **Who notices.** Any full-screen application entered with CSI ?1049h -- vim, less, htop, fzf -- while the window is narrowed during the session. The implicit save happens on entry against the shell's primary screen; the primary reflows during the resize; on CSI ?1049l the restore puts the cursor at the pre-reflow row and column. The shell then draws its next prompt over existing output or leaves a gap, and the scrollback keeps the damage.
 
-**Existing test.** `lib/TerminalCore/Tests/TerminalCoreTests/TerminalSavedCursorTests.swift#restoreClampAndPendingTripleGate` currently encodes the clamped value: after `resize(columns: 4, rows: 6)` it expects `TerminalCursor(row: 4, column: 3, isPendingWrap: true)`, where the reflowed answer is row 5. `lib/TerminalCore/Tests/TerminalCoreTests/TerminalAlternateScreenTests.swift#inactiveScreenResizeClampsSavedCursors` likewise expects `(row: 0, column: 3)` after a 5-to-4 column shrink that pushes the wide glyph onto the next row. Neither test's stated intent is about reflow fidelity -- one is about restore-time clamping, the other about which grid gets resized -- and no design doc states a decision, so I read these as incidental rather than deliberate. A fix has to update both expectations.
+**Existing test.** (As of the fix: both expectations named here were rewritten in `e94488ec`, and a new `TerminalSavedCursorResizeTests.swift` suite pins the behavior.) `lib/TerminalCore/Tests/TerminalCoreTests/TerminalSavedCursorTests.swift#restoreClampAndPendingTripleGate` encoded the clamped value: after `resize(columns: 4, rows: 6)` it expected `TerminalCursor(row: 4, column: 3, isPendingWrap: true)`, where the reflowed answer is row 5. `lib/TerminalCore/Tests/TerminalCoreTests/TerminalAlternateScreenTests.swift#inactiveScreenResizeClampsSavedCursors` likewise expected `(row: 0, column: 3)` after a 5-to-4 column shrink that pushes the wide glyph onto the next row. Neither test's stated intent was about reflow fidelity -- one is about restore-time clamping, the other about which grid gets resized -- and no design doc stated a decision, so I read these as incidental rather than deliberate. A fix has to update both expectations.
 
 **Probe (run, not predicted).**
 
@@ -637,6 +650,10 @@ either. Truncation is DanTerm's own policy, argued in the commit's plan.
 
 `DECSC / DECRC (ESC 7 / ESC 8) across a row-count shrink that pushes rows into scrollback` &middot; severity 3 (observable, narrow) &middot; hunter confidence 4
 
+**Done** in `e94488ec`, the same commit as [BUG-16](#bug-16): the shrink and
+grow branches of `#resizeHeight` now displace the saved cursor by the same row
+delta they apply to the live cursor. See BUG-16 for the shape of the fix.
+
 **Problem.** When rows shrink, `#resizeHeight` moves the top rows into scrollback and subtracts `displacedCount` from the live cursor's row, so the live cursor stays on its own text. The saved cursor gets no such subtraction -- it is only clamped at the end. The two cursors therefore move by different amounts, and a DECRC after the shrink lands on text that is `displacedCount` rows away from what was saved.
 
 **What DanTerm does.** `Terminal.swift#resizeHeight` shrink branch does `screen.rows.removeFirst(displacedCount)` and then `screen.cursor.row -= displacedCount`, touching only `screen.cursor`. `screen.savedCursor.position` is left alone until `Terminal.swift#clampScreenCursorState` clamps it with `min(max(row, 0), rowCount - 1)`. Nothing subtracts the displacement.
@@ -645,7 +662,7 @@ either. Truncation is DanTerm's own policy, argued in the commit's plan.
 
 **Who notices.** A shell or TUI that holds a DECSC across a window shrink. The common path is CSI ?1049h: the primary cursor is saved on entry, the user drags the window shorter while the alternate-screen program runs, and CSI ?1049l restores the shell's cursor several rows below where its prompt actually sits. The shell then overwrites live output.
 
-**Existing test.** none found. `TerminalSavedCursorTests.swift#restoreClampAndPendingTripleGate` resizes only the width (6x6 then 4x6), and `TerminalAlternateScreenTests.swift#inactiveScreenResizeClampsSavedCursors` also changes only columns (5 to 4 at a fixed 3 rows). I grepped every `resize(` call site under `lib/TerminalCore/Tests/TerminalCoreTests/` and found no test that shrinks rows with a live saved cursor.
+**Existing test.** none found at audit time; `e94488ec` added one. `TerminalSavedCursorTests.swift#restoreClampAndPendingTripleGate` resized only the width (6x6 then 4x6), and `TerminalAlternateScreenTests.swift#inactiveScreenResizeClampsSavedCursors` also changed only columns (5 to 4 at a fixed 3 rows). I grepped every `resize(` call site under `lib/TerminalCore/Tests/TerminalCoreTests/` and found no test that shrinks rows with a live saved cursor. `TerminalSavedCursorResizeTests.swift` now covers the row shrink, the grow-back, and the off-screen and blank-row fallbacks.
 
 **Probe (run, not predicted).**
 
