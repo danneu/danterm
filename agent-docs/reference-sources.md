@@ -131,3 +131,34 @@ counting ported tests -- the manifest's `method` field states it.
 Don't guess at API signatures, delegate protocols, enum cases, or framework
 behavior. Check the local sources above first; if they're insufficient, search
 online and read official docs before writing code.
+
+## Citing a reference tree
+
+Cite refetchable source trees as `file#identifier`, never `file:line`; use the
+nearest enclosing named identifier when the point itself is unnamed. This form
+is for external trees under `references/`. DanTerm's own documents use the forms
+in [citing-docs.md](citing-docs.md).
+
+## How much weight source carries
+
+Rules for how much weight source carries, and how you turn a probe into a
+finding:
+
+- **Source picks the probe; it does not replace running one.** A shell's
+  behavior is established by a real binary in a real PTY, and a terminal's by
+  feeding bytes to `TerminalCore.Terminal`. Reading the code tells you which
+  experiment to run.
+- **Reproduce from bytes, not from the GUI.** When an application misbehaves in
+  a pane, capture its byte stream and replay it into `TerminalCore` headlessly:
+  `danterm pane tape` for anything reproducible live, or a `pty.fork()` harness
+  when the stimulus is one the GUI cannot issue -- a synthetic `SIGWINCH`, a
+  specific `TIOCSWINSZ` geometry. Mark the byte offset of the stimulus so the
+  capture splits into before and after halves, then confirm the cause by
+  ablation: strip one sequence from the replay and show the symptom disappears.
+  A cause you have not ablated is a hypothesis.
+- **References are input, not authority.** On compatibility -- what a sequence
+  does, what a shell emits -- match them; that's the requirement. On design --
+  data model, where state lives, API shape -- they are only ideas: take the edge
+  cases they found, then build the simplest ideal solution for DanTerm. Their
+  structure encodes their history, not our constraints. "Ghostty does X" is not
+  a rationale.
