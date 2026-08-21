@@ -184,7 +184,7 @@ references are the requirement.
 | 3 | [BUG-19](#bug-19) | DECAWM off (CSI ? 7 l) followed by a double- | **pinned by a test** | Leave the cursor at the last column after a wide char printed there with DECAWM off |
 | 3 | [BUG-20](#bug-20) | IRM on (CSI 4 h) followed by a double-width  | **done** `25997f26` | Stop insert mode from erasing the wrap spacer a wide character just wrote |
 | 3 | [BUG-21](#bug-21) | CSI 0 K (EL 0) at column 0 of row 0, and CSI | **done** `bf8b6ea6` | Sever history's incoming wrap claim for every erase that blanks all of row 0, not just ED |
-| 2 | [BUG-22](#bug-22) | ESC Z (DECID, obsolete form of CSI c / DA1) | unpinned | Reply to ESC Z (DECID) with the primary device attributes string |
+| 2 | [BUG-22](#bug-22) | ESC Z (DECID, obsolete form of CSI c / DA1) | **done** `181b7b30` | Reply to ESC Z (DECID) with the primary device attributes string |
 | 2 | [BUG-23](#bug-23) | Legacy Escape key with the Alt modifier | **done** `9440fa34` | Prefix Alt+Escape with ESC in legacy mode |
 | 2 | [BUG-24](#bug-24) | ESC H (HTS) and CSI Ps g (TBC) | **done** `51609b1e` | Stop HTS and TBC from cancelling the pending-wrap flag |
 | 2 | [BUG-25](#bug-25) | CSI ? 2027 $ p (DECRQM for the grapheme-clus | unpinned | Report DECRQM ?2027 as permanently set instead of unrecognized |
@@ -788,6 +788,11 @@ delta they apply to the live cursor. See BUG-16 for the shape of the fix.
 ### BUG-22. Reply to ESC Z (DECID) with the primary device attributes string
 
 `ESC Z (DECID, obsolete form of CSI c / DA1)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 5
+
+**Done** in `181b7b30`. Exact DECID and both accepted DA1 spellings now use
+one primary device attributes responder. Behavioral tests pin their ordered
+reply, state purity, input split invariance, and rejection of an
+intermediate-bearing DECID form.
 
 **Problem.** ESC Z is a query that must produce a reply on the host channel. DanTerm parses it, hands it to the single-byte escape dispatcher, and drops it, so nothing is written to the reply channel. A program that writes ESC Z and blocks on the answer waits until its own timeout instead of getting an immediate identification.
 
