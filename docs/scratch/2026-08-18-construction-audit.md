@@ -1230,7 +1230,7 @@ rewrites.
 - [x] **[UNI-2](#uni-2)** (4x4, large) Derive the bulk-print run predicate from the scalar record instead of from a printable-ASCII byte range _(after [UNI-1](#uni-1))_
 - [x] **[CHROME-2](#chrome-2)** (3x5, small) Make the confirmation projection carry each button's answer instead of inferring it from button visibility -- `55f4eb4d` + `ae7c437c`
 - [ ] **[IOS-1](#ios-1)** (3x5, small) Let the replica report pinnedness instead of re-decoding tape JSON in the session model
-- [ ] **[PERSIST-1](#persist-1)** (3x5, small) Decide crash recovery from the lock file's existence, not from decoding it
+- [x] **[PERSIST-1](#persist-1)** (3x5, small) Decide crash recovery from the lock file's existence, not from decoding it -- `1706f20b`
 - [x] **[PTY-4](#pty-4)** (3x5, small) Read the PTY through one loop instead of one per drain reason _(after [XPORT-1](#xport-1))_ -- `7448dd16`
 - [x] **[RECON-1](#recon-1)** (3x5, small) Make container visibility a diffed field of ContainerShape instead of an unconditional per-tab op _(after [MODEL-3](#model-3))_ -- `075ac8a6`
 - [ ] **[REDUCE-2](#reduce-2)** (3x5, small) Let .startSearch open the pane's search state directly instead of round-tripping through the view
@@ -4122,6 +4122,23 @@ _Scope: Persistence, recovery, and the portable side-effect layer (lib/DanTermCo
 ##### PERSIST-1. Decide crash recovery from the lock file's existence, not from decoding it
 
 `correctness` &middot; impact 3, confidence 5 &middot; effort small &middot; wave 2 &middot; rescored
+
+**Done** in `1706f20b`, which carries the plan under `plans/impl/`. The fix is
+wider than this item asked for, in two ways the review found while planning it.
+First, a boolean existence query still collapses "confirmed absent" and "lookup
+failed", so an unreadable recovery directory could hold a lock and still report
+a clean exit -- the same contents-independent misclassification under a new
+name. Clean therefore means absence was confirmed; any other lookup failure
+reports crashed. Second, the write was the deeper defect. It sat in
+`applicationDidFinishLaunching` after the runtime, the window, and the view tree
+were built, so after a clean exit a crash anywhere earlier in launch left no
+lock at all and the next launch called it clean. The lock read and the lock
+claim are now one handshake in `app/SessionLockHandshake.swift`, taking only the
+resolved `DanTermInstancePaths` and running as launch's first fallible step --
+before the `--init` file is read, before checkpoints load. That split the
+checkpoint load out of `app/LaunchRecovery.swift`, which is now
+`loadLaunchCheckpoints`. Both halves are unconditional: `--fresh` and `--init`
+suppress the restore prompt, they no longer suppress the claim.
 
 **Files.** `lib/DanTermSupport/Sources/DanTermSupport/RecoveryStore.swift#readSessionLockFile`, `lib/DanTermSupport/Sources/DanTermSupport/RecoveryStore.swift#writeSessionLockFile`, `app/main.swift`
 
