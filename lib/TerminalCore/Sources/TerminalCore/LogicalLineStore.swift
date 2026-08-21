@@ -689,7 +689,7 @@ extension Terminal {
         /// The row's measurement rule is `reconstructLogicalLines`': a soft-wrapped row is
         /// measured to full width and a hard-ended row to its content end (`research/31/F4` case 17).
         /// "Soft-wrapped" here is `logicallyContinues`, not the raw claim: a claim whose margin
-        /// an erase blanked (`GridRow.marginErased`) measures as a hard end, or the erased
+        /// an erase blanked (`GridRow.marginProvenance`) measures as a hard end, or the erased
         /// leftovers would be admitted as line content and fuse separately printed lines.
         /// and the `.spacerHead` a wrap left in the last column is dropped, because where a
         /// spacer sits is a function of the width and `31/I1` forbids storing one. A hard-ended

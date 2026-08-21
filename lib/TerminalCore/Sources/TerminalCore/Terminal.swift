@@ -214,34 +214,41 @@ public struct Terminal: Equatable, Sendable {
         var contentIdentity: ContentIdentity?
     }
 
+    /// Records which operation last wrote a row's final column when cell shape alone cannot
+    /// decide whether a surviving wrap claim still has line-structure meaning.
+    enum MarginProvenance: Equatable, Sendable {
+        case content
+        case erase
+    }
+
     /// Moves row-level wrap and semantic-prompt identity with cells during scrolling.
     struct GridRow: Equatable, Sendable {
         var cells: [GridCell]
         var isSoftWrapped = false
 
-        /// True while an erase is the last writer of this row's final column. `isSoftWrapped`
-        /// is the printer's *claim* that the row continues, and EL 1/2 deliberately leave it
-        /// standing over blanked cells (xterm parity, `eraseLine`); this bit records that the
-        /// claim's evidence was erased, so `logicallyContinues` can decline it until a print
-        /// reaches the margin again. Cell provenance, not cell shape: a reflow-folded row
-        /// whose interior blank lands on the margin holds identical cells but genuinely
-        /// continues, which is why the readers cannot re-derive this from the grid.
-        var marginErased = false
+        /// The last writer of this row's final column. `isSoftWrapped` is the printer's
+        /// *claim* that the row continues, and EL 1/2 deliberately leave it standing over
+        /// blanked cells (xterm parity, `eraseLine`); erase provenance records that the claim's
+        /// evidence was erased, so `logicallyContinues` can decline it until a print reaches
+        /// the margin again. Cell provenance, not cell shape: a reflow-folded row whose
+        /// interior blank lands on the margin holds identical cells but genuinely continues,
+        /// which is why the readers cannot re-derive this from the grid.
+        var marginProvenance = MarginProvenance.content
 
         /// The wrap claim gated by its evidence: what every line-structure reader --
         /// admission, reflow, the text projections -- consumes in place of `isSoftWrapped`.
         /// The raw claim stays untouched for xterm parity and stays visible through
         /// `geometry`; this is the only meaning it has anywhere else.
-        var logicallyContinues: Bool { isSoftWrapped && marginErased == false }
+        var logicallyContinues: Bool { isSoftWrapped && marginProvenance != .erase }
 
         /// The row as the projection stream carries it: the claim collapsed to its gated
         /// value, so every walk over a stream reads line structure without knowing about
         /// the transient.
         var withGatedContinuation: GridRow {
-            guard isSoftWrapped, marginErased else { return self }
+            guard isSoftWrapped, marginProvenance == .erase else { return self }
             var row = self
             row.isSoftWrapped = false
-            row.marginErased = false
+            row.marginProvenance = .content
             return row
         }
 
@@ -1439,7 +1446,7 @@ public struct Terminal: Equatable, Sendable {
             case .vacated: "vacated"
             }
             let wrap = row.isSoftWrapped
-                ? (row.marginErased ? "stale" : "soft")
+                ? (row.marginProvenance == .erase ? "stale" : "soft")
                 : "hard"
             append("\u{1B}]133;S;mark=\(mark);wrap=\(wrap)\u{7}")
         }
@@ -2020,13 +2027,13 @@ public struct Terminal: Equatable, Sendable {
             switch wrap {
             case "hard":
                 screen.rows[screen.cursor.row].isSoftWrapped = false
-                screen.rows[screen.cursor.row].marginErased = false
+                screen.rows[screen.cursor.row].marginProvenance = .content
             case "soft":
                 screen.rows[screen.cursor.row].isSoftWrapped = true
-                screen.rows[screen.cursor.row].marginErased = false
+                screen.rows[screen.cursor.row].marginProvenance = .content
             case "stale":
                 screen.rows[screen.cursor.row].isSoftWrapped = true
-                screen.rows[screen.cursor.row].marginErased = true
+                screen.rows[screen.cursor.row].marginProvenance = .erase
             default:
                 break
             }
@@ -3152,7 +3159,7 @@ public struct Terminal: Equatable, Sendable {
                 contentEnd: Self.retainedContentEnd(in: row),
                 width: columnCount,
                 marginCellKind: row.cell(at: columnCount - 1).kind,
-                staleWrapClaim: row.isSoftWrapped && row.marginErased
+                staleWrapClaim: row.isSoftWrapped && row.marginProvenance == .erase
             ))
         }
         return result
@@ -4999,10 +5006,11 @@ public struct Terminal: Equatable, Sendable {
             }
         }
         // The margin cell's last writer is now an erase, so a surviving wrap claim on this
-        // row is unwitnessed until a print reaches the margin again (`GridRow.marginErased`).
+        // row is unwitnessed until a print reaches the margin again
+        // (`GridRow.marginProvenance`).
         // A protected margin cell was not erased, so it does not withdraw the claim.
         if upper == columnCount, survivors?[columnCount - 1 - lower] != true {
-            screen.rows[row].marginErased = true
+            screen.rows[row].marginProvenance = .erase
         }
         // Loop-invariant: the repair is a no-op above column 1, so it runs once
         // for the range rather than once per erased cell. It is idempotent, so
@@ -6470,7 +6478,7 @@ public struct Terminal: Equatable, Sendable {
     /// Ghostty, kitty, and foot; tmux severs on EL 2 and is the lone outlier.
     /// Pinned by CSIEraseTests#eraseLineWrapAsymmetry. What keeps the surviving
     /// claim harmless is `eraseCells` recording the blanked margin
-    /// (`GridRow.marginErased`): the line-structure readers decline the claim
+    /// (`GridRow.marginProvenance`): the line-structure readers decline the claim
     /// until a print reaches the margin again, so the parity state cannot fuse
     /// separately printed lines (TerminalStaleWrapClaimTests).
     ///
@@ -7223,7 +7231,7 @@ public struct Terminal: Equatable, Sendable {
             retainedUTF8ByteCount: TerminalScalars.utf8ByteCount(of: lastScalar!)
         )
         if column + count == columnCount {
-            screen.rows[row].marginErased = false
+            screen.rows[row].marginProvenance = .content
             screen.cursor.column = columnCount - 1
             screen.isPendingWrap = modes.isAutoWrapMode
         } else {
@@ -7380,7 +7388,7 @@ public struct Terminal: Equatable, Sendable {
                     contentIdentity: contentIdentity
                 )
                 screen.rows[target.row].isSoftWrapped = true
-                screen.rows[target.row].marginErased = false
+                screen.rows[target.row].marginProvenance = .content
                 screen.cursor = target
                 let advanced = advanceToNextRow(preservingWrapClaim: true)
                 if advanced == false {
@@ -7444,7 +7452,7 @@ public struct Terminal: Equatable, Sendable {
             contentIdentity: contentIdentity
         )
         if destination.column + 2 == columnCount {
-            screen.rows[destination.row].marginErased = false
+            screen.rows[destination.row].marginProvenance = .content
         }
         advanceCursorPastWideCell(at: destination)
         return destination
@@ -7540,7 +7548,7 @@ public struct Terminal: Equatable, Sendable {
                     contentIdentity: contentIdentity
                 )
                 screen.rows[screen.cursor.row].isSoftWrapped = true
-                screen.rows[screen.cursor.row].marginErased = false
+                screen.rows[screen.cursor.row].marginProvenance = .content
                 let gap = screen.cursor
                 let advanced = advanceToNextRow(preservingWrapClaim: true)
                 if advanced == false {
@@ -7587,7 +7595,7 @@ public struct Terminal: Equatable, Sendable {
             contentIdentity: contentIdentity
         )
         if screen.cursor.column + 2 == columnCount {
-            screen.rows[screen.cursor.row].marginErased = false
+            screen.rows[screen.cursor.row].marginProvenance = .content
         }
         clusterContext = ClusterContext(
             target: screen.cursor,

@@ -703,9 +703,9 @@ struct CSIEraseTests {
 
     @Test("a wrap claim whose margin cell a selective erase spared still names real content")
     func selectiveEraseKeepsTheWrapClaimWhoseMarginSurvived() throws {
-        // Intent: `GridRow.marginErased` records what was blanked, so a protected margin cell
-        //   surviving DECSEL 2 leaves the row's claim witnessed and the line stays fused; the
-        //   bare EL 2 blanks the margin and the readers split the line.
+        // Intent: `GridRow.marginProvenance` records the margin's last writer, so a protected
+        //   margin cell surviving DECSEL 2 leaves the row's claim witnessed and the line stays
+        //   fused; the bare EL 2 blanks the margin and the readers split the line.
         // Why it exists: the stale-claim gate exists because an erased margin no longer names
         //   content. A selective erase that spared the margin has not destroyed anything, so
         //   wiring the flag to the sequence rather than to the blanking would split a line that

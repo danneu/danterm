@@ -131,7 +131,8 @@ public struct TerminalRowStructure: Equatable, Sendable {
     /// nothing at that column.
     public let marginCellKind: TerminalCellKind
 
-    /// True while the row carries a wrap claim an erase left unwitnessed (`GridRow.marginErased`):
+    /// True while the row carries a wrap claim an erase left unwitnessed
+    /// (`GridRow.marginProvenance`):
     /// the xterm-parity transient EL 1/2 create. Such a claim has no line-structure meaning --
     /// `isSoftWrapped` here already reports the gated value -- but the transient itself is what
     /// this projection exists to make visible. Always false on retained rows, whose wrap facts
