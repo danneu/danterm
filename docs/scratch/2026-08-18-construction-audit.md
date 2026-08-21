@@ -188,7 +188,7 @@ references are the requirement.
 | 2 | [BUG-23](#bug-23) | Legacy Escape key with the Alt modifier | **done** `9440fa34` | Prefix Alt+Escape with ESC in legacy mode |
 | 2 | [BUG-24](#bug-24) | ESC H (HTS) and CSI Ps g (TBC) | **done** `51609b1e` | Stop HTS and TBC from cancelling the pending-wrap flag |
 | 2 | [BUG-25](#bug-25) | CSI ? 2027 $ p (DECRQM for the grapheme-clus | unpinned | Report DECRQM ?2027 as permanently set instead of unrecognized |
-| 2 | [BUG-26](#bug-26) | A C1 control as a UTF-8 code point, e.g. U+0 | unpinned | Stop printing a cell for C1 code points decoded from UTF-8 |
+| 2 | [BUG-26](#bug-26) | A C1 control as a UTF-8 code point, e.g. U+0 | **done** `75d3ec33` | Stop printing a cell for C1 code points decoded from UTF-8 |
 | 2 | [BUG-27](#bug-27) | CSI ? 7 h / CSI ? 7 l (DECAWM), CSI 4 h / CS | **done** `51609b1e` | Stop clearing the pending-wrap flag when a mode is set or reset |
 | 2 | [BUG-28](#bug-28) | Keypad Enter with kitty keyboard flag 1 (dis | **done** `bf3e3841` | Report unmodified keypad Enter as CSI 57414u under the kitty keyboard protocol |
 | 2 | [BUG-29](#bug-29) | OSC 10 ; ? ; ? ST (multi-parameter dynamic c | **pinned by a test** | Answer every ? in a dynamic colour request, advancing the colour index per parameter |
@@ -893,6 +893,11 @@ grapheme continuation behavior.
 ### BUG-26. Stop printing a cell for C1 code points decoded from UTF-8
 
 `A C1 control as a UTF-8 code point, e.g. U+0092 encoded as C2 92, in ground state` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4
+
+**Done** in `75d3ec33`. Ground state now consumes decoded U+0080..U+009F
+scalars without emitting an action. Regression tests cover every C1 scalar,
+chunk boundaries, adjacent text, pending wrap, damage, raw bytes, and control
+string payloads.
 
 **Problem.** When the stream decoder yields a scalar in U+0080..U+009F, DanTerm treats it as ordinary printable text. The generated width table only marks Mn/Me/Cf as zero width, so category Cc falls through to the default narrow width and the scalar takes a whole cell. Every subsequent character on that row is shifted one column right, and the cell itself renders as a missing glyph.
 
