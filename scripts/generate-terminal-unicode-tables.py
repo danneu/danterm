@@ -453,7 +453,7 @@ def canonical_caseless_records(
 
 
 def canonical_caseless_source(
-    packed: PackedClassificationTables,
+    packed: PackedRecordTables,
     decomposition_pool: ScalarPool,
     fold_pool: ScalarPool,
 ) -> str:
@@ -612,6 +612,12 @@ private enum CanonicalCombiningClassReferenceTables {{
 # and the folded grapheme class. Distinct values of this tuple form the palette.
 ClassificationRecord = tuple[int, bool, bool, bool, int]
 
+# Either record kind the two-stage packer accepts. The packer never reads a
+# field, so the only thing it needs from a record is that equal records compare
+# equal and hash alike; naming the union keeps its annotations honest now that
+# the search path's record packs through the same function as the feed path's.
+PackedRecord = ClassificationRecord | CanonicalCaselessRecord
+
 ELEMENT_BYTES = {"UInt8": 1, "UInt16": 2}
 
 
@@ -628,7 +634,7 @@ def index_element_type(largest: int, what: str) -> str:
     raise RuntimeError(f"packed Unicode table {what} {largest} exceeds UInt16")
 
 
-class PackedClassificationTables:
+class PackedRecordTables:
     """The whole emitted layout: a record palette behind two index stages.
 
     The block shift and the two index element types live here and nowhere else,
@@ -638,7 +644,7 @@ class PackedClassificationTables:
 
     def __init__(
         self,
-        palette: list[ClassificationRecord],
+        palette: list[PackedRecord],
         stage_one: list[int],
         stage_two: list[int],
         shift: int,
@@ -693,9 +699,9 @@ def classification_records(
     ]
 
 
-def packed_classification_tables(
-    records: list[ClassificationRecord],
-) -> PackedClassificationTables:
+def packed_record_tables(
+    records: list[PackedRecord],
+) -> PackedRecordTables:
     """Packs the records into the smallest two-stage layout over the shift range.
 
     Scalars share far fewer distinct records than there are scalars, so the
@@ -704,8 +710,8 @@ def packed_classification_tables(
     both the feed path's classification and the search path's canonical-caseless
     record pack through this one function.
     """
-    palette: list[ClassificationRecord] = []
-    palette_indexes: dict[ClassificationRecord, int] = {}
+    palette: list[PackedRecord] = []
+    palette_indexes: dict[PackedRecord, int] = {}
     indexed: list[int] = []
     for record in records:
         index = palette_indexes.get(record)
@@ -718,7 +724,7 @@ def packed_classification_tables(
     # rather than surfacing as "no shift fits" once the search comes up empty.
     index_element_type(len(palette) - 1, "palette index")
 
-    smallest: PackedClassificationTables | None = None
+    smallest: PackedRecordTables | None = None
     for shift in range(4, 13):
         block_size = 1 << shift
         stage_one: list[int] = []
@@ -738,7 +744,7 @@ def packed_classification_tables(
             # Too many distinct blocks to index at this shift alone; a smaller
             # block dedupes better, so keep searching rather than failing.
             continue
-        candidate = PackedClassificationTables(palette, stage_one, stage_two, shift)
+        candidate = PackedRecordTables(palette, stage_one, stage_two, shift)
         if smallest is None or candidate.byte_size < smallest.byte_size:
             smallest = candidate
     if smallest is None:
@@ -770,7 +776,7 @@ def palette_array(palette: list[ClassificationRecord]) -> str:
     return "\n".join(lines)
 
 
-def production_source(packed: PackedClassificationTables) -> str:
+def production_source(packed: PackedRecordTables) -> str:
     hashes = ", ".join(
         f"{name} {FILES[name][1]}"
         for name in (
@@ -1095,7 +1101,7 @@ def main() -> None:
         parse_incb_ranges(data["DerivedCoreProperties.txt"]),
         pictographic,
     )
-    packed = packed_classification_tables(
+    packed = packed_record_tables(
         classification_records(
             zero_width,
             wide,
@@ -1164,7 +1170,7 @@ def main() -> None:
     )
     canonical_caseless.write_text(
         canonical_caseless_source(
-            packed_classification_tables(caseless_records),
+            packed_record_tables(caseless_records),
             decomposition_pool,
             fold_pool,
         ),
