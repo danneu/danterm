@@ -1324,7 +1324,7 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [x] **[RUNTIME-4](#runtime-4)** (3x5, medium) Give each armed timer one owner instead of a handle field plus a token field -- `d9c8c4cb..35cfb61c`
 - [x] **[UNI-4](#uni-4)** (3x5, medium) Let the canonical-caseless tables answer "this scalar is unaffected" without a binary search or an allocation -- `041d4f23`
 - [x] **[XPORT-3](#xport-3)** (3x5, medium) Give pending-input spans absolute byte coordinates so a partial write never rewrites the queue -- `86e5a0ec`
-- [ ] **[IOS-2](#ios-2)** (3x4, medium) Make an authorized attempt carry its target so a Go tap can never be dropped against a stale one
+- [x] **[IOS-2](#ios-2)** (3x4, medium) Make an authorized attempt carry its target so a Go tap can never be dropped against a stale one -- `b6e331d1`
 - [x] **[REDUCE-3](#reduce-3)** (3x4, medium) Repair the focused pane's alerts in one pass instead of copying the rule into nine arms **[decide first](#decisions-to-make-first)**
 - [x] **[CHROME-4](#chrome-4)** (2x5, small) Build the preferences grid from declared rows so warning rows and padding stop being addressed by literal index -- `8f0f10a4`
 - [x] **[DRAW-3](#draw-3)** (2x5, small) Lower RenderColor straight into the context as components, deleting both the per-run CGColor allocation and the memo dictionary -- `242fba44`
@@ -5598,6 +5598,11 @@ _Scope: The iOS client (ios/DanTermMobileKit/Sources, ios/DanTermMobileApp)_
 `correctness` &middot; impact 3, confidence 4 &middot; effort medium &middot; wave 4 &middot; rewritten
 
 **Files.** `ios/DanTermMobileKit/Sources/DanTermMobileKit/MobileReconnectPolicy.swift#handle`, `ios/DanTermMobileKit/Sources/DanTermMobileKit/MobileSessionModel.swift#startAttempt`, `ios/DanTermMobileKit/Sources/DanTermMobileKit/MobileSessionModel.swift#connect`, `ios/DanTermMobileKit/Tests/DanTermMobileKitTests/ReconnectPolicyTests.swift#oneAttemptAtATime`
+
+**Done** in `b6e331d1`. `MobileReconnectEpisode` now owns the target for
+the episode, and each attempt authorization carries that target into the model.
+A manual request replaces the in-flight attempt, whose late result stays fenced
+by the connection generation.
 
 **Problem.** The episode's target and the target the in-flight attempt actually dialed are owned separately and can disagree. `MobileConnectTarget.setTarget` retargets the episode on every Go gesture, but `MobileReconnectPolicy.handle(.userRequestedConnect)` answers `.rest` whenever an attempt is already in flight, so the model starts nothing and never tears the old attempt down. A user who taps Go, waits during a slow dial, edits the host, and taps Go again gets: the new host stored and remembered, no new attempt, and -- if the first dial eventually succeeds -- a connection to the host they just replaced, while the status line still reads the old target's wording. The same seam has a second face: `startAttempt` guards `guard let target = connectTarget.established else { return [] }`, so the policy can latch `attemptInFlight = true` for an attempt that was never started and whose outcome nothing will ever report; every later signal then answers `.rest`, including `userRequestedConnect`, which is a permanently unrecoverable session.
 
