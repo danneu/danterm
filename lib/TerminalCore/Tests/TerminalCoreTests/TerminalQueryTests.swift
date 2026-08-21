@@ -9,9 +9,15 @@ struct TerminalQueryTests {
     func primaryQueries() throws {
         var terminal = try #require(Terminal(columns: 8, rows: 4))
 
-        terminal.feed(Array("\u{1B}[c\u{1B}[0c\u{1B}[5n\u{1B}[?5n".utf8))
-        #expect(terminal.pendingReplyBytes == Array("\u{1B}[?1;2c\u{1B}[?1;2c\u{1B}[0n\u{1B}[?0n".utf8))
-        #expect(terminal.drainReplyBytes() == Array("\u{1B}[?1;2c\u{1B}[?1;2c\u{1B}[0n\u{1B}[?0n".utf8))
+        terminal.feed(Array("\u{1B}Z\u{1B}[c\u{1B}[0c\u{1B}[5n\u{1B}[?5n".utf8))
+        #expect(
+            terminal.pendingReplyBytes
+                == Array("\u{1B}[?1;2c\u{1B}[?1;2c\u{1B}[?1;2c\u{1B}[0n\u{1B}[?0n".utf8)
+        )
+        #expect(
+            terminal.drainReplyBytes()
+                == Array("\u{1B}[?1;2c\u{1B}[?1;2c\u{1B}[?1;2c\u{1B}[0n\u{1B}[?0n".utf8)
+        )
         #expect(terminal.pendingReplyBytes.isEmpty)
 
         terminal.feed(Array("\u{1B}[3;4H\u{1B}[6n\u{1B}[?6n".utf8))
@@ -185,6 +191,7 @@ struct TerminalQueryTests {
     @Test("malformed and unsupported query forms are bit-identical no-ops")
     func unsupportedQueriesAreSilent() throws {
         let queries = [
+            "\u{1B} Z",
             "\u{1B}[1c", "\u{1B}[>c", "\u{1B}[=c",
             "\u{1B}[4n", "\u{1B}[7n", "\u{1B}[?4n", "\u{1B}[?7n",
             "\u{1B}[$p", "\u{1B}[?6;7$p", "\u{1B}[>1q",
@@ -210,10 +217,10 @@ struct TerminalQueryTests {
         var pendingWrap = try #require(Terminal(columns: 3, rows: 2))
         pendingWrap.feed(Array("abc".utf8))
         let pendingWrapBefore = pendingWrap
-        pendingWrap.feed(Array("\u{1B}[5n\u{1B}[6n\u{1B}[?25$p".utf8))
+        pendingWrap.feed(Array("\u{1B}Z\u{1B}[5n\u{1B}[6n\u{1B}[?25$p".utf8))
         #expect(
             pendingWrap.drainReplyBytes()
-                == Array("\u{1B}[0n\u{1B}[1;3R\u{1B}[?25;1$y".utf8)
+                == Array("\u{1B}[?1;2c\u{1B}[0n\u{1B}[1;3R\u{1B}[?25;1$y".utf8)
         )
         #expect(pendingWrap == pendingWrapBefore)
         pendingWrap.feed(Array("Z".utf8))
@@ -222,10 +229,10 @@ struct TerminalQueryTests {
         var clustered = try #require(Terminal(columns: 3, rows: 2))
         clustered.feed(Array("e".utf8))
         let clusteredBefore = clustered
-        clustered.feed(Array("\u{1B}[5n\u{1B}[6n\u{1B}[?25$p".utf8))
+        clustered.feed(Array("\u{1B}Z\u{1B}[5n\u{1B}[6n\u{1B}[?25$p".utf8))
         #expect(
             clustered.drainReplyBytes()
-                == Array("\u{1B}[0n\u{1B}[1;2R\u{1B}[?25;1$y".utf8)
+                == Array("\u{1B}[?1;2c\u{1B}[0n\u{1B}[1;2R\u{1B}[?25;1$y".utf8)
         )
         #expect(clustered == clusteredBefore)
         clustered.feed(Array("\u{301}".utf8))
@@ -234,7 +241,7 @@ struct TerminalQueryTests {
 
     @Test("query replies are invariant across every split point")
     func queryChunkInvariance() throws {
-        let bytes = Array("\u{1B}[3;4H\u{1B}[6n\u{1B}[?2026h\u{1B}[?2026$p".utf8)
+        let bytes = Array("\u{1B}[3;4H\u{1B}Z\u{1B}[6n\u{1B}[?2026h\u{1B}[?2026$p".utf8)
         var authored = try #require(Terminal(columns: 8, rows: 4))
         authored.feed(bytes)
 

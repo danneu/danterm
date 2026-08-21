@@ -6334,7 +6334,7 @@ public struct Terminal: Equatable, Sendable {
             guard sequence.parameters.isEmpty
                       || (sequence.parameters.count == 1 && sequence.parameters.first == 0)
             else { return }
-            appendReply("\u{1B}[?1;2c")
+            replyToPrimaryDeviceAttributesQuery()
         case 0x6E:
             replyToStatusQuery(sequence.parameters, isDECPrivate: false)
         case 0x41, 0x6B:
@@ -6446,6 +6446,10 @@ public struct Terminal: Equatable, Sendable {
         default:
             break
         }
+    }
+
+    private mutating func replyToPrimaryDeviceAttributesQuery() {
+        appendReply("\u{1B}[?1;2c")
     }
 
     private mutating func replyToModeQuery(
@@ -7009,6 +7013,8 @@ public struct Terminal: Equatable, Sendable {
             charsets.pendingSingleShift = .g2
         case 0x4F:
             charsets.pendingSingleShift = .g3
+        case 0x5A:
+            replyToPrimaryDeviceAttributesQuery()
         default:
             break
         }
