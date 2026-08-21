@@ -857,6 +857,60 @@ struct IpcServerRemoteTests {
         #expect(startedIndex < completedIndex)
     }
 
+    @Test("remote group creation records launch authority without its title")
+    func remoteGroupCreationAuditsLaunchAuthority() async throws {
+        // Intent: both durable lifecycle records retain the launch authority exercised
+        //   by group.new, while the display-only title stays outside the audit log.
+        // Why it exists: group.new carried the same launch object as tab.new and
+        //   pane.split on the wire but was absent from the independent audit switch.
+        // Scenario: a phone creates a group whose first pane launches a command.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let ports = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(runtimeDispatch: runtime.makeIpcDispatch())
+        defer { server.stop() }
+
+        await server.start()
+        let remote = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { remote.close() }
+        _ = try await remote.readRequest()
+
+        try remote.writeRequest(
+            method: IpcRequestMethod.groupNew.rawValue,
+            id: .number(1),
+            params: .object([
+                "name": .string("remote"),
+                "background": .bool(false),
+                "launch": .object([
+                    "cmd": .string("ssh server"),
+                    "cwd": .string("/tmp/work"),
+                    "title": .string("private title"),
+                ]),
+            ])
+        )
+        let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
+        while ports.sessionRequests.isEmpty, ContinuousClock.now < deadline {
+            await Task.yield()
+        }
+        guard ports.sessionRequests.isEmpty == false else { throw POSIXError(.ETIMEDOUT) }
+        ports.session.onEvent?(.processStarted)
+        #expect(try await remote.readResponse().error == nil)
+
+        let records = try fixture.auditEntries().filter {
+            $0.event.request?.method == IpcRequestMethod.groupNew.rawValue
+        }
+        #expect(records.map(\.event.kind) == [.requestStarted, .requestCompleted])
+        #expect(records.allSatisfy { $0.event.request?.command == "ssh server" })
+        #expect(records.allSatisfy { $0.event.request?.cwd == "/tmp/work" })
+        let durableText = String(
+            decoding: try Data(contentsOf: fixture.auditWriter.logURL),
+            as: UTF8.self
+        )
+        #expect(durableText.contains("private title") == false)
+    }
+
     @Test("the app audit path records local, remote, malformed, dropped, and close events")
     func completeAuditSequence() async throws {
         let fixture = try RemoteIpcServerFixture()

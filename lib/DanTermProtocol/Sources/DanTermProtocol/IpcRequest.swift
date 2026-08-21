@@ -248,6 +248,63 @@ struct IpcRequestTargetEntry: Equatable, Sendable {
     var auditValue: String { id.uuidString.lowercased() }
 }
 
+/// Carries one trusted request's wire params and the facts admitted to its audit record.
+struct IpcRequestProjection: Sendable {
+    let params: [String: JSONValue]
+    let targetEntries: [IpcRequestTargetEntry]
+    let auditCommand: String?
+    let auditCwd: String?
+    let auditInput: IpcAuditInputAccounting?
+
+    init(
+        params: [String: JSONValue],
+        targetEntries: [IpcRequestTargetEntry] = [],
+        auditCommand: String? = nil,
+        auditCwd: String? = nil,
+        auditInput: IpcAuditInputAccounting? = nil
+    ) {
+        self.params = params
+        self.targetEntries = targetEntries
+        self.auditCommand = auditCommand
+        self.auditCwd = auditCwd
+        self.auditInput = auditInput
+    }
+
+    static func launch(
+        _ launch: LaunchSpec?,
+        background: Bool,
+        params additionalParams: [String: JSONValue],
+        targetEntries: [IpcRequestTargetEntry] = []
+    ) -> IpcRequestProjection {
+        var params = launchParams(launch, background: background)
+        params.merge(additionalParams) { _, new in new }
+        return IpcRequestProjection(
+            params: params,
+            targetEntries: targetEntries,
+            auditCommand: launch?.cmd,
+            auditCwd: launch?.cwd
+        )
+    }
+
+    static func input(_ input: IpcPaneInput, pane: PaneId) -> IpcRequestProjection {
+        let params: [String: JSONValue]
+        let accounting: IpcAuditInputAccounting
+        switch input {
+        case .text(let text):
+            params = ["text": .string(text)]
+            accounting = .textBytes(text.utf8.count)
+        case .events(let events):
+            params = ["input": .array(events.map(inputEventJSON))]
+            accounting = .eventCount(events.count)
+        }
+        return IpcRequestProjection(
+            params: params,
+            targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)],
+            auditInput: accounting
+        )
+    }
+}
+
 /// Reports the stable JSON-RPC error produced while decoding a request catalog case.
 public enum IpcRequestDecodeError: Error, Equatable, Sendable {
     /// Rejects methods outside the exhaustive request catalog.
@@ -400,127 +457,173 @@ public enum IpcRequest: Equatable, Sendable {
         }
     }
 
-    /// Owns the ordered id-bearing entries shared by wire encoding and audit records.
-    var targetEntries: [IpcRequestTargetEntry] {
+    /// Projects wire params and permitted audit facts through one exhaustive catalog.
+    var projection: IpcRequestProjection {
         switch self {
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus, .quit,
-             .groupNew:
-            return []
-        case .groupRename(let group, _), .groupClose(let group, _):
-            return [IpcRequestTargetEntry(key: "group", id: group)]
-        case .tabNew(let target, _, _):
+        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus, .quit:
+            return IpcRequestProjection(params: [:])
+        case .groupNew(let name, let launch, let background):
+            return .launch(
+                launch,
+                background: background,
+                params: ["name": .string(name)]
+            )
+        case .groupRename(let group, let name):
+            return IpcRequestProjection(
+                params: ["name": .string(name)],
+                targetEntries: [IpcRequestTargetEntry(key: "group", id: group)]
+            )
+        case .groupClose(let group, let moveTabs):
+            return IpcRequestProjection(
+                params: ["moveTabs": .bool(moveTabs)],
+                targetEntries: [IpcRequestTargetEntry(key: "group", id: group)]
+            )
+        case .tabNew(let target, let launch, let background):
             switch target {
-            case .group(let group, _):
-                return [IpcRequestTargetEntry(key: "group", id: group)]
+            case .group(let group, let position):
+                return .launch(
+                    launch,
+                    background: background,
+                    params: [
+                        "position": .string(
+                            position == .afterSelected ? "afterSelected" : "atGroupEnd"
+                        ),
+                    ],
+                    targetEntries: [IpcRequestTargetEntry(key: "group", id: group)]
+                )
             case .afterTab(let tab):
-                return [IpcRequestTargetEntry(key: "afterTabId", id: tab)]
+                return .launch(
+                    launch,
+                    background: background,
+                    params: ["position": .string("afterTab")],
+                    targetEntries: [IpcRequestTargetEntry(key: "afterTabId", id: tab)]
+                )
             }
-        case .tabRename(let tab, _), .tabClose(let tab):
-            return [IpcRequestTargetEntry(key: "tab", id: tab)]
+        case .tabRename(let tab, let title):
+            return IpcRequestProjection(
+                params: ["title": title.map(JSONValue.string) ?? .null],
+                targetEntries: [IpcRequestTargetEntry(key: "tab", id: tab)]
+            )
+        case .tabClose(let tab):
+            return IpcRequestProjection(
+                params: [:],
+                targetEntries: [IpcRequestTargetEntry(key: "tab", id: tab)]
+            )
         case .paneFocus(let pane), .paneInfo(let pane), .paneClose(let pane),
-             .paneInput(let pane, _), .paneRead(let pane, _), .paneRows(let pane),
-             .paneZoom(let pane, _), .paneResize(let pane, _),
-             .paneTape(let pane, _, _, _), .paneSnapshot(let pane),
-             .themeSet(let pane, _), .agentAttach(let pane, _),
-             .agentActivity(let pane, _, _), .agentDetach(let pane, _):
-            return [IpcRequestTargetEntry(key: "pane", id: pane)]
-        case .paneSplit(let target, _, _):
+             .paneRows(let pane), .paneSnapshot(let pane):
+            return IpcRequestProjection(
+                params: [:],
+                targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)]
+            )
+        case .paneSplit(let target, let launch, let background):
             switch target {
-            case .pane(let pane, _):
-                return [IpcRequestTargetEntry(key: "pane", id: pane)]
+            case .pane(let pane, let direction):
+                return .launch(
+                    launch,
+                    background: background,
+                    params: [
+                        "direction": .string(
+                            direction == .horizontal ? "horizontal" : "vertical"
+                        ),
+                    ],
+                    targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)]
+                )
             case .tab(let tab):
-                return [IpcRequestTargetEntry(key: "tab", id: tab)]
+                return .launch(
+                    launch,
+                    background: background,
+                    params: [:],
+                    targetEntries: [IpcRequestTargetEntry(key: "tab", id: tab)]
+                )
             }
-        case .todoList(let owner), .todoAdd(let owner, _),
-             .todoClearCompleted(let owner):
-            return ownerTargetEntries(owner)
-        case .todoEdit(let owner, let todoId, _),
-             .todoSetDone(let owner, let todoId, _),
-             .todoDelete(let owner, let todoId):
-            return ownerTargetEntries(owner) + [IpcRequestTargetEntry(key: "todoId", id: todoId)]
+        case .paneInput(let pane, let input):
+            return .input(input, pane: pane)
+        case .paneRead(let pane, let lineLimit):
+            return IpcRequestProjection(
+                params: lineLimit.map { ["lines": .number(Double($0))] } ?? [:],
+                targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)]
+            )
+        case .paneZoom(let pane, let state):
+            return IpcRequestProjection(
+                params: ["state": .string(state.rawValue)],
+                targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)]
+            )
+        case .paneResize(let pane, let resize):
+            let params: [String: JSONValue]
+            switch resize {
+            case .grid(let columns, let rows):
+                params = [
+                    "columns": .number(Double(columns)),
+                    "rows": .number(Double(rows)),
+                ]
+            case .fit:
+                params = ["fit": .bool(true)]
+            }
+            return IpcRequestProjection(
+                params: params,
+                targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)]
+            )
+        case .paneTape(let pane, let follow, let start, let policy):
+            var params: [String: JSONValue] = [
+                "start": paneTapeStartJSON(start),
+                "mode": .string(policy.mode.rawValue),
+            ]
+            if follow { params["follow"] = .bool(true) }
+            if case .reconstructible(let budget) = policy, let budget {
+                params["syncHistoryBytes"] = .number(Double(budget))
+            }
+            return IpcRequestProjection(
+                params: params,
+                targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)]
+            )
+        case .themeSet(let pane, let themeName):
+            return IpcRequestProjection(
+                params: ["themeName": themeName.map(JSONValue.string) ?? .null],
+                targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)]
+            )
+        case .agentAttach(let pane, let session), .agentDetach(let pane, let session):
+            return IpcRequestProjection(
+                params: agentParams(session: session),
+                targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)]
+            )
+        case .agentActivity(let pane, let session, let activity):
+            var params = agentParams(session: session)
+            params["state"] = .string(activity.rawValue)
+            return IpcRequestProjection(
+                params: params,
+                targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)]
+            )
+        case .todoList(let owner), .todoClearCompleted(let owner):
+            return IpcRequestProjection(params: [:], targetEntries: ownerTargetEntries(owner))
+        case .todoAdd(let owner, let text):
+            return IpcRequestProjection(
+                params: ["text": .string(text)],
+                targetEntries: ownerTargetEntries(owner)
+            )
+        case .todoEdit(let owner, let todoId, let text):
+            return IpcRequestProjection(
+                params: ["text": .string(text)],
+                targetEntries: ownerTargetEntries(owner)
+                    + [IpcRequestTargetEntry(key: "todoId", id: todoId)]
+            )
+        // `isDone` stays out of params on purpose: the wire method carries it.
+        case .todoSetDone(let owner, let todoId, _), .todoDelete(let owner, let todoId):
+            return IpcRequestProjection(
+                params: [:],
+                targetEntries: ownerTargetEntries(owner)
+                    + [IpcRequestTargetEntry(key: "todoId", id: todoId)]
+            )
         }
     }
 
     /// Encodes this typed request into its JSON-RPC parameter object.
     public var params: [String: JSONValue] {
-        var object: [String: JSONValue]
-        switch self {
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus, .quit:
-            object = [:]
-        case .groupNew(let name, let launch, let background):
-            object = launchParams(launch, background: background)
-            object["name"] = .string(name)
-        case .groupRename(_, let name):
-            object = ["name": .string(name)]
-        case .groupClose(_, let moveTabs):
-            object = ["moveTabs": .bool(moveTabs)]
-        case .tabNew(let target, let launch, let background):
-            object = launchParams(launch, background: background)
-            switch target {
-            case .group(_, let position):
-                object["position"] = .string(position == .afterSelected ? "afterSelected" : "atGroupEnd")
-            case .afterTab:
-                object["position"] = .string("afterTab")
-            }
-        case .tabRename(_, let title):
-            object = ["title": title.map(JSONValue.string) ?? .null]
-        case .tabClose, .paneFocus, .paneInfo, .paneClose, .paneRows, .paneSnapshot:
-            object = [:]
-        case .paneSplit(let target, let launch, let background):
-            object = launchParams(launch, background: background)
-            if case .pane(_, let direction) = target {
-                object["direction"] = .string(direction == .horizontal ? "horizontal" : "vertical")
-            }
-        case .paneInput(_, let input):
-            switch input {
-            case .text(let text):
-                object = ["text": .string(text)]
-            case .events(let events):
-                object = ["input": .array(events.map(inputEventJSON))]
-            }
-        case .paneRead(_, let lineLimit):
-            object = [:]
-            if let lineLimit { object["lines"] = .number(Double(lineLimit)) }
-        case .paneZoom(_, let state):
-            object = ["state": .string(state.rawValue)]
-        case .paneResize(_, let resize):
-            switch resize {
-            case .grid(let columns, let rows):
-                object = [
-                    "columns": .number(Double(columns)),
-                    "rows": .number(Double(rows)),
-                ]
-            case .fit:
-                object = ["fit": .bool(true)]
-            }
-        case .paneTape(_, let follow, let start, let policy):
-            object = [
-                "start": paneTapeStartJSON(start),
-                "mode": .string(policy.mode.rawValue),
-            ]
-            if follow { object["follow"] = .bool(true) }
-            if case .reconstructible(let budget) = policy, let budget {
-                object["syncHistoryBytes"] = .number(Double(budget))
-            }
-        case .themeSet(_, let themeName):
-            object = ["themeName": themeName.map(JSONValue.string) ?? .null]
-        case .agentAttach(_, let session), .agentDetach(_, let session):
-            object = agentParams(session: session)
-        case .agentActivity(_, let session, let activity):
-            object = agentParams(session: session)
-            object["state"] = .string(activity.rawValue)
-        case .todoList, .todoClearCompleted:
-            object = [:]
-        case .todoAdd(_, let text), .todoEdit(_, _, let text):
-            object = ["text": .string(text)]
-        // `isDone` stays out of params on purpose: the wire method carries it.
-        case .todoSetDone, .todoDelete:
-            object = [:]
+        let requestProjection = projection
+        var params = requestProjection.params
+        for entry in requestProjection.targetEntries {
+            params[entry.key] = entry.wireValue
         }
-        for entry in targetEntries {
-            object[entry.key] = entry.wireValue
-        }
-        return object
+        return params
     }
 
     /// Decodes untrusted wire params into the one typed catalog consumed by core dispatch.

@@ -62,31 +62,16 @@ public struct IpcAuditRequestDescriptor: Codable, Equatable, Sendable {
 public extension IpcRequest {
     /// Projects this request into the sole content shape admitted to the audit writer.
     var auditDescriptor: IpcAuditRequestDescriptor {
-        let target = Dictionary(uniqueKeysWithValues: targetEntries.map { entry in
+        let requestProjection = projection
+        let target = Dictionary(uniqueKeysWithValues: requestProjection.targetEntries.map { entry in
             (entry.key, entry.auditValue)
         })
-        let launch: LaunchSpec?
-        let input: IpcAuditInputAccounting?
-        switch self {
-        case .tabNew(_, let value, _), .paneSplit(_, let value, _):
-            launch = value
-        default:
-            launch = nil
-        }
-        switch self {
-        case .paneInput(_, .text(let text)):
-            input = .textBytes(text.utf8.count)
-        case .paneInput(_, .events(let events)):
-            input = .eventCount(events.count)
-        default:
-            input = nil
-        }
         return IpcAuditRequestDescriptor(
             method: method.rawValue,
             target: target,
-            command: launch?.cmd,
-            cwd: launch?.cwd,
-            input: input
+            command: requestProjection.auditCommand,
+            cwd: requestProjection.auditCwd,
+            input: requestProjection.auditInput
         )
     }
 }

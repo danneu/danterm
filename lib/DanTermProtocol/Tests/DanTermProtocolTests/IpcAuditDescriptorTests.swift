@@ -42,9 +42,10 @@ struct IpcAuditDescriptorTests {
     }
 
     @Test("launch requests retain command and working directory")
-    func launchAuthorityIsRetained() {
+    func launchAuthorityIsRetained() throws {
         let launch = LaunchSpec(cmd: "ssh server", cwd: "/tmp/work", title: "private title")
         let requests: [IpcRequest] = [
+            .groupNew(name: "remote", launch: launch, background: false),
             .tabNew(
                 target: .group(group, position: .atGroupEnd),
                 launch: launch,
@@ -60,13 +61,20 @@ struct IpcAuditDescriptorTests {
         for request in requests {
             #expect(request.auditDescriptor.command == "ssh server")
             #expect(request.auditDescriptor.cwd == "/tmp/work")
+            #expect(request.params["launch"] == launch.jsonValue)
         }
-        #expect(requests[0].auditDescriptor.target == [
+        #expect(requests[0].auditDescriptor.target.isEmpty)
+        #expect(requests[1].auditDescriptor.target == [
             "group": group.rawValue.uuidString.lowercased(),
         ])
-        #expect(requests[1].auditDescriptor.target == [
+        #expect(requests[2].auditDescriptor.target == [
             "pane": pane.rawValue.uuidString.lowercased(),
         ])
+
+        let encoded = try requests.map {
+            String(decoding: try JSONEncoder().encode($0.auditDescriptor), as: UTF8.self)
+        }
+        #expect(encoded.allSatisfy { $0.contains("private title") == false })
 
         let tab = TabId(rawValue: UUID(uuidString: "44444444-4444-4444-8444-444444444444")!)
         #expect(IpcRequest.paneSplit(
@@ -74,6 +82,27 @@ struct IpcAuditDescriptorTests {
             launch: launch,
             background: true
         ).auditDescriptor.target == ["tab": tab.rawValue.uuidString.lowercased()])
+    }
+
+    @Test("content-bearing request values stay outside audit descriptors")
+    func contentBearingValuesStayRedacted() throws {
+        let requests: [(IpcRequest, String)] = [
+            (.groupNew(name: "secret-group", launch: nil, background: true), "secret-group"),
+            (.tabRename(tab: TabId(rawValue: UUID()), title: "secret-tab"), "secret-tab"),
+            (.themeSet(pane: pane, themeName: "secret-theme"), "secret-theme"),
+            (.todoAdd(owner: .pane(pane), text: "secret-todo"), "secret-todo"),
+        ]
+
+        for (request, secret) in requests {
+            let encoded = String(
+                decoding: try JSONEncoder().encode(request.auditDescriptor),
+                as: UTF8.self
+            )
+            #expect(encoded.contains(secret) == false)
+            #expect(request.auditDescriptor.command == nil)
+            #expect(request.auditDescriptor.cwd == nil)
+            #expect(request.auditDescriptor.input == nil)
+        }
     }
 
     @Test("pane.resize records its method and pane, and both forms audit alike")

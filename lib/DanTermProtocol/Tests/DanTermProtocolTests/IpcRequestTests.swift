@@ -151,6 +151,48 @@ struct IpcRequestTests {
         }
     }
 
+    @Test("every audit descriptor admits only catalog-approved wire facts")
+    func everyAuditDescriptorAdmitsOnlyApprovedWireFacts() throws {
+        // Intent: every representative request admits targets, launch authority, and
+        //   input quantity to its audit descriptor, and no other wire value.
+        // Why it exists: independent request switches let group.new launch a command
+        //   without recording it and could let another content field cross the boundary.
+        // Scenario: one representative request for every catalog method, including
+        //   launch-less tab creation and both pane input forms.
+        var fixtures = try representativeCLICommands()
+        let pane = PaneId(rawValue: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!)
+        fixtures.append(RepresentativeCLICommand(CLICommand(
+            request: .paneInput(pane: pane, input: .text("private input")),
+            outputMode: .none
+        )))
+
+        for fixture in fixtures {
+            let request = fixture.command.request
+            let params = fixture.command.params
+            let launch = params["launch"]?.asObject
+            let admitsLaunch = [
+                IpcRequestMethod.groupNew,
+                .tabNew,
+                .paneSplit,
+            ].contains(request.method)
+            let expectedInput: IpcAuditInputAccounting?
+            switch request {
+            case .paneInput(_, .text(let text)):
+                expectedInput = .textBytes(text.utf8.count)
+            case .paneInput(_, .events(let events)):
+                expectedInput = .eventCount(events.count)
+            default:
+                expectedInput = nil
+            }
+
+            let descriptor = request.auditDescriptor
+            #expect(descriptor.method == request.method.rawValue)
+            #expect(descriptor.command == (admitsLaunch ? launch?["cmd"]?.asString : nil))
+            #expect(descriptor.cwd == (admitsLaunch ? launch?["cwd"]?.asString : nil))
+            #expect(descriptor.input == expectedInput)
+        }
+    }
+
     @Test("every targeting catalog fixture rejects its absent target")
     func everyTargetingCatalogMethodRejectsAbsentTarget() throws {
         // Intent: each distinct target form pins its own missing-target decode error.
@@ -380,7 +422,7 @@ struct IpcRequestTests {
                 CLICommand(
                     request: .tabNew(
                         target: .afterTab(TabId(rawValue: UUID(uuidString: tab)!)),
-                        launch: LaunchSpec(cmd: nil, cwd: "/caller", title: nil),
+                        launch: nil,
                         background: false
                     ),
                     outputMode: .none
