@@ -5305,18 +5305,28 @@ public struct Terminal: Equatable, Sendable {
         clusterContext = nil
     }
 
+    /// Describes what an erase actually reached and blanked after wide-pair expansion.
+    struct EraseResult {
+        var coveredWholeRow: Bool
+        var blankedAllCells: Bool
+    }
+
     /// Erases a row range with pen colors after expanding across intersected wide pairs.
     ///
     /// `selective` is the `?` on DECSED/DECSEL: the region, the wide-pair expansion and the
     /// row-level repairs below are the same, and the only difference is that a protected cell
-    /// keeps its content. Returns whether every cell in the expanded range was blanked, which
-    /// is the one fact the row-level effects in `eraseLine`/`eraseEntireRow` derive from.
+    /// keeps its content. The result separates effective row coverage from protected survivors
+    /// so display erase can decide whether it actually blanked row 0 in full.
     @discardableResult
-    mutating func eraseCells(row: Int, columns: Range<Int>, selective: Bool = false) -> Bool {
-        guard screen.rows.indices.contains(row), columns.isEmpty == false else { return true }
+    mutating func eraseCells(row: Int, columns: Range<Int>, selective: Bool = false) -> EraseResult {
+        guard screen.rows.indices.contains(row), columns.isEmpty == false else {
+            return EraseResult(coveredWholeRow: false, blankedAllCells: true)
+        }
         var lower = max(0, columns.lowerBound)
         var upper = min(columnCount, columns.upperBound)
-        guard lower < upper else { return true }
+        guard lower < upper else {
+            return EraseResult(coveredWholeRow: false, blankedAllCells: true)
+        }
         if self.screen.rows[row].cells[lower].kind == .wideTail {
             lower -= 1
         }
@@ -5358,7 +5368,10 @@ public struct Terminal: Equatable, Sendable {
             screen.rows[row].marginProvenance = .erase
         }
         clusterContext = nil
-        return survivors?.contains(true) != true
+        return EraseResult(
+            coveredWholeRow: lower == 0 && upper == columnCount,
+            blankedAllCells: survivors?.contains(true) != true
+        )
     }
 
     /// Which columns a selective erase must leave standing, decided per wide pair.
@@ -6800,9 +6813,9 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    /// CSI K. Only EL 0 resets the row's soft wrap: erasing the right end destroys
-    /// the wrap point itself, while EL 1/2 blank cells without restructuring the
-    /// line -- a blanked row mid-line is a coherent state (rewrite-in-place).
+    /// CSI K. Every EL mode is a rewrite-in-place operation and keeps any incoming history
+    /// claim. Only EL 0 resets the row's own outgoing soft wrap: erasing the right end destroys
+    /// the wrap point itself, while EL 1/2 blank cells without restructuring the line.
     /// Matches xterm (`util.c#ClearRight` is the only clear that drops the flag),
     /// Ghostty, kitty, and foot; tmux severs on EL 2 and is the lone outlier.
     /// Pinned by CSIEraseTests#eraseLineWrapAsymmetry. What keeps the surviving
@@ -6814,41 +6827,44 @@ public struct Terminal: Equatable, Sendable {
     /// `selective` is the `?` on DECSEL. EL 0's soft-wrap reset is unconditional either way:
     /// the wrap point is the margin column itself, and a protected cell standing there is text
     /// the program means to keep, not a claim that the line continues.
-    private mutating func eraseLine(mode: UInt16, selective: Bool = false) {
+    private mutating func eraseLine(mode: UInt16, selective: Bool = false) -> Bool {
+        let eraseResult: EraseResult
         switch mode {
         case 0:
-            eraseCells(
+            eraseResult = eraseCells(
                 row: screen.cursor.row,
                 columns: screen.cursor.column..<columnCount,
                 selective: selective
             )
             screen.rows[screen.cursor.row].isSoftWrapped = false
         case 1:
-            eraseCells(
+            eraseResult = eraseCells(
                 row: screen.cursor.row,
                 columns: 0..<(screen.cursor.column + 1),
                 selective: selective
             )
         case 2:
-            eraseCells(row: screen.cursor.row, columns: 0..<columnCount, selective: selective)
+            eraseResult = eraseCells(
+                row: screen.cursor.row,
+                columns: 0..<columnCount,
+                selective: selective
+            )
         default:
-            return
+            return false
         }
         clearPendingMotionState()
+        return eraseResult.coveredWholeRow && eraseResult.blankedAllCells
     }
 
     /// `selective` is the `?` on DECSED. Mode 3 clears history whether or not it is selective:
     /// protection is a property of live cells, and xterm names the sequence "Selective Erase
     /// Saved Lines" for the same region ED 3 clears.
     private mutating func eraseDisplay(mode: UInt16, selective: Bool = false) {
+        var blankedRowZero = false
         switch mode {
         case 0:
-            // Only from home does mode 0 blank the whole of row 0; past column 0 the cells to
-            // the cursor's left survive and genuinely continue history's line.
-            if screen.cursor.row == 0, screen.cursor.column == 0, rowIsFullyErasable(0, selective: selective) {
-                severHistoryWrapClaimForRowZeroErase()
-            }
-            eraseLine(mode: 0, selective: selective)
+            let blankedCursorRow = eraseLine(mode: 0, selective: selective)
+            blankedRowZero = screen.cursor.row == 0 && blankedCursorRow
             if screen.cursor.row + 1 < rowCount {
                 for row in (screen.cursor.row + 1)..<rowCount {
                     eraseEntireRow(row, selective: selective)
@@ -6856,20 +6872,23 @@ public struct Terminal: Equatable, Sendable {
             }
         case 1:
             if screen.cursor.row > 0 {
-                if rowIsFullyErasable(0, selective: selective) {
-                    severHistoryWrapClaimForRowZeroErase()
-                }
                 for row in 0..<screen.cursor.row {
-                    eraseEntireRow(row, selective: selective)
+                    let blankedRow = eraseEntireRow(row, selective: selective)
+                    if row == 0 {
+                        blankedRowZero = blankedRow
+                    }
                 }
             }
-            eraseLine(mode: 1, selective: selective)
-        case 2:
-            if rowIsFullyErasable(0, selective: selective) {
-                severHistoryWrapClaimForRowZeroErase()
+            let blankedCursorRow = eraseLine(mode: 1, selective: selective)
+            if screen.cursor.row == 0 {
+                blankedRowZero = blankedCursorRow
             }
+        case 2:
             for row in screen.rows.indices {
-                eraseEntireRow(row, selective: selective)
+                let blankedRow = eraseEntireRow(row, selective: selective)
+                if row == 0 {
+                    blankedRowZero = blankedRow
+                }
             }
             clearPendingMotionState()
         case 3:
@@ -6878,6 +6897,9 @@ public struct Terminal: Equatable, Sendable {
             clearPendingMotionState()
         default:
             return
+        }
+        if blankedRowZero {
+            severHistoryWrapClaimForRowZeroErase()
         }
     }
 
@@ -6888,34 +6910,29 @@ public struct Terminal: Equatable, Sendable {
         clearPendingMotionState()
     }
 
-    /// Ends history's open logical line before an erase blanks the whole of live row 0.
+    /// Ends history's open logical line after a display erase blanks all of live row 0.
     ///
     /// The open tail record's bit is history's claim that its last retained row continues into
     /// live row 0; the erase clears only live rows' own outgoing flags, so nothing else can
     /// close it. Left open across such an erase it asserts a continuation whose cells are gone,
     /// and both readers act on it: `admit` appends the next scrolled-off row into the pre-clear
     /// record, and a later width change pulls the record's partial row back onto the cleared
-    /// screen (`research/31/D2` operation 2, amended 2026-08-05). Call only for erases that blank *all*
-    /// of row 0 -- a surviving prefix is a real continuation, and severing would split one
-    /// logical line in two. The funnel is a no-op on the alternate screen.
+    /// screen (`research/31/D2` operation 2, amended 2026-08-05). Display erase owns this
+    /// history-seam rule because it changes display structure; EL, DECSEL, and ECH are
+    /// rewrite-in-place operations and keep the predecessor's claim even when they blank the
+    /// row. A display erase with a surviving cell also keeps the claim. The funnel is a no-op
+    /// on the alternate screen.
     private mutating func severHistoryWrapClaimForRowZeroErase() {
         severWrapClaim(before: 0)
     }
 
     /// A row that keeps a protected cell was not cleared, so its line structure still stands.
-    private mutating func eraseEntireRow(_ row: Int, selective: Bool = false) {
-        guard eraseCells(row: row, columns: 0..<columnCount, selective: selective) else { return }
+    private mutating func eraseEntireRow(_ row: Int, selective: Bool = false) -> Bool {
+        let result = eraseCells(row: row, columns: 0..<columnCount, selective: selective)
+        guard result.blankedAllCells else { return false }
         screen.rows[row].isSoftWrapped = false
         screen.rows[row].semanticPrompt = .none
-    }
-
-    /// Whether a whole-row erase of `row` will actually blank all of it.
-    ///
-    /// The sever runs before the erase does, so this is the only way for it to ask the question
-    /// the sever's own rule poses: call it only for erases that blank *all* of row 0.
-    private func rowIsFullyErasable(_ row: Int, selective: Bool) -> Bool {
-        guard selective, screen.rows.indices.contains(row) else { return true }
-        return protectedMask(row: row, columns: 0..<columnCount).contains(true) == false
+        return result.coveredWholeRow
     }
 
     private func movementAmount(_ parameters: CSIParameters) -> Int? {

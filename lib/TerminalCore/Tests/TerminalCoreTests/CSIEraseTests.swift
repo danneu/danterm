@@ -349,9 +349,8 @@ struct CSIEraseTests {
 
     @Test("an erase that blanks the whole of live row 0 ends history's open logical line")
     func wholeRowZeroErasesSeverTheScrollbackWrapClaim() throws {
-        // Intent: exactly the erases that blank the whole of live row 0 -- ED 2, ED 1 with the
-        //   cursor below row 0, ED 0 from home, DECALN -- close history's open tail record; the
-        //   erases that leave any of row 0's cells standing, and EL 2, leave it open.
+        // Intent: display erases that blank the whole of live row 0 close history's open tail
+        //   record, while line and character erases leave it open even when they blank row 0.
         // Why it exists: the open bit is history's claim that the last retained row continues
         //   into live row 0. Once that row is blanked in full, the cells the claim names are
         //   gone, so keeping it asserts a continuation that no longer exists. The converse cases
@@ -360,7 +359,14 @@ struct CSIEraseTests {
         //   one real logical line in two.
         // Scenario: a wrapped line straddles the history/live seam -- its head is in scrollback,
         //   its remainder on live row 0 -- and an application issues each erase in turn.
-        let severing = ["\u{1B}[2J", "\u{1B}[2;1H\u{1B}[1J", "\u{1B}[H\u{1B}[J", "\u{1B}#8"]
+        let severing = [
+            "\u{1B}[2J",
+            "\u{1B}[2;1H\u{1B}[1J",
+            "\u{1B}[H\u{1B}[J",
+            "\u{1B}[1;8H\u{1B}[1J",
+            "\u{1B}[1;8H\u{1B}[?1J",
+            "\u{1B}#8",
+        ]
         for sequence in severing {
             var terminal = try makeSeamTerminal()
             #expect(terminal.scrollbackRow(at: 2)?.isSoftWrapped == true)
@@ -369,16 +375,54 @@ struct CSIEraseTests {
             expectValidGrid(terminal)
         }
 
-        // ED 1 with the cursor on row 0 blanks only columns 0...cursor.column; ED 0 with the
-        // cursor past column 0 blanks only columns cursor.column..<columnCount; EL 2 is a
-        // rewrite-in-place idiom and is not an erase-family wrap-flag trigger at all today.
-        let preserving = ["\u{1B}[1;4H\u{1B}[1J", "\u{1B}[1;4H\u{1B}[J", "\u{1B}[H\u{1B}[2K"]
+        // A partial display erase leaves a real continuation standing. EL and ECH are
+        // rewrite-in-place operations and do not change the history seam even when they blank
+        // every cell in row 0.
+        let preserving = [
+            "\u{1B}[1;4H\u{1B}[1J",
+            "\u{1B}[1;4H\u{1B}[J",
+            "\u{1B}[H\u{1B}[K",
+            "\u{1B}[H\u{1B}[2K",
+            "\u{1B}[H\u{1B}[8X",
+        ]
         for sequence in preserving {
             var terminal = try makeSeamTerminal()
             terminal.feed(Array(sequence.utf8))
             #expect(terminal.scrollbackRow(at: 2)?.isSoftWrapped == true, "\(sequence)")
             expectValidGrid(terminal)
         }
+
+        var wideExpansion = try makeSeamTerminal()
+        wideExpansion.feed(Array("\u{1B}[H\u{754C}\u{1B}[1;2H\u{1B}[J".utf8))
+        #expect(wideExpansion.scrollbackRow(at: 2)?.isSoftWrapped == false)
+        expectValidGrid(wideExpansion)
+
+        var protected = try makeSeamTerminal()
+        protected.feed(Array("\u{1B}[H\u{1B}[1\"qZ\u{1B}[0\"q\u{1B}[1;8H\u{1B}[?1J".utf8))
+        #expect(protected.scrollbackRow(at: 2)?.isSoftWrapped == true)
+        expectValidGrid(protected)
+    }
+
+    @Test("ED 1 through the last cell retains the same line boundary as ED 2")
+    func eraseDisplayLeftCompleteMatchesEraseDisplayCompleteHistory() throws {
+        // Intent: ED 1 at row 0's last column and ED 2 produce the same retained line boundary
+        //   when both blank all of the live continuation before replacement text is printed.
+        // Why it exists: the display-erase mode used to choose whether history's incoming wrap
+        //   claim closed, even when both modes produced the same blank row 0.
+        // Scenario: a ten-cell line wraps across the history seam, the application clears its
+        //   live continuation with either display erase, prints a replacement, and scrolls it off.
+        let prefix = "AAAAAAAAAABB\u{1B}[2;1H\n"
+        let suffix = "\u{1B}[Hcccc\u{1B}[2;1H\n\n"
+        var left = try #require(Terminal(columns: 10, rows: 2))
+        var complete = try #require(Terminal(columns: 10, rows: 2))
+
+        left.feed(Array("\(prefix)\u{1B}[1;10H\u{1B}[1J\(suffix)".utf8))
+        complete.feed(Array("\(prefix)\u{1B}[2J\(suffix)".utf8))
+
+        #expect(left.primaryHistoryText == "AAAAAAAAAA\ncccc")
+        #expect(left.primaryHistoryText == complete.primaryHistoryText)
+        expectValidGrid(left)
+        expectValidGrid(complete)
     }
 
     @Test("output printed after ED 2 starts a new history line rather than joining the cleared one")

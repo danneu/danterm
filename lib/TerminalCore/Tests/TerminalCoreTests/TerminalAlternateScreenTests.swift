@@ -149,6 +149,35 @@ struct TerminalAlternateScreenTests {
         expectValidGrid(terminal)
     }
 
+    @Test("alternate display erases and DECALN do not sever the primary history seam")
+    func alternateErasesKeepPrimaryHistorysWrapClaim() throws {
+        // Intent: display erases and DECALN affect only the active alternate grid and cannot
+        //   close the primary history store's open tail record.
+        // Why it exists: row-0 display erases have a primary-only history-side effect. A check
+        //   based only on what the active row erase blanked can leak that effect across screens.
+        // Scenario: a primary wrapped line straddles the history seam while an alternate-screen
+        //   application issues every display-erase mode and DECALN before returning.
+        let erases = [
+            "\u{1B}[H\u{1B}[J",
+            "\u{1B}[1;8H\u{1B}[1J",
+            "\u{1B}[2J",
+            "\u{1B}[H\u{1B}[?J",
+            "\u{1B}[1;8H\u{1B}[?1J",
+            "\u{1B}[?2J",
+            "\u{1B}#8",
+        ]
+        for erase in erases {
+            var terminal = try #require(Terminal(columns: 8, rows: 2))
+            terminal.feed(Array("first\r\nsecond\r\nwrapping line\r\nfourth".utf8))
+            #expect(terminal.scrollbackRow(at: 2)?.isSoftWrapped == true)
+
+            terminal.feed(Array("\u{1B}[?1047h\(erase)\u{1B}[?1047l".utf8))
+
+            #expect(terminal.scrollbackRow(at: 2)?.isSoftWrapped == true, "\(erase)")
+            expectValidGrid(terminal)
+        }
+    }
+
     @Test("full history follows alt with a hard seam while primary history stays continuous")
     func activeAndPrimaryHistoryProjections() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))

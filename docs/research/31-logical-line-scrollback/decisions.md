@@ -1374,28 +1374,29 @@ live refold (`D3` Decision 4), using this same cut-and-rewind mechanism.
 [`plans/impl/2026-08-05-0954-terminal-engine-improvement-findings.md`](../../../plans/impl/2026-08-05-0954-terminal-engine-improvement-findings.md)
 in operation 2's trigger list, and the arena still gains no sixth operation.**
 The close half of operation 2 was triggered only by a hard newline; it is now
-also triggered by **an erase that blanks the whole of live row 0 on the primary
-screen** -- `ED 2`, `ED 1` with the cursor below row 0, `ED 0` from home, and
-`DECALN`. The open bit is history's claim that its last retained row continues
-into live row 0, and an erase clears only live rows' own outgoing flags, so
-before this nothing closed the record: the claim survived an erase that had
-deleted every cell it named. Both readers acted on the stale bit -- operation 1
-appended the next scrolled-off row into the pre-clear record, so post-clear
-output was glued onto the pre-clear logical line in `primaryHistoryText` and in
-logical-line selection expansion; and operation 4's width-change trigger, added
-directly above, pulled the record's partial display row back onto the screen the
-erase had just cleared.
+also triggered when **ED or DECSED blanks the whole of live row 0 on the primary
+screen**, including an effective range widened across a wide pair and excluding
+a selective erase that leaves a protected cell standing. `DECALN` is the other
+erase-family trigger. The open bit is history's claim that its last retained row
+continues into live row 0, and an erase clears only live rows' own outgoing
+flags, so before this nothing closed the record: the claim survived a display
+erase that had deleted every cell it named. Both readers acted on the stale bit
+-- operation 1 appended the next scrolled-off row into the pre-clear record, so
+post-clear output was glued onto the pre-clear logical line in
+`primaryHistoryText` and in logical-line selection expansion; and operation 4's
+width-change trigger, added directly above, pulled the record's partial display
+row back onto the screen the erase had just cleared. This is a history-seam-only
+rule justified by that pull-back behavior.
 
 The boundary is "the whole of row 0", and the excluded cases are the reason it
-is stated that way. `ED 1` with the cursor on row 0 blanks only columns
-`0...cursor.column`, and `ED 0` past column 0 blanks only
-`cursor.column..<columnCount`: in both, the surviving cells of row 0 genuinely
-continue the retained line, and severing would split one real logical line in
-two. `EL 2` at row 0 was considered and is deliberately **not** a trigger: the
-`EL` modes 1 and 2 touch no wrap flag at all today -- a separable behavior family
-from the display erases -- and `EL 2`'s common use is rewrite-in-place, where the
-line does continue. The reopen half is unaffected and stays symmetric: a wrapped
-print resuming at the seam still reopens the record through
+is stated that way. `ED 1` and `ED 0` on row 0 keep the record open when the
+effective erase range leaves any cell standing; those cells genuinely continue
+the retained line, and severing would split one real logical line in two. `EL 0`
+from column 0 and `EL 2` were both considered and are deliberately **not**
+triggers. EL is a separate rewrite-in-place family: EL 0 resets the live row's
+own outgoing wrap flag, EL 1 and EL 2 do not, and none changes history's incoming
+claim. The same exclusion binds DECSEL and ECH. The reopen half is unaffected
+and stays symmetric: a wrapped print resuming at the seam still reopens the record through
 `restoreWrapClaimBeforeCursor`, so an erase-severed record can legitimately be
 reopened later. `ED 3` is operation 5 and needs none of this.
 
@@ -1413,7 +1414,9 @@ cell content, `ED` and newlines edit line structure. A blanked row that
 still continues its logical line is coherent -- seam claim and outgoing
 claim stay in agreement, unlike the half-cleared state finding 13 fixed --
 and refold already gives a soft-wrapped blank row its full width
-(`Terminal.swift#projectedCellEnd`).
+(`Terminal.swift#projectedCellEnd`). The live seam deliberately remains
+asymmetric: the same ED applied at row N greater than zero keeps row N-1's
+incoming claim. This amendment changes only the retained-history seam.
 
 This is a DanTerm choice rather than a compatibility fix, and it diverges
 knowingly: kitty (`references/kitty/kitty/screen.c#screen_erase_in_display`) and
