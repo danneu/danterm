@@ -235,7 +235,7 @@ Run `just benchmark-confirm baseline=8710ac53`.
 ### Commit progress
 
 - [x] `refactor(renderer): borrow terminal state during frame planning`
-- [ ] `perf(terminal): keep wrap projection outside the ordinary cell loop`
+- [x] `perf(terminal): keep wrap projection outside the ordinary cell loop`
 
 Each commit stays green, carries any necessary behavioral test adjustment, and
 records its own decision-bearing benchmark result.
@@ -286,3 +286,37 @@ records its own decision-bearing benchmark result.
   `initializeWithCopy for Terminal`, outlined terminal copy, or terminal
   destroy path inside planning. The attribution artifacts are
   `.build/wide-cell-wrap-gap-benchmarks/commit-isolation/danterm-retained-borrowed-final.*`.
+- Per operator direction, commit 2 used full confirm runs in place of the
+  planned quick benchmark. The first confirm after moving projection to the
+  row boundary left `scrollback-stream` inconclusive at +1.72%. The accepted
+  slice therefore gives full ordinary live rows a direct contiguous-buffer
+  traversal, omits the style snapshot when only the default style exists, and
+  carries retained storage through one reference context only when the
+  viewport starts in retained history.
+- Commit 2 confirm against `281022fc` made `scrollback-stream` faster by 4.94%
+  and `retained-browse` faster by 5.52%. It reported `terminal-feed`
+  equivalent (-0.01%), `content-churn` inconclusive (+0.89%), and
+  `style-churn` equivalent (+0.70%). Descriptive planning estimates improved
+  by 18.06% for content churn, 16.51% for style churn, and 11.38% for
+  incremental mixed; incremental draw was +2.70%. Artifacts are under
+  `.build/terminal-benchmark-comparisons/confirm/1412af96580c-0000`.
+- Final confirm against `8710ac53` made `retained-browse` faster by 8.29% and
+  left `scrollback-stream` inconclusive at -1.83%. It reported `terminal-feed`
+  equivalent (-0.05%), `content-churn` equivalent (+0.04%), and `style-churn`
+  equivalent (-0.12%). Descriptive planning estimates were -9.59% for content
+  churn, -8.92% for style churn, and -3.44% for incremental mixed;
+  incremental draw was -0.70%. Artifacts are under
+  `.build/terminal-benchmark-comparisons/confirm/1412af96580c-0001`.
+- The final matched 10-second retained sample contained 6,873 planning samples
+  and no `initializeWithCopy for Terminal`, outlined terminal copy, or terminal
+  destroy path inside planning. The attribution artifacts are
+  `.build/wide-cell-wrap-gap-benchmarks/commit-isolation/danterm-retained-commit2-final.*`.
+- The final deterministic memory census kept every field unchanged and its
+  normalized report matched the baseline SHA-256
+  `b89e8c39288a8d90be9b0dbe583eb15a494d2072eb73b9526a64283d32cca644`.
+  The raw and normalized artifacts are `.build/wide-wrap-memory-final.json`
+  and `.build/wide-wrap-memory-final-normalized-pretty.json`.
+- The focused projection and retained-row suites passed 29 tests. The full
+  TerminalCore suite passed 1,301 tests in 143 suites with two known issues,
+  and `just test` passed all 102 steps. The gate log is
+  `.build/wide-wrap-just-test.log`.

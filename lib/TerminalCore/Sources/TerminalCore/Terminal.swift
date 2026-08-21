@@ -470,6 +470,45 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Holds the two value-backed stores a viewport visitor must carry through nested callbacks.
+    ///
+    /// The callbacks are synchronous, but Swift still copies a captured value into each closure
+    /// context. One reference context keeps that ownership work per traversal instead of per row
+    /// while leaving the terminal itself borrowed.
+    private final class ViewportRowReadStorage {
+        private let store: LogicalLineStore
+        private let styles: [StyleId: TerminalStyle]?
+
+        init(store: LogicalLineStore, styles: [StyleId: TerminalStyle]?) {
+            self.store = store
+            self.styles = styles
+        }
+
+        @inline(__always)
+        func advance(_ cursor: LogicalLineStore.DisplayRowCursor) -> LogicalLineStore.DisplayRowCursor? {
+            store.advance(cursor)
+        }
+
+        @inline(__always)
+        func style(for id: StyleId) -> TerminalStyle {
+            id == Terminal.defaultStyleId ? TerminalStyle() : styles?[id] ?? TerminalStyle()
+        }
+
+        func withPaintedCells(
+            at cursor: LogicalLineStore.DisplayRowCursor,
+            _ body: (
+                _ count: Int,
+                _ styleIdAt: (_ column: Int) -> StyleId,
+                _ cellAt: (_ column: Int) -> (
+                    kind: TerminalCellKind,
+                    scalars: TerminalScalars
+                )
+            ) -> Void
+        ) {
+            store.withPaintedCells(at: cursor, body)
+        }
+    }
+
     /// Tracks cursor coordinates without exposing storage indices.
     private struct CellPosition: Equatable, Sendable {
         var row: Int
@@ -4975,154 +5014,286 @@ public struct Terminal: Equatable, Sendable {
     ) {
         let wanted = requested.clamped(to: 0..<rowCount)
         guard wanted.isEmpty == false else { return }
-        let topRow = scrollProjection.topRow
-        let viewportColumns = columnCount
-        let retainedStore = history.store
-        let primaryHead = screen.rows.first?.cells.first
-        let openTailPendingMargin = retainedStore.openTailPendingMarginCell
-        let resolvedStyles = styleTable
-        var cursor = historyCursor(atStreamRow: topRow + wanted.lowerBound)
 
-        // Memoized across segments because adjacent rows often repeat the same handful of style
-        // ids. Correct for any content -- a miss just re-resolves.
-        var lastId: StyleId?
-        var lastStyle = TerminalStyle()
-
-        for row in wanted {
-            let streamRow = topRow + row
-            // A row the caller does not want still has to be stepped over, or the cursor stops
-            // naming the row it is asked for next. Stepping is O(1); folding is not.
-            guard includesRow(row) else {
-                cursor = cursor.flatMap { retainedStore.advance($0) }
-                continue
+        // Bound the reference context to this traversal. It carries the two value-backed stores
+        // through nested row callbacks without making those callbacks copy the whole terminal.
+        do {
+            let topRow = scrollProjection.topRow
+            let viewportColumns = columnCount
+            let openTailPendingMargin = history.store.openTailPendingMarginCell
+            let primaryHead = screen.rows.first?.cells.first
+            var cursor = historyCursor(atStreamRow: topRow + wanted.lowerBound)
+            let resolvedStyles = styleTable.count == 1 ? nil : styleTable
+            let readStorage: ViewportRowReadStorage?
+            if cursor == nil {
+                readStorage = nil
+            } else {
+                readStorage = ViewportRowReadStorage(
+                    store: history.store,
+                    styles: resolvedStyles
+                )
             }
-            let at = cursor
-            cursor = at.flatMap { retainedStore.advance($0) }
-            if at == nil, viewportStreamRow(at: streamRow) == nil { continue }
+            // Every visitor below is synchronous and non-escaping. Carry a trivial reference
+            // through them, then keep its owner alive explicitly through the last callback.
+            let readStorageReference = readStorage.map(Unmanaged.passUnretained)
 
-            // Retained rows stream out of the arena rather than being materialized first.
-            // A frame reads every visible row once and discards it, so folding a `GridRow`
-            // here would buy an allocation and a full `GridCell` write per cell that nothing
-            // outlives -- `research/28/F17` measured that as the dominant term in the browsing
-            // regression. The style memoization is written out at each site rather than
-            // funnelled through a nested function: a local function called from inside the
-            // fold's own closure is one more indirect call per cell, on the frame path.
-            if let at {
-                body(row) { styleRunBody in
-                    retainedStore.withPaintedCells(at: at) {
-                        storedCount, storedStyleId, storedCell in
-                        // The segment visitor hands the borrowed packed-cell accessor down one
-                        // more non-escaping level; nothing here outlives this row traversal.
-                        withoutActuallyEscaping(storedCell) { forwardStoredCell in
-                            let margin = viewportColumns - 1
-                            let storedMargin: GridCell?
-                            if storedCount > margin {
-                                let packed = forwardStoredCell(margin)
-                                storedMargin = GridCell(
-                                    scalars: packed.scalars,
-                                    kind: packed.kind,
-                                    styleId: storedStyleId(margin)
-                                )
-                            } else {
-                                storedMargin = nil
-                            }
-                            let projectedMargin: GridCell? = cursor == nil
-                                ? Self.projectedMarginCell(
-                                    stored: storedMargin,
-                                    follower: primaryHead,
-                                    fillsMissingWrapSpacer: openTailPendingMargin != nil,
-                                    missingWrapMargin: openTailPendingMargin
-                                )
-                                : nil
-                            let padding = GridCell()
-                            var start = 0
-                            while start < viewportColumns {
-                                let styleId: StyleId
-                                if start == margin, let projectedMargin {
-                                    styleId = projectedMargin.styleId
-                                } else if start < storedCount {
-                                    styleId = storedStyleId(start)
-                                } else {
-                                    styleId = padding.styleId
+            // Memoized across segments because adjacent rows often repeat the same handful of style
+            // ids. Correct for any content -- a miss just re-resolves.
+            var lastId: StyleId?
+            var lastStyle = TerminalStyle()
+
+            for row in wanted {
+                let streamRow = topRow + row
+                // A row the caller does not want still has to be stepped over, or the cursor stops
+                // naming the row it is asked for next. Stepping is O(1); folding is not.
+                guard includesRow(row) else {
+                    if let current = cursor {
+                        cursor = readStorage?.advance(current)
+                    }
+                    continue
+                }
+                let at = cursor
+                if let at {
+                    cursor = readStorage?.advance(at)
+                }
+                if at == nil,
+                   viewportStreamRow(at: streamRow) == nil
+                {
+                    continue
+                }
+
+                // Retained rows stream out of the arena rather than being materialized first.
+                // A frame reads every visible row once and discards it, so folding a `GridRow`
+                // here would buy an allocation and a full `GridCell` write per cell that nothing
+                // outlives -- `research/28/F17` measured that as the dominant term in the browsing
+                // regression. The style memoization is written out at each site rather than
+                // funnelled through a nested function: a local function called from inside the
+                // fold's own closure is one more indirect call per cell, on the frame path.
+                if let at {
+                    let projectedMargin: GridCell?
+                    if cursor == nil, let openTailPendingMargin {
+                        projectedMargin = Self.projectedMarginCell(
+                            stored: nil,
+                            follower: primaryHead,
+                            fillsMissingWrapSpacer: true,
+                            missingWrapMargin: openTailPendingMargin
+                        )
+                    } else {
+                        projectedMargin = nil
+                    }
+                    body(row) { styleRunBody in
+                        guard let readStorageReference else {
+                            preconditionFailure("a retained cursor requires retained read storage")
+                        }
+                        readStorageReference.takeUnretainedValue().withPaintedCells(at: at) {
+                            storedCount, storedStyleId, storedCell in
+                            // The segment visitor hands the borrowed packed-cell accessor down one
+                            // more non-escaping level; nothing here outlives this row traversal.
+                            withoutActuallyEscaping(storedCell) { forwardStoredCell in
+                                let margin = viewportColumns - 1
+                                if projectedMargin != nil {
+                                    precondition(
+                                        storedCount == margin,
+                                        "a pending margin must complete the retained seam row"
+                                    )
                                 }
-                                var end = start + 1
-                                while end < viewportColumns {
-                                    let nextId: StyleId
-                                    if end == margin, let projectedMargin {
-                                        nextId = projectedMargin.styleId
-                                    } else if end < storedCount {
-                                        nextId = storedStyleId(end)
-                                    } else {
-                                        nextId = padding.styleId
+                                let padding = GridCell()
+                                let directEnd = projectedMargin == nil
+                                    ? min(storedCount, viewportColumns)
+                                    : margin
+                                var emittedTail = false
+                                var start = 0
+                                while start < directEnd {
+                                    let styleId = storedStyleId(start)
+                                    var end = start + 1
+                                    while end < directEnd, storedStyleId(end) == styleId {
+                                        end += 1
                                     }
-                                    guard nextId == styleId else { break }
-                                    end += 1
-                                }
-                                if styleId != lastId {
-                                    lastStyle = resolvedStyles[styleId] ?? TerminalStyle()
-                                    lastId = styleId
-                                }
-                                styleRunBody(start..<end, lastStyle) { cellBody in
-                                    for column in start..<end {
-                                        if column == margin, let projectedMargin {
-                                            cellBody(column, projectedMargin.kind, projectedMargin.scalars)
-                                        } else if column < storedCount {
+                                    let joinsProjectedMargin = end == directEnd
+                                        && directEnd == margin
+                                        && projectedMargin?.styleId == styleId
+                                    let joinsPadding = end == directEnd
+                                        && projectedMargin == nil
+                                        && directEnd < viewportColumns
+                                        && padding.styleId == styleId
+                                    let runEnd = joinsProjectedMargin || joinsPadding
+                                        ? viewportColumns
+                                        : end
+                                    if styleId != lastId {
+                                        lastStyle = readStorageReference.takeUnretainedValue()
+                                            .style(for: styleId)
+                                        lastId = styleId
+                                    }
+                                    styleRunBody(start..<runEnd, lastStyle) { cellBody in
+                                        for column in start..<end {
                                             let cell = forwardStoredCell(column)
                                             cellBody(column, cell.kind, cell.scalars)
-                                        } else {
+                                        }
+                                        if joinsProjectedMargin, let projectedMargin {
+                                            cellBody(margin, projectedMargin.kind, projectedMargin.scalars)
+                                        } else if joinsPadding {
+                                            for column in directEnd..<viewportColumns {
+                                                cellBody(column, padding.kind, padding.scalars)
+                                            }
+                                        }
+                                    }
+                                    emittedTail = joinsProjectedMargin || joinsPadding
+                                    start = end
+                                }
+                                if emittedTail == false, let projectedMargin {
+                                    if projectedMargin.styleId != lastId {
+                                        lastStyle = readStorageReference.takeUnretainedValue()
+                                            .style(for: projectedMargin.styleId)
+                                        lastId = projectedMargin.styleId
+                                    }
+                                    styleRunBody(margin..<viewportColumns, lastStyle) { cellBody in
+                                        cellBody(margin, projectedMargin.kind, projectedMargin.scalars)
+                                    }
+                                } else if emittedTail == false, directEnd < viewportColumns {
+                                    if padding.styleId != lastId {
+                                        lastStyle = readStorageReference.takeUnretainedValue()
+                                            .style(for: padding.styleId)
+                                        lastId = padding.styleId
+                                    }
+                                    styleRunBody(directEnd..<viewportColumns, lastStyle) { cellBody in
+                                        for column in directEnd..<viewportColumns {
                                             cellBody(column, padding.kind, padding.scalars)
                                         }
                                     }
                                 }
-                                start = end
                             }
                         }
                     }
-                }
-            } else if let windowRow = viewportStreamRow(at: streamRow) {
-                let margin = viewportColumns - 1
-                let projectedMargin = projectedViewportCell(
-                    in: windowRow,
-                    at: streamRow,
-                    column: margin
-                )
-                body(row) { styleRunBody in
-                    let padding = GridCell()
-                    var start = 0
-                    while start < viewportColumns {
-                        let styleId = start == margin
-                            ? projectedMargin.styleId
-                            : start < windowRow.cells.count
-                            ? windowRow.cells[start].styleId
-                            : padding.styleId
-                        var end = start + 1
-                        while end < viewportColumns {
-                            let nextId = end == margin
-                                ? projectedMargin.styleId
-                                : end < windowRow.cells.count
-                                ? windowRow.cells[end].styleId
-                                : padding.styleId
-                            guard nextId == styleId else { break }
-                            end += 1
-                        }
-                        if styleId != lastId {
-                            lastStyle = resolvedStyles[styleId] ?? TerminalStyle()
-                            lastId = styleId
-                        }
-                        styleRunBody(start..<end, lastStyle) { cellBody in
-                            for column in start..<end {
-                                let cell = column == margin
-                                    ? projectedMargin
-                                    : column < windowRow.cells.count
-                                    ? windowRow.cells[column]
-                                    : padding
-                                cellBody(column, cell.kind, cell.scalars)
+                } else if let windowRow = viewportStreamRow(at: streamRow) {
+                    let margin = viewportColumns - 1
+                    let projectedMargin: GridCell?
+                    if windowRow.logicallyContinues,
+                       windowRow.marginProvenance == .wideWrap
+                    {
+                        projectedMargin = Self.projectedMarginCell(
+                            stored: windowRow.cells.indices.contains(margin)
+                                ? windowRow.cells[margin]
+                                : nil,
+                            follower: projectionFollower(after: streamRow),
+                            fillsMissingWrapSpacer: true,
+                            missingWrapMargin: openTailPendingMargin
+                        )
+                    } else {
+                        projectedMargin = nil
+                    }
+                    if projectedMargin == nil, windowRow.cells.count >= viewportColumns {
+                        body(row) { styleRunBody in
+                            windowRow.cells.withUnsafeBufferPointer { cells in
+                                if resolvedStyles == nil {
+                                    if lastId != Self.defaultStyleId {
+                                        lastId = Self.defaultStyleId
+                                        lastStyle = TerminalStyle()
+                                    }
+                                    styleRunBody(0..<viewportColumns, lastStyle) { cellBody in
+                                        for column in 0..<viewportColumns {
+                                            let cell = cells[column]
+                                            cellBody(column, cell.kind, cell.scalars)
+                                        }
+                                    }
+                                    return
+                                }
+                                var start = 0
+                                while start < viewportColumns {
+                                    let styleId = cells[start].styleId
+                                    var end = start + 1
+                                    while end < viewportColumns, cells[end].styleId == styleId {
+                                        end += 1
+                                    }
+                                    if styleId != lastId {
+                                        lastStyle = styleId == Self.defaultStyleId
+                                            ? TerminalStyle()
+                                            : resolvedStyles?[styleId] ?? TerminalStyle()
+                                        lastId = styleId
+                                    }
+                                    styleRunBody(start..<end, lastStyle) { cellBody in
+                                        for column in start..<end {
+                                            let cell = cells[column]
+                                            cellBody(column, cell.kind, cell.scalars)
+                                        }
+                                    }
+                                    start = end
+                                }
                             }
                         }
-                        start = end
+                        continue
+                    }
+                    body(row) { styleRunBody in
+                        let padding = GridCell()
+                        let directEnd = projectedMargin == nil
+                            ? min(windowRow.cells.count, viewportColumns)
+                            : margin
+                        var emittedTail = false
+                        var start = 0
+                        while start < directEnd {
+                            let styleId = windowRow.cells[start].styleId
+                            var end = start + 1
+                            while end < directEnd, windowRow.cells[end].styleId == styleId {
+                                end += 1
+                            }
+                            let joinsProjectedMargin = end == directEnd
+                                && directEnd == margin
+                                && projectedMargin?.styleId == styleId
+                            let joinsPadding = end == directEnd
+                                && projectedMargin == nil
+                                && directEnd < viewportColumns
+                                && padding.styleId == styleId
+                            let runEnd = joinsProjectedMargin || joinsPadding
+                                ? viewportColumns
+                                : end
+                            if styleId != lastId {
+                                lastStyle = styleId == Self.defaultStyleId
+                                    ? TerminalStyle()
+                                    : resolvedStyles?[styleId] ?? TerminalStyle()
+                                lastId = styleId
+                            }
+                            styleRunBody(start..<runEnd, lastStyle) { cellBody in
+                                for column in start..<end {
+                                    let cell = windowRow.cells[column]
+                                    cellBody(column, cell.kind, cell.scalars)
+                                }
+                                if joinsProjectedMargin, let projectedMargin {
+                                    cellBody(margin, projectedMargin.kind, projectedMargin.scalars)
+                                } else if joinsPadding {
+                                    for column in directEnd..<viewportColumns {
+                                        cellBody(column, padding.kind, padding.scalars)
+                                    }
+                                }
+                            }
+                            emittedTail = joinsProjectedMargin || joinsPadding
+                            start = end
+                        }
+                        if emittedTail == false, let projectedMargin {
+                            if projectedMargin.styleId != lastId {
+                                lastStyle = projectedMargin.styleId == Self.defaultStyleId
+                                    ? TerminalStyle()
+                                    : resolvedStyles?[projectedMargin.styleId] ?? TerminalStyle()
+                                lastId = projectedMargin.styleId
+                            }
+                            styleRunBody(margin..<viewportColumns, lastStyle) { cellBody in
+                                cellBody(margin, projectedMargin.kind, projectedMargin.scalars)
+                            }
+                        } else if emittedTail == false, directEnd < viewportColumns {
+                            if padding.styleId != lastId {
+                                lastStyle = padding.styleId == Self.defaultStyleId
+                                    ? TerminalStyle()
+                                    : resolvedStyles?[padding.styleId] ?? TerminalStyle()
+                                lastId = padding.styleId
+                            }
+                            styleRunBody(directEnd..<viewportColumns, lastStyle) { cellBody in
+                                for column in directEnd..<viewportColumns {
+                                    cellBody(column, padding.kind, padding.scalars)
+                                }
+                            }
+                        }
                     }
                 }
             }
+            withExtendedLifetime(readStorage) {}
         }
     }
 
