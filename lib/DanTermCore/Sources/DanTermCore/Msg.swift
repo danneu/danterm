@@ -195,7 +195,7 @@ enum Msg {
     case endSearch(paneId: PaneId)
     // Backend search callbacks: reported by whichever terminal engine owns the pane,
     // never crossing the C boundary, so they carry no backend in their names.
-    case searchStarted(paneId: PaneId, needle: String)
+    // Opening search is not among them -- `.startSearch` writes that state itself.
     case searchTotalReported(paneId: PaneId, total: Int?)
     case searchSelectionReported(paneId: PaneId, selected: Int?)
 

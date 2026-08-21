@@ -7,7 +7,6 @@ enum TerminalSessionEvent: Equatable {
     case bell
     case report(SessionReport)
     case desktopNotification(title: String, body: String)
-    case searchStarted(String)
     case searchTotal(Int?)
     case searchSelected(Int?)
     case clickedToFocus
@@ -30,8 +29,6 @@ func terminalMessages(
         return [.sessionReport(sessionId: sessionId, report: report)]
     case .desktopNotification(let title, let body):
         return [.sessionNotification(sessionId: sessionId, title: title, body: body)]
-    case .searchStarted(let needle):
-        return [.searchStarted(paneId: paneId, needle: needle)]
     case .searchTotal(let total):
         return [.searchTotalReported(paneId: paneId, total: total)]
     case .searchSelected(let selected):

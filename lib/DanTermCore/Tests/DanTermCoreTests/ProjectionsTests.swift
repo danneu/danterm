@@ -866,7 +866,8 @@ import Testing
         #expect(desiredSearchOverlays(in: model)[paneId] == nil,
             "no active search -> no key")
 
-        update(&model, .searchStarted(paneId: paneId, needle: "foo"))
+        update(&model, .startSearch)
+        update(&model, .searchNeedleChanged(paneId: paneId, needle: "foo"))
         model.updatePane(paneId) {
             $0.live.search?.status = .matched(selected: 2, total: 7)
         }

@@ -138,7 +138,6 @@ struct AppRuntimeSessionCommandTests {
             row: 2
         ))
         runtime.perform(.focusSession(paneId: paneId, focused: true))
-        runtime.perform(.sendStartSearch(paneId: paneId))
         runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "find"))
         runtime.perform(.sendSearchNavigate(paneId: paneId, direction: .previous))
 
@@ -154,7 +153,6 @@ struct AppRuntimeSessionCommandTests {
         #expect(wheel.column == 4)
         #expect(wheel.row == 2)
         #expect(fixture.session.focusedValues == [true])
-        #expect(fixture.session.startSearchCount == 1)
         #expect(fixture.session.searchNeedles == ["find"])
         #expect(fixture.session.searchDirections.count == 1)
         if case .previous = fixture.session.searchDirections[0] {

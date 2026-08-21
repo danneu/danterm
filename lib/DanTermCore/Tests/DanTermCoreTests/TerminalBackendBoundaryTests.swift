@@ -83,10 +83,6 @@ struct TerminalBackendBoundaryTests {
             }
             return false
         }
-        assertSessionMessage(.searchStarted("needle"), paneId: paneId) {
-            if case .searchStarted(let id, let needle) = $0 { return id == paneId && needle == "needle" }
-            return false
-        }
         assertSessionMessage(.searchTotal(7), paneId: paneId) {
             if case .searchTotalReported(let id, let total) = $0 { return id == paneId && total == 7 }
             return false

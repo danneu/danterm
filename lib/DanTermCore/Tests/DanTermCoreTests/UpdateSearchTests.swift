@@ -1,34 +1,84 @@
 // Swift Testing migration of the legacy `tests/UpdateSearchTests.swift`
-// harness suite. Pins the search-domain Msg paths: startSearch /
-// searchStarted (focus-field + live-search creation), needle changes
-// (stale match-status reset), searchNavigate, endSearch teardown, the
-// searchTotalReported / searchSelectionReported handlers (model-only, no
-// commands), and cleanup of live search across closePane / closeTab /
-// sessionCreationFailed / deleteGroup.
+// harness suite. Pins the search-domain Msg paths: startSearch (focus-field
+// + live-search creation), needle changes (stale match-status reset),
+// searchNavigate, endSearch teardown, the searchTotalReported /
+// searchSelectionReported handlers (model-only, no commands), and cleanup of
+// live search across closePane / closeTab / sessionCreationFailed /
+// deleteGroup.
+//
+// Nothing here tests "a backend report opens search": no message can do that
+// any more, so the states the deleted searchStarted tests guarded -- search
+// opened on an orphan pane, a needle arriving with the activation -- are
+// unrepresentable.
 import Foundation
 import Testing
 
 @testable import DanTermCore
 
 @Suite struct UpdateSearchTests {
-    @Test("startSearch emits sendStartSearch for focused pane")
-    func startSearchEmitsSendStartSearchForFocusedPane() {
-        // Intent: startSearch emits sendStartSearch addressed to the
-        //   focused pane and does NOT create live search (that arrives via
-        //   the backend's searchStarted callback).
-        // Why it exists: pins the two-step search activation (command
-        //   first, model state on the callback).
-        // Scenario: spec-first startSearch.
+    @Test("startSearch opens field-owned search on the focused pane with no command")
+    func startSearchOpensFieldOwnedSearchOnFocusedPane() {
+        // Intent: startSearch writes the focused pane's live search itself --
+        //   empty needle, field ownership -- and emits nothing, so the overlay
+        //   and the caret both follow from the projections.
+        // Why it exists: search used to open through a round trip out to the
+        //   pane session and back, which left the model saying "closed" while
+        //   the view was opening it, and dropped Cmd-F outright on a pane whose
+        //   session had not mounted.
         var model = makeModel()
         createTab(&model)
-        let tab = selectedTab(in: model)!
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+
         let commands = update(&model, .startSearch)
-        #expect(hasEffect(commands) {
-            if case .sendStartSearch(let pid) = $0 { return pid == tab.paneTree.focusedPaneId }
-            return false
-        }, "expected sendStartSearch")
-        #expect(model.pane(tab.paneTree.focusedPaneId)?.live.search == nil,
-            "should not create search state")
+
+        #expect(model.pane(paneId)?.live.search?.needle == "")
+        #expect(model.pane(paneId)?.live.search?.focusOwner == .field)
+        #expect(commands.isEmpty, "opening search asks the backend for nothing")
+        #expect(desiredSearchOverlays(in: model)[paneId] != nil,
+            "the overlay projection must key the pane straight after startSearch")
+        #expect(desiredPaneFocus(in: model) == .searchField(paneId),
+            "the focus projection must name the field straight after startSearch")
+    }
+
+    @Test("startSearch on an open search keeps the needle and reclaims the field")
+    func startSearchOnOpenSearchKeepsNeedleAndReclaimsField() {
+        // Intent: a second Cmd-F on a pane that already has search open leaves
+        //   the typed needle and its status alone and only takes field
+        //   ownership back from the terminal.
+        // Why it exists: the user reaches for Cmd-F to get back into the field
+        //   after typing into the terminal; wiping the needle there would throw
+        //   away what they were searching for.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        update(&model, .startSearch)
+        update(&model, .searchNeedleChanged(paneId: paneId, needle: "kept"))
+        update(&model, .searchTotalReported(paneId: paneId, total: 3))
+        update(&model, .paneBecameFirstResponder(paneId: paneId))
+        #expect(model.pane(paneId)?.live.search?.focusOwner == .terminal)
+
+        let commands = update(&model, .startSearch)
+
+        #expect(model.pane(paneId)?.live.search?.needle == "kept")
+        #expect(model.pane(paneId)?.live.search?.status == .counted(total: 3))
+        #expect(model.pane(paneId)?.live.search?.focusOwner == .field)
+        #expect(commands.isEmpty)
+    }
+
+    @Test("startSearch with no selected tab changes nothing")
+    func startSearchWithNoSelectedTabChangesNothing() {
+        // Intent: Cmd-F with no tab to search leaves both the model and the
+        //   command list alone.
+        // Why it exists: the reducer now writes pane state directly, so the
+        //   no-tab guard is the only thing between a stray Cmd-F and a pane
+        //   lookup with nothing behind it.
+        var model = makeModel()
+        let before = model
+
+        let commands = update(&model, .startSearch)
+
+        #expect(commands.isEmpty)
+        #expect(model == before, "startSearch without a selected tab touched the model")
     }
 
     @Test("navigateFocusedSearch forwards to the focused pane's active search")
@@ -41,7 +91,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .searchStarted(paneId: paneId, needle: "hit"))
+        update(&model, .startSearch)
 
         let commands = update(&model, .navigateFocusedSearch(direction: .previous))
         #expect(hasEffect(commands) {
@@ -65,67 +115,6 @@ import Testing
         #expect(commands.isEmpty, "expected no commands without search state")
     }
 
-    @Test("searchStarted creates field-owned SearchModel")
-    func searchStartedCreatesFieldOwnedSearchModel() {
-        // Intent: searchStarted installs live search with the field as owner.
-        // Why it exists: pins the model-owned focus policy on activation.
-        // Scenario: spec-first backend start.
-        var model = makeModel()
-        createTab(&model)
-        let tab = selectedTab(in: model)!
-        let paneId = tab.paneTree.focusedPaneId
-        let commands = update(&model, .searchStarted(paneId: paneId, needle: ""))
-        #expect(model.pane(paneId)?.live.search != nil, "search state should exist")
-        #expect(model.pane(paneId)?.live.search?.needle == "")
-        #expect(model.pane(paneId)?.live.search?.focusOwner == .field)
-        #expect(commands.isEmpty)
-    }
-
-    @Test("searchStarted for a pane outside the tree creates no overlay")
-    func searchStartedForMissingPaneCreatesNoOverlay() {
-        // Intent: searchStarted ignores a pane id that no tree leaf owns.
-        // Why it exists: live search state belongs to PaneModel, so an orphan
-        //   search overlay must be unrepresentable.
-        // Scenario: MODEL-5 deliberately narrows the defensive callback path.
-        var model = makeModel()
-        createTab(&model)
-        let missingPaneId = PaneId()
-
-        let commands = update(&model, .searchStarted(paneId: missingPaneId, needle: "orphan"))
-
-        #expect(desiredSearchOverlays(in: model)[missingPaneId] == nil)
-        #expect(commands.isEmpty)
-    }
-
-    @Test("searchStarted with needle sets needle in model")
-    func searchStartedWithNeedleSetsNeedle() {
-        // Intent: searchStarted carries the needle into live search.
-        // Why it exists: pins the needle propagation on activation.
-        // Scenario: spec-first needle-on-start.
-        var model = makeModel()
-        createTab(&model)
-        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .searchStarted(paneId: paneId, needle: "hello"))
-        #expect(model.pane(paneId)?.live.search?.needle == "hello")
-    }
-
-    @Test("searchStarted when already active updates needle and reclaims field ownership")
-    func searchStartedWhileActiveUpdatesNeedleAndOwner() {
-        // Intent: re-entering searchStarted on an active pane updates
-        //   the needle and restores field ownership.
-        // Why it exists: pins the idempotent re-entry path.
-        // Scenario: spec-first re-entry update.
-        var model = makeModel()
-        createTab(&model)
-        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .searchStarted(paneId: paneId, needle: "first"))
-        update(&model, .paneBecameFirstResponder(paneId: paneId))
-        let commands = update(&model, .searchStarted(paneId: paneId, needle: "second"))
-        #expect(model.pane(paneId)?.live.search?.needle == "second")
-        #expect(model.pane(paneId)?.live.search?.focusOwner == .field)
-        #expect(commands.isEmpty)
-    }
-
     @Test("a search-field focus report adopts its pane along with field ownership")
     func searchFieldFocusReportAdoptsItsPane() {
         // Intent: the report of a click into a pane's search field focuses that
@@ -140,8 +129,10 @@ import Testing
         let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .paneBecameFirstResponder(paneId: paneA))
-        update(&model, .searchStarted(paneId: paneB, needle: "hit"))
+        // Search stands open on pane B while pane A holds focus, which no
+        // activation message can produce -- .startSearch always targets the
+        // focused pane -- so the fixture is written as pane state.
+        model.updatePane(paneB) { $0.live.search = SearchModel(needle: "hit") }
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneB,
@@ -173,7 +164,7 @@ import Testing
         let firstTabId = model.selectedTabId
         createTab(&model)
         let secondTabPane = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .searchStarted(paneId: secondTabPane, needle: "hit"))
+        update(&model, .startSearch)
         update(&model, .selectTab(id: firstTabId!))
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: secondTabPane,
@@ -199,7 +190,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .searchStarted(paneId: paneId, needle: ""))
+        update(&model, .startSearch)
         model.updatePane(paneId) { $0.live.search?.status = .matched(selected: 2, total: 5) }
         let commands = update(&model, .searchNeedleChanged(paneId: paneId, needle: "new"))
         #expect(model.pane(paneId)?.live.search?.needle == "new")
@@ -218,7 +209,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .searchStarted(paneId: paneId, needle: ""))
+        update(&model, .startSearch)
         let commands = update(&model, .searchNavigate(paneId: paneId, direction: .next))
         #expect(hasEffect(commands) {
             if case .sendSearchNavigate(let pid, let dir) = $0 {
@@ -237,7 +228,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .searchStarted(paneId: paneId, needle: "test"))
+        update(&model, .startSearch)
         let commands = update(&model, .endSearch(paneId: paneId))
         #expect(model.pane(paneId)?.live.search == nil, "search state should be removed")
         #expect(hasEffect(commands) {
@@ -271,7 +262,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .searchStarted(paneId: paneId, needle: "x"))
+        update(&model, .startSearch)
 
         let commands = update(&model, .searchTotalReported(paneId: paneId, total: 42))
         #expect(model.pane(paneId)?.live.search?.status == .counted(total: 42))
@@ -297,7 +288,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .searchStarted(paneId: paneId, needle: "x"))
+        update(&model, .startSearch)
 
         let orphan = update(&model, .searchSelectionReported(paneId: paneId, selected: 3))
         #expect(model.pane(paneId)?.live.search?.status == nil, "no total yet -> nothing to select into")
@@ -322,7 +313,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .searchStarted(paneId: paneId, needle: "test"))
+        update(&model, .startSearch)
         #expect(model.pane(paneId)?.live.search != nil, "search state should exist before close")
         update(&model, .closePane(paneId: paneId))
         #expect(desiredSearchOverlays(in: model)[paneId] == nil,
@@ -340,7 +331,7 @@ import Testing
         createTab(&model)
         let tabId = model.selectedTabId!
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .searchStarted(paneId: paneId, needle: "test"))
+        update(&model, .startSearch)
         update(&model, .closeTab(id: tabId))
         #expect(desiredSearchOverlays(in: model)[paneId] == nil,
             "the closed tab's pane should have no search overlay")

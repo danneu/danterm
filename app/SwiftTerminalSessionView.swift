@@ -1225,12 +1225,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             : nil
     }
 
-    func startSearch() {
-        // Synchronous on purpose: `.searchStarted` is what creates the pane's
-        // searchState and mounts the overlay, so it cannot wait on an engine round-trip.
-        callbackGate.emit(.searchStarted(""))
-    }
-
     func setSearchNeedle(_ needle: String) {
         // An empty needle is "no search", not a search for nothing -- clearing also
         // drops the active-match highlight.

@@ -17,8 +17,6 @@ func recordTerminalCharacterizationEvent(_ event: TerminalSessionEvent) {
         description = "session.report:\(String(describing: report))"
     case .desktopNotification(let title, let body):
         description = "session.desktopNotification:\(title):\(body)"
-    case .searchStarted(let needle):
-        description = "session.searchStarted:\(needle)"
     case .searchTotal(let total):
         description = "session.searchTotal:\(String(describing: total))"
     case .searchSelected(let selected):
@@ -1008,9 +1006,6 @@ class AppRuntime {
             window?.makeKeyAndOrderFront(nil)
 
         // Search commands
-
-        case .sendStartSearch(let paneId):
-            paneSession(for: paneId)?.startSearch()
 
         case .sendSearchNeedle(let paneId, let needle):
             guard let host = paneHost(for: paneId) else { break }

@@ -117,7 +117,6 @@ enum Command {
     case saveDanTermConfig(DanTermConfig)
 
     // Search
-    case sendStartSearch(paneId: PaneId)
     case sendSearchNeedle(paneId: PaneId, needle: String)
     case sendSearchNavigate(paneId: PaneId, direction: SearchDirection)
     case sendEndSearch(paneId: PaneId)

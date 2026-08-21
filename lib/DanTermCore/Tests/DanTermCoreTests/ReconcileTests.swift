@@ -166,7 +166,7 @@ import Testing
         let selectedBackgroundPane = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(desiredPaneFocus(in: model) == .terminal(selectedBackgroundPane))
 
-        update(&model, .searchStarted(paneId: selectedBackgroundPane, needle: "hit"))
+        update(&model, .startSearch)
         #expect(desiredPaneFocus(in: model) == .searchField(selectedBackgroundPane))
         update(&model, .paneBecameFirstResponder(paneId: selectedBackgroundPane))
         #expect(desiredPaneFocus(in: model) == .terminal(selectedBackgroundPane))

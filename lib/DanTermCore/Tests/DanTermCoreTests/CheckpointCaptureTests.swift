@@ -172,7 +172,8 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         update(&model, .clearAlertsForTabs(tabIds: [model.groups[0].tabs[0].id]))
         #expect(lightProjection(model) == baseline, "alert clearing")
 
-        update(&model, .searchStarted(paneId: searchPane, needle: "hit"))
+        update(&model, .startSearch)
+        update(&model, .searchNeedleChanged(paneId: searchPane, needle: "hit"))
         update(&model, .paneBecameFirstResponder(paneId: searchPane))
         #expect(model.pane(searchPane)?.live.search?.focusOwner == .terminal)
         #expect(lightProjection(model) == baseline, "search")

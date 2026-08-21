@@ -124,7 +124,6 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var focusedValues: [Bool] = []
     var visibleValues: [Bool] = []
     var renderingAvailableValues: [Bool] = []
-    var startSearchCount = 0
     var searchNeedles: [String] = []
     var searchDirections: [SearchDirection] = []
     var endSearchCount = 0
@@ -171,7 +170,6 @@ final class RecordingTerminalSession: NSView, TerminalSession {
         onGridOverride?(grid)
     }
     func setCopyOnSelect(_ enabled: Bool) {}
-    func startSearch() { startSearchCount += 1 }
     func setSearchNeedle(_ needle: String) { searchNeedles.append(needle) }
     func navigateSearch(_ direction: SearchDirection) { searchDirections.append(direction) }
     func endSearch() { endSearchCount += 1 }

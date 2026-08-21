@@ -13,20 +13,19 @@ func swiftTerminalSessionViewTests() {
         // Intent: every search entry point reaches the engine controller with its semantic input.
         // Why it exists: the real view gained search routing while the UI controller shim stayed
         //   incomplete, preventing the harness from compiling and leaving this adapter untested.
-        // Scenario: the user opens find, types a needle, navigates both ways, clears it, and closes.
+        // Scenario: the user types a needle, navigates both ways, clears it, and closes.
         let controller = TerminalPaneSessionController()
         let pane = SwiftTerminalSessionView(controller: controller)
         var events: [TerminalSessionEvent] = []
         pane.onEvent = { events.append($0) }
 
-        pane.startSearch()
         pane.setSearchNeedle("needle")
         pane.navigateSearch(.next)
         pane.navigateSearch(.previous)
         pane.setSearchNeedle("")
         pane.endSearch()
 
-        try uiExpect(events == [.searchStarted("")], "search start did not mount the overlay")
+        try uiExpect(events.isEmpty, "search routing must not report events back: \(events)")
         try uiExpect(controller.searchQueries == ["needle"],
                      "search needle routing diverged: \(controller.searchQueries)")
         try uiExpect(controller.searchNextRequests == 1, "next search was not routed once")

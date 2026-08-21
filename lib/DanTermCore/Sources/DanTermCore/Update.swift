@@ -1137,19 +1137,17 @@ func update(
     // MARK: - Search
 
     case .startSearch:
+        // Opening search is the reducer's own decision, so it writes the state here
+        // rather than asking the session to report it back: the overlay and the caret
+        // both follow from this pane state on the next reconcile sweep, and a pane
+        // whose session has not mounted yet still opens.
         guard let tab = selectedTab(in: model) else { return [] }
-        return [.sendStartSearch(paneId: tab.paneTree.focusedPaneId)]
-
-    case .searchStarted(let paneId, let needle):
-        guard model.pane(paneId) != nil else { return [] }
-        model.updatePane(paneId) { pane in
+        model.updatePane(tab.paneTree.focusedPaneId) { pane in
+            // Re-entry keeps the typed needle and status; Cmd-F only reclaims the field.
             if pane.live.search == nil {
                 pane.live.search = SearchModel()
             }
             pane.live.search?.focusOwner = .field
-            if !needle.isEmpty {
-                pane.live.search?.needle = needle
-            }
         }
         return []
 
