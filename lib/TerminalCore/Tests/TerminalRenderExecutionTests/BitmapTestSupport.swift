@@ -127,7 +127,11 @@ final class BitmapSurface {
     private let data: UnsafeMutableRawPointer
     private let byteCount: Int
 
-    init(size: RenderFrameSize, metrics: TerminalRenderMetrics) throws {
+    init(
+        size: RenderFrameSize,
+        metrics: TerminalRenderMetrics,
+        colorSpace: CGColorSpace? = nil
+    ) throws {
         let pixelCount = size.pixelWidth.multipliedReportingOverflow(by: size.pixelHeight)
         try #require(pixelCount.overflow == false)
         let byteCount = pixelCount.partialValue.multipliedReportingOverflow(by: 4)
@@ -144,7 +148,9 @@ final class BitmapSurface {
         )
 
         do {
-            let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+            let colorSpace = try #require(
+                colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)
+            )
             let context = try #require(CGContext(
                 data: allocatedData,
                 width: size.pixelWidth,

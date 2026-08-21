@@ -545,14 +545,16 @@ public func drawRenderFrame(
     }
 
     context.setBlendMode(.copy)
-    context.setFillColor(plan.defaultBackground.cgColor(in: colorSpace))
+    context.setFillColorSpace(colorSpace)
+    context.setStrokeColorSpace(colorSpace)
+    context.setFillColor(plan.defaultBackground)
     context.fill(CGRect(origin: .zero, size: frameSize.pointSize))
 
     let rows = RenderPlanRowSelection(rows: plan.rows, restriction: restriction)
 
     for row in rows {
         for run in row.backgroundRuns {
-            context.setFillColor(run.color.cgColor(in: colorSpace))
+            context.setFillColor(run.color)
             context.fill(cellRect(
                 row: run.row,
                 startColumn: run.startColumn,
@@ -564,7 +566,7 @@ public func drawRenderFrame(
 
     for row in rows {
         for run in row.overlayRuns {
-            context.setFillColor(run.color.cgColor(in: colorSpace))
+            context.setFillColor(run.color)
             context.fill(cellRect(
                 row: run.row,
                 startColumn: run.startColumn,
@@ -581,7 +583,7 @@ public func drawRenderFrame(
         rows.selects(row: cursor.row) ? cursor : nil
     }
     if let cursor, cursor.shape == .block {
-        context.setFillColor(cursor.color.cgColor(in: colorSpace))
+        context.setFillColor(cursor.color)
         context.fill(cellRect(
             row: cursor.row,
             startColumn: cursor.column,
@@ -598,11 +600,10 @@ public func drawRenderFrame(
     context.textMatrix = originalTextMatrix
     context.drawDecorationRuns(
         rows,
-        metrics: metrics,
-        colorSpace: colorSpace
+        metrics: metrics
     )
     if let cursor {
-        context.drawCursor(cursor, metrics: metrics, colorSpace: colorSpace)
+        context.drawCursor(cursor, metrics: metrics)
     }
 }
 
@@ -630,6 +631,15 @@ private func pixelAlignedOffset(
 }
 
 private extension RenderColor {
+    var components: (CGFloat, CGFloat, CGFloat, CGFloat) {
+        (
+            CGFloat(red) / 255,
+            CGFloat(green) / 255,
+            CGFloat(blue) / 255,
+            1
+        )
+    }
+
     func cgColor(in colorSpace: CGColorSpace) -> CGColor {
         CGColor(
             colorSpace: colorSpace,
@@ -708,10 +718,27 @@ private func glyphOrigin(
 }
 
 private extension CGContext {
+    func setFillColor(_ color: RenderColor) {
+        var components = color.components
+        withUnsafePointer(to: &components) { pointer in
+            pointer.withMemoryRebound(to: CGFloat.self, capacity: 4) {
+                setFillColor($0)
+            }
+        }
+    }
+
+    func setStrokeColor(_ color: RenderColor) {
+        var components = color.components
+        withUnsafePointer(to: &components) { pointer in
+            pointer.withMemoryRebound(to: CGFloat.self, capacity: 4) {
+                setStrokeColor($0)
+            }
+        }
+    }
+
     func drawCursor(
         _ cursor: RenderCursor,
-        metrics: TerminalRenderMetrics,
-        colorSpace: CGColorSpace
+        metrics: TerminalRenderMetrics
     ) {
         let cell = cellRect(
             row: cursor.row,
@@ -745,7 +772,7 @@ private extension CGContext {
         saveGState()
         clip(to: cell)
         setBlendMode(.copy)
-        setFillColor(cursor.color.cgColor(in: colorSpace))
+        setFillColor(cursor.color)
         fill(overlayRect)
         restoreGState()
     }
@@ -1323,8 +1350,7 @@ private extension CGContext {
 
     func drawDecorationRuns(
         _ rows: RenderPlanRowSelection,
-        metrics: TerminalRenderMetrics,
-        colorSpace: CGColorSpace
+        metrics: TerminalRenderMetrics
     ) {
         for row in rows {
             for run in row.decorationRuns {
@@ -1337,8 +1363,8 @@ private extension CGContext {
                 saveGState()
                 clip(to: runRect)
                 setBlendMode(.copy)
-                setFillColor(run.color.cgColor(in: colorSpace))
-                setStrokeColor(run.color.cgColor(in: colorSpace))
+                setFillColor(run.color)
+                setStrokeColor(run.color)
 
                 for kind in run.kinds {
                     switch kind {
@@ -1370,7 +1396,7 @@ private extension CGContext {
                     case .underlineDashed:
                         fillPatternedUnderline(in: runRect, metrics: metrics, dashPixels: 3)
                     case .strikethrough:
-                        setFillColor(run.strikethroughColor.cgColor(in: colorSpace))
+                        setFillColor(run.strikethroughColor)
                         fillDecorationBar(
                             in: runRect,
                             top: CGFloat(run.row) * metrics.cellSize.height

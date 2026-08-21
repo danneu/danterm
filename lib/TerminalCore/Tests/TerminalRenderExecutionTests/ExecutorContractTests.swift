@@ -386,14 +386,57 @@ struct ExecutorContractTests {
         expectBitmap(first, matches: second)
     }
 
-    @Test("Drawing restores CTM, text matrix, and a nonrectangular caller clip")
+    @Test("Non-text sRGB colors convert identically in a Display P3 destination")
+    func nonTextColorsRetainSRGBMeaningInDisplayP3() throws {
+        // Intent: every non-text layer keeps its sRGB meaning when the destination
+        //   bitmap uses Display P3, including both fill and stroke decorations.
+        // Why it exists: component setters interpret values in the context's current
+        //   color space, so adopting the destination space silently changes pixels.
+        // Scenario: a frame combines a truecolor background, selection overlay,
+        //   curly underline plus strikethrough, and a block cursor in one P3 bitmap.
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+        terminal.feed(Array(
+            "\u{1B}[48;2;241;19;43m "
+                .appending("\u{1B}[0m ")
+                .appending("\u{1B}[38;2;29;217;83;58;2;31;97;239;4:3;9m ")
+                .appending("\u{1B}[0m \u{1B}[1;4H").utf8
+        ))
+        terminal.setSelection(.init(
+            start: .init(row: 0, column: 1),
+            end: .init(row: 0, column: 2)
+        ))
+        let plan = planFrame(
+            for: terminal,
+            presentation: .init(theme: .dark, isCursorVisible: true, cursorShape: .block)
+        )
+        let size = try #require(renderFrameSize(for: plan, metrics: metrics))
+        let displayP3 = try #require(CGColorSpace(name: CGColorSpace.displayP3))
+        let subject = try BitmapSurface(size: size, metrics: metrics, colorSpace: displayP3)
+        let reference = try BitmapSurface(size: size, metrics: metrics, colorSpace: displayP3)
+        let subjectContext = try #require(subject.context)
+        let referenceContext = try #require(reference.context)
+
+        drawRenderFrame(plan, metrics: metrics, in: subjectContext)
+        try drawReferenceNonTextLayers(plan, metrics: metrics, in: referenceContext)
+
+        let truecolor = try #require(plan.rows.first?.backgroundRuns.first)
+        let convertedPixel = reference.bitmap().pixel(
+            x: truecolor.startColumn * metrics.cellWidthPixels,
+            yFromTop: 0
+        )
+        #expect(convertedPixel != Pixel(truecolor.color))
+        expectBitmap(subject.bitmap(), matches: reference.bitmap())
+    }
+
+    @Test("Drawing restores CTM, text matrix, clip, and component color spaces")
     func drawingRestoresCallerContext() throws {
         // Intent: prove the executor returns every caller-owned context state,
-        //   including the exact shape of a clip rather than only its bounds.
+        //   including the exact clip shape and fill and stroke color spaces.
         // Why it exists: clip bounding boxes can compare equal after a leaked
-        //   rectangular clip even though later caller drawing is corrupted.
+        //   rectangular clip, while object colors cannot reveal a leaked space.
         // Scenario: a view clips terminal drawing to a triangular damage area,
-        //   then draws an opaque sentinel through that same clip afterward.
+        //   then draws raw-component fill and stroke sentinels through it afterward.
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
         let plan = try makePlan(
             input: "\u{1B}[41;37;4mA",
@@ -405,8 +448,13 @@ struct ExecutorContractTests {
         let control = try BitmapSurface(size: size, metrics: metrics)
         let subjectContext = try #require(subject.context)
         let controlContext = try #require(control.context)
+        let displayP3 = try #require(CGColorSpace(name: CGColorSpace.displayP3))
         applyTriangularClip(to: subjectContext, size: size.pointSize)
         applyTriangularClip(to: controlContext, size: size.pointSize)
+        subjectContext.setFillColorSpace(displayP3)
+        subjectContext.setStrokeColorSpace(displayP3)
+        controlContext.setFillColorSpace(displayP3)
+        controlContext.setStrokeColorSpace(displayP3)
 
         let callerTextMatrix = CGAffineTransform(
             a: 0.75,
@@ -425,8 +473,8 @@ struct ExecutorContractTests {
         #expect(subjectContext.ctm == callerCTM)
         #expect(subjectContext.textMatrix == callerTextMatrix)
 
-        try drawSentinel(in: subjectContext, size: size.pointSize)
-        try drawSentinel(in: controlContext, size: size.pointSize)
+        drawComponentSentinel(in: subjectContext, size: size.pointSize)
+        drawComponentSentinel(in: controlContext, size: size.pointSize)
         expectBitmap(subject.bitmap(), matches: control.bitmap())
     }
 }
@@ -478,12 +526,116 @@ private func applyTriangularClip(to context: CGContext, size: CGSize) {
     context.clip()
 }
 
-private func drawSentinel(in context: CGContext, size: CGSize) throws {
-    let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+private func drawComponentSentinel(in context: CGContext, size: CGSize) {
     context.setBlendMode(.copy)
-    context.setFillColor(try #require(CGColor(
-        colorSpace: colorSpace,
-        components: [0.25, 0.5, 0.75, 1]
-    )))
+    context.setFillColor([0.25, 0.5, 0.75, 1])
     context.fill(CGRect(origin: .zero, size: size))
+
+    context.setStrokeColor([0.8, 0.3, 0.1, 1])
+    context.setLineWidth(2)
+    context.stroke(CGRect(x: 1, y: 1, width: size.width - 2, height: size.height - 2))
+}
+
+private func drawReferenceNonTextLayers(
+    _ plan: RenderFramePlan,
+    metrics: TerminalRenderMetrics,
+    in context: CGContext
+) throws {
+    let size = try #require(renderFrameSize(for: plan, metrics: metrics))
+    let sRGB = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+    func color(_ value: RenderColor) throws -> CGColor {
+        try #require(CGColor(
+            colorSpace: sRGB,
+            components: [
+                CGFloat(value.red) / 255,
+                CGFloat(value.green) / 255,
+                CGFloat(value.blue) / 255,
+                1,
+            ]
+        ))
+    }
+    func rect(row: Int, column: Int, count: Int) -> CGRect {
+        CGRect(
+            x: CGFloat(column) * metrics.cellSize.width,
+            y: CGFloat(row) * metrics.cellSize.height,
+            width: CGFloat(count) * metrics.cellSize.width,
+            height: metrics.cellSize.height
+        )
+    }
+
+    context.setBlendMode(.copy)
+    context.setFillColor(try color(plan.defaultBackground))
+    context.fill(CGRect(origin: .zero, size: size.pointSize))
+    for row in plan.rows {
+        for run in row.backgroundRuns {
+            context.setFillColor(try color(run.color))
+            context.fill(rect(row: run.row, column: run.startColumn, count: run.columnCount))
+        }
+    }
+    for row in plan.rows {
+        for run in row.overlayRuns {
+            context.setFillColor(try color(run.color))
+            context.fill(rect(row: run.row, column: run.startColumn, count: run.columnCount))
+        }
+    }
+    if let cursor = plan.cursor, cursor.shape == .block {
+        context.setFillColor(try color(cursor.color))
+        context.fill(rect(row: cursor.row, column: cursor.column, count: cursor.columnWidth))
+    }
+    for row in plan.rows {
+        for run in row.decorationRuns {
+            let runRect = rect(row: run.row, column: run.startColumn, count: run.columnCount)
+            context.saveGState()
+            context.clip(to: runRect)
+            context.setBlendMode(.copy)
+            context.setFillColor(try color(run.color))
+            context.setStrokeColor(try color(run.color))
+            for kind in run.kinds {
+                switch kind {
+                case .underlineCurly:
+                    drawReferenceCurlyUnderline(in: runRect, metrics: metrics, context: context)
+                case .strikethrough:
+                    context.setFillColor(try color(run.strikethroughColor))
+                    context.fill(CGRect(
+                        x: runRect.minX,
+                        y: CGFloat(run.row) * metrics.cellSize.height
+                            + metrics.strikethroughOffset,
+                        width: runRect.width,
+                        height: metrics.underlineThickness
+                    ))
+                default:
+                    Issue.record("Unexpected decoration kind in Display P3 fixture: \(kind)")
+                }
+            }
+            context.restoreGState()
+        }
+    }
+}
+
+private func drawReferenceCurlyUnderline(
+    in runRect: CGRect,
+    metrics: TerminalRenderMetrics,
+    context: CGContext
+) {
+    let deviceStep = 1 / metrics.displayScale
+    let amplitude = max(metrics.underlineThickness, deviceStep)
+    let period = max(metrics.cellSize.width, deviceStep * 4)
+    let centerY = runRect.minY + metrics.underlineOffset - amplitude
+    let firstSample = Int((runRect.minX / deviceStep).rounded(.down)) - 1
+    let lastSample = Int((runRect.maxX / deviceStep).rounded(.up)) + 1
+    let path = CGMutablePath()
+    for sample in firstSample...lastSample {
+        let x = CGFloat(sample) * deviceStep
+        let y = centerY + amplitude * sin(2 * .pi * x / period)
+        if sample == firstSample {
+            path.move(to: CGPoint(x: x, y: y))
+        } else {
+            path.addLine(to: CGPoint(x: x, y: y))
+        }
+    }
+    context.addPath(path)
+    context.setLineWidth(metrics.underlineThickness)
+    context.setLineCap(.butt)
+    context.setLineJoin(.round)
+    context.strokePath()
 }
