@@ -457,12 +457,24 @@ def fetch_tailnet_status(socket_path: Path, pid: int, timeout: float = 10.0) -> 
     )
     connection = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
     deadline = time.monotonic() + timeout
-    line = b""
+    buffered = b""
+    response: dict[str, object] | None = None
     try:
         connection.settimeout(timeout)
         connection.connect(str(socket_path))
         connection.sendall(request.encode("utf-8") + b"\n")
-        while b"\n" not in line:
+        while response is None:
+            while b"\n" in buffered:
+                line, buffered = buffered.split(b"\n", 1)
+                try:
+                    frame = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(frame, dict) and frame.get("id") == 1:
+                    response = frame
+                    break
+            if response is not None:
+                break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError
@@ -470,7 +482,7 @@ def fetch_tailnet_status(socket_path: Path, pid: int, timeout: float = 10.0) -> 
             received = connection.recv(65536)
             if not received:
                 raise ConnectionError
-            line += received
+            buffered += received
     except OSError:
         terminate_session(pid)
         raise LaunchFailedError(
@@ -478,10 +490,7 @@ def fetch_tailnet_status(socket_path: Path, pid: int, timeout: float = 10.0) -> 
         ) from None
     finally:
         connection.close()
-    try:
-        status = json.loads(line.split(b"\n", 1)[0])["result"]
-    except (ValueError, KeyError, TypeError):
-        status = None
+    status = None if response is None else response.get("result")
     if not isinstance(status, dict) or "state" not in status:
         terminate_session(pid)
         raise LaunchFailedError("the app answered tailnet.status with no status, so it was killed")

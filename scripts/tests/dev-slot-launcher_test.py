@@ -295,24 +295,33 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         root: Path,
         socket_path: Path,
         status: Mapping[str, object] | None = None,
+        *,
+        hello_before_status: bool = False,
     ) -> Path:
         """A bundle executable that reports its arguments and serves its control socket.
 
         With a status it answers every request line with that JSON-RPC result, the way
         the app answers `tailnet.status`; without one it only listens, which is how an
-        app that never answers the query is reproduced.
+        app that never answers the query is reproduced. It can also send the server-first
+        hello notification that every real DanTerm IPC connection sends.
         """
 
         reply = (
             None if status is None
             else json.dumps({"jsonrpc": "2.0", "id": 1, "result": dict(status)})
         )
+        hello = json.dumps({"jsonrpc": "2.0", "method": "hello", "params": {}})
+        wire_reply = (
+            None
+            if reply is None
+            else ((hello + "\n") if hello_before_status else "") + reply + "\n"
+        )
         script = root / "DanTerm Dev (1)"
         script.write_text(
             f"#!{sys.executable}\n"
             "import socket, sys, time\n"
             "print('args:', ' '.join(sys.argv[1:]), flush=True)\n"
-            f"reply = {reply!r}\n"
+            f"reply = {wire_reply!r}\n"
             "server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
             f"server.bind({str(socket_path)!r})\n"
             "server.listen(8)\n"
@@ -323,7 +332,7 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             "    connection, _ = server.accept()\n"
             "    try:\n"
             "        connection.recv(65536)\n"
-            "        connection.sendall(reply.encode('utf-8') + b'\\n')\n"
+            "        connection.sendall(reply.encode('utf-8'))\n"
             "    except OSError:\n"
             "        pass\n"
             "    finally:\n"
@@ -340,6 +349,7 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         foreground: bool,
         tailnet: bool = False,
         status: Mapping[str, object] | None = None,
+        hello_before_status: bool = False,
     ) -> tuple[dict[str, object], Path]:
         """Runs the real launch path against a stand-in app, as main() does after staging."""
 
@@ -348,7 +358,12 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         identity["socketPath"] = str(socket_path)
         claim = launcher.claim_development_slot(root, range(1, 2))
         handle = launcher.launch_slot_app(
-            self.stand_in_app(root, socket_path, status),
+            self.stand_in_app(
+                root,
+                socket_path,
+                status,
+                hello_before_status=hello_before_status,
+            ),
             identity,
             {"PATH": "/usr/bin:/bin"},
             claim,
@@ -399,6 +414,25 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             self.assertEqual(handle["tailnet"], status)
             self.assertIn("--tailnet", log.read_text(encoding="utf-8"))
             self.assertEqual(launcher.survey_slots(root, range(1, 2))[0]["tailnet"], status)
+
+    def test_tailnet_launch_ignores_server_first_hello_before_status(self) -> None:
+        # Intent: a --tailnet launch correlates the status response by request id after
+        #   ignoring notifications, even when both frames arrive in one read.
+        # Why it exists: every real IPC connection sends hello before reading requests,
+        #   which made the launcher mistake that notification for the status response.
+        # Scenario: the dev-slot launcher connects to a real DanTerm control socket.
+        status = {"state": "listening", "endpoint": "100.99.4.1:24865"}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            handle, _ = self.launch(
+                root,
+                foreground=False,
+                tailnet=True,
+                status=status,
+                hello_before_status=True,
+            )
+
+            self.assertEqual(handle["tailnet"], status)
 
     def test_a_launch_without_the_flag_reports_no_tailnet_at_all(self) -> None:
         # Intent: the default launch every agent uses asks nothing about the tailnet and
