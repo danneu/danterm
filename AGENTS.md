@@ -308,7 +308,15 @@ prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
 - `just test-ui` -- AppKit UI harness. Excluded from the gate because it needs a
   WindowServer connection: it fails headless but runs fine from any shell in a
   logged-in GUI session, including an agent's.
+- `just lint` -- the rule checks alone, without the tests. A subset of `just test`.
 - Targeted: `swift test --package-path lib/DanTermCore [--filter CheckpointTests]`.
+
+**Which test command, when.** In the red-green-refactor loop, run the targeted
+suite for the package you edit (`swift test --package-path lib/X [--filter Y]`)
+and `just lint`. Targeted runs stop at the package boundary, so a green loop
+does not mean a safe change. Run `just test` before every commit. Do not run it
+inside the loop: it takes too long to run often, and its CPU tokens are shared
+with every other agent on the machine.
 
 Run a suite once, into a file, and grep the file: `just test-ui > .build/ui.log
 2>&1`. Re-running a minute-long suite to try a different grep wastes the minute,

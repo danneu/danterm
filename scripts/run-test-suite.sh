@@ -16,6 +16,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# `just lint` runs the rule checks alone. The flag is consumed here so that every `$1`
+# test further down still sees the worker, list-steps, or jobs argument it expects.
+LINT_ONLY=0
+if [[ "${1:-}" == "--lint-only" ]]; then
+    LINT_ONLY=1
+    shift
+fi
+
 # Keep Swift and xcrun compiler caches inside the writable workspace. Sandboxed agents cannot
 # write Clang's default cache under ~/.cache, and every gate child inherits this boundary.
 export CLANG_MODULE_CACHE_PATH="$REPO_ROOT/.build/clang-module-cache"
@@ -49,6 +57,38 @@ WIDE_MARKER='wide: '
 WIDE_ASK="${DANTERM_GATE_WIDE_ASK:-2}"
 (( WIDE_ASK > BUDGET )) && WIDE_ASK=$BUDGET
 (( WIDE_ASK < 1 )) && WIDE_ASK=1
+
+# The rule checks, as one named subset. These run against the working tree rather than
+# against a package, so they are what `just lint` runs on its own: an agent in a
+# red-green-refactor loop needs them every iteration, and needs the rest of the gate
+# only before a commit. Their self-tests stay in STEPS -- those check the lint scripts,
+# not the tree, so they matter when you edit a lint and not while you edit anything else.
+#
+# Defined once and spliced into STEPS below, so the two lists cannot drift apart.
+# shellcheck disable=SC2016
+LINT_STEPS=(
+    './scripts/gate-test-coverage-lint.py'
+    './scripts/manifest-ownership-lint.py'
+    './scripts/generated-unicode-tables-lint.py'
+    './scripts/terminal-backend-boundary-lint.sh'
+    './scripts/chip-artwork-isolation-gate.sh'
+    'python3 ./scripts/terminal-recording-schema-audit.py'
+    './scripts/core-purity-lint.sh'
+    './scripts/terminal-pty-host-test-seam-lint.sh'
+    './scripts/research-index-lint.sh'
+    './scripts/docs-lint.py'
+    './scripts/kitty-parity-lint.py'
+    './scripts/alacritty-parity-lint.py'
+    './scripts/terminal-fence-accounting-lint.sh'
+    './scripts/terminal-exit-concurrency-lint.sh'
+    './scripts/ambient-identity-lint.sh'
+    './scripts/checkpoint-off-main-lint.sh'
+    './scripts/reconcile-pass-lint.sh'
+    './scripts/reducer-command-discard-lint.sh'
+    './scripts/terminal-scalar-append-lint.sh'
+    './scripts/terminal-benchmark-draw-path-lint.sh'
+    './scripts/usage-single-source-lint.sh'
+)
 
 # Ordered longest-measured-first. With a bounded pool this is list scheduling: putting
 # the long poles in front keeps the tail from being one slow step finishing alone.
@@ -102,11 +142,8 @@ STEPS=(
     './scripts/tests/core-purity-lint_test.sh'
     './scripts/tests/run-test-suite_test.sh'
     './scripts/tests/gate-cpu-tokens_test.sh'
-    './scripts/gate-test-coverage-lint.py'
     'python3 ./scripts/tests/gate_test_coverage_lint_test.py'
-    './scripts/manifest-ownership-lint.py'
     'python3 ./scripts/tests/manifest_ownership_lint_test.py'
-    './scripts/generated-unicode-tables-lint.py'
     'python3 ./scripts/tests/generated_unicode_tables_lint_test.py'
     'python3 ./scripts/tests/manifest_targets_test.py'
     # The compiling half of the iOS gate's self-test. It runs its fixture cases in
@@ -125,22 +162,17 @@ STEPS=(
     'python3 ./scripts/tests/docs_lint_test.py'
     './scripts/tests/terminal-backend-boundary-lint_test.sh'
     './scripts/tests/agent-notifications-live_test.py'
-    './scripts/terminal-backend-boundary-lint.sh'
-    './scripts/chip-artwork-isolation-gate.sh'
     './scripts/tests/chip-artwork-isolation-gate_test.sh'
     './scripts/tests/test-terminal-pty_test.sh'
     './scripts/tests/test-terminal-pty-cleanup_test.sh'
     'python3 ./scripts/tests/pack_theme_catalog_test.py'
     'python3 ./scripts/tests/terminal_tape_to_fixture_test.py'
     'python3 ./scripts/tests/terminal_recording_schema_audit_test.py'
-    'python3 ./scripts/terminal-recording-schema-audit.py'
     './scripts/tests/terminal-viability-harness_test.sh'
     './scripts/tests/terminal-benchmark-harness_test.sh'
-    './scripts/core-purity-lint.sh'
     './scripts/tests/bundle-theme-resources_test.sh'
     './scripts/tests/terminal-fence-accounting-lint_test.sh'
     './scripts/tests/terminal-pty-host-test-seam-lint_test.sh'
-    './scripts/terminal-pty-host-test-seam-lint.sh'
     './scripts/tests/terminal-exit-concurrency-lint_test.sh'
     './scripts/tests/ambient-identity-lint_test.sh'
     './scripts/tests/checkpoint-off-main-lint_test.sh'
@@ -153,19 +185,14 @@ STEPS=(
     'python3 ./scripts/tests/terminal_benchmark_workloads_test.py'
     'python3 ./scripts/tests/terminal_benchmark_plan_calibration_test.py'
     'python3 ./scripts/tests/terminal_benchmark_candidate_screen_test.py'
-    './scripts/research-index-lint.sh'
-    './scripts/docs-lint.py'
     './scripts/tests/just-clean_test.sh'
-    './scripts/kitty-parity-lint.py'
     './scripts/tests/kitty-parity-lint_test.sh'
-    './scripts/alacritty-parity-lint.py'
     './scripts/tests/alacritty-parity-lint_test.sh'
     'python3 ./scripts/tests/terminal_benchmark_validation_test.py'
     'python3 ./scripts/tests/terminal_benchmark_producer_test.py'
     'python3 ./scripts/tests/terminal_draw_acceptance_test.py'
     'python3 ./scripts/tests/terminal_benchmark_compare_test.py'
     'python3 ./scripts/tests/import_themes_test.py'
-    './scripts/terminal-fence-accounting-lint.sh'
     'python3 ./scripts/tests/terminal_profile_report_test.py'
     'python3 ./scripts/tests/terminal_headless_draw_compare_test.py'
     'python3 ./scripts/tests/terminal_benchmark_fixtures_test.py'
@@ -174,14 +201,7 @@ STEPS=(
     'python3 ./scripts/tests/terminal_btop_stimulus_test.py'
     'python3 ./scripts/tests/terminal_btop_artifacts_test.py'
     'python3 ./scripts/tests/terminal_btop_workload_test.py'
-    './scripts/terminal-exit-concurrency-lint.sh'
-    './scripts/ambient-identity-lint.sh'
-    './scripts/checkpoint-off-main-lint.sh'
-    './scripts/reconcile-pass-lint.sh'
-    './scripts/reducer-command-discard-lint.sh'
-    './scripts/terminal-scalar-append-lint.sh'
-    './scripts/terminal-benchmark-draw-path-lint.sh'
-    './scripts/usage-single-source-lint.sh'
+    "${LINT_STEPS[@]}"
 )
 
 # Test seam: the self-test substitutes a synthetic step list so it can exercise the
@@ -191,6 +211,8 @@ if [[ -n "${RUN_TEST_SUITE_STEPS_FILE:-}" ]]; then
     while IFS= read -r line; do
         [[ -n "$line" ]] && STEPS+=("$line")
     done <"$RUN_TEST_SUITE_STEPS_FILE"
+elif (( LINT_ONLY )); then
+    STEPS=("${LINT_STEPS[@]}")
 elif [[ "${1:-}" != "--worker" ]]; then
     # The iOS portability gate is one cross-compile per pinned package, and the packages
     # share nothing -- each writes its own scratch path inside itself. Looping over them
