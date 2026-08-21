@@ -180,9 +180,9 @@ references are the requirement.
 | 3 | [BUG-15](#bug-15) | CSI Pm m (SGR) with more than 24 parameters  | **done** `c9f2f6a5` | Truncate an over-long CSI parameter list instead of discarding the whole sequence |
 | 3 | [BUG-16](#bug-16) | DECSC / DECRC (ESC 7 / ESC 8), and the impli | **done** `e94488ec` | Carry the saved cursor through width reflow instead of only clamping it |
 | 3 | [BUG-17](#bug-17) | DECSC / DECRC (ESC 7 / ESC 8) across a row-c | **done** `e94488ec` | Displace the saved cursor by the same row delta as the live cursor on a height shrink |
-| 3 | [BUG-18](#bug-18) | printing a narrow or wide character over one | unpinned | Paint the vacated half of a wide pair with a background, not the default style |
+| 3 | [BUG-18](#bug-18) | printing a narrow or wide character over one | **done** `14b664eb` | Paint the vacated half of a wide pair with a background, not the default style |
 | 3 | [BUG-19](#bug-19) | DECAWM off (CSI ? 7 l) followed by a double- | **pinned by a test** | Leave the cursor at the last column after a wide char printed there with DECAWM off |
-| 3 | [BUG-20](#bug-20) | IRM on (CSI 4 h) followed by a double-width  | unpinned | Stop insert mode from erasing the wrap spacer a wide character just wrote |
+| 3 | [BUG-20](#bug-20) | IRM on (CSI 4 h) followed by a double-width  | **done** `25997f26` | Stop insert mode from erasing the wrap spacer a wide character just wrote |
 | 3 | [BUG-21](#bug-21) | CSI 0 K (EL 0) at column 0 of row 0, and CSI | unpinned | Sever history's incoming wrap claim for every erase that blanks all of row 0, not just ED |
 | 2 | [BUG-22](#bug-22) | ESC Z (DECID, obsolete form of CSI c / DA1) | unpinned | Reply to ESC Z (DECID) with the primary device attributes string |
 | 2 | [BUG-23](#bug-23) | Legacy Escape key with the Alt modifier | **done** `9440fa34` | Prefix Alt+Escape with ESC in legacy mode |
