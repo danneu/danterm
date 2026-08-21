@@ -48,6 +48,11 @@ struct TerminalInputStream: Equatable, Sendable {
         byte >= 0x20 && byte <= 0x7E
     }
 
+    /// Identifies decoded protocol controls that ground state consumes without an action.
+    static func isIgnoredDecodedScalar(_ scalar: Unicode.Scalar) -> Bool {
+        (0x80...0x9F).contains(scalar.value)
+    }
+
     /// Recognizes the next action in `bytes` starting at `index`, advancing `index` over exactly
     /// the bytes that action consumed, and returns nil once the chunk is exhausted. Unfinished
     /// UTF-8 and VT sequences stay in `self` for the next chunk, so feeding is chunk-invariant.
@@ -67,7 +72,7 @@ struct TerminalInputStream: Equatable, Sendable {
         in bytes: UnsafeBufferPointer<UInt8>,
         from index: inout Int
     ) -> TerminalStreamAction? {
-        while index < bytes.count {
+        input: while index < bytes.count {
             let byte = bytes[index]
             // Ground state with an idle decoder is the only condition under which a printable
             // ASCII byte is exactly one printable ASCII scalar, and it stays true for as long as
@@ -101,6 +106,12 @@ struct TerminalInputStream: Equatable, Sendable {
                     let encodedByteCount = TerminalScalars.utf8ByteCount(of: scalar)
                     guard consumedEveryByte, probeIndex - scalarStart == encodedByteCount else {
                         break
+                    }
+                    if Self.isIgnoredDecodedScalar(scalar) {
+                        guard scalarStart == start else { break }
+                        decoder = probe
+                        index = probeIndex
+                        continue input
                     }
                     guard terminalUnicodeClassification(for: scalar).isBulkPrintable else {
                         if scalarStart == start { firstNonBulkScalar = scalar }
@@ -142,6 +153,7 @@ struct TerminalInputStream: Equatable, Sendable {
                 index += 1
             }
             guard let scalar = result.scalar else { continue }
+            if Self.isIgnoredDecodedScalar(scalar) { continue }
 
             switch scalar.value {
             case 0x1B:

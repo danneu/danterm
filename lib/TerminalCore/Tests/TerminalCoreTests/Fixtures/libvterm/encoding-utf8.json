@@ -8,7 +8,7 @@
     "license": "MIT",
     "licenseNotice": "LICENSE.libvterm.txt",
     "recordedDeviations": [
-      "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery."
+      "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery; decoded C1 scalars are ignored."
     ]
   },
   "initial": { "columns": 16, "rows": 1 },
@@ -16,7 +16,7 @@
     { "type": "feed", "text": "123" },
     { "type": "expect", "expect": { "viewportText": "123             " } },
     { "type": "feed", "base64": "G2PCgN+/" },
-    { "type": "expect", "expect": { "viewportText": "\u0080\u07ff              " } },
+    { "type": "expect", "expect": { "viewportText": "\u07ff               " } },
     { "type": "feed", "base64": "G2PgoIDvv70=" },
     { "type": "expect", "expect": { "viewportText": "\u0800\ufffd              " } },
     { "type": "feed", "base64": "G2PwkICA97+/vw==" },
@@ -30,7 +30,7 @@
     { "type": "feed", "base64": "G2PCIeAh4KAh8CHwkCHwkIAh" },
     { "type": "expect", "expect": { "viewportText": "\ufffd!\ufffd!\ufffd!\ufffd!\ufffd!\ufffd!    " } },
     { "type": "feed", "base64": "G2PCwpDgwpDwkMKQ" },
-    { "type": "expect", "expect": { "viewportText": "\ufffd\u0090\ufffd\u0090\ufffd\u0090          " } },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd             " } },
     { "type": "feed", "base64": "G2PAgMG/" },
     { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd            " } },
     { "type": "feed", "base64": "G2PggIDgn78=" },

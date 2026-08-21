@@ -147,7 +147,7 @@ struct TerminalFixtureTests {
             "DanTerm retains rows scrolled off the top of a region anchored at row 0 (libvterm's premove rule) but never retains rows vacated by line edits.",
             "DanTerm retains default and indexed colors semantically instead of resolving libvterm palette RGB values.",
             "Pinned libvterm lacks SGR 58/59 and mishandles 38:2::r:g:b; DanTerm deliberately consumes both correctly.",
-            "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery.",
+            "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery; decoded C1 scalars are ignored.",
             "DanTerm retains grapheme scalars exactly instead of truncating after five combining marks.",
             "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC.",
             "DanTerm emits strict xterm legacy encodings where pinned libvterm emits unsolicited fixterms CSI-u for modified letters, Space, and Tab.",

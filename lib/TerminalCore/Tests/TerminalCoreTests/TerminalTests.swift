@@ -53,6 +53,34 @@ struct TerminalTests {
         #expect(terminal.cell(row: 1, column: 0)?.scalars == ["D"])
     }
 
+    @Test("decoded C1 input has no terminal effect")
+    func decodedC1HasNoTerminalEffect() throws {
+        // Intent: decoded C1 scalars do not mutate cells, cursor state, wrap state, or damage.
+        // Why it exists: the parser previously sent valid UTF-8 C1 scalars to grid reduction.
+        // Scenario: one C1 is surrounded by text, another arrives while wrap is pending, and a
+        //   C1-only feed arrives after damage has drained.
+        var terminal = try #require(Terminal(columns: 5, rows: 1))
+        _ = terminal.drainDamage()
+
+        terminal.feed(Array("A\u{0092}B".utf8))
+        #expect(terminal.screenText == "AB   ")
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: false))
+        #expect((0..<5).allSatisfy { terminal.cell(row: 0, column: $0)?.scalars.contains("\u{0092}") == false })
+
+        var pendingWrap = try #require(Terminal(columns: 5, rows: 2))
+        pendingWrap.feed(Array("ABCDE".utf8))
+        #expect(pendingWrap.geometry.cursor == TerminalCursor(row: 0, column: 4, isPendingWrap: true))
+        _ = pendingWrap.drainDamage()
+
+        pendingWrap.feed(Array("\u{0080}\u{009F}".utf8))
+        #expect(pendingWrap.geometry.cursor == TerminalCursor(row: 0, column: 4, isPendingWrap: true))
+        #expect(pendingWrap.drainDamage() == .none)
+
+        pendingWrap.feed(Array("F".utf8))
+        #expect(pendingWrap.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: false))
+        #expect(pendingWrap.cell(row: 1, column: 0)?.scalars == ["F"])
+    }
+
     @Test("a wide cell at the last column leaves a spacer head and wraps whole")
     func wideAtRightEdge() throws {
         var terminal = try #require(Terminal(columns: 3, rows: 2))

@@ -143,6 +143,40 @@ struct TerminalInputStreamTests {
         ])
     }
 
+    @Test("decoded ground-state C1 scalars are ignored under every feed split")
+    func decodedGroundC1ScalarsAreIgnored() {
+        // Intent: every decoded C1 scalar disappears without changing adjacent decoded text.
+        // Why it exists: both the incremental and bulk scalar paths previously printed C1 values.
+        // Scenario: the full C1 range sits between non-ASCII sentinels in authored, bytewise, and
+        //   every two-way split feed.
+        let bytes = Array(("é" + (0x80...0x9F).compactMap(UnicodeScalar.init).map(String.init).joined() + "界").utf8)
+        let expected: [TerminalStreamAction] = [.print("é"), .print("界")]
+
+        var authored = TerminalInputStream()
+        #expect(authored.expandedFeed(bytes) == expected)
+
+        var bytewise = TerminalInputStream()
+        #expect(bytes.flatMap { bytewise.expandedFeed([$0]) } == expected)
+
+        for offset in 0...bytes.count {
+            var split = TerminalInputStream()
+            #expect(
+                split.expandedFeed(Array(bytes[..<offset]))
+                    + split.expandedFeed(Array(bytes[offset...])) == expected,
+                "split at \(offset)"
+            )
+        }
+    }
+
+    @Test("raw C1 bytes, decoded C1 scalars, and U+00A0 remain distinct")
+    func c1DecodingBoundary() {
+        var stream = TerminalInputStream()
+
+        let actions = stream.expandedFeed([0x80] + Array("\u{0080}\u{009F}\u{00A0}".utf8))
+
+        #expect(actions == [.print("\u{FFFD}"), .print("\u{00A0}")])
+    }
+
     @Test("reference malformed fixture uses maximal-subpart replacement")
     func referenceMalformedFixture() {
         var stream = TerminalInputStream()
@@ -320,9 +354,9 @@ struct TerminalInputStreamTests {
         }
     }
 
-    @Test("control strings absorb C1-range UTF-8 continuation bytes across chunk boundaries")
-    func controlStringsAbsorbUTF8ContinuationBytes() {
-        let payload = Array((0x0400...0x041F).compactMap(UnicodeScalar.init).map(String.init).joined().utf8)
+    @Test("control strings preserve C1-range UTF-8 bytes across chunk boundaries")
+    func controlStringsPreserveC1RangeUTF8Bytes() {
+        let payload = Array((0x80...0x9F).compactMap(UnicodeScalar.init).map(String.init).joined().utf8)
         let strings: [[UInt8]] = [
             [0x1B, 0x5D] + payload + [0x07],
             [0x1B, 0x5D] + payload + [0x1B, 0x5C],
