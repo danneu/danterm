@@ -114,8 +114,14 @@ struct IpcServerOwnershipTests {
         #expect(fixture.paths.ipcAuditDirectory.path.hasPrefix(fixture.rootURL.path))
     }
 
-    @Test("recovery answer commits the restore before IPC starts accepting")
-    func restoreAnswerStartsIpcAfterCommit() async throws {
+    @Test("recovery prompt starts IPC before its answer commits the restore")
+    func restorePromptStartsIpcBeforeAnswer() async throws {
+        // Intent: showing the recovery prompt starts IPC while the recovered panes remain
+        //   inert until the user answers Restore.
+        // Why it exists: the server used to stay closed for the whole prompt because restore
+        //   replaced the model outside the reducer. The reducer store removed that constraint.
+        // Scenario: a client pings while the launch recovery prompt is still unanswered, then
+        //   the user restores the saved pane.
         let socket = TemporaryInstancePaths()
         defer { socket.remove() }
         let ports = RecordingAppRuntimePorts()
@@ -138,20 +144,27 @@ struct IpcServerOwnershipTests {
             params: .object([:])
         )), to: peer)
 
-        // This expiry is the observation: the recovery decision must still gate acceptance.
-        #expect(pollForReadableData(peer, timeoutMilliseconds: 50) == false)
-        let noticeId = try #require(runtime.model.noticeQueue.first?.id)
-        runtime.send(.noticeAnswered(id: noticeId, answer: .restore))
-
+        let becameReadable = await Task.detached {
+            pollForReadableData(peer, timeoutMilliseconds: 30_000)
+        }.value
+        guard becameReadable else {
+            throw POSIXError(.ETIMEDOUT)
+        }
         let response = try await Task.detached {
             try readResponse(id: .number(8), from: peer)
         }.value
         #expect(response.error == nil)
+        #expect(runtime.paneHosts.keys.contains(paneId) == false)
+
+        let noticeId = try #require(runtime.model.noticeQueue.first?.id)
+        runtime.send(.noticeAnswered(id: noticeId, answer: .restore))
+        await Task.yield()
+
         #expect(runtime.paneHosts.keys.contains(paneId))
     }
 
-    @Test("Start Fresh creates a fresh tab before IPC starts accepting")
-    func startFreshStartsIpcAfterFreshTab() async throws {
+    @Test("Start Fresh creates a fresh tab while IPC is already accepting")
+    func startFreshKeepsActiveIpc() async throws {
         let socket = TemporaryInstancePaths()
         defer { socket.remove() }
         let ports = RecordingAppRuntimePorts()
@@ -174,22 +187,28 @@ struct IpcServerOwnershipTests {
             params: .object([:])
         )), to: peer)
 
-        // This expiry is the observation: the recovery decision must still gate acceptance.
-        #expect(pollForReadableData(peer, timeoutMilliseconds: 50) == false)
-        let noticeId = try #require(runtime.model.noticeQueue.first?.id)
-        runtime.send(.noticeAnswered(id: noticeId, answer: .startFresh))
-
+        let becameReadable = await Task.detached {
+            pollForReadableData(peer, timeoutMilliseconds: 30_000)
+        }.value
+        guard becameReadable else {
+            throw POSIXError(.ETIMEDOUT)
+        }
         let response = try await Task.detached {
             try readResponse(id: .number(9), from: peer)
         }.value
         #expect(response.error == nil)
+
+        let noticeId = try #require(runtime.model.noticeQueue.first?.id)
+        runtime.send(.noticeAnswered(id: noticeId, answer: .startFresh))
+        await Task.yield()
+
         #expect(ports.sessionRequests.count == 1)
         #expect(runtime.paneHosts.keys.contains(recoveredPaneId) == false)
         #expect(runtime.model.allPaneIds.count == 1)
     }
 
-    @Test("failed recovery build falls back to fresh before IPC starts accepting")
-    func failedRestoreStillStartsIpc() async throws {
+    @Test("failed recovery build falls back to fresh while IPC stays available")
+    func failedRestoreKeepsActiveIpc() async throws {
         let socket = TemporaryInstancePaths()
         defer { socket.remove() }
         let ports = RecordingAppRuntimePorts()
@@ -214,15 +233,21 @@ struct IpcServerOwnershipTests {
             params: .object([:])
         )), to: peer)
 
-        // This expiry is the observation: the recovery decision must still gate acceptance.
-        #expect(pollForReadableData(peer, timeoutMilliseconds: 50) == false)
-        let noticeId = try #require(runtime.model.noticeQueue.first?.id)
-        runtime.send(.noticeAnswered(id: noticeId, answer: .restore))
-
+        let becameReadable = await Task.detached {
+            pollForReadableData(peer, timeoutMilliseconds: 30_000)
+        }.value
+        guard becameReadable else {
+            throw POSIXError(.ETIMEDOUT)
+        }
         let response = try await Task.detached {
             try readResponse(id: .number(10), from: peer)
         }.value
         #expect(response.error == nil)
+
+        let noticeId = try #require(runtime.model.noticeQueue.first?.id)
+        runtime.send(.noticeAnswered(id: noticeId, answer: .restore))
+        await Task.yield()
+
         #expect(ports.sessionRequests.count == 2)
         #expect(runtime.model.allPaneIds.count == 1)
     }

@@ -608,7 +608,7 @@ class AppRuntime {
         ipcServer.handle?.socketPath
     }
 
-    /// Starts request acceptance after the launch bootstrap branch has resolved.
+    /// Starts request acceptance when the selected launch branch is ready to serve it.
     func startIpcServer() {
         guard let server = ipcServer.handle, let startToken = ipcServerStartToken else { return }
         ipcServerStartToken = nil
@@ -924,7 +924,6 @@ class AppRuntime {
                 } else {
                     runtime.send(.createTabInSelectedGroup())
                 }
-                runtime.startIpcServer()
             }) else { break }
             // Leave both the answering send frame and the panel button-action stack.
             DispatchQueue.main.async(execute: callback)
@@ -1470,10 +1469,12 @@ class AppRuntime {
         }
     }
 
-    /// Retains validated recovery data and reports the launch decision as model state.
+    /// Retains validated recovery data, reports the launch decision, and starts IPC while
+    /// the prompt waits for its answer.
     func requestRestorePrompt(_ loaded: ValidatedAppRestore, message: String) {
         pendingLaunchRestore = loaded
         send(.noticeReported(.restorePrompt(message: message)))
+        startIpcServer()
     }
 
     /// Build all runtime objects for a validated restore without touching the live session.
