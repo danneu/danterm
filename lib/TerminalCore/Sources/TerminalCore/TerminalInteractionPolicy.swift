@@ -118,7 +118,7 @@ private struct WheelRemainder: Equatable, Sendable {
 /// Owns explicit gesture latches and fractional history shared by live and replay policy.
 public struct TerminalInteractionState: Equatable, Sendable {
     fileprivate var mouseTracker = TerminalMouseTracker()
-    fileprivate var pointerOwners: [TerminalPointerConsumption?] = [nil, nil, nil]
+    fileprivate var pointerOwners: [TerminalMouseButton: TerminalPointerConsumption] = [:]
     fileprivate var selectionDrag: SelectionDrag?
     fileprivate var selectionGestureCompletes = false
     fileprivate var activeWheelRoute: TerminalWheelRoute?
@@ -146,7 +146,7 @@ public func decideTerminalPointer(
     let onGrid = isOnGrid(event.cell, terminal: terminal)
     let decision = decidePointerArm(event, onGrid: onGrid, terminal: terminal, state: &state)
     guard onGrid == false else { return decision }
-    state.pointerOwners = state.pointerOwners.map { $0 == .link ? nil : $0 }
+    state.pointerOwners = state.pointerOwners.filter { $0.value != .link }
     return TerminalPointerDecision(
         consumption: decision.consumption,
         inputBytes: decision.inputBytes,
@@ -170,7 +170,7 @@ private func decidePointerArm(
     switch event {
     case let .down(button, cell, modifiers, clickCount):
         let (column, row, offsetX) = (cell.column, cell.row, cell.offsetX)
-        if state.pointerOwners[button.rawValue] == nil,
+        if state.pointerOwners[button] == nil,
            button == .left,
            modifiers.contains(.command),
            onGrid,
@@ -179,7 +179,7 @@ private func decidePointerArm(
            )),
            terminal.canAdmitArmedLink(link)
         {
-            state.pointerOwners[button.rawValue] = .link
+            state.pointerOwners[button] = .link
             return pointerDecision(
                 .link,
                 armMutation: .set(link)
@@ -190,7 +190,7 @@ private func decidePointerArm(
             tracker: &state.mouseTracker,
             modes: modes
         )
-        if let existingOwner = state.pointerOwners[button.rawValue] {
+        if let existingOwner = state.pointerOwners[button] {
             return pointerDecision(
                 existingOwner,
                 bytes: existingOwner == .report ? reportBytes : []
@@ -201,7 +201,7 @@ private func decidePointerArm(
             modifiers: modifiers,
             tracking: modes.mouseTracking
         )
-        state.pointerOwners[button.rawValue] = owner
+        state.pointerOwners[button] = owner
         return pointerDownDecision(
             owner: owner,
             button: button,
@@ -217,9 +217,9 @@ private func decidePointerArm(
 
     case let .up(button, cell, modifiers):
         let (column, row) = (cell.column, cell.row)
-        let owner = state.pointerOwners[button.rawValue] ?? .ignored
+        let owner = state.pointerOwners[button] ?? .ignored
         if owner == .link {
-            state.pointerOwners[button.rawValue] = nil
+            state.pointerOwners[button] = nil
             guard onGrid else {
                 return pointerDecision(
                     .link,
@@ -252,7 +252,7 @@ private func decidePointerArm(
             tracker: &state.mouseTracker,
             modes: modes
         )
-        state.pointerOwners[button.rawValue] = nil
+        state.pointerOwners[button] = nil
         let completesSelection = state.selectionGestureCompletes
         if button == .left {
             state.selectionDrag = nil
@@ -274,7 +274,7 @@ private func decidePointerArm(
 
     case let .move(cell, modifiers):
         let (column, row, offsetX) = (cell.column, cell.row, cell.offsetX)
-        if state.pointerOwners.contains(where: { $0 == .link }) {
+        if state.pointerOwners.values.contains(.link) {
             guard onGrid else {
                 return pointerDecision(
                     .link,
@@ -293,7 +293,7 @@ private func decidePointerArm(
             modes: modes
         )
         if let drag = state.selectionDrag,
-           state.pointerOwners[TerminalMouseButton.left.rawValue] == .selection {
+           state.pointerOwners[.left] == .selection {
             let dragHover = hoverMutation(cell: cell, modifiers: modifiers, terminal: terminal)
             // The anchored text is no longer retained, so there is nothing to extend from.
             // The button stays selection-owned -- releasing it must still end the gesture
@@ -352,10 +352,10 @@ private func decidePointerArm(
             )
         }
         let hover = hoverMutation(cell: cell, modifiers: modifiers, terminal: terminal)
-        if state.pointerOwners.contains(where: { $0 == .report }) {
+        if state.pointerOwners.values.contains(.report) {
             return pointerDecision(.report, bytes: reportBytes, hoverMutation: hover)
         }
-        if state.pointerOwners[TerminalMouseButton.left.rawValue] == .selection {
+        if state.pointerOwners[.left] == .selection {
             return pointerDecision(.selection, hoverMutation: hover)
         }
         if modes.mouseTracking == .anyMotion {
@@ -372,7 +372,7 @@ private func decidePointerArm(
 public func cancelTerminalLinkInteraction(
     state: inout TerminalInteractionState
 ) -> TerminalLinkCancellation {
-    state.pointerOwners = state.pointerOwners.map { $0 == .link ? nil : $0 }
+    state.pointerOwners = state.pointerOwners.filter { $0.value != .link }
     return TerminalLinkCancellation(hoverMutation: .clear, armMutation: .clear)
 }
 

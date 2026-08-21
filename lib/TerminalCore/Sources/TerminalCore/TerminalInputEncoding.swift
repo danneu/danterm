@@ -85,7 +85,7 @@ public struct TerminalKeyModifiers: OptionSet, Equatable, Sendable {
 }
 
 /// The three stateful mouse buttons represented by terminal reporting protocols.
-public enum TerminalMouseButton: Int, Equatable, Sendable {
+public enum TerminalMouseButton: Int, Hashable, Sendable {
     case left = 0
     case middle = 1
     case right = 2

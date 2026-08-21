@@ -721,6 +721,58 @@ struct TerminalInteractionPolicyTests {
         ))
     }
 
+    @Test("link cancellation preserves an independently report-owned button")
+    func linkCancellationPreservesReportOwner() throws {
+        // Intent: cancelling a link gesture clears only the button that owns that link.
+        // Why it exists: pointer ownership is per button, so link cleanup must not erase a
+        //   concurrent report gesture before its matching release reaches the child.
+        // Scenario: a mouse-reporting application owns a held right button while Cmd-left
+        //   activates a link, then the link is cancelled by an off-grid event or mouse exit.
+        var terminal = try #require(Terminal(columns: 24, rows: 2))
+        terminal.feed(Array("https://a.co\u{1B}[?1000;1006h".utf8))
+        let rightRelease = Array("\u{1B}[<2;15;1m".utf8)
+
+        var offGridState = TerminalInteractionState()
+        #expect(decideTerminalPointer(
+            .down(.right, cell: .init(column: 14, row: 0)),
+            terminal: terminal,
+            state: &offGridState
+        ).consumption == .report)
+        #expect(decideTerminalPointer(
+            .down(.left, cell: .init(column: 2, row: 0), modifiers: [.command]),
+            terminal: terminal,
+            state: &offGridState
+        ).consumption == .link)
+        _ = decideTerminalPointer(
+            .move(cell: .init(column: 2, row: 0, isInsideGrid: false)),
+            terminal: terminal,
+            state: &offGridState
+        )
+        #expect(decideTerminalPointer(
+            .up(.right, cell: .init(column: 14, row: 0)),
+            terminal: terminal,
+            state: &offGridState
+        ).inputBytes == rightRelease)
+
+        var explicitState = TerminalInteractionState()
+        #expect(decideTerminalPointer(
+            .down(.right, cell: .init(column: 14, row: 0)),
+            terminal: terminal,
+            state: &explicitState
+        ).consumption == .report)
+        #expect(decideTerminalPointer(
+            .down(.left, cell: .init(column: 2, row: 0), modifiers: [.command]),
+            terminal: terminal,
+            state: &explicitState
+        ).consumption == .link)
+        _ = cancelTerminalLinkInteraction(state: &explicitState)
+        #expect(decideTerminalPointer(
+            .up(.right, cell: .init(column: 14, row: 0)),
+            terminal: terminal,
+            state: &explicitState
+        ).inputBytes == rightRelease)
+    }
+
     @Test("printing across the content-identity wrap keeps working and drops the armed link")
     func contentIdentityWrapDropsArmedLink() throws {
         // Intent: output that exhausts the per-cell content-identity counter keeps printing, and
