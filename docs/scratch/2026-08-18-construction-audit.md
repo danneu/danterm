@@ -1299,7 +1299,7 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [x] **[PTY-1](#pty-1)** (3x5, medium) Cancel every retained dispatch source from the one registry that already holds them -- `dab5337f`
 - [x] **[RUNTIME-4](#runtime-4)** (3x5, medium) Give each armed timer one owner instead of a handle field plus a token field -- `d9c8c4cb..35cfb61c`
 - [x] **[UNI-4](#uni-4)** (3x5, medium) Let the canonical-caseless tables answer "this scalar is unaffected" without a binary search or an allocation -- `041d4f23`
-- [ ] **[XPORT-3](#xport-3)** (3x5, medium) Give pending-input spans absolute byte coordinates so a partial write never rewrites the queue
+- [x] **[XPORT-3](#xport-3)** (3x5, medium) Give pending-input spans absolute byte coordinates so a partial write never rewrites the queue -- `86e5a0ec`
 - [ ] **[IOS-2](#ios-2)** (3x4, medium) Make an authorized attempt carry its target so a Go tap can never be dropped against a stale one
 - [x] **[REDUCE-3](#reduce-3)** (3x4, medium) Repair the focused pane's alerts in one pass instead of copying the rule into nine arms **[decide first](#decisions-to-make-first)**
 - [x] **[CHROME-4](#chrome-4)** (2x5, small) Build the preferences grid from declared rows so warning rows and padding stop being addressed by literal index -- `8f0f10a4`
