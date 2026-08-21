@@ -4976,6 +4976,11 @@ public struct Terminal: Equatable, Sendable {
         let wanted = requested.clamped(to: 0..<rowCount)
         guard wanted.isEmpty == false else { return }
         let topRow = scrollProjection.topRow
+        let viewportColumns = columnCount
+        let retainedStore = history.store
+        let primaryHead = screen.rows.first?.cells.first
+        let openTailPendingMargin = retainedStore.openTailPendingMarginCell
+        let resolvedStyles = styleTable
         var cursor = historyCursor(atStreamRow: topRow + wanted.lowerBound)
 
         // Memoized across segments because adjacent rows often repeat the same handful of style
@@ -4988,28 +4993,28 @@ public struct Terminal: Equatable, Sendable {
             // A row the caller does not want still has to be stepped over, or the cursor stops
             // naming the row it is asked for next. Stepping is O(1); folding is not.
             guard includesRow(row) else {
-                cursor = cursor.flatMap { history.store.advance($0) }
+                cursor = cursor.flatMap { retainedStore.advance($0) }
                 continue
             }
             let at = cursor
-            cursor = at.flatMap { history.store.advance($0) }
+            cursor = at.flatMap { retainedStore.advance($0) }
             if at == nil, viewportStreamRow(at: streamRow) == nil { continue }
 
-            body(row) { styleRunBody in
-                // Retained rows stream out of the arena rather than being materialized first.
-                // A frame reads every visible row once and discards it, so folding a `GridRow`
-                // here would buy an allocation and a full `GridCell` write per cell that nothing
-                // outlives -- `research/28/F17` measured that as the dominant term in the browsing
-                // regression. The style memoization is written out at each site rather than
-                // funnelled through a nested function: a local function called from inside the
-                // fold's own closure is one more indirect call per cell, on the frame path.
-                if let at {
-                    history.store.withPaintedCells(at: at) { storedCount, storedStyleId, storedCell in
+            // Retained rows stream out of the arena rather than being materialized first.
+            // A frame reads every visible row once and discards it, so folding a `GridRow`
+            // here would buy an allocation and a full `GridCell` write per cell that nothing
+            // outlives -- `research/28/F17` measured that as the dominant term in the browsing
+            // regression. The style memoization is written out at each site rather than
+            // funnelled through a nested function: a local function called from inside the
+            // fold's own closure is one more indirect call per cell, on the frame path.
+            if let at {
+                body(row) { styleRunBody in
+                    retainedStore.withPaintedCells(at: at) {
+                        storedCount, storedStyleId, storedCell in
                         // The segment visitor hands the borrowed packed-cell accessor down one
                         // more non-escaping level; nothing here outlives this row traversal.
                         withoutActuallyEscaping(storedCell) { forwardStoredCell in
-                            let head = screen.rows.first?.cells.first
-                            let margin = columnCount - 1
+                            let margin = viewportColumns - 1
                             let storedMargin: GridCell?
                             if storedCount > margin {
                                 let packed = forwardStoredCell(margin)
@@ -5024,14 +5029,14 @@ public struct Terminal: Equatable, Sendable {
                             let projectedMargin: GridCell? = cursor == nil
                                 ? Self.projectedMarginCell(
                                     stored: storedMargin,
-                                    follower: head,
-                                    fillsMissingWrapSpacer: history.store.openTailPendingMarginCell != nil,
-                                    missingWrapMargin: history.store.openTailPendingMarginCell
+                                    follower: primaryHead,
+                                    fillsMissingWrapSpacer: openTailPendingMargin != nil,
+                                    missingWrapMargin: openTailPendingMargin
                                 )
                                 : nil
                             let padding = GridCell()
                             var start = 0
-                            while start < columnCount {
+                            while start < viewportColumns {
                                 let styleId: StyleId
                                 if start == margin, let projectedMargin {
                                     styleId = projectedMargin.styleId
@@ -5041,7 +5046,7 @@ public struct Terminal: Equatable, Sendable {
                                     styleId = padding.styleId
                                 }
                                 var end = start + 1
-                                while end < columnCount {
+                                while end < viewportColumns {
                                     let nextId: StyleId
                                     if end == margin, let projectedMargin {
                                         nextId = projectedMargin.styleId
@@ -5054,7 +5059,7 @@ public struct Terminal: Equatable, Sendable {
                                     end += 1
                                 }
                                 if styleId != lastId {
-                                    lastStyle = self.style(for: styleId)
+                                    lastStyle = resolvedStyles[styleId] ?? TerminalStyle()
                                     lastId = styleId
                                 }
                                 styleRunBody(start..<end, lastStyle) { cellBody in
@@ -5073,23 +5078,25 @@ public struct Terminal: Equatable, Sendable {
                             }
                         }
                     }
-                } else if let windowRow = viewportStreamRow(at: streamRow) {
+                }
+            } else if let windowRow = viewportStreamRow(at: streamRow) {
+                let margin = viewportColumns - 1
+                let projectedMargin = projectedViewportCell(
+                    in: windowRow,
+                    at: streamRow,
+                    column: margin
+                )
+                body(row) { styleRunBody in
                     let padding = GridCell()
-                    let margin = columnCount - 1
-                    let projectedMargin = projectedViewportCell(
-                        in: windowRow,
-                        at: streamRow,
-                        column: margin
-                    )
                     var start = 0
-                    while start < columnCount {
+                    while start < viewportColumns {
                         let styleId = start == margin
                             ? projectedMargin.styleId
                             : start < windowRow.cells.count
                             ? windowRow.cells[start].styleId
                             : padding.styleId
                         var end = start + 1
-                        while end < columnCount {
+                        while end < viewportColumns {
                             let nextId = end == margin
                                 ? projectedMargin.styleId
                                 : end < windowRow.cells.count
@@ -5099,7 +5106,7 @@ public struct Terminal: Equatable, Sendable {
                             end += 1
                         }
                         if styleId != lastId {
-                            lastStyle = self.style(for: styleId)
+                            lastStyle = resolvedStyles[styleId] ?? TerminalStyle()
                             lastId = styleId
                         }
                         styleRunBody(start..<end, lastStyle) { cellBody in

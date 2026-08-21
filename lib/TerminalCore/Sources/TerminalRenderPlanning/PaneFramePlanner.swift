@@ -34,13 +34,13 @@ public struct PaneFramePlanner: Sendable {
     /// The result is always a complete plan, never a clipped one: callers that
     /// draw incrementally pass the resulting row restriction to the executor.
     public mutating func planFrame(
-        for terminal: Terminal,
+        for terminal: borrowing Terminal,
         presentation: RenderPresentation,
         damage: TerminalDamage
     ) -> RenderFramePlan {
         let reusable = retained?.presentation == presentation ? retained?.rows : nil
-        let planned = FramePlanner(terminal: terminal, presentation: presentation)
-            .plan(reusing: reusable, damage: damage)
+        let planned = FramePlanner(presentation: presentation)
+            .plan(for: terminal, reusing: reusable, damage: damage)
         retained = RetainedFrame(presentation: presentation, rows: planned.retained)
         return planned.plan
     }

@@ -5,11 +5,11 @@ import TerminalCore
 /// Produces all grid-space drawing work from the terminal's public viewport
 /// inspection surface and explicit presentation inputs alone.
 public func planFrame(
-    for terminal: Terminal,
+    for terminal: borrowing Terminal,
     presentation: RenderPresentation
 ) -> RenderFramePlan {
-    FramePlanner(terminal: terminal, presentation: presentation)
-        .plan(reusing: nil, damage: .full)
+    FramePlanner(presentation: presentation)
+        .plan(for: terminal, reusing: nil, damage: .full)
         .plan
 }
 
@@ -237,10 +237,9 @@ private struct OpenDecorationRun {
     }
 }
 
-/// Owns only one call's transient traversal state, preserving a stateless public
-/// planning boundary while keeping layer algorithms in one focused type.
+/// Owns one call's small presentation input while borrowing the terminal state
+/// it inspects, preserving a stateless public planning boundary.
 struct FramePlanner {
-    let terminal: Terminal
     let presentation: RenderPresentation
 
     /// Plans a complete viewport, replanning only rows `damage` marks when
@@ -248,9 +247,14 @@ struct FramePlanner {
     ///
     /// Callers own the lineage and presentation checks; this only refuses reuse
     /// on the shape mismatches it can see for itself (full damage, changed grid).
-    func plan(reusing retained: RetainedFrameRows?, damage: TerminalDamage) -> PlannedFrame {
+    func plan(
+        for terminal: borrowing Terminal,
+        reusing retained: RetainedFrameRows?,
+        damage: TerminalDamage
+    ) -> PlannedFrame {
         let columnCount = terminal.viewportColumnCount
-        let rowCount = terminal.scrollProjection.windowRows
+        let scrollProjection = terminal.scrollProjection
+        let rowCount = scrollProjection.windowRows
         let cursorSpan = presentation.isCursorVisible ? terminal.cursorPlacement : nil
 
         let reusable: RetainedFrameRows? =
@@ -291,8 +295,9 @@ struct FramePlanner {
         }
 
         let selectionRange = terminal.selectionRange
+        let hoveredLinkRange = terminal.hoveredLink?.range
         let activeSearchMatchRange = terminal.activeSearchMatchRange
-        let viewportTop = terminal.scrollProjection.topRow
+        let viewportTop = scrollProjection.topRow
         let viewportRows = viewportTop..<(viewportTop + rowCount)
         let searchMatchRanges = terminal.searchMatchRanges(in: viewportRows)
         var cursorStyle = reusable?.cursorStyle
@@ -325,10 +330,25 @@ struct FramePlanner {
             rows: 0..<rowCount,
             where: { reuseSource($0) == nil }
         ) { row, visit in
-            let hovered = hoveredColumns(row: row, columns: columnCount)
-            let selected = columns(for: selectionRange, row: row, columns: columnCount)
+            let hovered = hoveredColumns(
+                for: hoveredLinkRange,
+                row: row,
+                columns: columnCount,
+                viewportTop: viewportTop
+            )
+            let selected = columns(
+                for: selectionRange,
+                row: row,
+                columns: columnCount,
+                viewportTop: viewportTop
+            )
             let matches = searchMatchRanges.compactMap { match -> (Range<Int>, Bool)? in
-                guard let columns = columns(for: match, row: row, columns: columnCount) else {
+                guard let columns = columns(
+                    for: match,
+                    row: row,
+                    columns: columnCount,
+                    viewportTop: viewportTop
+                ) else {
                     return nil
                 }
                 return (columns, match == activeSearchMatchRange)
@@ -555,9 +575,14 @@ struct FramePlanner {
     }
 
     /// The hovered-link span for one row, resolved once instead of per column.
-    private func hoveredColumns(row: Int, columns: Int) -> Range<Int>? {
-        guard let range = terminal.hoveredLink?.range else { return nil }
-        let streamRow = terminal.scrollProjection.topRow + row
+    private func hoveredColumns(
+        for range: TerminalTextRange?,
+        row: Int,
+        columns: Int,
+        viewportTop: Int
+    ) -> Range<Int>? {
+        guard let range else { return nil }
+        let streamRow = viewportTop + row
         guard range.start.row...range.end.row ~= streamRow else { return nil }
         let start = streamRow == range.start.row ? range.start.column : 0
         let end = streamRow == range.end.row ? range.end.column : columns
@@ -569,10 +594,11 @@ struct FramePlanner {
     private func columns(
         for range: TerminalTextRange?,
         row: Int,
-        columns: Int
+        columns: Int,
+        viewportTop: Int
     ) -> Range<Int>? {
         guard let selection = range, selection.start != selection.end else { return nil }
-        let streamRow = terminal.scrollProjection.topRow + row
+        let streamRow = viewportTop + row
         guard selection.start.row...selection.end.row ~= streamRow else { return nil }
         let start = streamRow == selection.start.row ? selection.start.column : 0
         let end = streamRow == selection.end.row ? selection.end.column : columns
