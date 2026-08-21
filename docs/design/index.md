@@ -79,7 +79,8 @@ without opening it.
 - [2026-07-31: Nix-Managed Config Location](2026-07-31-nix-managed-config-location.md) -- Accepted.
 - [2026-08-01: OSC 133 Prompt Anchoring](2026-08-01-osc-133-prompt-anchoring.md) -- Accepted.
 - [2026-08-05: Pane and Session Lexicon](2026-08-05-pane-session-lexicon.md) -- Accepted.
-- [2026-08-06: The AppKit UI Harness Is a Whole-Module Substitution Seam, Not a Test Target](2026-08-06-ui-harness-whole-module-substitution.md) -- Accepted.
+- [2026-08-06: The AppKit UI Harness Is a Whole-Module Substitution Seam, Not a Test Target](2026-08-06-ui-harness-whole-module-substitution.md)
+  -- Superseded by [2026-08-21: The UI Suite Is an Ordinary Test Target](2026-08-21-ui-suite-as-an-ordinary-test-target.md).
 - [2026-08-06: The Swift Terminal Engine -- Migration Record and Decision Register](2026-08-06-swift-terminal-engine.md) -- Accepted.
 - [2026-08-10: Terminal-Reported Pane Facts -- the Model Owns Values, the Stream Owns Lifecycles](2026-08-10-terminal-reported-pane-facts.md)
   -- Superseded by [2026-08-10: Session-Owned Terminal-Reported Facts](2026-08-10-session-owned-terminal-reported-facts.md).
@@ -87,3 +88,4 @@ without opening it.
 - [2026-08-16: Model-Owned Pane Geometry](2026-08-16-model-owned-pane-geometry.md) -- Accepted.
 - [2026-08-17: The Test-Seam Rule -- a Component Never Asks Whether It Is Under Test](2026-08-17-test-seam-rule.md) -- Accepted.
 - [2026-08-17: A Package Owns Its Sources -- One Manifest Declares a Target](2026-08-17-package-owns-its-targets.md) -- Accepted.
+- [2026-08-21: The UI Suite Is an Ordinary Test Target, Behind Three Named Seams](2026-08-21-ui-suite-as-an-ordinary-test-target.md) -- Accepted.

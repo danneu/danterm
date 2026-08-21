@@ -4,9 +4,7 @@ import Foundation
 // The UI suite has no TerminalCore module; it compiles the engine's own
 // ActivatableWebURI.swift in directly, so the gate below is the real one there
 // too and not a stub.
-#if !DANTERM_UI_TEST
 import TerminalCore
-#endif
 
 /// Converts an activation-approved URI into an openable `URL`, and refuses everything the
 /// terminal did not approve.

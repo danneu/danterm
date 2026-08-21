@@ -5,7 +5,6 @@ import DanTermProtocol
 // A leaf module with no engine dependency, so both the app build and the UI harness
 // resolve it and the view can name one lifecycle vocabulary in either build.
 import PaneProcessLifecycle
-#if !DANTERM_UI_TEST
 import TerminalCore
 import TerminalCoreRecording
 import TerminalPaneSession
@@ -15,22 +14,14 @@ import TerminalPaneSession
 import TerminalPTYHost
 import TerminalRenderExecution
 import TerminalRenderPlanning
-#endif
 
 /// The event payload every pane-tape value at the `TerminalSession` boundary carries.
 ///
-/// A per-build alias rather than an associated type: the session protocol is used
-/// existentially all over the app, and the UI-test harness compiles it without the engine at
-/// all. It lives in this file because this is the adapter that may name engine types; the
-/// harness has no recorder to serve a tape from, so its alias only has to be a value the
-/// generic stream types can be named with.
-#if DANTERM_UI_TEST
-typealias PaneTapeSessionEvent = JSONValue
-#else
+/// An alias rather than an associated type: the session protocol is used existentially all
+/// over the app. It lives in this file because this is the adapter that may name engine
+/// types.
 typealias PaneTapeSessionEvent = NeutralTerminalRecordingEvent
-#endif
 
-#if !DANTERM_UI_TEST
 /// Restates the engine's live-capture provenance in the protocol's JSON vocabulary.
 func paneTapeProvenanceJSON() throws -> JSONValue {
     let data = try JSONEncoder().encode(NeutralTerminalProvenance.liveCapture())
@@ -148,7 +139,6 @@ func paneTapeStateSynchronization(
         cursor: paneTapeCursor(synchronization.cursor)
     )
 }
-#endif
 
 /// Lowers stored terminal facts from the engine vocabulary into the
 /// session-owned reducer vocabulary; occurrence and view-only events stay outside it.
@@ -192,7 +182,10 @@ func sessionReport(for event: TerminalSemanticEvent) -> SessionReport? {
 
 /// Adapts one headless Swift terminal controller into DanTerm's AppKit pane contract.
 final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMenuItemValidation, TerminalSession {
-    private let controller: TerminalPaneSessionController
+    private let controller: any TerminalPaneSessionControlling
+    /// The recorder behind this session, when there is one. A session with no
+    /// recorder serves no pane tape, and every tape entry point answers nothing.
+    private var tapeSource: (any TerminalPaneTapeSource)? { controller as? any TerminalPaneTapeSource }
     private let resolveTheme: (String) -> RenderTheme?
     private let callbackGate = TerminalSessionCallbackGate()
     private let wheelNormalizer = TerminalWheelNormalizer()
@@ -230,7 +223,14 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// frame costs no full-frame copy. Nil until the first publish that has
     /// geometry, and replaced whole -- never reshaped -- whenever a
     /// presentation input moves.
-    private var swapchain: TerminalFrameSwapchain?
+    private var swapchain: (any TerminalPanePresentationSurface)?
+    /// Builds each replacement rotation. Given rather than found, so a test can
+    /// watch what the view presented without a second render path in production.
+    private let makePresentationSurface: TerminalPanePresentationSurfaceFactory
+    /// Resolves cell geometry for a font. Given rather than found, because the real
+    /// answer depends on which faces are installed on the machine, and a pane's
+    /// fallback behavior has to be provable without depending on that.
+    private let makeMetrics: TerminalPaneMetricsFactory
     /// Retains the store the layer is showing, so replacing the swapchain
     /// cannot free the frame currently on screen before its successor renders.
     private var displayedStore: TerminalFrameBackingStore?
@@ -305,11 +305,10 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         )
     }
     var hasSelection: Bool { controller.hasSelection }
-    #if DANTERM_UI_TEST
     var publishedBackgroundForTesting: RenderColor? {
         publishedFrame?.plan.defaultBackground
     }
-    /// PO5's three independent counters, read by the harness rather than by a
+    /// PO5's three independent counters, read by the UI suite rather than by a
     /// live sampler: renders must never exceed publications, and an
     /// AppKit-initiated layer display must cause none at all.
     private(set) var publishCountForTesting = 0
@@ -350,7 +349,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         renderCountForTesting = 0
         layerDisplayCountForTesting = 0
     }
-    #endif
     #if DANTERM_TERMINAL_BENCHMARK
     var benchmarkGeometry: TerminalBenchmarkGeometry? {
         guard let dimensions = currentDimensions, let metrics = currentMetrics else { return nil }
@@ -368,15 +366,20 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// Installs the controller's sole end callback while preserving backend evidence
     /// work ahead of the app's close request and any resulting pane teardown.
     init(
-        controller: TerminalPaneSessionController,
+        controller: any TerminalPaneSessionControlling,
         fontSize: Double = DanTermConfig.default.resolvedFontSize,
         fontFamily: String? = nil,
         gridOverride: PaneGridOverride? = nil,
         applicationActive: Bool = true,
         resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
+        makePresentationSurface: @escaping TerminalPanePresentationSurfaceFactory
+            = liveTerminalPanePresentationSurface,
+        makeMetrics: @escaping TerminalPaneMetricsFactory = liveTerminalPaneMetrics,
         onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
     ) {
         self.controller = controller
+        self.makePresentationSurface = makePresentationSurface
+        self.makeMetrics = makeMetrics
         self.fontSize = CGFloat(fontSize)
         self.fontFamily = fontFamily
         self.applicationActive = applicationActive
@@ -477,9 +480,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         frameRateSampler?.recordLayerDisplay(
             deliveryCount: controller.fenceMetrics.delivery.count
         )
-        #if DANTERM_UI_TEST
         layerDisplayCountForTesting += 1
-        #endif
     }
 
     /// Shows `store`'s surface directly, with no full-frame copy anywhere in
@@ -508,7 +509,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         columns: Int,
         rows: Int,
         metrics: TerminalRenderMetrics
-    ) -> TerminalFrameSwapchain? {
+    ) -> (any TerminalPanePresentationSurface)? {
         let colorSpace = surfaceColorSpace
         // The live swapchain answers for its own inputs (research/33 T25 I3):
         // any inequality means the buffers on screen cannot be trusted, and the
@@ -522,12 +523,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
            ) {
             return swapchain
         }
-        swapchain = TerminalFrameSwapchain(
-            columns: columns,
-            rows: rows,
-            metrics: metrics,
-            colorSpace: colorSpace
-        )
+        swapchain = makePresentationSurface(columns, rows, metrics, colorSpace)
         return swapchain
     }
 
@@ -580,8 +576,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     private func presentAttempt(
         plan: RenderFramePlan,
         metrics: TerminalRenderMetrics,
-        using swapchain: TerminalFrameSwapchain,
-        attempt: (TerminalFrameSwapchain) -> TerminalFrameBackingStore?
+        using swapchain: any TerminalPanePresentationSurface,
+        attempt: (any TerminalPanePresentationSurface) -> TerminalFrameBackingStore?
     ) {
         #if DANTERM_TERMINAL_BENCHMARK
         let renderStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
@@ -590,9 +586,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             frameRateSampler?.recordRender(
                 deliveryCount: controller.fenceMetrics.delivery.count
             )
-            #if DANTERM_UI_TEST
             renderCountForTesting += 1
-            #endif
             attach(store)
             #if DANTERM_TERMINAL_BENCHMARK
             let beginSurfaceConvergence = observeCompletedBenchmarkRender(
@@ -1310,18 +1304,18 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         return { retention in read(retention.maxLines, retention.maxChars) }
     }
 
-    #if !DANTERM_UI_TEST
     func paneTapeOpening(
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,
         policy: PaneTapeSyncPolicy
     ) -> (@Sendable () throws -> PaneTapeOpening<PaneTapeSessionEvent>)? {
+        guard let tapeSource else { return nil }
         let requestedCursor: PaneTapeCursor
         switch start {
         case .cursor(let cursor): requestedCursor = cursor
         case .beginning, .now: requestedCursor = .beginning
         }
-        let fence = controller.flightRecordingStreamFence(from: recorderCursor(requestedCursor))
+        let fence = tapeSource.flightRecordingStreamFence(from: recorderCursor(requestedCursor))
         return {
             let decision = decidePaneTapeOpening(
                 request: PaneTapeStreamRequest(capture: capture, policy: policy, position: start),
@@ -1348,7 +1342,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         policy: PaneTapeSyncPolicy,
         replicaHistoryIsComplete: Bool
     ) -> (@Sendable () -> PaneTapeContinuation<PaneTapeSessionEvent>)? {
-        guard let fence = controller.flightRecordingFollowStreamFence(
+        guard let tapeSource, let fence = tapeSource.flightRecordingFollowStreamFence(
             subscriptionId: subscriptionId,
             from: recorderCursor(cursor)
         ) else {
@@ -1377,17 +1371,16 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         cursor: PaneTapeCursor,
         notify: @escaping @Sendable () -> Void
     ) -> PaneTapeFollowNoticeRegistration? {
-        controller.addFlightRecordingFollowNotice(
+        guard let tapeSource else { return nil }
+        tapeSource.addFlightRecordingFollowNotice(
             id: id,
             from: recorderCursor(cursor),
             notify: notify
         )
-        let controller = controller
         return PaneTapeFollowNoticeRegistration {
-            controller.removeFlightRecordingFollowNotice(id: id)
+            tapeSource.removeFlightRecordingFollowNotice(id: id)
         }
     }
-    #endif
 
     func scroll(toRow row: Int) {
         controller.scroll(toTopRow: row)
@@ -1647,15 +1640,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// new pane with no geometry and an existing pane frozen on its old grid.
     private func resolvedMetrics(displayScale: CGFloat) -> TerminalRenderMetrics? {
         if let fontFamily,
-           let metrics = TerminalRenderMetrics(
-               displayScale: displayScale,
-               fontSize: fontSize,
-               fontFamily: fontFamily
-           )
+           let metrics = makeMetrics(displayScale, fontSize, fontFamily)
         {
             return metrics
         }
-        return TerminalRenderMetrics(displayScale: displayScale, fontSize: fontSize)
+        return makeMetrics(displayScale, fontSize, nil)
     }
 
     /// A theme change repaints every row, including rows no damage will name,
@@ -1713,9 +1702,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             deliveryCount: controller.fenceMetrics.delivery.count,
             gridRows: frame.plan.rowCount
         )
-        #if DANTERM_UI_TEST
         publishCountForTesting += 1
-        #endif
         publishedFrame = (frame.plan, metrics)
         // No invalidation and no damage bookkeeping: the publish either renders
         // into a buffer and shows it, or coalesces into the pending

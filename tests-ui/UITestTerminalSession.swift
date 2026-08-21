@@ -1,309 +1,25 @@
-// Test-only terminal-engine values and controller used to compile the real Swift pane view.
-// A fake survives here only where the real source cannot compile in the harness -- the
-// renderer and IOSurface types, the geometry types that drag the engine's scalars and
-// styles behind them, and the live session controller. Everything else is the real
-// production declaration, compiled or imported.
+// The terminal session and presentation surface the pane view is tested against.
+//
+// `SwiftTerminalSessionView` drives a live terminal through two seams: a session
+// controller and the rotation of buffers it presents. The production controller
+// forks a PTY child, so this file supplies a recording stand-in for it. The
+// production rotation is a final engine type, so the surface here wraps a REAL
+// one -- the pixels are rendered by the shipping code, and only the observation
+// and the buffer-busy switch belong to the suite.
 import Cocoa
-import IOSurface
+import CoreGraphics
 import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
-enum TerminalCellKind {
-    case padding
-    case narrow
-    case wideHead
-    case wideTail
-    case spacerHead
-}
-
-struct TerminalRowStructure {
-    let index: Int
-    let isRetained: Bool
-    let isSoftWrapped: Bool
-    let contentEnd: Int
-    let width: Int
-    let marginCellKind: TerminalCellKind
-    let staleWrapClaim: Bool
-}
-
-struct RenderColor: Equatable {
-    let red: UInt8
-    let green: UInt8
-    let blue: UInt8
-}
-
-/// Test-only fixed-palette stand-in used by the real app-side bridge.
-struct RenderANSIColors {
-    init?(exactly colors: [RenderColor]) {
-        guard colors.count == 16 else { return nil }
-    }
-}
-
-struct RenderTheme {
-    static let dark = RenderTheme(defaultBackground: .init(red: 0, green: 0, blue: 0))
-    let defaultBackground: RenderColor
-
-    init(defaultBackground: RenderColor) {
-        self.defaultBackground = defaultBackground
-    }
-
-    init(
-        ansiColors: RenderANSIColors,
-        defaultForeground: RenderColor,
-        defaultBackground: RenderColor,
-        selectionForeground: RenderColor,
-        selectionBackground: RenderColor,
-        cursor: RenderColor,
-        cursorText: RenderColor
-    ) {
-        self.defaultBackground = defaultBackground
-    }
-}
-
-struct RenderFramePlan {
-    /// The fake viewport's row count, exposed so a test can enumerate every row without
-    /// restating the literal that `rowCount` and the initializer default already share.
-    static let rowsForTesting = 10
-
-    let defaultBackground: RenderColor
-    let columns: Int
-    let rowCount: Int
-
-    /// The grid defaults to the fake viewport, and a test overrides it only to
-    /// stand in for a resize -- the one trust-breaking input that reaches the
-    /// view as a differently-shaped plan rather than as new metrics.
-    init(
-        defaultBackground: RenderColor,
-        columns: Int = 10,
-        rowCount: Int = RenderFramePlan.rowsForTesting
-    ) {
-        self.defaultBackground = defaultBackground
-        self.columns = columns
-        self.rowCount = rowCount
-    }
-}
-
-struct TerminalDamageShift: Equatable {
-    let region: Range<Int>
-    let delta: Int
-}
-
-struct TerminalDamage: Equatable {
-    static let full = TerminalDamage(isFull: true)
-    let isFull: Bool
-    let rows: Set<Int>
-    let shift: TerminalDamageShift?
-
-    init(isFull: Bool = false, rows: Set<Int> = [], shift: TerminalDamageShift? = nil) {
-        self.isFull = isFull
-        self.rows = rows
-        self.shift = shift
-    }
-
-    init(rows: Range<Int>, rowCount: Int) {
-        self.init(rows: Set(rows))
-    }
-
-    static let none = TerminalDamage()
-
-    var damagedRowCount: Int { rows.count }
-
-    mutating func formUnion(_ other: TerminalDamage) {
-        guard isFull == false else { return }
-        if other.isFull {
-            self = .full
-        } else {
-            self = TerminalDamage(rows: rows.union(other.rows))
-        }
-    }
-}
-
-/// A frame store the harness can attach as layer contents without rendering
-/// anything. Only what the view touches survives here -- the surface it shows
-/// and the geometry it shows it at; the pixel contract lives in the engine's
-/// own FrameBackingStoreTests.
-final class TerminalFrameBackingStore {
-    let columns: Int
-    let rows: Int
-    let metrics: TerminalRenderMetrics
-    let ioSurface: IOSurface
-
-    init?(
-        columns: Int,
-        rows: Int,
-        metrics: TerminalRenderMetrics,
-        colorSpace: CGColorSpace? = nil
-    ) {
-        guard columns > 0, rows > 0 else { return nil }
-        guard let surface = IOSurface(properties: [
-            .width: columns,
-            .height: rows,
-            .bytesPerElement: 4,
-            .pixelFormat: UInt32(0x4247_5241), // 'BGRA'
-        ]) else { return nil }
-        self.columns = columns
-        self.rows = rows
-        self.metrics = metrics
-        ioSurface = surface
-    }
-}
-
-/// Records what the production view asked the swapchain to present, so the
-/// harness can pin the single render path -- which rows a publish rendered,
-/// which publishes coalesced, which retry finished one -- without pixels or a
-/// compositor. Acquisition is a switch here because the real gate is the render
-/// server's in-use report, which no headless harness can steer.
-final class TerminalFrameSwapchain {
-    /// False stands in for a render server still reading every detached
-    /// surface: no buffer is acquirable, so every publish coalesces.
-    static var canAcquireForTesting = true
-    /// The rows each render covered, in order. `.full` renders record every
-    /// row; an incremental render records the damage composed since the
-    /// acquired buffer was last current.
-    private(set) static var renderedRowSetsForTesting: [Set<Int>] = []
-    /// Counts swapchain construction, so the harness can tell a replacement
-    /// (a trust-breaking input) from a re-render of the same buffers.
-    private(set) static var creationCountForTesting = 0
-
-    static func resetForTesting() {
-        canAcquireForTesting = true
-        renderedRowSetsForTesting = []
-        creationCountForTesting = 0
-    }
-
-    private let store: TerminalFrameBackingStore
-    private let columns: Int
-    private let rows: Int
-    private let metrics: TerminalRenderMetrics
-    private let colorSpace: CGColorSpace?
-    private var pendingPlan: RenderFramePlan?
-    private var staleDamage = TerminalDamage.none
-    private var isCurrent = false
-
-    private(set) var lastRenderedDamage: TerminalDamage?
-    var hasPendingPresentation: Bool { pendingPlan != nil }
-
-    init?(
-        columns: Int,
-        rows: Int,
-        metrics: TerminalRenderMetrics,
-        colorSpace: CGColorSpace? = nil
-    ) {
-        guard let store = TerminalFrameBackingStore(
-            columns: columns,
-            rows: rows,
-            metrics: metrics,
-            colorSpace: colorSpace
-        ) else { return nil }
-        self.store = store
-        self.columns = columns
-        self.rows = rows
-        self.metrics = metrics
-        self.colorSpace = colorSpace
-        Self.creationCountForTesting += 1
-    }
-
-    func matches(
-        columns: Int,
-        rows: Int,
-        metrics: TerminalRenderMetrics,
-        colorSpace: CGColorSpace?
-    ) -> Bool {
-        self.columns == columns && self.rows == rows
-            && matches(metrics: metrics, colorSpace: colorSpace)
-    }
-
-    func matches(metrics: TerminalRenderMetrics, colorSpace: CGColorSpace?) -> Bool {
-        self.metrics == metrics && self.colorSpace == colorSpace
-    }
-
-    func publish(plan: RenderFramePlan, damage: TerminalDamage) -> TerminalFrameBackingStore? {
-        staleDamage.formUnion(damage)
-        pendingPlan = plan
-        return presentPending()
-    }
-
-    func retryPendingPresentation() -> TerminalFrameBackingStore? {
-        presentPending()
-    }
-
-    private func presentPending() -> TerminalFrameBackingStore? {
-        guard pendingPlan != nil, Self.canAcquireForTesting else { return nil }
-        let rendered: TerminalDamage = isCurrent && staleDamage.isFull == false
-            ? staleDamage
-            : .full
-        Self.renderedRowSetsForTesting.append(
-            rendered.isFull ? Set(0..<rows) : rendered.rows
-        )
-        lastRenderedDamage = rendered
-        isCurrent = true
-        staleDamage = .none
-        pendingPlan = nil
-        return store
-    }
-}
-
-struct TerminalPaneFrame {
-    let plan: RenderFramePlan
-    let damage: TerminalDamage
-}
-
-struct TerminalRenderMetrics: Equatable {
-    /// A family that would pass an availability probe yet yields no usable cell
-    /// geometry -- the real metrics refuse a face with no nominal `M` glyph, or one
-    /// whose cell box cannot be pixel-quantized. Naming the case here proves an
-    /// unusable face falls back instead of leaving a terminal blank or frozen without
-    /// depending on any particular font being installed on the test machine.
-    static let unusableFamily = "DanTermTestUnusableFace"
-
-    /// A family with double-width cells, so a live family change is observable in the
-    /// grid the view reports rather than only in metrics the harness cannot see.
-    static let wideFamily = "DanTermTestWideFace"
-
-    let cellSize: CGSize
-    /// The layer's contents scale rides the surface the view attaches, so the
-    /// harness has to carry a real value here rather than a placeholder.
-    let displayScale: CGFloat
-
-    init?(displayScale: CGFloat, fontSize: CGFloat = 13, fontFamily: String? = nil) {
-        guard displayScale > 0, fontSize > 0, fontFamily != Self.unusableFamily else { return nil }
-        let widthFactor: CGFloat = fontFamily == Self.wideFamily ? 2 : 1
-        cellSize = CGSize(width: 8 * widthFactor * fontSize / 13, height: 16 * fontSize / 13)
-        self.displayScale = displayScale
-    }
-}
-
-struct TerminalScrollProjection: Equatable {
-    let totalRows: Int
-    let topRow: Int
-    let windowRows: Int
-    let isFollowing: Bool
-}
-
-struct TerminalPaneViewportState: Equatable {
-    let isScrollbarEnabled: Bool
-    let projection: TerminalScrollProjection
-}
-
-struct TerminalHyperlink: Equatable {
-    let uri: String
-    let explicitId: String?
-
-    init(uri: String, explicitId: String? = nil) {
-        self.uri = uri
-        self.explicitId = explicitId
-    }
-}
-
-struct TerminalPaneFenceMetrics {
-    struct Measurement {
-        var count: UInt64 = 0
-    }
-
-    var delivery = Measurement()
-}
-
+/// Records what the pane view asked its session to do, and drives the view's own
+/// callbacks the way a live terminal would.
 @MainActor
-final class TerminalPaneSessionController {
+final class FakeTerminalPaneSessionController: TerminalPaneSessionControlling {
     var onFrame: ((TerminalPaneFrame) -> Void)?
     var onClipboardWrite: ((String) -> Void)?
     var onSelectionCopy: ((String) -> Void)?
@@ -316,11 +32,11 @@ final class TerminalPaneSessionController {
     var onPrimaryHistoryMutation: (() -> Void)?
     /// Stands in for the real controller's per-fence display-interval read
     /// (research/33 D8); the harness never fences, so it is write-only here.
-    var displayRefreshIntervalNanoseconds: (() -> UInt64)?
+    var displayRefreshIntervalNanoseconds: () -> UInt64 = { 8_333_333 }
     var currentPlan: RenderFramePlan?
-    /// Stands in for the real controller's fence census, which the frame-rate
-    /// sampler's call sites read. The harness never emits a rate sample, so a
-    /// frozen zero is the whole contract.
+    /// The real controller's fence census, which the frame-rate sampler's call
+    /// sites read. The suite never emits a rate sample, so a frozen zero is the
+    /// whole contract.
     let fenceMetrics = TerminalPaneFenceMetrics()
     /// Stands in for the real controller's absolute viewport top, which the
     /// delivery-shape sampler's call site reads. Same contract as
@@ -384,14 +100,11 @@ final class TerminalPaneSessionController {
         self.processIsRunning = processIsRunning
     }
 
-    func sendText(_ text: String, origin: UInt64?, waitGeneration: PaneInputWaitGeneration?) {
-        sendText(text, origin: origin, waitGeneration: waitGeneration, onCompletion: nil)
-    }
     func sendText(
         _ text: String,
         origin: UInt64?,
         waitGeneration: PaneInputWaitGeneration?,
-        onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?
+        onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void
     ) {
         textInputs.append(text)
         inputOrigins.append(origin)
@@ -405,7 +118,7 @@ final class TerminalPaneSessionController {
         modifiers: TerminalKeyModifiers,
         origin: UInt64?,
         waitGeneration: PaneInputWaitGeneration?,
-        onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
+        onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void
     ) {
         let bytes = encodeTerminalKey(key, modifiers: modifiers, modes: inputModes)
         inputBytes.append(bytes)
@@ -419,7 +132,7 @@ final class TerminalPaneSessionController {
         _ text: String,
         origin: UInt64?,
         waitGeneration: PaneInputWaitGeneration?,
-        onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
+        onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void
     ) {
         let bytes = encodeTerminalPaste(text, modes: inputModes)
         inputBytes.append(bytes)
@@ -445,7 +158,7 @@ final class TerminalPaneSessionController {
     private func deliverOrBuffer(
         _ onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?,
         waitGeneration: PaneInputWaitGeneration?,
-        recording record: @escaping (TerminalPaneSessionController) -> Void
+        recording record: @escaping (FakeTerminalPaneSessionController) -> Void
     ) {
         let delivery: () -> Void = { [weak self] in
             guard let self else { return }
@@ -493,16 +206,8 @@ final class TerminalPaneSessionController {
     func sendWheel(
         _ event: TerminalWheelEvent,
         origin: UInt64?,
-        waitGeneration: PaneInputWaitGeneration?
-    ) {
-        wheelEvents.append(event)
-        submittedWaitGenerations.append(waitGeneration)
-    }
-    func sendWheel(
-        _ event: TerminalWheelEvent,
-        origin: UInt64?,
         waitGeneration: PaneInputWaitGeneration?,
-        onCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)?
+        onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void
     ) {
         wheelEvents.append(event)
         submittedWaitGenerations.append(waitGeneration)
@@ -514,9 +219,9 @@ final class TerminalPaneSessionController {
         waitGeneration: PaneInputWaitGeneration?
     ) {
         submittedWaitGenerations.append(waitGeneration)
-        sendPointer(event, origin: origin)
+        recordPointer(event, origin: origin)
     }
-    private func sendPointer(_ event: TerminalPointerEvent, origin: UInt64?) {
+    private func recordPointer(_ event: TerminalPointerEvent, origin: UInt64?) {
         pointerEvents.append(event)
         // Link work follows the real policy: an event the view measured outside the grid arms
         // nothing, hovers nothing, opens nothing, and drops whatever an earlier event armed.
@@ -572,8 +277,8 @@ final class TerminalPaneSessionController {
     func readRowStructure() -> [TerminalRowStructure] { [] }
     func readFullHistoryText() -> String { "" }
     func readPrimaryHistoryText() -> String { "" }
-    func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? { nil }
-    func primaryHistoryTailReader() -> @Sendable (Int, Int) -> String? { { _, _ in nil } }
+    func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String { "" }
+    func primaryHistoryTailReader() -> @Sendable (Int, Int) -> String { { _, _ in "" } }
     private(set) var gridDimensions: [TerminalDimensions] = []
 
     // Mirrors TerminalPaneSession.setGridDimensions(_:pinned:). `pinned` is

@@ -1,7 +1,5 @@
 // Narrow app boundary that maps decoded neutral themes into renderer-owned values.
-#if !DANTERM_UI_TEST
 import TerminalRenderPlanning
-#endif
 
 extension ThemeCatalog {
     /// Resolves and converts a complete catalog entry without exposing renderer types to core.

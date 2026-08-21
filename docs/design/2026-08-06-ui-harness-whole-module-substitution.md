@@ -1,9 +1,16 @@
 # The AppKit UI Harness Is a Whole-Module Substitution Seam, Not a Test Target
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-08-06
+- Superseded by: [2026-08-21: The UI Suite Is an Ordinary Test Target, Behind Three Named Seams](2026-08-21-ui-suite-as-an-ordinary-test-target.md)
 
 <!-- docs-lint: allow-missing app/TerminalView.swift -->
+<!-- docs-lint: allow-missing tests-ui/SidebarViewTestShim.swift -->
+<!-- docs-lint: allow-missing tests-ui/SwiftTerminalSessionViewTestShim.swift -->
+
+> **Superseded.** The central finding below -- that no test can construct
+> `AppRuntime` -- was already false when it was written: `DanTermAppTests`
+> constructs one headlessly. See the successor note.
 
 ## Context
 

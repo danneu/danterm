@@ -243,16 +243,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// Identifies the row whose exact field owns the live inline rename session.
     var activeRenameTarget: RenameTarget? { activeRename.target }
 
-#if DANTERM_UI_TEST
-    /// UI-harness seam that forces the next in-place update for selected rows down
-    /// the visible-but-unmaterialized branch without depending on AppKit timing.
-    var testForceNextNilCellTabIds: Set<TabId> = []
-    var testForceNextNilCellGroupIds: Set<GroupId> = []
-
-    func testResetRecycledRenameState(_ cell: SidebarTabCellView) {
-        resetRecycledRenameState(cell)
+    /// Fetches the cell already materialized for a row, or nothing when AppKit has
+    /// not built one. Given rather than read straight off the outline view, because
+    /// "on screen but not yet materialized" is a real state the reconcile loop must
+    /// retry through, and nothing else can put AppKit into it on demand.
+    lazy var materializedCell: (Int) -> NSView? = { [weak outlineView] row in
+        outlineView?.view(atColumn: 0, row: row, makeIfNecessary: false)
     }
-#endif
 
     /// Row structure of the last applied projection: single-group mode promotes
     /// tabs to root rows and shows no group rows.
@@ -517,7 +514,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// An editable NSTextField reports no intrinsic width, so a poisoned cell renders
     /// its title ~2pt wide no matter what stringValue holds (the 2026-06-11 blank
     /// tab-title incident). Belt-and-braces reset at the reuse boundary.
-    private func resetRecycledRenameState(_ cell: NSTableCellView) {
+    func resetRecycledRenameState(_ cell: NSTableCellView) {
         guard let textField = cell.textField else { return }
         if activeRename.owns(textField), let torn = activeRename.take() {
             report([torn.end])
@@ -727,14 +724,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return false }
         let isVisible = outlineView.visibleRect.intersects(outlineView.rect(ofRow: row))
-#if DANTERM_UI_TEST
-        if testForceNextNilCellTabIds.remove(tab.id) != nil {
-            return isVisible
-        }
-#endif
-        guard let cell = outlineView.view(
-            atColumn: 0, row: row,
-            makeIfNecessary: false) as? SidebarTabCellView
+        guard let cell = materializedCell(row) as? SidebarTabCellView
         else { return isVisible }
         let isEditing = cell.titleField.currentEditor() != nil
         cell.apply(tab, isEditingTitle: isEditing)
@@ -748,14 +738,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return false }
         let isVisible = outlineView.visibleRect.intersects(outlineView.rect(ofRow: row))
-#if DANTERM_UI_TEST
-        if testForceNextNilCellGroupIds.remove(group.id) != nil {
-            return isVisible
-        }
-#endif
-        guard let cell = outlineView.view(
-            atColumn: 0, row: row,
-            makeIfNecessary: false) as? SidebarGroupCellView
+        guard let cell = materializedCell(row) as? SidebarGroupCellView
         else { return isVisible }
         let isEditing = cell.titleField.currentEditor() != nil
         cell.apply(group, isEditingTitle: isEditing)

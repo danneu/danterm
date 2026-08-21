@@ -3,11 +3,7 @@
 // meanings keep their own type in TerminalCore -- the parser produces those, and
 // nothing here is something a parser can see.
 
-// The UI harness compiles TerminalCore's sources into its own module, so it has the
-// terminal vocabulary already and no module to import (see test-ui.sh).
-#if !DANTERM_UI_TEST
 import TerminalCore
-#endif
 
 /// Names one wait a pane's agent has reported, so an input that ends a wait can
 /// say which wait it ended.
