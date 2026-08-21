@@ -12,7 +12,6 @@ final class SidebarTabCellView: NSTableCellView {
     let chip: ChipView
     let titleField: NSTextField
     let leadingStack: NSStackView
-    let subtitleField: NSTextField
     let paneStrip: PaneStripView
     let alertBadge: NSTextField
     let accessoryStack: NSStackView
@@ -51,13 +50,7 @@ final class SidebarTabCellView: NSTableCellView {
         leadingStack.spacing = 4
         leadingStack.setHuggingPriority(.defaultLow, for: .horizontal)
 
-        let subtitleField = SingleLineLabel.make(truncating: .byTruncatingMiddle)
-        subtitleField.translatesAutoresizingMaskIntoConstraints = false
-        subtitleField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        subtitleField.textColor = .secondaryLabelColor
-
         let paneStrip = PaneStripView()
-        paneStrip.isHidden = true
 
         let alertBadge = NSTextField.makeBadge()
         let accessoryStack = NSStackView(views: [alertBadge])
@@ -73,7 +66,6 @@ final class SidebarTabCellView: NSTableCellView {
         self.chip = chip
         self.titleField = titleField
         self.leadingStack = leadingStack
-        self.subtitleField = subtitleField
         self.paneStrip = paneStrip
         self.alertBadge = alertBadge
         self.accessoryStack = accessoryStack
@@ -83,7 +75,6 @@ final class SidebarTabCellView: NSTableCellView {
         textField = titleField
         addSubview(colorStripe)
         addSubview(leadingStack)
-        addSubview(subtitleField)
         addSubview(paneStrip)
         addSubview(accessoryStack)
 
@@ -97,10 +88,6 @@ final class SidebarTabCellView: NSTableCellView {
             leadingStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             leadingStack.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             leadingStack.trailingAnchor.constraint(equalTo: accessoryStack.leadingAnchor, constant: -4),
-            subtitleField.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
-            subtitleField.trailingAnchor.constraint(
-                lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
-            subtitleField.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 1),
             paneStrip.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
             // Equal, not <=: the strip has no intrinsic width and fits itself
             // to whatever it is given, so it needs a definite one.
@@ -124,10 +111,7 @@ final class SidebarTabCellView: NSTableCellView {
             jumpBadge.isHidden = tab.jumpKey == nil
         }
 
-        subtitleField.stringValue = tab.subtitle?.text ?? ""
-        subtitleField.isHidden = tab.subtitle == nil || !tab.paneChips.isEmpty
         paneStrip.chips = tab.paneChips
-        paneStrip.isHidden = tab.paneChips.isEmpty
         alertBadge.updateBadge(count: tab.unreadAlertCount)
         chip.kind = tab.chipKind
 

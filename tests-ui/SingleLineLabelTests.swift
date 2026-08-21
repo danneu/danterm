@@ -22,7 +22,6 @@ func singleLineLabelTests() {
         let tabCell: SidebarTabCellView = try sidebarCell(
             for: .tab(sidebarFixtureTabId), in: outline)
         try assertSingleLine(tabCell.titleField, "sidebar tab title")
-        try assertSingleLine(tabCell.subtitleField, "sidebar tab subtitle")
         _ = sidebar
     }
 
@@ -32,10 +31,11 @@ func singleLineLabelTests() {
         try assertSingleLine(try onlySingleLineField(in: row, named: "switcher row"), "switcher row name")
     }
 
-    uiTest("the window chrome title lays out one line and truncates") {
+    uiTest("a hostile working directory stays flat in the window chrome title") {
         let chrome = WindowChromeView(frame: NSRect(x: 0, y: 0, width: 600, height: 38))
-        chrome.updateTitle("one")
-        let fields = singleLineFields(in: chrome).filter { $0.stringValue == "one" }
+        let title = DisplayLine("shell — /tmp/line one\nline two").text
+        chrome.updateTitle(title)
+        let fields = singleLineFields(in: chrome).filter { $0.stringValue == title }
         guard let title = fields.first else {
             throw UITestFailure(message: "chrome should show its title in a label")
         }

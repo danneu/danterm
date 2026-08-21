@@ -617,18 +617,17 @@ struct SidebarTabProjection: Equatable {
   // copy of the old projection in place (and the executor can mirror it). They never
   // change identity, only rendered content.
   var displayTitle: DisplayLine
-  var subtitle: DisplayLine?
   var unreadAlertCount: Int
   var jumpKey: Character?   // model.jumpMode?.keyMap[tab.id]
   var color: TabColor?
   var hasCustomTitle: Bool = false
-  // The row speaks for the focused pane, like displayTitle and subtitle do.
+  // The row speaks for the focused pane, like displayTitle does.
   var chipKind: ChipKind = .terminal
-  // The second line's pane enumeration, empty for a single-pane tab. Carried in
-  // the projection so a split, a close, a focus move, or a state change inside
-  // the tab reloads the row. Only `unreadAlertCount` overlaps at all, and it
-  // moves for a tab-wide total rather than for the pane that changed, so
-  // without this field an agent going idle would never repaint the strip.
+  // The second line's pane enumeration. Carried in the projection so a split,
+  // a close, a focus move, or a state change inside the tab reloads the row.
+  // Only `unreadAlertCount` overlaps at all, and it moves for a tab-wide total
+  // rather than for the pane that changed, so without this field an agent going
+  // idle would never repaint the strip.
   var paneChips: [TabPaneChip] = []
 }
 
@@ -701,7 +700,6 @@ func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProje
         SidebarTabProjection(
           id: tab.id,
           displayTitle: DisplayLine(tabDisplayTitle(tab)),
-          subtitle: tabSubtitle(tab).map { DisplayLine($0) },
           unreadAlertCount: tally.byTab[tab.id] ?? 0,
           jumpKey: model.jumpMode?.keyMap[tab.id],
           color: tab.color,

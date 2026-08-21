@@ -106,7 +106,7 @@ func sidebarProjectionRowTests() {
     }
 
     uiTest("a materialized tab paints every scalar projection field") {
-        // Intent: one apply paints the tab title, subtitle, chip, alert badge,
+        // Intent: one apply paints the tab title, pane strip, chip, alert badge,
         //   jump badge, and color stripe from the supplied projection.
         // Why it exists: typed access removes silent lookup failures only if each
         //   stored child remains part of the cell's single total paint path.
@@ -125,7 +125,7 @@ func sidebarProjectionRowTests() {
         model.groups[0].tabs[0].color = .purple
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         model.groups[0].tabs[0].paneTree.updatePane(paneId) { pane in
-            pane.session?.cwd = "painted subtitle"
+            pane.session?.cwd = "working directory that must not paint"
             pane.session?.agent = .attached(
                 session: AgentSession(kind: "codex", sessionId: "paint-test")!,
                 activity: nil)
@@ -137,10 +137,17 @@ func sidebarProjectionRowTests() {
         let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         try uiExpect(cell.titleField.stringValue == "painted title",
             "the title should come from the projection")
+        try uiExpect(cell.paneStrip.chips.count == 1,
+            "the second line should show the tab's sole pane")
+        try uiExpect(cell.paneStrip.chips[0].paneId == paneId,
+            "the pane strip should identify the sole pane")
+        try uiExpect(cell.paneStrip.chips[0].isFocused,
+            "the sole pane should be focused")
         try uiExpect(
-            cell.subtitleField.isHidden == false
-                && cell.subtitleField.stringValue == "painted subtitle",
-            "the subtitle should come from the projection")
+            projectionRowTextFields(in: cell).allSatisfy {
+                $0.stringValue != "working directory that must not paint"
+            },
+            "the working directory should not appear anywhere in the sidebar row")
         try uiExpect(cell.chip.kind == .codex,
             "the chip should come from the projection")
         try uiExpect(
@@ -441,6 +448,12 @@ private func projectionRowSplitTab(
 
 private func projectionRowTitleLaneWidth(_ cell: SidebarTabCellView) -> CGFloat {
     cell.leadingStack.bounds.maxX - cell.titleField.frame.minX
+}
+
+private func projectionRowTextFields(in root: NSView) -> [NSTextField] {
+    root.subviews.flatMap { view in
+        (view as? NSTextField).map { [$0] } ?? projectionRowTextFields(in: view)
+    }
 }
 
 private func projectionRowGroupInteractionFixture() -> (

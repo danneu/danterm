@@ -921,11 +921,54 @@ import Testing
 
     // MARK: - desiredSidebar
 
+    @Test("desiredSidebar: a single-pane tab shows its pane instead of its working directory")
+    func desiredSidebarSinglePaneShowsPaneInsteadOfWorkingDirectory() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
+        let agent = try #require(AgentSession(kind: "codex", sessionId: "sidebar-single"))
+        model.updatePane(paneId) { pane in
+            pane.session?.cwd = "\(NSHomeDirectory())/src"
+            pane.session?.agent = .attached(
+                session: agent,
+                activity: .working)
+        }
+        model.alerts = [AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneId,
+            title: "DanTerm", body: "x", createdAt: Date(), isUnread: true)]
+
+        let tab = try #require(desiredSidebar(in: model).groups.first?.tabs.first)
+
+        let chip = try #require(tab.paneChips.first)
+        #expect(tab.paneChips.count == 1)
+        #expect(chip.paneId == paneId)
+        #expect(chip.isFocused)
+        #expect(chip.kind == .codex)
+        #expect(chip.hasAlert)
+        #expect(chip.agent == .working)
+    }
+
+    @Test("desiredSidebar: a working-directory-only update does not reload the tab row")
+    func desiredSidebarIgnoresWorkingDirectoryOnlyUpdate() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
+        let before = desiredSidebar(in: model)
+
+        model.updatePane(paneId) { pane in
+            pane.session?.cwd = "\(NSHomeDirectory())/src"
+        }
+        let after = desiredSidebar(in: model)
+
+        #expect(after == before)
+        #expect(computeSidebarRowOps(old: before, new: after).isEmpty)
+    }
+
     @Test("desiredSidebar: ordered groups -> tabs with rendered attrs, collapse, jump badge")
     func desiredSidebarOrderedGroupsTabsAttrsCollapseJump() {
         // Intent: the sidebar projection lists groups in model order, each
         //   with collapse + isFirst + tabCount + unreadAlertCount, and tabs
-        //   with displayTitle/subtitle/color/unreadAlertCount + optional
+        //   with displayTitle/color/unreadAlertCount + optional
         //   jumpKey from jumpMode.keyMap.
         // Why it exists: pins the sidebar render contract end to end across
         //   every projected field.
@@ -965,7 +1008,6 @@ import Testing
         #expect(work.unreadAlertCount == 1, "group bell rolls up its tabs' unread alerts")
         #expect(work.tabs.map(\.id) == [tA, tB], "tabs in group order")
         #expect(work.tabs[0].displayTitle == "Edited")
-        #expect(work.tabs[0].subtitle == "~/src")
         #expect(work.tabs[0].color == .blue)
         #expect(work.tabs[0].unreadAlertCount == 1)
         #expect(work.tabs[0].jumpKey == nil, "tab A has no jump key")

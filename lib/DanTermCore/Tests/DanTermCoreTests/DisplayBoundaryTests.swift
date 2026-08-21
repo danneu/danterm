@@ -87,7 +87,6 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
                 expectFlat(group.name, "sidebar group name", input: hostile)
                 for tab in group.tabs {
                     expectFlat(tab.displayTitle, "sidebar tab title", input: hostile)
-                    expectFlat(tab.subtitle, "sidebar tab subtitle", input: hostile)
                 }
             }
 
@@ -236,8 +235,8 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
 }
 
 @Suite struct DisplaySurfaceTests {
-    @Test("a hostile title reaches the sidebar row flat")
-    func sidebarRowIsFlat() throws {
+    @Test("a hostile title and working directory reach the window title flat")
+    func windowTitleIsFlat() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
@@ -245,9 +244,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
         update(&model, .sessionReport(sessionId: sessionId, report: .title("a\nb")))
         update(&model, .sessionReport(sessionId: sessionId, report: .cwd("/tmp\nx")))
 
-        let row = desiredSidebar(in: model).groups[0].tabs[0]
-        #expect(row.displayTitle.text == "a b")
-        #expect(row.subtitle?.text == "/tmp x")
+        #expect(desiredWindowChrome(in: model).windowTitle.text == "a b — /tmp x")
     }
 
     @Test("a hostile title reaches the close-tab confirmation flat")

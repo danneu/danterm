@@ -94,15 +94,16 @@ struct ChipKindTests {
         #expect(desiredPaneToolbar(in: model)[paneId]?.chipKind == .codex)
     }
 
-    // Why it exists: the row's second line is a cwd until the tab splits, so an
-    //   empty strip is the signal that the cwd still owns that line.
-    @Test("a single-pane tab has no pane strip")
-    func singlePaneTabHasNoStrip() throws {
+    @Test("a single-pane tab's strip contains its focused pane")
+    func singlePaneTabStripContainsFocusedPane() throws {
         var model = makeModel()
         createTab(&model)
         let tab = try #require(selectedTab(in: model))
 
-        #expect(tabPaneChips(tab, unreadByPane: [:]).isEmpty)
+        let strip = tabPaneChips(tab, unreadByPane: [:])
+
+        #expect(strip.map(\.paneId) == [tab.paneTree.focusedPaneId])
+        #expect(strip.map(\.isFocused) == [true])
     }
 
     @Test("a split tab's strip lists every pane in tree order, focus flagged")

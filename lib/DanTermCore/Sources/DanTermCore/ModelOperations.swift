@@ -595,7 +595,6 @@ func abbreviateHome(_ path: String, home: String = NSHomeDirectory()) -> String 
 /// Derives tab chrome from the focused pane's current terminal session.
 ///
 /// `PaneTree` guarantees that the focused pane belongs to this tab.
-/// `desiredSidebar` calls this once per row.
 func tabChrome(_ tab: TabModel) -> (title: String, subtitle: String?) {
   guard let session = tab.paneTree.focusedPane.session else {
     return ("Terminal", nil)
@@ -648,8 +647,8 @@ enum PaneAgentMark: Equatable {
   case quiet
 }
 
-/// One entry of the chip row a multi-pane tab shows in place of its cwd
-/// subtitle. Carries the pane id so a later iteration can make a chip clickable.
+/// One entry of the chip row a tab shows for its panes. Carries the pane id so
+/// a later iteration can make a chip clickable.
 ///
 /// `hasAlert` and `agent` are separate and neither collapses into the other: a
 /// pane can be both ringing and mid-turn, and the chip says so with two marks.
@@ -663,13 +662,10 @@ struct TabPaneChip: Equatable {
 
 /// The chips for a tab's panes, in the tree's left-to-right order, with the
 /// tab's focused pane flagged so the row can draw the others greyscale.
-/// Empty for a single-pane tab: that row keeps showing its cwd instead.
-///
 /// `unreadByPane` is `UnreadAlertTally.byPane`, so the sidebar projection can
 /// pass the count it has already rolled up instead of rescanning the alerts.
 func tabPaneChips(_ tab: TabModel, unreadByPane: [PaneId: Int]) -> [TabPaneChip] {
   let panes = panesInNode(tab.paneTree.root)
-  guard panes.count > 1 else { return [] }
   return panes.map { pane in
     let agent = pane.session?.agent ?? .none
     return TabPaneChip(
