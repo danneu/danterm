@@ -1280,7 +1280,7 @@ reducer and projection churn above it has stopped.
 - [ ] **[LOOKUP-2](#lookup-2)** (3x4, medium) Type snapshot identity fields as typed ids instead of String so capture stops formatting UUIDs _(with [LOOKUP-1](#lookup-1))_
 - [ ] **[HIST-4](#hist-4)** (2x5, small) Take one locate for the whole truncated tail instead of one per row
 - [ ] **[LOOKUP-4](#lookup-4)** (2x5, small) Answer pane-membership and layout questions with a tree walk instead of materializing pane-id arrays and sets _(after [RECON-1](#recon-1))_
-- [ ] **[RECON-4](#recon-4)** (2x5, medium) Key the sidebar projection's tabs by id so row lookups stop being linear scans with intermediate arrays
+- [x] **[RECON-4](#recon-4)** (2x5, medium) Key the sidebar projection's tabs by id so row lookups stop being linear scans with intermediate arrays -- closed as salvage, doc note only, `96bdfe1b`
 - [ ] **[LOOKUP-1](#lookup-1)** (3x3, large) Split AppModel into a persisted value and an ephemeral value so checkpoint change-detection stops rebuilding a DTO
 - [x] **[RUNTIME-5](#runtime-5)** (2x4, small) Derive the previously visible tab from the reconcile cache, not from `isHidden` _(after [RECON-1](#recon-1))_ -- `075ac8a6`
 - [ ] **[CHROME-5](#chrome-5)** (2x4, medium) Extract the theme list (filter, selection, cell vending) shared by the browser and the picker sheet
@@ -1319,7 +1319,7 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [ ] **[INTERACT-6](#interact-6)** (2x5, small) Key pointer-owner and wheel-remainder storage by their enums instead of by hand-written slots
 - [ ] **[IPC-5](#ipc-5)** (2x5, small) Make IpcRequest.decode typed-throws so IpcServer cannot need two decode-failure paths
 - [x] **[LOOKUP-3](#lookup-3)** (2x5, small) Make DisplayLine normalization allocation-free for text that is already a single clean line
-- [ ] **[LOOKUP-6](#lookup-6)** (2x5, small) Resolve each sidebar row's chrome once per sweep instead of twice through separate title and subtitle accessors
+- [x] **[LOOKUP-6](#lookup-6)** (2x5, small) Resolve each sidebar row's chrome once per sweep instead of twice through separate title and subtitle accessors -- closed 2026-08-21 without a code change
 - [ ] **[MODEL-4](#model-4)** (2x5, small) Group the sidebar group row's reload attributes into one Equatable value
 - [ ] **[MODEL-7](#model-7)** (2x5, small) Make PaneTree.remove non-mutating and return an outcome that cannot be misread as a live tree
 - [ ] **[PANE-2](#pane-2)** (2x5, small) Type the container's leaf cache as the wrapper it needs, so a missing wrapper is retried, not cached
@@ -7515,6 +7515,8 @@ _Scope: Data-structure choice in the pure core: lookups, scans, and copies in th
 
 `perf-hot-path` &middot; impact 2, confidence 5 &middot; effort small &middot; wave 4 &middot; confirmed
 
+**Closed 2026-08-21 without a code change.** The verify-issue pass confirmed the claim and found it undercounted: each sidebar row walks the tab's tree four times (`tabDisplayTitle`, `tabSubtitle`, `tabChipKind`, `tabPaneChips`) and the selected tab pays three more in `desiredWindowChrome`; `abbreviateHome` evaluates `NSHomeDirectory()` on every call; the `tabChrome` doc claim "once per row" has been false since `cf3c4b00`. It is not unmeasurable: research/33/F14 (the T6 probe, `scripts/research/33/t6-msg-work.py`) put `desiredSidebar` plus `desiredWindowChrome` at 29.5 us of a 58.5 us sweep at 3 tabs -- half the sweep, 0.08% of a core. The recommended shape is S25 from the 2026-08-11 audit: one `TabChrome` value (title, displayTitle, subtitle, chipKind) per tab from a single focused-pane read, built once by `desiredSidebar` and `desiredWindowChrome`, `tabTitle`/`tabSubtitle` deleted as entry points, `NSHomeDirectory()` hoisted to one value per projection call, and an early-out in `tabPaneChips` for a one-leaf tree. Not implemented; the existing `desiredSidebar`, `desiredWindowChrome`, and `CustomTitleTests` cases are the behavioral net if someone picks it up.
+
 **Files.** `lib/DanTermCore/Sources/DanTermCore/Projections.swift`, `lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift`
 
 **Problem.** `tabDisplayTitle` and `tabSubtitle` are separate accessors that each call `tabChrome`, and `tabChrome` resolves the focused pane by walking the tab's split tree and then abbreviates *both* the title and the cwd. `desiredSidebar` calls both per row, and `desiredWindowChrome` calls both again for the selected tab, so every sweep does two tree walks and two `abbreviateHome` pairs per row and discards half the result each time. `PaneTree.focusedPane` is itself a full `paneInNode` walk that copies out the whole `PaneModel`.
@@ -7654,6 +7656,8 @@ _Scope: Per-frame and per-event cost in the AppKit reconcile passes (app/Reconci
 ##### RECON-4. Key the sidebar projection's tabs by id so row lookups stop being linear scans with intermediate arrays
 
 `data-modeling` &middot; impact 2, confidence 5 &middot; effort medium &middot; wave 3 &middot; rescored
+
+**Done** as salvage in `96bdfe1b`, which only adds a doc note to `SidebarProjection.tab(_:)` saying it runs once per `insertTab`/`reloadTab` op, not once per row. The restructure itself was dropped by the 2026-08-21 verify-issue pass: `tab(_:)` is per-op (usually zero or one calls per sweep), research/33/F14 measured the whole sweep at 61 us at realistic size with the row-op diff not even a line item, and the keyed form would make `SidebarItemStore.insertGroup` re-join ids to a table with a new rebuild path while adding a swift-collections dependency `lib/DanTermCore` does not have. Reopen only if a sidebar-sweep measurement at real tab counts shows the diff, rather than the projection, is the cost.
 
 **Files.** `app/SidebarReconcileDriver.swift`, `lib/DanTermCore/Sources/DanTermCore/Projections.swift`, `lib/DanTermCore/Sources/DanTermCore/SidebarItemStore.swift`
 
