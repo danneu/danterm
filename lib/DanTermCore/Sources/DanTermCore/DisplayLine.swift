@@ -41,6 +41,8 @@ struct DisplayLine: Equatable, Hashable, Sendable, CustomStringConvertible, Expr
     /// of "a b". The final collapse re-trims, because removing a control can
     /// leave a space at an edge that was interior before.
     private static func normalize(_ raw: String) -> String {
+        if isAlreadyNormalized(raw) { return raw }
+
         let collapsed = raw.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
         var kept = String.UnicodeScalarView()
         for scalar in collapsed.unicodeScalars where !isRemoved(scalar) {
@@ -49,12 +51,38 @@ struct DisplayLine: Equatable, Hashable, Sendable, CustomStringConvertible, Expr
         return String(kept).split(separator: " ").joined(separator: " ")
     }
 
+    /// Identifies the common path where normalization can preserve the input
+    /// storage instead of building equivalent text through three new buffers.
+    private static func isAlreadyNormalized(_ raw: String) -> Bool {
+        var sawNonWhitespace = false
+        var previousWasWhitespace = false
+
+        for character in raw {
+            if character.isWhitespace {
+                if character != " " || !sawNonWhitespace || previousWasWhitespace {
+                    return false
+                }
+                previousWasWhitespace = true
+            } else {
+                sawNonWhitespace = true
+                previousWasWhitespace = false
+            }
+
+            if character.unicodeScalars.contains(where: isRemoved) {
+                return false
+            }
+        }
+
+        return !previousWasWhitespace
+    }
+
     /// C0 and C1 controls, which no label should ever be asked to draw, plus the
     /// bidi overrides and isolates, which reorder the text around them and can
     /// disguise one string as another. General category `Format` is otherwise
     /// left alone so ZWJ keeps an emoji sequence a single glyph.
     private static func isRemoved(_ scalar: Unicode.Scalar) -> Bool {
-        if scalar.properties.generalCategory == .control { return true }
-        return (0x202A...0x202E).contains(scalar.value) || (0x2066...0x2069).contains(scalar.value)
+        let value = scalar.value
+        if value <= 0x1F || (0x7F...0x9F).contains(value) { return true }
+        return (0x202A...0x202E).contains(value) || (0x2066...0x2069).contains(value)
     }
 }

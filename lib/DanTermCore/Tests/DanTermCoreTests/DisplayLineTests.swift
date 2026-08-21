@@ -8,6 +8,26 @@ import Testing
 
 struct DisplayLineTests {
     @Test(
+        "normalization preserves the exact UTF-8 bytes of already-normal text",
+        arguments: ["plain", "two words", "e\u{301}"]
+    )
+    func alreadyNormalTextPreservesBytes(raw: String) {
+        #expect(Array(DisplayLine(raw).text.utf8) == Array(raw.utf8))
+    }
+
+    @Test(
+        "non-normal spacing is rewritten to the expected UTF-8 bytes",
+        arguments: [
+            (" leading", "leading"),
+            ("trailing ", "trailing"),
+            ("two  spaces", "two spaces"),
+        ]
+    )
+    func nonNormalSpacingIsRewritten(raw: String, expected: String) {
+        #expect(Array(DisplayLine(raw).text.utf8) == Array(expected.utf8))
+    }
+
+    @Test(
         "each run of whitespace collapses to a single space",
         arguments: [
             "a\nb",
@@ -60,6 +80,37 @@ struct DisplayLineTests {
     @Test("whitespace exposed by stripping a control is still trimmed")
     func whitespaceExposedByStrippingIsTrimmed() {
         #expect(DisplayLine("\u{0007} hello \u{001B}").text == "hello")
+    }
+
+    @Test("spaces exposed by stripping a control collapse again")
+    func spacesExposedByStrippingCollapse() {
+        #expect(DisplayLine("a \u{0007} b").text == "a b")
+    }
+
+    // Intent: Pin every BMP scalar to the composed normalization rules.
+    // Why it exists: The production range test replaces a Unicode property lookup.
+    // Scenario: Put each scalar between two letters and compare public output to a property-driven oracle.
+    @Test("every BMP scalar follows the composed whitespace and removal rules")
+    func everyBMPScalarFollowsComposedRules() {
+        for value in UInt32(0)...0xFFFF {
+            guard let scalar = Unicode.Scalar(value) else { continue }
+            let scalarText = String(scalar)
+            let raw = "a\(scalarText)b"
+            let expected: String
+
+            if Character(scalarText).isWhitespace {
+                expected = "a b"
+            } else if scalar.properties.generalCategory == .control
+                || (0x202A...0x202E).contains(value)
+                || (0x2066...0x2069).contains(value)
+            {
+                expected = "ab"
+            } else {
+                expected = raw
+            }
+
+            #expect(DisplayLine(raw).text == expected, "Unexpected normalization for U+\(String(value, radix: 16, uppercase: true))")
+        }
     }
 
     @Test("an input with nothing to show normalizes to the empty line", arguments: ["", "   ", "\n\t\r\n", "\u{0007}\u{001B}"])
