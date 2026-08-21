@@ -669,6 +669,8 @@ struct SidebarProjection: Equatable {
   }
 
   /// The row payload `SidebarItemStore` mounts for an inserted or reloaded tab.
+  /// Linear over every group's tabs, but it runs once per `insertTab` or
+  /// `reloadTab` op -- usually zero or one per sweep -- not once per row.
   func tab(_ id: TabId) -> SidebarTabProjection? {
     for group in groups {
       if let tab = group.tabs.first(where: { $0.id == id }) { return tab }
