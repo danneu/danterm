@@ -903,12 +903,15 @@ extension Terminal {
             return keys
         }
 
+        /// Takes the cell's scalars borrowed, so scanning a painted cell never copies
+        /// its inline `TerminalScalars` storage into an array just to ask for a key.
         private static func searchGraphemeKey(
-            for scalars: [Unicode.Scalar]
+            for scalars: some Collection<Unicode.Scalar>
         ) -> SearchGraphemeKey {
-            if scalars.count == 1, let scalar = scalars.first, scalar.value < 0x80 {
-                let value = scalar.value
-                return .scalar(value >= 0x41 && value <= 0x5A ? value + 0x20 : value)
+            if scalars.count == 1, let scalar = scalars.first {
+                if let key = singleScalarSearchGraphemeKey(for: scalar) {
+                    return key
+                }
             }
             let key = canonicalCaselessKey(for: scalars)
             if key.count == 1, let scalar = key.first {
@@ -917,17 +920,20 @@ extension Terminal {
             return .scalars(key)
         }
 
-        /// Reads the common ASCII cell directly from inline scalar storage so search does not
-        /// allocate an array for every painted cell it scans.
-        private static func searchGraphemeKey(for scalars: TerminalScalars) -> SearchGraphemeKey {
-            if scalars.count == 1 {
-                let scalar = scalars[0]
-                if scalar.value < 0x80 {
-                    let value = scalar.value
-                    return .scalar(value >= 0x41 && value <= 0x5A ? value + 0x20 : value)
-                }
+        /// Answers the one-scalar cell without building a key, or reports that the
+        /// scalar needs the full D145 pipeline.
+        ///
+        /// Search scans a whole screen of these, so the two cases that cover almost
+        /// every cell -- ASCII, and any scalar that is already its own canonical
+        /// caseless key -- must not reach an allocation.
+        private static func singleScalarSearchGraphemeKey(
+            for scalar: Unicode.Scalar
+        ) -> SearchGraphemeKey? {
+            let value = scalar.value
+            if value < 0x80 {
+                return .scalar(value >= 0x41 && value <= 0x5A ? value + 0x20 : value)
             }
-            return searchGraphemeKey(for: Array(scalars))
+            return isCanonicalCaselessIdentity(scalar) ? .scalar(value) : nil
         }
 
         private static func range(

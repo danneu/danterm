@@ -324,33 +324,52 @@ def boolean_array(values: list[bool], values_per_line: int = 12) -> str:
     return "\n".join(lines)
 
 
-def parse_canonical_data(
-    text: str,
-) -> tuple[dict[int, list[int]], list[tuple[int, int, int]]]:
+def parse_canonical_data(text: str) -> tuple[dict[int, list[int]], dict[int, int]]:
+    """Reads the canonical decompositions and the non-zero combining classes.
+
+    Compatibility decompositions carry a `<tag>` prefix and are dropped: the
+    search key is NFD, not NFKD.
+    """
     decompositions: dict[int, list[int]] = {}
-    combining_values: list[tuple[int, int]] = []
+    combining_classes: dict[int, int] = {}
     for raw_line in text.splitlines():
         fields = raw_line.split(";")
         scalar = int(fields[0], 16)
         combining_class = int(fields[3])
         decomposition = fields[5]
         if combining_class != 0:
-            combining_values.append((scalar, combining_class))
+            combining_classes[scalar] = combining_class
         if decomposition and not decomposition.startswith("<"):
             decompositions[scalar] = [int(value, 16) for value in decomposition.split()]
+    return decompositions, combining_classes
 
-    combining_ranges: list[tuple[int, int, int]] = []
-    for scalar, combining_class in combining_values:
-        if (
-            combining_ranges
-            and combining_ranges[-1][1] + 1 == scalar
-            and combining_ranges[-1][2] == combining_class
-        ):
-            lower, _, prior_class = combining_ranges[-1]
-            combining_ranges[-1] = (lower, scalar, prior_class)
-        else:
-            combining_ranges.append((scalar, scalar, combining_class))
-    return decompositions, combining_ranges
+
+def fully_resolved_decompositions(
+    decompositions: dict[int, list[int]],
+) -> dict[int, list[int]]:
+    """Expands each canonical decomposition until no component decomposes further.
+
+    Resolving here is what lets the runtime walk a decomposition as a flat pool
+    slice instead of recursing through the table per component. Unicode
+    guarantees the canonical mapping graph is acyclic, and the depth bound below
+    turns a corrupt input into a loud failure rather than a hang.
+    """
+    resolved: dict[int, list[int]] = {}
+
+    def resolve(scalar: int, depth: int) -> list[int]:
+        if depth > 32:
+            raise RuntimeError(f"canonical decomposition of U+{scalar:04X} does not terminate")
+        mapping = decompositions.get(scalar)
+        if mapping is None:
+            return [scalar]
+        components: list[int] = []
+        for component in mapping:
+            components.extend(resolve(component, depth + 1))
+        return components
+
+    for scalar in decompositions:
+        resolved[scalar] = resolve(scalar, 0)
+    return resolved
 
 
 def parse_full_case_folding(text: str) -> dict[int, list[int]]:
@@ -369,72 +388,221 @@ def parse_full_case_folding(text: str) -> dict[int, list[int]]:
     return mappings
 
 
-def flattened_mappings(
-    mappings: dict[int, list[int]],
-) -> tuple[list[int], list[int], list[int]]:
-    scalars: list[int] = []
-    offsets: list[int] = []
-    pool: list[int] = []
-    for scalar, mapping in sorted(mappings.items()):
-        scalars.append(scalar)
-        offsets.append(len(pool))
-        pool.extend(mapping)
-    offsets.append(len(pool))
-    return scalars, offsets, pool
+class ScalarPool:
+    """Interns scalar runs so identical mappings share one slice of the emitted pool.
+
+    Records carry a start and a length into this pool, and the many scalars that
+    fold or decompose to the same run -- every mapping to a bare ASCII letter,
+    for one -- then cost nothing beyond the record they share.
+    """
+
+    def __init__(self) -> None:
+        self.values: list[int] = []
+        self._starts: dict[tuple[int, ...], int] = {}
+
+    def intern(self, run: list[int]) -> tuple[int, int]:
+        if not run:
+            return (0, 0)
+        key = tuple(run)
+        start = self._starts.get(key)
+        if start is None:
+            start = len(self.values)
+            self._starts[key] = start
+            self.values.extend(run)
+        return (start, len(run))
+
+
+# One scalar's whole canonical-caseless answer: combining class, then the start
+# and length of its fully resolved canonical decomposition and of its full case
+# fold in their pools. A zero length means "no mapping", which is why the
+# absence of a decomposition and the absence of a fold are one lookup apart.
+CanonicalCaselessRecord = tuple[int, int, int, int, int]
+
+
+def canonical_caseless_records(
+    decompositions: dict[int, list[int]],
+    combining_classes: dict[int, int],
+    case_folding: dict[int, list[int]],
+) -> tuple[list[CanonicalCaselessRecord], ScalarPool, ScalarPool]:
+    """Builds one record per scalar in the codespace, plus the two pools they index.
+
+    Hangul syllables are left with no decomposition on purpose: the runtime
+    decomposes them arithmetically, and spelling out all 11,172 mappings would
+    add a pool entry per syllable to buy nothing.
+    """
+    decomposition_pool = ScalarPool()
+    fold_pool = ScalarPool()
+    records: list[CanonicalCaselessRecord] = []
+    for value in range(MAX_SCALAR + 1):
+        decomposition = decompositions.get(value)
+        fold = case_folding.get(value)
+        decomposition_start, decomposition_length = (
+            decomposition_pool.intern(decomposition) if decomposition else (0, 0)
+        )
+        fold_start, fold_length = fold_pool.intern(fold) if fold else (0, 0)
+        records.append(
+            (
+                combining_classes.get(value, 0),
+                decomposition_start,
+                decomposition_length,
+                fold_start,
+                fold_length,
+            )
+        )
+    return records, decomposition_pool, fold_pool
 
 
 def canonical_caseless_source(
-    decompositions: dict[int, list[int]],
-    combining_ranges: list[tuple[int, int, int]],
-    case_folding: dict[int, list[int]],
+    packed: PackedClassificationTables,
+    decomposition_pool: ScalarPool,
+    fold_pool: ScalarPool,
 ) -> str:
-    decomposition_scalars, decomposition_offsets, decomposition_pool = flattened_mappings(
-        decompositions
+    combining_classes = [record[0] for record in packed.palette]
+    decomposition_starts = [record[1] for record in packed.palette]
+    decomposition_lengths = [record[2] for record in packed.palette]
+    fold_starts = [record[3] for record in packed.palette]
+    fold_lengths = [record[4] for record in packed.palette]
+    pool_index_type = index_element_type(
+        max(len(decomposition_pool.values), len(fold_pool.values)), "caseless pool offset"
     )
-    fold_scalars, fold_offsets, fold_pool = flattened_mappings(case_folding)
-    combining_lower_bounds = [lower for lower, _, _ in combining_ranges]
-    combining_upper_bounds = [upper for _, upper, _ in combining_ranges]
-    combining_values = [value for _, _, value in combining_ranges]
     hashes = ", ".join(
         f"{name} {FILES[name][1]}"
         for name in ("UnicodeData.txt", "CaseFolding.txt")
     )
+    mask = (1 << packed.shift) - 1
     return f'''// Generated by scripts/generate-terminal-unicode-tables.py; do not edit.
 // Unicode {UNICODE_VERSION}; source sha256: {hashes}
 //
 // Flat, explicitly typed parallel arrays: nested or tuple-shaped literals at this
 // scale drive swift-frontend's constraint solver into multi-gigabyte territory,
 // while flat homogeneous integer literals typecheck linearly (the same shape as
-// GeneratedPackedUnicodeTables, proven at 31k+ elements).
+// GeneratedPackedUnicodeTables, proven at 31k+ elements). That is also why the
+// record palette is five parallel arrays rather than an array of structs.
 
-/// Owns compact pinned inputs for import-free canonical caseless key construction.
+/// One scalar's pinned canonical-caseless facts, so the search key path asks the
+/// tables once per scalar instead of searching a sorted array per question.
+struct CanonicalCaselessRecord {{
+    let combiningClass: UInt8
+    let decompositionStart: Int
+    let decompositionLength: Int
+    let foldStart: Int
+    let foldLength: Int
+
+    /// True when the scalar is its own canonical caseless key on its own. Hangul
+    /// syllables also satisfy this test and are excluded by the caller, because
+    /// their decomposition is arithmetic and therefore absent from the table.
+    var mapsToItself: Bool {{
+        combiningClass == 0 && decompositionLength == 0 && foldLength == 0
+    }}
+}}
+
+/// Owns the pinned per-scalar records and the two scalar pools they index.
 enum GeneratedCanonicalCaselessTables {{
-    static let decompositionScalars: [UInt32] = [
-{hexadecimal_array(decomposition_scalars)}
-    ]
-    static let decompositionOffsets: [UInt16] = [
-{integer_array(decomposition_offsets)}
-    ]
     static let decompositionPool: [UInt32] = [
-{hexadecimal_array(decomposition_pool)}
-    ]
-    static let combiningClassLowerBounds: [UInt32] = [
-{hexadecimal_array(combining_lower_bounds)}
-    ]
-    static let combiningClassUpperBounds: [UInt32] = [
-{hexadecimal_array(combining_upper_bounds)}
-    ]
-    static let combiningClassValues: [UInt8] = [
-{integer_array(combining_values)}
-    ]
-    static let foldScalars: [UInt32] = [
-{hexadecimal_array(fold_scalars)}
-    ]
-    static let foldOffsets: [UInt16] = [
-{integer_array(fold_offsets)}
+{hexadecimal_array(decomposition_pool.values)}
     ]
     static let foldPool: [UInt32] = [
-{hexadecimal_array(fold_pool)}
+{hexadecimal_array(fold_pool.values)}
+    ]
+
+    /// Reads one scalar's record through the two index stages. The stages hold
+    /// palette indexes, so every value they can produce is a record the
+    /// generator emitted and the read has no failure path.
+    static func record(for value: UInt32) -> CanonicalCaselessRecord {{
+        let block = Int(stageOne[Int(value >> {packed.shift})])
+        let index = Int(stageTwo[(block << {packed.shift}) | Int(value & 0x{mask:X})])
+        return CanonicalCaselessRecord(
+            combiningClass: combiningClasses[index],
+            decompositionStart: Int(decompositionStarts[index]),
+            decompositionLength: Int(decompositionLengths[index]),
+            foldStart: Int(foldStarts[index]),
+            foldLength: Int(foldLengths[index])
+        )
+    }}
+
+    static let combiningClasses: [UInt8] = [
+{integer_array(combining_classes)}
+    ]
+    static let decompositionStarts: [{pool_index_type}] = [
+{integer_array(decomposition_starts)}
+    ]
+    static let decompositionLengths: [UInt8] = [
+{integer_array(decomposition_lengths)}
+    ]
+    static let foldStarts: [{pool_index_type}] = [
+{integer_array(fold_starts)}
+    ]
+    static let foldLengths: [UInt8] = [
+{integer_array(fold_lengths)}
+    ]
+
+    static let stageOne: [{packed.stage_one_type}] = [
+{integer_array(packed.stage_one)}
+    ]
+
+    static let stageTwo: [{packed.stage_two_type}] = [
+{integer_array(packed.stage_two)}
+    ]
+}}
+'''
+
+
+def combining_class_reference_ranges(text: str) -> list[tuple[int, int, int]]:
+    """Re-derives the combining class of every scalar straight from UnicodeData.txt.
+
+    The production table reaches its answer through interning, a palette, and two
+    index stages. This walk shares none of that, so a packing bug shows up as a
+    disagreement rather than as the same wrong answer on both sides.
+    """
+    classes = bytearray(MAX_SCALAR + 1)
+    for raw_line in text.splitlines():
+        fields = raw_line.split(";")
+        classes[int(fields[0], 16)] = int(fields[3])
+    ranges: list[tuple[int, int, int]] = []
+    start = 0
+    for value in range(1, MAX_SCALAR + 1):
+        if classes[value] != classes[start]:
+            ranges.append((start, value - 1, classes[start]))
+            start = value
+    ranges.append((start, MAX_SCALAR, classes[start]))
+    return ranges
+
+
+def combining_class_reference_source(ranges: list[tuple[int, int, int]]) -> str:
+    lower_bounds = [lower for lower, _, _ in ranges]
+    upper_bounds = [upper for _, upper, _ in ranges]
+    values = [value for _, _, value in ranges]
+    return f'''// Generated independently from the official Unicode {UNICODE_VERSION} property files.
+//
+// Flat, explicitly typed parallel arrays: an array-of-initializer literal at this
+// scale costs gigabytes of swift-frontend memory to typecheck, while flat
+// homogeneous literals typecheck linearly. The structs are rebuilt at runtime.
+
+/// Exhaustive expected combining class run used to validate every Unicode scalar offline.
+struct CanonicalCombiningClassReferenceRange {{
+    let lowerBound: UInt32
+    let upperBound: UInt32
+    let combiningClass: UInt8
+}}
+
+let canonicalCombiningClassReferenceRanges: [CanonicalCombiningClassReferenceRange] =
+    CanonicalCombiningClassReferenceTables.lowerBounds.indices.map {{
+        CanonicalCombiningClassReferenceRange(
+            lowerBound: CanonicalCombiningClassReferenceTables.lowerBounds[$0],
+            upperBound: CanonicalCombiningClassReferenceTables.upperBounds[$0],
+            combiningClass: CanonicalCombiningClassReferenceTables.combiningClasses[$0]
+        )
+    }}
+
+private enum CanonicalCombiningClassReferenceTables {{
+    static let lowerBounds: [UInt32] = [
+{hexadecimal_array(lower_bounds)}
+    ]
+    static let upperBounds: [UInt32] = [
+{hexadecimal_array(upper_bounds)}
+    ]
+    static let combiningClasses: [UInt8] = [
+{integer_array(values)}
     ]
 }}
 '''
@@ -530,9 +698,11 @@ def packed_classification_tables(
 ) -> PackedClassificationTables:
     """Packs the records into the smallest two-stage layout over the shift range.
 
-    Every scalar's record is one of a few dozen distinct values, so the stages
-    carry palette indexes and the shift is chosen by measuring emitted bytes
-    rather than fixed by hand.
+    Scalars share far fewer distinct records than there are scalars, so the
+    stages carry palette indexes and the shift is chosen by measuring emitted
+    bytes rather than fixed by hand. Nothing here reads a record's fields, so
+    both the feed path's classification and the search path's canonical-caseless
+    record pack through this one function.
     """
     palette: list[ClassificationRecord] = []
     palette_indexes: dict[ClassificationRecord, int] = {}
@@ -957,6 +1127,10 @@ def main() -> None:
         repo_root
         / "lib/TerminalCore/Sources/TerminalCore/CanonicalCaseless.generated.swift"
     )
+    combining_class_reference = (
+        repo_root
+        / "lib/TerminalCore/Tests/TerminalCoreTests/CanonicalCombiningClassReference.generated.swift"
+    )
     conformance_corpus_directory = (
         repo_root
         / "lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/unicode"
@@ -981,10 +1155,25 @@ def main() -> None:
         grapheme_corpus_source(parse_grapheme_corpus(data["GraphemeBreakTest.txt"])),
         encoding="utf-8",
     )
-    decompositions, combining_ranges = parse_canonical_data(data["UnicodeData.txt"])
+    decompositions, combining_classes = parse_canonical_data(data["UnicodeData.txt"])
     case_folding = parse_full_case_folding(data["CaseFolding.txt"])
+    caseless_records, decomposition_pool, fold_pool = canonical_caseless_records(
+        fully_resolved_decompositions(decompositions),
+        combining_classes,
+        case_folding,
+    )
     canonical_caseless.write_text(
-        canonical_caseless_source(decompositions, combining_ranges, case_folding),
+        canonical_caseless_source(
+            packed_classification_tables(caseless_records),
+            decomposition_pool,
+            fold_pool,
+        ),
+        encoding="utf-8",
+    )
+    combining_class_reference.write_text(
+        combining_class_reference_source(
+            combining_class_reference_ranges(data["UnicodeData.txt"])
+        ),
         encoding="utf-8",
     )
     normalization_corpus.write_text(
@@ -1000,6 +1189,7 @@ def main() -> None:
     print(f"generated {grapheme_reference.relative_to(repo_root)}")
     print(f"generated {grapheme_corpus.relative_to(repo_root)}")
     print(f"generated {canonical_caseless.relative_to(repo_root)}")
+    print(f"generated {combining_class_reference.relative_to(repo_root)}")
     print(f"generated {normalization_corpus.relative_to(repo_root)}")
     print(f"generated {case_folding_corpus.relative_to(repo_root)}")
 

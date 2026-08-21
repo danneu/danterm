@@ -86,7 +86,7 @@ import Testing
             let scalar = try #require(Unicode.Scalar(scalarValue))
             let expected = try scalars(mapping)
             #expect(
-                fullCaseFold(of: scalar) == expected,
+                Array(fullCaseFold(of: scalar)) == expected,
                 "fold mapping for U+\(String(scalarValue, radix: 16, uppercase: true))"
             )
         }
@@ -105,6 +105,90 @@ import Testing
         #expect(canonicalCaselessKey(for: upper) == decomposed)
         #expect(canonicalCaselessKey(for: decomposed) == decomposed)
         #expect(canonicalCaselessKey(for: try scalars([0x006E])) != decomposed)
+    }
+
+    @Test("an unmapped combining mark still reorders its cluster")
+    func unmappedCombiningMarkStillOrders() throws {
+        // Intent: pin that canonical ordering happens for a mark that has neither
+        //   a canonical decomposition nor a case fold.
+        // Why it exists: combining class is a third, independent reason a scalar
+        //   is not its own key. A shortcut keyed only on "no decomposition and no
+        //   fold" would return this cluster unordered and silently break D145
+        //   equivalence for every stacked-accent search.
+        // Scenario: a with acute (class 230) then dot below (class 220) must key
+        //   to a with dot below then acute, whichever order the text spelled.
+        let asTyped = try scalars([0x0061, 0x0301, 0x0323])
+        let ordered = try scalars([0x0061, 0x0323, 0x0301])
+        #expect(canonicalCaselessKey(for: asTyped) == ordered)
+        #expect(canonicalCaselessKey(for: ordered) == ordered)
+    }
+
+    @Test("scalars with no canonical or case mapping key to themselves")
+    func unmappedScalarsKeyToThemselves() throws {
+        // Intent: pin the key of the scalars that carry no canonical
+        //   decomposition, no case fold, and combining class zero.
+        // Why it exists: these are the bulk of the scanned codespace, and the key
+        //   path answers them from a per-scalar record rather than by searching.
+        //   A record that mislabels one would change what search matches.
+        // Scenario: a CJK ideograph, a box-drawing character, and a braille
+        //   pattern each search as exactly the scalar the cell holds.
+        for value: UInt32 in [0x4E00, 0x754C, 0x2500, 0x256C, 0x2800, 0x28FF] {
+            let scalar = try scalars([value])
+            #expect(
+                canonicalCaselessKey(for: scalar) == scalar,
+                "U+\(hex(value)) should be its own canonical caseless key"
+            )
+        }
+    }
+
+    @Test("decomposition and case folding stay independent properties")
+    func decompositionAndFoldingAreNotConflated() throws {
+        // Intent: pin the key of a scalar that decomposes but does not fold, and
+        //   of one that folds but does not decompose.
+        // Why it exists: one per-scalar record now answers both questions, so a
+        //   record that conflated the two would still pass a test built only on
+        //   scalars where both apply, such as N-tilde.
+        // Scenario: lowercase a-grave decomposes to a plus grave and folds to
+        //   itself; Cyrillic capital A folds to lowercase and decomposes to
+        //   itself.
+        #expect(canonicalCaselessKey(for: try scalars([0x00E0])) == (try scalars([0x0061, 0x0300])))
+        #expect(canonicalCaselessKey(for: try scalars([0x0410])) == (try scalars([0x0430])))
+    }
+
+    @Test("the record's combining class matches every Unicode 17.0 scalar")
+    func combiningClassMatchesPinnedReference() {
+        // Intent: compare the packed production record with the independently
+        //   emitted reference combining class for every valid Unicode scalar.
+        // Why it exists: combining class now travels through interning, a record
+        //   palette, and two index stages. A packing bug there would misorder
+        //   clusters in scripts no sampled fixture covers.
+        // Scenario: regenerating the pinned Unicode data must preserve the
+        //   canonical ordering input everywhere, not only where the normalization
+        //   corpus happens to look.
+        var checkedScalarCount = 0
+        var mismatchedScalarCount = 0
+        var firstMismatch: String?
+        for range in canonicalCombiningClassReferenceRanges {
+            for value in range.lowerBound...range.upperBound {
+                guard Unicode.Scalar(value) != nil else { continue }
+                checkedScalarCount += 1
+                let actual = GeneratedCanonicalCaselessTables.record(for: value).combiningClass
+                guard actual != range.combiningClass else { continue }
+                mismatchedScalarCount += 1
+                if firstMismatch == nil {
+                    firstMismatch =
+                        "U+\(hex(value)) expected combining class \(range.combiningClass), "
+                        + "got \(actual)"
+                }
+            }
+        }
+        // A reference that yielded no ranges would make the sweep vacuous, so the
+        // count of checked scalars is pinned to the assignable codespace.
+        #expect(checkedScalarCount == 1_112_064, "checked \(checkedScalarCount) scalars")
+        #expect(
+            mismatchedScalarCount == 0,
+            "combining class mismatches: \(mismatchedScalarCount), first \(firstMismatch ?? "none")"
+        )
     }
 
     private func scalars(_ values: [UInt32]) throws -> [Unicode.Scalar] {

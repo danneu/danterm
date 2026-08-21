@@ -137,6 +137,38 @@ struct TerminalSearchTests {
         #expect(terminal.activeSearchMatchRange == nil)
     }
 
+    @Test("search equates a Hangul syllable with its jamo spelling")
+    func hangulSyllableMatchesItsJamoSpelling() throws {
+        // Intent: a precomposed Hangul syllable and the leading-plus-vowel jamo
+        //   spelling of the same syllable share one search key in both directions.
+        // Why it exists: Hangul decomposes arithmetically, so a syllable carries no
+        //   entry in the generated mapping table. A shortcut that reads the table
+        //   alone would call every syllable already-canonical and stop matching the
+        //   jamo spelling, and no other search fixture types Korean.
+        // Scenario: a pane holds the syllable ga in both spellings and the user
+        //   searches with either one.
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        terminal.feed(Array("\u{AC00} \u{1100}\u{1161}".utf8))
+
+        for needle in ["\u{AC00}", "\u{1100}\u{1161}"] {
+            // `beginSearch` reports the match nearest the cursor, which sits after
+            // the fed text, so the jamo spelling comes first and `searchNext` wraps
+            // back to the precomposed syllable.
+            var result = terminal.beginSearch(needle)
+            #expect(result)
+            #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+                start: TerminalTextPosition(row: 0, column: 3),
+                end: TerminalTextPosition(row: 0, column: 5)
+            ))
+            result = terminal.searchNext()
+            #expect(result)
+            #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+                start: TerminalTextPosition(row: 0, column: 0),
+                end: TerminalTextPosition(row: 0, column: 2)
+            ))
+        }
+    }
+
     @Test("search keeps grapheme count and compatibility distinctions")
     func canonicalCaselessSearchLimits() throws {
         // Intent: full case folding stays inside one already-segmented grapheme and
