@@ -6280,7 +6280,7 @@ public struct Terminal: Equatable, Sendable {
                 guard sequence.parameters.count <= 1 else { return }
                 let mode = sequence.parameters.first ?? 0
                 guard mode <= 2 else { return }
-                eraseLine(mode: mode, selective: true)
+                _ = eraseLine(mode: mode, selective: true)
             default:
                 break
             }
@@ -6386,7 +6386,7 @@ public struct Terminal: Equatable, Sendable {
             guard sequence.parameters.count <= 1 else { return }
             let mode = sequence.parameters.first ?? 0
             guard mode <= 2 else { return }
-            eraseLine(mode: mode)
+            _ = eraseLine(mode: mode)
         case 0x58:
             guard let amount = movementAmount(sequence.parameters) else { return }
             eraseCharacters(amount: amount)
@@ -6864,7 +6864,7 @@ public struct Terminal: Equatable, Sendable {
             blankedRowZero = screen.cursor.row == 0 && blankedCursorRow
             if screen.cursor.row + 1 < rowCount {
                 for row in (screen.cursor.row + 1)..<rowCount {
-                    eraseEntireRow(row, selective: selective)
+                    _ = eraseEntireRow(row, selective: selective)
                 }
             }
         case 1:
@@ -7296,7 +7296,7 @@ public struct Terminal: Equatable, Sendable {
 
         severWrapClaim(before: 0)
         for row in screen.rows.indices {
-            eraseEntireRow(row)
+            _ = eraseEntireRow(row)
         }
     }
 

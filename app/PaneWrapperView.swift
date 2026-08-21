@@ -8,6 +8,7 @@ import DanTermProtocol
 
 /// Offers every desired toolbar render without recording whether a wrapper was
 /// present. The wrapper itself owns the last value it successfully applied.
+@MainActor
 func offerPaneToolbarRenders(
     _ renders: [PaneId: PaneToolbarRender],
     wrapperFor: (PaneId) -> PaneWrapperView?
