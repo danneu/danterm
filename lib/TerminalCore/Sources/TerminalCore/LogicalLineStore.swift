@@ -331,6 +331,12 @@ extension Terminal {
         private var openIdentityRuns: [IdentityRun] = []
         private var openPreviousIdentity: Terminal.ContentIdentity?
 
+        /// The blank skipped by a wide wrap on the open tail's last admitted row.
+        ///
+        /// Its follower decides whether it was structural or content. It stays outside the
+        /// record until that decision so the stored line remains width-free.
+        private var pendingMarginStyleId: Terminal.StyleId?
+
         /// The two sequence-keyed side tables and the bytes they cost, held by one owner.
         ///
         /// The tables and their charge used to be four independent fields moved by hand at
@@ -696,7 +702,11 @@ extension Terminal {
         /// row whose tail past the content is painted by a background erase contributes that
         /// paint as the record's **trailing fill style**, not as cells.
         mutating func admit(_ row: Terminal.GridRow) {
+            resolvePendingMargin(before: row.cells.first)
             let admission = admissionExtent(row)
+            let leavesPendingMargin = row.logicallyContinues
+                && row.cell(at: width - 1).kind == .spacerHead
+            let pendingMarginCapacity = leavesPendingMargin ? 1 : 0
 
             // A budget too small to hold one display row of this width retains nothing rather
             // than trapping. The arena's address space is reserved once and never grown
@@ -707,8 +717,11 @@ extension Terminal {
             // because a record may not straddle one (`research/31/DD54`), which at the 64 KiB chunk floor
             // is ~4,090 columns of worst-case side-table content.
             let worstCase = LogicalLineRecord.Header.byteCount
-                + max(1, admission.contentEnd) * LogicalLineRecord.cellBytes
-                + projectedTableBytes(addingCells: max(1, admission.contentEnd))
+                + max(1, admission.contentEnd + pendingMarginCapacity)
+                    * LogicalLineRecord.cellBytes
+                + projectedTableBytes(
+                    addingCells: max(1, admission.contentEnd + pendingMarginCapacity)
+                )
             guard worstCase <= regionCapacityBytes else { return }
 
             // A hard-ended row with no content still occupies a display row when the line
@@ -725,11 +738,15 @@ extension Terminal {
 
             // `research/31/DD3`: no record exceeds 1/32 of the budget. Splitting before the append keeps
             // the cut on a display-row boundary at the admitting width.
-            if let open = openTailRecord(), open.cellCount + cellCount > forcedSplitCellCap {
+            if let open = openTailRecord(),
+               open.cellCount + cellCount + pendingMarginCapacity > forcedSplitCellCap
+            {
                 forceSplitOpenRecord()
             }
 
-            makeRoom(forCells: cellCount)
+            // Reserve the one cell a non-wide follower or a close may materialize. Nothing can
+            // then force-split the open tail before its pending margin is resolved.
+            makeRoom(forCells: cellCount + pendingMarginCapacity)
             openRecordIfNeeded(mark: row.semanticPrompt)
             if restoresBlankRow {
                 appendCell(
@@ -747,6 +764,10 @@ extension Terminal {
             // `research/31/DD5`: the display-row count is *counted* here, not derived -- admission knows
             // it consumed one row, so no `ceil` and no wide-cell scan runs on the write path.
             addDisplayRowsToTail(1)
+
+            if leavesPendingMargin {
+                pendingMarginStyleId = row.cell(at: width - 1).styleId
+            }
 
             if row.logicallyContinues == false {
                 closeOpenRecord()
@@ -864,6 +885,7 @@ extension Terminal {
         /// This is `severScrollbackWrapClaim` under the new store, and the whole of it is one
         /// header bit plus the tables the open record had been accumulating.
         mutating func closeOpenRecord() {
+            resolvePendingMarginForClose()
             guard var record = openTailRecord() else { return }
             let offset = offsets[offsets.count - 1]
             flushOpenTables(into: &record, at: offset)
@@ -926,28 +948,32 @@ extension Terminal {
             writeCursor = recordOffset(in: offset) + record.byteLength
         }
 
-        /// Materializes the styled blank a background-erase sever or spacer clear leaves behind
-        /// (`research/31/D3` Decision 3).
-        ///
-        /// Asymmetric on purpose: today's `pack` trims a default-styled trailing blank and keeps
-        /// a non-default one, so storing nothing in the default case is what *reproduces* today's
-        /// output rather than a shortcut.
-        /// Returns whether the repair stored anything, so a caller can invalidate exactly the
-        /// display row whose painted content changed and no other.
-        @discardableResult
-        mutating func repairClearedSpacer(styleId: Terminal.StyleId) -> Bool {
-            guard styleId != Terminal.defaultStyleId else { return false }
-            guard let record = openTailRecord() else { return false }
-            let offset = offsets[offsets.count - 1]
-            let last = lastRowRange(ofRecordAt: offset, cellCount: record.cellCount)
-            guard last.end - last.start == width - 1 else { return false }
-            appendCell(Terminal.GridCell(scalars: .empty, kind: .padding, styleId: styleId))
-            return true
+        /// Resolves the open tail's skipped margin against the first cell of its follower.
+        private mutating func resolvePendingMargin(before follower: Terminal.GridCell?) {
+            guard let styleId = pendingMarginStyleId else { return }
+            pendingMarginStyleId = nil
+            guard follower?.kind != .wideHead else { return }
+            appendCell(Terminal.GridCell(kind: .padding, styleId: styleId))
+        }
+
+        /// Resolves a pending margin when no follower will arrive because the line is closing.
+        private mutating func resolvePendingMarginForClose() {
+            guard let styleId = pendingMarginStyleId else { return }
+            pendingMarginStyleId = nil
+            guard styleId != Terminal.defaultStyleId else { return }
+            appendCell(Terminal.GridCell(kind: .padding, styleId: styleId))
         }
 
         /// Cuts the open logical line here and lets the next admission continue it in a new
         /// record, which readers rejoin by adjacency (`research/31/DD6`).
-        mutating func forceSplitOpenRecord() {
+        mutating func forceSplitOpenRecord(pendingFollower: Terminal.GridCell? = nil) {
+            if pendingMarginStyleId != nil {
+                precondition(
+                    pendingFollower != nil,
+                    "a forced split must resolve the pending margin from its follower"
+                )
+                resolvePendingMargin(before: pendingFollower)
+            }
             guard var record = openTailRecord(), record.cellCount > 0 else { return }
             let offset = offsets[offsets.count - 1]
             flushOpenTables(into: &record, at: offset)
@@ -1093,6 +1119,7 @@ extension Terminal {
             headTrimmedCells = OriginalCellOffset(value: 0)
             blocks.removeAll()
             sideTables.removeAll()
+            pendingMarginStyleId = nil
             clearOpenScratch()
         }
 
@@ -1104,7 +1131,10 @@ extension Terminal {
         /// The only operation that shrinks the arena from the back, and the only one whose rows
         /// are not lost: they keep their absolute stream positions and merely change which side
         /// of the history/live seam they sit on, which is why `evictedRowCount` does not move.
-        mutating func truncateTail(displayRows: Int) -> [Terminal.GridRow] {
+        mutating func truncateTail(
+            displayRows: Int,
+            follower: Terminal.GridCell? = nil
+        ) -> [Terminal.GridRow] {
             let count = min(displayRows, grandDisplayRowTotal)
             guard count > 0 else { return [] }
 
@@ -1118,6 +1148,36 @@ extension Terminal {
             for index in (grandDisplayRowTotal - count)..<grandDisplayRowTotal {
                 guard let row = paintedDisplayRow(at: index) else { break }
                 handedBack.append(row)
+            }
+            if let styleId = pendingMarginStyleId, var row = handedBack.last {
+                precondition(
+                    row.cells.count == width - 1,
+                    "a pending margin must complete the open tail's short final row"
+                )
+                let margin = follower?.kind == .wideHead
+                    ? Terminal.GridCell(
+                        kind: .spacerHead,
+                        styleId: follower?.styleId ?? styleId,
+                        hyperlinkId: follower?.hyperlinkId,
+                        contentIdentity: follower?.contentIdentity
+                    )
+                    : Terminal.GridCell(kind: .padding, styleId: styleId)
+                row.cells.append(margin)
+                handedBack[handedBack.count - 1] = row
+                pendingMarginStyleId = nil
+            } else if let head = follower,
+                      head.kind == .wideHead,
+                      var row = handedBack.last,
+                      row.isSoftWrapped,
+                      row.cells.count == width - 1
+            {
+                row.cells.append(Terminal.GridCell(
+                    kind: .spacerHead,
+                    styleId: head.styleId,
+                    hyperlinkId: head.hyperlinkId,
+                    contentIdentity: head.contentIdentity
+                ))
+                handedBack[handedBack.count - 1] = row
             }
             for _ in 0..<count {
                 guard offsets.count > 0 else { break }
@@ -1254,8 +1314,12 @@ extension Terminal {
         /// No retained byte outside the open tail is written. That is `31/I3` in one sentence:
         /// a width change evicts nothing, at any width down to the engine minimum.
         @discardableResult
-        mutating func setWidth(_ newWidth: Int) -> [Terminal.GridCell] {
+        mutating func setWidth(
+            _ newWidth: Int,
+            follower: Terminal.GridCell? = nil
+        ) -> [Terminal.GridCell] {
             precondition(newWidth >= 1)
+            resolvePendingMargin(before: follower)
             width = newWidth
             let pulled = pullBackOpenTailRemainder()
             recomputeIndex()
@@ -1684,6 +1748,11 @@ extension Terminal {
         /// "the last retained display row soft-wraps into the live grid".
         var hasOpenTailRecord: Bool { openTailRecord() != nil }
 
+        /// The remembered blank a seam reader shows when the live follower is not a wide head.
+        var openTailPendingMarginCell: Terminal.GridCell? {
+            pendingMarginStyleId.map { Terminal.GridCell(kind: .padding, styleId: $0) }
+        }
+
         /// A copy of this store at a different byte budget, holding exactly the same records.
         ///
         /// The only way to build an eviction oracle, and the reason it is a record-level copy
@@ -1709,6 +1778,9 @@ extension Terminal {
                 } else if record.isOpen == false {
                     copy.closeOpenRecord()
                 }
+            }
+            if copy.hasOpenTailRecord {
+                copy.pendingMarginStyleId = pendingMarginStyleId
             }
             return copy
         }
@@ -1741,6 +1813,7 @@ extension Terminal {
                   lhs.width == rhs.width,
                   lhs.evictedRowCount == rhs.evictedRowCount,
                   lhs.grandDisplayRowTotal == rhs.grandDisplayRowTotal,
+                  lhs.pendingMarginStyleId == rhs.pendingMarginStyleId,
                   lhs.offsets.count == rhs.offsets.count
             else { return false }
             for index in 0..<lhs.offsets.count {

@@ -36,18 +36,14 @@ struct TerminalScrollbackTests {
         #expect(terminal.scrollbackRow(at: 3) == nil)
     }
 
-    @Test("a background-erase sever and spacer clear leave the vacated column painted")
-    func backgroundErasePaintsTheSeveredSpacerColumn() throws {
-        // Intent: when a non-default background erase severs a retained wrap claim -- or clears
-        //   the spacer through EL -- the column the spacer occupied is painted in the erase
-        //   colour, and under the default erase style it is painted in the default colour.
-        // Why it exists: `31/PO2`. History stores logical lines and never stores a spacer, so
-        //   the naive mapping loses a cell the engine really holds and paints: `research/31/D3`
-        //   Decision 3 measured the four states against the real engine and made the repair a
-        //   tail append, asymmetric on purpose -- today's canonical trimming drops a
-        //   *default*-styled blank there, so storing nothing is what reproduces it.
-        // Scenario: a wide glyph wraps at the right margin, its row scrolls off, and a
-        //   background-erased insert or erase-in-line takes the column back.
+    @Test("a severed pending margin keeps its wrap-time paint")
+    func severedPendingMarginKeepsWrapTimePaint() throws {
+        // Intent: a sever uses the pending margin's wrap-time paint, not the erase pen that
+        //   happens to remove its follower.
+        // Why it exists: resolving from the live write makes history depend on which operation
+        //   first touches the follower and loses the paint when that write uses the default pen.
+        // Scenario: a default-painted wide wrap scrolls off, then insert line severs it under
+        //   either a red or default erase pen.
         var painted: [TerminalColor?] = []
         for sgr in ["\u{1B}[41m", ""] {
             var terminal = try #require(Terminal(columns: 4, rows: 2))
@@ -64,10 +60,31 @@ struct TerminalScrollbackTests {
             painted.append(repaired.cells[3].style.background)
             expectValidGrid(terminal)
         }
-        // The whole of `research/31/D3` Decision 3: the erase colour survives into history, and the
-        // default one is still the default rather than the erase colour left over.
-        #expect(painted[0] != painted[1])
+        #expect(painted[0] == painted[1])
+        #expect(painted[0] == TerminalStyle().background)
         #expect(painted[1] == TerminalStyle().background)
+    }
+
+    @Test("a retired one-row seam margin survives text projection and width round trips")
+    func retiredOneRowSeamMarginSurvivesProjectionAndResize() throws {
+        // Intent: replacing the live wide head resolves the retained row's pending margin as
+        //   content before any resize can fold the line.
+        // Why it exists: this is the D7 regression where history text lost one margin column and
+        //   a 4 -> 5 -> 4 resize collapsed two rows into one.
+        // Scenario: a wide glyph wraps from column 4 on a one-row grid, then X replaces its head.
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+        terminal.feed(Array("\u{1B}[4G\u{754C}\u{1B}[1GX".utf8))
+
+        #expect(terminal.primaryHistoryText == "    X")
+        #expect(terminal.scrollbackRow(at: 0)?.cells[3].kind == .padding)
+
+        terminal.resize(columns: 5, rows: 1)
+        terminal.resize(columns: 4, rows: 1)
+
+        #expect(terminal.primaryHistoryText == "    X")
+        #expect(terminal.scrollbackRowCount == 1)
+        #expect(terminal.screenText == "X   ")
+        expectValidGrid(terminal)
     }
 
     @Test("clearing a viewport wide cell repairs its retained spacer row")

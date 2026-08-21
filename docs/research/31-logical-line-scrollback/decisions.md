@@ -2048,9 +2048,9 @@ Scroll anchoring (`F4` case 15): the browsing anchor is one of the ten restated
 anchors, which is also what makes Decision 1's "no anchor cache" true. The
 `Comparable` contract's call sites: untouched, because the type is untouched.
 
-#### Decision 3 (`HR3`) -- the severed wrap claim's BCE cell is materialized into the open tail record as one styled cell, and the same rule closes `X9`
+#### Decision 3 (`HR3`) -- the open tail remembers a skipped margin until its follower resolves it
 
-**What the engine actually does, measured rather than asserted.** A throwaway
+**What the engine did before the 2026-08-21 amendment, measured rather than asserted.** A throwaway
 test was run against the real engine at `c8f46b1` and deleted before this commit;
 its body is quoted so the reading is reproducible from the doc alone:
 
@@ -2128,14 +2128,25 @@ re-spelling a measured case on the strength of an unmeasured generalization is
 not licensed by an amendment that changed no number. A later slice may take it
 deliberately; it would have to re-measure the same four states.
 
-**What it costs, stated so the addition side is not understated.** `F4`
-Observation 5's "all three writes are header-bit flips" becomes "two of the three
-are a header-bit flip **plus at most one appended cell**, and the third
-(`clearPreviousSpacer`) is an appended cell with no flip". It is still a **tail
-append** -- the operation admission already performs at the write cursor -- so no
-new mutating operation joins `D2`'s table of five and the "middle immutable"
-premise is untouched. `D2` Decision 2's row 2 is amended below. The charge is 8
-bytes, charged like any other cells.
+**Amended 2026-08-21: the open tail now remembers the skipped margin's wrap-time
+paint and its follower resolves that margin.** The 2026-08-04 mechanism above is
+superseded. Admission drops the spacer and remembers its style on the open tail.
+A leading wide head discards the pending margin; any other admitted follower
+first appends one padding cell with the remembered style. Closing the line keeps
+the measured default-style asymmetry: it appends the remembered blank only when
+that style is non-default. A width change resolves against live row 0 before it
+refolds, and a height grow hands the pending margin back with the row so the live
+projection decides whether it is a spacer or content. Front eviction and budget
+rebase carry the pending margin with its open record; whole-record eviction drops
+it. This replaces both write-triggered repairs. The erase or shift that first
+touches the live follower no longer chooses the retained margin's paint.
+
+**What it costs, stated so the addition side is not understated.** The store
+holds one optional style id for the open tail. Admission reserves room for one
+possible margin cell. Follower admission or close may append that one cell at
+the write cursor, so no new mutating operation joins `D2`'s table of five and
+the "middle immutable" premise is untouched. The appended cell costs 8 bytes,
+charged like any other cell.
 
 #### Decision 4 (discovered while settling `HR3`) -- the open tail record ends on a display-row boundary at the current width, re-established by the same pull-back `HR4` already needs
 

@@ -260,9 +260,6 @@ struct TerminalLogicalLineFoldTests {
         store.admit(wrapped)
         #expect(store.recordSummary(at: 0)!.cellCount == 2)
 
-        // The cut lands between the dropped spacer and the wide head that explains it.
-        store.forceSplitOpenRecord()
-
         var head = Terminal.GridCell(
             scalars: TerminalScalars(Unicode.Scalar(0x754C)!),
             kind: .wideHead,
@@ -270,6 +267,9 @@ struct TerminalLogicalLineFoldTests {
         )
         head.hyperlinkId = 4
         head.contentIdentity = 77
+        // The cut lands between the dropped spacer and the wide head that explains it.
+        store.forceSplitOpenRecord(pendingFollower: head)
+
         var next = Terminal.GridRow(cells: [
             head,
             Terminal.GridCell(scalars: .empty, kind: .wideTail, styleId: 9),
@@ -477,65 +477,105 @@ struct TerminalLogicalLineFoldTests {
         #expect(painted.cell(at: 8).styleId == painted.cell(at: end).styleId)
     }
 
-    // MARK: - `research/31/D3` Decision 3: the background-erase blank
+    // MARK: - A pending wrap margin belongs to the open tail
 
-    @Test("A cleared spacer under a non-default erase style is materialized as one styled cell")
-    func clearedSpacerMaterializesTheBackgroundEraseBlank() {
-        // Intent: repairing a cleared spacer under a non-default erase style appends one
-        //   styled blank to the open record, and under the default style appends nothing.
-        // Why it exists: `research/31/D3` Decision 3 measured today's engine storing exactly one styled
-        //   cell at that column, and nothing at all when the style is default -- so the fold
-        //   reproduces today's output only if the repair is asymmetric in the same way. The
-        //   returned Bool is part of that contract: `Terminal.clearPreviousSpacer` branches on
-        //   it to invalidate exactly the display row whose paint changed, so a repair that
-        //   stored a cell and reported `false` would leave that row stale on screen.
+    @Test("The follower either discards or materializes a pending wrap margin")
+    func followerResolvesThePendingWrapMargin() throws {
+        // Intent: a leading wide head consumes the skipped margin, while every other follower
+        //   makes the remembered wrap-time blank part of the logical line.
+        // Why it exists: the open tail cannot decide whether the dropped spacer was structural
+        //   until it sees the next row. Resolving from a later live write loses the column at the
+        //   history seam.
+        // Scenario: admit the same styled gap row before either a wide or narrow follower.
+        let gap = Self.gapRow(width: 3, styleId: 5)
+
+        var wide = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
+        wide.admit(gap)
+        wide.admit(Terminal.GridRow(cells: [
+            Terminal.GridCell(
+                scalars: TerminalScalars(Unicode.Scalar(0x754C)!),
+                kind: .wideHead,
+                styleId: 7
+            ),
+            Terminal.GridCell(kind: .wideTail, styleId: 7),
+        ]))
+        #expect(wide.recordSummary(at: 0)?.cellCount == 4)
+        #expect(wide.displayRow(at: 0)?.cell(at: 2).kind == .spacerHead)
+
+        var narrow = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
+        narrow.admit(gap)
+        narrow.admit(Terminal.GridRow(cells: [
+            Terminal.GridCell(scalars: TerminalScalars("X" as Unicode.Scalar), kind: .narrow),
+        ]))
+        #expect(narrow.recordSummary(at: 0)?.cellCount == 4)
+        let first = try #require(narrow.displayRow(at: 0))
+        #expect(first.cell(at: 2).kind == .padding)
+        #expect(first.cell(at: 2).styleId == 5)
+        #expect(narrow.displayRow(at: 1)?.cell(at: 0).scalars == ["X"])
+    }
+
+    @Test("Closing a pending wrap margin keeps only non-default wrap-time paint")
+    func closeResolvesThePendingWrapMargin() throws {
         for (styleId, expectedCells) in [(Terminal.StyleId(5), 3), (Terminal.defaultStyleId, 2)] {
             var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
-            var wrapped = Terminal.GridRow(cells: [
-                Terminal.GridCell(scalars: TerminalScalars("a" as Unicode.Scalar), kind: .narrow),
-                Terminal.GridCell(scalars: TerminalScalars("b" as Unicode.Scalar), kind: .narrow),
-                Terminal.GridCell(scalars: .empty, kind: .spacerHead),
-            ])
-            wrapped.isSoftWrapped = true
-            store.admit(wrapped)
+            store.admit(Self.gapRow(width: 3, styleId: styleId))
 
-            let repaired = store.repairClearedSpacer(styleId: styleId)
+            store.closeOpenRecord()
 
-            #expect(repaired == (expectedCells == 3))
-            #expect(store.recordSummary(at: 0)!.cellCount == expectedCells)
-            #expect(store.grandDisplayRowTotal == 1)
-            if expectedCells == 3 {
-                let row = store.displayRow(at: 0)!
-                #expect(row.cell(at: 2).kind == .padding)
-                #expect(row.cell(at: 2).styleId == styleId)
-            }
+            #expect(store.recordSummary(at: 0)?.cellCount == expectedCells)
+            let row = try #require(store.displayRow(at: 0))
+            #expect(row.cell(at: 2).kind == .padding)
+            #expect(row.cell(at: 2).styleId == styleId)
         }
     }
 
-    @Test("An open tail whose last display row is already full is left alone by the spacer repair")
-    func clearedSpacerRepairSkipsAFullLastDisplayRow() {
-        // Intent: `repairClearedSpacer` stores nothing and reports `false` when the open tail's
-        //   last display row already occupies the full width.
-        // Why it exists: the `lastRowColumns == width - 1` guard is what makes the repair a
-        //   no-op for a row that never deferred a wide cluster. Without it the repair would
-        //   append a styled blank onto a full row, pushing the record into an extra display row
-        //   that today's engine does not show -- and nothing else in the suite exercises the
-        //   guard, so the sole existing repair test only ever reaches the short-row case.
-        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
-        var wrapped = Terminal.GridRow(cells: [
-            Terminal.GridCell(scalars: TerminalScalars("a" as Unicode.Scalar), kind: .narrow),
-            Terminal.GridCell(scalars: TerminalScalars("b" as Unicode.Scalar), kind: .narrow),
-            Terminal.GridCell(scalars: TerminalScalars("c" as Unicode.Scalar), kind: .narrow),
+    @Test("A pending margin survives rebase and front eviction but leaves with its record")
+    func pendingMarginLifetimeFollowsItsOpenRecord() throws {
+        let gap = Self.gapRow(width: 3, styleId: 5)
+        let narrowFollower = Terminal.GridRow(cells: [
+            Terminal.GridCell(scalars: TerminalScalars("X" as Unicode.Scalar), kind: .narrow),
         ])
-        wrapped.isSoftWrapped = true
-        store.admit(wrapped)
-        #expect(store.recordSummary(at: 0)!.cellCount == 3)
 
-        let repaired = store.repairClearedSpacer(styleId: 5)
+        var source = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
+        source.admit(Terminal.GridRow(cells: [
+            Terminal.GridCell(scalars: TerminalScalars("z" as Unicode.Scalar), kind: .narrow),
+        ]))
+        source.admit(gap)
 
-        #expect(repaired == false)
-        #expect(store.recordSummary(at: 0)!.cellCount == 3)
-        #expect(store.grandDisplayRowTotal == 1)
+        var rebased = source.rebased(toBudgetBytes: 1 << 15)
+        _ = rebased.evictOneDisplayRow()
+        rebased.admit(narrowFollower)
+        let retainedGap = try #require(rebased.displayRow(at: 0))
+        #expect(retainedGap.cell(at: 2).styleId == 5)
+
+        var evicted = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
+        evicted.admit(gap)
+        _ = evicted.evictOneDisplayRow()
+        evicted.admit(narrowFollower)
+        #expect(evicted.recordSummary(at: 0)?.cellCount == 1)
+        #expect(evicted.displayRow(at: 0)?.cell(at: 0).scalars == ["X"])
+    }
+
+    @Test("Width and height hand-backs resolve the pending margin against the live follower")
+    func handBacksResolveThePendingWrapMargin() throws {
+        let gap = Self.gapRow(width: 3, styleId: 5)
+        let head = Terminal.GridCell(
+            scalars: TerminalScalars(Unicode.Scalar(0x754C)!),
+            kind: .wideHead,
+            styleId: 7
+        )
+
+        var widthChange = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
+        widthChange.admit(gap)
+        let prefix = widthChange.setWidth(4, follower: Terminal.GridCell())
+        #expect(prefix.map(\.styleId) == [0, 0, 5])
+
+        var heightGrow = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
+        heightGrow.admit(gap)
+        let pulled = heightGrow.truncateTail(displayRows: 1, follower: head)
+        let row = try #require(pulled.first)
+        #expect(row.cell(at: 2).kind == .spacerHead)
+        #expect(row.cell(at: 2).styleId == 7)
     }
 
     @Test("The borrowing walks emit exactly the painted row's columns, on every content class")
@@ -749,6 +789,20 @@ struct TerminalLogicalLineFoldTests {
             #expect(column == width - 1, "\(label) seam row, column \(column)")
         }
         #expect(folded.isSoftWrapped == reference.isSoftWrapped, "\(label) seam row: soft wrap")
+    }
+
+    /// Builds the stored-spacer form the store still admits while live rows hold that marker.
+    private static func gapRow(width: Int, styleId: Terminal.StyleId) -> Terminal.GridRow {
+        var cells = (0..<(width - 1)).map { offset in
+            Terminal.GridCell(
+                scalars: TerminalScalars(Unicode.Scalar(0x61 + offset)!),
+                kind: .narrow
+            )
+        }
+        cells.append(Terminal.GridCell(kind: .spacerHead, styleId: styleId))
+        var row = Terminal.GridRow(cells: cells)
+        row.isSoftWrapped = true
+        return row
     }
 
     /// Holds both of the store's walks to today's stored row, each over the extent it owns.

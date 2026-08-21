@@ -256,7 +256,8 @@ public struct Terminal: Equatable, Sendable {
         func projected(
             columns: Int,
             follower: GridCell?,
-            fillsMissingWrapSpacer: Bool = false
+            fillsMissingWrapSpacer: Bool = false,
+            missingWrapMargin: GridCell? = nil
         ) -> GridRow {
             var row = withGatedContinuation
             guard columns > 0 else { return row }
@@ -265,13 +266,12 @@ public struct Terminal: Equatable, Sendable {
             let projectedMargin = Terminal.projectedMarginCell(
                 stored: storedMargin,
                 follower: follower,
-                fillsMissingWrapSpacer: fillsMissingWrapSpacer
+                fillsMissingWrapSpacer: fillsMissingWrapSpacer,
+                missingWrapMargin: missingWrapMargin
             )
             if row.cells.indices.contains(margin), projectedMargin != storedMargin {
                 row.cells[margin] = projectedMargin
-            } else if fillsMissingWrapSpacer,
-                      row.cells.count == margin,
-                      projectedMargin.kind == .spacerHead
+            } else if fillsMissingWrapSpacer, row.cells.count == margin
             {
                 row.cells.append(projectedMargin)
             }
@@ -412,7 +412,9 @@ public struct Terminal: Equatable, Sendable {
             return row.projected(
                 columns: columns,
                 follower: position == historyRows - 1 ? live.first?.cells.first : nil,
-                fillsMissingWrapSpacer: position == historyRows - 1 && history.hasOpenTailRecord
+                fillsMissingWrapSpacer: position == historyRows - 1
+                    && history.openTailPendingMarginCell != nil,
+                missingWrapMargin: history.openTailPendingMarginCell
             )
         }
 
@@ -438,7 +440,8 @@ public struct Terminal: Equatable, Sendable {
                             columns: columns,
                             follower: position == historyRows - 1 ? live.first?.cells.first : nil,
                             fillsMissingWrapSpacer: position == historyRows - 1
-                                && history.hasOpenTailRecord
+                                && history.openTailPendingMarginCell != nil,
+                            missingWrapMargin: history.openTailPendingMarginCell
                         )
                     }
                     body(position, row)
@@ -2855,7 +2858,8 @@ public struct Terminal: Equatable, Sendable {
                 : nil,
             fillsMissingWrapSpacer: index == historyRowCount - 1
                 && isAlternateScreenActive == false
-                && history.store.hasOpenTailRecord
+                && history.store.openTailPendingMarginCell != nil,
+            missingWrapMargin: history.store.openTailPendingMarginCell
         )
         let row = folded.materialized(to: columnCount)
         return TerminalScrollbackRow(
@@ -3174,7 +3178,8 @@ public struct Terminal: Equatable, Sendable {
                 retained[last] = retained[last].projected(
                     columns: columnCount,
                     follower: liveRows.first?.cells.first,
-                    fillsMissingWrapSpacer: history.store.hasOpenTailRecord
+                    fillsMissingWrapSpacer: history.store.openTailPendingMarginCell != nil,
+                    missingWrapMargin: history.store.openTailPendingMarginCell
                 )
             }
         }
@@ -3278,7 +3283,7 @@ public struct Terminal: Equatable, Sendable {
             projectPrimarySeam(
                 in: &stream,
                 follower: primaryRows.first?.cells.first,
-                fillsMissingWrapSpacer: false
+                fillsMissingWrapSpacer: true
             )
             stream.append(contentsOf: primaryRows)
             return stream
@@ -3298,7 +3303,7 @@ public struct Terminal: Equatable, Sendable {
         projectPrimarySeam(
             in: &stream,
             follower: primaryRows.first?.cells.first,
-            fillsMissingWrapSpacer: false
+            fillsMissingWrapSpacer: true
         )
         stream.append(contentsOf: primaryRows)
         return stream
@@ -3933,7 +3938,8 @@ public struct Terminal: Equatable, Sendable {
                     let margin = Self.projectedMarginCell(
                         stored: storedMargin,
                         follower: screen.rows.first?.cells.first,
-                        fillsMissingWrapSpacer: history.store.hasOpenTailRecord
+                        fillsMissingWrapSpacer: history.store.openTailPendingMarginCell != nil,
+                        missingWrapMargin: history.store.openTailPendingMarginCell
                     )
                     kinds[columnCount - 1] = TerminalCellGeometry(kind: margin.kind)
                 }
@@ -3983,7 +3989,8 @@ public struct Terminal: Equatable, Sendable {
             follower: projectionFollower(after: streamRow),
             fillsMissingWrapSpacer: streamRow == historyRowCount - 1
                 && isAlternateScreenActive == false
-                && history.store.hasOpenTailRecord
+                && history.store.openTailPendingMarginCell != nil,
+            missingWrapMargin: history.store.openTailPendingMarginCell
         )
     }
 
@@ -3999,7 +4006,8 @@ public struct Terminal: Equatable, Sendable {
             follower: projectionFollower(after: streamRow),
             fillsMissingWrapSpacer: streamRow == historyRowCount - 1
                 && isAlternateScreenActive == false
-                && history.store.hasOpenTailRecord
+                && history.store.openTailPendingMarginCell != nil,
+            missingWrapMargin: history.store.openTailPendingMarginCell
         )
     }
 
@@ -4038,14 +4046,15 @@ public struct Terminal: Equatable, Sendable {
     private static func projectedMarginCell(
         stored: GridCell?,
         follower: GridCell?,
-        fillsMissingWrapSpacer: Bool
+        fillsMissingWrapSpacer: Bool,
+        missingWrapMargin: GridCell? = nil
     ) -> GridCell {
         if let stored, stored.kind != .spacerHead { return stored }
         guard stored?.kind == .spacerHead || fillsMissingWrapSpacer else {
             return GridCell()
         }
         guard let follower, follower.kind == .wideHead else {
-            return stored ?? GridCell()
+            return stored ?? missingWrapMargin ?? GridCell()
         }
         return GridCell(
             kind: .spacerHead,
@@ -4127,7 +4136,9 @@ public struct Terminal: Equatable, Sendable {
         retained[last] = retained[last].projected(
             columns: columnCount,
             follower: follower,
-            fillsMissingWrapSpacer: fillsMissingWrapSpacer && history.store.hasOpenTailRecord
+            fillsMissingWrapSpacer: fillsMissingWrapSpacer
+                && history.store.openTailPendingMarginCell != nil,
+            missingWrapMargin: history.store.openTailPendingMarginCell
         )
     }
 
@@ -5000,7 +5011,8 @@ public struct Terminal: Equatable, Sendable {
                                 ? Self.projectedMarginCell(
                                     stored: storedMargin,
                                     follower: head,
-                                    fillsMissingWrapSpacer: history.store.hasOpenTailRecord
+                                    fillsMissingWrapSpacer: history.store.openTailPendingMarginCell != nil,
+                                    missingWrapMargin: history.store.openTailPendingMarginCell
                                 )
                                 : nil
                             let padding = GridCell()
@@ -5252,31 +5264,6 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    /// Re-derives the `.spacerHead` the last handed-back display row is missing.
-    ///
-    /// History never stores a spacer -- where one sits is a function of the width, which `31/I1`
-    /// forbids storing -- and the fold re-derives it from the wide head that follows. For the
-    /// open tail's final display row that head is the live grid's first cell, so the fold cannot
-    /// see it and the row comes back one column short. Handing that row to the live grid as-is
-    /// would materialize the column as an ordinary blank, and the next width change would then
-    /// wrap a space the program never printed into the line. The live grid *can* see the head,
-    /// which is why the repair belongs here rather than in the store.
-    private func restoreSeamSpacer(in pulled: inout [GridRow], before follower: GridRow? = nil) {
-        guard var last = pulled.last,
-              last.isSoftWrapped,
-              last.cells.count == columnCount - 1,
-              let head = (follower ?? screen.rows.first)?.cells.first,
-              head.kind == .wideHead
-        else { return }
-        last.cells.append(GridCell(
-            kind: .spacerHead,
-            styleId: head.styleId,
-            hyperlinkId: head.hyperlinkId,
-            contentIdentity: head.contentIdentity
-        ))
-        pulled[pulled.count - 1] = last
-    }
-
     private mutating func clippedBlank(replacing cell: GridCell) -> GridCell {
         GridCell(styleId: internStyle(TerminalStyle(background: style(for: cell.styleId).background)))
     }
@@ -5316,9 +5303,11 @@ public struct Terminal: Equatable, Sendable {
                     // The rows keep their absolute stream positions and merely change which side
                     // of the history/live seam they sit on, so no anchor moves and
                     // `evictedRowCount` does not advance.
-                    var pulled = mutateHistory { $0.truncateTail(displayRows: pulledCount) }
+                    let follower = screen.rows.first?.cells.first
+                    let pulled = mutateHistory {
+                        $0.truncateTail(displayRows: pulledCount, follower: follower)
+                    }
                     pulledCount = pulled.count
-                    restoreSeamSpacer(in: &pulled)
                     screen.rows.insert(
                         contentsOf: pulled.map { $0.materialized(to: columnCount) },
                         at: 0
@@ -5365,7 +5354,10 @@ public struct Terminal: Equatable, Sendable {
         let seamPrompt = history.store.hasOpenTailRecord
             ? history.store.recordSummary(at: history.store.recordCount - 1)?.semanticPrompt ?? SemanticPromptRow.none
             : SemanticPromptRow.none
-        let seamPrefix = mutateHistory { $0.setWidth(newColumnCount) }
+        let seamFollower = screen.rows.first?.cells.first
+        let seamPrefix = mutateHistory {
+            $0.setWidth(newColumnCount, follower: seamFollower)
+        }
         let historyRowsAfter = historyRowCount
         let captured = rebasedAcrossSeam(capturedBeforeSeam, seamPrefixLength: seamPrefix.count)
 
@@ -5466,9 +5458,11 @@ public struct Terminal: Equatable, Sendable {
         let deficit = rowCount - rebuiltRows.count
         if deficit > 0, historyRowCount > 0 {
             let pullCount = min(deficit, historyRowCount)
-            var pulled = mutateHistory { $0.truncateTail(displayRows: pullCount) }
+            let follower = rebuiltRows.first?.cells.first
+            let pulled = mutateHistory {
+                $0.truncateTail(displayRows: pullCount, follower: follower)
+            }
             columnCount = newColumnCount
-            restoreSeamSpacer(in: &pulled, before: rebuiltRows.first)
             columnCount = oldColumnCount
             rebuiltRows.insert(
                 contentsOf: pulled.map { $0.materialized(to: newColumnCount) },
@@ -8168,18 +8162,11 @@ public struct Terminal: Equatable, Sendable {
 
     /// Ends the logical line history is still printing, which is `research/31/D2` operation 2.
     ///
-    /// A header bit plus at most one appended cell (`research/31/D3` Decision 3): the background-erase
-    /// style the sever paints into the vacated spacer column is a cell today's `pack` stores and
-    /// the renderer paints, so it is materialized into the open record before the line closes
-    /// rather than lost to a record measured at its content end.
+    /// The store resolves any skipped margin from its wrap-time paint before closing the line.
     private mutating func severScrollbackWrapClaim(replacementStyleId: StyleId) {
         guard history.store.hasOpenTailRecord else { return }
         invalidateInspection(inScrollbackRow: historyRowCount - 1)
-        // One door body, not two: the sever's two store calls move the closed seam once.
-        mutateHistory { store in
-            store.repairClearedSpacer(styleId: replacementStyleId)
-            store.closeOpenRecord()
-        }
+        mutateHistory { $0.closeOpenRecord() }
     }
 
     private mutating func restoreWrapClaimBeforeCursor() {
@@ -8270,14 +8257,9 @@ public struct Terminal: Equatable, Sendable {
             invalidateInspection(inViewportRows: (row - 1)..<row)
             screen.rows[row - 1].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
         } else if row == 0, isAlternateScreenActive == false, historyRowCount > 0 {
-            // The store never held the spacer -- where one sits is a function of the width, which
-            // `31/I1` forbids storing -- so the column the clear vacated shows up as the open
-            // tail's short final display row, and the repair fills it (`research/31/D3` Decision 3, which
-            // measured this against the real engine and found `research/31/F6` `X9`'s "no-op" wrong).
-            let repaired = mutateHistory { $0.repairClearedSpacer(styleId: replacementStyleId) }
-            // Even when nothing was stored, the seam's spacer is *derived* from the live cell
-            // this clear just overwrote, so the last retained row displays differently now.
-            if repaired || seamRowIsShortOfItsSpacer {
+            // This write changes whether the seam projects a spacer or the store's remembered
+            // wrap-time blank, without mutating the row above it.
+            if seamRowIsShortOfItsSpacer {
                 invalidateInspection(inScrollbackRow: historyRowCount - 1)
             }
         }
