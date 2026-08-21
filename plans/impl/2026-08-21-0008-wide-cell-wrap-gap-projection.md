@@ -374,6 +374,6 @@ Green, independently reviewable commits; order is load-bearing where noted.
 - [x] 1. fix(terminal): paint every print vacate with the background-erase pen
 - [x] 2. fix(terminal): keep the cursor on the last column when autowrap is off
 - [x] 3. refactor(terminal): record the margin's last writer as row provenance
-- [ ] 4. refactor(terminal): route every line-structure reader through one spacer projection
+- [x] 4. refactor(terminal): route every line-structure reader through one spacer projection
 - [ ] 5. feat(terminal): let the open tail's follower resolve its pending margin
 - [ ] 6. refactor(terminal): derive the wrap spacer instead of storing it
