@@ -1,6 +1,6 @@
 // Decides where the next attempt starts: the position the replica stored, or nothing at all.
 //
-// It is a separate value from `MobileReconnectPolicy` because that one answers when an
+// It is a separate value from `MobileReconnectEpisode` because that one answers when an
 // attempt runs and owns nothing about resume state. What does not belong here: reading or
 // writing the checkpoint store, and any scheduling.
 import Foundation

@@ -31,11 +31,10 @@ public struct MobileSessionProjection: Equatable, Sendable {
 
 /// Holds the phone's session facts and answers every event from them.
 ///
-/// It composes the existing policies rather than replacing them: the reconnect policy still
-/// decides when an attempt runs, the resume policy still decides where it starts, the
-/// connect target still decides which gesture may read the fields, and the status still
-/// composes the line. This type owns the order those answers are applied in, which is the
-/// part that had no home and lived in the view controller.
+/// It composes the existing policies rather than replacing them: the reconnect episode owns
+/// the active target and decides when an attempt runs, the resume policy decides where it
+/// starts, and the status composes the line. This type owns the order those answers are
+/// applied in, which is the part that had no home and lived in the view controller.
 public struct MobileSessionModel: Equatable, Sendable {
     /// How long the phone lets an advanced replica sit before its position is written out.
     public static let checkpointInterval: TimeInterval = 30
@@ -46,11 +45,8 @@ public struct MobileSessionModel: Equatable, Sendable {
     private var panes: [PaneRosterItem] = []
     private var selectedPaneId: PaneId?
     private var surface = MobileSurfaceFacts()
-    /// The target and pane the current episode is about, so an automatic retry cannot
-    /// silently follow a half-typed host field.
-    private var connectTarget = MobileConnectTarget()
     private var preferredPaneId: PaneId?
-    private var reconnectPolicy = MobileReconnectPolicy()
+    private var reconnectEpisode = MobileReconnectEpisode()
     private var resumePolicy = MobileResumePolicy()
     private var inputMapper = MobileInputMapper()
     /// The id of the tape subscription, which is the one request whose refusal ends the
@@ -93,7 +89,7 @@ public struct MobileSessionModel: Equatable, Sendable {
     /// is worded as the time remaining, which only that moment can state.
     public func projection(at now: TimeInterval) -> MobileSessionProjection {
         var composed = status
-        composed.noteRecovery(reconnectPolicy.recoveryPhase(at: now))
+        composed.noteRecovery(reconnectEpisode.recoveryPhase(at: now))
         return MobileSessionProjection(
             status: composed.line(at: now),
             draft: draft,
@@ -146,7 +142,7 @@ public struct MobileSessionModel: Equatable, Sendable {
             return reconnect(.appForegrounded, env: env)
 
         case .appBackgrounded:
-            // The teardown comes first, and the policy is told after it, so it learns that
+            // The teardown comes first, and the episode is told after it, so it learns that
             // this connection is one the app dropped itself and still owes on return.
             let teardown: [MobileSessionEffect] = [
                 .flushCheckpoint(savingReplica: takeCheckpointDirt(), synchronously: true),
@@ -352,16 +348,10 @@ public struct MobileSessionModel: Equatable, Sendable {
         _ pane: PaneId,
         env: MobileSessionEnv
     ) -> [MobileSessionEffect] {
-        switch connectTarget.reuseTarget() {
-        case .connect:
-            preferredPaneId = pane
-            return reconnect(.userRequestedConnect, env: env)
-        case .reportDraft(let problem):
-            draftProblem = problem
-            return [.redraw]
-        case .ignore:
-            return []
-        }
+        let effects = reconnect(.targetReused, env: env)
+        guard effects.isEmpty == false else { return [] }
+        preferredPaneId = pane
+        return effects
     }
 
     /// The gesture that names a server: the Go button, or the attempt made at launch.
@@ -370,44 +360,41 @@ public struct MobileSessionModel: Equatable, Sendable {
         env: MobileSessionEnv
     ) -> [MobileSessionEffect] {
         self.draft = draft
-        switch connectTarget.setTarget(from: draft) {
-        case .connect(let target):
+        switch draft.validate() {
+        case .valid(let target):
             draftProblem = nil
             preferredPaneId = selectedPaneId
             return [.storeTarget(host: target.host, port: String(target.port))]
-                + reconnect(.userRequestedConnect, env: env)
+                + reconnect(.targetNamed(target), env: env)
         case .reportDraft(let problem):
-            // A field problem is reported beside its field and nowhere else. The policy is
-            // left alone deliberately: a typo must not cancel a retry already owed to a
+            // A field problem is reported beside its field and nowhere else. The episode
+            // is left alone deliberately: a typo must not cancel a retry already owed to a
             // good target.
             draftProblem = problem
             return [.redraw]
+        }
+    }
+
+    /// Feeds the reconnect episode one event and turns the single decision it returns into
+    /// effects. The episode's own moment is handed over as it stands: no arithmetic here.
+    private mutating func reconnect(
+        _ event: MobileReconnectEvent,
+        env: MobileSessionEnv
+    ) -> [MobileSessionEffect] {
+        switch reconnectEpisode.handle(event, at: env.now) {
+        case .attemptNow(let target):
+            return [.cancelRetryTimer] + startAttempt(target) + [.redraw]
+        case .wait(let until):
+            return [.armRetryTimer(deadline: until), .redraw]
+        case .rest:
+            return [.cancelRetryTimer, .redraw]
         case .ignore:
             return []
         }
     }
 
-    /// Feeds the reconnect policy one event and turns the single decision it returns into
-    /// effects. The policy's own moment is handed over as it stands: no arithmetic here.
-    private mutating func reconnect(
-        _ event: MobileReconnectEvent,
-        env: MobileSessionEnv
-    ) -> [MobileSessionEffect] {
-        switch reconnectPolicy.handle(event, at: env.now) {
-        case .attemptNow:
-            return [.cancelRetryTimer] + startAttempt() + [.redraw]
-        case .wait(let until):
-            return [.armRetryTimer(deadline: until), .redraw]
-        case .rest:
-            return [.cancelRetryTimer, .redraw]
-        }
-    }
-
-    /// Opens one attempt against the episode's target. The policy only says `attemptNow`
-    /// inside an episode a gesture started, and a gesture only starts one against a target
-    /// it resolved.
-    private mutating func startAttempt() -> [MobileSessionEffect] {
-        guard let target = connectTarget.established else { return [] }
+    /// Opens one attempt against the non-optional target the episode authorized.
+    private mutating func startAttempt(_ target: MobileServerTarget) -> [MobileSessionEffect] {
         let teardown: [MobileSessionEffect] = [
             .flushCheckpoint(savingReplica: takeCheckpointDirt(), synchronously: true),
             .disconnect,
@@ -417,11 +404,11 @@ public struct MobileSessionModel: Equatable, Sendable {
         return teardown + [.connect(target)]
     }
 
-    /// Ends the current connection on one typed cause and lets the policy decide what
+    /// Ends the current connection on one typed cause and lets the episode decide what
     /// follows it.
     ///
     /// The teardown comes first and is what makes the cause unique: it fences the runner,
-    /// so a stream that ended and then reported its read error cannot hand the policy a
+    /// so a stream that ended and then reported its read error cannot hand the episode a
     /// second, differently classified cause for the same connection.
     private mutating func end(
         with failure: MobileConnectionFailure,

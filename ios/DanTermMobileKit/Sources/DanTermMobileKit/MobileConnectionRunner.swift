@@ -9,7 +9,7 @@ public enum MobileConnectionRunnerEvent: Equatable, Sendable {
     /// Delivers one classified frame from the session reader.
     case frame(DanTermClientFrame)
     /// Reports the typed cause that ended this connection. It is typed rather than a
-    /// user-facing state because the shell's reconnect policy schedules on the cause: a
+    /// user-facing state because the shell's reconnect episode schedules on the cause: a
     /// dropped stream is worth another attempt and a malformed line is not, and both
     /// present the same words.
     case failed(MobileConnectionFailure)

@@ -1,7 +1,7 @@
-// The phone's whole reconnect policy: which failures are worth another attempt, and when
-// the next attempt may run.
+// The phone's reconnect episode: the active server, which failures are worth another
+// attempt, and when the next attempt may run.
 //
-// The policy is pure. It performs no attempt, opens no socket, and owns no timer: it
+// The episode is pure. It performs no attempt, opens no socket, and owns no timer: it
 // consumes injected events -- attempt outcomes, clock ticks, network-path status, app
 // lifecycle, user gestures -- and answers with one decision the shell executes. Keeping
 // the whole decision here is what makes the retry rules testable without a device, and
@@ -125,7 +125,7 @@ public enum MobileRetryClass: Equatable, Sendable {
     case manual
 }
 
-/// Everything the policy must be told, from the shell that observes it.
+/// Everything the episode must be told, from the shell that observes it.
 public enum MobileReconnectEvent: Equatable, Sendable {
     /// The in-flight attempt, or the connection it established, ended with this cause.
     case attemptFailed(MobileConnectionFailure)
@@ -137,20 +137,24 @@ public enum MobileReconnectEvent: Equatable, Sendable {
     case networkPathChanged(usable: Bool)
     case appForegrounded
     case appBackgrounded
-    /// The user asked to connect -- the Go button, or picking a pane.
-    case userRequestedConnect
+    /// The Go gesture validated and named a new server for the episode.
+    case targetNamed(MobileServerTarget)
+    /// A pane gesture asked to reuse the server already active in the episode.
+    case targetReused
     /// The user dropped the connection or the attempt.
     case userCancelled
 }
 
-/// The only thing the policy asks the shell to do.
+/// The only thing the episode asks the shell to do.
 public enum MobileReconnectDecision: Equatable, Sendable {
-    /// Start one attempt now.
-    case attemptNow
+    /// Start one attempt now against this exact authorized target.
+    case attemptNow(MobileServerTarget)
     /// Schedule a `clockFired` event for this time.
     case wait(until: TimeInterval)
     /// Cancel any pending timer and schedule nothing.
     case rest
+    /// The gesture requires an active target, but no episode exists yet.
+    case ignore
 }
 
 /// What the app is doing about the current failure, presented beside the causal state.
@@ -166,13 +170,13 @@ public enum MobileRecoveryPhase: Equatable, Sendable {
     case waitingForNetwork
 }
 
-/// Decides when the phone attempts a connection, and when it stops trying.
+/// Owns the reconnect target and decides when the phone attempts it or stops trying.
 ///
 /// The type is a value: a caller holds one, feeds it events with an explicit clock
 /// reading, and acts on what it returns. `handle` is the only entry point that advances
-/// it, and it marks its own attempt in flight when it returns `attemptNow`, so a second
-/// trigger arriving before the outcome cannot start an overlapping attempt.
-public struct MobileReconnectPolicy: Equatable, Sendable {
+/// it, and it marks its own attempt in flight when it returns `attemptNow`, so automatic
+/// triggers cannot overlap. A manual gesture deliberately replaces that attempt.
+public struct MobileReconnectEpisode: Equatable, Sendable {
     /// The bounded shape of one automatic episode.
     ///
     /// The delays are per remaining attempt and their count *is* the budget, so the
@@ -196,7 +200,7 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
         public static let standard = Schedule(delays: [0, 2, 5, 15, 30], stabilityWindow: 60)
     }
 
-    /// What the policy owes the connection right now.
+    /// What an active episode owes the connection right now.
     private enum Standing: Equatable {
         /// Nothing outstanding: connected, attempting, or never started.
         case clear
@@ -209,37 +213,42 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
         case manual
     }
 
+    /// Facts that exist only after a gesture has supplied the one authoritative target.
+    private struct Active: Equatable, Sendable {
+        var target: MobileServerTarget
+        var standing = Standing.clear
+        var remainingDelays: ArraySlice<TimeInterval>
+        var attemptInFlight = false
+        var connectedAt: TimeInterval?
+    }
+
     private let schedule: Schedule
-    private var standing = Standing.clear
-    /// The episode's remaining effort: the delays of the automatic attempts it may still
-    /// schedule, in order. An authorized automatic attempt consumes the head, so an
-    /// exhausted budget is an empty slice rather than a count compared against a limit --
-    /// which is why nothing here grows without bound and no range check guards a lookup.
-    private var remainingDelays: ArraySlice<TimeInterval>
-    private var attemptInFlight = false
+    private var active: Active?
+    // These facts survive targetless idle so they govern the first target once one exists.
     private var foregrounded = true
     private var pathUsable = true
-    private var connectedAt: TimeInterval?
 
     public init(schedule: Schedule = .standard) {
         self.schedule = schedule
-        self.remainingDelays = schedule.delays[...]
     }
 
-    /// Advances the policy by one event and states what the shell should do next.
+    /// Advances the episode by one event and states what the shell should do next.
     public mutating func handle(
         _ event: MobileReconnectEvent,
         at now: TimeInterval
     ) -> MobileReconnectDecision {
         switch event {
         case .attemptFailed(let failure):
-            attemptInFlight = false
+            guard active != nil else { return .rest }
+            active?.attemptInFlight = false
             rearmIfConnectionWasStable(endingAt: now)
-            standing = standing(after: failure, at: now)
+            let nextStanding = standing(after: failure, at: now)
+            active?.standing = nextStanding
         case .attemptConnected:
-            attemptInFlight = false
-            connectedAt = now
-            standing = .clear
+            guard active != nil else { return .rest }
+            active?.attemptInFlight = false
+            active?.connectedAt = now
+            active?.standing = .clear
         case .clockFired:
             break
         case .networkPathChanged(let usable):
@@ -256,48 +265,61 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
             // becomes due the moment the app returns -- without restoring the budget,
             // which only stability or a gesture does.
             foregrounded = false
-            if connectedAt != nil || attemptInFlight {
+            if active?.connectedAt != nil || active?.attemptInFlight == true {
                 rearmIfConnectionWasStable(endingAt: now)
-                standing = .waiting(scheduledAt: now, notBefore: now)
+                active?.standing = .waiting(scheduledAt: now, notBefore: now)
             }
-            attemptInFlight = false
-            connectedAt = nil
+            active?.attemptInFlight = false
+            active?.connectedAt = nil
         case .userCancelled:
-            attemptInFlight = false
-            connectedAt = nil
-            standing = .manual
-        case .userRequestedConnect:
-            // The gesture is the manual remedy itself, so it restores the whole policy
-            // from any class or phase and answers to neither the path nor a class floor.
-            connectedAt = nil
-            remainingDelays = schedule.delays[...]
-            standing = .clear
-            guard attemptInFlight == false else { return .rest }
-            attemptInFlight = true
-            return .attemptNow
+            active?.attemptInFlight = false
+            active?.connectedAt = nil
+            active?.standing = .manual
+        case .targetNamed(let target):
+            // The gesture is the manual remedy itself, so it restores the whole episode
+            // from any class or phase and replaces any attempt already in flight.
+            active = Active(
+                target: target,
+                remainingDelays: schedule.delays[...],
+                attemptInFlight: true
+            )
+            return .attemptNow(target)
+        case .targetReused:
+            guard var active else { return .ignore }
+            active.connectedAt = nil
+            active.remainingDelays = schedule.delays[...]
+            active.standing = .clear
+            active.attemptInFlight = true
+            self.active = active
+            return .attemptNow(active.target)
         }
         return automaticDecision(at: now)
     }
 
     /// States what the shell should show beside the causal failure. Pure: unlike `handle`,
-    /// asking does not advance the policy.
+    /// asking does not advance the episode.
     public func recoveryPhase(at now: TimeInterval) -> MobileRecoveryPhase {
-        if attemptInFlight { return .attempting }
-        guard case .waiting(let scheduledAt, _) = standing, foregrounded else { return .none }
+        guard let active else { return .none }
+        if active.attemptInFlight { return .attempting }
+        guard case .waiting(let scheduledAt, _) = active.standing, foregrounded else {
+            return .none
+        }
         guard pathUsable else { return .waitingForNetwork }
         return .waiting(until: max(scheduledAt, now))
     }
 
     private mutating func automaticDecision(at now: TimeInterval) -> MobileReconnectDecision {
-        guard attemptInFlight == false, foregrounded, pathUsable else { return .rest }
-        guard case .waiting(let scheduledAt, _) = standing else { return .rest }
+        guard var active else { return .rest }
+        guard active.attemptInFlight == false, foregrounded, pathUsable else { return .rest }
+        guard case .waiting(let scheduledAt, _) = active.standing else { return .rest }
         guard scheduledAt <= now else { return .wait(until: scheduledAt) }
-        attemptInFlight = true
+        active.attemptInFlight = true
         // Empty already means the budget is spent, so the one attempt a signal buys after
         // give-up takes nothing from it and leaves nothing to take.
-        remainingDelays = remainingDelays.dropFirst()
-        standing = .clear
-        return .attemptNow
+        active.remainingDelays = active.remainingDelays.dropFirst()
+        active.standing = .clear
+        self.active = active
+        return .attemptNow(active.target)
     }
 
     /// Schedules the next automatic attempt, or gives up, according to the failure's class.
@@ -309,11 +331,15 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
         case .manual:
             return .manual
         case .transient:
-            guard let delay = remainingDelays.first else { return .gaveUp(notBefore: now) }
+            guard let delay = active?.remainingDelays.first else {
+                return .gaveUp(notBefore: now)
+            }
             return .waiting(scheduledAt: now + delay, notBefore: now)
         case .capacity(let bound):
             let floor = now + bound.seconds
-            guard let delay = remainingDelays.first else { return .gaveUp(notBefore: floor) }
+            guard let delay = active?.remainingDelays.first else {
+                return .gaveUp(notBefore: floor)
+            }
             return .waiting(scheduledAt: max(now + delay, floor), notBefore: floor)
         }
     }
@@ -322,18 +348,20 @@ public struct MobileReconnectPolicy: Equatable, Sendable {
     /// signal never restores the budget: only a stable connection or a gesture does, so a
     /// flapping path costs one attempt per restoration rather than a fresh episode.
     private mutating func armForSignal(at now: TimeInterval) {
+        guard let standing = active?.standing else { return }
         switch standing {
         case .waiting(_, let notBefore), .gaveUp(let notBefore):
-            standing = .waiting(scheduledAt: max(now, notBefore), notBefore: notBefore)
+            active?.standing = .waiting(scheduledAt: max(now, notBefore), notBefore: notBefore)
         case .clear, .manual:
             break
         }
     }
 
     private mutating func rearmIfConnectionWasStable(endingAt now: TimeInterval) {
-        if let connectedAt, now - connectedAt >= schedule.stabilityWindow {
-            remainingDelays = schedule.delays[...]
+        if let connectedAt = active?.connectedAt,
+           now - connectedAt >= schedule.stabilityWindow {
+            active?.remainingDelays = schedule.delays[...]
         }
-        connectedAt = nil
+        active?.connectedAt = nil
     }
 }

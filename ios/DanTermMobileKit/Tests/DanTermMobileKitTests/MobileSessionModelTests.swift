@@ -10,6 +10,89 @@ import DanTermProtocol
 import Foundation
 import Testing
 
+@Test("A valid Go gesture replaces an in-flight attempt with its new target")
+func goGestureReplacesInFlightAttempt() {
+    // Intent: the second valid server becomes both the persisted target and the target of
+    //   the replacement attempt, with the old attempt torn down before the new one starts.
+    // Why it exists: target storage used to accept the edit while reconnect policy rejected
+    //   the gesture, leaving the old attempt current after the user replaced its server.
+    // Scenario: the first Mac is still connecting when the user submits a second Mac.
+    var session = Session()
+    _ = session.handle(.launched(MobileLaunchInputs(environmentHost: session.target.host)))
+    let replacement = MobileServerTarget(host: "other.tailnet", port: 9000)
+
+    let effects = session.handle(.connectRequested(MobileTargetDraft(
+        host: replacement.host,
+        port: String(replacement.port)
+    )))
+
+    #expect(effects.filter(\.leavesThePhone) == [
+        .storeTarget(host: replacement.host, port: String(replacement.port)),
+        .flushCheckpoint(savingReplica: false, synchronously: true),
+        .disconnect,
+        .connect(replacement),
+    ])
+    #expect(session.model.projection(at: session.now).status.text.contains(replacement.host))
+}
+
+@Test("A pane gesture replaces an in-flight attach without reading an invalid draft")
+func paneGestureReusesTargetDuringInFlightAttach() {
+    // Intent: selecting a pane is the same manual replacement remedy as Go, but it reuses
+    //   the active server even when the edited draft cannot name one.
+    // Why it exists: the separate policy used to reject every manual gesture while an
+    //   attempt was in flight, and a shared shell route once let draft edits block panes.
+    // Scenario: the roster arrived, the user half-edits the host, then picks another pane
+    //   before the first pane has attached.
+    var session = Session()
+    _ = session.handle(.launched(MobileLaunchInputs(environmentHost: session.target.host)))
+    _ = session.handle(.attemptSucceeded(
+        roster: roster(panes: [(201, "zsh"), (202, "vim")]),
+        serverVersion: "1.2.3"
+    ))
+    #expect(session.handle(.connectRequested(MobileTargetDraft(host: "   ", port: "7420")))
+        == [.redraw])
+
+    let effects = session.handle(.paneSelected(paneId(202)))
+
+    #expect(effects.filter(\.leavesThePhone) == [
+        .flushCheckpoint(savingReplica: false, synchronously: true),
+        .disconnect,
+        .connect(session.target),
+    ])
+}
+
+@Test("A pane gesture before the first target has no effect")
+func paneGestureWithoutAnEpisodeIsIgnored() {
+    var session = Session()
+    let before = session.model
+    #expect(session.handle(.paneSelected(session.pane)).isEmpty)
+    #expect(session.model == before)
+}
+
+@Test("An invalid draft leaves the active target and its timed retry unchanged")
+func invalidDraftDoesNotDisturbPendingRecovery() {
+    // Intent: a field error reports itself without changing the target, retry budget, or
+    //   deadline already owed to the established server.
+    // Why it exists: draft validation is outside the reconnect episode so partial edits
+    //   cannot become scheduling inputs or silently cancel recovery.
+    // Scenario: two failed attempts arm backoff, then the user submits a blank host before
+    //   that timer fires.
+    var session = Session()
+    let delay = MobileReconnectEpisode.Schedule.standard.delays[1]
+    _ = session.handle(.launched(MobileLaunchInputs(environmentHost: session.target.host)))
+    _ = session.handle(.connectionEnded(.transport(.peerClosed, phase: .establishing)))
+    let waiting = session.handle(
+        .connectionEnded(.transport(.peerClosed, phase: .establishing))
+    )
+    #expect(waiting.contains(.armRetryTimer(deadline: session.now + delay)))
+
+    #expect(session.handle(.connectRequested(MobileTargetDraft(host: "   ", port: "7420")))
+        == [.redraw])
+    session.now += delay
+
+    #expect(session.handle(.retryTimerFired).contains(.connect(session.target)))
+}
+
 @Test("Backgrounding saves the position, drops the connection, and owes a reconnect")
 func backgroundingFlushesThenDisconnects() throws {
     // Intent: the background event returns exactly the checkpoint flush and then the

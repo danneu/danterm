@@ -1,4 +1,4 @@
-// Verifies the instrument that delivers a moment the reconnect policy named: on the
+// Verifies the instrument that delivers a moment the reconnect episode named: on the
 // policy's own monotonic base, and without depending on a run loop that a drag can park.
 import Foundation
 import Testing

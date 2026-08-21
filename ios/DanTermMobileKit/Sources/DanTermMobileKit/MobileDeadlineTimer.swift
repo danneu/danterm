@@ -1,16 +1,16 @@
-// The one instrument that delivers a moment the shell scheduled, on the clock the policy
+// The one instrument that delivers a moment the shell scheduled, on the clock the episode
 // named it on.
 //
 // It lives in the kit rather than in the UIKit shell for two reasons: the shell has no
 // tests, and a deadline is only worth the base it is delivered on -- an instrument that
-// reads a different clock than the policy silently turns an exact moment into a floor.
+// reads a different clock than the episode silently turns an exact moment into a floor.
 //
 // What does not belong here: any knowledge of what is due at the deadline. The instrument
 // delivers a callback and knows nothing about retries or checkpoints.
 import Dispatch
 import Foundation
 
-/// The single monotonic reading the reconnect policy schedules on and the deadline timer
+/// The single monotonic reading the reconnect episode schedules on and the deadline timer
 /// delivers on.
 ///
 /// It is one place so the two cannot drift apart: this clock counts the time the system has

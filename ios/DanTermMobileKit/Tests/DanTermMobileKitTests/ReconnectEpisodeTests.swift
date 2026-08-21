@@ -1,16 +1,18 @@
-// Tests the pure reconnect policy: cause classification, scheduling, and rest.
+// Tests the pure reconnect episode: target authority, cause classification, scheduling,
+// and rest.
 //
-// Every test drives the policy with an explicit clock, so nothing here waits on real
+// Every test drives the episode with an explicit clock, so nothing here waits on real
 // time. What is deliberately absent: anything about how an attempt is performed --
-// the policy decides only when one runs.
+// the episode decides only when one runs.
 import DanTermClient
 import DanTermMobileKit
 import DanTermProtocol
 import Foundation
 import Testing
 
-private let schedule = MobileReconnectPolicy.Schedule.standard
+private let schedule = MobileReconnectEpisode.Schedule.standard
 private let budget = schedule.delays.count
+private let target = MobileServerTarget(host: "mac.example", port: 7420)
 
 private func lostConnection() -> MobileConnectionFailure {
     .transport(.peerClosed, phase: .established)
@@ -92,8 +94,8 @@ func silencePhaseWording() {
 
 @Test("A transient failure attempts again immediately")
 func transientRetriesAtOnce() {
-    var policy = MobileReconnectPolicy()
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow)
+    var episode = reconnectEpisode()
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow(target))
 }
 
 @Test("Every manual cause schedules nothing however long the clock runs")
@@ -114,12 +116,12 @@ func manualCausesNeverSchedule() {
         .deviceSetup,
     ]
     for failure in manual {
-        var policy = MobileReconnectPolicy()
-        #expect(policy.handle(.attemptFailed(failure), at: 100) == .rest)
+        var episode = reconnectEpisode()
+        #expect(episode.handle(.attemptFailed(failure), at: 100) == .rest)
         for tick in stride(from: 200.0, through: 100_000.0, by: 9_900.0) {
-            #expect(policy.handle(.clockFired, at: tick) == .rest)
+            #expect(episode.handle(.clockFired, at: tick) == .rest)
         }
-        #expect(policy.recoveryPhase(at: 100_000) == .none)
+        #expect(episode.recoveryPhase(at: 100_000) == .none)
     }
 }
 
@@ -130,22 +132,22 @@ func capacityWaitsTheCarriedBound() {
     // Why it exists: retrying sooner competes for exactly the resource the refusal named,
     //   and the bound is the server's to state -- a nonstandard one must be honored.
     let stated = IpcLivenessBound(seconds: 45)!
-    var policy = MobileReconnectPolicy()
+    var episode = reconnectEpisode()
     let refusal = MobileConnectionFailure.conversation(
         .connectionLimit(stated),
         phase: .establishing
     )
-    #expect(policy.handle(.attemptFailed(refusal), at: 100) == .wait(until: 145))
-    #expect(policy.handle(.clockFired, at: 144) == .wait(until: 145))
-    #expect(policy.handle(.clockFired, at: 145) == .attemptNow)
+    #expect(episode.handle(.attemptFailed(refusal), at: 100) == .wait(until: 145))
+    #expect(episode.handle(.clockFired, at: 144) == .wait(until: 145))
+    #expect(episode.handle(.clockFired, at: 145) == .attemptNow(target))
 }
 
 @Test("A capacity refusal without a stated bound waits the contract default")
 func capacityWaitsTheDefaultBound() {
-    var policy = MobileReconnectPolicy()
+    var episode = reconnectEpisode()
     let refusal = MobileConnectionFailure.conversation(.connectionLimit(nil), phase: .establishing)
     #expect(
-        policy.handle(.attemptFailed(refusal), at: 100)
+        episode.handle(.attemptFailed(refusal), at: 100)
             == .wait(until: 100 + IpcLivenessBound.standard.seconds)
     )
 }
@@ -157,24 +159,53 @@ func signalsRespectTheCapacityFloor() {
         .connectionLimit(stated),
         phase: .establishing
     )
-    var policy = MobileReconnectPolicy()
-    #expect(policy.handle(.attemptFailed(refusal), at: 100) == .wait(until: 145))
-    #expect(policy.handle(.networkPathChanged(usable: false), at: 101) == .rest)
-    #expect(policy.handle(.networkPathChanged(usable: true), at: 102) == .wait(until: 145))
-    #expect(policy.handle(.appForegrounded, at: 103) == .wait(until: 145))
-    #expect(policy.handle(.clockFired, at: 145) == .attemptNow)
+    var episode = reconnectEpisode()
+    #expect(episode.handle(.attemptFailed(refusal), at: 100) == .wait(until: 145))
+    #expect(episode.handle(.networkPathChanged(usable: false), at: 101) == .rest)
+    #expect(episode.handle(.networkPathChanged(usable: true), at: 102) == .wait(until: 145))
+    #expect(episode.handle(.appForegrounded, at: 103) == .wait(until: 145))
+    #expect(episode.handle(.clockFired, at: 145) == .attemptNow(target))
 }
 
 @Test("A user gesture ignores the capacity floor because it is the manual remedy")
 func gestureIgnoresTheCapacityFloor() {
     let stated = IpcLivenessBound(seconds: 45)!
-    var policy = MobileReconnectPolicy()
+    var episode = reconnectEpisode()
     let refusal = MobileConnectionFailure.conversation(
         .connectionLimit(stated),
         phase: .establishing
     )
-    #expect(policy.handle(.attemptFailed(refusal), at: 100) == .wait(until: 145))
-    #expect(policy.handle(.userRequestedConnect, at: 101) == .attemptNow)
+    #expect(episode.handle(.attemptFailed(refusal), at: 100) == .wait(until: 145))
+    #expect(episode.handle(.targetReused, at: 101) == .attemptNow(target))
+}
+
+@Test("Every manual gesture replaces an in-flight attempt with the active target")
+func manualGesturesReplaceInFlightAttempts() {
+    // Intent: a newly named target and a reused target both authorize complete replacement
+    // attempts, while automatic signals still rest during the in-flight attempt.
+    // Why it exists: the old episode treated manual and automatic triggers alike once an
+    // attempt existed, so it rejected the user's remedy after target storage accepted it.
+    let replacement = MobileServerTarget(host: "other.example", port: 9000)
+    var episode = reconnectEpisode()
+
+    #expect(episode.handle(.targetNamed(replacement), at: 1) == .attemptNow(replacement))
+    #expect(episode.handle(.appForegrounded, at: 2) == .rest)
+    #expect(episode.handle(.clockFired, at: 3) == .rest)
+    #expect(episode.handle(.targetReused, at: 4) == .attemptNow(replacement))
+}
+
+@Test("Path facts observed without a target govern the first episode")
+func idlePathFactsSurviveTheFirstTarget() {
+    // Intent: an unusable path learned while targetless suspends recovery after the first
+    //   manual attempt fails, and restoration retries the same target.
+    // Why it exists: making the active episode optional must not discard facts that arrive
+    //   before the user supplies the first server.
+    var episode = MobileReconnectEpisode()
+    #expect(episode.handle(.networkPathChanged(usable: false), at: 1) == .rest)
+    #expect(episode.handle(.targetNamed(target), at: 2) == .attemptNow(target))
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 3) == .rest)
+    #expect(episode.recoveryPhase(at: 3) == .waitingForNetwork)
+    #expect(episode.handle(.networkPathChanged(usable: true), at: 4) == .attemptNow(target))
 }
 
 @Test("Delays grow across an episode and the budget is finite")
@@ -182,24 +213,24 @@ func boundedAutomaticPhase() {
     // Intent: repeated failure spends a finite number of automatic attempts and then rests.
     // Why it exists: an unbounded retry loop against a sleeping Mac drains the battery and
     //   makes "Reconnecting" a permanent hang-shaped state.
-    var policy = MobileReconnectPolicy()
+    var episode = reconnectEpisode()
     var now = 100.0
     for delay in schedule.delays {
-        let decision = policy.handle(.attemptFailed(lostConnection()), at: now)
+        let decision = episode.handle(.attemptFailed(lostConnection()), at: now)
         if delay == 0 {
-            #expect(decision == .attemptNow)
+            #expect(decision == .attemptNow(target))
         } else {
             #expect(decision == .wait(until: now + delay))
             now += delay
-            #expect(policy.handle(.clockFired, at: now) == .attemptNow)
+            #expect(episode.handle(.clockFired, at: now) == .attemptNow(target))
         }
         now += 1
     }
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: now) == .rest)
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: now) == .rest)
     for tick in stride(from: now + 10, through: now + 100_000, by: 9_900) {
-        #expect(policy.handle(.clockFired, at: tick) == .rest)
+        #expect(episode.handle(.clockFired, at: tick) == .rest)
     }
-    #expect(policy.recoveryPhase(at: now + 100_000) == .none)
+    #expect(episode.recoveryPhase(at: now + 100_000) == .none)
 }
 
 @Test("A stream that keeps desynchronizing spends the one budget and then rests")
@@ -207,32 +238,32 @@ func desynchronizationUsesTheOneEpisodeBudget() {
     // Intent: a replica that detects a gap on every connection retries automatically, draws
     //   on the same episode budget as any other transient failure, and comes to rest with a
     //   manual remedy instead of looping.
-    // Why it exists: routing the detected gap through this policy is what forbids a second,
+    // Why it exists: routing the detected gap through this episode is what forbids a second,
     //   unbounded repair mechanism of its own. A desync after a connection that served long
     //   enough to prove stable is a rare incident, not accumulated evidence, so it starts a
     //   fresh episode.
-    var policy = MobileReconnectPolicy()
+    var episode = reconnectEpisode()
     var now = 100.0
     for delay in schedule.delays {
-        let decision = policy.handle(.attemptFailed(.streamDesynchronized), at: now)
+        let decision = episode.handle(.attemptFailed(.streamDesynchronized), at: now)
         if delay == 0 {
-            #expect(decision == .attemptNow)
+            #expect(decision == .attemptNow(target))
         } else {
             #expect(decision == .wait(until: now + delay))
             now += delay
-            #expect(policy.handle(.clockFired, at: now) == .attemptNow)
+            #expect(episode.handle(.clockFired, at: now) == .attemptNow(target))
         }
         now += 1
     }
-    #expect(policy.handle(.attemptFailed(.streamDesynchronized), at: now) == .rest)
-    #expect(policy.handle(.clockFired, at: now + 100_000) == .rest)
-    #expect(policy.recoveryPhase(at: now + 100_000) == .none)
+    #expect(episode.handle(.attemptFailed(.streamDesynchronized), at: now) == .rest)
+    #expect(episode.handle(.clockFired, at: now + 100_000) == .rest)
+    #expect(episode.recoveryPhase(at: now + 100_000) == .none)
 
-    var stable = MobileReconnectPolicy()
-    #expect(stable.handle(.userRequestedConnect, at: 100) == .attemptNow)
+    var stable = reconnectEpisode()
+    #expect(stable.handle(.targetReused, at: 100) == .attemptNow(target))
     #expect(stable.handle(.attemptConnected, at: 101) == .rest)
     let proven = 101 + schedule.stabilityWindow
-    #expect(stable.handle(.attemptFailed(.streamDesynchronized), at: proven) == .attemptNow)
+    #expect(stable.handle(.attemptFailed(.streamDesynchronized), at: proven) == .attemptNow(target))
     #expect(stable.handle(.attemptFailed(.streamDesynchronized), at: proven + 1)
         == .wait(until: proven + 1 + schedule.delays[1]))
 }
@@ -243,39 +274,39 @@ func signalAfterGiveUpBuysOneAttempt() {
     //   attempt, whose failure returns to rest with the budget still spent.
     // Why it exists: restoring the budget on a signal turns a flapping path into an
     //   endless retry loop, which is the defect the bounded phase exists to forbid.
-    var policy = exhaustedPolicy(startingAt: 100)
-    #expect(policy.handle(.networkPathChanged(usable: false), at: 500) == .rest)
-    #expect(policy.handle(.networkPathChanged(usable: true), at: 501) == .attemptNow)
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 502) == .rest)
-    #expect(policy.handle(.appForegrounded, at: 503) == .attemptNow)
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 504) == .rest)
-    #expect(policy.handle(.clockFired, at: 900) == .rest)
+    var episode = exhaustedEpisode(startingAt: 100)
+    #expect(episode.handle(.networkPathChanged(usable: false), at: 500) == .rest)
+    #expect(episode.handle(.networkPathChanged(usable: true), at: 501) == .attemptNow(target))
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 502) == .rest)
+    #expect(episode.handle(.appForegrounded, at: 503) == .attemptNow(target))
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 504) == .rest)
+    #expect(episode.handle(.clockFired, at: 900) == .rest)
 }
 
 @Test("A long run of signals after give-up buys one attempt each, forever")
 func signalsAfterGiveUpNeverCompound() {
     // Intent: after give-up, any number of signal-then-failure rounds authorizes exactly
-    //   one attempt per signal, and the policy never rests differently for having run
+    //   one attempt per signal, and the episode never rests differently for having run
     //   longer.
-    // Why it exists: the spent budget is what bounds a flapping path, and a policy that
+    // Why it exists: the spent budget is what bounds a flapping path, and an episode that
     //   accumulated anything per post-give-up attempt would either drift or stop being
     //   safe after enough rounds. A long run is the only way to see that.
-    var policy = exhaustedPolicy(startingAt: 100)
+    var episode = exhaustedEpisode(startingAt: 100)
     var now = 500.0
     for _ in 0..<200 {
-        #expect(policy.handle(.appForegrounded, at: now) == .attemptNow)
-        #expect(policy.handle(.attemptFailed(lostConnection()), at: now + 1) == .rest)
-        #expect(policy.handle(.clockFired, at: now + 2) == .rest)
+        #expect(episode.handle(.appForegrounded, at: now) == .attemptNow(target))
+        #expect(episode.handle(.attemptFailed(lostConnection()), at: now + 1) == .rest)
+        #expect(episode.handle(.clockFired, at: now + 2) == .rest)
         now += 10
     }
 }
 
 @Test("A user gesture restores the whole budget from a rested state")
 func gestureRestoresTheBudget() {
-    var policy = exhaustedPolicy(startingAt: 100)
-    #expect(policy.handle(.userRequestedConnect, at: 500) == .attemptNow)
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 501) == .attemptNow)
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 502) == .wait(until: 504))
+    var episode = exhaustedEpisode(startingAt: 100)
+    #expect(episode.handle(.targetReused, at: 500) == .attemptNow(target))
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 501) == .attemptNow(target))
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 502) == .wait(until: 504))
 }
 
 @Test("A connect-then-die flap still terminates at the budget")
@@ -284,48 +315,48 @@ func flapTerminatesAtTheBudget() {
     //   refresh the attempt budget.
     // Why it exists: rearming on connect alone makes an unstable link retry forever with
     //   no user-visible progress.
-    var policy = MobileReconnectPolicy()
+    var episode = reconnectEpisode()
     var now = 100.0
     var attempts = 0
     while attempts < budget {
-        let decision = policy.handle(.attemptFailed(lostConnection()), at: now)
+        let decision = episode.handle(.attemptFailed(lostConnection()), at: now)
         if case .wait(let until) = decision {
             now = until
-            #expect(policy.handle(.clockFired, at: now) == .attemptNow)
+            #expect(episode.handle(.clockFired, at: now) == .attemptNow(target))
         }
         attempts += 1
-        #expect(policy.handle(.attemptConnected, at: now) == .rest)
+        #expect(episode.handle(.attemptConnected, at: now) == .rest)
         now += schedule.stabilityWindow / 2
     }
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: now) == .rest)
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: now) == .rest)
 }
 
 @Test("A connection that proves stable rearms the budget")
 func stableConnectionRearmsTheBudget() {
-    var policy = exhaustedPolicy(startingAt: 100)
-    #expect(policy.handle(.userRequestedConnect, at: 500) == .attemptNow)
-    #expect(policy.handle(.attemptConnected, at: 501) == .rest)
+    var episode = exhaustedEpisode(startingAt: 100)
+    #expect(episode.handle(.targetReused, at: 500) == .attemptNow(target))
+    #expect(episode.handle(.attemptConnected, at: 501) == .rest)
     let stable = 501 + schedule.stabilityWindow
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: stable) == .attemptNow)
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: stable + 1)
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: stable) == .attemptNow(target))
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: stable + 1)
         == .wait(until: stable + 1 + schedule.delays[1]))
 }
 
 @Test("Backgrounding and cancel drop the pending attempt")
 func restAfterBackgroundingAndCancel() {
-    var backgrounded = MobileReconnectPolicy()
-    #expect(backgrounded.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow)
+    var backgrounded = reconnectEpisode()
+    #expect(backgrounded.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow(target))
     #expect(backgrounded.handle(.attemptFailed(lostConnection()), at: 101) == .wait(until: 103))
     #expect(backgrounded.handle(.appBackgrounded, at: 102) == .rest)
     #expect(backgrounded.handle(.clockFired, at: 103) == .rest)
     #expect(backgrounded.recoveryPhase(at: 103) == .none)
 
-    var cancelled = MobileReconnectPolicy()
-    #expect(cancelled.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow)
+    var cancelled = reconnectEpisode()
+    #expect(cancelled.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow(target))
     #expect(cancelled.handle(.userCancelled, at: 101) == .rest)
     #expect(cancelled.handle(.clockFired, at: 500) == .rest)
     #expect(cancelled.handle(.networkPathChanged(usable: true), at: 501) == .rest)
-    #expect(cancelled.handle(.userRequestedConnect, at: 502) == .attemptNow)
+    #expect(cancelled.handle(.targetReused, at: 502) == .attemptNow(target))
 }
 
 @Test("A connection dropped for backgrounding is owed again on return")
@@ -334,43 +365,43 @@ func backgroundingOwesTheConnectionItDropped() {
     //   foreground reconnects without a tap.
     // Why it exists: backgrounding is not a failure, so nothing else would leave an
     //   attempt owed, and the phone would come back to a dead pane until the user tapped.
-    var connected = MobileReconnectPolicy()
-    #expect(connected.handle(.userRequestedConnect, at: 100) == .attemptNow)
+    var connected = reconnectEpisode()
+    #expect(connected.handle(.targetReused, at: 100) == .attemptNow(target))
     #expect(connected.handle(.attemptConnected, at: 101) == .rest)
     #expect(connected.handle(.appBackgrounded, at: 102) == .rest)
-    #expect(connected.handle(.appForegrounded, at: 900) == .attemptNow)
+    #expect(connected.handle(.appForegrounded, at: 900) == .attemptNow(target))
 
     // An attempt still in flight is owed the same way: the shell cancelled it, so nothing
     // is going to report its outcome.
-    var attempting = MobileReconnectPolicy()
-    #expect(attempting.handle(.userRequestedConnect, at: 100) == .attemptNow)
+    var attempting = reconnectEpisode()
+    #expect(attempting.handle(.targetReused, at: 100) == .attemptNow(target))
     #expect(attempting.handle(.appBackgrounded, at: 101) == .rest)
-    #expect(attempting.handle(.appForegrounded, at: 102) == .attemptNow)
+    #expect(attempting.handle(.appForegrounded, at: 102) == .attemptNow(target))
 }
 
-@Test("Backgrounding an idle policy leaves nothing owed")
+@Test("Backgrounding an idle episode leaves nothing owed")
 func backgroundingWithoutAConnectionOwesNothing() {
     // Intent: the round trip through the background does not become a trigger of its own.
     // Why it exists: a manual-class rest must stay resting, and a give-up must not gain a
     //   free episode, just because the user switched apps and came back.
-    var manual = MobileReconnectPolicy()
+    var manual = reconnectEpisode()
     #expect(manual.handle(.attemptFailed(.conversation(.notAdmitted, phase: .establishing)), at: 100)
         == .rest)
     #expect(manual.handle(.appBackgrounded, at: 101) == .rest)
     #expect(manual.handle(.appForegrounded, at: 102) == .rest)
 
-    var fresh = MobileReconnectPolicy()
+    var fresh = MobileReconnectEpisode()
     #expect(fresh.handle(.appBackgrounded, at: 100) == .rest)
     #expect(fresh.handle(.appForegrounded, at: 101) == .rest)
 }
 
 @Test("Foreground return during the automatic phase attempts at once")
 func foregroundReturnAttempts() {
-    var policy = MobileReconnectPolicy()
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow)
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 101) == .wait(until: 103))
-    #expect(policy.handle(.appBackgrounded, at: 102) == .rest)
-    #expect(policy.handle(.appForegrounded, at: 400) == .attemptNow)
+    var episode = reconnectEpisode()
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow(target))
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 101) == .wait(until: 103))
+    #expect(episode.handle(.appBackgrounded, at: 102) == .rest)
+    #expect(episode.handle(.appForegrounded, at: 400) == .attemptNow(target))
 }
 
 @Test("The retry clock is suspended while no usable network path exists")
@@ -379,93 +410,102 @@ func clockSuspendedWithoutAPath() {
     //   coming back is itself the trigger.
     // Why it exists: an attempt that cannot succeed is wasted battery, and a silent wait
     //   with no stated reason reads as a hang.
-    var policy = MobileReconnectPolicy()
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow)
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 101) == .wait(until: 103))
-    #expect(policy.handle(.networkPathChanged(usable: false), at: 102) == .rest)
-    #expect(policy.recoveryPhase(at: 102) == .waitingForNetwork)
+    var episode = reconnectEpisode()
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow(target))
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 101) == .wait(until: 103))
+    #expect(episode.handle(.networkPathChanged(usable: false), at: 102) == .rest)
+    #expect(episode.recoveryPhase(at: 102) == .waitingForNetwork)
     for tick in stride(from: 103.0, through: 5_000.0, by: 100.0) {
-        #expect(policy.handle(.clockFired, at: tick) == .rest)
+        #expect(episode.handle(.clockFired, at: tick) == .rest)
     }
-    #expect(policy.handle(.networkPathChanged(usable: true), at: 5_001) == .attemptNow)
+    #expect(episode.handle(.networkPathChanged(usable: true), at: 5_001) == .attemptNow(target))
     // The outage spent no attempt, so the episode resumes at the delay it was owed rather
     // than several steps further along a backoff the phone never actually tried.
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 5_002)
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 5_002)
         == .wait(until: 5_002 + schedule.delays[2]))
 }
 
 @Test("A user gesture attempts even with no usable path")
 func gestureAttemptsWithoutAPath() {
-    var policy = MobileReconnectPolicy()
-    #expect(policy.handle(.networkPathChanged(usable: false), at: 100) == .rest)
-    #expect(policy.handle(.userRequestedConnect, at: 101) == .attemptNow)
+    var episode = reconnectEpisode()
+    #expect(episode.handle(.networkPathChanged(usable: false), at: 100) == .rest)
+    #expect(episode.handle(.targetReused, at: 101) == .attemptNow(target))
 }
 
 @Test("A manual-class rest answers only a user gesture")
 func manualRestIgnoresAutomaticSignals() {
-    var policy = MobileReconnectPolicy()
-    #expect(policy.handle(.attemptFailed(.conversation(.notAdmitted, phase: .establishing)), at: 100)
+    var episode = reconnectEpisode()
+    #expect(episode.handle(.attemptFailed(.conversation(.notAdmitted, phase: .establishing)), at: 100)
         == .rest)
-    #expect(policy.handle(.networkPathChanged(usable: false), at: 101) == .rest)
-    #expect(policy.handle(.networkPathChanged(usable: true), at: 102) == .rest)
-    #expect(policy.handle(.appForegrounded, at: 103) == .rest)
-    #expect(policy.handle(.clockFired, at: 104) == .rest)
-    #expect(policy.recoveryPhase(at: 104) == .none)
-    #expect(policy.handle(.userRequestedConnect, at: 105) == .attemptNow)
+    #expect(episode.handle(.networkPathChanged(usable: false), at: 101) == .rest)
+    #expect(episode.handle(.networkPathChanged(usable: true), at: 102) == .rest)
+    #expect(episode.handle(.appForegrounded, at: 103) == .rest)
+    #expect(episode.handle(.clockFired, at: 104) == .rest)
+    #expect(episode.recoveryPhase(at: 104) == .none)
+    #expect(episode.handle(.targetReused, at: 105) == .attemptNow(target))
 }
 
-@Test("At most one attempt runs at a time")
-func oneAttemptAtATime() {
-    // Intent: no trigger starts a second attempt while one is still in flight.
+@Test("Automatic signals never overlap an attempt, while a manual gesture replaces it")
+func onlyManualGesturesReplaceAnAttempt() {
+    // Intent: no automatic trigger starts a second attempt while one is still in flight,
+    //   but the user's gesture replaces that attempt immediately.
     // Why it exists: two concurrent attempts would race over the same stored resume
-    //   cursor, which is the one thing the policy must not be able to disturb.
-    var policy = MobileReconnectPolicy()
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow)
-    #expect(policy.handle(.appForegrounded, at: 101) == .rest)
-    #expect(policy.handle(.networkPathChanged(usable: true), at: 102) == .rest)
-    #expect(policy.handle(.clockFired, at: 103) == .rest)
-    #expect(policy.handle(.userRequestedConnect, at: 104) == .rest)
-    #expect(policy.recoveryPhase(at: 104) == .attempting)
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 105) == .attemptNow)
+    //   cursor, which is the one thing the episode must not be able to disturb.
+    var episode = reconnectEpisode()
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow(target))
+    #expect(episode.handle(.appForegrounded, at: 101) == .rest)
+    #expect(episode.handle(.networkPathChanged(usable: true), at: 102) == .rest)
+    #expect(episode.handle(.clockFired, at: 103) == .rest)
+    #expect(episode.handle(.targetReused, at: 104) == .attemptNow(target))
+    #expect(episode.recoveryPhase(at: 104) == .attempting)
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 105) == .attemptNow(target))
 }
 
-@Test("Every phase the policy occupies presents something other than a hang")
+@Test("Every phase the episode occupies presents something other than a hang")
 func recoveryPhaseIsAlwaysPresentable() {
     // Intent: over a full episode -- attempt, wait, outage, give-up -- the recovery phase
     //   always names what the app is doing, and give-up returns to the plain terminal rest.
     // Why it exists: the causal failure state stays visible throughout, so recovery has to
     //   decorate it rather than replace it with a state that never resolves.
-    var policy = MobileReconnectPolicy()
-    #expect(policy.recoveryPhase(at: 99) == .none)
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow)
-    #expect(policy.recoveryPhase(at: 100) == .attempting)
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: 101) == .wait(until: 103))
-    #expect(policy.recoveryPhase(at: 101) == .waiting(until: 103))
-    #expect(policy.handle(.networkPathChanged(usable: false), at: 102) == .rest)
-    #expect(policy.recoveryPhase(at: 102) == .waitingForNetwork)
-    #expect(policy.handle(.networkPathChanged(usable: true), at: 103) == .attemptNow)
-    #expect(policy.recoveryPhase(at: 103) == .attempting)
-    #expect(policy.handle(.attemptConnected, at: 104) == .rest)
-    #expect(policy.recoveryPhase(at: 104) == .none)
+    var episode = reconnectEpisode()
+    #expect(episode.handle(.attemptConnected, at: 1) == .rest)
+    #expect(episode.recoveryPhase(at: 99) == .none)
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 100) == .attemptNow(target))
+    #expect(episode.recoveryPhase(at: 100) == .attempting)
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: 101) == .wait(until: 103))
+    #expect(episode.recoveryPhase(at: 101) == .waiting(until: 103))
+    #expect(episode.handle(.networkPathChanged(usable: false), at: 102) == .rest)
+    #expect(episode.recoveryPhase(at: 102) == .waitingForNetwork)
+    #expect(episode.handle(.networkPathChanged(usable: true), at: 103) == .attemptNow(target))
+    #expect(episode.recoveryPhase(at: 103) == .attempting)
+    #expect(episode.handle(.attemptConnected, at: 104) == .rest)
+    #expect(episode.recoveryPhase(at: 104) == .none)
 }
 
 @Test("Give-up rests in the plain terminal state with no pending recovery")
 func giveUpPresentsPlainRest() {
-    var policy = exhaustedPolicy(startingAt: 100)
-    #expect(policy.recoveryPhase(at: 1_000) == .none)
+    let episode = exhaustedEpisode(startingAt: 100)
+    #expect(episode.recoveryPhase(at: 1_000) == .none)
 }
 
-/// Drives the policy through its whole automatic budget so a test can start from rest.
-private func exhaustedPolicy(startingAt start: TimeInterval) -> MobileReconnectPolicy {
-    var policy = MobileReconnectPolicy()
+/// Drives the episode through its whole automatic budget so a test can start from rest.
+private func exhaustedEpisode(startingAt start: TimeInterval) -> MobileReconnectEpisode {
+    var episode = reconnectEpisode()
     var now = start
     for _ in 0..<budget {
-        if case .wait(let until) = policy.handle(.attemptFailed(lostConnection()), at: now) {
+        if case .wait(let until) = episode.handle(.attemptFailed(lostConnection()), at: now) {
             now = until
-            _ = policy.handle(.clockFired, at: now)
+            _ = episode.handle(.clockFired, at: now)
         }
         now += 1
     }
-    #expect(policy.handle(.attemptFailed(lostConnection()), at: now) == .rest)
-    return policy
+    #expect(episode.handle(.attemptFailed(lostConnection()), at: now) == .rest)
+    return episode
+}
+
+/// Starts an episode through the same target-bearing manual authorization production uses.
+private func reconnectEpisode() -> MobileReconnectEpisode {
+    var episode = MobileReconnectEpisode()
+    #expect(episode.handle(.targetNamed(target), at: 0) == .attemptNow(target))
+    return episode
 }

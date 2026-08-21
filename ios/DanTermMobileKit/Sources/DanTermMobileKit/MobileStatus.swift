@@ -7,7 +7,7 @@
 // connection state and reversed by hand with a flag -- unspellable here.
 //
 // What does not belong here: colors, fonts, and any other UIKit decision (the shell's),
-// when a retry runs (`MobileReconnectPolicy`'s), and where it resumes from
+// when a retry runs (`MobileReconnectEpisode`'s), and where it resumes from
 // (`MobileResumePolicy`'s).
 import Foundation
 
