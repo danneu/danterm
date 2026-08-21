@@ -3,12 +3,20 @@
 // menu-lifetime retention of the ephemeral wrapper.
 import Cocoa
 import DanTermProtocol
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func paneWrapperViewTests() {
+func paneWrapperViewTests() async {
     print("PaneWrapperView")
 
-    uiTest("includeClipboard menu has full composition, all enabled") {
+    await uiTest("includeClipboard menu has full composition, all enabled") {
         // Intent: the terminal right-click menu (includeClipboard: true) is the
         //   toolbar menu plus a Copy/Paste clipboard section on top, with every
         //   item enabled when the pane has a selection, cwd, agent session, and
@@ -32,7 +40,7 @@ func paneWrapperViewTests() {
         try uiExpect(items.allSatisfy(\.isEnabled), "all items should be enabled, got \(items.map { ($0.title, $0.isEnabled) })")
     }
 
-    uiTest("includeClipboard menu disables Copy without a selection") {
+    await uiTest("includeClipboard menu disables Copy without a selection") {
         // Intent: without a terminal selection, Copy is present but disabled,
         //   and the menu's shape (item count) is identical to the with-selection
         //   menu.
@@ -52,7 +60,7 @@ func paneWrapperViewTests() {
                      "menu shape should be selection-independent: \(menu.items.count) vs \(withSelectionCount)")
     }
 
-    uiTest("toolbar menu has no clipboard items") {
+    await uiTest("toolbar menu has no clipboard items") {
         // Intent: includeClipboard: false and the no-arg default both produce
         //   today's toolbar menu composition, with no Copy/Paste items.
         // Why it exists: pins that the toolbar "..." button and drag-handle
@@ -71,7 +79,7 @@ func paneWrapperViewTests() {
         }
     }
 
-    uiTest("menu actions route to the clicked pane and its terminal") {
+    await uiTest("menu actions route to the clicked pane and its terminal") {
         // Intent: performing menu items dispatches the right effects -- Copy and
         //   Paste act on the pane's terminal view; Split Right, Close Pane, and
         //   Zoom send pane-scoped messages carrying this pane's id.
@@ -108,7 +116,7 @@ func paneWrapperViewTests() {
         try uiExpect(sawClose, "Close Pane should send .requestClosePane(paneId:)")
     }
 
-    uiTest("model-dependent items follow pane state") {
+    await uiTest("model-dependent items follow pane state") {
         // Intent: a pane with no cwd gets a disabled Copy cwd item; a pane with
         //   no agent session gets no Copy Agent Session ID item at all.
         // Why it exists: pins the two model-driven item states on the unified
@@ -124,7 +132,7 @@ func paneWrapperViewTests() {
                      "agent session item should be absent when the pane has no agent session")
     }
 
-    uiTest("agent menu visibility and copied id follow the session model") {
+    await uiTest("agent menu visibility and copied id follow the session model") {
         let agent = AgentSession(kind: "claude", sessionId: "snapshot-session")!
         let fx = makePaneMenuFixture(agentSession: agent)
         fx.wrapper.menuPasteboard = NSPasteboard(
@@ -150,7 +158,7 @@ func paneWrapperViewTests() {
         )
     }
 
-    uiTest("Copy Pane ID copies the wrapper's full pane UUID") {
+    await uiTest("Copy Pane ID copies the wrapper's full pane UUID") {
         let fx = makePaneMenuFixture()
         fx.wrapper.menuPasteboard = NSPasteboard(
             name: .init("com.danterm.tests.pane-id.\(UUID().uuidString)")
@@ -166,7 +174,7 @@ func paneWrapperViewTests() {
         )
     }
 
-    uiTest("zoom item reflects zoom and split state") {
+    await uiTest("zoom item reflects zoom and split state") {
         // Intent: a single-pane unzoomed wrapper shows a disabled "Zoom Pane";
         //   a zoomed wrapper shows an enabled "Unzoom Pane".
         // Why it exists: pins the zoom affordance states on the unified menu
@@ -180,7 +188,7 @@ func paneWrapperViewTests() {
         try uiExpect(unzoomItem.isEnabled, "Unzoom Pane should be enabled while zoomed")
     }
 
-    uiTest("an unrendered wrapper exposes neutral zoom affordances") {
+    await uiTest("an unrendered wrapper exposes neutral zoom affordances") {
         // Intent: wrapper construction claims no zoom or split fact before its
         //   first toolbar render.
         // Why it exists: constructor booleans used to make a wrapper look
@@ -189,8 +197,8 @@ func paneWrapperViewTests() {
         let model = makeSinglePaneModel(hasSplits: true)
         let wrapper = PaneWrapperView(
             paneId: model.paneId,
-            terminalView: TerminalView(),
-            runtime: AppRuntime(model: model.model)
+            terminalView: FakeTerminalSession(),
+            runtime: makeUITestRuntime(model: model.model)
         )
         wrapper.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
         wrapper.layoutSubtreeIfNeeded()
@@ -201,7 +209,7 @@ func paneWrapperViewTests() {
         try uiExpect(!zoomItem.isEnabled, "an unrendered wrapper should disable Zoom Pane")
     }
 
-    uiTest("persistent wrapper zoom affordances follow toolbar projection") {
+    await uiTest("persistent wrapper zoom affordances follow toolbar projection") {
         // Intent: one wrapper changes its menu and its zoom button as the tab
         //   moves through single-pane, split, zoomed, and single-pane states.
         //   The button is present exactly while the pane is zoomed or its tab
@@ -240,7 +248,7 @@ func paneWrapperViewTests() {
             "closing back down to one pane should collapse the button again")
     }
 
-    uiTest("a neutral whole render clears every populated toolbar field") {
+    await uiTest("a neutral whole render clears every populated toolbar field") {
         // Intent: applying one complete render replaces every toolbar field,
         //   including nil, false, and zero values in the next render.
         // Why it exists: partial-update defaults could preserve stale chrome
@@ -294,7 +302,7 @@ func paneWrapperViewTests() {
         try uiExpect(releaseButton?.isHidden == true, "neutral render should hide grid take-back")
     }
 
-    uiTest("a render offered before its wrapper exists is retried unchanged") {
+    await uiTest("a render offered before its wrapper exists is retried unchanged") {
         // Intent: a reconcile with no wrapper does not record the desired
         //   toolbar render as applied.
         // Why it exists: the runtime cache used to advance even when optional
@@ -302,14 +310,14 @@ func paneWrapperViewTests() {
         //   unchanged value.
         // Scenario: spec-first session host appears after the chrome pass.
         let model = makeSinglePaneModel(cwd: nil, hasSplits: false)
-        let runtime = AppRuntime(model: model.model)
+        let runtime = makeUITestRuntime(model: model.model)
         let desired = desiredPaneToolbar(in: runtime.model)
         var wrapper: PaneWrapperView?
 
         offerPaneToolbarRenders(desired) { _ in wrapper }
         wrapper = PaneWrapperView(
             paneId: model.paneId,
-            terminalView: TerminalView(),
+            terminalView: FakeTerminalSession(),
             runtime: runtime
         )
         offerPaneToolbarRenders(desired) { _ in wrapper }
@@ -324,7 +332,7 @@ func paneWrapperViewTests() {
         try uiExpect(visibleText.contains("Terminal"), "the retried render should reach the new wrapper")
     }
 
-    uiTest("the zoom button states which direction the next click goes") {
+    await uiTest("the zoom button states which direction the next click goes") {
         // Intent: tooltip, accessibility description, and accent fill all flip
         //   with the projected zoom state, in both directions, on the one
         //   persistent button.
@@ -364,7 +372,7 @@ func paneWrapperViewTests() {
             "the accent fill should come back off")
     }
 
-    uiTest("the take-back affordance follows the projected claim and clears it in one click") {
+    await uiTest("the take-back affordance follows the projected claim and clears it in one click") {
         // Intent: the button appears exactly while the toolbar projection reports
         //   a claimed grid, and one click sends the clear for this pane.
         // Why it exists: a claimed grid is durable -- no Mac layout event ends it
@@ -410,7 +418,7 @@ func paneWrapperViewTests() {
             "a released pane should collapse the button again, got \(releaseButton.frame.width)")
     }
 
-    uiTest("menu keeps the wrapper alive and actions still fire after teardown") {
+    await uiTest("menu keeps the wrapper alive and actions still fire after teardown") {
         // Intent: a built menu strongly retains the ephemeral wrapper, so its
         //   actions still dispatch after a reconcile releases the wrapper while
         //   the menu is tracking.
@@ -422,8 +430,8 @@ func paneWrapperViewTests() {
         // draining them the wrapper would survive anyway and the pre-fix run
         // would silently pass.
         let model = makeSinglePaneModel()
-        let runtime = AppRuntime(model: model.model)
-        let terminal = TerminalView()
+        let runtime = makeUITestRuntime(model: model.model)
+        let terminal = FakeTerminalSession()
         var menu: NSMenu?
         weak var observer: PaneWrapperView?
 
@@ -446,7 +454,7 @@ func paneWrapperViewTests() {
         try uiExpect(sawClose, "Close Pane should still dispatch after the wrapper's owner released it")
     }
 
-    uiTest("every pane-menu entry point outlines its pane while the menu tracks") {
+    await uiTest("every pane-menu entry point outlines its pane while the menu tracks") {
         // Intent: each of the three menus the wrapper builds -- the terminal
         //   right-click, the "..." toolbar button, and the drag-handle
         //   right-click -- mounts the outline when it opens and removes it when
@@ -487,7 +495,7 @@ func paneWrapperViewTests() {
         }
     }
 
-    uiTest("the outline changes neither pane layout nor hit testing") {
+    await uiTest("the outline changes neither pane layout nor hit testing") {
         // Intent: mounting and unmounting the outline leaves every laid-out
         //   subview frame in the pane identical, and leaves the same view
         //   answering a hit test in the terminal area.
@@ -523,7 +531,7 @@ func paneWrapperViewTests() {
         try uiExpect(fx.wrapper.hitTest(point) === hitBefore, "removing the outline should restore hit testing")
     }
 
-    uiTest("the outline draws a ring at its edge and leaves the pane content clear") {
+    await uiTest("the outline draws a ring at its edge and leaves the pane content clear") {
         // Intent: drawing the outline paints along its border and paints
         //   nothing in the middle.
         // Why it exists: the ring is handed to AppKit's focus-ring machinery
@@ -574,8 +582,8 @@ private func paneWrapperDescendants(of root: NSView) -> [NSView] {
 
 private struct PaneMenuFixture {
     let wrapper: PaneWrapperView
-    let runtime: AppRuntime
-    let terminal: TerminalView
+    let runtime: RecordingAppRuntime
+    let terminal: FakeTerminalSession
     let paneId: PaneId
 }
 
@@ -610,8 +618,8 @@ private func makePaneMenuFixture(
     hasSplits: Bool = true
 ) -> PaneMenuFixture {
     let (model, paneId) = makeSinglePaneModel(cwd: cwd, hasSplits: hasSplits)
-    let runtime = AppRuntime(model: model)
-    let terminal = TerminalView()
+    let runtime = makeUITestRuntime(model: model)
+    let terminal = FakeTerminalSession()
     if let agentSession, let sessionId = runtime.model.pane(paneId)?.session?.id {
         runtime.model.updateSession(sessionId) {
             reduceSession(&$0, report: .agentAttached(agentSession))

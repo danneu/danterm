@@ -2,12 +2,20 @@
 // detached NSMenus after AppKit validation so manually disabled items cannot be
 // re-enabled by autoenablesItems drift.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func sidebarContextMenuTests() {
+func sidebarContextMenuTests() async {
     print("SidebarContextMenu")
 
-    uiTest("single group keeps Delete Group disabled after menu update") {
+    await uiTest("single group keeps Delete Group disabled after menu update") {
         // Intent: a single-group sidebar context menu keeps Delete Group disabled
         //   even after AppKit's menu validation pass.
         // Why it exists: pins the drift-audit bug where `isEnabled = false` was
@@ -25,7 +33,7 @@ func sidebarContextMenuTests() {
             "Delete Group should stay disabled when only one group exists")
     }
 
-    uiTest("multiple groups keep Delete Group enabled after menu update") {
+    await uiTest("multiple groups keep Delete Group enabled after menu update") {
         let (sidebar, model) = makeSidebarContextMenuHarness(groupCount: 2)
 
         let menu = try uiRequire(sidebar.contextMenu(forGroupId: model.groups[0].id),
@@ -37,7 +45,7 @@ func sidebarContextMenuTests() {
             "Delete Group should be enabled when multiple groups exist")
     }
 
-    uiTest("a right-click on a tab marks the clicked row so AppKit outlines it") {
+    await uiTest("a right-click on a tab marks the clicked row so AppKit outlines it") {
         // Intent: after a right-click on a sidebar tab, the outline view knows
         //   which row was clicked.
         // Why it exists: AppKit draws the context-menu outline only from
@@ -72,7 +80,7 @@ func sidebarContextMenuTests() {
         _ = sidebar
     }
 
-    uiTest("group menu items dispatch their message for the clicked group") {
+    await uiTest("group menu items dispatch their message for the clicked group") {
         // Intent: firing a group context-menu item sends the message that item
         //   names, carrying the group the menu was built for.
         // Why it exists: the item's action and its payload used to be set
@@ -101,7 +109,7 @@ func sidebarContextMenuTests() {
             "Delete Group should target the clicked group, got \(deletedId)")
     }
 
-    uiTest("Rename Group sends its message after menu tracking ends") {
+    await uiTest("Rename Group sends its message after menu tracking ends") {
         // Intent: Rename Group dispatches on a later main-queue turn, not from
         //   the menu action itself.
         // Why it exists: the model's rename begin drives a reconcile pass that
@@ -117,7 +125,7 @@ func sidebarContextMenuTests() {
         try uiExpect(runtime.sentMessages.isEmpty,
             "Rename Group dispatched synchronously: \(runtime.sentMessages)")
 
-        try pumpMainQueue(untilTrue: { !runtime.sentMessages.isEmpty })
+        try await pumpMainQueue(untilTrue: { !runtime.sentMessages.isEmpty })
         guard case .beginSidebarRename(.group(let renamedId)) = try onlySentMessage(runtime) else {
             throw UITestFailure(message: "Rename Group sent \(runtime.sentMessages)")
         }
@@ -125,7 +133,7 @@ func sidebarContextMenuTests() {
             "Rename Group should target the clicked group, got \(renamedId)")
     }
 
-    uiTest("tab menu items dispatch their message for the selected tabs") {
+    await uiTest("tab menu items dispatch their message for the selected tabs") {
         // Intent: firing each batch item in the tab context menu sends that
         //   item's message carrying the multi-select resolution.
         // Why it exists: every batch item used to carry the same untyped id box,
@@ -194,7 +202,7 @@ func sidebarContextMenuTests() {
             "Close should target the selection, got \(closedIds)")
     }
 
-    uiTest("Rename Tab targets the clicked row and sends after menu tracking ends") {
+    await uiTest("Rename Tab targets the clicked row and sends after menu tracking ends") {
         // Intent: Rename Tab acts on the clicked row alone, and dispatches on a
         //   later main-queue turn like Rename Group does.
         // Why it exists: Rename Tab is the one item that ignores the multi-select
@@ -209,7 +217,7 @@ func sidebarContextMenuTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty,
             "Rename Tab dispatched synchronously: \(fx.runtime.sentMessages)")
 
-        try pumpMainQueue(untilTrue: { !fx.runtime.sentMessages.isEmpty })
+        try await pumpMainQueue(untilTrue: { !fx.runtime.sentMessages.isEmpty })
         guard case .beginSidebarRename(.tab(let renamedId)) = try onlySentMessage(fx.runtime) else {
             throw UITestFailure(message: "Rename Tab sent \(fx.runtime.sentMessages)")
         }
@@ -223,9 +231,10 @@ func sidebarContextMenuTests() {
 @MainActor
 private func makeSidebarRightClickHarness() -> (SidebarView, NSOutlineView, NSWindow) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
-    sidebar.runtime = AppRuntime()
+    sidebar.runtime = makeUITestRuntime()
     let window = NSWindow(
         contentRect: sidebar.frame, styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = sidebar
     window.layoutIfNeeded()
 
@@ -266,9 +275,9 @@ private func makeSidebarContextMenuHarness(groupCount: Int) -> (SidebarView, App
 @MainActor
 private func makeSidebarGroupMenuHarness(
     groupCount: Int
-) -> (sidebar: SidebarView, runtime: AppRuntime, model: AppModel) {
+) -> (sidebar: SidebarView, runtime: RecordingAppRuntime, model: AppModel) {
     let (sidebar, model) = makeSidebarContextMenuHarness(groupCount: groupCount)
-    let runtime = AppRuntime()
+    let runtime = makeUITestRuntime()
     sidebar.runtime = runtime
     return (sidebar, runtime, model)
 }
@@ -279,10 +288,10 @@ private func makeSidebarGroupMenuHarness(
 /// unselected tab keeps `Move to New Group` from extracting every live tab.
 @MainActor
 private func makeSidebarTabMenuHarness() throws -> (
-    sidebar: SidebarView, runtime: AppRuntime, tabIds: [TabId], clickedRow: Int
+    sidebar: SidebarView, runtime: RecordingAppRuntime, tabIds: [TabId], clickedRow: Int
 ) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
-    let runtime = AppRuntime()
+    let runtime = makeUITestRuntime()
     sidebar.runtime = runtime
 
     var panes: [PaneId] = []
@@ -326,7 +335,7 @@ private func fireContextMenuItem(_ item: NSMenuItem) throws {
 /// Reads the single message a fired item dispatched, so a test that expects one
 /// dispatch fails loudly on zero or many.
 @MainActor
-private func onlySentMessage(_ runtime: AppRuntime) throws -> Msg {
+private func onlySentMessage(_ runtime: RecordingAppRuntime) throws -> Msg {
     try uiExpect(runtime.sentMessages.count == 1,
         "expected exactly one message, got \(runtime.sentMessages)")
     return runtime.sentMessages[0]

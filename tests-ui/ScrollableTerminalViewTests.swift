@@ -4,12 +4,20 @@
 // scroll chrome the same view sizes from published session state. Pointer
 // routing for the view lives in its own suite.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func scrollableTerminalViewTests() {
+func scrollableTerminalViewTests() async {
     print("ScrollableTerminalView")
 
-    uiTest("gutter is reserved on all four sides with no ring showing") {
+    await uiTest("gutter is reserved on all four sides with no ring showing") {
         // Intent: the terminal area sits inset by 2pt on every side of the
         //   scroll wrapper, with no focus ring applied.
         // Why it exists: the ring is a CALayer border, which draws inward from
@@ -23,7 +31,7 @@ func scrollableTerminalViewTests() {
                      "terminal area \(grid) is not the wrapper bounds inset by 2pt (\(expected))")
     }
 
-    uiTest("gutter does not move when focus and alert state change") {
+    await uiTest("gutter does not move when focus and alert state change") {
         // Intent: the terminal area's size and position are identical with the
         //   ring off, on for focus, on for an alert, and back off.
         // Why it exists: a gutter that appeared only while a ring showed would
@@ -45,7 +53,7 @@ func scrollableTerminalViewTests() {
                      "grid did not shrink by the gutter on both axes: \(idle)")
     }
 
-    uiTest("ring never draws wider than the reserved gutter") {
+    await uiTest("ring never draws wider than the reserved gutter") {
         // Intent: the drawn border width fits inside the space the layout
         //   reserved for it, measured from the geometry rather than from the
         //   constant that produced it.
@@ -63,7 +71,7 @@ func scrollableTerminalViewTests() {
         try uiExpect(drawn <= reserved, "ring width \(drawn) exceeds the reserved gutter \(reserved)")
     }
 
-    uiTest("ring color follows focus and alert state") {
+    await uiTest("ring color follows focus and alert state") {
         // Intent: focused is green, alerted-and-unfocused is red, idle is no
         //   ring, and focus wins when a focused pane also has an alert.
         // Why it exists: pins the precedence the projection feeds in, and pins
@@ -92,7 +100,7 @@ func scrollableTerminalViewTests() {
         }
     }
 
-    uiTest("gutter paints the session background from construction and after a theme change") {
+    await uiTest("gutter paints the session background from construction and after a theme change") {
         // Intent: the gutter is the pane's terminal background at the moment
         //   the pane appears, and follows every later background the session
         //   publishes.
@@ -117,7 +125,7 @@ func scrollableTerminalViewTests() {
                         + "\(String(describing: fx.scrollWrapper.layer?.backgroundColor))")
     }
 
-    uiTest("a pane with no layout metrics scrolls nowhere and sizes to the viewport") {
+    await uiTest("a pane with no layout metrics scrolls nowhere and sizes to the viewport") {
         // Intent: a session that has not laid out a grid yet gives its document
         //   view exactly the viewport height and leaves the scroll origin at rest.
         // Why it exists: missing layout metrics is the one absence the session
@@ -142,7 +150,7 @@ func scrollableTerminalViewTests() {
                      "a pane without metrics scrolled to \(chrome.contentView.bounds.origin.y)")
     }
 
-    uiTest("a pane with metrics sizes its document to scrollback and restores its row") {
+    await uiTest("a pane with metrics sizes its document to scrollback and restores its row") {
         // Intent: with a cell height published, the document view spans the whole
         //   scrollback in pixels and the clip view sits at the row the session
         //   reports.
@@ -188,7 +196,7 @@ private func scrollChrome(of wrapper: ScrollableTerminalView) throws -> NSScroll
 private struct GutterFixture {
     let wrapper: PaneWrapperView
     let scrollWrapper: ScrollableTerminalView
-    let terminal: TerminalView
+    let terminal: FakeTerminalSession
 
     /// The terminal area's rect in the scroll wrapper's own coordinates, which is
     /// what the gutter is an inset of. Reading it through `convert` keeps the
@@ -209,7 +217,7 @@ private func makeGutterFixture(
     var model = AppModel(groups: [group])
     model.selectedTabId = tab.id
 
-    let terminal = TerminalView()
+    let terminal = FakeTerminalSession()
     // Layer-backed so "the terminal view's own layer carries no ring" is a real
     // reading of a real layer rather than a nil-coalesced default.
     terminal.wantsLayer = true
@@ -218,7 +226,7 @@ private func makeGutterFixture(
         scrollPosition: .init(total: 24, offset: 0, length: 24), background: background)
     let wrapper = PaneWrapperView(
         paneId: paneId, terminalView: terminal,
-        runtime: AppRuntime(model: model))
+        runtime: makeUITestRuntime(model: model))
     wrapper.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
     wrapper.layoutSubtreeIfNeeded()
 

@@ -1,16 +1,24 @@
 // Integration tests for AppKit lifecycle and occlusion forwarding into terminal sessions.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func appPresentationLifecycleTests() {
+func appPresentationLifecycleTests() async {
     print("AppPresentationLifecycle")
 
-    uiTest("workspace sleep and wake reach sessions until observer teardown") {
-        let runtime = AppRuntime()
+    await uiTest("workspace sleep and wake reach sessions until observer teardown") {
+        let runtime = makeUITestRuntime()
         let paneId = PaneId()
-        let session = TerminalView()
+        let session = FakeTerminalSession()
         runtime.installTerminalSession(session, paneId: paneId)
-        let delegate = AppDelegate()
+        let delegate = AppDelegate(instancePaths: runtime.instancePaths)
         delegate.runtime = runtime
         let center = NSWorkspace.shared.notificationCenter
 
@@ -31,14 +39,14 @@ func appPresentationLifecycleTests() {
         )
     }
 
-    uiTest("window occlusion reaches session visibility and reveals once") {
+    await uiTest("window occlusion reaches session visibility and reveals once") {
         let paneId = PaneId()
         let tabId = TabId()
         let groupId = GroupId()
-        let session = TerminalView()
+        let session = FakeTerminalSession()
         let pane = PaneModel(id: paneId)
         let tab = TabModel(id: tabId, customTitle: nil, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
-        let runtime = AppRuntime(model: AppModel(
+        let runtime = makeUITestRuntime(model: AppModel(
             groups: [GroupModel(id: groupId, name: "General", tabs: [tab])],
             selectedTabId: tabId
         ))
@@ -50,7 +58,7 @@ func appPresentationLifecycleTests() {
             defer: false
         )
         runtime.window = window
-        let delegate = AppDelegate()
+        let delegate = AppDelegate(instancePaths: runtime.instancePaths)
         delegate.runtime = runtime
 
         window.reportedOcclusionState = []

@@ -1,17 +1,24 @@
 // UI-harness tests for model-owned pane geometry in the flat tab container.
 import Cocoa
 import PaneProcessLifecycle
+import ChipArtwork
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func splitContainerViewTests() {
+func splitContainerViewTests() async {
     print("SplitContainerView")
 
-    uiTest("nested panes and dividers are direct model-laid-out children") {
+    await uiTest("nested panes and dividers are direct model-laid-out children") {
         let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
-        let runtime = AppRuntime()
-        runtime.installTerminalSession(TerminalView(), paneId: paneA)
-        runtime.installTerminalSession(TerminalView(), paneId: paneB)
-        runtime.installTerminalSession(TerminalView(), paneId: paneC)
+        let runtime = makeUITestRuntime()
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneA)
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneB)
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneC)
         let root = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
             first: .leaf(PaneModel(id: paneA)),
@@ -45,7 +52,7 @@ func splitContainerViewTests() {
             "layout must not report ratios back to the model")
     }
 
-    uiTest("hidden and visible containers use identical geometry") {
+    await uiTest("hidden and visible containers use identical geometry") {
         let splitId = SplitId()
         let visible = makeSplitContainer(splitId: splitId, ratio: 0.7)
         let hidden = makeSplitContainer(splitId: splitId, ratio: 0.7)
@@ -59,7 +66,7 @@ func splitContainerViewTests() {
             "visibility changed model-owned geometry")
     }
 
-    uiTest("a hidden container lands model geometry from its own ops") {
+    await uiTest("a hidden container lands model geometry from its own ops") {
         // Intent: a hidden container that receives a tree update and then a zoom
         //   lands every pane wrapper at its paneLayout frame, with no
         //   ensureLaidOut() call anywhere in the sequence.
@@ -68,9 +75,9 @@ func splitContainerViewTests() {
         //   geometry on their own.
         // Scenario: spec-first background split followed by a background zoom.
         let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
-        let runtime = AppRuntime()
-        runtime.installTerminalSession(TerminalView(), paneId: paneA)
-        runtime.installTerminalSession(TerminalView(), paneId: paneB)
+        let runtime = makeUITestRuntime()
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneA)
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneB)
         let splitRoot = SplitNodeModel.split(
             id: splitId, direction: .horizontal,
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
@@ -101,7 +108,7 @@ func splitContainerViewTests() {
             "a background zoom left the unzoomed sibling showing")
     }
 
-    uiTest("a selection switch lays out only the revealed container") {
+    await uiTest("a selection switch lays out only the revealed container") {
         // Intent: applying the hide/reveal pair a selection change emits leaves
         //   the hidden container's panes untouched, while the revealed
         //   container's panes land at paneLayout for its current bounds.
@@ -111,9 +118,9 @@ func splitContainerViewTests() {
         // Scenario: both containers are resized with the window, then selection
         //   moves from the visible tab to the hidden one.
         let paneA = PaneId(), paneB = PaneId()
-        let runtime = AppRuntime()
-        runtime.installTerminalSession(TerminalView(), paneId: paneA)
-        runtime.installTerminalSession(TerminalView(), paneId: paneB)
+        let runtime = makeUITestRuntime()
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneA)
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneB)
         let rootA = SplitNodeModel.leaf(PaneModel(id: paneA))
         let rootB = SplitNodeModel.leaf(PaneModel(id: paneB))
         let selected = persistentContainer(root: rootA, runtime: runtime)
@@ -142,9 +149,9 @@ func splitContainerViewTests() {
             "the revealed container did not land its pane at the model frame")
     }
 
-    uiTest("reapplying layout writes no pane frame and emits no ratio") {
+    await uiTest("reapplying layout writes no pane frame and emits no ratio") {
         let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
-        let runtime = AppRuntime()
+        let runtime = makeUITestRuntime()
         let terminalA = FrameRecordingTerminalView()
         let terminalB = FrameRecordingTerminalView()
         runtime.installTerminalSession(terminalA, paneId: paneA)
@@ -167,7 +174,7 @@ func splitContainerViewTests() {
             "unchanged layout emitted ratio feedback")
     }
 
-    uiTest("Claude Code 2026-08-16 nested split submits only true model slots") {
+    await uiTest("Claude Code 2026-08-16 nested split submits only true model slots") {
         // Intent: splitting one column submits one new grid for each affected pane
         //   and none for the untouched sibling, whether the tab is visible or hidden.
         // Why it exists: the 2026-08-16 Claude Code incident submitted a temporary
@@ -176,13 +183,13 @@ func splitContainerViewTests() {
         for hidden in [false, true] {
             let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
             let outerSplit = SplitId(), nestedSplit = SplitId()
-            let controllerA = TerminalPaneSessionController()
-            let controllerB = TerminalPaneSessionController()
-            let controllerC = TerminalPaneSessionController()
-            let runtime = AppRuntime()
-            runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerA, fontSize: 13), paneId: paneA)
-            runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerB, fontSize: 13), paneId: paneB)
-            runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerC, fontSize: 13), paneId: paneC)
+            let controllerA = FakeTerminalPaneSessionController()
+            let controllerB = FakeTerminalPaneSessionController()
+            let controllerC = FakeTerminalPaneSessionController()
+            let runtime = makeUITestRuntime()
+            runtime.installTerminalSession(makeTestPane(controller: controllerA, fontSize: 13), paneId: paneA)
+            runtime.installTerminalSession(makeTestPane(controller: controllerB, fontSize: 13), paneId: paneB)
+            runtime.installTerminalSession(makeTestPane(controller: controllerC, fontSize: 13), paneId: paneC)
             let oldRoot = SplitNodeModel.split(
                 id: outerSplit, direction: .horizontal,
                 first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
@@ -219,16 +226,16 @@ func splitContainerViewTests() {
         }
     }
 
-    uiTest("only divider gestures change ratios and the model round trip moves them") {
+    await uiTest("only divider gestures change ratios and the model round trip moves them") {
         // Intent: resize, zoom, reveal, and minimum clamping emit no ratio message;
         //   a drag emits one clamped ratio and moves only through returned model layout.
         // Why it exists: AppKit layout used to overwrite stored ratios after a
         //   minimum clamp and deferred divider motion behind the reconcile timer.
         // Scenario: an extreme ratio shrinks below two minima, grows, then receives a drag.
         let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
-        let runtime = AppRuntime()
-        runtime.installTerminalSession(TerminalView(), paneId: paneA)
-        runtime.installTerminalSession(TerminalView(), paneId: paneB)
+        let runtime = makeUITestRuntime()
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneA)
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneB)
         var root = SplitNodeModel.split(
             id: splitId, direction: .horizontal,
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
@@ -262,11 +269,11 @@ func splitContainerViewTests() {
             "divider did not move within the synchronous model round trip")
     }
 
-    uiTest("divider hit area and accessibility value follow clamped layout") {
+    await uiTest("divider hit area and accessibility value follow clamped layout") {
         let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
-        let runtime = AppRuntime()
-        runtime.installTerminalSession(TerminalView(), paneId: paneA)
-        runtime.installTerminalSession(TerminalView(), paneId: paneB)
+        let runtime = makeUITestRuntime()
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneA)
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneB)
         let root = SplitNodeModel.split(
             id: splitId, direction: .horizontal,
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
@@ -286,11 +293,11 @@ func splitContainerViewTests() {
             "accessibility value did not report the clamped model layout")
     }
 
-    uiTest("known wrapper rect derives its terminal grid after fixed chrome") {
+    await uiTest("known wrapper rect derives its terminal grid after fixed chrome") {
         let paneId = PaneId()
-        let controller = TerminalPaneSessionController()
-        let terminal = SwiftTerminalSessionView(controller: controller, fontSize: 13)
-        let runtime = AppRuntime()
+        let controller = FakeTerminalPaneSessionController()
+        let terminal = makeTestPane(controller: controller, fontSize: 13)
+        let runtime = makeUITestRuntime()
         runtime.installTerminalSession(terminal, paneId: paneId)
         let container = persistentContainer(
             root: .leaf(PaneModel(id: paneId)), runtime: runtime)
@@ -299,25 +306,37 @@ func splitContainerViewTests() {
             contentRect: container.frame,
             styleMask: [.titled], backing: .buffered, defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentView = container
         defer { window.close() }
 
         container.rebuild()
         container.layoutSubtreeIfNeeded()
 
-        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 12, rows: 10),
+        // The claim is that the child hears about the terminal's own rectangle, not the
+        // wrapper's: the submitted grid matches the rectangle left after chrome, and is
+        // shorter than the one the whole 200pt wrapper would imply.
+        let cell = paneCellSize(terminal, fontSize: 13)
+        try uiExpect(
+            controller.gridDimensions.last == expectedGrid(paneSize: terminal.bounds.size, metrics: uiTestMetrics(fontSize: 13)),
             "100x200 wrapper did not subtract fixed chrome: \(controller.gridDimensions)")
+        guard let withoutChrome = terminalGridDimensions(
+            size: TerminalPointSize(width: 100, height: 200),
+            cellSize: TerminalPointSize(width: cell.width, height: cell.height)
+        ) else { throw UITestFailure(message: "the wrapper rect derived no grid") }
+        try uiExpect((controller.gridDimensions.last?.rows ?? 0) < withoutChrome.rows,
+            "the wrapper's fixed chrome was not subtracted at all: \(controller.gridDimensions)")
     }
 
-    uiTest("container rebuild reparents the same pane wrapper") {
+    await uiTest("container rebuild reparents the same pane wrapper") {
         // Intent: rebuilding pane containers preserves both the terminal session
         //   and its runtime-owned wrapper host.
         // Why it exists: pane moves, splits, and zoom toggles must preserve
         //   toolbar and search-overlay identity with the terminal host.
         // Scenario: the incremental-container reconciliation performance fix.
         let paneId = PaneId()
-        let terminal = TerminalView()
-        let runtime = AppRuntime()
+        let terminal = FakeTerminalSession()
+        let runtime = makeUITestRuntime()
         runtime.installTerminalSession(terminal, paneId: paneId)
         let root = SplitNodeModel.leaf(PaneModel(id: paneId))
         let container = SplitContainerView(
@@ -337,15 +356,15 @@ func splitContainerViewTests() {
         try uiExpect(firstWrapper === secondWrapper, "rebuild should preserve wrapper chrome")
     }
 
-    uiTest("tree update preserves wrapper and search overlay without ratio feedback") {
+    await uiTest("tree update preserves wrapper and search overlay without ratio feedback") {
         // Intent: splitting a pane updates one live tree while preserving the
         //   pane wrapper, its search overlay, and every stored split ratio.
         // Why it exists: the old whole-tab rebuild discarded pane chrome and
         //   could feed layout-produced divider positions back into the model.
         // Scenario: the incremental-container reconciliation performance fix.
         let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
-        let terminalA = TerminalView(), terminalB = TerminalView()
-        let runtime = AppRuntime()
+        let terminalA = FakeTerminalSession(), terminalB = FakeTerminalSession()
+        let runtime = makeUITestRuntime()
         runtime.installTerminalSession(terminalA, paneId: paneA)
         runtime.installTerminalSession(terminalB, paneId: paneB)
         let oldRoot = SplitNodeModel.leaf(PaneModel(id: paneA))
@@ -395,7 +414,7 @@ func splitContainerViewTests() {
         try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty, "swap or close layout emitted split-ratio feedback")
     }
 
-    uiTest("flat split preserves focus before reconciliation selects the new pane") {
+    await uiTest("flat split preserves focus before reconciliation selects the new pane") {
         // Intent: a structural split keeps the existing responder mounted, then
         //   the model-selected new pane receives focus in the same reconcile.
         // Why it exists: the 2026-08-12 incident stranded first responder while
@@ -410,7 +429,7 @@ func splitContainerViewTests() {
             ratio: 0.5
         )
         let oldTab = TabModel(id: tabId, paneTree: PaneTree(root: oldRoot, focusedPaneId: paneA))
-        let runtime = AppRuntime(model: AppModel(
+        let runtime = makeUITestRuntime(model: AppModel(
             groups: [GroupModel(id: GroupId(), name: "General", tabs: [oldTab])],
             selectedTabId: tabId
         ))
@@ -448,7 +467,7 @@ func splitContainerViewTests() {
             "the first key event did not reach the repaired pane")
     }
 
-    uiTest("pane focus reconciliation repairs a reparented search field") {
+    await uiTest("pane focus reconciliation repairs a reparented search field") {
         // Intent: an active search field remains the desired responder across a
         //   pane-tree update even though AppKit discards its field editor.
         // Why it exists: search ownership is the second pane-local focus target;
@@ -470,7 +489,7 @@ func splitContainerViewTests() {
             groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
             selectedTabId: tabId
         )
-        let runtime = AppRuntime(model: model)
+        let runtime = makeUITestRuntime(model: model)
         runtime.installTerminalSession(FocusableTerminalView(), paneId: paneA)
         runtime.installTerminalSession(FocusableTerminalView(), paneId: paneB)
         let container = persistentContainer(root: oldRoot, runtime: runtime)
@@ -493,7 +512,7 @@ func splitContainerViewTests() {
             "declarative focus pass did not restore the search field editor")
     }
 
-    uiTest("a click in a pane's search field reports field focus for that pane") {
+    await uiTest("a click in a pane's search field reports field focus for that pane") {
         // Intent: the gesture that hands a search field key focus reports it,
         //   for the focused pane and for one the user clicks into cold.
         // Why it exists: focus reports come from interaction sites now. Without
@@ -516,7 +535,7 @@ func splitContainerViewTests() {
         )
         model.updatePane(paneA) { $0.live.search = SearchModel(needle: "hit") }
         model.updatePane(paneB) { $0.live.search = SearchModel(needle: "hit") }
-        let runtime = AppRuntime(model: model)
+        let runtime = makeUITestRuntime(model: model)
 
         for paneId in [paneA, paneB] {
             runtime.sentMessages = []
@@ -534,7 +553,7 @@ func splitContainerViewTests() {
         }
     }
 
-    uiTest("the focus pass's search-field repair dispatches nothing") {
+    await uiTest("the focus pass's search-field repair dispatches nothing") {
         // Intent: a sweep that repairs the responder to a pane's search field
         //   originates no Msg.
         // Why it exists: I1 -- a reconcile pass that sends re-enters the whole
@@ -551,7 +570,7 @@ func splitContainerViewTests() {
             selectedTabId: tabId
         )
         model.updatePane(paneId) { $0.live.search = SearchModel(needle: "hit") }
-        let runtime = AppRuntime(model: model)
+        let runtime = makeUITestRuntime(model: model)
         let terminal = FocusableTerminalView()
         runtime.installTerminalSession(terminal, paneId: paneId)
         let container = persistentContainer(root: root, runtime: runtime)
@@ -575,7 +594,7 @@ func splitContainerViewTests() {
             "the repair changed search focus ownership")
     }
 
-    uiTest("a responder move with no gesture reports nothing and the next sweep repairs it") {
+    await uiTest("a responder move with no gesture reports nothing and the next sweep repairs it") {
         // Intent: a responder move nobody asked for never becomes a model fact, and
         //   the pass that moves the responder back reports nothing either.
         // Why it exists: the pane view used to adopt every responder gain, so a
@@ -595,11 +614,11 @@ func splitContainerViewTests() {
             groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
             selectedTabId: tabId
         )
-        let runtime = AppRuntime(model: model)
+        let runtime = makeUITestRuntime(model: model)
         // The production pane view, not the harness stand-in: the report this test
         // rules out is one only the real view can make.
-        let terminalA = SwiftTerminalSessionView(controller: TerminalPaneSessionController())
-        let terminalB = SwiftTerminalSessionView(controller: TerminalPaneSessionController())
+        let terminalA = makeTestPane(controller: FakeTerminalPaneSessionController())
+        let terminalB = makeTestPane(controller: FakeTerminalPaneSessionController())
         var events: [TerminalSessionEvent] = []
         terminalA.onEvent = { events.append($0) }
         terminalB.onEvent = { events.append($0) }
@@ -624,7 +643,7 @@ func splitContainerViewTests() {
             "the sweep dispatched \(runtime.sentMessages)")
     }
 
-    uiTest("pane focus claimant distinguishes pane, field editor, window, and non-pane focus") {
+    await uiTest("pane focus claimant distinguishes pane, field editor, window, and non-pane focus") {
         // Intent: claimant detection resolves pane terminal and search controls,
         //   treats the window as unclaimed, and preserves deliberate non-pane focus.
         // Why it exists: AppKit puts a shared field editor in firstResponder, so
@@ -638,7 +657,7 @@ func splitContainerViewTests() {
             selectedTabId: tabId
         )
         model.updatePane(paneId) { $0.live.search = SearchModel() }
-        let runtime = AppRuntime(model: model)
+        let runtime = makeUITestRuntime(model: model)
         let terminal = FocusableTerminalView()
         runtime.installTerminalSession(terminal, paneId: paneId)
         let container = persistentContainer(root: root, runtime: runtime)
@@ -679,7 +698,7 @@ func splitContainerViewTests() {
             "reconciliation stole a deliberate non-pane claimant")
     }
 
-    uiTest("pane focus query encodes every live claimant shape") {
+    await uiTest("pane focus query encodes every live claimant shape") {
         let paneId = PaneId(rawValue: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!)
 
         try uiExpect(paneFocusInfoResult(.pane(.terminal(paneId))) == .object([
@@ -702,20 +721,20 @@ func splitContainerViewTests() {
         ]), "unclaimed focus JSON changed")
     }
 
-    uiTest("nested zoom fills the container and unzoom restores every pane") {
+    await uiTest("nested zoom fills the container and unzoom restores every pane") {
         // Intent: zooming a nested pane expands it through every ancestor split,
         //   then unzoom restores all three panes with usable geometry.
         // Why it exists: the first incremental implementation left a stale root
         //   child detached, then hid another branch without relaying out the tree.
         // Scenario: the split, split, zoom, unzoom regression reported on 2026-08-11.
         let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
-        let controllerA = TerminalPaneSessionController()
-        let controllerB = TerminalPaneSessionController()
-        let controllerC = TerminalPaneSessionController()
-        let runtime = AppRuntime()
-        runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerA, fontSize: 13), paneId: paneA)
-        runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerB, fontSize: 13), paneId: paneB)
-        runtime.installTerminalSession(SwiftTerminalSessionView(controller: controllerC, fontSize: 13), paneId: paneC)
+        let controllerA = FakeTerminalPaneSessionController()
+        let controllerB = FakeTerminalPaneSessionController()
+        let controllerC = FakeTerminalPaneSessionController()
+        let runtime = makeUITestRuntime()
+        runtime.installTerminalSession(makeTestPane(controller: controllerA, fontSize: 13), paneId: paneA)
+        runtime.installTerminalSession(makeTestPane(controller: controllerB, fontSize: 13), paneId: paneB)
+        runtime.installTerminalSession(makeTestPane(controller: controllerC, fontSize: 13), paneId: paneC)
         let root = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal, first: .leaf(PaneModel(id: paneA)),
             second: .split(
@@ -755,17 +774,17 @@ func splitContainerViewTests() {
             "unzoom should restore nonzero geometry for every pane")
     }
 
-    uiTest("cross-tab tree updates preserve a moved wrapper in either order") {
+    await uiTest("cross-tab tree updates preserve a moved wrapper in either order") {
         // Intent: moving a pane between tabs reparents its one wrapper even when
         //   the destination update runs before the source update.
         // Why it exists: container op order follows dictionary iteration, so one
         //   tab must not tear a wrapper back out of its new parent.
         // Scenario: the incremental-container reconciliation performance fix.
         let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
-        let runtime = AppRuntime()
-        runtime.installTerminalSession(TerminalView(), paneId: paneA)
-        runtime.installTerminalSession(TerminalView(), paneId: paneB)
-        runtime.installTerminalSession(TerminalView(), paneId: paneC)
+        let runtime = makeUITestRuntime()
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneA)
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneB)
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneC)
         let sourceOld = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)), ratio: 0.5)
@@ -786,19 +805,19 @@ func splitContainerViewTests() {
         try uiExpect(movedWrapper.isDescendant(of: destination), "source update detached the moved wrapper from its destination")
     }
 
-    uiTest("removing the runtime host releases pane chrome") {
+    await uiTest("removing the runtime host releases pane chrome") {
         // Intent: removing a pane's session-lifetime host releases its wrapper
         //   once no container parents that wrapper.
         // Why it exists: the ownership inversion must not trade rebuild churn for
         //   a runtime-owned wrapper leak.
         // Scenario: the incremental-container reconciliation performance fix.
         let paneId = PaneId()
-        let runtime = AppRuntime()
+        let runtime = makeUITestRuntime()
         weak var hostObserver: PaneHost?
         weak var wrapperObserver: PaneWrapperView?
 
         autoreleasepool {
-            runtime.installTerminalSession(TerminalView(), paneId: paneId)
+            runtime.installTerminalSession(FakeTerminalSession(), paneId: paneId)
             hostObserver = runtime.paneHost(for: paneId)
             wrapperObserver = hostObserver?.wrapper
             runtime.tearDownSession(paneId)
@@ -811,7 +830,7 @@ func splitContainerViewTests() {
 
 /// Builds a container whose wrapper lookup goes through the runtime lifetime root.
 @MainActor
-private func persistentContainer(root: SplitNodeModel, runtime: AppRuntime) -> SplitContainerView {
+private func persistentContainer(root: SplitNodeModel, runtime: RecordingAppRuntime) -> SplitContainerView {
     SplitContainerView(
         rootNode: root,
         wrapperLookup: { [weak runtime] paneId in runtime?.paneHost(for: paneId)?.wrapper },
@@ -826,11 +845,12 @@ private func focusTestWindow(content: NSView) -> NSWindow {
         contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
         styleMask: [.titled], backing: .buffered, defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentView = content
     return window
 }
 
-private final class FocusableTerminalView: TerminalView {
+private final class FocusableTerminalView: FakeTerminalSession {
     private(set) var receivedCharacters: [String] = []
 
     override var acceptsFirstResponder: Bool { true }
@@ -853,14 +873,14 @@ private func makeSearchFieldClick() throws -> NSEvent {
 
 /// Unwraps one runtime-owned pane wrapper for identity assertions.
 @MainActor
-private func requireWrapper(_ runtime: AppRuntime, _ paneId: PaneId) throws -> PaneWrapperView {
+private func requireWrapper(_ runtime: RecordingAppRuntime, _ paneId: PaneId) throws -> PaneWrapperView {
     guard let wrapper = runtime.findPaneWrapper(for: paneId) else {
         throw UITestFailure(message: "missing wrapper for \(paneId)")
     }
     return wrapper
 }
 
-private func makeSplitContainer(splitId: SplitId, ratio: CGFloat, runtime: AppRuntime? = nil) -> SplitContainerView {
+private func makeSplitContainer(splitId: SplitId, ratio: CGFloat, runtime: RecordingAppRuntime? = nil) -> SplitContainerView {
     let root = SplitNodeModel.split(
         id: splitId,
         direction: .horizontal,
@@ -934,7 +954,7 @@ private func splitRatioChangedMessages(_ messages: [Msg]) -> [(SplitId, CGFloat)
     return result
 }
 
-private final class FrameRecordingTerminalView: TerminalView {
+private final class FrameRecordingTerminalView: FakeTerminalSession {
     private(set) var frameSizes: [NSSize] = []
 
     override func setFrameSize(_ newSize: NSSize) {

@@ -8,12 +8,18 @@
 // and the buffer-busy switch belong to the suite.
 import Cocoa
 import CoreGraphics
+import DanTermProtocol
 import PaneProcessLifecycle
 import TerminalCore
 import TerminalPaneSession
 import TerminalPTYHost
 import TerminalRenderExecution
-import TerminalRenderPlanning
+// `@testable` here, not a plain import, for the frame plan and the fence census: both
+// are values only the engine mints in production, and their memberwise initializers are
+// internal. A test that must hand the view a plan of a chosen shape needs them, and the
+// same-package form of this is already proven by client-tests.
+@testable import TerminalPaneSession
+@testable import TerminalRenderPlanning
 @testable import DanTerm
 
 /// Records what the pane view asked its session to do, and drives the view's own
@@ -319,7 +325,7 @@ final class FakeTerminalPaneSessionController: TerminalPaneSessionControlling {
         onSearchStatus?(status)
     }
 
-    func emitFrameForTest(damage: TerminalDamage = .init(isFull: true)) {
+    func emitFrameForTest(damage: TerminalDamage = .full) {
         emitFrame(damage: damage)
     }
 
@@ -328,8 +334,325 @@ final class FakeTerminalPaneSessionController: TerminalPaneSessionControlling {
         emitFrame()
     }
 
-    private func emitFrame(damage: TerminalDamage = .init(isFull: true)) {
+    private func emitFrame(damage: TerminalDamage = .full) {
         let plan = currentPlan ?? RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         onFrame?(.init(plan: plan, damage: damage))
     }
+}
+
+// MARK: - Presentation surface
+
+/// Records what the production view asked its buffers to present, so the suite can
+/// pin the single render path -- which rows a publish rendered, which publishes
+/// coalesced, which retry finished one -- without pixels or a compositor.
+///
+/// This is a stand-in rotation, NOT a wrapper around a real `TerminalFrameSwapchain`.
+/// The shipping rotation keeps three buffers and picks the least-stale detached one,
+/// so a second publish lands in a fresh buffer and renders in full; this one keeps a
+/// single buffer that composes stale damage, so a second publish renders only what
+/// changed. Every rendered-row assertion in this suite was written against the second
+/// shape, and swapping in the first would silently redefine what those cases claim.
+/// Proving the three-buffer rotation is the engine's own job, in its swapchain tests.
+///
+/// Acquisition is a switch because the real gate is the render server's in-use
+/// report, which no headless suite can steer.
+@MainActor
+final class RecordingPresentationSurface: TerminalPanePresentationSurface {
+    /// False stands in for a render server still reading every detached surface:
+    /// no buffer is acquirable, so every publish coalesces.
+    static var canAcquire = true
+    /// The rows each render covered, in order. A full render records every row; an
+    /// incremental render records the damage composed since the buffer was current.
+    private(set) static var renderedRowSets: [Set<Int>] = []
+    /// Counts rotation construction, so a test can tell a replacement (a
+    /// trust-breaking input) from a re-render of the same buffers.
+    private(set) static var creationCount = 0
+
+    static func reset() {
+        canAcquire = true
+        renderedRowSets = []
+        creationCount = 0
+    }
+
+    /// The factory a test hands to the pane view. Nil geometry is the same refusal
+    /// the shipping rotation gives when a store cannot be allocated.
+    static let factory: TerminalPanePresentationSurfaceFactory = { columns, rows, metrics, colorSpace in
+        RecordingPresentationSurface(
+            columns: columns,
+            rows: rows,
+            metrics: metrics,
+            colorSpace: colorSpace
+        )
+    }
+
+    private let store: TerminalFrameBackingStore
+    private let columns: Int
+    private let rows: Int
+    private let metrics: TerminalRenderMetrics
+    private let colorSpace: CGColorSpace?
+    private var pendingPlan: RenderFramePlan?
+    private var staleDamage = TerminalDamage.none
+    private var isCurrent = false
+
+    private(set) var lastRenderedDamage: TerminalDamage?
+    var hasPendingPresentation: Bool { pendingPlan != nil }
+    /// One buffer, so it is always caught up with itself.
+    var allBuffersHaveRenderedLatestWholeFrameDamage: Bool { isCurrent }
+
+    init?(
+        columns: Int,
+        rows: Int,
+        metrics: TerminalRenderMetrics,
+        colorSpace: CGColorSpace? = nil
+    ) {
+        guard let store = TerminalFrameBackingStore(
+            columns: columns,
+            rows: rows,
+            metrics: metrics,
+            colorSpace: colorSpace
+        ) else { return nil }
+        self.store = store
+        self.columns = columns
+        self.rows = rows
+        self.metrics = metrics
+        self.colorSpace = colorSpace
+        Self.creationCount += 1
+    }
+
+    func matches(
+        columns: Int,
+        rows: Int,
+        metrics: TerminalRenderMetrics,
+        colorSpace: CGColorSpace?
+    ) -> Bool {
+        self.columns == columns && self.rows == rows
+            && matches(metrics: metrics, colorSpace: colorSpace)
+    }
+
+    func matches(metrics: TerminalRenderMetrics, colorSpace: CGColorSpace?) -> Bool {
+        self.metrics == metrics && self.colorSpace == colorSpace
+    }
+
+    func requireEveryBufferToRenderAgain() {
+        isCurrent = false
+    }
+
+    func publish(plan: RenderFramePlan, damage: TerminalDamage) -> TerminalFrameBackingStore? {
+        staleDamage.formUnion(damage)
+        pendingPlan = plan
+        return presentPending()
+    }
+
+    func retryPendingPresentation() -> TerminalFrameBackingStore? {
+        presentPending()
+    }
+
+    private func presentPending() -> TerminalFrameBackingStore? {
+        guard pendingPlan != nil, Self.canAcquire else { return nil }
+        let rendered: TerminalDamage = isCurrent && staleDamage.isFull == false
+            ? staleDamage
+            : .full
+        Self.renderedRowSets.append(
+            rendered.isFull ? Set(0..<rows) : Set(rendered.rowIndices)
+        )
+        lastRenderedDamage = rendered
+        isCurrent = true
+        staleDamage = .none
+        pendingPlan = nil
+        return store
+    }
+}
+
+// MARK: - Frame plans
+
+extension RenderFramePlan {
+    /// The suite's viewport row count. Named so a test can enumerate every row
+    /// without restating the literal the default `rowCount` already carries.
+    static let rowsForTesting = 10
+
+    /// A blank plan of a chosen shape.
+    ///
+    /// The pane view reads a plan's geometry and its clear color and hands the rest
+    /// to the renderer, so an empty row carries everything these cases need. The
+    /// grid defaults to the suite's viewport and a test overrides it only to stand
+    /// in for a resize -- the one trust-breaking input that reaches the view as a
+    /// differently-shaped plan rather than as new metrics.
+    init(
+        defaultBackground: RenderColor,
+        columns: Int = 10,
+        rowCount: Int = RenderFramePlan.rowsForTesting
+    ) {
+        self.init(
+            columns: columns,
+            defaultBackground: defaultBackground,
+            rows: Array(
+                repeating: RenderPlanRow(
+                    backgroundRuns: [],
+                    overlayRuns: [],
+                    textRuns: [],
+                    decorationRuns: [],
+                    inkClass: []
+                ),
+                count: rowCount
+            ),
+            cursor: nil
+        )
+    }
+}
+
+extension RenderTheme {
+    /// A theme identified only by the color the pane clears to.
+    ///
+    /// The pane view reads exactly one field of a theme -- the default background,
+    /// which it paints the layer and the frame plan with -- and hands the rest to the
+    /// renderer. A case that swaps themes is asking whether the view followed the
+    /// swap, so naming the one field it can observe states the claim directly.
+    init(defaultBackground: RenderColor) {
+        self.init(
+            ansiColors: RenderANSIColors(exactly: Array(repeating: defaultBackground, count: 16))!,
+            defaultForeground: defaultBackground,
+            defaultBackground: defaultBackground,
+            selectionForeground: defaultBackground,
+            selectionBackground: defaultBackground,
+            cursor: defaultBackground,
+            cursorText: defaultBackground
+        )
+    }
+}
+
+// MARK: - Pane view under test
+
+/// Family names the suite's metrics resolver answers for.
+///
+/// The engine's real metrics carry a measured font set, so a synthetic cell box
+/// cannot be built. These name the two answers a pane must handle -- a face with
+/// no usable geometry, and a face whose geometry differs from the default -- and
+/// the resolver below produces them from real measurements.
+enum UITestFontFamily {
+    /// A face that passes an availability probe yet yields no usable cell box, which
+    /// is what an installed face missing its nominal `M` glyph does.
+    static let unusable = "DanTermTestUnusableFace"
+    /// A face whose cells differ from the default family's, so a live family change is
+    /// observable in the grid the pane reports rather than only in metrics.
+    static let wide = "DanTermTestWideFace"
+}
+
+/// The suite's cell geometry: real measurements, with the two named families
+/// answered deterministically.
+@MainActor
+func uiTestMetrics(
+    displayScale: CGFloat,
+    fontSize: CGFloat,
+    fontFamily: String?
+) -> TerminalRenderMetrics? {
+    switch fontFamily {
+    case UITestFontFamily.unusable:
+        return nil
+    case UITestFontFamily.wide:
+        return liveTerminalPaneMetrics(
+            displayScale: displayScale,
+            fontSize: fontSize * 2,
+            fontFamily: nil
+        )
+    default:
+        // The default family is deliberately dropped: which faces are installed is a
+        // property of the machine, and no case here is about font lookup.
+        return liveTerminalPaneMetrics(
+            displayScale: displayScale,
+            fontSize: fontSize,
+            fontFamily: nil
+        )
+    }
+}
+
+/// The production pane view, with the two collaborators the suite substitutes bound.
+///
+/// Every case builds its pane here so no case can silently get the shipping rotation
+/// or the machine's own font lookup and then assert against numbers derived from
+/// neither.
+@MainActor
+func makeTestPane(
+    controller: any TerminalPaneSessionControlling,
+    fontSize: Double = DanTermConfig.default.resolvedFontSize,
+    fontFamily: String? = nil,
+    gridOverride: PaneGridOverride? = nil,
+    applicationActive: Bool = true,
+    resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
+    onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
+) -> SwiftTerminalSessionView {
+    SwiftTerminalSessionView(
+        controller: controller,
+        fontSize: fontSize,
+        fontFamily: fontFamily,
+        gridOverride: gridOverride,
+        applicationActive: applicationActive,
+        resolveTheme: resolveTheme,
+        makePresentationSurface: RecordingPresentationSurface.factory,
+        makeMetrics: uiTestMetrics,
+        onSessionEnded: onSessionEnded
+    )
+}
+
+/// The grid a pane of `size` reports for `metrics`, by the engine's own floor rule.
+///
+/// The suite reads its expected geometry from the metrics it injected rather than
+/// from a fixed cell box, because the real cell box depends on the machine's system
+/// monospace face.
+@MainActor
+func expectedGrid(
+    paneSize: CGSize,
+    metrics: TerminalRenderMetrics
+) -> TerminalDimensions? {
+    terminalGridDimensions(
+        size: TerminalPointSize(width: paneSize.width, height: paneSize.height),
+        cellSize: TerminalPointSize(
+            width: metrics.cellSize.width,
+            height: metrics.cellSize.height
+        )
+    )
+}
+
+/// The metrics the suite's resolver gives for one font choice, at the scale a test
+/// window runs at.
+@MainActor
+func uiTestMetrics(fontSize: CGFloat, fontFamily: String? = nil) -> TerminalRenderMetrics {
+    uiTestMetrics(
+        displayScale: NSScreen.main?.backingScaleFactor ?? 2,
+        fontSize: fontSize,
+        fontFamily: fontFamily
+    )!
+}
+
+/// The cell box a pane resolved, or the box its font implies before it has laid out.
+///
+/// Read from the pane rather than fixed, because the engine's metrics come from a
+/// real font measurement and a synthetic cell box cannot be built. A case that means
+/// "an eighth of the way into column 2" says so through `paneCellPoint` instead of
+/// naming a point that only lands there for one particular face.
+@MainActor
+func paneCellSize(
+    _ pane: SwiftTerminalSessionView,
+    fontSize: CGFloat = CGFloat(DanTermConfig.default.resolvedFontSize)
+) -> CGSize {
+    pane.presentationGeometryForTesting?.cellSize ?? uiTestMetrics(fontSize: fontSize).cellSize
+}
+
+/// A window-space point a given fraction into one grid cell of `pane`.
+///
+/// `offsetY` defaults to the middle of the row, because no case is about the
+/// sub-cell vertical position; the column offset is the one a selection boundary
+/// depends on, so it stays explicit.
+@MainActor
+func paneCellPoint(
+    column: Int,
+    offsetX: CGFloat = 0,
+    row: Int,
+    offsetY: CGFloat = 0.5,
+    in pane: SwiftTerminalSessionView
+) -> NSPoint {
+    let cell = paneCellSize(pane)
+    return NSPoint(
+        x: (CGFloat(column) + offsetX) * cell.width,
+        y: pane.bounds.height - (CGFloat(row) + offsetY) * cell.height
+    )
 }

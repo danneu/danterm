@@ -2,13 +2,21 @@
 // compose/edit modes, keyboard paths, pasteboard payloads, drop handling, and
 // focus restoration across model re-apply.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 /// Runs pane-scoped todo popover coverage in the AppKit UI harness.
 @MainActor
-func todoPopoverViewTests() {
+func todoPopoverViewTests() async {
     print("TodoPopoverView")
 
-    uiTest("apply renders pane todo rows in projection order") {
+    await uiTest("apply renders pane todo rows in projection order") {
         // Intent: the pane popover renders one TodoRow per projected todo, in
         //   order, with the expected row identifiers and display titles.
         // Why it exists: pins the view binding for the pane-scoped TODO
@@ -26,7 +34,7 @@ func todoPopoverViewTests() {
                      "unexpected row text: \(rowTextValues(rows))")
     }
 
-    uiTest("empty list shows empty label and clear button follows completion") {
+    await uiTest("empty list shows empty label and clear button follows completion") {
         // Intent: empty pane lists show the empty-state label and hide the
         //   scroll view; the Clear completed button follows hasCompleted.
         // Why it exists: pins the pane popover's empty-state branch separately
@@ -53,7 +61,7 @@ func todoPopoverViewTests() {
         try uiExpect(!clearButton.isHidden, "clear button should be visible with completed todos")
     }
 
-    uiTest("row checkbox sends toggleTodoDone and restores prior selection") {
+    await uiTest("row checkbox sends toggleTodoDone and restores prior selection") {
         // Intent: a row checkbox dispatches the pane-scoped toggle message and
         //   re-selects the row that was selected before the mutation.
         // Why it exists: pins the post-send selection restoration path against
@@ -79,7 +87,7 @@ func todoPopoverViewTests() {
                      "selection should return to Pane beta after checkbox mutation")
     }
 
-    uiTest("row delete button sends deleteTodo") {
+    await uiTest("row delete button sends deleteTodo") {
         let fx = makePaneTodoFixture()
         defer { fx.window.close() }
 
@@ -94,7 +102,7 @@ func todoPopoverViewTests() {
         }
     }
 
-    uiTest("clear completed sends clearCompletedTodos") {
+    await uiTest("clear completed sends clearCompletedTodos") {
         let fx = makePaneTodoFixture()
         defer { fx.window.close() }
 
@@ -106,7 +114,7 @@ func todoPopoverViewTests() {
         }
     }
 
-    uiTest("non-empty compose submit sends addTodo and clears field") {
+    await uiTest("non-empty compose submit sends addTodo and clears field") {
         // Intent: Return in the compose field trims, sends a pane add message,
         //   and clears the compose draft.
         // Why it exists: pins the NSTextViewDelegate submit path at the AppKit
@@ -130,7 +138,7 @@ func todoPopoverViewTests() {
         try uiExpect(compose.string.isEmpty, "compose field should be cleared")
     }
 
-    uiTest("whitespace compose submit sends nothing") {
+    await uiTest("whitespace compose submit sends nothing") {
         let fx = makePaneTodoFixture()
         defer { fx.window.close() }
         let compose = try visibleTodoInput(in: fx)
@@ -142,7 +150,7 @@ func todoPopoverViewTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "whitespace compose submit should send no messages")
     }
 
-    uiTest("Return on a selected row enters edit mode with item text and focus") {
+    await uiTest("Return on a selected row enters edit mode with item text and focus") {
         // Intent: Return in list mode swaps to editor mode for the selected
         //   row, pre-fills the edit input, and focuses that input.
         // Why it exists: pins the pane-specific edit transition and first
@@ -160,7 +168,7 @@ func todoPopoverViewTests() {
         try uiExpect(fx.window.firstResponder === editInput.textView, "edit input should be first responder")
     }
 
-    uiTest("save sends trimmed editTodoText and returns to selected list row") {
+    await uiTest("save sends trimmed editTodoText and returns to selected list row") {
         // Intent: Save commits edits to the pane item, returns to list mode,
         //   re-selects the edited row, and focuses the table.
         // Why it exists: pins the button path through saveEditThenReturnToList.
@@ -185,7 +193,7 @@ func todoPopoverViewTests() {
         try uiExpect(fx.window.firstResponder === fx.table, "table should be first responder after save")
     }
 
-    uiTest("whitespace-only save is rejected and stays editing") {
+    await uiTest("whitespace-only save is rejected and stays editing") {
         // Intent: Save rejects an edit draft that trims to empty and keeps the
         //   editor focused.
         // Why it exists: pins local validation before dispatch. Spec-first.
@@ -203,7 +211,7 @@ func todoPopoverViewTests() {
         try uiExpect(fx.window.firstResponder === editInput.textView, "edit input should regain focus")
     }
 
-    uiTest("cancel exits edit mode without sending and reselects target") {
+    await uiTest("cancel exits edit mode without sending and reselects target") {
         // Intent: Cancel abandons the active edit, returns to list mode, and
         //   re-selects the row that was being edited.
         // Why it exists: pins editor cancellation as view-local state only.
@@ -220,7 +228,7 @@ func todoPopoverViewTests() {
         try uiExpect(try selectedRowTitle(in: fx) == "Pane beta", "edit target should be re-selected")
     }
 
-    uiTest("edit mode draws Cancel left of Save at the trailing inset") {
+    await uiTest("edit mode draws Cancel left of Save at the trailing inset") {
         // Intent: the editor's buttons sit together at the trailing edge with
         //   Save rightmost, and the key-view loop follows the drawn order.
         // Why it exists: the editor used to draw [Save] [Cancel] left-aligned,
@@ -257,7 +265,7 @@ func todoPopoverViewTests() {
         try uiExpect(chain[2] === editInput.textView, "the loop should close back on the edit input")
     }
 
-    uiTest("Return in the edit input saves rather than being taken by a button") {
+    await uiTest("Return in the edit input saves rather than being taken by a button") {
         // Intent: Return typed in the edit input runs the input's own submit
         //   path; no button in the editor claims Return as a key equivalent.
         // Why it exists: the action row assigns Return to a default button, and
@@ -284,7 +292,7 @@ func todoPopoverViewTests() {
         }
     }
 
-    uiTest("apply mid-edit preserves draft when target still exists") {
+    await uiTest("apply mid-edit preserves draft when target still exists") {
         // Intent: reconcile preserves an in-progress edit draft when the same
         //   todo target survives in the new projection.
         // Why it exists: pins the pane side of the open-popover draft
@@ -307,7 +315,7 @@ func todoPopoverViewTests() {
         try uiExpect(isEffectivelyHidden(fx.scrollView), "scroll view should remain hidden in edit mode")
     }
 
-    uiTest("apply mid-edit exits when target is gone and selects nearest row") {
+    await uiTest("apply mid-edit exits when target is gone and selects nearest row") {
         // Intent: reconcile leaves edit mode when the edited todo disappears,
         //   then selects the nearest remaining row.
         // Why it exists: pins stale-target cleanup for open pane popovers.
@@ -328,7 +336,7 @@ func todoPopoverViewTests() {
         try uiExpect(try selectedRowTitle(in: fx) == "Pane beta", "nearest remaining row should be selected")
     }
 
-    uiTest("Cmd-Backspace deletes selected row and selects nearest survivor") {
+    await uiTest("Cmd-Backspace deletes selected row and selects nearest survivor") {
         // Intent: Cmd-Backspace dispatches delete for the selected row and
         //   moves selection to the nearest row after a production-like reapply.
         // Why it exists: pins the pane list keyboard route through
@@ -357,7 +365,7 @@ func todoPopoverViewTests() {
                      "selection should move to the nearest surviving row")
     }
 
-    uiTest("Shift-J sends reorderTodo to the next index") {
+    await uiTest("Shift-J sends reorderTodo to the next index") {
         // Intent: Shift-J reorders the selected row down one slot; Cmd-J is
         //   ignored by the strict modifier classifier.
         // Why it exists: pins the pane list keyboard route through
@@ -383,7 +391,7 @@ func todoPopoverViewTests() {
         }
     }
 
-    uiTest("Escape in list mode sends toggleTodoPopover") {
+    await uiTest("Escape in list mode sends toggleTodoPopover") {
         let fx = makePaneTodoFixture()
         defer { fx.window.close() }
 
@@ -395,7 +403,7 @@ func todoPopoverViewTests() {
         }
     }
 
-    uiTest("Escape in compose focuses list when possible and dismisses empty lists") {
+    await uiTest("Escape in compose focuses list when possible and dismisses empty lists") {
         // Intent: Escape from compose moves focus to the list when a row exists;
         //   with an empty list, it dismisses the popover instead.
         // Why it exists: pins the two branches of focusListFromInput from the
@@ -430,7 +438,7 @@ func todoPopoverViewTests() {
         }
     }
 
-    uiTest("pasteboardWriterForRow emits pane todo UUID string") {
+    await uiTest("pasteboardWriterForRow emits pane todo UUID string") {
         // Intent: item rows write a bare UUID string for the pane todo drag
         //   pasteboard type.
         // Why it exists: pins the supported drag payload without testing an
@@ -449,7 +457,7 @@ func todoPopoverViewTests() {
                      "drag payload should be the row todo UUID")
     }
 
-    uiTest("apply preserves compose focus and draft") {
+    await uiTest("apply preserves compose focus and draft") {
         // Intent: applying a fresh projection while compose is first responder
         //   keeps compose focused and preserves its draft.
         // Why it exists: pins the compose branch of restoreFirstResponder for
@@ -474,7 +482,7 @@ func todoPopoverViewTests() {
         try uiExpect(fx.window.firstResponder === compose.textView, "compose input should remain first responder")
     }
 
-    uiTest("apply preserves table focus or falls back to compose when rows empty") {
+    await uiTest("apply preserves table focus or falls back to compose when rows empty") {
         // Intent: applying while the table is focused keeps table focus when
         //   the selected item survives; if the list empties, focus moves to
         //   compose.
@@ -507,7 +515,7 @@ func todoPopoverViewTests() {
                      "empty refresh should move focus back to compose")
     }
 
-    uiTest("Cmd-N while editing saves, clears compose draft, and focuses compose") {
+    await uiTest("Cmd-N while editing saves, clears compose draft, and focuses compose") {
         // Intent: Cmd-N in edit mode saves the edit, clears the compose draft,
         //   exits edit mode, and focuses compose through the root key-equivalent
         //   hook.
@@ -541,7 +549,7 @@ func todoPopoverViewTests() {
         try uiExpect(fx.window.firstResponder === visible.textView, "compose input should be first responder")
     }
 
-    uiTest("shortcut help closes before pane parent disappears") {
+    await uiTest("shortcut help closes before pane parent disappears") {
         // Intent: the pane popover closes its shortcut-help child before the
         //   parent popover disappears.
         // Why it exists: pins the nested-popover lifetime invariant that the
@@ -555,17 +563,17 @@ func todoPopoverViewTests() {
         fx.window.orderFrontRegardless()
 
         fx.vc.toggleShortcutHelp(nil)
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        await pumpMainQueueOnce()
 
         try uiExpect(fx.vc.hasShortcutHelpPopover, "shortcut help should open with a parent popover handle")
 
         fx.vc.viewWillDisappear()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        await pumpMainQueueOnce()
 
         try uiExpect(!fx.vc.hasShortcutHelpPopover, "shortcut help should close before the pane parent disappears")
     }
 
-    uiTest("accepted drop reorders the pane list and restores the prior selection") {
+    await uiTest("accepted drop reorders the pane list and restores the prior selection") {
         // Intent: dropping a pane todo accepts the drop, dispatches the pane
         //   reorder message carrying the drop index, and leaves the row that
         //   was selected before the drop still selected.
@@ -597,7 +605,7 @@ func todoPopoverViewTests() {
                      "selection should stay on the row selected before the drop")
     }
 
-    uiTest("Shift-H and Shift-L are unhandled in the pane list") {
+    await uiTest("Shift-H and Shift-L are unhandled in the pane list") {
         // Intent: the pane list ignores the bucket-move keys entirely.
         // Why it exists: bucket moves are a tab-only behavior, so the pane must
         //   report the key as unhandled rather than silently swallowing it.
@@ -619,7 +627,7 @@ func todoPopoverViewTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "pane bucket keys should send nothing")
     }
 
-    uiTest("Cmd-Shift-H and Cmd-Shift-L bubble out of the pane popover") {
+    await uiTest("Cmd-Shift-H and Cmd-Shift-L bubble out of the pane popover") {
         // Intent: the pane popover does not claim the Cmd-Shift bucket keys, so
         //   AppKit keeps routing them to the surrounding app.
         // Why it exists: the tab popover deliberately swallows these keys and
@@ -640,7 +648,7 @@ func todoPopoverViewTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "pane Cmd-Shift bucket keys should send nothing")
     }
 
-    uiTest("compose submit leaves the pane selection where it was") {
+    await uiTest("compose submit leaves the pane selection where it was") {
         // Intent: adding a pane task does not move selection onto the new row.
         // Why it exists: the tab popover selects the task it just added and the
         //   pane one does not; the difference only shows through the re-entrant
@@ -674,7 +682,7 @@ private let paneTodoRowDragType = NSPasteboard.PasteboardType("com.danneu.danter
 
 private struct PaneTodoFixture {
     let vc: TodoPopoverController<PaneTodoPopoverScope>
-    let runtime: AppRuntime
+    let runtime: RecordingAppRuntime
     let window: NSWindow
     let model: AppModel
     let paneId: PaneId
@@ -704,13 +712,14 @@ private func makePaneTodoFixture(todos: [TodoItem]? = nil) -> PaneTodoFixture {
     var model = AppModel(groups: [group])
     model.selectedTabId = tabId
 
-    let runtime = AppRuntime(model: model)
+    let runtime = makeUITestRuntime(model: model)
     let vc = TodoPopoverController(scope: PaneTodoPopoverScope(paneId: paneId), runtime: runtime)
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 320, height: 400),
         styleMask: [.titled],
         backing: .buffered,
         defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = vc.view
     vc.apply(desiredPaneTodoPopover(paneId: paneId, in: model)!)
     window.layoutIfNeeded()
@@ -888,7 +897,7 @@ private func keyDownEvent(
 }
 
 private func expectSingleMessage(
-    _ runtime: AppRuntime,
+    _ runtime: RecordingAppRuntime,
     _ description: String,
     matches: (Msg) -> Bool
 ) throws {

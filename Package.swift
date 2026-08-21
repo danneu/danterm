@@ -104,6 +104,33 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        // The AppKit UI suite. Every case drives real AppKit views, so the target
+        // declares that it needs a WindowServer connection; the gate's coverage check
+        // reads that declaration and requires the gate to skip this estate rather than
+        // keeping a list of excluded names of its own.
+        .testTarget(
+            name: "DanTermUITests",
+            dependencies: [
+                "DanTerm",
+                .product(name: "ChipArtwork", package: "ChipArtwork"),
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+                .product(name: "PaneProcessLifecycle", package: "TerminalPTY"),
+                .product(name: "TerminalCore", package: "TerminalCore"),
+                .product(name: "TerminalCoreRecording", package: "TerminalCore"),
+                .product(name: "TerminalPaneSession", package: "TerminalPTY"),
+                .product(name: "TerminalPTYHost", package: "TerminalPTY"),
+                .product(name: "TerminalRenderPlanning", package: "TerminalCore"),
+                .product(name: "TerminalRenderExecution", package: "TerminalCore"),
+            ],
+            path: "tests-ui",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+                // Every case here drives AppKit views, and the runner is main-actor
+                // isolated end to end. Saying so once beats annotating each helper.
+                .defaultIsolation(MainActor.self),
+                .define("DANTERM_REQUIRES_WINDOWSERVER"),
+            ]
+        ),
         .testTarget(
             name: "DanTermCLITests",
             dependencies: [

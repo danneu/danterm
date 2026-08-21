@@ -6,6 +6,14 @@
 // `lib/DanTermCore/Tests/DanTermCoreTests/TypedIdTestInit.swift`); the harness is
 // impure test code, so nondeterministic fixture ids are fine here.
 import Foundation
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 extension TypedId {
     init() { self.init(rawValue: UUID()) }

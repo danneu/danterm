@@ -6,13 +6,21 @@
 // only this harness can prove the panel presents all of it, scrolls rather than
 // elides, and hands one command at a time to the clipboard.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 /// Registers confirmation-panel coverage in the standalone UI harness.
 @MainActor
-func confirmationPanelTests() {
+func confirmationPanelTests() async {
     print("ConfirmationPanel")
 
-    uiTest("every projected command gets its own item and its own copy control") {
+    await uiTest("every projected command gets its own item and its own copy control") {
         // Intent: the panel presents the command list as items, one per
         //   projected command, in order and in full.
         // Why it exists: with one copy control per command and no others, there
@@ -33,7 +41,7 @@ func confirmationPanelTests() {
                      "expected exactly one copy control per command, got \(copyControls(in: fx.panel).count)")
     }
 
-    uiTest("an item's copy writes only its own command") {
+    await uiTest("an item's copy writes only its own command") {
         let fx = makeConfirmationFixture()
         defer { fx.panel.close() }
         let commands = ["make test", "npm run dev", "rsync -a source dest"]
@@ -46,7 +54,7 @@ func confirmationPanelTests() {
         try uiExpect(fx.pasteboard.clearCount == 1, "a copy should replace the clipboard, not append to it")
     }
 
-    uiTest("copy works for an item the panel is too short to draw") {
+    await uiTest("copy works for an item the panel is too short to draw") {
         // Intent: an item's copy writes its projected command whether or not the
         //   panel has room to draw that item.
         // Why it exists: this is the regression the change exists to prevent.
@@ -73,7 +81,7 @@ func confirmationPanelTests() {
                      "an undrawn item should still copy its own command in full")
     }
 
-    uiTest("an item copies the command its position holds now, not the one it held before") {
+    await uiTest("an item copies the command its position holds now, not the one it held before") {
         // Intent: a reconfigure repoints every item at the new projection.
         // Why it exists: the panel is reused across confirmations and refreshes
         //   live as panes close, so an item that kept its old command would copy
@@ -90,7 +98,7 @@ func confirmationPanelTests() {
                      "the first item should copy the command it now shows, got \(fx.pasteboard.strings)")
     }
 
-    uiTest("a partly selected item still copies its whole command") {
+    await uiTest("a partly selected item still copies its whole command") {
         // Intent: the copy action writes the projected command, never the text
         //   selection.
         // Why it exists: the command text stays selectable, so a stray selection
@@ -110,7 +118,7 @@ func confirmationPanelTests() {
                      "the copy control should ignore the selection, got \(fx.pasteboard.strings)")
     }
 
-    uiTest("the panel sizes to its item list until the bound, then scrolls") {
+    await uiTest("the panel sizes to its item list until the bound, then scrolls") {
         // Intent: the panel's height is derived from its content, capped by the
         //   bound that keeps it on screen; past the cap the list scrolls.
         // Why it exists: the old panel asserted a fixed 460x190 frame, so a long
@@ -143,7 +151,7 @@ func confirmationPanelTests() {
                      "the command area must not leave the panel ambiguously laid out")
     }
 
-    uiTest("a wrapped command shows every one of its lines") {
+    await uiTest("a wrapped command shows every one of its lines") {
         // Intent: an item reports the height its wrapped text needs at the width
         //   it is actually given, so nothing is cut off below the bound.
         // Why it exists: sizing an item to a constant width would clip its last
@@ -172,7 +180,7 @@ func confirmationPanelTests() {
                      "a list under the bound should show every line without scrolling")
     }
 
-    uiTest("a resize on reconfigure holds the title bar still") {
+    await uiTest("a resize on reconfigure holds the title bar still") {
         // Intent: a refresh that grows or shrinks the panel keeps its top edge.
         // Why it exists: the quit panel reconfigures live as panes close, and an
         //   AppKit resize anchors the bottom-left corner by default -- so the
@@ -192,7 +200,7 @@ func confirmationPanelTests() {
         }
     }
 
-    uiTest("the command text is selectable") {
+    await uiTest("the command text is selectable") {
         let fx = makeConfirmationFixture()
         defer { fx.panel.close() }
 
@@ -204,7 +212,7 @@ func confirmationPanelTests() {
         try uiExpect(label.stringValue == "make test", "the item should hold the command")
     }
 
-    uiTest("a confirmation with no running command shows no command area") {
+    await uiTest("a confirmation with no running command shows no command area") {
         let fx = makeConfirmationFixture()
         defer { fx.panel.close() }
         fx.panel.configure(makeConfirmationProjection(commands: ["make test"]))
@@ -218,7 +226,7 @@ func confirmationPanelTests() {
         try uiExpect(fx.pasteboard.strings.isEmpty, "an empty confirmation must not touch the clipboard")
     }
 
-    uiTest("Return and Escape answer while focus sits in the command area") {
+    await uiTest("Return and Escape answer while focus sits in the command area") {
         // Intent: the panel's two reserved keys still work when a command's text
         //   holds first responder.
         // Why it exists: the command text is selectable, so it takes focus on a
@@ -247,7 +255,7 @@ func confirmationPanelTests() {
         }
     }
 
-    uiTest("a delete-group confirmation draws its three choices in dialog order") {
+    await uiTest("a delete-group confirmation draws its three choices in dialog order") {
         // Intent: the alternative sits leading, cancel next, and the default
         //   rightmost against the panel's content inset.
         // Why it exists: this path had no harness coverage at all, and it drew
@@ -272,7 +280,7 @@ func confirmationPanelTests() {
                      "the default button should end at the content inset, got \(trailing) vs \(rowTrailing)")
     }
 
-    uiTest("each confirmation button sends the message its choice names") {
+    await uiTest("each confirmation button sends the message its choice names") {
         // Intent: the message follows the answered choice.
         // Why it exists: the panel used to pick between confirm and the
         //   delete-group choice by reading a hidden button's visibility.
@@ -302,7 +310,7 @@ func confirmationPanelTests() {
         }
     }
 
-    uiTest("Return answers the delete-group default from the command area") {
+    await uiTest("Return answers the delete-group default from the command area") {
         // Intent: the reserved Return key answers the projected confirm choice,
         //   whichever confirmation is open.
         // Why it exists: the deleted isHidden branch is what used to make Return
@@ -323,7 +331,7 @@ func confirmationPanelTests() {
         }
     }
 
-    uiTest("a long confirm title keeps the buttons inside the panel") {
+    await uiTest("a long confirm title keeps the buttons inside the panel") {
         // Intent: a button row wider than the text column widens the panel
         //   instead of overflowing it, and the size still settles.
         // Why it exists: the column width used to be a required constant, so a
@@ -355,14 +363,14 @@ func confirmationPanelTests() {
 // MARK: - Fixture
 
 private struct ConfirmationFixture {
-    let runtime: AppRuntime
+    let runtime: RecordingAppRuntime
     let panel: ConfirmationPanel
     let pasteboard: RecordingConfirmationPasteboard
 }
 
 @MainActor
 private func makeConfirmationFixture() -> ConfirmationFixture {
-    let runtime = AppRuntime()
+    let runtime = makeUITestRuntime()
     let panel = ConfirmationPanel(runtime: runtime)
     let pasteboard = RecordingConfirmationPasteboard()
     panel.pasteboard = pasteboard

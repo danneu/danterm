@@ -1,11 +1,19 @@
 // UI-harness coverage for the main-actor callback gate shared by terminal adapters.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func terminalBackendBoundaryTests() {
+func terminalBackendBoundaryTests() async {
     print("TerminalBackendBoundary")
 
-    uiTest("callback gate delivers events and session state while active") {
+    await uiTest("callback gate delivers events and session state while active") {
         let gate = TerminalSessionCallbackGate()
         let observer = RecordingSessionStateObserver()
         var events: [TerminalSessionEvent] = []
@@ -25,7 +33,7 @@ func terminalBackendBoundaryTests() {
         try uiExpect(observer.states == [state], "active session state was not delivered")
     }
 
-    uiTest("callback gate drops both channels after teardown") {
+    await uiTest("callback gate drops both channels after teardown") {
         // Intent: terminal product events and view-local scrollbar state stop at
         //   the same teardown boundary.
         // Why it exists: a C callback racing final session teardown must never

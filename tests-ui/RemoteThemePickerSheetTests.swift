@@ -2,13 +2,21 @@
 // controls. Fixtures keep the controller in a plain, unordered window so the
 // production dismiss path no-ops instead of depending on real sheet presentation.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 /// Registers RemoteThemePickerSheet coverage in the standalone UI harness.
 @MainActor
-func remoteThemePickerSheetTests() {
+func remoteThemePickerSheetTests() async {
     print("RemoteThemePickerSheet")
 
-    uiTest("constructs against an empty catalog with zero rows and no callback") {
+    await uiTest("constructs against an empty catalog with zero rows and no callback") {
         let sheet = RemoteThemePickerSheet()
         var fired = false
         sheet.onSelect = { _ in fired = true }
@@ -19,7 +27,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(!fired, "construction must not fire onSelect")
     }
 
-    uiTest("search filter narrows rows case-insensitively") {
+    await uiTest("search filter narrows rows case-insensitively") {
         let fx = makeRemotePickerFixture()
         defer { fx.window.close() }
 
@@ -31,7 +39,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(fx.recorder.names.isEmpty, "filtering should not fire onSelect")
     }
 
-    uiTest("theme cell wires a swatch view") {
+    await uiTest("theme cell wires a swatch view") {
         // Intent: the row cell built by viewFor carries a ColorSwatchView
         //   installed in the cell with the swatchView back-reference set.
         // Why it exists: cellText() only reads textField, so before this pin the
@@ -52,7 +60,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(swatch.superview === cell, "swatch should be installed in the cell")
     }
 
-    uiTest("clearing the filter restores all rows") {
+    await uiTest("clearing the filter restores all rows") {
         let fx = makeRemotePickerFixture()
         defer { fx.window.close() }
 
@@ -63,7 +71,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(fx.recorder.names.isEmpty, "clearing the filter should not fire onSelect")
     }
 
-    uiTest("no-match filter disables select and double-click commit fires nothing") {
+    await uiTest("no-match filter disables select and double-click commit fires nothing") {
         let fx = makeRemotePickerFixture()
         defer { fx.window.close() }
 
@@ -76,7 +84,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(fx.recorder.names.isEmpty, "empty-results commit should not fire onSelect")
     }
 
-    uiTest("double-click commit fires onSelect exactly once with the selected name") {
+    await uiTest("double-click commit fires onSelect exactly once with the selected name") {
         let fx = makeRemotePickerFixture()
         defer { fx.window.close() }
 
@@ -89,7 +97,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(fx.recorder.names == ["Nord"], "double-click should select Nord once, got \(fx.recorder.names)")
     }
 
-    uiTest("select button commit fires onSelect exactly once with the selected name") {
+    await uiTest("select button commit fires onSelect exactly once with the selected name") {
         let fx = makeRemotePickerFixture()
         defer { fx.window.close() }
 
@@ -99,7 +107,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(fx.recorder.names == ["Dracula"], "Select should pick Dracula once, got \(fx.recorder.names)")
     }
 
-    uiTest("commit after filtering targets the filtered row index") {
+    await uiTest("commit after filtering targets the filtered row index") {
         let fx = makeRemotePickerFixture()
         defer { fx.window.close() }
 
@@ -110,7 +118,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(fx.recorder.names == ["Gruvbox Light"], "filtered commit should pick Gruvbox Light, got \(fx.recorder.names)")
     }
 
-    uiTest("commit with no selection fires nothing") {
+    await uiTest("commit with no selection fires nothing") {
         let fx = makeRemotePickerFixture()
         defer { fx.window.close() }
 
@@ -122,7 +130,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(fx.recorder.names.isEmpty, "no-selection commit should not fire onSelect")
     }
 
-    uiTest("cancel fires nothing") {
+    await uiTest("cancel fires nothing") {
         let fx = makeRemotePickerFixture()
         defer { fx.window.close() }
 
@@ -131,7 +139,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(fx.recorder.names.isEmpty, "Cancel should not fire onSelect")
     }
 
-    uiTest("Cancel and Select sit together at the trailing edge") {
+    await uiTest("Cancel and Select sit together at the trailing edge") {
         // Intent: the sheet draws Cancel immediately left of Select, with
         //   Select's trailing edge at the container's content inset.
         // Why it exists: the sheet used to pin Cancel to the bottom-left corner
@@ -154,7 +162,7 @@ func remoteThemePickerSheetTests() {
                      "Cancel should be carried along by the pair, not pinned at the leading inset")
     }
 
-    uiTest("current theme preselects its row and marks the cell") {
+    await uiTest("current theme preselects its row and marks the cell") {
         let fx = makeRemotePickerFixture(currentTheme: "Nord")
         defer { fx.window.close() }
 
@@ -165,7 +173,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(fx.recorder.names.isEmpty, "preselection should not fire onSelect")
     }
 
-    uiTest("filtering keeps or clears the current theme selection") {
+    await uiTest("filtering keeps or clears the current theme selection") {
         let fx = makeRemotePickerFixture(currentTheme: "Gruvbox Dark")
         defer { fx.window.close() }
 
@@ -181,7 +189,7 @@ func remoteThemePickerSheetTests() {
         try uiExpect(fx.recorder.names.isEmpty, "filtering current theme visibility should not fire onSelect")
     }
 
-    uiTest("selecting a row enables Select") {
+    await uiTest("selecting a row enables Select") {
         let fx = makeRemotePickerFixture()
         defer { fx.window.close() }
 
@@ -217,6 +225,7 @@ private func makeRemotePickerFixture(
         styleMask: [.titled],
         backing: .buffered,
         defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = sheet.view
     sheet.viewDidAppear()
     let fx = RemotePickerFixture(sheet: sheet, window: window, recorder: recorder, names: names)

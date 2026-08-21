@@ -22,6 +22,35 @@ final class RecordingAppRuntime: AppRuntime {
     var onSend: ((Msg) -> Void)?
     var focusedPaneSessions: [PaneId] = []
 
+    /// The model this runtime answers with, held here rather than in the store the
+    /// reducer drives. These are view tests: `send` stops at the recorder above, so
+    /// nothing would ever advance the real store, and a test states the model it
+    /// wants the views reconciled against by assigning it.
+    private var substitutedModel: AppModel
+    override var model: AppModel {
+        get { substitutedModel }
+        set { substitutedModel = newValue }
+    }
+
+    init(
+        substituting model: AppModel,
+        ports: AppRuntimePorts,
+        dialogSurfaces: DialogSurfaces,
+        instancePaths: DanTermInstancePaths,
+        configStore: DanTermConfigStore
+    ) {
+        substitutedModel = model
+        super.init(
+            ports: ports,
+            dialogSurfaces: dialogSurfaces,
+            instancePaths: instancePaths,
+            configStore: configStore,
+            initialModel: model,
+            startsApplicationServices: false,
+            applicationActive: true
+        )
+    }
+
     override func send(_ msg: Msg) {
         sentMessages.append(msg)
         onSend?(msg)
@@ -52,13 +81,11 @@ func makeUITestRuntime(model: AppModel = AppModel(groups: [])) -> RecordingAppRu
         temporaryRoot: root.appendingPathComponent("tmp", isDirectory: true)
     )
     return RecordingAppRuntime(
+        substituting: model,
         ports: .live(terminalBackend: SwiftTerminalBackend()),
         dialogSurfaces: inertDialogSurfaces(),
         instancePaths: paths,
-        configStore: DanTermConfigStore(url: root.appendingPathComponent("absent.json")),
-        initialModel: model,
-        startsApplicationServices: false,
-        applicationActive: true
+        configStore: DanTermConfigStore(url: root.appendingPathComponent("absent.json"))
     )
 }
 
@@ -86,7 +113,7 @@ private func inertDialogSurfaces() -> DialogSurfaces {
 /// The stable session boundary the pane chrome is tested against: a recording
 /// stand-in for a live terminal, with no engine and no PTY behind it.
 @MainActor
-final class FakeTerminalSession: NSView, TerminalSession {
+class FakeTerminalSession: NSView, TerminalSession {
     var paneMenuProvider: (() -> NSMenu?)?
     var hasSelection = false
     var performedActions: [String] = []

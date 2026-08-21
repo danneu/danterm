@@ -7,13 +7,21 @@
 // pinned here the same way: the pure text in PreferencesTailnetTests, the rows
 // that display it here.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 /// Registers Preferences-panel coverage in the standalone UI harness.
 @MainActor
-func preferencesPanelTests() {
+func preferencesPanelTests() async {
     print("PreferencesPanel")
 
-    uiTest("settings use a standard Mac window") {
+    await uiTest("settings use a standard Mac window") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
 
@@ -24,7 +32,7 @@ func preferencesPanelTests() {
         try uiExpect(!fx.panel.styleMask.contains(.resizable), "single-pane settings should not resize")
     }
 
-    uiTest("settings use user-facing alert and config action labels") {
+    await uiTest("settings use user-facing alert and config action labels") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         let titles = descendantControlTitles(in: fx.panel.contentView)
@@ -36,7 +44,7 @@ func preferencesPanelTests() {
         try uiExpect(!titles.contains("Open Config File..."), "an immediate action should not imply another step")
     }
 
-    uiTest("a warning row expands only for its own warning") {
+    await uiTest("a warning row expands only for its own warning") {
         // Intent: each of the three warning rows collapses and expands on its own
         //   warning, and on no other row's.
         // Why it exists: the rows used to be addressed by literal grid index, so
@@ -61,7 +69,7 @@ func preferencesPanelTests() {
         try uiExpect(remoteTheme.isHidden, "the remote theme row should stay collapsed")
     }
 
-    uiTest("only the rows that start a section carry top padding") {
+    await uiTest("only the rows that start a section carry top padding") {
         // Intent: section spacing belongs to the row that starts the section, and
         //   to no other row.
         // Why it exists: the padding used to be applied to four literal row
@@ -86,7 +94,7 @@ func preferencesPanelTests() {
         }
     }
 
-    uiTest("theme names are picker-only") {
+    await uiTest("theme names are picker-only") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         fx.panel.apply(makeProjection(themeText: "Monokai", remoteThemeText: "Purplepeter"))
@@ -98,7 +106,7 @@ func preferencesPanelTests() {
         try uiExpect(!remote.isEditable, "remote theme changes should go through the picker")
     }
 
-    uiTest("theme fields fill the same remaining row width") {
+    await uiTest("theme fields fill the same remaining row width") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         fx.panel.apply(makeProjection(themeText: "Monokai Remastered", remoteThemeText: "Purplepeter"))
@@ -119,7 +127,7 @@ func preferencesPanelTests() {
         )
     }
 
-    uiTest("the label column reserves no width beyond its widest label") {
+    await uiTest("the label column reserves no width beyond its widest label") {
         // Intent: the right-aligned label column shrink-wraps its widest label,
         //   so every spare point of the form goes to the input controls.
         // Why it exists: NSGridView hands 100% of a grid's surplus width to
@@ -143,7 +151,7 @@ func preferencesPanelTests() {
                      + "but \(deadSpace)pt of the label column is unused")
     }
 
-    uiTest("the settings window is exactly as wide as its content needs") {
+    await uiTest("the settings window is exactly as wide as its content needs") {
         // Intent: the panel's width is derived from its content, never asserted.
         // Why it exists: this is the invariant that makes the label-padding bug
         //   impossible. Any surplus width the window carries is surplus the grid
@@ -163,7 +171,7 @@ func preferencesPanelTests() {
         )
     }
 
-    uiTest("the input controls get the full width the labels do not need") {
+    await uiTest("the input controls get the full width the labels do not need") {
         // Intent: the control column is at least as wide as the panel declares
         //   it wants, so themes and font families stay readable.
         // Why it exists: before the width became content-driven, the controls
@@ -181,7 +189,7 @@ func preferencesPanelTests() {
         )
     }
 
-    uiTest("theme fallback warnings show inline and collapse when resolved") {
+    await uiTest("theme fallback warnings show inline and collapse when resolved") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         let grid = try settingsGrid(in: fx.panel)
@@ -202,7 +210,7 @@ func preferencesPanelTests() {
         try uiExpect(remoteRow.isHidden, "resolved remote warning row should collapse")
     }
 
-    uiTest("the font-family combo box lists the projected choices in order") {
+    await uiTest("the font-family combo box lists the projected choices in order") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
 
@@ -217,7 +225,7 @@ func preferencesPanelTests() {
                      "an unset family should display the system-monospace entry")
     }
 
-    uiTest("picking a family from the list applies that family immediately") {
+    await uiTest("picking a family from the list applies that family immediately") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         fx.panel.apply(makeProjection(choices: [systemMonospaceFontChoiceTitle, "Menlo"]))
@@ -234,7 +242,7 @@ func preferencesPanelTests() {
         }
     }
 
-    uiTest("picking the system-monospace entry applies the sentinel, not a font name") {
+    await uiTest("picking the system-monospace entry applies the sentinel, not a font name") {
         // Intent: the one non-font entry round-trips through the same message as
         //   every family, and the core is what turns it back into "no family".
         // Why it exists: pins the seam that keeps the AppKit side free of
@@ -255,7 +263,7 @@ func preferencesPanelTests() {
                      "expected the sentinel title, got \(family ?? "nil")")
     }
 
-    uiTest("typing a family drafts the typed text") {
+    await uiTest("typing a family drafts the typed text") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         fx.panel.apply(makeProjection(choices: [systemMonospaceFontChoiceTitle, "Menlo"]))
@@ -271,7 +279,7 @@ func preferencesPanelTests() {
         try uiExpect(family == "Fira Code", "expected the typed text, got \(family ?? "nil")")
     }
 
-    uiTest("clearing the field drafts no family at all") {
+    await uiTest("clearing the field drafts no family at all") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         fx.panel.apply(makeProjection(text: "Menlo", choices: [systemMonospaceFontChoiceTitle, "Menlo"]))
@@ -287,7 +295,7 @@ func preferencesPanelTests() {
         try uiExpect(family == nil, "an empty field means no family, got \(family ?? "nil")")
     }
 
-    uiTest("ending a text edit applies the drafted value") {
+    await uiTest("ending a text edit applies the drafted value") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
 
@@ -300,7 +308,7 @@ func preferencesPanelTests() {
         }
     }
 
-    uiTest("the font-size stepper updates the field and applies the size") {
+    await uiTest("the font-size stepper updates the field and applies the size") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         fx.panel.apply(makeProjection(fontSizeText: "13"))
@@ -322,7 +330,7 @@ func preferencesPanelTests() {
         }
     }
 
-    uiTest("a projected warning shows inline and lays out") {
+    await uiTest("a projected warning shows inline and lays out") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         let warning = "Font \"Fira Codee\" is not installed -- using the system monospace font."
@@ -337,7 +345,7 @@ func preferencesPanelTests() {
         try uiExpect((fx.panel.contentView?.fittingSize.height ?? 0) > 0, "panel should size itself")
     }
 
-    uiTest("a projection without a warning hides the label") {
+    await uiTest("a projection without a warning hides the label") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         fx.panel.apply(makeProjection(text: "Fira Codee", warning: "Font \"Fira Codee\" is not installed."))
@@ -350,7 +358,7 @@ func preferencesPanelTests() {
                      "hiding the warning must not leave the panel ambiguously laid out")
     }
 
-    uiTest("the copy-on-select checkbox shows and immediately applies the projected value") {
+    await uiTest("the copy-on-select checkbox shows and immediately applies the projected value") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
 
@@ -372,7 +380,7 @@ func preferencesPanelTests() {
         try uiExpect(fx.panel.copyOnSelectCheckbox.state == .off, "a disarmed option should untick the box")
     }
 
-    uiTest("the tailnet section shows the projected base, endpoint, and status") {
+    await uiTest("the tailnet section shows the projected base, endpoint, and status") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
 
@@ -389,7 +397,7 @@ func preferencesPanelTests() {
         try uiExpect(titles.contains("Listening"), "expected the live listener status")
     }
 
-    uiTest("the tailnet section is read-only and says when an edit takes effect") {
+    await uiTest("the tailnet section is read-only and says when an edit takes effect") {
         // Intent: nothing in the tailnet section accepts an edit, and the panel
         //   tells the user that a config change reaches the listener at the next
         //   launch.
@@ -421,12 +429,12 @@ func preferencesPanelTests() {
 // MARK: - Fixture
 
 private struct PreferencesFixture {
-    let runtime: AppRuntime
+    let runtime: RecordingAppRuntime
     let panel: PreferencesPanel
 }
 
 private func makePreferencesFixture() -> PreferencesFixture {
-    let runtime = AppRuntime()
+    let runtime = makeUITestRuntime()
     let panel = PreferencesPanel(runtime: runtime)
     return PreferencesFixture(runtime: runtime, panel: panel)
 }

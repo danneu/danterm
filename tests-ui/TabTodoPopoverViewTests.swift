@@ -2,12 +2,20 @@
 // routing, edit/compose modes, reconcile preservation, bucket moves, and
 // pasteboard payloads.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func tabTodoPopoverViewTests() {
+func tabTodoPopoverViewTests() async {
     print("TabTodoPopoverView")
 
-    uiTest("a pane section header lays out one line and truncates") {
+    await uiTest("a pane section header lays out one line and truncates") {
         let fx = makeTabTodoFixture()
         defer { fx.window.close() }
 
@@ -20,7 +28,7 @@ func tabTodoPopoverViewTests() {
         try assertSingleLine(title, "tab-todo pane section header")
     }
 
-    uiTest("apply renders populated tab and pane sections in row order") {
+    await uiTest("apply renders populated tab and pane sections in row order") {
         // Intent: the popover renders the projection's flattened tab/pane row
         //   sequence with the expected AppKit row identifiers and titles.
         // Why it exists: pins the view binding for the richest untested TODO
@@ -42,7 +50,7 @@ func tabTodoPopoverViewTests() {
         ], "unexpected row text: \(rowTextValues(rows))")
     }
 
-    uiTest("empty tab section renders placeholder and clear button follows tab completion") {
+    await uiTest("empty tab section renders placeholder and clear button follows tab completion") {
         // Intent: an empty tab section shows its placeholder, and Clear
         //   completed is visible only when tab-level todos include a done item.
         // Why it exists: pins tab-scoped completion visibility separately from
@@ -66,7 +74,7 @@ func tabTodoPopoverViewTests() {
         try uiExpect(!clearButton.isHidden, "clear button should be visible with completed tab todos")
     }
 
-    uiTest("tab-row checkbox sends explicit setTodoDone") {
+    await uiTest("tab-row checkbox sends explicit setTodoDone") {
         // Intent: a tab task checkbox dispatches the explicit done value with
         //   the row item's owner and todo id.
         // Why it exists: pins the button target/action route independently of
@@ -86,7 +94,7 @@ func tabTodoPopoverViewTests() {
         }
     }
 
-    uiTest("pane-row checkbox sends setTodoDone for its pane") {
+    await uiTest("pane-row checkbox sends setTodoDone for its pane") {
         // Intent: a pane task checkbox dispatches to the pane owning that row,
         //   carrying the inverted done state.
         // Why it exists: guards against resolving pane rows through selected
@@ -106,7 +114,7 @@ func tabTodoPopoverViewTests() {
         }
     }
 
-    uiTest("delete buttons route tab and pane rows to their owners") {
+    await uiTest("delete buttons route tab and pane rows to their owners") {
         // Intent: delete buttons on tab and pane rows dispatch owner-specific
         //   delete messages.
         // Why it exists: pins the shared TodoRowView reuse so a pane row cannot
@@ -134,7 +142,7 @@ func tabTodoPopoverViewTests() {
         }, "second delete should target pane todo")
     }
 
-    uiTest("clear completed sends owner-scoped clearCompletedTodos") {
+    await uiTest("clear completed sends owner-scoped clearCompletedTodos") {
         // Intent: the Clear completed button dispatches the shared clear
         //   message with the popover's tab owner.
         // Why it exists: pins that the tab popover button does not call the
@@ -153,7 +161,7 @@ func tabTodoPopoverViewTests() {
         }
     }
 
-    uiTest("non-empty compose submit sends owner-scoped addTodo and clears field") {
+    await uiTest("non-empty compose submit sends owner-scoped addTodo and clears field") {
         // Intent: Enter in the compose field trims, sends the shared add
         //   message with the tab owner, and clears the compose draft.
         // Why it exists: pins the NSTextViewDelegate submit path without
@@ -177,7 +185,7 @@ func tabTodoPopoverViewTests() {
         try uiExpect(compose.string.isEmpty, "compose field should be cleared")
     }
 
-    uiTest("whitespace compose submit sends nothing") {
+    await uiTest("whitespace compose submit sends nothing") {
         // Intent: whitespace-only compose submits are rejected before dispatch.
         // Why it exists: pins the view's local validation at the AppKit entry
         //   point. Spec-first.
@@ -194,7 +202,7 @@ func tabTodoPopoverViewTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "whitespace compose submit should send no messages")
     }
 
-    uiTest("Return on a selected row enters edit mode with item text") {
+    await uiTest("Return on a selected row enters edit mode with item text") {
         // Intent: Return in list mode switches to editor mode for the selected
         //   row and pre-fills the edit field.
         // Why it exists: pins the minimal key synthesis route through
@@ -212,7 +220,7 @@ func tabTodoPopoverViewTests() {
                      "compose input should be hidden in edit mode")
     }
 
-    uiTest("save button sends trimmed tab and pane edit messages") {
+    await uiTest("save button sends trimmed tab and pane edit messages") {
         // Intent: Save commits edits to the selected row's owner and returns to
         //   list mode.
         // Why it exists: pins both tab and pane edit dispatch paths through the
@@ -254,7 +262,7 @@ func tabTodoPopoverViewTests() {
         }
     }
 
-    uiTest("whitespace-only save is rejected and stays editing") {
+    await uiTest("whitespace-only save is rejected and stays editing") {
         // Intent: Save rejects an edit draft that trims to empty and keeps the
         //   editor active.
         // Why it exists: pins validation before dispatch so empty task text is
@@ -273,7 +281,7 @@ func tabTodoPopoverViewTests() {
         try uiExpect(isEffectivelyHidden(fx.table), "table should remain hidden while edit is rejected")
     }
 
-    uiTest("cancel button exits edit mode without sending") {
+    await uiTest("cancel button exits edit mode without sending") {
         // Intent: Cancel abandons the active edit and returns to list mode
         //   without dispatch.
         // Why it exists: pins editor cancellation as view-local state only.
@@ -289,7 +297,7 @@ func tabTodoPopoverViewTests() {
         try uiExpect(!isEffectivelyHidden(fx.table), "table should be visible after cancel")
     }
 
-    uiTest("apply mid-edit preserves draft when target still exists") {
+    await uiTest("apply mid-edit preserves draft when target still exists") {
         // Intent: reconcile preserves an in-progress edit draft when the same
         //   todo target survives in the new projection.
         // Why it exists: pins the e7d4576 behavior that open popover contents
@@ -311,7 +319,7 @@ func tabTodoPopoverViewTests() {
         try uiExpect(isEffectivelyHidden(fx.table), "table should remain hidden in edit mode")
     }
 
-    uiTest("apply mid-edit exits edit mode when target is gone") {
+    await uiTest("apply mid-edit exits edit mode when target is gone") {
         // Intent: reconcile leaves edit mode when the todo being edited no
         //   longer exists in the projection.
         // Why it exists: pins stale-target cleanup for open popovers.
@@ -330,7 +338,7 @@ func tabTodoPopoverViewTests() {
         try uiExpect(try visibleTodoInput(in: fx).string.isEmpty, "compose field should be visible after exiting edit")
     }
 
-    uiTest("shouldSelectRow focuses pane headers and only selects item rows") {
+    await uiTest("shouldSelectRow focuses pane headers and only selects item rows") {
         // Intent: delegate selection allows item rows, rejects headers and
         //   placeholders, and focuses the pane represented by pane headers.
         // Why it exists: pins the deliberate direct runtime focus side effect
@@ -353,7 +361,7 @@ func tabTodoPopoverViewTests() {
                      "pane header should focus its pane, got \(fx.runtime.focusedPaneSessions)")
     }
 
-    uiTest("pasteboardWriterForRow emits tab and pane drag payloads") {
+    await uiTest("pasteboardWriterForRow emits tab and pane drag payloads") {
         // Intent: item rows write drag payload JSON identifying their source
         //   bucket and todo id; non-item rows do not write anything.
         // Why it exists: pins the supported drag surface without testing the
@@ -384,7 +392,7 @@ func tabTodoPopoverViewTests() {
         try uiExpect(panePayload.todoId == fx.paneOpenId.uuidString, "pane payload todo id mismatch")
     }
 
-    uiTest("shortcut help closes before tab parent disappears") {
+    await uiTest("shortcut help closes before tab parent disappears") {
         // Intent: the tab popover closes its shortcut-help child before the
         //   parent popover disappears.
         // Why it exists: pins the nested-popover lifetime invariant that the
@@ -398,17 +406,17 @@ func tabTodoPopoverViewTests() {
         fx.window.orderFrontRegardless()
 
         fx.vc.toggleShortcutHelp(nil)
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        await pumpMainQueueOnce()
 
         try uiExpect(fx.vc.hasShortcutHelpPopover, "shortcut help should open with a parent popover handle")
 
         fx.vc.viewWillDisappear()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        await pumpMainQueueOnce()
 
         try uiExpect(!fx.vc.hasShortcutHelpPopover, "shortcut help should close before the tab parent disappears")
     }
 
-    uiTest("Escape in list mode sends toggleTodoPopover") {
+    await uiTest("Escape in list mode sends toggleTodoPopover") {
         // Intent: Escape with the list focused dismisses the tab popover
         //   through the toggle message.
         // Why it exists: the pane suite already pins this; the tab suite was
@@ -425,7 +433,7 @@ func tabTodoPopoverViewTests() {
         }
     }
 
-    uiTest("Cmd-Backspace deletes the selected row and selects the nearest survivor") {
+    await uiTest("Cmd-Backspace deletes the selected row and selects the nearest survivor") {
         // Intent: Cmd-Backspace dispatches delete for the selected row and
         //   moves selection to the nearest remaining selectable row.
         // Why it exists: the tab list has non-selectable header and
@@ -454,7 +462,7 @@ func tabTodoPopoverViewTests() {
                      "selection should move to the nearest surviving row")
     }
 
-    uiTest("Cmd-N while editing saves, clears the compose draft, and focuses compose") {
+    await uiTest("Cmd-N while editing saves, clears the compose draft, and focuses compose") {
         // Intent: Cmd-N in edit mode saves the edit, clears the compose draft,
         //   leaves edit mode, and focuses compose.
         // Why it exists: the pane suite pins this route; the tab suite was
@@ -488,7 +496,7 @@ func tabTodoPopoverViewTests() {
         try uiExpect(fx.window.firstResponder === visible.textView, "compose input should be first responder")
     }
 
-    uiTest("apply preserves compose focus and draft") {
+    await uiTest("apply preserves compose focus and draft") {
         // Intent: applying a fresh projection while compose is first responder
         //   keeps compose focused and preserves its draft.
         // Why it exists: pins the compose branch of first-responder restore on
@@ -512,7 +520,7 @@ func tabTodoPopoverViewTests() {
         try uiExpect(fx.window.firstResponder === compose.textView, "compose input should remain first responder")
     }
 
-    uiTest("apply preserves table focus or falls back to compose when no row is selectable") {
+    await uiTest("apply preserves table focus or falls back to compose when no row is selectable") {
         // Intent: applying while the table is focused keeps table focus when
         //   the selected item survives; when every task disappears, focus
         //   moves to compose.
@@ -548,7 +556,7 @@ func tabTodoPopoverViewTests() {
                      "a list with no selectable row should move focus back to compose")
     }
 
-    uiTest("accepted same-bucket drop reorders the tab section and keeps the dropped todo selected") {
+    await uiTest("accepted same-bucket drop reorders the tab section and keeps the dropped todo selected") {
         // Intent: dropping a tab task inside its own section accepts the drop,
         //   dispatches the reorder message with the section-local index, and
         //   leaves the dropped task selected.
@@ -580,7 +588,7 @@ func tabTodoPopoverViewTests() {
                      "dropped task should still belong to the tab section")
     }
 
-    uiTest("accepted cross-bucket drop moves the todo and selects it under its new owner") {
+    await uiTest("accepted cross-bucket drop moves the todo and selects it under its new owner") {
         // Intent: dropping a tab task into a pane section accepts the drop,
         //   dispatches moveTodo rather than reorderTodo, and selects the task
         //   at its new owner.
@@ -614,7 +622,7 @@ func tabTodoPopoverViewTests() {
                      "moved task should be selected under its new pane owner")
     }
 
-    uiTest("Shift-L and Shift-H move the selected todo between buckets and keep it selected") {
+    await uiTest("Shift-L and Shift-H move the selected todo between buckets and keep it selected") {
         // Intent: the bucket keys move the selected task to the adjacent
         //   section and leave it selected under its new owner in both
         //   directions.
@@ -665,7 +673,7 @@ func tabTodoPopoverViewTests() {
                      "returned task should be selected under the tab section")
     }
 
-    uiTest("Cmd-Shift-H and Cmd-Shift-L are swallowed by the tab popover") {
+    await uiTest("Cmd-Shift-H and Cmd-Shift-L are swallowed by the tab popover") {
         // Intent: the tab popover claims the Cmd-Shift bucket keys so they
         //   never reach the surrounding app, and dispatches nothing for them.
         // Why it exists: the pane popover deliberately lets the same keys
@@ -686,7 +694,7 @@ func tabTodoPopoverViewTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "swallowed bucket keys should send nothing")
     }
 
-    uiTest("compose submit selects the newly added tab task") {
+    await uiTest("compose submit selects the newly added tab task") {
         // Intent: after adding a task from compose, the tab popover selects the
         //   row that just appeared.
         // Why it exists: the selection is resolved against the projection the
@@ -718,7 +726,7 @@ func tabTodoPopoverViewTests() {
 
 private struct TabTodoFixture {
     let vc: TodoPopoverController<TabTodoPopoverScope>
-    let runtime: AppRuntime
+    let runtime: RecordingAppRuntime
     let window: NSWindow
     let model: AppModel
     let tabId: TabId
@@ -768,13 +776,14 @@ private func makeTabTodoFixture(
     var model = AppModel(groups: [group])
     model.selectedTabId = tabId
 
-    let runtime = AppRuntime(model: model)
+    let runtime = makeUITestRuntime(model: model)
     let vc = TodoPopoverController(scope: TabTodoPopoverScope(tabId: tabId), runtime: runtime)
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 320, height: 400),
         styleMask: [.titled],
         backing: .buffered,
         defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = vc.view
     vc.apply(desiredTabTodoPopover(tabId: tabId, in: model)!)
     window.layoutIfNeeded()
@@ -921,7 +930,7 @@ private func enterEdit(rowTitle: String, in fx: TabTodoFixture) throws {
 }
 
 private func expectSingleMessage(
-    _ runtime: AppRuntime,
+    _ runtime: RecordingAppRuntime,
     _ description: String,
     matches: (Msg) -> Bool
 ) throws {

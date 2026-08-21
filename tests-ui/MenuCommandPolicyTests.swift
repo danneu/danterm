@@ -2,12 +2,20 @@
 // The cases pin default-deny terminal command gating without compiling the full
 // app runtime into the UI harness.
 import Foundation
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func menuCommandPolicyTests() {
+func menuCommandPolicyTests() async {
     print("MenuCommandPolicy")
 
-    uiTest("terminal action follows window liveness") {
+    await uiTest("terminal action follows window liveness") {
         let closePane = Selector(("closePane:"))
 
         try uiExpect(
@@ -20,7 +28,7 @@ func menuCommandPolicyTests() {
         )
     }
 
-    uiTest("window-independent app action ignores window liveness") {
+    await uiTest("window-independent app action ignores window liveness") {
         let preferences = #selector(WindowIndependentMenuActions.showPreferences(_:))
 
         try uiExpect(
@@ -33,7 +41,7 @@ func menuCommandPolicyTests() {
         )
     }
 
-    uiTest("unknown action is window-scoped by default") {
+    await uiTest("unknown action is window-scoped by default") {
         let brandNewCommand = Selector(("brandNewCommand:"))
 
         try uiExpect(
@@ -42,7 +50,7 @@ func menuCommandPolicyTests() {
         )
     }
 
-    uiTest("nil action is enabled") {
+    await uiTest("nil action is enabled") {
         try uiExpect(
             MenuCommandPolicy.isEnabled(action: nil, windowIsLive: false),
             "nil action should stay enabled for separators and submenu parents"

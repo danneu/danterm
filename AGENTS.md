@@ -103,7 +103,7 @@ prebuild step.
 | `just test` | The local gate. Run it before every commit, never inside the edit loop. |
 | `just lint` | The rule checks alone, a subset of `just test`. |
 | `swift test --package-path lib/X [--filter Y]` | Targeted suite for one package. |
-| `just test-ui` | AppKit UI harness; excluded from the gate because it needs a WindowServer. |
+| `just test-ui` | The AppKit UI suite; excluded from the gate because it needs a WindowServer. |
 
 **Which test command, when.** In the red-green-refactor loop, run the targeted
 suite for the package you edit plus `just lint`. Targeted runs stop at the

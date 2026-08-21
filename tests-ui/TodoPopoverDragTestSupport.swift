@@ -3,6 +3,14 @@
 // the dragging pasteboard, so the double answers every other requirement with
 // an inert value. Keep suite-specific fixtures and assertions out of here.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 /// Stands in for the NSDraggingInfo AppKit would hand a drop handler, so the
 /// suites can drive `acceptDrop` without a real drag session.
@@ -28,7 +36,7 @@ final class FakeTodoDraggingInfo: NSObject, NSDraggingInfo {
 
     func slideDraggedImage(to screenPoint: NSPoint) {}
 
-    override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+    nonisolated override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
 
     func enumerateDraggingItems(
         options enumOpts: NSDraggingItemEnumerationOptions,

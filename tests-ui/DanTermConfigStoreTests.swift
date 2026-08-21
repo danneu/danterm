@@ -1,12 +1,20 @@
 // Filesystem integration coverage for DanTerm's atomic JSON config transaction.
 import Foundation
 import DanTermProtocol
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func danTermConfigStoreTests() {
+func danTermConfigStoreTests() async {
     print("DanTermConfigStore")
 
-    uiTest("open-config seed is writable v1 and immediately accepts Preferences save") {
+    await uiTest("open-config seed is writable v1 and immediately accepts Preferences save") {
         let fixture = try ConfigStoreFixture()
         defer { fixture.remove() }
         let store = DanTermConfigStore(url: fixture.url)
@@ -22,7 +30,7 @@ func danTermConfigStoreTests() {
         try uiExpect(try store.load() == config, "seed refused the first Preferences save")
     }
 
-    uiTest("save re-reads external edits and preserves unknown exact numbers") {
+    await uiTest("save re-reads external edits and preserves unknown exact numbers") {
         let fixture = try ConfigStoreFixture()
         defer { fixture.remove() }
         let source = Data(
@@ -46,7 +54,7 @@ func danTermConfigStoreTests() {
         try uiExpect(saved.contains("\"future\": \"kept\""), "nested external edit was lost")
     }
 
-    uiTest("invalid documents fall back at load and refuse every save") {
+    await uiTest("invalid documents fall back at load and refuse every save") {
         for source in [
             Data("{".utf8),
             Data("{\"theme\":{}}".utf8),
@@ -71,7 +79,7 @@ func danTermConfigStoreTests() {
         }
     }
 
-    uiTest("failed multi-field write leaves the original file byte-identical") {
+    await uiTest("failed multi-field write leaves the original file byte-identical") {
         let fixture = try ConfigStoreFixture()
         defer { fixture.remove() }
         let original = DanTermConfigDocument.seedData
@@ -100,7 +108,7 @@ func danTermConfigStoreTests() {
                      "failed transaction partially changed the file")
     }
 
-    uiTest("save through a config symlink updates its target and preserves the link") {
+    await uiTest("save through a config symlink updates its target and preserves the link") {
         // Intent: a Preferences save through the home-manager config link rewrites
         //   the repo-owned target without replacing the link.
         // Why it exists: Foundation's atomic replacement otherwise consumes the
@@ -125,7 +133,7 @@ func danTermConfigStoreTests() {
         )
     }
 
-    uiTest("seeding a dangling config symlink creates its target and preserves the link") {
+    await uiTest("seeding a dangling config symlink creates its target and preserves the link") {
         // Intent: opening a config whose out-of-store link target is absent seeds
         //   the target as a writable v1 document and retains the link.
         // Why it exists: file-existence checks follow symlinks, so a dangling link
@@ -150,7 +158,7 @@ func danTermConfigStoreTests() {
         )
     }
 
-    uiTest("refused save through a config symlink leaves target bytes unchanged") {
+    await uiTest("refused save through a config symlink leaves target bytes unchanged") {
         // Intent: invalid linked config documents remain byte-identical when a save
         //   is refused.
         // Why it exists: resolving the transaction address must not weaken the
@@ -176,7 +184,7 @@ func danTermConfigStoreTests() {
         )
     }
 
-    uiTest("failed save through a config symlink leaves target bytes unchanged") {
+    await uiTest("failed save through a config symlink leaves target bytes unchanged") {
         // Intent: an atomic write failure against a resolved config target leaves
         //   its original bytes intact.
         // Why it exists: moving the write from the visible link to its target must
@@ -213,7 +221,7 @@ func danTermConfigStoreTests() {
         )
     }
 
-    uiTest("retargeting a config symlink during save cannot modify the new target") {
+    await uiTest("retargeting a config symlink during save cannot modify the new target") {
         // Intent: one save reads and writes one resolved file even if the visible
         //   config link changes mid-transaction.
         // Why it exists: resolving separately for read and write creates a race that

@@ -7,6 +7,8 @@
 <!-- docs-lint: allow-missing app/TerminalView.swift -->
 <!-- docs-lint: allow-missing tests-ui/SidebarViewTestShim.swift -->
 <!-- docs-lint: allow-missing tests-ui/SwiftTerminalSessionViewTestShim.swift -->
+<!-- docs-lint: allow-missing scripts/tests/test-ui-harness_test.sh -->
+<!-- docs-lint: allow-missing test-ui.sh -->
 
 > **Superseded.** The central finding below -- that no test can construct
 > `AppRuntime` -- was already false when it was written: `DanTermAppTests`

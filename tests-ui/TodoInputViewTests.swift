@@ -1,12 +1,20 @@
 // UI tests for TodoInputView sizing and undo ownership.
 
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func todoInputViewTests() {
+func todoInputViewTests() async {
     print("TodoInputView")
 
-    uiTest("default input reports compact height") {
+    await uiTest("default input reports compact height") {
         let input = TodoInputView()
         try uiExpect(
             TodoInputView.inputHeight == TodoInputView.height(visibleLineCount: TodoInputView.defaultVisibleLineCount),
@@ -18,7 +26,7 @@ func todoInputViewTests() {
         )
     }
 
-    uiTest("edit input reports larger visible line count height") {
+    await uiTest("edit input reports larger visible line count height") {
         let input = TodoInputView(visibleLineCount: TodoInputView.editVisibleLineCount)
         let expectedHeight = TodoInputView.inputLineHeight * CGFloat(TodoInputView.editVisibleLineCount)
             + TodoInputView.inputInsetY * 2
@@ -34,7 +42,7 @@ func todoInputViewTests() {
         )
     }
 
-    uiTest("todo input scopes undo to its own manager and still undoes typing") {
+    await uiTest("todo input scopes undo to its own manager and still undoes typing") {
         // Intent: a TodoInputView's typing undo lives in a manager owned by the
         //   field, and in-field undo while composing still works.
         // Why it exists: regression for the 2026-06-09 SIGSEGV. Typing undo
@@ -49,6 +57,7 @@ func todoInputViewTests() {
             styleMask: [.titled],
             backing: .buffered,
             defer: false)
+        window.isReleasedWhenClosed = false
         defer { window.close() }
         window.contentView = input
         window.makeFirstResponder(input.textView)

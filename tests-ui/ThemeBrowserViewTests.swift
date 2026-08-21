@@ -1,13 +1,21 @@
 // UI-harness tests for ThemeBrowserView's catalog rendering, filtering,
 // selection dispatch, context-menu shape, and AppKit menu-target lifetime.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 /// Registers ThemeBrowserView coverage in the standalone UI harness.
 @MainActor
-func themeBrowserViewTests() {
+func themeBrowserViewTests() async {
     print("ThemeBrowserView")
 
-    uiTest("runtime catalog projects complete swatches and resolves names without paths") {
+    await uiTest("runtime catalog projects complete swatches and resolves names without paths") {
         // Intent: one decoded entry drives both browser colors and the renderer bridge.
         // Why it exists: separate parsing paths can drift, and untrusted names must never become paths.
         // Scenario: the browser renders a packed theme and a remote traversal-like key is rejected.
@@ -38,7 +46,7 @@ func themeBrowserViewTests() {
                      "path traversal resolved outside exact catalog keys")
     }
 
-    uiTest("unreadable and malformed catalogs expose no partial themes") {
+    await uiTest("unreadable and malformed catalogs expose no partial themes") {
         // Intent: resource failures collapse to an empty catalog rather than partial theme state.
         // Why it exists: runtime theme completeness is all-or-nothing across the packed resource.
         // Scenario: the bundle read fails or returns malformed JSON during application startup.
@@ -49,8 +57,8 @@ func themeBrowserViewTests() {
         )
     }
 
-    uiTest("constructs against an empty catalog and applies a projection without dispatch") {
-        let runtime = AppRuntime()
+    await uiTest("constructs against an empty catalog and applies a projection without dispatch") {
+        let runtime = makeUITestRuntime()
         let view = ThemeBrowserView()
         view.runtime = runtime
         view.apply(ThemeBrowserProjection(currentThemeName: nil))
@@ -58,7 +66,7 @@ func themeBrowserViewTests() {
         try uiExpect(runtime.sentMessages.isEmpty, "apply must not dispatch")
     }
 
-    uiTest("a freshly constructed browser renders its catalog without an external reload") {
+    await uiTest("a freshly constructed browser renders its catalog without an external reload") {
         let view = ThemeBrowserView(themeNames: ["Dracula", "Nord"])
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
@@ -66,6 +74,7 @@ func themeBrowserViewTests() {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         defer { window.close() }
         window.contentView = view
         window.layoutIfNeeded()
@@ -77,7 +86,7 @@ func themeBrowserViewTests() {
         )
     }
 
-    uiTest("search filter narrows rows case-insensitively") {
+    await uiTest("search filter narrows rows case-insensitively") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
 
@@ -88,7 +97,7 @@ func themeBrowserViewTests() {
         try uiExpect(try cellText(row: 1, in: fx) == "Gruvbox Light", "second filtered row mismatch")
     }
 
-    uiTest("theme cell wires a swatch view") {
+    await uiTest("theme cell wires a swatch view") {
         // Intent: the row cell built by viewFor carries a ColorSwatchView
         //   installed in the cell with the swatchView back-reference set.
         // Why it exists: cellText() only reads textField, so before this pin the
@@ -109,7 +118,7 @@ func themeBrowserViewTests() {
         try uiExpect(swatch.superview === cell, "swatch should be installed in the cell")
     }
 
-    uiTest("clearing the filter restores all rows") {
+    await uiTest("clearing the filter restores all rows") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
 
@@ -119,7 +128,7 @@ func themeBrowserViewTests() {
         try uiExpect(fx.view.tableView.numberOfRows == fx.names.count, "all rows should be restored")
     }
 
-    uiTest("no-match filter yields zero rows") {
+    await uiTest("no-match filter yields zero rows") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
 
@@ -128,7 +137,7 @@ func themeBrowserViewTests() {
         try uiExpect(fx.view.tableView.numberOfRows == 0, "no-match query should show zero rows")
     }
 
-    uiTest("selection sends setPaneTheme for the focused pane") {
+    await uiTest("selection sends setPaneTheme for the focused pane") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
 
@@ -137,7 +146,7 @@ func themeBrowserViewTests() {
         try expectSingleSetPaneTheme(fx.runtime, paneId: fx.paneId, themeName: "Nord")
     }
 
-    uiTest("selection after filtering targets the filtered index") {
+    await uiTest("selection after filtering targets the filtered index") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
 
@@ -147,7 +156,7 @@ func themeBrowserViewTests() {
         try expectSingleSetPaneTheme(fx.runtime, paneId: fx.paneId, themeName: "Gruvbox Light")
     }
 
-    uiTest("re-selecting the current theme sends nothing") {
+    await uiTest("re-selecting the current theme sends nothing") {
         let fx = makeThemeBrowserFixture(currentTheme: "Nord")
         defer { fx.window.close() }
 
@@ -156,7 +165,7 @@ func themeBrowserViewTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "re-selecting current theme should not dispatch")
     }
 
-    uiTest("apply moves selection and checkmark without dispatching") {
+    await uiTest("apply moves selection and checkmark without dispatching") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
 
@@ -170,7 +179,7 @@ func themeBrowserViewTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "apply should not dispatch")
     }
 
-    uiTest("apply nil clears checkmark, reset visibility, and selection") {
+    await uiTest("apply nil clears checkmark, reset visibility, and selection") {
         let fx = makeThemeBrowserFixture(currentTheme: "Nord")
         defer { fx.window.close() }
 
@@ -183,7 +192,7 @@ func themeBrowserViewTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "apply should not dispatch")
     }
 
-    uiTest("filtering keeps the current theme's row selected without dispatch") {
+    await uiTest("filtering keeps the current theme's row selected without dispatch") {
         let fx = makeThemeBrowserFixture(currentTheme: "Gruvbox Dark")
         defer { fx.window.close() }
 
@@ -193,7 +202,7 @@ func themeBrowserViewTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "filtering should not dispatch")
     }
 
-    uiTest("filtering away the current theme deselects") {
+    await uiTest("filtering away the current theme deselects") {
         let fx = makeThemeBrowserFixture(currentTheme: "Nord")
         defer { fx.window.close() }
 
@@ -203,7 +212,7 @@ func themeBrowserViewTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "filtering should not dispatch")
     }
 
-    uiTest("reset button sends setPaneTheme nil") {
+    await uiTest("reset button sends setPaneTheme nil") {
         let fx = makeThemeBrowserFixture(currentTheme: "Nord")
         defer { fx.window.close() }
 
@@ -212,7 +221,7 @@ func themeBrowserViewTests() {
         try expectSingleSetPaneTheme(fx.runtime, paneId: fx.paneId, themeName: nil)
     }
 
-    uiTest("close button sends the theme browser toggle message") {
+    await uiTest("close button sends the theme browser toggle message") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
 
@@ -224,7 +233,7 @@ func themeBrowserViewTests() {
         }
     }
 
-    uiTest("context-menu builder yields Copy Name carrying the row's theme and a strong anchor") {
+    await uiTest("context-menu builder yields Copy Name carrying the row's theme and a strong anchor") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
         let menu = NSMenu()
@@ -241,7 +250,7 @@ func themeBrowserViewTests() {
         try uiExpect(payload.anchor === fx.view, "payload should anchor the browser")
     }
 
-    uiTest("builder clears stale items and yields empty for row -1") {
+    await uiTest("builder clears stale items and yields empty for row -1") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
         let menu = NSMenu()
@@ -252,7 +261,7 @@ func themeBrowserViewTests() {
         try uiExpect(menu.items.isEmpty, "miss-click menu should be empty")
     }
 
-    uiTest("builder yields empty for out-of-bounds row") {
+    await uiTest("builder yields empty for out-of-bounds row") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
         let menu = NSMenu()
@@ -262,7 +271,7 @@ func themeBrowserViewTests() {
         try uiExpect(menu.items.isEmpty, "out-of-bounds menu should be empty")
     }
 
-    uiTest("builder reads the active filter") {
+    await uiTest("builder reads the active filter") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
         let menu = NSMenu()
@@ -274,7 +283,7 @@ func themeBrowserViewTests() {
         try uiExpect(payload.themeName == "Gruvbox Dark", "builder should use filtered row names")
     }
 
-    uiTest("a right-click on a row yields a menu carrying that row's theme") {
+    await uiTest("a right-click on a row yields a menu carrying that row's theme") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
 
@@ -284,7 +293,7 @@ func themeBrowserViewTests() {
         try uiExpect(payload.themeName == fx.names[1], "menu payload theme mismatch: \(payload.themeName)")
     }
 
-    uiTest("a right-click that misses every row yields no menu") {
+    await uiTest("a right-click that misses every row yields no menu") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
         let table = fx.view.tableView
@@ -294,7 +303,7 @@ func themeBrowserViewTests() {
         try uiExpect(table.menu(for: event) == nil, "a click past the last row should yield no menu")
     }
 
-    uiTest("a right-click marks the clicked row so AppKit outlines it") {
+    await uiTest("a right-click marks the clicked row so AppKit outlines it") {
         // Intent: after a right-click, the table knows which row was clicked.
         // Why it exists: AppKit draws the context-menu outline only from
         //   NSTableView's own menu(for:), which is also what sets clickedRow. An
@@ -314,7 +323,7 @@ func themeBrowserViewTests() {
             "the table view should hold no menu once menu(for:) returns")
     }
 
-    uiTest("menu keeps the browser alive and Copy Name still fires after teardown") {
+    await uiTest("menu keeps the browser alive and Copy Name still fires after teardown") {
         // Intent: a built menu strongly retains the ephemeral theme browser, so
         //   Copy Name still works after the browser's owner releases it.
         // Why it exists: NSMenuItem.target is weak; without a representedObject
@@ -347,7 +356,7 @@ func themeBrowserViewTests() {
         try uiExpect(copied == "Gruvbox Dark", "Copy Name should write to recording pasteboard")
     }
 
-    uiTest("the per-click menu, its item, and its payload all deallocate after dismissal") {
+    await uiTest("the per-click menu, its item, and its payload all deallocate after dismissal") {
         // Intent: nothing survives one right-click. The browser stores no menu,
         //   so the whole menu graph goes away once AppKit releases it.
         // Why it exists: a menu stored on the table view closes the cycle
@@ -370,16 +379,14 @@ func themeBrowserViewTests() {
             itemObserver = item
             payloadObserver = try menuPayload(from: item)
         }
-        autoreleasepool {
-            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
-        }
+        await pumpMainQueueOnce()
 
         try uiExpect(menuObserver == nil, "the per-click menu should deallocate after dismissal")
         try uiExpect(itemObserver == nil, "the menu item should deallocate after dismissal")
         try uiExpect(payloadObserver == nil, "the anchor payload should deallocate after dismissal")
     }
 
-    uiTest("the browser deallocates once its owner and its menu are both gone") {
+    await uiTest("the browser deallocates once its owner and its menu are both gone") {
         // Intent: the anchor payload retains the browser for the menu's lifetime
         //   and no longer.
         // Why it exists: the anchor is what keeps Copy Name working across a
@@ -453,7 +460,7 @@ private func fixtureThemeCatalogData() -> Data {
 
 private struct ThemeBrowserFixture {
     let view: ThemeBrowserView
-    let runtime: AppRuntime
+    let runtime: RecordingAppRuntime
     let window: NSWindow
     let tabId: TabId
     let paneId: PaneId
@@ -473,7 +480,7 @@ private func makeThemeBrowserFixture(
     var model = AppModel(groups: [group])
     model.selectedTabId = tabId
 
-    let runtime = AppRuntime(model: model)
+    let runtime = makeUITestRuntime(model: model)
     let view = ThemeBrowserView(themeNames: names)
     view.runtime = runtime
 
@@ -482,6 +489,7 @@ private func makeThemeBrowserFixture(
         styleMask: [.titled],
         backing: .buffered,
         defer: false)
+    window.isReleasedWhenClosed = false
     let contentArea = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
     window.contentView = contentArea
     contentArea.addSubview(view)
@@ -529,7 +537,7 @@ private func settleThemeBrowserFixture(view: ThemeBrowserView, window: NSWindow)
 }
 
 private func expectSingleSetPaneTheme(
-    _ runtime: AppRuntime,
+    _ runtime: RecordingAppRuntime,
     paneId: PaneId,
     themeName: String?
 ) throws {

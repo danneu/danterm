@@ -10,12 +10,20 @@
 // does not break them.
 import Cocoa
 import DanTermProtocol
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func chipViewTests() {
+func chipViewTests() async {
     print("ChipView")
 
-    uiTest("the toolbar chip follows the pane's agent kind") {
+    await uiTest("the toolbar chip follows the pane's agent kind") {
         // Intent: whatever kind the projection hands the wrapper is the kind
         //   the pane's chip shows.
         // Why it exists: the chip is the only thing identifying a pane at a
@@ -30,7 +38,7 @@ func chipViewTests() {
         }
     }
 
-    uiTest("an agent with its own chip is not also spelled out in text") {
+    await uiTest("an agent with its own chip is not also spelled out in text") {
         // Intent: attaching a claude session paints the claude chip and adds no
         //   text naming the kind.
         // Why it exists: the chip and the old indigo agent pill both name the
@@ -48,7 +56,7 @@ func chipViewTests() {
             "kind should not be repeated as text, got \(visibleLabelTexts(in: wrapper))")
     }
 
-    uiTest("an agent with no chip of its own is named in text") {
+    await uiTest("an agent with no chip of its own is named in text") {
         // Intent: a kind DanTerm ships no mark for gets the generic agent chip,
         //   and the toolbar still names it in text.
         // Why it exists: hook `kind` strings are open-ended, so unknown kinds
@@ -66,7 +74,7 @@ func chipViewTests() {
             "unknown kind should be named in text, got \(visibleLabelTexts(in: wrapper))")
     }
 
-    uiTest("the session id survives the text fallback being hidden") {
+    await uiTest("the session id survives the text fallback being hidden") {
         // Intent: the chip carries the "<kind> session <id>" tooltip whenever a
         //   session is attached, whether or not the text fallback is shown.
         // Why it exists: the tooltip used to live on the agent pill, which is
@@ -84,7 +92,7 @@ func chipViewTests() {
             "expected the session tooltip, got \(String(describing: chip.toolTip))")
     }
 
-    uiTest("detaching an agent clears the chip tooltip and the text fallback") {
+    await uiTest("detaching an agent clears the chip tooltip and the text fallback") {
         // Intent: going from attached back to a plain shell leaves no trace of
         //   the departed session.
         // Why it exists: toolbar renders replace whole values, so a field only ever
@@ -113,8 +121,8 @@ private func makeChipWrapper() -> PaneWrapperView {
     var model = AppModel(groups: [GroupModel(id: GroupId(), name: "g", tabs: [tab])])
     model.selectedTabId = tab.id
     return PaneWrapperView(
-        paneId: paneId, terminalView: TerminalView(),
-        runtime: AppRuntime(model: model))
+        paneId: paneId, terminalView: FakeTerminalSession(),
+        runtime: makeUITestRuntime(model: model))
 }
 
 /// The single ChipView under a view, found by walking rather than by name so the

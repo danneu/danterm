@@ -11,9 +11,16 @@
 // and not in the pure core suite.
 import ChipArtwork
 import Cocoa
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func paneStripViewTests() {
+func paneStripViewTests() async {
     print("PaneStripView")
 
     // A strip of `count` panes with the one at `focused` marked, every chip
@@ -118,7 +125,7 @@ func paneStripViewTests() {
         }
     }
 
-    uiTest("a strip that fits shows every pane and no overflow count") {
+    await uiTest("a strip that fits shows every pane and no overflow count") {
         // Intent: given room for all of them, nothing is elided.
         // Why it exists: the count is the whole answer for the common case of
         //   two or three panes, and a spurious "+0" would be noise. Spec-first.
@@ -130,7 +137,7 @@ func paneStripViewTests() {
         try uiExpect(plan.hidden == 0, "expected nothing hidden, got \(plan.hidden)")
     }
 
-    uiTest("a strip too long for its row elides the excess") {
+    await uiTest("a strip too long for its row elides the excess") {
         // Intent: at a width that holds about four chips, a fourteen-pane tab
         //   shows a short run and counts the rest.
         // Why it exists: the incident this replaces -- a stack of fixed-width
@@ -146,7 +153,7 @@ func paneStripViewTests() {
             "every pane is either shown or counted, got \(plan.visible.count) + \(plan.hidden)")
     }
 
-    uiTest("the run never overflows the width it is given") {
+    await uiTest("the run never overflows the width it is given") {
         // Intent: across a sweep of widths and pane counts, the chips plus the
         //   overflow label always fit.
         // Why it exists: this is the property the view exists for, and the
@@ -169,7 +176,7 @@ func paneStripViewTests() {
         }
     }
 
-    uiTest("the focused pane is never the one elided") {
+    await uiTest("the focused pane is never the one elided") {
         // Intent: whichever pane is focused, it is inside the visible run.
         // Why it exists: the strip's whole job is to say which pane you are in.
         //   A strip that hides exactly that chip is worse than no strip, and the
@@ -185,7 +192,7 @@ func paneStripViewTests() {
         }
     }
 
-    uiTest("the two marks take opposite corners and stay inside the bleed") {
+    await uiTest("the two marks take opposite corners and stay inside the bleed") {
         // Intent: the alert mark sits on the chip's top-trailing corner and the
         //   agent mark on its bottom-trailing one, each overhanging by exactly
         //   the declared bleed, at the same size, and never touching each other.
@@ -231,7 +238,7 @@ func paneStripViewTests() {
             "the two ringed marks overlap: \(alert) and \(agent)")
     }
 
-    uiTest("every mark the strip paints is ringed in the color of the row") {
+    await uiTest("every mark the strip paints is ringed in the color of the row") {
         // Intent: painting any of the three marks leaves a band of the row's own
         //   color between the dot and everything it lands on.
         // Why it exists: the incident this fixes -- on a selected tab the amber
@@ -262,7 +269,7 @@ func paneStripViewTests() {
         }
     }
 
-    uiTest("an alerting pane with a working agent paints both marks") {
+    await uiTest("an alerting pane with a working agent paints both marks") {
         // Intent: a chip that has rung a bell while its agent runs draws red at
         //   the top-trailing corner and amber at the bottom-trailing one.
         // Why it exists: this is the regression the split exists for. The chip
@@ -286,7 +293,7 @@ func paneStripViewTests() {
             "the bottom mark is \(agentColor.debugDescription), expected the busy amber")
     }
 
-    uiTest("a pane with nothing to report paints no mark at all") {
+    await uiTest("a pane with nothing to report paints no mark at all") {
         // Intent: a quiet chip leaves both of its corners as they were.
         // Why it exists: the marks are the strip's only third channel, so ones
         //   that lit for every pane would report nothing. Spec-first.
@@ -306,7 +313,7 @@ func paneStripViewTests() {
         }
     }
 
-    uiTest("the run stays anchored at the start until the focus forces it") {
+    await uiTest("the run stays anchored at the start until the focus forces it") {
         // Intent: focusing an early pane leaves the strip reading from pane one;
         //   only a focus past the end of the run slides it.
         // Why it exists: a strip that recentered on every focus change would

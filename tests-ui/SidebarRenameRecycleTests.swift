@@ -6,12 +6,20 @@
 // title (and the cell's own stringValue) stay correct. These tests drive the real
 // SidebarView executor, so they need the WindowServer like the rest of the UI harness.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func sidebarRenameRecycleTests() {
+func sidebarRenameRecycleTests() async {
     print("SidebarRenameRecycle")
 
-    uiTest("a self-repairing row op stops the stale remainder of its script") {
+    await uiTest("a self-repairing row op stops the stale remainder of its script") {
         // Intent: a full rebuild caused by an unappliable op supersedes every
         //   later op in the same script.
         // Why it exists: applying a stale insert after rebuilding from the live
@@ -43,7 +51,7 @@ func sidebarRenameRecycleTests() {
             "the stale insert after a self-repair must not duplicate the new tab")
     }
 
-    uiTest("a self-repairing row op ends a live inline rename") {
+    await uiTest("a self-repairing row op ends a live inline rename") {
         // Intent: a store-escalated full rebuild tears down an active field editor
         //   before NSOutlineView reloads its rows.
         // Why it exists: the rename guard cannot predict a refusal inside the store,
@@ -76,7 +84,7 @@ func sidebarRenameRecycleTests() {
             "self-repair should detach the live field editor")
     }
 
-    uiTest("a resized sidebar row immediately resizes its materialized cell") {
+    await uiTest("a resized sidebar row immediately resizes its materialized cell") {
         // Intent: a hosted cell follows the row's complete bounds as soon as AppKit
         //   changes the row frame, without requiring a later layout pass.
         // Why it exists: NSOutlineView can resize an NSTableRowView without scheduling
@@ -93,7 +101,7 @@ func sidebarRenameRecycleTests() {
             "materialized cell should follow the resized row without a layout pass")
     }
 
-    uiTest("sidebar cells and accessories track the visible content width") {
+    await uiTest("sidebar cells and accessories track the visible content width") {
         // Intent: group and tab cells span the clip view, and their trailing
         //   accessories keep the declared inset at initial, narrow, and wide sizes.
         // Why it exists: NSOutlineView can resize a row while leaving its already-
@@ -139,7 +147,7 @@ func sidebarRenameRecycleTests() {
         }
     }
 
-    uiTest("titles and inline rename do not move the accessory lane") {
+    await uiTest("titles and inline rename do not move the accessory lane") {
         // Intent: short and long titles truncate before a visible alert badge and
         //   preserve its trailing alignment through rename commit and cancellation.
         // Why it exists: title intrinsic size and field-editor teardown must not become
@@ -227,7 +235,7 @@ func sidebarRenameRecycleTests() {
             scroll: scroll, label: "after title change")
     }
 
-    uiTest("tab and group rename fields retain their title lanes") {
+    await uiTest("tab and group rename fields retain their title lanes") {
         // Intent: editable tab and group title fields keep useful horizontal space,
         //   including when the tab shares its leading lane with a jump badge.
         // Why it exists: NSTextField loses intrinsic horizontal width while editable;
@@ -269,7 +277,7 @@ func sidebarRenameRecycleTests() {
             "editable group title should retain useful width beside its accessories")
     }
 
-    uiTest("pointer click-away commits a live rename exactly once") {
+    await uiTest("pointer click-away commits a live rename exactly once") {
         // Intent: an outline pointer interaction commits the current draft before
         //   AppKit can discard the editor, without producing duplicate rename sends.
         // Why it exists: direct-click ordering can remove the field editor before
@@ -305,7 +313,7 @@ func sidebarRenameRecycleTests() {
             "pointer click-away should return the title field to display state")
     }
 
-    uiTest("group commit cancel and click-away each end ownership once") {
+    await uiTest("group commit cancel and click-away each end ownership once") {
         // Intent: group Enter commits, Escape cancels, and click-away commits with
         //   the same exactly-once ownership rules as tab rename.
         // Why it exists: group rename skips empty commits and uses a different message,
@@ -336,7 +344,7 @@ func sidebarRenameRecycleTests() {
             doCommandBy: #selector(NSResponder.insertNewline(_:)))
         try uiExpect(runtime.sentMessages.count == commitStart,
             "the delegate must not dispatch on AppKit's own callback stack")
-        try pumpMainQueue(untilTrue: { runtime.sentMessages.count == commitStart + 2 })
+        try await pumpMainQueue(untilTrue: { runtime.sentMessages.count == commitStart + 2 })
         let commitMessages = Array(runtime.sentMessages[commitStart...])
         try uiExpect(commitMessages.count == 2,
             "group Enter should send rename then rename-ended")
@@ -358,7 +366,7 @@ func sidebarRenameRecycleTests() {
         _ = sidebar.control(
             field, textView: cancelEditor,
             doCommandBy: #selector(NSResponder.cancelOperation(_:)))
-        try pumpMainQueue(untilTrue: { runtime.sentMessages.count == cancelStart + 1 })
+        try await pumpMainQueue(untilTrue: { runtime.sentMessages.count == cancelStart + 1 })
         let cancelMessages = Array(runtime.sentMessages[cancelStart...])
         try uiExpect(cancelMessages.count == 1,
             "group Escape should send only rename-ended")
@@ -389,7 +397,7 @@ func sidebarRenameRecycleTests() {
             "every group exit should restore display state")
     }
 
-    uiTest("reconcile cancels a rename whose field editor AppKit discarded") {
+    await uiTest("reconcile cancels a rename whose field editor AppKit discarded") {
         // Intent: rename ownership and the editable field are normalized when AppKit has
         //   removed the field editor, even if sidebar selection already matches.
         // Why it exists: selection's no-op fast path previously trusted stale ownership and
@@ -425,7 +433,7 @@ func sidebarRenameRecycleTests() {
             "abandoned editor should restore the model title instead of stale draft text")
     }
 
-    uiTest("a pointer interaction reports an abandoned editor's end in the same turn") {
+    await uiTest("a pointer interaction reports an abandoned editor's end in the same turn") {
         // Intent: the pointer path dispatches the rename end synchronously even on
         //   its abandoned-editor branch, with no run-loop turn in between.
         // Why it exists: that branch used to defer through DispatchQueue.main,
@@ -457,7 +465,7 @@ func sidebarRenameRecycleTests() {
             "the abandoned session should be gone")
     }
 
-    uiTest("collapsing the edited row's group ends the inline rename") {
+    await uiTest("collapsing the edited row's group ends the inline rename") {
         // Intent: after a setGroupCollapsed op removes the row being renamed, the
         //   edit is over: re-expanding the group must show a non-editable title
         //   field with the model title, and no live field editor.
@@ -522,7 +530,7 @@ func sidebarRenameRecycleTests() {
             "re-shown row must display the model title")
     }
 
-    uiTest("Cmd-T while a rename is live ends the edit instead of stranding it") {
+    await uiTest("Cmd-T while a rename is live ends the edit instead of stranding it") {
         // Intent: a reconcile that inserts a tab and moves the sidebar selection
         //   (what Cmd-T produces) while an inline rename is live must end the
         //   rename cleanly: title field back to non-editable, ownership cleared.
@@ -571,7 +579,7 @@ func sidebarRenameRecycleTests() {
             "selection moving away must clear rename ownership")
     }
 
-    uiTest("cosmetic sweep with unchanged selection leaves inline rename intact") {
+    await uiTest("cosmetic sweep with unchanged selection leaves inline rename intact") {
         // Intent: an empty-op reconcile whose selection target already matches the
         //   live view leaves an active inline rename alone.
         // Why it exists: the selection no-op guard must bail before redundant
@@ -611,7 +619,7 @@ func sidebarRenameRecycleTests() {
             "cosmetic sweep should preserve rename ownership")
     }
 
-    uiTest("selection-ending rename resync retains a dropped tab reload") {
+    await uiTest("selection-ending rename resync retains a dropped tab reload") {
         // Intent: the inline resync that runs after a selection change ends a live
         //   rename feeds dropped row ids into the sidebar cache advance.
         // Why it exists: covers the direct updateTabRow call site in
@@ -641,7 +649,7 @@ func sidebarRenameRecycleTests() {
         let afterCmdT = renameRecycleModel(
             [(group, "G", false, [(edited, "alpha updated"), (other, "beta"), (spawned, "Terminal")])],
             selected: spawned)
-        sidebar.testForceNextNilCellTabIds.insert(edited)
+        forceNextUnmaterializedCell(forTab: edited, in: sidebar, outline: outline)
         let dropped = applyRenameRecycleTransitionResult(
             old: initialProjection, newModel: afterCmdT,
             to: sidebar, outline: outline)
@@ -667,7 +675,7 @@ func sidebarRenameRecycleTests() {
             "retry should repaint the edited row from the live model")
     }
 
-    uiTest("group structural exits end the exact live rename") {
+    await uiTest("group structural exits end the exact live rename") {
         // Intent: removal, a full row rebuild, and selection movement each end a
         //   live group rename, report the end into the outbox, and restore the
         //   field from model-backed display state.
@@ -729,7 +737,7 @@ func sidebarRenameRecycleTests() {
                 "\(exit) should clear the group rename session")
             try uiExpect(runtime.sentMessages.isEmpty,
                 "\(exit) should report the end rather than send it from the pass")
-            try pumpMainQueue(untilTrue: { reportsRenameEnded(runtime.sentMessages) })
+            try await pumpMainQueue(untilTrue: { reportsRenameEnded(runtime.sentMessages) })
             try uiExpect(field.isEditable == false,
                 "\(exit) should restore the group field to display state")
             try uiExpect(field.currentEditor() == nil,
@@ -740,7 +748,7 @@ func sidebarRenameRecycleTests() {
         }
     }
 
-    uiTest("a double-click asks the model to begin the clicked row's rename") {
+    await uiTest("a double-click asks the model to begin the clicked row's rename") {
         // Intent: double-clicking a tab row or a group header asks the model to
         //   begin that rename, rather than opening an editor the model has no
         //   record of.
@@ -772,7 +780,7 @@ func sidebarRenameRecycleTests() {
             "a double-click must not open an editor on its own")
     }
 
-    uiTest("renaming a row whose editor a recycle destroyed opens an editor again") {
+    await uiTest("renaming a row whose editor a recycle destroyed opens an editor again") {
         // Intent: a second rename of a row opens an editor even when the view
         //   gave the first session up without the model hearing about it.
         // Why it exists: the reuse-pool branch tears the session down inside
@@ -800,7 +808,7 @@ func sidebarRenameRecycleTests() {
 
         // The reuse-pool branch of viewFor:, which a scroll reaches with no
         // reconcile pass anywhere on the stack.
-        sidebar.testResetRecycledRenameState(cell)
+        sidebar.resetRecycledRenameState(cell)
         try uiExpect(sidebar.activeRenameTarget == nil,
             "precondition: the recycle should leave the view owning no session")
 
@@ -815,7 +823,7 @@ func sidebarRenameRecycleTests() {
             "the reopened rename should attach a live field editor")
     }
 
-    uiTest("a begin the pass cannot honor records no open session") {
+    await uiTest("a begin the pass cannot honor records no open session") {
         // Intent: when the requested row has no cell to hand a field editor to,
         //   the pass reports the end of that rename, and no later pass opens it.
         // Why it exists: the model records the request before the pass runs, so
@@ -861,7 +869,7 @@ func sidebarRenameRecycleTests() {
 
             // The end names the request, which is what retracts it in the model
             // (update() drops the pending request only for the session it names).
-            try pumpMainQueue(untilTrue: { !runtime.sentMessages.isEmpty })
+            try await pumpMainQueue(untilTrue: { !runtime.sentMessages.isEmpty })
             let ended: [RenameSessionId] = runtime.sentMessages.compactMap {
                 if case .sidebarRenameEnded(let session) = $0 { return session }
                 return nil
@@ -881,7 +889,7 @@ func sidebarRenameRecycleTests() {
         }
     }
 
-    uiTest("collapsing the group that holds an edited tab reports the rename end") {
+    await uiTest("collapsing the group that holds an edited tab reports the rename end") {
         // Intent: a group collapse that hides the edited tab row ends the rename
         //   and reports it back through the pass, like the other structural exits.
         // Why it exists: only a tab rename can reach this cause -- collapsing a
@@ -918,14 +926,14 @@ func sidebarRenameRecycleTests() {
             "collapse should clear the tab rename session")
         try uiExpect(runtime.sentMessages.isEmpty,
             "collapse should report the end rather than send it from the pass")
-        try pumpMainQueue(untilTrue: { reportsRenameEnded(runtime.sentMessages) })
+        try await pumpMainQueue(untilTrue: { reportsRenameEnded(runtime.sentMessages) })
         try uiExpect(field.isEditable == false,
             "collapse should restore the tab field to display state")
         try uiExpect(field.stringValue == "alpha",
             "collapse should restore the model-backed tab title")
     }
 
-    uiTest("a reported follow-up finds the projection cache already advanced") {
+    await uiTest("a reported follow-up finds the projection cache already advanced") {
         // Intent: by the time a follow-up is handed back, the driver has stored the
         //   projection the pass applied, so the follow-up's own sweep diffs against
         //   the new state and has nothing left to do.
@@ -958,7 +966,7 @@ func sidebarRenameRecycleTests() {
             old: driver, newModel: rebuilt, to: sidebar, outline: outline)
         try uiExpect(runtime.sentMessages.isEmpty,
             "neither sweep should dispatch a message from inside itself")
-        try pumpMainQueue(untilTrue: { reportsRenameEnded(runtime.sentMessages) })
+        try await pumpMainQueue(untilTrue: { reportsRenameEnded(runtime.sentMessages) })
         try uiExpect(first.advancedProjection.groups.map(\.id) == [groupA],
             "the cache the pass stored should already be the rebuilt projection")
 
@@ -967,14 +975,14 @@ func sidebarRenameRecycleTests() {
         let delivered = runtime.sentMessages.count
         _ = applyRenameRecycleTransitionResult(
             old: driver, newModel: rebuilt, to: sidebar, outline: outline)
-        pumpMainQueueOnce()
+        await pumpMainQueueOnce()
         try uiExpect(runtime.sentMessages.count == delivered,
             "the follow-up's own sweep should see an advanced cache and report nothing")
         try uiExpect(cell.titleField.stringValue == "A",
             "the edited row should show its model-backed name after both sweeps")
     }
 
-    uiTest("a pass handing the rename to a successor row reports the prior commit") {
+    await uiTest("a pass handing the rename to a successor row reports the prior commit") {
         // Intent: when the model moves a live rename to another row, the pass
         //   commits the predecessor's draft and ends its ownership through the same
         //   return channel, then leaves the successor's editor active.
@@ -1005,7 +1013,7 @@ func sidebarRenameRecycleTests() {
 
         try uiExpect(runtime.sentMessages.isEmpty,
             "the handoff should report both messages rather than send them mid-pass")
-        try pumpMainQueue(untilTrue: { reportsRenameEnded(runtime.sentMessages) })
+        try await pumpMainQueue(untilTrue: { reportsRenameEnded(runtime.sentMessages) })
         var committedName: String??
         for msg in runtime.sentMessages {
             if case .renameTab(let id, let name) = msg, id == first { committedName = name }
@@ -1016,7 +1024,7 @@ func sidebarRenameRecycleTests() {
             "the successor row should own the live editor")
     }
 
-    uiTest("a replaced rename commits the prior draft once and ignores its stale field") {
+    await uiTest("a replaced rename commits the prior draft once and ignores its stale field") {
         // Intent: taking the editor to a successor row commits the prior draft
         //   exactly once, and a late callback from the prior field neither ends
         //   the successor session nor commits a second time.
@@ -1046,7 +1054,7 @@ func sidebarRenameRecycleTests() {
 
         try uiExpect(runtime.sentMessages.isEmpty,
             "the pass should report the prior commit rather than send it")
-        try pumpMainQueue(untilTrue: { reportsRenameEnded(runtime.sentMessages) })
+        try await pumpMainQueue(untilTrue: { reportsRenameEnded(runtime.sentMessages) })
         let firstRenames = runtime.sentMessages.filter {
             if case .renameTab(let id, let name) = $0 {
                 return id == first && name == "first draft"
@@ -1061,7 +1069,7 @@ func sidebarRenameRecycleTests() {
         let delivered = runtime.sentMessages.count
         _ = sidebar.control(firstField, textShouldEndEditing: NSTextView())
         _ = sidebar.control(NSTextField(), textShouldEndEditing: NSTextView())
-        pumpMainQueueOnce()
+        await pumpMainQueueOnce()
 
         try uiExpect(sidebar.activeRenameTarget == .tab(second),
             "stale prior-field callback must not clear the successor session")
@@ -1069,7 +1077,7 @@ func sidebarRenameRecycleTests() {
             "stale prior-field callback must not dispatch a second rename")
     }
 
-    uiTest("reuse reset clears an abandoned session without a reconcile") {
+    await uiTest("reuse reset clears an abandoned session without a reconcile") {
         // Intent: resetting a reused cell clears the session that owns its field even
         //   when AppKit discarded the editor without a delegate callback.
         // Why it exists: cell reuse is the last ownership boundary before stale edit
@@ -1087,7 +1095,7 @@ func sidebarRenameRecycleTests() {
         let cell: SidebarTabCellView = try sidebarCell(for: .tab(tab), in: outline)
         cell.titleField.abortEditing()
 
-        sidebar.testResetRecycledRenameState(cell)
+        sidebar.resetRecycledRenameState(cell)
 
         try uiExpect(sidebar.activeRenameTarget == nil,
             "reuse reset should clear ownership of the discarded editor")
@@ -1095,7 +1103,7 @@ func sidebarRenameRecycleTests() {
             "reuse reset should restore display state")
     }
 
-    uiTest("a recycle with no pass on the stack still reports the rename end") {
+    await uiTest("a recycle with no pass on the stack still reports the rename end") {
         // Intent: the reuse-pool teardown -- the one path with no pass to return a
         //   fact to and no interaction to ride -- reaches the model on the next
         //   main-queue turn, and reaches it from off the reporting stack.
@@ -1116,18 +1124,18 @@ func sidebarRenameRecycleTests() {
         try uiExpect(cell.titleField.currentEditor() != nil,
             "precondition: the rename should attach a field editor")
 
-        sidebar.testResetRecycledRenameState(cell)
+        sidebar.resetRecycledRenameState(cell)
 
         // The AR1 window, observed on purpose: AppKit is still walking its rows
         // here, so the end may not be dispatched on this stack.
         try uiExpect(runtime.sentMessages.isEmpty,
             "the recycle must not dispatch inside AppKit's row traversal")
-        try pumpMainQueue(untilTrue: { !runtime.sentMessages.isEmpty })
+        try await pumpMainQueue(untilTrue: { !runtime.sentMessages.isEmpty })
         try uiExpect(endedSessions(runtime.sentMessages) == [session],
             "the recycle should report the end of the session it gave up")
     }
 
-    uiTest("a rename end survives the sidebar being released before delivery") {
+    await uiTest("a rename end survives the sidebar being released before delivery") {
         // Intent: an end reported with no send frame open still reaches the model
         //   when the view that reported it is gone by the time the drain runs.
         // Why it exists: the click-away path used to deliver on a main-queue hop
@@ -1135,7 +1143,7 @@ func sidebarRenameRecycleTests() {
         //   and the model kept claiming the session.
         // Scenario: a window closes and drops its sidebar in the same turn that a
         //   rename teardown reported.
-        let runtime = AppRuntime()
+        let runtime = makeUITestRuntime()
         var session: RenameSessionId?
         weak var reporter: SidebarView?
         autoreleasepool {
@@ -1147,7 +1155,7 @@ func sidebarRenameRecycleTests() {
             session = recordRenameBegin(.tab(tab), in: &model)
             applySidebarTestModel(model, using: driver, to: sidebar, outline: outline)
             let cell: SidebarTabCellView? = try? sidebarCell(for: .tab(tab), in: outline)
-            cell.map { sidebar.testResetRecycledRenameState($0) }
+            cell.map { sidebar.resetRecycledRenameState($0) }
             reporter = sidebar
             window.makeFirstResponder(nil)
             window.contentView = NSView()
@@ -1156,12 +1164,12 @@ func sidebarRenameRecycleTests() {
 
         try uiExpect(reporter == nil,
             "precondition: the reporting view should be gone before the drain runs")
-        try pumpMainQueue(untilTrue: { !runtime.sentMessages.isEmpty })
+        try await pumpMainQueue(untilTrue: { !runtime.sentMessages.isEmpty })
         try uiExpect(endedSessions(runtime.sentMessages) == [session],
             "the outbox should deliver the end after its reporter is gone")
     }
 
-    uiTest("a recycled group caret acts on the group in its new row") {
+    await uiTest("a recycled group caret acts on the group in its new row") {
         // Intent: a reused group row's caret expands or collapses the group that
         //   the outline row now represents.
         // Why it exists: reusable controls must not retain action identity from a
@@ -1202,7 +1210,7 @@ func sidebarRenameRecycleTests() {
         }, "recycled caret should act on the group in its new row")
     }
 
-    uiTest("a tab row inserted after a collapse-stranded rename shows its title") {
+    await uiTest("a tab row inserted after a collapse-stranded rename shows its title") {
         // Intent: a new tab inserted after an edited row was torn down by a group
         //   collapse gets a clean cell: non-editable title field, no field editor,
         //   title text visible.
@@ -1274,8 +1282,8 @@ func sidebarRenameRecycleTests() {
 // MARK: - Harness helpers (local: the selection-cache test helpers are file-private)
 
 private func makeRenameRecycleHarness(
-    runtime: AppRuntime = AppRuntime()
-) -> (SidebarView, NSOutlineView, NSWindow, AppRuntime) {
+    runtime: RecordingAppRuntime = makeUITestRuntime()
+) -> (SidebarView, NSOutlineView, NSWindow, RecordingAppRuntime) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
     sidebar.runtime = runtime
     let window = NSWindow(
@@ -1283,6 +1291,7 @@ private func makeRenameRecycleHarness(
         styleMask: [.titled],
         backing: .buffered,
         defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = sidebar
     window.layoutIfNeeded()
     let outline = sidebarOutlineView(in: sidebar)!

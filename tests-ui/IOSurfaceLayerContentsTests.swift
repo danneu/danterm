@@ -18,9 +18,17 @@
 import Cocoa
 import IOSurface
 import QuartzCore
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func ioSurfaceLayerContentsTests() {
+func ioSurfaceLayerContentsTests() async {
     print("IOSurfaceLayerContents")
 
     // Intent: with a "contents" entry of NSNull in the layer's actions
@@ -37,7 +45,7 @@ func ioSurfaceLayerContentsTests() {
     // detached surface across four later presentations. Promptness is not part
     // of the contract -- pin two owns freeing, demands only monotonicity, and
     // waits by presenting frames the way a live swapchain does.
-    uiTest("disabled actions: a contents swap attaches no implicit animation") {
+    await uiTest("disabled actions: a contents swap attaches no implicit animation") {
         let layer = CALayer()
         layer.actions = ["contents": NSNull()]
         let front = try makeProbeSurface()
@@ -49,7 +57,7 @@ func ioSurfaceLayerContentsTests() {
 
         layer.contents = front
         try uiExpect(
-            flushAndPump(deadline: 5.0) { front.isInUse },
+            await flushAndPump(deadline: 5.0) { front.isInUse },
             "render server never acquired the attached surface; is the probe window composited?")
 
         var attached = front
@@ -82,7 +90,7 @@ func ioSurfaceLayerContentsTests() {
     // Scenario: surface A displays, then B replaces it; B/C swaps keep
     // committing until A reports free, and from then on no swap and no
     // rewrite of A may ever see it in use again.
-    uiTest("viability gate: a detached surface reported free stays free") {
+    await uiTest("viability gate: a detached surface reported free stays free") {
         let layer = CALayer()
         layer.actions = ["contents": NSNull()]
         let candidate = try makeProbeSurface()
@@ -96,7 +104,7 @@ func ioSurfaceLayerContentsTests() {
 
         layer.contents = candidate
         try uiExpect(
-            flushAndPump(deadline: 5.0) { candidate.isInUse },
+            await flushAndPump(deadline: 5.0) { candidate.isInUse },
             "render server never acquired the attached surface; is the probe window composited?")
 
         // Both waits below count presented frames rather than elapsed seconds.
@@ -117,7 +125,7 @@ func ioSurfaceLayerContentsTests() {
             swap(&attached, &idle)
             layer.contents = attached
             CATransaction.flush()
-            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            await pumpMainQueueOnce()
             frames += 1
         }
         try uiExpect(
@@ -131,7 +139,7 @@ func ioSurfaceLayerContentsTests() {
             try uiExpect(
                 !candidate.isInUse,
                 "VIABILITY GATE FAILED: a surface reported free was re-acquired by the render server")
-            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            await pumpMainQueueOnce()
             try uiExpect(
                 !candidate.isInUse,
                 "VIABILITY GATE FAILED: a surface reported free was re-acquired by the render server")
@@ -157,7 +165,7 @@ func ioSurfaceLayerContentsTests() {
     // Scenario: a surface twice the size of the grid's point extent, red in its
     // top half and blue in its bottom, shown by a view half again as wide and
     // tall as the surface covers.
-    uiTest("presentation: row 0 on top, unscaled, letterbox background, colors unconverted") {
+    await uiTest("presentation: row 0 on top, unscaled, letterbox background, colors unconverted") {
         let scale: CGFloat = 2
         let surfacePixels = NSSize(width: 32, height: 16)
         let viewPoints = NSSize(width: 40, height: 20)
@@ -381,12 +389,12 @@ private func fill(_ surface: IOSurface, byte: UInt8) {
 /// surface to go free never terminates on a cold pipeline, however long the
 /// deadline: see pin two, which waits by presenting frames instead.
 @MainActor
-private func flushAndPump(deadline: TimeInterval, until condition: () -> Bool) -> Bool {
+private func flushAndPump(deadline: TimeInterval, until condition: () -> Bool) async -> Bool {
     let end = Date().addingTimeInterval(deadline)
     repeat {
         CATransaction.flush()
         if condition() { return true }
-        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        await pumpMainQueueOnce()
     } while Date() < end
     return condition()
 }

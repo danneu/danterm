@@ -1,15 +1,23 @@
 // UI-harness coverage for notice-panel buttons and reserved key equivalents.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 /// Registers notice-panel message-routing coverage in the standalone UI harness.
 @MainActor
-func noticePanelTests() {
+func noticePanelTests() async {
     print("NoticePanel")
 
     // The assertion the headless app-test gave up when the reconcile sweep stopped
     // building its own panel: the real panel renders a projection's words.
-    uiTest("configure renders the projection title and message into the labels") {
-        let runtime = AppRuntime()
+    await uiTest("configure renders the projection title and message into the labels") {
+        let runtime = makeUITestRuntime()
         let panel = NoticePanel(runtime: runtime)
         defer { panel.orderOut(nil) }
         let projection = makeNoticeProjection()
@@ -22,8 +30,8 @@ func noticePanelTests() {
                      "body was \(panel.bodyLabel.stringValue)")
     }
 
-    uiTest("message notice has one OK button that sends dismiss") {
-        let runtime = AppRuntime()
+    await uiTest("message notice has one OK button that sends dismiss") {
+        let runtime = makeUITestRuntime()
         let panel = NoticePanel(runtime: runtime)
         defer { panel.orderOut(nil) }
         let projection = makeNoticeProjection()
@@ -39,8 +47,8 @@ func noticePanelTests() {
         }
     }
 
-    uiTest("recovery buttons and Return and Escape send their projected answers") {
-        let runtime = AppRuntime()
+    await uiTest("recovery buttons and Return and Escape send their projected answers") {
+        let runtime = makeUITestRuntime()
         let panel = NoticePanel(runtime: runtime)
         defer { panel.orderOut(nil) }
         let projection = makeRecoveryNoticeProjection()

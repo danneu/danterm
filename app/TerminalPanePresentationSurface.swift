@@ -5,8 +5,8 @@
 // `TerminalFrameSwapchain`, a final engine type, so a test that wants to watch
 // what a publish rendered -- or to hold every buffer busy and see the publish
 // coalesce -- cannot wrap it. This protocol is the whole of what the view asks
-// of that rotation, so a test wraps a real swapchain and observes it while the
-// view under test stays the production view.
+// of that rotation, so a test supplies a recording stand-in for it while the view
+// under test stays the production view.
 import CoreGraphics
 import TerminalCore
 import TerminalRenderExecution

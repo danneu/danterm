@@ -2,20 +2,27 @@
 import Cocoa
 import CoreGraphics
 import PaneProcessLifecycle
+import ChipArtwork
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor private var retainedSwiftPaneWindows: [NSWindow] = []
 
 @MainActor
-func swiftTerminalSessionViewTests() {
+func swiftTerminalSessionViewTests() async {
     print("SwiftTerminalSessionView")
 
-    uiTest("search commands route through the Swift pane controller") {
+    await uiTest("search commands route through the Swift pane controller") {
         // Intent: every search entry point reaches the engine controller with its semantic input.
         // Why it exists: the real view gained search routing while the UI controller shim stayed
         //   incomplete, preventing the harness from compiling and leaving this adapter untested.
         // Scenario: the user types a needle, navigates both ways, clears it, and closes.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller)
         var events: [TerminalSessionEvent] = []
         pane.onEvent = { events.append($0) }
 
@@ -34,13 +41,13 @@ func swiftTerminalSessionViewTests() {
                      "empty needle and end did not both clear search")
     }
 
-    uiTest("theme application resolves names and falls back to dark") {
+    await uiTest("theme application resolves names and falls back to dark") {
         // Intent: complete themes apply while every unresolved name reaches the dark fallback.
         // Why it exists: hand-edited catalog misses must never retain stale pane colors.
         // Scenario: a user applies a valid theme, two invalid names, then clears the override.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let resolved = RenderTheme(defaultBackground: .init(red: 12, green: 34, blue: 56))
-        let pane = SwiftTerminalSessionView(
+        let pane = makeTestPane(
             controller: controller,
             resolveTheme: { $0 == "Known" ? resolved : nil }
         )
@@ -61,7 +68,7 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("session state carries the theme background and republishes on a theme change") {
+    await uiTest("session state carries the theme background and republishes on a theme change") {
         // Intent: `state.background` is the pane's current terminal default
         //   background before any theme is applied, and a theme swap pushes a
         //   fresh state to the observer carrying the new one.
@@ -69,9 +76,9 @@ func swiftTerminalSessionViewTests() {
         //   its color off this channel. Without the construction-time value a
         //   pane shows an unthemed gutter until its first theme change; without
         //   the emit on `applyTheme`, it never catches up at all.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let themed = RenderTheme(defaultBackground: .init(red: 12, green: 34, blue: 56))
-        let pane = SwiftTerminalSessionView(
+        let pane = makeTestPane(
             controller: controller,
             resolveTheme: { $0 == "Known" ? themed : nil }
         )
@@ -91,41 +98,51 @@ func swiftTerminalSessionViewTests() {
                      "theme change published no state to the observer: \(observer.states.count) states")
     }
 
-    uiTest("font size updates live cell metrics and reports the resized PTY grid") {
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+    await uiTest("font size updates live cell metrics and reports the resized PTY grid") {
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
         pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
         mountInTestWindow(pane, frame: pane.frame)
 
-        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 12, rows: 12),
-                     "initial configured font did not size the PTY grid")
+        let atThirteen = uiTestMetrics(fontSize: 13)
+        let atTwentySix = uiTestMetrics(fontSize: 26)
+        try uiExpect(
+            controller.gridDimensions.last == expectedGrid(paneSize: pane.frame.size, metrics: atThirteen),
+            "initial configured font did not size the PTY grid")
 
         pane.setFontSize(26)
 
-        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 6, rows: 6),
-                     "live font change did not resize the PTY grid")
-        try uiExpect(pane.state.cellHeight == 32, "live font change did not update cell metrics")
+        try uiExpect(
+            controller.gridDimensions.last == expectedGrid(paneSize: pane.frame.size, metrics: atTwentySix),
+            "live font change did not resize the PTY grid")
+        try uiExpect(pane.state.cellHeight == atTwentySix.cellSize.height,
+                     "live font change did not update cell metrics")
     }
 
-    uiTest("font family updates live cell metrics and resizes the PTY grid") {
+    await uiTest("font family updates live cell metrics and resizes the PTY grid") {
         // Intent: a resolved family handed to a live pane re-derives cell geometry and
         //   the grid the child process is told about.
         // Why it exists: the family reaches panes the same way the font size does, so
         //   without this the reconciler could push a family that never leaves the view.
         // Scenario: spec-first -- the user picks a new font family in Preferences and
         //   saves; open panes must repaint on the new grid with no reload.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
         pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
         mountInTestWindow(pane, frame: pane.frame)
 
-        pane.setFontFamily(TerminalRenderMetrics.wideFamily)
+        let beforeFamily = controller.gridDimensions.last
+        pane.setFontFamily(UITestFontFamily.wide)
 
-        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 6, rows: 12),
-                     "live family change did not resize the PTY grid")
+        let wide = uiTestMetrics(fontSize: 13, fontFamily: UITestFontFamily.wide)
+        try uiExpect(
+            controller.gridDimensions.last == expectedGrid(paneSize: pane.frame.size, metrics: wide),
+            "live family change did not resize the PTY grid")
+        try uiExpect(controller.gridDimensions.last != beforeFamily,
+                     "the family change left the grid where it was")
     }
 
-    uiTest("a family without usable metrics falls back to system monospace") {
+    await uiTest("a family without usable metrics falls back to system monospace") {
         // Intent: a family that passes availability but cannot yield grid metrics still
         //   leaves the pane with valid metrics and grid dimensions, both at creation and
         //   on a live change away from a working family.
@@ -133,38 +150,45 @@ func swiftTerminalSessionViewTests() {
         //   synchronizePresentation used to bail outright on nil metrics, leaving a new pane
         //   blank and freezing an existing pane on its old grid until restart.
         // Scenario: spec-first -- an installed but degenerate face named in config.
-        let created = TerminalPaneSessionController()
-        let createdPane = SwiftTerminalSessionView(
+        let created = FakeTerminalPaneSessionController()
+        let createdPane = makeTestPane(
             controller: created,
             fontSize: 13,
-            fontFamily: TerminalRenderMetrics.unusableFamily
+            fontFamily: UITestFontFamily.unusable
         )
         createdPane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
         mountInTestWindow(createdPane, frame: createdPane.frame)
 
-        try uiExpect(created.gridDimensions.last == TerminalDimensions(columns: 12, rows: 12),
-                     "an unusable configured family left a new pane without geometry")
-        try uiExpect(createdPane.state.cellHeight == 16,
+        // The fallback face is the one a pane with no configured family uses, so the
+        // claim is stated against that pane's own geometry rather than a fixed cell box.
+        let fallback = uiTestMetrics(fontSize: 13)
+        try uiExpect(
+            created.gridDimensions.last == expectedGrid(paneSize: createdPane.frame.size, metrics: fallback),
+            "an unusable configured family left a new pane without geometry")
+        try uiExpect(createdPane.state.cellHeight == fallback.cellSize.height,
                      "an unusable configured family left a new pane without cell metrics")
 
-        let live = TerminalPaneSessionController()
-        let livePane = SwiftTerminalSessionView(
+        let live = FakeTerminalPaneSessionController()
+        let livePane = makeTestPane(
             controller: live,
             fontSize: 13,
-            fontFamily: TerminalRenderMetrics.wideFamily
+            fontFamily: UITestFontFamily.wide
         )
         livePane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
         mountInTestWindow(livePane, frame: livePane.frame)
-        try uiExpect(live.gridDimensions.last == TerminalDimensions(columns: 6, rows: 12),
-                     "the working family did not size the grid before the fallback case")
+        let wide = uiTestMetrics(fontSize: 13, fontFamily: UITestFontFamily.wide)
+        try uiExpect(
+            live.gridDimensions.last == expectedGrid(paneSize: livePane.frame.size, metrics: wide),
+            "the working family did not size the grid before the fallback case")
 
-        livePane.setFontFamily(TerminalRenderMetrics.unusableFamily)
+        livePane.setFontFamily(UITestFontFamily.unusable)
 
-        try uiExpect(live.gridDimensions.last == TerminalDimensions(columns: 12, rows: 12),
+        try uiExpect(
+            live.gridDimensions.last == expectedGrid(paneSize: livePane.frame.size, metrics: fallback),
                      "an unusable family froze an existing pane on its old grid")
     }
 
-    uiTest("a pane smaller than one cell still reports the floored grid") {
+    await uiTest("a pane smaller than one cell still reports the floored grid") {
         // Intent: a pane whose bounds do not hold a whole grid reports the sizing floors --
         //   two columns and one row -- rather than a zero-width or zero-height grid.
         // Why it exists: a zero dimension reaches the child as an invalid winsize, and the
@@ -172,8 +196,8 @@ func swiftTerminalSessionViewTests() {
         //   harness used to re-declare the sizing function without them, so the app could
         //   have lost the floors with every UI test still green.
         // Scenario: spec-first -- the user drags a divider until the pane is a sliver.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
         pane.frame = NSRect(x: 0, y: 0, width: 10, height: 10)
         mountInTestWindow(pane, frame: pane.frame)
 
@@ -181,7 +205,7 @@ func swiftTerminalSessionViewTests() {
                      "a sliver pane did not report the floored grid: \(controller.gridDimensions)")
     }
 
-    uiTest("a grid override drives the pane's grid and no rectangle change disturbs it") {
+    await uiTest("a grid override drives the pane's grid and no rectangle change disturbs it") {
         // Intent: setting an override submits exactly that grid once, every later
         //   rectangle change submits nothing at all, and clearing submits exactly
         //   the grid the pane's current rectangle derives.
@@ -190,8 +214,8 @@ func swiftTerminalSessionViewTests() {
         //   undo the claim, which is the whole reason the override exists.
         // Scenario: spec-first -- the phone claims a pane at 60x30, then the user
         //   drags the Mac window's divider, then takes the pane back.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
         pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
         mountInTestWindow(pane, frame: pane.frame)
         let gridsAtMount = controller.gridDimensions.count
@@ -218,11 +242,13 @@ func swiftTerminalSessionViewTests() {
             controller.gridDimensions.count == gridsAtMount + 2,
             "clearing the override did not submit exactly one grid: \(controller.gridDimensions)"
         )
-        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 25, rows: 25),
-                     "clearing did not return the pane to its rectangle's grid: \(controller.gridDimensions)")
+        try uiExpect(
+            controller.gridDimensions.last
+                == expectedGrid(paneSize: pane.frame.size, metrics: uiTestMetrics(fontSize: 13)),
+            "clearing did not return the pane to its rectangle's grid: \(controller.gridDimensions)")
     }
 
-    uiTest("a font change under an override moves cell metrics but not the grid") {
+    await uiTest("a font change under an override moves cell metrics but not the grid") {
         // Intent: an override fixes rows and columns, so a font change only
         //   changes how large a cell is drawn.
         // Why it exists: font size is a pixel input, not a grid input. Letting it
@@ -235,8 +261,8 @@ func swiftTerminalSessionViewTests() {
         // the cell box the pane draws at is the font's own. A claim the slot
         // cannot contain is drawn down to fit instead, and that case is covered
         // by its own test.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
         pane.frame = NSRect(x: 0, y: 0, width: 1200, height: 1200)
         mountInTestWindow(pane, frame: pane.frame)
         pane.setGridOverride(PaneGridOverride(columns: 60, rows: 30))
@@ -248,12 +274,12 @@ func swiftTerminalSessionViewTests() {
             controller.gridDimensions.count == gridsAfterClaim,
             "a font change under an override submitted a grid: \(controller.gridDimensions)"
         )
-        try uiExpect(pane.state.cellHeight == 32,
+        try uiExpect(pane.state.cellHeight == uiTestMetrics(fontSize: 26).cellSize.height,
                      "a font change under an override did not update cell metrics: "
                         + "\(String(describing: pane.state.cellHeight))")
     }
 
-    uiTest("a pane created with an override submits only that grid") {
+    await uiTest("a pane created with an override submits only that grid") {
         // Intent: a pane that starts overridden reports the override as its very
         //   first grid, with no rectangle-derived grid ahead of it.
         // Why it exists: a restored pane's child must never observe a size no
@@ -261,8 +287,8 @@ func swiftTerminalSessionViewTests() {
         //   winsize and show up on the pane's tape.
         // Scenario: spec-first -- the app restarts with a pane the phone had
         //   claimed at 60x30.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(
             controller: controller,
             fontSize: 13,
             gridOverride: PaneGridOverride(columns: 60, rows: 30)
@@ -274,15 +300,15 @@ func swiftTerminalSessionViewTests() {
                      "a pane created overridden submitted another grid: \(controller.gridDimensions)")
     }
 
-    uiTest("a claimed grid that fits its slot renders at native cell metrics with blank surround") {
+    await uiTest("a claimed grid that fits its slot renders at native cell metrics with blank surround") {
         // Intent: a claim smaller than the pane's rectangle draws at the pane's
         //   own scale, at the top-left corner, leaving the rest of the slot empty.
         // Why it exists: the Mac shows a claimed pane as the claiming client sees
         //   it. Stretching a small grid over the slot would show the user a size
         //   nobody is running at.
         // Scenario: spec-first -- the phone claims a large Mac pane at 10x5.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
         pane.frame = NSRect(x: 0, y: 0, width: 200, height: 400)
         mountInTestWindow(pane, frame: pane.frame)
         guard let window = pane.window else { throw UITestFailure(message: "pane did not mount") }
@@ -307,7 +333,7 @@ func swiftTerminalSessionViewTests() {
                      "the grid was not anchored at the pane's top-left corner")
     }
 
-    uiTest("a claimed grid larger than its slot is drawn down uniformly into the slot's pixels") {
+    await uiTest("a claimed grid larger than its slot is drawn down uniformly into the slot's pixels") {
         // Intent: an oversized claim shrinks by one factor on both axes, and the
         //   surface it renders into stays inside the pane's own pixel extent.
         // Why it exists: the shrink has to happen while drawing. A buffer sized to
@@ -315,8 +341,8 @@ func swiftTerminalSessionViewTests() {
         //   allocate pixels the pane never had room for.
         // Scenario: spec-first -- a phone claims 60x30 on a Mac pane too small to
         //   show that grid at its own cell size.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
         pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
         mountInTestWindow(pane, frame: pane.frame)
         guard let window = pane.window else { throw UITestFailure(message: "pane did not mount") }
@@ -336,14 +362,32 @@ func swiftTerminalSessionViewTests() {
             "the claimed grid rendered outside the pane's pixel extent: \(claimed.surfacePixelSize)")
         try uiExpect(claimed.renderScale < scale,
                      "an oversized claim did not draw down: \(claimed.renderScale) vs \(scale)")
-        let horizontal = claimed.cellSize.width / native.cellSize.width
-        let vertical = claimed.cellSize.height / native.cellSize.height
-        try uiExpect(abs(horizontal - vertical) < 0.0001,
-                     "the shrink was not uniform: \(horizontal) horizontally, \(vertical) vertically")
-        try uiExpect(horizontal < 1, "an oversized claim did not shrink the cell box: \(horizontal)")
+        // One factor on both axes, stated as "the drawn-down box is what this font renders
+        // at the reported scale, carried back into the pane's own space". The two axes'
+        // shrink ratios cannot be compared to each other instead: a cell box is quantized
+        // to whole backing pixels, and at a heavily reduced scale a cell is a few pixels
+        // across, so one pixel of rounding separates the ratios by more than any uniform
+        // shrink would.
+        guard let atClaimedScale = uiTestMetrics(
+            displayScale: claimed.renderScale,
+            fontSize: 13,
+            fontFamily: nil
+        ) else {
+            throw UITestFailure(message: "the reported render scale resolved no metrics")
+        }
+        let expectedCell = CGSize(
+            width: atClaimedScale.cellSize.width * claimed.renderScale / scale,
+            height: atClaimedScale.cellSize.height * claimed.renderScale / scale
+        )
+        try uiExpect(claimed.cellSize == expectedCell,
+                     "the shrink was not one scale on both axes: \(claimed.cellSize) "
+                        + "against \(expectedCell)")
+        try uiExpect(claimed.cellSize.width < native.cellSize.width
+                        && claimed.cellSize.height < native.cellSize.height,
+                     "an oversized claim did not shrink the cell box: \(claimed.cellSize)")
     }
 
-    uiTest("pointer input maps through the transform a drawn-down claim is shown at") {
+    await uiTest("pointer input maps through the transform a drawn-down claim is shown at") {
         // Intent: a click on a shrunk claimed grid names the cell drawn under the
         //   pointer, not the cell the same point would name at native cell size.
         // Why it exists: the grid the user sees and the grid the engine is told
@@ -351,8 +395,8 @@ func swiftTerminalSessionViewTests() {
         //   box would offset every selection and every mouse-mode report.
         // Scenario: spec-first -- the user clicks inside a pane the phone claimed
         //   at 60x30.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
         pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
         mountInTestWindow(pane, frame: pane.frame)
         guard let native = pane.presentationGeometryForTesting else {
@@ -385,7 +429,7 @@ func swiftTerminalSessionViewTests() {
                      "the click did not name the cell drawn under it: \(named)")
     }
 
-    uiTest("geometry that is not finite or is out of Int range yields no grid and no cell") {
+    await uiTest("geometry that is not finite or is out of Int range yields no grid and no cell") {
         // Intent: both pure geometry conversions the pane view calls refuse an unusable
         //   input instead of returning a value built from it.
         // Why it exists: `Int(_:)` on a non-finite or out-of-range Double traps, so a
@@ -416,17 +460,17 @@ func swiftTerminalSessionViewTests() {
         }
     }
 
-    uiTest("initial theme fills before draw and the retained first plan publishes on mount") {
+    await uiTest("initial theme fills before draw and the retained first plan publishes on mount") {
         // Intent: the view paints themed chrome immediately and adopts the controller's first plan.
         // Why it exists: waiting for child output creates a dark flash on restore and split inheritance.
         // Scenario: a themed controller with a retained plan mounts before its child writes a byte.
         let prefill = RenderTheme(defaultBackground: .init(red: 11, green: 22, blue: 33))
         let planned = RenderColor(red: 44, green: 55, blue: 66)
-        let controller = TerminalPaneSessionController(
+        let controller = FakeTerminalPaneSessionController(
             theme: prefill,
             currentPlan: RenderFramePlan(defaultBackground: planned)
         )
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
 
         try uiExpect(
             pane.layer?.backgroundColor?.components?.prefix(3).map { UInt8(($0 * 255).rounded()) }
@@ -442,13 +486,13 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("engine search status maps into paired product events") {
+    await uiTest("engine search status maps into paired product events") {
         // Intent: each atomic engine status becomes the total and selected events the model expects.
         // Why it exists: splitting one engine value into two callbacks must preserve nil, empty,
         //   and zero-based matched semantics without leaving stale counter state.
         // Scenario: a search is cleared, misses, then selects the third of five matches.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller)
         var events: [TerminalSessionEvent] = []
         pane.onEvent = { events.append($0) }
 
@@ -463,11 +507,11 @@ func swiftTerminalSessionViewTests() {
         ], "search status mapping diverged: \(events)")
     }
 
-    uiTest("pane registers and accepts only supported drag types") {
+    await uiTest("pane registers and accepts only supported drag types") {
         // Intent: the Swift pane participates in AppKit dragging for file URLs, URLs, and strings.
         // Why it exists: destination callbacks are never sent unless the view registers its types.
         // Scenario: supported and unrelated pasteboards enter a mounted Swift-engine pane.
-        let pane = makeMountedPane(controller: TerminalPaneSessionController())
+        let pane = makeMountedPane(controller: FakeTerminalPaneSessionController())
         try uiExpect(
             Set(pane.registeredDraggedTypes) == [.fileURL, .URL, .string],
             "pane registered unexpected drag types: \(pane.registeredDraggedTypes)"
@@ -490,11 +534,11 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("file drop sends shell-quoted content through bracketed paste") {
+    await uiTest("file drop sends shell-quoted content through bracketed paste") {
         // Intent: dropped file paths use shared drag quoting and owner-side paste policy.
         // Why it exists: a raw write would permit control injection and omit DEC 2004 markers.
         // Scenario: Finder drops a path containing a space onto a bracketed-paste pane.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.inputModes.bracketedPaste = true
         let pane = makeMountedPane(controller: controller)
         let pasteboard = makePasteboard()
@@ -509,11 +553,11 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(controller.textInputs.isEmpty, "file drop used the raw text path")
     }
 
-    uiTest("browser URL drop takes priority over its plain string") {
+    await uiTest("browser URL drop takes priority over its plain string") {
         // Intent: a non-file URL is shell-quoted instead of falling through to plain text.
         // Why it exists: browser drags commonly advertise both URL and string representations.
         // Scenario: a link with shell metacharacters is dragged from a browser into the pane.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         let pasteboard = makePasteboard()
         let item = NSPasteboardItem()
@@ -530,12 +574,12 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("unbracketed multiline drop converts newlines and filters controls") {
+    await uiTest("unbracketed multiline drop converts newlines and filters controls") {
         // Intent: drag input inherits unbracketed paste encoding and control filtering.
         // Why it exists: the residual auto-execute behavior must be explicit without admitting
         //   escape-sequence injection through a raw terminal write.
         // Scenario: a plain-text drag contains two lines and an embedded escape character.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         let pasteboard = makePasteboard()
         pasteboard.setString("one\u{1B}\ntwo", forType: .string)
@@ -547,8 +591,8 @@ func swiftTerminalSessionViewTests() {
                      "unbracketed paste encoding diverged: \(controller.inputBytes)")
     }
 
-    uiTest("empty drop writes nothing") {
-        let controller = TerminalPaneSessionController()
+    await uiTest("empty drop writes nothing") {
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         let pasteboard = makePasteboard()
         pasteboard.setString("  \n", forType: .string)
@@ -561,7 +605,7 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(controller.textInputs.isEmpty, "empty drop wrote raw text")
     }
 
-    uiTest("a mounted pane renders one complete frame and submits nothing at a draw seam") {
+    await uiTest("a mounted pane renders one complete frame and submits nothing at a draw seam") {
         // Intent: the first frame reaches the screen through the owned surface --
         //   one render covering every row -- and no AppKit drawing happens at all.
         // Why it exists: research/33 T25 I4. The draw seam is deleted, so a pane
@@ -569,19 +613,19 @@ func swiftTerminalSessionViewTests() {
         //   would both show here and nowhere else.
         // Scenario: a pane is mounted in a window, which is the first moment it
         //   has geometry to render at.
-        TerminalFrameSwapchain.resetForTesting()
-        let controller = TerminalPaneSessionController(
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
 
         try uiExpect(
-            TerminalFrameSwapchain.renderedRowSetsForTesting
+            RecordingPresentationSurface.renderedRowSets
                 == [Set(0..<RenderFramePlan.rowsForTesting)],
             "mounting did not render exactly one complete frame: "
-                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+                + "\(RecordingPresentationSurface.renderedRowSets)"
         )
         try uiExpect(
             pane.renderCountForTesting == 1,
@@ -593,7 +637,7 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("a publish renders exactly the rows its damage names") {
+    await uiTest("a publish renders exactly the rows its damage names") {
         // Intent: the damage a publish carries is what the render covers, and
         //   scattered rows stay scattered.
         // Why it exists: this is the drawn-row pin from the deleted draw seam,
@@ -604,25 +648,25 @@ func swiftTerminalSessionViewTests() {
         // Scenario: a TUI updates a status row near the top of a ten-row
         //   viewport, then one near the bottom, then a flood -- or an occlusion
         //   return -- publishes `.full`.
-        TerminalFrameSwapchain.resetForTesting()
-        let controller = TerminalPaneSessionController(
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
-        TerminalFrameSwapchain.resetForTesting()
+        RecordingPresentationSurface.reset()
         pane.resetSurfaceCountersForTesting()
 
-        controller.emitFrameForTest(damage: .init(rows: [1]))
-        controller.emitFrameForTest(damage: .init(rows: [8]))
+        controller.emitFrameForTest(damage: .init(rows: [1], rowCount: RenderFramePlan.rowsForTesting))
+        controller.emitFrameForTest(damage: .init(rows: [8], rowCount: RenderFramePlan.rowsForTesting))
         controller.emitFrameForTest(damage: .full)
 
         try uiExpect(
-            TerminalFrameSwapchain.renderedRowSetsForTesting
+            RecordingPresentationSurface.renderedRowSets
                 == [[1], [8], Set(0..<RenderFramePlan.rowsForTesting)],
             "publishes did not render exactly their own damage: "
-                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+                + "\(RecordingPresentationSurface.renderedRowSets)"
         )
         try uiExpect(
             pane.renderCountForTesting == pane.publishCountForTesting,
@@ -631,7 +675,7 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("an AppKit-initiated redisplay renders nothing") {
+    await uiTest("an AppKit-initiated redisplay renders nothing") {
         // Intent: a layer display callback reattaches and returns; it never
         //   renders and never asks the engine for anything.
         // Why it exists: research/33 T25 PO5's second assertion. The old draw
@@ -640,15 +684,15 @@ func swiftTerminalSessionViewTests() {
         //   nobody's frame. With the pane owning its pixels there is nothing
         //   for AppKit to ask for, and this is what proves it stayed that way.
         // Scenario: a mounted pane is invalidated the way AppKit invalidates it.
-        TerminalFrameSwapchain.resetForTesting()
-        let controller = TerminalPaneSessionController(
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
         pane.resetSurfaceCountersForTesting()
-        TerminalFrameSwapchain.resetForTesting()
+        RecordingPresentationSurface.reset()
 
         pane.needsDisplay = true
         pane.displayIfNeeded()
@@ -662,13 +706,13 @@ func swiftTerminalSessionViewTests() {
             "an AppKit redisplay caused \(pane.renderCountForTesting) render(s)"
         )
         try uiExpect(
-            TerminalFrameSwapchain.renderedRowSetsForTesting.isEmpty,
+            RecordingPresentationSurface.renderedRowSets.isEmpty,
             "an AppKit redisplay reached the surface: "
-                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+                + "\(RecordingPresentationSurface.renderedRowSets)"
         )
     }
 
-    uiTest("a coalesced burst renders its last plan on a retry, then goes quiet") {
+    await uiTest("a coalesced burst renders its last plan on a retry, then goes quiet") {
         // Intent: publishes that find no acquirable buffer render nothing and
         //   coalesce into one pending presentation; when a buffer frees, one
         //   retry renders the composed damage of the whole burst, and the pane
@@ -680,20 +724,20 @@ func swiftTerminalSessionViewTests() {
         // Scenario: three publishes arrive while the render server still holds
         //   every detached buffer, then the buffers free and no further output
         //   comes.
-        TerminalFrameSwapchain.resetForTesting()
-        let controller = TerminalPaneSessionController(
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
         pane.resetSurfaceCountersForTesting()
-        TerminalFrameSwapchain.resetForTesting()
+        RecordingPresentationSurface.reset()
 
-        TerminalFrameSwapchain.canAcquireForTesting = false
-        controller.emitFrameForTest(damage: .init(rows: [2]))
-        controller.emitFrameForTest(damage: .init(rows: [4]))
-        controller.emitFrameForTest(damage: .init(rows: [6]))
+        RecordingPresentationSurface.canAcquire = false
+        controller.emitFrameForTest(damage: .init(rows: [2], rowCount: RenderFramePlan.rowsForTesting))
+        controller.emitFrameForTest(damage: .init(rows: [4], rowCount: RenderFramePlan.rowsForTesting))
+        controller.emitFrameForTest(damage: .init(rows: [6], rowCount: RenderFramePlan.rowsForTesting))
         try uiExpect(
             pane.renderCountForTesting == 0,
             "an unacquirable swapchain still rendered \(pane.renderCountForTesting) time(s)"
@@ -703,29 +747,29 @@ func swiftTerminalSessionViewTests() {
             "the coalesced burst left no pending presentation to retry"
         )
 
-        TerminalFrameSwapchain.canAcquireForTesting = true
-        pumpRunLoop(untilTrue: { pane.hasPendingPresentationForTesting == false })
+        RecordingPresentationSurface.canAcquire = true
+        await pumpRunLoop(untilTrue: { pane.hasPendingPresentationForTesting == false })
 
         try uiExpect(
             pane.hasPendingPresentationForTesting == false,
             "the pending presentation never rendered after buffers freed"
         )
         try uiExpect(
-            TerminalFrameSwapchain.renderedRowSetsForTesting == [[2, 4, 6]],
+            RecordingPresentationSurface.renderedRowSets == [[2, 4, 6]],
             "the retry did not render the burst's composed damage once: "
-                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+                + "\(RecordingPresentationSurface.renderedRowSets)"
         )
 
         // No further output arrives; the pane must stop retrying by itself.
         let rendersAfterRetry = pane.renderCountForTesting
-        pumpRunLoop(seconds: 0.15)
+        await pumpRunLoop(seconds: 0.15)
         try uiExpect(
             pane.renderCountForTesting == rendersAfterRetry,
             "a quiet pane kept rendering: \(pane.renderCountForTesting) vs \(rendersAfterRetry)"
         )
     }
 
-    uiTest("a metrics change replaces the swapchain and re-renders the current plan") {
+    await uiTest("a metrics change replaces the swapchain and re-renders the current plan") {
         // Intent: cell geometry moving -- through a font change here, through a
         //   backing-scale change on a display move, through a resize -- discards
         //   the buffers and renders the current plan afresh.
@@ -735,34 +779,34 @@ func swiftTerminalSessionViewTests() {
         //   Nothing publishes on a scale change either, so the view has to
         //   re-render on its own or the pane freezes on the old frame.
         // Scenario: a mounted pane's font size changes.
-        TerminalFrameSwapchain.resetForTesting()
-        let controller = TerminalPaneSessionController(
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
-        let swapchainsAtMount = TerminalFrameSwapchain.creationCountForTesting
-        TerminalFrameSwapchain.resetForTesting()
+        let swapchainsAtMount = RecordingPresentationSurface.creationCount
+        RecordingPresentationSurface.reset()
         pane.resetSurfaceCountersForTesting()
 
         try uiExpect(swapchainsAtMount == 1, "mounting built \(swapchainsAtMount) swapchains")
         pane.setFontSize(26)
 
         try uiExpect(
-            TerminalFrameSwapchain.creationCountForTesting == 1,
+            RecordingPresentationSurface.creationCount == 1,
             "the metrics change did not replace the swapchain: "
-                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+                + "\(RecordingPresentationSurface.creationCount)"
         )
         try uiExpect(
-            TerminalFrameSwapchain.renderedRowSetsForTesting
+            RecordingPresentationSurface.renderedRowSets
                 == [Set(0..<RenderFramePlan.rowsForTesting)],
             "the replacement did not render a complete frame: "
-                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+                + "\(RecordingPresentationSurface.renderedRowSets)"
         )
     }
 
-    uiTest("a resized grid replaces the swapchain") {
+    await uiTest("a resized grid replaces the swapchain") {
         // Intent: a publish carrying a differently-shaped grid builds new
         //   buffers instead of trying to bring the old ones current.
         // Why it exists: I3's trust rule again, through the door a resize
@@ -771,14 +815,14 @@ func swiftTerminalSessionViewTests() {
         //   and a swapchain sized to the old grid would refuse or misplace
         //   every row of the new one.
         // Scenario: the engine republishes after a SIGWINCH added two rows.
-        TerminalFrameSwapchain.resetForTesting()
-        let controller = TerminalPaneSessionController(
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
-        TerminalFrameSwapchain.resetForTesting()
+        RecordingPresentationSurface.reset()
 
         let resizedRows = RenderFramePlan.rowsForTesting + 2
         controller.currentPlan = RenderFramePlan(
@@ -788,18 +832,18 @@ func swiftTerminalSessionViewTests() {
         controller.emitFrameForTest(damage: .full)
 
         try uiExpect(
-            TerminalFrameSwapchain.creationCountForTesting == 1,
+            RecordingPresentationSurface.creationCount == 1,
             "the resized grid did not replace the swapchain: "
-                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+                + "\(RecordingPresentationSurface.creationCount)"
         )
         try uiExpect(
-            TerminalFrameSwapchain.renderedRowSetsForTesting == [Set(0..<resizedRows)],
+            RecordingPresentationSurface.renderedRowSets == [Set(0..<resizedRows)],
             "the resized grid did not render a complete frame at its new height: "
-                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+                + "\(RecordingPresentationSurface.renderedRowSets)"
         )
     }
 
-    uiTest("a theme change replaces the swapchain") {
+    await uiTest("a theme change replaces the swapchain") {
         // Intent: applying a theme discards the buffers rather than trusting
         //   them for a later incremental render.
         // Why it exists: a theme repaints every row, including rows no damage
@@ -807,35 +851,35 @@ func swiftTerminalSessionViewTests() {
         //   would keep the old theme's colors in every quiet row -- the one
         //   trust-breaking input no value comparison on geometry can see.
         // Scenario: a mounted pane is given a theme with a different background.
-        TerminalFrameSwapchain.resetForTesting()
-        let controller = TerminalPaneSessionController(
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
         let resolved = RenderTheme(defaultBackground: .init(red: 12, green: 34, blue: 56))
-        let pane = SwiftTerminalSessionView(
+        let pane = makeTestPane(
             controller: controller,
             resolveTheme: { $0 == "Known" ? resolved : nil }
         )
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
-        TerminalFrameSwapchain.resetForTesting()
+        RecordingPresentationSurface.reset()
 
         pane.applyTheme("Known")
 
         try uiExpect(
-            TerminalFrameSwapchain.creationCountForTesting == 1,
+            RecordingPresentationSurface.creationCount == 1,
             "the theme change did not replace the swapchain: "
-                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+                + "\(RecordingPresentationSurface.creationCount)"
         )
         try uiExpect(
-            TerminalFrameSwapchain.renderedRowSetsForTesting
+            RecordingPresentationSurface.renderedRowSets
                 == [Set(0..<RenderFramePlan.rowsForTesting)],
             "the theme change did not render a complete frame: "
-                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+                + "\(RecordingPresentationSurface.renderedRowSets)"
         )
     }
 
-    uiTest("a window color-space change replaces the swapchain at unchanged geometry") {
+    await uiTest("a window color-space change replaces the swapchain at unchanged geometry") {
         // Intent: the window moving to a display with a different profile
         //   discards the buffers, even though every cell metric is identical.
         // Why it exists: the stores render into memory tagged with the window's
@@ -846,18 +890,18 @@ func swiftTerminalSessionViewTests() {
         //   metrics-only check would miss it entirely.
         // Scenario: a mounted pane's window changes color space at the same
         //   backing scale and the same grid.
-        TerminalFrameSwapchain.resetForTesting()
-        let controller = TerminalPaneSessionController(
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
         guard let window = pane.window else {
             throw UITestFailure(message: "the mounted pane has no window")
         }
         let before = window.colorSpace
-        TerminalFrameSwapchain.resetForTesting()
+        RecordingPresentationSurface.reset()
 
         window.colorSpace = before == NSColorSpace.displayP3
             ? NSColorSpace.sRGB
@@ -865,19 +909,19 @@ func swiftTerminalSessionViewTests() {
         pane.viewDidChangeBackingProperties()
 
         try uiExpect(
-            TerminalFrameSwapchain.creationCountForTesting == 1,
+            RecordingPresentationSurface.creationCount == 1,
             "the color-space change did not replace the swapchain: "
-                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+                + "\(RecordingPresentationSurface.creationCount)"
         )
         try uiExpect(
-            TerminalFrameSwapchain.renderedRowSetsForTesting
+            RecordingPresentationSurface.renderedRowSets
                 == [Set(0..<RenderFramePlan.rowsForTesting)],
             "the color-space change did not render a complete frame: "
-                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+                + "\(RecordingPresentationSurface.renderedRowSets)"
         )
     }
 
-    uiTest("the screen-change refresh sees a window color-space move") {
+    await uiTest("the screen-change refresh sees a window color-space move") {
         // Intent: the runtime's screen-change entry point applies the same
         //   presentation-input test the AppKit callback does, so a window that
         //   reaches a display with a different profile at the same backing scale
@@ -889,18 +933,18 @@ func swiftTerminalSessionViewTests() {
         //   of output -- and a pane with no output never caught up at all.
         // Scenario: a user drags a window holding a quiet pane onto a display with
         //   a different color profile at the same backing scale.
-        TerminalFrameSwapchain.resetForTesting()
-        let controller = TerminalPaneSessionController(
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
         guard let window = pane.window else {
             throw UITestFailure(message: "the mounted pane has no window")
         }
         let before = window.colorSpace
-        TerminalFrameSwapchain.resetForTesting()
+        RecordingPresentationSurface.reset()
 
         window.colorSpace = before == NSColorSpace.displayP3
             ? NSColorSpace.sRGB
@@ -908,19 +952,19 @@ func swiftTerminalSessionViewTests() {
         pane.refreshPresentation()
 
         try uiExpect(
-            TerminalFrameSwapchain.creationCountForTesting == 1,
+            RecordingPresentationSurface.creationCount == 1,
             "the screen-change refresh did not replace the swapchain: "
-                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+                + "\(RecordingPresentationSurface.creationCount)"
         )
         try uiExpect(
-            TerminalFrameSwapchain.renderedRowSetsForTesting
+            RecordingPresentationSurface.renderedRowSets
                 == [Set(0..<RenderFramePlan.rowsForTesting)],
             "the screen-change refresh did not render a complete frame: "
-                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+                + "\(RecordingPresentationSurface.renderedRowSets)"
         )
     }
 
-    uiTest("a resize that changes the grid leaves the render to the republish") {
+    await uiTest("a resize that changes the grid leaves the render to the republish") {
         // Intent: a resize submits the new grid and stops there. The view does not
         //   render the plan it is holding, because that plan was built for the old
         //   shape; the engine's republish is what puts the new shape on screen.
@@ -929,15 +973,15 @@ func swiftTerminalSessionViewTests() {
         //   them off the new dimensions would render a stale plan and build buffers
         //   the next publish immediately throws away.
         // Scenario: a user drags a divider, narrowing a pane by whole cells.
-        TerminalFrameSwapchain.resetForTesting()
-        let controller = TerminalPaneSessionController(
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
         let gridsAtMount = controller.gridDimensions.count
-        TerminalFrameSwapchain.resetForTesting()
+        RecordingPresentationSurface.reset()
         pane.resetSurfaceCountersForTesting()
 
         pane.setFrameSize(NSSize(width: 40, height: 160))
@@ -947,9 +991,9 @@ func swiftTerminalSessionViewTests() {
             "the resize did not submit one new grid: \(controller.gridDimensions)"
         )
         try uiExpect(
-            TerminalFrameSwapchain.creationCountForTesting == 0,
+            RecordingPresentationSurface.creationCount == 0,
             "the resize built a swapchain before the republish: "
-                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+                + "\(RecordingPresentationSurface.creationCount)"
         )
         try uiExpect(
             pane.renderCountForTesting == 0,
@@ -963,9 +1007,9 @@ func swiftTerminalSessionViewTests() {
         controller.emitFrameForTest(damage: .full)
 
         try uiExpect(
-            TerminalFrameSwapchain.creationCountForTesting == 1,
+            RecordingPresentationSurface.creationCount == 1,
             "the republish did not replace the swapchain: "
-                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+                + "\(RecordingPresentationSurface.creationCount)"
         )
         try uiExpect(
             pane.renderCountForTesting == 1,
@@ -973,7 +1017,7 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("a pane resized to a zero dimension submits nothing and renders nothing") {
+    await uiTest("a pane resized to a zero dimension submits nothing and renders nothing") {
         // Intent: bounds with no area leave the grid, the swapchain, and the frame
         //   on screen exactly as they were.
         // Why it exists: scale and pixel size are one invariant
@@ -982,15 +1026,15 @@ func swiftTerminalSessionViewTests() {
         //   invalid winsize, and a zero-sized swapchain is an allocation that fails.
         // Scenario: a user drags a divider fully shut, or a pane's host collapses it
         //   to a zero-height strip during a layout pass.
-        TerminalFrameSwapchain.resetForTesting()
-        let controller = TerminalPaneSessionController(
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
         let gridsAtMount = controller.gridDimensions.count
-        TerminalFrameSwapchain.resetForTesting()
+        RecordingPresentationSurface.reset()
         pane.resetSurfaceCountersForTesting()
 
         pane.setFrameSize(NSSize(width: 80, height: 0))
@@ -1000,9 +1044,9 @@ func swiftTerminalSessionViewTests() {
             "a zero-height pane submitted a grid: \(controller.gridDimensions)"
         )
         try uiExpect(
-            TerminalFrameSwapchain.creationCountForTesting == 0,
+            RecordingPresentationSurface.creationCount == 0,
             "a zero-height pane built a swapchain: "
-                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+                + "\(RecordingPresentationSurface.creationCount)"
         )
         try uiExpect(
             pane.renderCountForTesting == 0,
@@ -1010,7 +1054,7 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("a metrics change publishes the new cell geometry to the state observer") {
+    await uiTest("a metrics change publishes the new cell geometry to the state observer") {
         // Intent: new cell metrics reach the state observer, not just the pane's own
         //   live `state` getter.
         // Why it exists: `ScrollableTerminalView` is that observer and re-reads state
@@ -1019,8 +1063,8 @@ func swiftTerminalSessionViewTests() {
         //   font-size coverage reads `pane.state.cellHeight`, which is a live getter
         //   and stays correct even with the emit gone.
         // Scenario: a user changes the terminal font size in Preferences.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
         pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
         mountInTestWindow(pane, frame: pane.frame)
         let observer = SwiftPaneStateObserver()
@@ -1029,14 +1073,14 @@ func swiftTerminalSessionViewTests() {
         pane.setFontSize(26)
 
         try uiExpect(
-            observer.states.last?.cellHeight == 32,
+            observer.states.last?.cellHeight == uiTestMetrics(fontSize: 26).cellSize.height,
             "the metrics change published no new cell height: "
                 + "\(String(describing: observer.states.last?.cellHeight))"
         )
     }
 
-    uiTest("semantic notifications and progress cross the AppKit adapter") {
-        let controller = TerminalPaneSessionController()
+    await uiTest("semantic notifications and progress cross the AppKit adapter") {
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         var events: [TerminalSessionEvent] = []
         pane.onEvent = { events.append($0) }
@@ -1054,20 +1098,20 @@ func swiftTerminalSessionViewTests() {
         ], "semantic adapter diverged: \(events)")
     }
 
-    uiTest("mounted pane forwards fractional wheel metadata once") {
+    await uiTest("mounted pane forwards fractional wheel metadata once") {
         // Intent: the Swift pane converts a line wheel event into one owner-side row intent
         //   and terminates responder-chain handling at the pane.
         // Why it exists: the enclosing terminal scroll view forwards wheel events to the
         //   pane, so calling super would bounce the same event back through the scroll view.
         // Scenario: a user wheels upward by two line units over a mounted Swift pane.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         let enclosingScrollView = WheelBounceSentinelScrollView()
         pane.nextResponder = enclosingScrollView
         let event = try makeScrollWheelEvent(
             units: .line,
             deltaY: 2,
-            location: .init(x: 17, y: 125),
+            location: paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: pane),
             modifiers: [.shift, .control],
             phase: .began
         )
@@ -1089,39 +1133,53 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("pointer callbacks normalize cells buttons modifiers and click counts") {
+    await uiTest("pointer callbacks normalize cells buttons modifiers and click counts") {
         // Intent: every native left-button transition becomes one platform-neutral pointer event.
         // Why it exists: view-side routing or point-space forwarding would bypass owner policy.
         // Scenario: a Shift-double-click drag crosses cells and releases beyond the viewport.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
 
         pane.mouseDown(with: try makeMouseEvent(
             type: .leftMouseDown,
-            location: .init(x: 17, y: 125),
+            location: paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: pane),
             modifiers: [.shift],
             clickCount: 2
         ))
         pane.mouseDragged(with: try makeMouseEvent(
             type: .leftMouseDragged,
-            location: .init(x: 31, y: 111),
+            location: paneCellPoint(column: 3, offsetX: 0.875, row: 3, in: pane),
             modifiers: [.shift]
         ))
         pane.mouseUp(with: try makeMouseEvent(
             type: .leftMouseUp,
-            location: .init(x: 200, y: -40),
+            location: NSPoint(x: pane.bounds.width * 2.5, y: -pane.bounds.height * 0.25),
             modifiers: [.shift]
         ))
 
-        // Cells are 8 points wide here, so x=17 and x=31 land an eighth and seven eighths of
-        // the way into their columns: the sub-cell position character selection resolves a
-        // boundary from has to survive the view boundary, not just the column.
+        // The press and the drag land an eighth and seven eighths of the way into their
+        // columns: the sub-cell position character selection resolves a boundary from has
+        // to survive the view boundary, not just the column. The release is past the
+        // viewport on both axes, so it clamps to the grid's last cell and says it is
+        // outside.
+        guard let grid = terminalGridDimensions(
+            size: TerminalPointSize(width: pane.bounds.width, height: pane.bounds.height),
+            cellSize: TerminalPointSize(
+                width: paneCellSize(pane).width,
+                height: paneCellSize(pane).height
+            )
+        ) else { throw UITestFailure(message: "the mounted pane resolved no grid") }
         try uiExpect(controller.pointerEvents == [
             .down(.left, cell: .init(column: 2, row: 2, offsetX: 0.125), modifiers: [.shift], clickCount: 2),
             .move(cell: .init(column: 3, row: 3, offsetX: 0.875), modifiers: [.shift]),
             .up(
                 .left,
-                cell: .init(column: 9, row: 9, offsetX: 1, isInsideGrid: false),
+                cell: .init(
+                    column: grid.columns - 1,
+                    row: grid.rows - 1,
+                    offsetX: 1,
+                    isInsideGrid: false
+                ),
                 modifiers: [.shift]
             ),
         ], "pointer normalization diverged: \(controller.pointerEvents)")
@@ -1131,18 +1189,18 @@ func swiftTerminalSessionViewTests() {
                      "an out-of-bounds release still sent a separate cancellation")
     }
 
-    uiTest("wheel direct and momentum phases reach the owner unchanged") {
+    await uiTest("wheel direct and momentum phases reach the owner unchanged") {
         // Intent: precise fractional motion and its direct/momentum lifecycle reach the owner.
         // Why it exists: route latching and remainder ownership both depend on these boundaries.
         // Scenario: a trackpad gesture ends its direct phase and continues with momentum.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
 
         for phase in [NSEvent.Phase.began, .changed, .ended] {
             pane.scrollWheel(with: try makeScrollWheelEvent(
                 units: .pixel,
                 deltaY: 4,
-                location: .init(x: 9, y: 143),
+                location: paneCellPoint(column: 1, offsetX: 0.125, row: 1, in: pane),
                 phase: phase
             ))
         }
@@ -1150,7 +1208,7 @@ func swiftTerminalSessionViewTests() {
             pane.scrollWheel(with: try makeScrollWheelEvent(
                 units: .pixel,
                 deltaY: 4,
-                location: .init(x: 9, y: 143),
+                location: paneCellPoint(column: 1, offsetX: 0.125, row: 1, in: pane),
                 momentumPhase: phase
             ))
         }
@@ -1158,7 +1216,10 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(controller.wheelEvents.map(\.phase) == [
             .began, .changed, .ended, .momentumBegan, .momentumChanged, .momentumEnded,
         ], "wheel phase normalization diverged: \(controller.wheelEvents)")
-        try uiExpect(controller.wheelEvents.allSatisfy { $0.rowDelta == -0.25 },
+        // Four points of motion is a fraction of a row, and the fraction has to survive
+        // the view: quantizing here would make a trackpad scroll jump whole rows.
+        let expectedRowDelta = -4 / paneCellSize(pane).height
+        try uiExpect(controller.wheelEvents.allSatisfy { $0.rowDelta == expectedRowDelta },
                      "precise wheel motion was quantized in the view")
     }
 
@@ -1178,7 +1239,7 @@ func swiftTerminalSessionViewTests() {
 //      //   claimed would eat the report the running program is waiting for.
 //      // Scenario: spec-first -- the user right-clicks a plain shell, then the same pane
 //      //   under a full-screen program that turned mouse reporting on, then shift-clicks it.
-//      let controller = TerminalPaneSessionController()
+//      let controller = FakeTerminalPaneSessionController()
 //      let pane = makeMountedPane(controller: controller)
 //      let provided = NSMenu()
 //      pane.paneMenuProvider = { provided }
@@ -1219,7 +1280,7 @@ func swiftTerminalSessionViewTests() {
 //      //   engine's button owner, which then swallows the next right-click a program claims.
 //      // Scenario: spec-first -- the user right-clicks a plain shell to open the menu, then
 //      //   a program turns mouse reporting on and the user right-clicks again.
-//      let controller = TerminalPaneSessionController()
+//      let controller = FakeTerminalPaneSessionController()
 //      let pane = makeMountedPane(controller: controller)
 //      pane.paneMenuProvider = { NSMenu() }
 //      let point = NSPoint(x: 17, y: 125)
@@ -1238,7 +1299,7 @@ func swiftTerminalSessionViewTests() {
 //      ], "the claimed gesture was not delivered whole: \(controller.pointerEvents)")
 //  }
 
-    uiTest("an unclaimed control-click both focuses the pane and offers the menu") {
+    await uiTest("an unclaimed control-click both focuses the pane and offers the menu") {
         // Intent: a control-click reports pane focus and returns the menu from the same
         //   call, and forwards nothing; a claimed one runs the right-button lifecycle.
         // Why it exists: AppKit asks for the menu before any mouse lifecycle on a
@@ -1247,13 +1308,13 @@ func swiftTerminalSessionViewTests() {
         //   menu still opens, on a pane that never became key.
         // Scenario: spec-first -- the user control-clicks an unfocused pane running a
         //   plain shell, then control-clicks one under a program that claims the mouse.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         let provided = NSMenu()
         pane.paneMenuProvider = { provided }
         var events: [TerminalSessionEvent] = []
         pane.onEvent = { events.append($0) }
-        let point = NSPoint(x: 9, y: 143)
+        let point = paneCellPoint(column: 1, offsetX: 0.125, row: 1, in: pane)
         let down = try makeMouseEvent(
             type: .leftMouseDown, location: point, modifiers: [.control]
         )
@@ -1278,7 +1339,7 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(events == [.clickedToFocus], "a claimed control-click reported \(events)")
     }
 
-    uiTest("a press the view could not forward is never answered by a release") {
+    await uiTest("a press the view could not forward is never answered by a release") {
         // Intent: a release reaches the engine only for a press from the same physical
         //   button that reached it, on every one of the three buttons; the left click
         //   still names its pane even when its press went nowhere.
@@ -1288,10 +1349,9 @@ func swiftTerminalSessionViewTests() {
         //   then carry as an unpaired `.up`.
         // Scenario: spec-first -- the user clicks a pane in the instant between its
         //   creation and its first layout, and lets go once it is on screen.
-        let point = NSPoint(x: 17, y: 125)
-
-        let leftController = TerminalPaneSessionController()
+        let leftController = FakeTerminalPaneSessionController()
         let leftPane = makeUnmountedPane(controller: leftController)
+        let point = paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: leftPane)
         var events: [TerminalSessionEvent] = []
         leftPane.onEvent = { events.append($0) }
         leftPane.mouseDown(with: try makeMouseEvent(type: .leftMouseDown, location: point))
@@ -1302,7 +1362,7 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(leftController.pointerEvents.isEmpty,
                      "a left release outran its press: \(leftController.pointerEvents)")
 
-        let rightController = TerminalPaneSessionController()
+        let rightController = FakeTerminalPaneSessionController()
         rightController.claimsMouseButtons = true
         let rightPane = makeUnmountedPane(controller: rightController)
         rightPane.rightMouseDown(with: try makeMouseEvent(type: .rightMouseDown, location: point))
@@ -1311,7 +1371,7 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(rightController.pointerEvents.isEmpty,
                      "a right release outran its press: \(rightController.pointerEvents)")
 
-        let middleController = TerminalPaneSessionController()
+        let middleController = FakeTerminalPaneSessionController()
         let middlePane = makeUnmountedPane(controller: middleController)
         middlePane.otherMouseDown(with: try makeMiddleMouseEvent(
             type: .otherMouseDown, location: point
@@ -1324,7 +1384,7 @@ func swiftTerminalSessionViewTests() {
                      "a middle release outran its press: \(middleController.pointerEvents)")
     }
 
-    uiTest("the middle button forwards its press and release as a pair") {
+    await uiTest("the middle button forwards its press and release as a pair") {
         // Intent: a mounted pane forwards a middle-button click whole, so the empty
         //   result in the pre-layout test above is the dropped press and not a path
         //   that forwards nothing at all.
@@ -1333,9 +1393,9 @@ func swiftTerminalSessionViewTests() {
         //   left nor the right coverage exercises.
         // Scenario: spec-first -- the user middle-clicks a pane to paste the primary
         //   selection into a program that reads the mouse.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
-        let point = NSPoint(x: 17, y: 125)
+        let point = paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: pane)
 
         pane.otherMouseDown(with: try makeMiddleMouseEvent(type: .otherMouseDown, location: point))
         pane.otherMouseUp(with: try makeMiddleMouseEvent(type: .otherMouseUp, location: point))
@@ -1346,7 +1406,7 @@ func swiftTerminalSessionViewTests() {
         ], "the middle button was not delivered as a pair: \(controller.pointerEvents)")
     }
 
-    uiTest("a release names the button its own press was reported as") {
+    await uiTest("a release names the button its own press was reported as") {
         // Intent: a control-click released after Control comes back up still reports
         //   `.right`, and a left and a right button held together each pair with their
         //   own press rather than with each other.
@@ -1357,12 +1417,12 @@ func swiftTerminalSessionViewTests() {
         // Scenario: spec-first -- the user control-clicks and lets go of Control before
         //   the mouse, then presses left and right together over a program that claims
         //   both buttons.
-        let point = NSPoint(x: 17, y: 125)
         let cell = TerminalViewportCell(column: 2, row: 2, offsetX: 0.125)
 
-        let controlController = TerminalPaneSessionController()
+        let controlController = FakeTerminalPaneSessionController()
         controlController.claimsMouseButtons = true
         let controlPane = makeMountedPane(controller: controlController)
+        let point = paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: controlPane)
         controlPane.mouseDown(with: try makeMouseEvent(
             type: .leftMouseDown, location: point, modifiers: [.control]
         ))
@@ -1372,7 +1432,7 @@ func swiftTerminalSessionViewTests() {
             .up(.right, cell: cell, modifiers: []),
         ], "releasing Control renamed the click: \(controlController.pointerEvents)")
 
-        let bothController = TerminalPaneSessionController()
+        let bothController = FakeTerminalPaneSessionController()
         bothController.claimsMouseButtons = true
         let bothPane = makeMountedPane(controller: bothController)
         bothPane.mouseDown(with: try makeMouseEvent(type: .leftMouseDown, location: point))
@@ -1387,7 +1447,7 @@ func swiftTerminalSessionViewTests() {
         ], "overlapping buttons crossed their releases: \(bothController.pointerEvents)")
     }
 
-    uiTest("only a click that takes key focus reports pane focus") {
+    await uiTest("only a click that takes key focus reports pane focus") {
         // Intent: the gesture that hands this pane key focus reports it, and no
         //   other button reports anything.
         // Why it exists: focus reports come from interaction sites now. AppKit's
@@ -1399,11 +1459,11 @@ func swiftTerminalSessionViewTests() {
         //   click, and an other-button press. The other-button press is dropped by
         //   that entry point's own middle-button guard, so its arm pins the weaker
         //   claim that nothing escapes `otherMouseDown` by any path.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         var events: [TerminalSessionEvent] = []
         pane.onEvent = { events.append($0) }
-        let point = NSPoint(x: 9, y: 143)
+        let point = paneCellPoint(column: 1, offsetX: 0.125, row: 1, in: pane)
 
         pane.mouseDown(with: try makeMouseEvent(type: .leftMouseDown, location: point))
         try uiExpect(events == [.clickedToFocus], "a plain click reported \(events)")
@@ -1420,7 +1480,7 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(events.isEmpty, "a right or other-button press reported \(events)")
     }
 
-    uiTest("gaining first responder reports nothing and only tells the engine") {
+    await uiTest("gaining first responder reports nothing and only tells the engine") {
         // Intent: a responder gain is presentation state, never a model fact.
         // Why it exists: the pane-focus pass repairs the responder to this view, and
         //   AppKit calls becomeFirstResponder from inside that call. A report here
@@ -1428,7 +1488,7 @@ func swiftTerminalSessionViewTests() {
         //   responder dispatch where the lint script cannot see it.
         // Scenario: the pane is made first responder programmatically, the way the
         //   pass does it.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         var events: [TerminalSessionEvent] = []
         pane.onEvent = { events.append($0) }
@@ -1440,11 +1500,11 @@ func swiftTerminalSessionViewTests() {
                      "focus reached the engine as \(controller.focusChanges)")
     }
 
-    uiTest("explicit copy fences selection and hasSelection stays cache-only") {
+    await uiTest("explicit copy fences selection and hasSelection stays cache-only") {
         // Intent: Copy fences pending selection work while menu enablement reads only cached state.
         // Why it exists: asynchronous drag consumption must not put stale text on the pasteboard.
         // Scenario: a selection ends immediately before the user invokes Copy.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.selectedTextOnFence = "alpha"
         let pane = makeMountedPane(controller: controller)
         let pasteboard = NSPasteboard(name: .init("danterm.swift-selection-test"))
@@ -1454,11 +1514,11 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(pane.hasSelection == false, "selection cache unexpectedly fenced the owner")
         pane.mouseDown(with: try makeMouseEvent(
             type: .leftMouseDown,
-            location: .init(x: 1, y: 159)
+            location: paneCellPoint(column: 0, offsetX: 0.125, row: 0, in: pane)
         ))
         pane.mouseUp(with: try makeMouseEvent(
             type: .leftMouseUp,
-            location: .init(x: 17, y: 159)
+            location: paneCellPoint(column: 2, offsetX: 0.125, row: 0, in: pane)
         ))
         pane.copySelection()
 
@@ -1467,14 +1527,14 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(pane.hasSelection, "cached selection did not refresh after fenced copy")
     }
 
-    uiTest("Edit > Copy routes through the responder chain and validates on cached selection") {
+    await uiTest("Edit > Copy routes through the responder chain and validates on cached selection") {
         // Intent: the standard `copy(_:)` action copies the selection, and Edit > Copy is
         //   enabled only while a selection exists, without disturbing Paste.
         // Why it exists: the Swift engine declines Command keys in `keyDown`, so Cmd-C only
         //   works if the pane owns `copy(_:)` on the responder chain; over-broad validation
         //   would silently disable unrelated Edit items such as Paste.
         // Scenario: a user drag-selects output, presses Cmd-C, then clicks to clear it.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.selectedTextOnFence = "beta"
         let pane = makeMountedPane(controller: controller)
         let pasteboard = NSPasteboard(name: .init("danterm.swift-menu-copy-test"))
@@ -1493,11 +1553,11 @@ func swiftTerminalSessionViewTests() {
 
         pane.mouseDown(with: try makeMouseEvent(
             type: .leftMouseDown,
-            location: .init(x: 1, y: 159)
+            location: paneCellPoint(column: 0, offsetX: 0.125, row: 0, in: pane)
         ))
         pane.mouseUp(with: try makeMouseEvent(
             type: .leftMouseUp,
-            location: .init(x: 17, y: 159)
+            location: paneCellPoint(column: 2, offsetX: 0.125, row: 0, in: pane)
         ))
         pane.copy(nil)
 
@@ -1507,13 +1567,13 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(pane.validateMenuItem(pasteItem), "Paste validation tracked the selection")
     }
 
-    uiTest("copy-on-select writes a relayed selection only while it is armed") {
+    await uiTest("copy-on-select writes a relayed selection only while it is armed") {
         // Intent: arming copy-on-select puts a completed selection's relayed text on the
         //   pasteboard, and disarming stops the engine relaying anything at all.
         // Why it exists: the option is a subscriber, not a branch -- if disarming only
         //   suppressed the write, the engine would still pay to extract the text.
         // Scenario: spec-first; the user unticks "Copy selection to clipboard" and drags.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         let pasteboard = NSPasteboard(name: .init("danterm.swift-copy-on-select-test"))
         pasteboard.clearContents()
@@ -1532,11 +1592,11 @@ func swiftTerminalSessionViewTests() {
                      "a disarmed pane still reached the pasteboard")
     }
 
-    uiTest("Cmd-C copies the same in both copy-on-select modes") {
+    await uiTest("Cmd-C copies the same in both copy-on-select modes") {
         // Intent: arming or disarming copy-on-select leaves the explicit copy path alone.
         // Why it exists: the option governs what a gesture does, never what Cmd-C does.
         // Scenario: spec-first; the user copies by hand with the option on, then off.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.selectedTextOnFence = "gamma"
         let pane = makeMountedPane(controller: controller)
         let pasteboard = NSPasteboard(name: .init("danterm.swift-copy-on-select-cmd-c-test"))
@@ -1551,7 +1611,7 @@ func swiftTerminalSessionViewTests() {
         }
     }
 
-    uiTest("Edit > Select All routes through the responder chain and validates as enabled") {
+    await uiTest("Edit > Select All routes through the responder chain and validates as enabled") {
         // Intent: the nil-targeted `selectAll(_:)` action reaches the pane through AppKit's
         //   responder-chain lookup, produces a selection the pane reports, and leaves
         //   Edit > Select All validating as enabled.
@@ -1560,7 +1620,7 @@ func swiftTerminalSessionViewTests() {
         //   the chain (not calling the method directly) is the point -- a direct call would pass
         //   even if the menu item stayed disabled or the action resolved to another responder.
         // Scenario: a user makes the pane first responder and presses Cmd-A.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         guard let window = pane.window else {
             throw UITestFailure(message: "mounted pane had no window")
@@ -1585,14 +1645,14 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(pane.validateMenuItem(selectAllItem), "Select All validated as disabled")
     }
 
-    uiTest("Command-modified keys produce no terminal input") {
+    await uiTest("Command-modified keys produce no terminal input") {
         // Intent: Cmd-C and Cmd-A are owned by the menu/responder chain and never encoded as
         //   terminal input.
         // Why it exists: a fix that reintroduced a Command branch in `keyDown` would send a
         //   stray byte to the shell whenever such a shortcut fell through -- for Cmd-A, the
         //   `\x01` the line editor uses for start-of-line.
         // Scenario: the user presses Cmd-C then Cmd-A on a mounted pane with no selection.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         let before = controller.inputBytes
 
@@ -1603,11 +1663,11 @@ func swiftTerminalSessionViewTests() {
                      "Command key leaked terminal input: \(controller.inputBytes)")
     }
 
-    uiTest("OSC 52 writes and empty clears reach the injected pasteboard") {
+    await uiTest("OSC 52 writes and empty clears reach the injected pasteboard") {
         // Intent: delivered terminal clipboard effects write only at the AppKit boundary.
         // Why it exists: presentation gating and top-level model routing must not own OSC 52 data.
         // Scenario: a remote program writes text, then clears the general clipboard selection.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         let pasteboard = NSPasteboard(name: .init("danterm.swift-osc52-test"))
         pasteboard.clearContents()
@@ -1619,11 +1679,11 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(pasteboard.string(forType: .string) == "", "empty OSC 52 did not clear")
     }
 
-    uiTest("tracking area delivers mouse moves to the normalized adapter") {
+    await uiTest("tracking area delivers mouse moves to the normalized adapter") {
         // Intent: the pane continuously forwards normalized hover motion without a mode mirror.
         // Why it exists: any-motion capture can begin from child output between native callbacks.
         // Scenario: an Option-modified pointer move lands over a visible terminal cell.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         pane.updateTrackingAreas()
 
@@ -1633,7 +1693,7 @@ func swiftTerminalSessionViewTests() {
                      "pane installed no pointer-entry/exit tracking area")
         pane.mouseMoved(with: try makeMouseEvent(
             type: .mouseMoved,
-            location: .init(x: 17, y: 125),
+            location: paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: pane),
             modifiers: [.option]
         ))
         try uiExpect(controller.pointerEvents == [
@@ -1641,13 +1701,13 @@ func swiftTerminalSessionViewTests() {
         ], "mouse move did not reach the owner adapter")
     }
 
-    uiTest("Cmd-click forwards Command and opens only boundary-valid web URLs") {
+    await uiTest("Cmd-click forwards Command and opens only boundary-valid web URLs") {
         // Intent: AppKit forwards Command intent to owner policy, then independently validates
         //   the click-time target before invoking the injected system opener.
         // Why it exists: terminal output must not reach file or custom URL handlers even if
         //   engine validation regresses or a malformed target crosses the owner boundary.
         // Scenario: a user Cmd-clicks links with valid HTTP(S), unsafe, and malformed targets.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         var opened: [URL] = []
         pane.linkOpener = { url in
@@ -1657,12 +1717,12 @@ func swiftTerminalSessionViewTests() {
 
         let down = try makeMouseEvent(
             type: .leftMouseDown,
-            location: .init(x: 17, y: 125),
+            location: paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: pane),
             modifiers: [.command]
         )
         let up = try makeMouseEvent(
             type: .leftMouseUp,
-            location: .init(x: 17, y: 125),
+            location: paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: pane),
             modifiers: [.command]
         )
         for target in [
@@ -1706,17 +1766,17 @@ func swiftTerminalSessionViewTests() {
         ], "unsafe or malformed target crossed the opener boundary: \(opened)")
     }
 
-    uiTest("Cmd flags changes replay the stationary pointer and update link chrome") {
+    await uiTest("Cmd flags changes replay the stationary pointer and update link chrome") {
         // Intent: pressing and releasing Command without moving refreshes owner hover and native
         //   chrome at the last terminal position.
         // Why it exists: AppKit does not emit mouseMoved merely because modifier flags changed.
         // Scenario: the pointer rests over a web link while the user presses and releases Cmd.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.hoveredLinkForCommandMove = .init(uri: "https://example.com/stationary")
         let pane = makeMountedPane(controller: controller)
         pane.mouseMoved(with: try makeMouseEvent(
             type: .mouseMoved,
-            location: .init(x: 17, y: 125)
+            location: paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: pane)
         ))
 
         pane.flagsChanged(with: try makeFlagsChangedEvent(keyCode: 55, modifiers: [.command]))
@@ -1745,11 +1805,11 @@ func swiftTerminalSessionViewTests() {
                      "an unrelated render frame overwrote the current cursor")
     }
 
-    uiTest("pointer exit clears hover and cancels a pending link click") {
+    await uiTest("pointer exit clears hover and cancels a pending link click") {
         // Intent: leaving the viewport clears presentation and invalidates the owner-side arm.
         // Why it exists: a later release must not activate a link whose gesture left the pane.
         // Scenario: the user Cmd-presses a link, leaves the pane, then releases over the old cell.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let link = TerminalHyperlink(uri: "https://example.com/exit")
         controller.hoveredLinkForCommandMove = link
         controller.linkForCommandClick = link
@@ -1759,21 +1819,21 @@ func swiftTerminalSessionViewTests() {
 
         pane.mouseMoved(with: try makeMouseEvent(
             type: .mouseMoved,
-            location: .init(x: 17, y: 125),
+            location: paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: pane),
             modifiers: [.command]
         ))
         pane.mouseDown(with: try makeMouseEvent(
             type: .leftMouseDown,
-            location: .init(x: 17, y: 125),
+            location: paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: pane),
             modifiers: [.command]
         ))
         pane.mouseExited(with: try makePointerExitEvent(
-            location: .init(x: 81, y: 125),
+            location: NSPoint(x: pane.bounds.width + 1, y: pane.bounds.height - 2.5 * paneCellSize(pane).height),
             modifiers: [.command]
         ))
         pane.mouseUp(with: try makeMouseEvent(
             type: .leftMouseUp,
-            location: .init(x: 17, y: 125),
+            location: paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: pane),
             modifiers: [.command]
         ))
 
@@ -1787,14 +1847,14 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(preview?.isHidden == true, "a stale owner frame restored hover after exit")
     }
 
-    uiTest("an off-grid press or release cannot open a link") {
+    await uiTest("an off-grid press or release cannot open a link") {
         // Intent: whichever half of a Cmd-click lands off the grid, the gesture opens nothing.
         // Why it exists: the pane sends one message per pointer transition, and the measured
         //   insideness rides inside it, so the decision that refuses the link is the same one
         //   that reports the press or release. Nothing follows an event to correct it.
         // Scenario: the user Cmd-drags off the pane and releases, then Cmd-presses in the
         //   blank surround beside the grid and releases over the link.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let link = TerminalHyperlink(uri: "https://example.com/offgrid")
         controller.hoveredLinkForCommandMove = link
         controller.linkForCommandClick = link
@@ -1802,8 +1862,8 @@ func swiftTerminalSessionViewTests() {
         var opened: [URL] = []
         pane.linkOpener = { url in opened.append(url); return true }
 
-        let onGrid = NSPoint(x: 17, y: 125)
-        let offGrid = NSPoint(x: 200, y: -40)
+        let onGrid = paneCellPoint(column: 2, offsetX: 0.125, row: 2, in: pane)
+        let offGrid = NSPoint(x: pane.bounds.width * 2.5, y: -pane.bounds.height * 0.25)
 
         pane.mouseDown(with: try makeMouseEvent(
             type: .leftMouseDown, location: onGrid, modifiers: [.command]
@@ -1822,7 +1882,7 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(opened.isEmpty, "a press that began off the grid opened \(opened)")
     }
 
-    uiTest("a grid that shrinks under a parked pointer drops the hover chrome") {
+    await uiTest("a grid that shrinks under a parked pointer drops the hover chrome") {
         // Intent: the pane decides hover from where the pointer sits in the grid it has now,
         //   not from where it sat when the last pointer event arrived.
         // Why it exists: the pointer can stay still while the grid shrinks away from under it,
@@ -1830,13 +1890,13 @@ func swiftTerminalSessionViewTests() {
         //   no longer on the grid.
         // Scenario: spec-first -- a remote client claims a much smaller grid while the pointer
         //   rests on a link near the pane's right edge.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.hoveredLinkForCommandMove = .init(uri: "https://example.com/parked")
         let pane = makeMountedPane(controller: controller)
         // The pane is ten 8x16 cells wide, so this parks the pointer in column 8.
         pane.mouseMoved(with: try makeMouseEvent(
             type: .mouseMoved,
-            location: .init(x: 65, y: 125),
+            location: paneCellPoint(column: 8, offsetX: 0.125, row: 2, in: pane),
             modifiers: [.command]
         ))
         let preview = pane.subviews.compactMap { $0 as? LinkPreviewView }.first
@@ -1854,9 +1914,9 @@ func swiftTerminalSessionViewTests() {
                      "the pill survived a grid that no longer covers the parked pointer")
     }
 
-    uiTest("pane maps viewport state and scrollbar commands through the controller") {
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller)
+    await uiTest("pane maps viewport state and scrollbar commands through the controller") {
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller)
         let observer = SwiftPaneStateObserver()
         pane.stateObserver = observer
 
@@ -1882,13 +1942,13 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("composition commits text before terminal key encoding") {
+    await uiTest("composition commits text before terminal key encoding") {
         // Intent: marked-text composition commits through sendText even while Kitty mode is active.
         // Why it exists: terminal key encoding must never reinterpret native Option/dead-key text.
         // Scenario: AppKit reports the marked and committed phases of Option+e, e as acute e.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.inputModes.kittyKeyboardFlags = 1
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
 
         let notFound = NSRange(location: NSNotFound, length: 0)
         pane.setMarkedText(
@@ -1903,16 +1963,16 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(controller.inputBytes.isEmpty, "composition leaked into terminal key encoding")
     }
 
-    uiTest("multi-stage Chinese IME commits only final text through native input") {
+    await uiTest("multi-stage Chinese IME commits only final text through native input") {
         // Intent: successive Chinese IME marked-text replacements stay local until AppKit
         //   commits the final candidate through the native text-input callback.
         // Why it exists: partial candidates or their backing key events must not reach the PTY,
         //   and the final commit must not also be encoded as a terminal key.
         // Scenario: Pinyin input advances through "n", "ni", and a selected Chinese candidate
         //   before AppKit commits the two-character phrase.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.inputModes.kittyKeyboardFlags = 1
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         let notFound = NSRange(location: NSNotFound, length: 0)
 
         pane.setMarkedText(
@@ -1943,12 +2003,12 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(pane.hasMarkedText() == false, "committed IME text remained marked")
     }
 
-    uiTest("control punctuation and function keys normalize into core bytes") {
+    await uiTest("control punctuation and function keys normalize into core bytes") {
         // Intent: layout-derived Control punctuation and function keys retain semantic identity.
         // Why it exists: AppKit mutates Control characters and represents function keys as PUA text.
         // Scenario: a user enters the ASCII control-punctuation set, then F3 in Kitty mode.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller)
         let cases: [(UInt16, NSEvent.ModifierFlags, [UInt8])] = [
             (49, [.control], [0x00]),
             (33, [.control], [0x1B]),
@@ -1972,15 +2032,15 @@ func swiftTerminalSessionViewTests() {
                      "F3 did not use Kitty encoding: \(String(describing: controller.inputBytes.last))")
     }
 
-    uiTest("a keystroke's origin is the system event's own occurrence time") {
+    await uiTest("a keystroke's origin is the system event's own occurrence time") {
         // Intent: both `keyDown` routes -- committed text and a fixed terminal key -- attribute
         // their bytes to the time the system created the event.
         // Why it exists: the pane recorder charges the distance between that origin and the
         // completed write to the app, so a handler that sampled its own clock instead would
         // charge every stall ahead of it to the child, which is the ambiguity the tape removes.
         // Scenario: two key events that occurred at 2.5s and 3.5s of uptime reach the pane.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller)
 
         pane.keyDown(with: try makeKeyEvent(
             keyCode: 40,
@@ -1996,14 +2056,14 @@ func swiftTerminalSessionViewTests() {
                      "input lost the event's own time: \(controller.inputOrigins)")
     }
 
-    uiTest("a GUI keystroke submitted before spawn is delivered after process start") {
+    await uiTest("a GUI keystroke submitted before spawn is delivered after process start") {
         // Intent: the real AppKit key route accepts input while the pane process is spawning,
         //   then delivers it when that process starts.
         // Why it exists: GUI input shares the lifecycle path with IPC input, and the old
         //   pre-running reducer arm silently discarded keystrokes.
         // Scenario: a deterministic spawning controller receives K before its process-start edge.
-        let controller = TerminalPaneSessionController(processIsRunning: false)
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let controller = FakeTerminalPaneSessionController(processIsRunning: false)
+        let pane = makeTestPane(controller: controller)
 
         pane.keyDown(with: try makeKeyEvent(keyCode: 40, modifiers: [], characters: "k"))
 
@@ -2017,15 +2077,15 @@ func swiftTerminalSessionViewTests() {
                      "process start did not deliver the buffered GUI keystroke exactly once")
     }
 
-    uiTest("a typed key stamps the wait the pane holds and reports it back on delivery") {
+    await uiTest("a typed key stamps the wait the pane holds and reports it back on delivery") {
         // Intent: a real AppKit keystroke reads the pane's current agent wait at the moment
         //   it is submitted, and the delivered occurrence reaches the app naming that wait.
         // Why it exists: this is the only proof of the app-side origin read. Scripted input
         //   snapshots the wait inside core dispatch, so every core test would still pass if
         //   the typed path stamped nothing and no keystroke ever retracted a wait.
         // Scenario: an agent reports `waiting`, the user presses Escape in the pane.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller)
         var generation: AgentWaitGeneration? = AgentWaitGeneration(rawValue: 7)
         pane.currentAgentWaitGeneration = { generation }
         var events: [TerminalSessionEvent] = []
@@ -2053,7 +2113,7 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("a refused submission names its reason and reaches the app boundary rejected") {
+    await uiTest("a refused submission names its reason and reaches the app boundary rejected") {
         // Intent: when lifecycle policy refuses a submission, the reason stays attached to
         //   the terminal result, and the pane reports the refusal to the app as a rejection.
         // Why it exists: an input that never crossed the descriptor must not read as
@@ -2062,15 +2122,15 @@ func swiftTerminalSessionViewTests() {
         //   a refusal leaves the delivered-input record untouched.
         // Scenario: spec-first -- the pane's pending-input bound is already full when the
         //   user pastes, and then the child's shell fails to launch at all.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.submissionFailure = .bufferLimitExceeded
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         var results: [TerminalInputSubmissionResult] = []
         pane.sendInputText("ls", waitGeneration: nil) { results.append($0) }
         controller.submissionFailure = .launchFailed(.noUsableShell)
         pane.sendInputText("pwd", waitGeneration: nil) { results.append($0) }
 
-        pumpRunLoop(untilTrue: { results.count == 2 })
+        await pumpRunLoop(untilTrue: { results.count == 2 })
 
         try uiExpect(
             controller.completedResults == [
@@ -2085,7 +2145,7 @@ func swiftTerminalSessionViewTests() {
                      "a refused submission was recorded as delivered: \(controller.deliveredTextInputs)")
     }
 
-    uiTest("the pane forwards a session result carrying what ended the child") {
+    await uiTest("the pane forwards a session result carrying what ended the child") {
         // Intent: the result the pane hands its owner is the whole lifecycle result, exit
         //   status and launch failure included, and each arm still emits its own event.
         // Why it exists: the owner decides whether to keep a pane open from why the child
@@ -2093,9 +2153,9 @@ func swiftTerminalSessionViewTests() {
         //   view that dropped the payload would have kept every UI test green.
         // Scenario: spec-first -- one child is killed by a signal, and a second pane's
         //   shell cannot be launched at all.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         var results: [PaneProcessLifecycleResult] = []
-        let pane = SwiftTerminalSessionView(controller: controller) { results.append($0) }
+        let pane = makeTestPane(controller: controller, onSessionEnded: { results.append($0) })
         var events: [TerminalSessionEvent] = []
         pane.onEvent = { events.append($0) }
 
@@ -2108,14 +2168,14 @@ func swiftTerminalSessionViewTests() {
                      "the session result arms did not emit their own events: \(events)")
     }
 
-    uiTest("input the app originates carries the time it entered the pane") {
+    await uiTest("input the app originates carries the time it entered the pane") {
         // Intent: input with no system event behind it -- the IPC text and key entries -- still
         // reports an origin, taken as it enters the pane.
         // Why it exists: an absent origin means "these bytes originated at the pane owner", so
         // an unstamped IPC submission would misattribute the app's own queueing to the owner.
         // Scenario: the control socket sends one text run and one named key.
-        let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller)
 
         let before = DispatchTime.now().uptimeNanoseconds
         pane.sendInputText("ls", waitGeneration: nil)
@@ -2133,14 +2193,14 @@ func swiftTerminalSessionViewTests() {
         }
     }
 
-    uiTest("keyboard input runs before a sustained frame stream completes") {
+    await uiTest("keyboard input runs before a sustained frame stream completes") {
         // Intent: the real AppKit key route reaches the pane controller before a
         //   continuing stream of visible frame callbacks finishes.
         // Why it exists: real-PTY convergence cannot detect a view or responder path
         //   that becomes inert while the main actor is processing visible output.
         // Scenario: one-at-a-time frame callbacks keep rearming while a queued K key
         //   event crosses `keyDown`; the stream then drains to its final frame.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         let producer = SustainedFrameProducer(controller: controller, frameCount: 200)
         let keyEvent = try makeKeyEvent(keyCode: 40, modifiers: [], characters: "k")
@@ -2154,9 +2214,9 @@ func swiftTerminalSessionViewTests() {
             inputArrivedBeforeCompletion = producer.isComplete == false
         }
 
-        let hangGuard = Date(timeIntervalSinceNow: 2)
+        let hangGuard = Date(timeIntervalSinceNow: 30)
         while producer.isComplete == false, Date() < hangGuard {
-            RunLoop.main.run(mode: .default, before: hangGuard)
+            await pumpMainQueueOnce()
         }
 
         try uiExpect(producer.isComplete, "sustained frame stream did not converge")
@@ -2164,13 +2224,13 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(controller.textInputs == ["k"], "AppKit key did not reach the pane controller")
     }
 
-    uiTest("numeric keypad keys retain their semantic identity") {
+    await uiTest("numeric keypad keys retain their semantic identity") {
         // Intent: keypad text is encoded as a keypad key instead of ordinary committed text.
         // Why it exists: application-keypad mode changes bytes even though AppKit supplies a digit.
         // Scenario: the child enables DECKPAM and the user presses keypad zero.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.inputModes.applicationKeypad = true
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
 
         pane.keyDown(with: try makeKeyEvent(
             keyCode: 82,
@@ -2183,16 +2243,16 @@ func swiftTerminalSessionViewTests() {
                      "keypad zero lost application-keypad semantics: \(controller.inputBytes)")
     }
 
-    uiTest("menu and context paste share the owner-side safe-paste path") {
+    await uiTest("menu and context paste share the owner-side safe-paste path") {
         // Intent: both AppKit paste entry points submit raw clipboard text to owner-side policy.
         // Why it exists: bypassing the owner could admit escape injection or skip bracket markers.
         // Scenario: Edit > Paste and the pane menu paste text containing an embedded marker.
         // The scratch pasteboard is not incidental: both entry points read
         // `selectionPasteboard`, so assigning one here keeps the harness off the
         // developer's real clipboard the way the copy tests above already do.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.inputModes.bracketedPaste = true
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         let pasteboard = NSPasteboard(name: .init("danterm.swift-paste-test"))
         pane.selectionPasteboard = pasteboard
         pasteboard.clearContents()
@@ -2206,7 +2266,7 @@ func swiftTerminalSessionViewTests() {
                      "paste entry points diverged: \(controller.inputBytes)")
     }
 
-    uiTest("IPC text pastes while structured input text stays raw") {
+    await uiTest("IPC text pastes while structured input text stays raw") {
         // Intent: `Command.sendText` reaches the pane as a paste, and `Command.sendInputText`
         //   reaches it as raw committed text.
         // Why it exists: the two commands are only meaningfully different at this adapter, and
@@ -2214,9 +2274,9 @@ func swiftTerminalSessionViewTests() {
         //   while structured `input` text must arrive as if typed.
         // Scenario: an IPC caller sends `{text: ...}` and then `{input: [...]}` containing the
         //   same escape-bearing string into a pane with bracketed paste active.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.inputModes.bracketedPaste = true
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
         let payload = "one\u{1B}[201~\ntwo"
 
         pane.sendText(payload, waitGeneration: nil)
@@ -2228,13 +2288,13 @@ func swiftTerminalSessionViewTests() {
                      "structured input text gained paste semantics: \(controller.textInputs)")
     }
 
-    uiTest("runtime and responder focus signals are deduplicated") {
+    await uiTest("runtime and responder focus signals are deduplicated") {
         // Intent: logical pane focus and first-responder callbacks share one transition funnel.
         // Why it exists: AppKit and reconcile commonly report the same transition back-to-back.
         // Scenario: a pane gains and loses focus through both signal sources with mode 1004 active.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.inputModes.focusReporting = true
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeTestPane(controller: controller)
 
         pane.setFocused(true)
         _ = pane.becomeFirstResponder()
@@ -2248,7 +2308,7 @@ func swiftTerminalSessionViewTests() {
                      "focus reports were not owner-gated: \(controller.inputBytes)")
     }
 
-    uiTest("terminal focus is pane focus and application activation together") {
+    await uiTest("terminal focus is pane focus and application activation together") {
         // Intent: the pane reports its terminal focused only while it owns pane focus and
         //   DanTerm is active, and it retains each input independently of the other.
         // Why it exists: a terminal view stays its window's first responder while DanTerm
@@ -2256,9 +2316,9 @@ func swiftTerminalSessionViewTests() {
         //   while the user is in another app.
         // Scenario: a pane created during an inactive launch takes pane focus, DanTerm
         //   activates and deactivates, and the pane keeps pane focus throughout.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         controller.inputModes.focusReporting = true
-        let pane = SwiftTerminalSessionView(controller: controller, applicationActive: false)
+        let pane = makeTestPane(controller: controller, applicationActive: false)
 
         pane.setFocused(true)
         try uiExpect(controller.focusChanges.isEmpty,
@@ -2280,7 +2340,7 @@ func swiftTerminalSessionViewTests() {
                      "activation overwrote retained pane focus: \(controller.focusChanges)")
     }
 
-    uiTest("a released pane is unreachable by every controller callback") {
+    await uiTest("a released pane is unreachable by every controller callback") {
         // Intent: deallocating the AppKit view while the controller still holds its
         //   callbacks releases the view and leaves no callback able to touch it.
         // Why it exists: the view's eight controller callbacks are `[weak self]` and
@@ -2297,18 +2357,19 @@ func swiftTerminalSessionViewTests() {
         // The pane is built and released inside an autoreleasepool: AppKit init
         // paths routinely autorelease view references, so without draining them the
         // pane would survive regardless and a broken `[weak self]` would still pass.
-        let controller = TerminalPaneSessionController()
+        let controller = FakeTerminalPaneSessionController()
         var events: [TerminalSessionEvent] = []
         weak var released: SwiftTerminalSessionView?
 
         autoreleasepool {
-            let pane = SwiftTerminalSessionView(controller: controller)
+            let pane = makeTestPane(controller: controller)
             pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
             pane.onEvent = { events.append($0) }
             released = pane
 
             let window = NSWindow(
                 contentRect: pane.frame, styleMask: [], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
             window.contentView = pane
             pane.updateTrackingAreas()
             controller.emitFrameForTest()
@@ -2372,7 +2433,7 @@ private final class DraggingInfoStub: NSObject, @preconcurrency NSDraggingInfo {
 
     func slideDraggedImage(to screenPoint: NSPoint) {}
 
-    override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+    nonisolated override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
 
     func enumerateDraggingItems(
         options enumOpts: NSDraggingItemEnumerationOptions = [],
@@ -2526,10 +2587,10 @@ private func momentumPhaseCode(_ phase: NSEvent.Phase) -> Int64 {
 /// Runs the main run loop for `seconds`, so main-queue work the pane scheduled
 /// -- the pending-presentation retry above all -- actually gets to run.
 @MainActor
-private func pumpRunLoop(seconds: TimeInterval) {
+private func pumpRunLoop(seconds: TimeInterval) async {
     let end = Date().addingTimeInterval(seconds)
     while Date() < end {
-        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005))
+        await pumpMainQueueOnce()
     }
 }
 
@@ -2537,15 +2598,15 @@ private func pumpRunLoop(seconds: TimeInterval) {
 /// that a slow machine cannot fail the test while a genuinely stalled retry
 /// still does.
 @MainActor
-private func pumpRunLoop(untilTrue condition: () -> Bool, deadline: TimeInterval = 2.0) {
+private func pumpRunLoop(untilTrue condition: () -> Bool, deadline: TimeInterval = 30.0) async {
     let end = Date().addingTimeInterval(deadline)
     while Date() < end && condition() == false {
-        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005))
+        await pumpMainQueueOnce()
     }
 }
 
 @MainActor
-private func makeMountedPane(controller: TerminalPaneSessionController) -> SwiftTerminalSessionView {
+private func makeMountedPane(controller: FakeTerminalPaneSessionController) -> SwiftTerminalSessionView {
     let pane = makeUnmountedPane(controller: controller)
     mountInTestWindow(pane, frame: pane.frame)
     return pane
@@ -2555,8 +2616,8 @@ private func makeMountedPane(controller: TerminalPaneSessionController) -> Swift
 /// freshly created pane is in until its first layout pass, and the only way to test what
 /// an input that arrives before that resolution does.
 @MainActor
-private func makeUnmountedPane(controller: TerminalPaneSessionController) -> SwiftTerminalSessionView {
-    let pane = SwiftTerminalSessionView(controller: controller)
+private func makeUnmountedPane(controller: FakeTerminalPaneSessionController) -> SwiftTerminalSessionView {
+    let pane = makeTestPane(controller: controller)
     pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
     return pane
 }
@@ -2570,11 +2631,11 @@ private final class FirstResponderProbeView: NSView {
 /// Produces a bounded one-callback-at-a-time frame stream for AppKit input ordering tests.
 @MainActor
 private final class SustainedFrameProducer {
-    private let controller: TerminalPaneSessionController
+    private let controller: FakeTerminalPaneSessionController
     private var remainingFrameCount: Int
     private(set) var isComplete = false
 
-    init(controller: TerminalPaneSessionController, frameCount: Int) {
+    init(controller: FakeTerminalPaneSessionController, frameCount: Int) {
         self.controller = controller
         remainingFrameCount = frameCount
     }
@@ -2600,6 +2661,7 @@ private final class SustainedFrameProducer {
 @MainActor
 private func mountInTestWindow(_ view: NSView, frame: NSRect) {
     let window = NSWindow(contentRect: frame, styleMask: [], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = view
     retainedSwiftPaneWindows.append(window)
 }

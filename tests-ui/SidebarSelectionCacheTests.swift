@@ -1,14 +1,22 @@
 // UI regressions for SidebarView cache identity, AppKit row selection restore, and
 // scroll-reveal behavior.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 // The runner calls this from `@MainActor main()`, so the body is main-actor in
 // fact. Saying so lets the closures below reach `sidebarBadgeCount`.
 @MainActor
-func sidebarSelectionCacheTests() {
+func sidebarSelectionCacheTests() async {
     print("SidebarSelectionCache")
 
-    uiTest("a fresh reconcile driver fully builds a fresh empty sidebar") {
+    await uiTest("a fresh reconcile driver fully builds a fresh empty sidebar") {
         // Intent: constructing a driver makes its first pass a full rebuild.
         // Why it exists: a cache retained outside the driver can make a restored
         //   session diff against rows that belong to the prior view.
@@ -35,7 +43,7 @@ func sidebarSelectionCacheTests() {
             "single-group mode should materialize all three tab rows")
     }
 
-    uiTest("real sidebar executor preserves selected-row highlight after cross-group move") {
+    await uiTest("real sidebar executor preserves selected-row highlight after cross-group move") {
         let (sidebar, outline, window) = makeSidebarSelectionHarness()
         defer { window.close() }
 
@@ -66,7 +74,7 @@ func sidebarSelectionCacheTests() {
         try assertSidebarSelectedTab(moved, in: outline)
     }
 
-    uiTest("real sidebar executor keeps survivor highlighted after close following cache-drifting move") {
+    await uiTest("real sidebar executor keeps survivor highlighted after close following cache-drifting move") {
         let (sidebar, outline, window) = makeSidebarSelectionHarness()
         defer { window.close() }
 
@@ -104,7 +112,7 @@ func sidebarSelectionCacheTests() {
         try assertSidebarSelectedTab(survivor, in: outline)
     }
 
-    uiTest("cosmetic sidebar sweep marks no row for redraw") {
+    await uiTest("cosmetic sidebar sweep marks no row for redraw") {
         // Intent: an empty-op sidebar reconcile with unchanged focus leaves every
         //   visible row view clean and does not re-issue the current selection.
         // Why it exists: cosmetic coalesced sweeps used to reassert row emphasis and
@@ -127,7 +135,7 @@ func sidebarSelectionCacheTests() {
             "cosmetic sweep should preserve the selected row set")
     }
 
-    uiTest("reloadTab sweep with unchanged focus does not redraw unchanged rows") {
+    await uiTest("reloadTab sweep with unchanged focus does not redraw unchanged rows") {
         // Intent: a title-only sidebar update changes the affected row without
         //   dirtying every other row view's background/selection layer.
         // Why it exists: reloadTab sweeps still need to refresh the edited cell, but
@@ -156,7 +164,7 @@ func sidebarSelectionCacheTests() {
         try assertVisibleSidebarRowsDoNotNeedDisplay(in: outline, except: [changedRow])
     }
 
-    uiTest("visible painted badge reload reports no dropped row") {
+    await uiTest("visible painted badge reload reports no dropped row") {
         // Intent: a visible, materialized tab row that paints successfully reports
         //   no unapplied row ids.
         // Why it exists: guards the updateTabRow return polarity that reconcile
@@ -183,7 +191,7 @@ func sidebarSelectionCacheTests() {
             "painted row should show the live cleared badge")
     }
 
-    uiTest("off-screen nil-cell badge reload is not retained") {
+    await uiTest("off-screen nil-cell badge reload is not retained") {
         // Intent: a reload for an off-screen tab row does not request cache
         //   retention even when the cell is unavailable.
         // Why it exists: prevents the over-retention case where an ordinary
@@ -205,7 +213,7 @@ func sidebarSelectionCacheTests() {
         let cleared = sidebarAlertModel(
             groupId: group, tabIds: tabIds, paneIds: panes,
             selected: tabIds[0], unreadPaneIds: [])
-        sidebar.testForceNextNilCellTabIds.insert(tabIds[29])
+        forceNextUnmaterializedCell(forTab: tabIds[29], in: sidebar, outline: outline)
         let result = applySidebarTransitionResult(
             old: projection, newModel: cleared, to: sidebar, outline: outline)
 
@@ -215,7 +223,7 @@ func sidebarSelectionCacheTests() {
             "off-screen nil-cell tab should still advance the cache")
     }
 
-    uiTest("visible nil-cell badge reload is retained and repaints on retry") {
+    await uiTest("visible nil-cell badge reload is retained and repaints on retry") {
         // Intent: a visible row whose cell cannot be fetched stays pending in the
         //   cache, then the next reconcile re-emits and paints the live badge.
         // Why it exists: pins the app-layer bridge between updateTabRow's dropped
@@ -236,7 +244,7 @@ func sidebarSelectionCacheTests() {
             "precondition: alert badge should be visible")
 
         let cleared = sidebarAlertModel(groupId: group, tabId: tab, paneId: pane, unread: false)
-        sidebar.testForceNextNilCellTabIds.insert(tab)
+        forceNextUnmaterializedCell(forTab: tab, in: sidebar, outline: outline)
         let dropped = applySidebarTransitionResult(
             old: projection, newModel: cleared, to: sidebar, outline: outline)
 
@@ -257,7 +265,7 @@ func sidebarSelectionCacheTests() {
             "cache should converge after the retry paints")
     }
 
-    uiTest("empty-op sweep restores the focused tab as the lead row") {
+    await uiTest("empty-op sweep restores the focused tab as the lead row") {
         // Intent: when the selected set already matches the model, restore still fixes
         //   the lead/last-selected row so range selection anchors on the focused tab.
         // Why it exists: a set-only no-op guard would strand the wrong lead row while
@@ -288,7 +296,7 @@ func sidebarSelectionCacheTests() {
             "restore should make the focused tab the lead row")
     }
 
-    uiTest("focus change re-emphasizes the new row and de-emphasizes the old") {
+    await uiTest("focus change re-emphasizes the new row and de-emphasizes the old") {
         // Intent: a focus-only transition updates forced accent drawing for both
         //   affected visible rows.
         // Why it exists: the redraw optimization must not skip emphasis refresh when
@@ -326,10 +334,10 @@ func sidebarSelectionCacheTests() {
 }
 
 @MainActor
-func sidebarScrollRevealTests() {
+func sidebarScrollRevealTests() async {
     print("SidebarScrollReveal")
 
-    uiTest("cosmetic reconcile preserves the user's scroll position") {
+    await uiTest("cosmetic reconcile preserves the user's scroll position") {
         // Intent: cosmetic sidebar reconciles leave the user's manual scroll position
         //   alone when the focused tab is unchanged and off-screen.
         // Why it exists: locks down the sidebar stutter regression, where every
@@ -365,7 +373,7 @@ func sidebarScrollRevealTests() {
         try assertSidebarRowOffScreen(0, in: outline)
     }
 
-    uiTest("focus change reveals an off-screen tab, including within a multi-selection") {
+    await uiTest("focus change reveals an off-screen tab, including within a multi-selection") {
         // Intent: a real focus change still reveals the newly focused tab even when the
         //   destination row starts off-screen.
         // Why it exists: guards against over-correcting the stutter by deleting reveal
@@ -422,6 +430,7 @@ private func makeSidebarSelectionHarness() -> (SidebarView, NSOutlineView, NSWin
         styleMask: [.titled],
         backing: .buffered,
         defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = sidebar
     window.layoutIfNeeded()
     let outline = sidebarOutlineView(in: sidebar)!

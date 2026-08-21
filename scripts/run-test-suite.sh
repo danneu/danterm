@@ -143,7 +143,9 @@ STEPS=(
     'python3 ./scripts/tests/dev-slot-launcher_test.py'
     'python3 ./scripts/tests/terminal_benchmark_calibration_test.py'
     'swift test --package-path lib/DanTermSupport'
-    'wide: swift test --scratch-path .build-app-tests'
+    # `--skip DanTermUITests`: that target declares DANTERM_REQUIRES_WINDOWSERVER, and
+    # the gate is headless. `just test-ui` runs it.
+    'wide: swift test --scratch-path .build-app-tests --skip DanTermUITests'
     './scripts/tests/core-purity-lint_test.sh'
     './scripts/tests/run-test-suite_test.sh'
     './scripts/tests/gate-cpu-tokens_test.sh'
@@ -162,7 +164,6 @@ STEPS=(
     './scripts/tests/ios-app_test.sh'
     'swift test --package-path lib/TerminalHostTools --scratch-path lib/TerminalHostTools/.build-gate'
     './scripts/tests/provision-worktree_test.sh'
-    './scripts/tests/test-ui-harness_test.sh'
     './scripts/tests/research-index-lint_test.sh'
     'python3 ./scripts/tests/docs_lint_test.py'
     './scripts/tests/terminal-backend-boundary-lint_test.sh'

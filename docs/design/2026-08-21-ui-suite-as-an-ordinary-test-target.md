@@ -64,7 +64,19 @@ build. Two consequences bind: `send(_:)` stays overridable, and every route a
 the outbox -- passes through it, so no class of report is invisible to the
 substitution.
 
-**D5 -- No production source selects a test's collaborators on a build flag.**
+**D5 -- A target that cannot run headless declares it, and the gate reads the
+declaration.** `DanTermUITests` carries `DANTERM_REQUIRES_WINDOWSERVER` in its
+`swiftSettings`, and `scripts/gate-test-coverage-lint.py` requires the gate lane
+over that package to skip it by name. The manifest that owns the target is the one
+place this is said; no check keeps a list of excluded names, and a lane that merely
+fails to reach the estate is not accepted as an exclusion.
+
+**D6 -- The suite suspends; it does not spin a run loop.** The suite runs inside a
+main-queue work item, and a serial queue does not re-enter itself, so a nested
+`RunLoop.run` cannot deliver a block the code under test just posted. Every wait is
+a suspension, which releases the work item and lets the queue drain.
+
+**D7 -- No production source selects a test's collaborators on a build flag.**
 `DANTERM_UI_TEST` is gone. Where it guarded an engine import so a fake would
 win, a seam replaced it. Where it hid a forced branch in the sidebar, the branch
 became one given cell lookup: "on screen but not yet materialized" is a real
@@ -74,6 +86,21 @@ it on demand.
 ## Consequences
 
 - The per-view "promotion" ritual is gone, and with it the silent list rot.
+- Measured after the move, against 44s and 55s to build plus 11s to run before it:
+  a cold run is 40s, a run after one production view file changes is 17s, and a
+  run with nothing changed is 11.5s. The suite's own execution is about 10s of
+  each, so the build fell from most of the wall clock to a few seconds of it.
+- **The move exposed a real over-release.** Test windows are created
+  programmatically, so `isReleasedWhenClosed` defaults to true and `close()`
+  released a window ARC still owned. The bespoke harness never popped an
+  autorelease pool, so the freed memory was never touched again; a suspending
+  suite pops one at every await, and the double free became a reproducible
+  segfault in `objc_autoreleasePoolPop`. The suite now clears the flag on the
+  windows it owns.
+- The suite is one Swift Testing case driving the existing `uiTest` runner, not
+  386 `@Test` functions. Converting each case as well would have made a behavior
+  regression indistinguishable from a conversion slip; that conversion is a
+  follow-up.
 - The UI suite stays out of `just test`: it needs a WindowServer connection.
 - Cell geometry can no longer be fabricated -- the engine's metrics carry a
   measured font set -- so pane-geometry cases state their expectation relative

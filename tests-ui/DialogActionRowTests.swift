@@ -2,13 +2,21 @@
 // dialog's buttons go. Every assertion reads drawn frames rather than stack
 // view properties, so a rewrite that keeps the layout keeps the suite passing.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 /// Registers DialogActionRow coverage in the standalone UI harness.
 @MainActor
-func dialogActionRowTests() {
+func dialogActionRowTests() async {
     print("DialogActionRow")
 
-    uiTest("orders alternate, cancel, default from leading to trailing") {
+    await uiTest("orders alternate, cancel, default from leading to trailing") {
         // Intent: role decides position, whatever order the caller listed the
         //   actions in.
         // Why it exists: the bug this type replaces was three surfaces each
@@ -24,7 +32,7 @@ func dialogActionRowTests() {
                      "expected alternate, cancel, default; got \(titlesByPosition(row))")
     }
 
-    uiTest("packs the cancel and default pair against the trailing edge") {
+    await uiTest("packs the cancel and default pair against the trailing edge") {
         // Intent: the pair hugs the row's trailing edge with no slack after it,
         //   and cancel is nowhere near the leading edge.
         // Why it exists: this is the original defect. The confirmation panel
@@ -43,7 +51,7 @@ func dialogActionRowTests() {
                      "cancel should sit past the row midpoint, got \(cancel.frame.minX)")
     }
 
-    uiTest("separates an alternate from the trailing pair") {
+    await uiTest("separates an alternate from the trailing pair") {
         // Intent: alternates hold the leading edge, and the gap between them and
         //   the cancel/default pair is real slack, not the button spacing.
         let row = laidOutRow([
@@ -60,7 +68,7 @@ func dialogActionRowTests() {
                      "expected slack between the alternate and the pair, got \(cancel.frame.minX - alternate.frame.maxX)")
     }
 
-    uiTest("each button runs its own action exactly once") {
+    await uiTest("each button runs its own action exactly once") {
         var fired: [String] = []
         let row = laidOutRow([
             action("Close Tabs", .alternate) { fired.append("alternate") },
@@ -77,7 +85,7 @@ func dialogActionRowTests() {
                      "each click should run its own handler once, got \(fired)")
     }
 
-    uiTest("claims Return and Escape only when it reserves them") {
+    await uiTest("claims Return and Escape only when it reserves them") {
         let reserving = laidOutRow([
             action("Cancel", .cancel),
             action("Save", .defaultAction),
@@ -97,7 +105,7 @@ func dialogActionRowTests() {
                      "a deferring row must leave Escape to its host")
     }
 
-    uiTest("a long alternate title truncates instead of squeezing the pair") {
+    await uiTest("a long alternate title truncates instead of squeezing the pair") {
         // Intent: when the actions do not fit, the alternate gives up width and
         //   cancel and the default keep theirs.
         // Why it exists: a dialog whose width is fixed by its text column must
@@ -124,7 +132,7 @@ func dialogActionRowTests() {
                      "the alternate should stay inside the row, got \(alternate.frame.maxX) of \(crowded.bounds.maxX)")
     }
 
-    uiTest("dropping an action leaves no button holding its space") {
+    await uiTest("dropping an action leaves no button holding its space") {
         // Intent: after setActions narrows three actions to two, exactly two
         //   buttons are drawn and the pair still ends at the trailing edge.
         // Why it exists: the panel this replaces hid its secondary button

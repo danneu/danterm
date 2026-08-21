@@ -61,7 +61,7 @@ test-serial:
 
 # Run UI tests (AppKit, requires display)
 test-ui:
-    ./test-ui.sh
+    swift test --filter DanTermUITests
 
 # Run opt-in live Claude/Codex notification compatibility tests (authenticated, quota-using).
 test-agent-notifications-live agent="all":

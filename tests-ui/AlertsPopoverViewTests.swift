@@ -1,13 +1,21 @@
 // UI-harness tests for AlertsPopoverView's rendered alert rows, empty states,
 // selection-to-message routing, show-all control, and mark-all command.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 /// Runs alerts popover coverage in the AppKit UI harness.
 @MainActor
-func alertsPopoverViewTests() {
+func alertsPopoverViewTests() async {
     print("AlertsPopoverView")
 
-    uiTest("an alert row title lays out one line and truncates") {
+    await uiTest("an alert row title lays out one line and truncates") {
         let paneId = PaneId()
         let fx = makeAlertsFixture(alerts: [
             makeAlert(paneId: paneId, title: "one", body: "a body", isUnread: true, ageSeconds: 90),
@@ -22,7 +30,7 @@ func alertsPopoverViewTests() {
         try assertSingleLine(title, "alerts popover row title")
     }
 
-    uiTest("apply renders rows in order with text, time labels, and unread dots") {
+    await uiTest("apply renders rows in order with text, time labels, and unread dots") {
         let paneId = PaneId()
         let alerts = [
             makeAlert(paneId: paneId, title: "Build done", body: "Command finished", isUnread: true, ageSeconds: 90),
@@ -46,7 +54,7 @@ func alertsPopoverViewTests() {
         try uiExpect(!(try unreadDot(in: rows[2]).isHidden), "third row unread dot should be visible")
     }
 
-    uiTest("empty states show tab text and toggle table and mark-all visibility") {
+    await uiTest("empty states show tab text and toggle table and mark-all visibility") {
         do {
             let paneId = PaneId()
             let fx = makeAlertsFixture(alerts: [
@@ -87,7 +95,7 @@ func alertsPopoverViewTests() {
         }
     }
 
-    uiTest("clicking the middle row sends activateAlert with that row id") {
+    await uiTest("clicking the middle row sends activateAlert with that row id") {
         let paneId = PaneId()
         let alerts = [
             makeAlert(paneId: paneId, title: "One", body: "First", isUnread: true, ageSeconds: 90),
@@ -102,7 +110,7 @@ func alertsPopoverViewTests() {
         try expectSingleActivateAlert(fx.runtime, "activate middle alert", alertId: alerts[1].id)
     }
 
-    uiTest("row deselects after activate and the same row is clickable twice") {
+    await uiTest("row deselects after activate and the same row is clickable twice") {
         let paneId = PaneId()
         let alerts = [
             makeAlert(paneId: paneId, title: "One", body: "First", isUnread: true, ageSeconds: 90),
@@ -122,7 +130,7 @@ func alertsPopoverViewTests() {
                      "both messages should activate the same alert")
     }
 
-    uiTest("stale-pane row still sends activateAlert with its alert id") {
+    await uiTest("stale-pane row still sends activateAlert with its alert id") {
         // Intent: clicking an alert row dispatches the alert id even when the
         //   alert's pane is no longer live.
         // Why it exists: stale-pane resolution is core's job, covered in
@@ -145,7 +153,7 @@ func alertsPopoverViewTests() {
         try expectSingleActivateAlert(fx.runtime, "activate stale alert", alertId: alert.id)
     }
 
-    uiTest("checkbox syncs from projection and toggling dispatches") {
+    await uiTest("checkbox syncs from projection and toggling dispatches") {
         let paneId = PaneId()
         let fx = makeAlertsFixture(alerts: [
             makeAlert(paneId: paneId, title: "Read alert", body: "History row", isUnread: false, ageSeconds: 90),
@@ -163,7 +171,7 @@ func alertsPopoverViewTests() {
         }
     }
 
-    uiTest("apply twice re-renders without dispatching") {
+    await uiTest("apply twice re-renders without dispatching") {
         // Intent: applying a fresh projection to an open controller replaces rows
         //   and control state without sending messages.
         // Why it exists: pins the d797b50 reconcile path where production
@@ -194,7 +202,7 @@ func alertsPopoverViewTests() {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "render-only apply should not dispatch")
     }
 
-    uiTest("Mark All Read sends markAllAlertsRead") {
+    await uiTest("Mark All Read sends markAllAlertsRead") {
         let paneId = PaneId()
         let fx = makeAlertsFixture(alerts: [
             makeAlert(paneId: paneId, title: "Unread alert", body: "Needs attention", isUnread: true, ageSeconds: 90),
@@ -212,7 +220,7 @@ func alertsPopoverViewTests() {
 
 private struct AlertsFixture {
     let vc: AlertsPopoverViewController
-    let runtime: AppRuntime
+    let runtime: RecordingAppRuntime
     let window: NSWindow
     let model: AppModel
     let paneId: PaneId
@@ -236,7 +244,7 @@ private func makeAlertsFixture(
     model.showAllAlerts = showAll
     model.alertsPopoverOpen = true
 
-    let runtime = AppRuntime(model: model)
+    let runtime = makeUITestRuntime(model: model)
     let vc = AlertsPopoverViewController()
     vc.runtime = runtime
     let window = NSWindow(
@@ -244,6 +252,7 @@ private func makeAlertsFixture(
         styleMask: [.titled],
         backing: .buffered,
         defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = vc.view
     vc.apply(desiredAlertsPopover(in: model)!)
     window.layoutIfNeeded()
@@ -360,7 +369,7 @@ private func onlyAlertLabel(titled title: String, in view: NSView) throws -> NST
 }
 
 private func expectSingleMessage(
-    _ runtime: AppRuntime,
+    _ runtime: RecordingAppRuntime,
     _ description: String,
     matches: (Msg) -> Bool
 ) throws {
@@ -371,7 +380,7 @@ private func expectSingleMessage(
 }
 
 private func expectSingleActivateAlert(
-    _ runtime: AppRuntime,
+    _ runtime: RecordingAppRuntime,
     _ description: String,
     alertId: AlertId
 ) throws {

@@ -5,14 +5,22 @@
 // group row through collapse, unread, and tab-count changes. Both need the real
 // SidebarView executor, so they need the WindowServer like the rest of the harness.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 // The runner calls this from `@MainActor main()`, so the body is main-actor in
 // fact. Saying so lets the closures below reach AppKit cell state.
 @MainActor
-func sidebarProjectionRowTests() {
+func sidebarProjectionRowTests() async {
     print("SidebarProjectionRow")
 
-    uiTest("badge hit testing returns only the tab with a visible badge") {
+    await uiTest("badge hit testing returns only the tab with a visible badge") {
         // Intent: a point inside a visible tab alert badge resolves that tab, and
         //   the same point resolves nothing after the badge is hidden.
         // Why it exists: the old badge tests built a fake cell from identifier
@@ -49,7 +57,7 @@ func sidebarProjectionRowTests() {
             "the badge point should resolve nothing after the badge is hidden")
     }
 
-    uiTest("clearing a jump key restores its title lane after rename") {
+    await uiTest("clearing a jump key restores its title lane after rename") {
         // Intent: a hidden stored jump badge reserves no width, while an active
         //   rename keeps its current title lane until the deferred repaint lands.
         // Why it exists: storing the badge permanently is safe only if hiding it
@@ -105,7 +113,7 @@ func sidebarProjectionRowTests() {
             "the deferred repaint should return the badge width after rename ends")
     }
 
-    uiTest("a materialized tab paints every scalar projection field") {
+    await uiTest("a materialized tab paints every scalar projection field") {
         // Intent: one apply paints the tab title, pane strip, chip, alert badge,
         //   jump badge, and color stripe from the supplied projection.
         // Why it exists: typed access removes silent lookup failures only if each
@@ -162,7 +170,7 @@ func sidebarProjectionRowTests() {
             "the color stripe should come from the projection")
     }
 
-    uiTest("a reload suppressed by rename leaves the whole row on its old projection") {
+    await uiTest("a reload suppressed by rename leaves the whole row on its old projection") {
         // Intent: while a rename suppresses a tab's reload, reconfiguring that cell
         //   redraws the projection the row last applied -- title, alert badge, and
         //   pane strip alike -- and a later reconcile converges all three.
@@ -238,7 +246,7 @@ func sidebarProjectionRowTests() {
             "a bell says nothing about either pane's agent")
     }
 
-    uiTest("a group row draws its caret and both badges from the applied projection") {
+    await uiTest("a group row draws its caret and both badges from the applied projection") {
         // Intent: collapse state, unread count, and tab count reach a group cell only
         //   through the projection its row ops carried, in both collapsed and
         //   expanded states.
@@ -291,7 +299,7 @@ func sidebarProjectionRowTests() {
             bell: nil, tabCount: nil, label: "re-expanded group")
     }
 
-    uiTest("a missed collapse paint is retained and retried through the group painter") {
+    await uiTest("a missed collapse paint is retained and retried through the group painter") {
         // Intent: a visible group row whose collapse paint cannot fetch its cell is
         //   retained, then converges through the normal group repaint on the next pass.
         // Why it exists: the collapse-only painter bypassed updateGroupRow's dropped-row
@@ -308,7 +316,7 @@ func sidebarProjectionRowTests() {
         _ = applySidebarTestModel(
             initialModel, using: driver, to: sidebar, outline: outline)
 
-        sidebar.testForceNextNilCellGroupIds.insert(fixture.groupId)
+        forceNextUnmaterializedCell(forGroup: fixture.groupId, in: sidebar, outline: outline)
         fixture.model.groups[0].isCollapsed = true
         let missed = applySidebarTestModel(
             fixture.model, using: driver, to: sidebar, outline: outline)
@@ -326,7 +334,7 @@ func sidebarProjectionRowTests() {
             bell: "1", tabCount: "3", label: "retried collapsed group")
     }
 
-    uiTest("the disclosure path paints group chrome from the reconciled projection") {
+    await uiTest("the disclosure path paints group chrome from the reconciled projection") {
         // Intent: disclosure collapse and expand leave the caret, bell, and tab count
         //   on the projection produced by the synchronous toggle reconcile.
         // Why it exists: deleting the delegate's second painter is safe only while the
@@ -362,7 +370,7 @@ func sidebarProjectionRowTests() {
             bell: nil, tabCount: nil, label: "disclosure-expanded group")
     }
 
-    uiTest("the caret button paints group chrome from the reconciled projection") {
+    await uiTest("the caret button paints group chrome from the reconciled projection") {
         // Intent: caret-button collapse and expand leave the caret, bell, and tab count
         //   on the projection produced by the synchronous toggle reconcile.
         // Why it exists: the custom caret enters the same AppKit delegate path as the
@@ -406,16 +414,17 @@ func sidebarProjectionRowTests() {
 
 @MainActor
 private func makeProjectionRowHarness() -> (
-    SidebarView, SidebarOutlineView, NSWindow, AppRuntime, SidebarReconcileDriver
+    SidebarView, SidebarOutlineView, NSWindow, RecordingAppRuntime, SidebarReconcileDriver
 ) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
-    let runtime = AppRuntime()
+    let runtime = makeUITestRuntime()
     sidebar.runtime = runtime
     let window = NSWindow(
         contentRect: sidebar.frame,
         styleMask: [.titled],
         backing: .buffered,
         defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = sidebar
     window.layoutIfNeeded()
     let outline = sidebarOutlineView(in: sidebar) as! SidebarOutlineView

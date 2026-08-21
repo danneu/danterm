@@ -1,6 +1,14 @@
 // Shared sidebar UI harness helpers. Sidebar suites drive the production
 // reconcile owner through this file instead of rebuilding its pipeline.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 /// Drives the production sidebar reconciler and optionally materializes every row.
 @MainActor
@@ -47,32 +55,37 @@ func recordRenameBegin(_ target: RenameTarget, in model: inout AppModel) -> Rena
     return session
 }
 
-/// Runs the main queue until `condition` holds, so a report waiting on its
-/// scheduled drain is delivered before an assertion reads it. The deadline is a
-/// hang guard, not a measurement: a passing run satisfies the condition on the
-/// first turn.
+/// Lets the main queue deliver what the code under test posted, until `condition`
+/// holds. The deadline is a hang guard, not a measurement: a passing run satisfies
+/// the condition on the first turn.
+///
+/// A suspension, not a nested run loop. The suite runs inside a main-queue work
+/// item, and a serial queue does not re-enter itself, so spinning a run loop here
+/// would never dequeue the block the code under test just posted. Suspending
+/// releases the work item, and the queue delivers before the next resume.
 func pumpMainQueue(
     untilTrue condition: () -> Bool,
     timeout: TimeInterval = 5,
     file: String = #file,
     line: Int = #line
-) throws {
+) async throws {
     let deadline = Date().addingTimeInterval(timeout)
     while !condition() {
         guard Date() < deadline else {
             throw UITestFailure(
                 message: "timed out waiting for the main queue to deliver (\(file):\(line))")
         }
-        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005))
+        await pumpMainQueueOnce()
     }
 }
 
-/// Runs the main queue for one turn, so a report that had a turn to arrive has
-/// taken it. The 10ms is a probe that is meant to expire, not a guard: the point
-/// is to give delivery its chance before asserting that nothing arrived.
+/// Gives the main queue one turn, so a report that had a chance to arrive has
+/// taken it. Meant to expire: the point is to let delivery happen before asserting
+/// that nothing arrived.
 @MainActor
-func pumpMainQueueOnce() {
-    RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+func pumpMainQueueOnce() async {
+    await Task.yield()
+    try? await Task.sleep(for: .milliseconds(5))
 }
 
 /// Materializes every visible outline row after a reconcile pass.
@@ -156,4 +169,67 @@ func sidebarBellAlert(paneId: PaneId) -> AlertModel {
         body: "",
         createdAt: Date(timeIntervalSince1970: 0),
         isUnread: true)
+}
+
+// MARK: - Unmaterialized-cell staging
+
+/// Makes the sidebar's next materialized-cell lookup for one row report nothing,
+/// the way AppKit does for a row it has not built a view for yet, and restores
+/// itself afterwards.
+///
+/// The reconcile loop retries through that state, and nothing else can put AppKit
+/// into it on demand, so the lookup is a given collaborator on `SidebarView` and
+/// this is the suite's stand-in for it. Matching on the item at the queried row
+/// rather than on a row number is what keeps the stage correct across an insert
+/// or a collapse that moves rows before the pass runs.
+@MainActor
+private func forceNextUnmaterializedCell(
+    matching isTarget: @escaping (SidebarItem) -> Bool,
+    in sidebar: SidebarView,
+    outline: NSOutlineView
+) {
+    let underlying = sidebar.materializedCell
+    var pending = true
+    sidebar.materializedCell = { [weak outline] row in
+        if pending,
+           let item = outline?.item(atRow: row) as? SidebarItem,
+           isTarget(item)
+        {
+            pending = false
+            return nil
+        }
+        return underlying(row)
+    }
+}
+
+@MainActor
+func forceNextUnmaterializedCell(
+    forTab tab: TabId,
+    in sidebar: SidebarView,
+    outline: NSOutlineView
+) {
+    forceNextUnmaterializedCell(
+        matching: { item in
+            guard case .tab(let projection) = item.kind else { return false }
+            return projection.id == tab
+        },
+        in: sidebar,
+        outline: outline
+    )
+}
+
+@MainActor
+func forceNextUnmaterializedCell(
+    forGroup group: GroupId,
+    in sidebar: SidebarView,
+    outline: NSOutlineView
+) {
+    forceNextUnmaterializedCell(
+        matching: { item in
+            guard case .group(let projection) = item.kind else { return false }
+            return projection.id == group
+        },
+        in: sidebar,
+        outline: outline
+    )
 }

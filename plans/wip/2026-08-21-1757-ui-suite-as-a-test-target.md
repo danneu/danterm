@@ -138,6 +138,12 @@ tests can already build.
   by keeping each case's claim unchanged and only changing what the number is
   read from.
 
+## Follow-up
+
+- The suite is one Swift Testing case around the existing `uiTest` runner. Per-case
+  conversion to `@Test` functions is deliberately not part of this move: doing both
+  at once would make a behavior regression indistinguishable from a conversion slip.
+
 ## Implementation discretion
 
 - Whether the swapchain seam is a factory the view is given or a protocol the

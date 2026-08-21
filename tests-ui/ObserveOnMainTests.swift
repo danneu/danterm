@@ -3,6 +3,14 @@
 // are checked here -- the body runs on the main thread, and it runs in the same
 // pass as a main-thread post -- so the five call sites do not each need a test.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 /// Mutable state a notification body writes and the test reads afterwards, in a
 /// reference the body can capture without the harness caring about isolation.
@@ -12,10 +20,10 @@ private final class ObserverProbe {
 }
 
 @MainActor
-func observeOnMainTests() {
+func observeOnMainTests() async {
     print("observeOnMain")
 
-    uiTest("body runs in the same pass as a main-thread post") {
+    await uiTest("body runs in the same pass as a main-thread post") {
         // Intent: after `post` returns on the main thread, the body has
         //   already run -- no main-actor turn separates the two.
         // Why it exists: the scroller-style observer forces overlay scrollers
@@ -34,7 +42,7 @@ func observeOnMainTests() {
                      "body ran \(probe.runCount) times by the time post returned, expected 1")
     }
 
-    uiTest("body runs on the main thread when posted from a background thread") {
+    await uiTest("body runs on the main thread when posted from a background thread") {
         // Intent: a notification posted off the main thread still runs its
         //   body on the main thread.
         // Why it exists: this is the guarantee the main-actor bodies depend on.
@@ -54,14 +62,14 @@ func observeOnMainTests() {
 
         let deadline = Date().addingTimeInterval(5)
         while probe.runCount == 0, Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            await pumpMainQueueOnce()
         }
 
         try uiExpect(probe.runCount == 1, "body never ran for a background post")
         try uiExpect(probe.ranOnMainThread, "body ran off the main thread")
     }
 
-    uiTest("only notifications matching the object filter reach the body") {
+    await uiTest("only notifications matching the object filter reach the body") {
         // Intent: the `object` argument still narrows delivery to one poster.
         // Why it exists: four of the five call sites filter on a specific
         //   scroll view or text view, so a helper that dropped the filter would

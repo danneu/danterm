@@ -6,12 +6,20 @@
 // reaching the view, and this suite proves the view would survive anyway. Two
 // independent guards, asserted independently.
 import Cocoa
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
 @MainActor
-func singleLineLabelTests() {
+func singleLineLabelTests() async {
     print("SingleLineLabel")
 
-    uiTest("every sidebar row label lays out one line and truncates") {
+    await uiTest("every sidebar row label lays out one line and truncates") {
         let (sidebar, outline, window, _, _) = makeSingleLineSidebar()
         defer { window.close() }
 
@@ -25,13 +33,13 @@ func singleLineLabelTests() {
         _ = sidebar
     }
 
-    uiTest("the switcher row name lays out one line and truncates") {
+    await uiTest("the switcher row name lays out one line and truncates") {
         let row = SwitcherRowView()
         row.apply(row: SwitcherRow(tabId: TabId(), name: "one", color: nil, alertCount: 0), isCursor: false)
         try assertSingleLine(try onlySingleLineField(in: row, named: "switcher row"), "switcher row name")
     }
 
-    uiTest("a hostile working directory stays flat in the window chrome title") {
+    await uiTest("a hostile working directory stays flat in the window chrome title") {
         let chrome = WindowChromeView(frame: NSRect(x: 0, y: 0, width: 600, height: 38))
         let title = DisplayLine("shell — /tmp/line one\nline two").text
         chrome.updateTitle(title)
@@ -42,7 +50,7 @@ func singleLineLabelTests() {
         try assertSingleLine(title, "window chrome title")
     }
 
-    uiTest("the pane toolbar label and both accessories lay out one line and truncate") {
+    await uiTest("the pane toolbar label and both accessories lay out one line and truncate") {
         let wrapper = makeSingleLinePaneWrapper()
         wrapper.applyToolbarRender(paneToolbarRender(
             label: "one", isRemote: true, remoteLabel: "one", agentLabel: "one",
@@ -58,7 +66,7 @@ func singleLineLabelTests() {
         }
     }
 
-    uiTest("Return in the sidebar rename field editor commits instead of inserting a line break") {
+    await uiTest("Return in the sidebar rename field editor commits instead of inserting a line break") {
         // Why it exists: the tab title field goes editable for inline rename, and
         // an editable field that accepts Return would put a newline straight into
         // the model, past every admission point.
@@ -125,9 +133,10 @@ private let sidebarFixtureTabId = TabId()
 private func makeSingleLineSidebar()
     -> (SidebarView, NSOutlineView, NSWindow, AppModel, SidebarReconcileDriver) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
-    sidebar.runtime = AppRuntime()
+    sidebar.runtime = makeUITestRuntime()
     let window = NSWindow(
         contentRect: sidebar.frame, styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = sidebar
     window.layoutIfNeeded()
     let outline = sidebarOutlineView(in: sidebar)!
@@ -157,8 +166,8 @@ private func makeSingleLinePaneWrapper() -> PaneWrapperView {
     var model = AppModel(groups: [GroupModel(id: GroupId(), name: "g", tabs: [tab])])
     model.selectedTabId = tab.id
     return PaneWrapperView(
-        paneId: paneId, terminalView: TerminalView(),
-        runtime: AppRuntime(model: model))
+        paneId: paneId, terminalView: FakeTerminalSession(),
+        runtime: makeUITestRuntime(model: model))
 }
 
 private func requireField(_ field: NSTextField?) throws -> NSTextField {

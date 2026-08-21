@@ -1,46 +1,63 @@
 // UI-test runner entry point plus shared harness assertions and pane divider tests.
+//
+// The suite is one Swift Testing case that drives the whole `uiTest` runner below,
+// not 386 separate `@Test` functions. That is deliberate for now: the port from the
+// bespoke `swiftc` harness to a test target changed the packaging, and converting
+// each case as well would have made a behavior regression indistinguishable from a
+// conversion slip. Per-case conversion is the follow-up.
 import Cocoa
+import Testing
+import ChipArtwork
+import PaneProcessLifecycle
+import TerminalCore
+import TerminalPaneSession
+import TerminalPTYHost
+import TerminalRenderExecution
+import TerminalRenderPlanning
+@testable import DanTerm
 
-@main
-struct UITestRunner {
+enum UITestRunner {
+    @Test("the AppKit UI suite")
     @MainActor
-    static func main() {
+    static func run() async throws {
         // NSApplication must be initialized for NSSplitView layout to work
         let _ = NSApplication.shared
 
-        terminalBackendBoundaryTests()
-        appPresentationLifecycleTests()
-        danTermConfigStoreTests()
-        swiftTerminalSessionViewTests()
-        ioSurfaceLayerContentsTests()
-        paneDividerViewTests()
-        linkPreviewViewTests()
-        paneWrapperViewTests()
-        observeOnMainTests()
-        scrollableTerminalViewTests()
-        chipViewTests()
-        paneStripViewTests()
-        splitContainerViewTests()
-        menuCommandPolicyTests()
-        todoInputViewTests()
-        sidebarSelectionCacheTests()
-        sidebarScrollRevealTests()
-        sidebarRenameRecycleTests()
-        sidebarContextMenuTests()
-        sidebarProjectionRowTests()
-        tabTodoPopoverViewTests()
-        themeBrowserViewTests()
-        remoteThemePickerSheetTests()
-        todoPopoverViewTests()
-        alertsPopoverViewTests()
-        preferencesPanelTests()
-        confirmationPanelTests()
-        noticePanelTests()
-        dialogActionRowTests()
-        singleLineLabelTests()
+        await terminalBackendBoundaryTests()
+        await appPresentationLifecycleTests()
+        await danTermConfigStoreTests()
+        await swiftTerminalSessionViewTests()
+        await ioSurfaceLayerContentsTests()
+        await paneDividerViewTests()
+        await linkPreviewViewTests()
+        await paneWrapperViewTests()
+        await observeOnMainTests()
+        await scrollableTerminalViewTests()
+        await chipViewTests()
+        await paneStripViewTests()
+        await splitContainerViewTests()
+        await menuCommandPolicyTests()
+        await todoInputViewTests()
+        await sidebarSelectionCacheTests()
+        await sidebarScrollRevealTests()
+        await sidebarRenameRecycleTests()
+        await sidebarContextMenuTests()
+        await sidebarProjectionRowTests()
+        await tabTodoPopoverViewTests()
+        await themeBrowserViewTests()
+        await remoteThemePickerSheetTests()
+        await todoPopoverViewTests()
+        await alertsPopoverViewTests()
+        await preferencesPanelTests()
+        await confirmationPanelTests()
+        await noticePanelTests()
+        await dialogActionRowTests()
+        await singleLineLabelTests()
 
         print("\n\(uiTotal - uiFailures)/\(uiTotal) passed")
-        if uiFailures > 0 { exit(1) }
+        // Each case already printed its own name and message on the way past, so the
+        // count is the verdict; the printed log is where a failure is read.
+        #expect(uiFailures == 0, "\(uiFailures) of \(uiTotal) UI cases failed")
     }
 }
 
@@ -53,10 +70,10 @@ struct UITestRunner {
 // touches AppKit views, so the harness states that isolation instead of
 // leaving each caller to re-declare it.
 @MainActor
-func uiTest(_ name: String, _ body: () throws -> Void) {
+func uiTest(_ name: String, _ body: () async throws -> Void) async {
     uiTotal += 1
     do {
-        try body()
+        try await body()
         print("  \u{2713} \(name)")
     } catch let e as UITestFailure {
         print("  \u{2717} \(name): \(e.message)")
@@ -78,10 +95,10 @@ func uiExpect(_ condition: Bool, _ message: String = "assertion failed", file: S
 // MARK: - Tests
 
 @MainActor
-func paneDividerViewTests() {
+func paneDividerViewTests() async {
     print("PaneDividerView")
 
-    uiTest("divider exposes splitter accessibility from model layout") {
+    await uiTest("divider exposes splitter accessibility from model layout") {
         let splitId = SplitId()
         let divider = PaneDividerView(splitId: splitId)
         divider.apply(
@@ -103,7 +120,7 @@ func paneDividerViewTests() {
             "divider accessibility value did not follow model layout")
     }
 
-    uiTest("divider drag reports one clamped ratio and never moves itself") {
+    await uiTest("divider drag reports one clamped ratio and never moves itself") {
         let splitId = SplitId()
         let divider = PaneDividerView(splitId: splitId)
         divider.apply(
