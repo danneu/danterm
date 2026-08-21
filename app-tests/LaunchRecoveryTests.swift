@@ -1,8 +1,9 @@
-// Swift Testing suite for the launch-time recovery read -- the decision launch makes
-// about the previous session before AppKit starts. It covers the skip rule, crash
-// detection, every tier combination the recovery directory can hold, and the full
-// write-relaunch-merge flow driven through the production writers. Behavior only:
-// every assertion reads the returned value, never a helper's shape.
+// Swift Testing suite for what launch decides about the previous session before AppKit
+// starts: the session-lock handshake that detects a crash and claims this launch's lock,
+// and the checkpoint load with its skip rule, every tier combination the recovery
+// directory can hold, and the full write-relaunch-merge flow driven through the
+// production writers. Behavior only: every assertion reads a returned value or the disk,
+// never a helper's shape.
 import DanTermProtocol
 import Foundation
 import Testing
@@ -64,65 +65,143 @@ private struct RecoveryFixture {
     func read(
         startup: StartupPolicy = .promptForRecovery,
         hasInitSnapshot: Bool = false
-    ) -> LaunchRecovery {
-        readLaunchRecovery(
+    ) -> ValidatedAppRestore? {
+        loadLaunchCheckpoints(
             paths: instance.paths,
             startup: startup,
             hasInitSnapshot: hasInitSnapshot
         )
     }
 
+    func handshake() -> SessionLockHandshake {
+        claimSessionLock(paths: instance.paths)
+    }
+
+    var lockExists: Bool {
+        FileManager.default.fileExists(atPath: instance.paths.sessionLockFile.path)
+    }
+
+    /// Puts arbitrary bytes where the lock belongs, which is how a lock written by a
+    /// build with a different `SessionLock` shape reaches the next launch.
+    func writeRawLock(_ bytes: Data) throws {
+        try FileManager.default.createDirectory(
+            at: instance.paths.recoveryDirectory,
+            withIntermediateDirectories: true
+        )
+        try bytes.write(to: instance.paths.sessionLockFile)
+    }
+
     func remove() { instance.remove() }
 }
 
 @Suite struct LaunchRecoveryTests {
-    @Test("an untouched recovery directory reports nothing and creates nothing")
+    @Test("an untouched recovery directory offers no restore and creates nothing")
     func emptyRecoveryDirectoryReportsNothing() {
-        // Intent: a first launch reports no crash, no restore, and leaves no file behind.
-        // Why it exists: the read runs on every launch, so a read that creates its own
-        //   directory would make "nothing was ever saved" indistinguishable from a crash.
+        // Intent: a first launch finds no checkpoint and leaves no file behind.
+        // Why it exists: the load runs on every launch, so a load that created its own
+        //   directory would leave a trail no later reader could tell from a real session.
         // Scenario: spec-first first launch on an empty temporary root.
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
 
-        let recovery = fixture.read()
-
-        #expect(recovery.previousSessionCrashed == false)
-        #expect(recovery.restore == nil)
+        #expect(fixture.read() == nil)
         #expect(!FileManager.default.fileExists(
             atPath: fixture.instance.paths.recoveryDirectory.path
         ))
     }
 
     @Test("a session lock alone means crashed with nothing to restore")
-    func sessionLockAloneMeansCrashed() {
+    func sessionLockAloneMeansCrashed() throws {
         // Intent: the lock decides "crashed", and it decides nothing about restore.
         // Why it exists: crash detection and checkpoint loading are independent; a crash
         //   before the first checkpoint must still prompt rather than silently restore.
         // Scenario: spec-first kill with no checkpoint yet written.
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
-        writeSessionLockFile(paths: fixture.instance.paths)
+        try writeSessionLockFile(paths: fixture.instance.paths)
 
-        let recovery = fixture.read()
-
-        #expect(recovery.previousSessionCrashed)
-        #expect(recovery.restore == nil)
+        #expect(fixture.handshake().previousSessionCrashed)
+        #expect(fixture.read() == nil)
     }
 
-    @Test("the read never deletes the session lock")
-    func readLeavesTheSessionLockInPlace() {
-        // Intent: the lock survives the read.
-        // Why it exists: the launch write path overwrites the lock atomically later, so
-        //   deleting it here would open a window where a startup crash reads as a clean exit.
+    @Test("a lock whose contents cannot be understood still means crashed")
+    func unreadableLockContentsMeanCrashed() throws {
+        // Intent: any bytes at the lock's path report a crash -- invalid JSON, and an
+        //   empty file.
+        // Why it exists: the decision used to decode the file, so a lock left by a build
+        //   whose payload shape had changed read as a clean exit and the session was lost
+        //   with no prompt. Existence is the contract; the contents are diagnostics.
+        // Scenario: spec-first first launch after a format change, over a crashed session.
+        for bytes in [Data("{ not json".utf8), Data()] {
+            let fixture = RecoveryFixture()
+            defer { fixture.remove() }
+            try fixture.writeRawLock(bytes)
+
+            #expect(fixture.handshake().previousSessionCrashed,
+                "\(bytes.count) bytes at the lock path must still report a crash")
+        }
+    }
+
+    @Test("a recovery directory that cannot be inspected means crashed")
+    func unsearchableRecoveryDirectoryMeansCrashed() throws {
+        // Intent: a lookup that fails for any reason other than "no such file" reports a
+        //   crash, while a confirmed absence still reports a clean exit.
+        // Why it exists: failing safe is the point of the query. A location we cannot
+        //   inspect may well hold a lock, and calling that clean discards the previous
+        //   session without asking.
+        // Scenario: spec-first launch with a regular file where the recovery directory
+        //   belongs, so the lock path cannot be resolved at all.
+        let absent = RecoveryFixture()
+        defer { absent.remove() }
+        #expect(absent.handshake().previousSessionCrashed == false,
+            "an absent directory is a confirmed absence, so it reads as a clean exit")
+
+        let blocked = RecoveryFixture()
+        defer { blocked.remove() }
+        try FileManager.default.createDirectory(
+            at: blocked.instance.paths.recoveryDirectory.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("not a directory".utf8)
+            .write(to: blocked.instance.paths.recoveryDirectory)
+
+        #expect(blocked.handshake().previousSessionCrashed)
+    }
+
+    @Test("the handshake claims this launch's lock before it returns")
+    func handshakeClaimsTheLockItself() {
+        // Intent: a launch that finds no lock reports a clean previous exit and still
+        //   leaves its own lock on disk by the time the handshake returns.
+        // Why it exists: the claim used to sit at the end of AppKit startup, so a crash
+        //   anywhere between launch and the window -- reading `--init`, loading
+        //   checkpoints, building the view tree -- left nothing behind, and the next
+        //   launch reported a clean exit for a run that crashed.
+        // Scenario: spec-first launch after a clean exit.
+        let fixture = RecoveryFixture()
+        defer { fixture.remove() }
+
+        let handshake = fixture.handshake()
+
+        #expect(handshake.previousSessionCrashed == false)
+        #expect(handshake.claimFailure == nil)
+        #expect(fixture.lockExists, "the claim happens inside the handshake, not later")
+    }
+
+    @Test("the handshake reports the previous lock even though it overwrites it")
+    func handshakeReadsBeforeItClaims() throws {
+        // Intent: the read of the previous launch's lock happens before this launch's
+        //   claim overwrites it.
+        // Why it exists: both halves touch one path, so an implementation that claimed
+        //   first would erase the fact it is supposed to report.
         // Scenario: spec-first relaunch after a crash.
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
-        writeSessionLockFile(paths: fixture.instance.paths)
+        try writeSessionLockFile(paths: fixture.instance.paths)
 
-        _ = fixture.read()
+        let handshake = fixture.handshake()
 
-        #expect(readSessionLockFile(paths: fixture.instance.paths) != nil)
+        #expect(handshake.previousSessionCrashed)
+        #expect(fixture.lockExists, "this launch's own lock replaced the previous one")
     }
 
     @Test("a light checkpoint alone restores the light tier")
@@ -131,7 +210,7 @@ private struct RecoveryFixture {
         defer { fixture.remove() }
         fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
 
-        let restore = try #require(fixture.read().restore)
+        let restore = try #require(fixture.read())
 
         #expect(restore.model.groups[0].tabs.count == 2)
     }
@@ -146,7 +225,7 @@ private struct RecoveryFixture {
             try checkpointBytes(model, scrollback: [paneId: enrichedScrollback])
         )
 
-        let restore = try #require(fixture.read().restore)
+        let restore = try #require(fixture.read())
 
         #expect(restore.model.groups[0].tabs.count == 1)
         #expect(scrollbackTexts(restore) == [enrichedScrollback])
@@ -169,7 +248,7 @@ private struct RecoveryFixture {
         _ = update(&model, .createTabInSelectedGroup())
         fixture.writeLight(try checkpointBytes(model))
 
-        let restore = try #require(fixture.read().restore)
+        let restore = try #require(fixture.read())
 
         #expect(restore.model.groups[0].tabs.count == 2)
         #expect(restore.paneSnapshots.count == 2)
@@ -187,7 +266,7 @@ private struct RecoveryFixture {
         fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
         fixture.writeEnriched(Data("{ not json".utf8))
 
-        let restore = try #require(fixture.read().restore)
+        let restore = try #require(fixture.read())
 
         #expect(restore.model.groups[0].tabs.count == 2)
         #expect(scrollbackTexts(restore).isEmpty)
@@ -204,29 +283,26 @@ private struct RecoveryFixture {
         fixture.writeLight(try withUnsupportedVersion(checkpointBytes(makeRecoveryModel(tabs: 3))))
         fixture.writeEnriched(try checkpointBytes(makeRecoveryModel(tabs: 1)))
 
-        let restore = try #require(fixture.read().restore)
+        let restore = try #require(fixture.read())
 
         #expect(restore.model.groups[0].tabs.count == 1)
     }
 
-    @Test("a fresh startup policy reads nothing")
+    @Test("a fresh startup policy loads no checkpoint")
     func freshStartupReadsNothing() throws {
-        // Intent: `--fresh` skips the whole read, lock included.
+        // Intent: `--fresh` skips the checkpoint load.
         // Why it exists: a pool slot launched fresh must not inherit another run's
-        //   session or report its crash.
+        //   session.
         // Scenario: spec-first `--fresh` launch over a full recovery directory.
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
-        writeSessionLockFile(paths: fixture.instance.paths)
+        try writeSessionLockFile(paths: fixture.instance.paths)
         fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
 
-        let recovery = fixture.read(startup: .fresh)
-
-        #expect(recovery.previousSessionCrashed == false)
-        #expect(recovery.restore == nil)
+        #expect(fixture.read(startup: .fresh) == nil)
     }
 
-    @Test("an explicit init snapshot reads nothing")
+    @Test("an explicit init snapshot loads no checkpoint")
     func initSnapshotReadsNothing() throws {
         // Intent: `--init` wins over recovery outright.
         // Why it exists: a caller that names the session it wants must not be prompted
@@ -234,13 +310,38 @@ private struct RecoveryFixture {
         // Scenario: spec-first `--init` launch over a full recovery directory.
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
-        writeSessionLockFile(paths: fixture.instance.paths)
+        try writeSessionLockFile(paths: fixture.instance.paths)
         fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
 
-        let recovery = fixture.read(hasInitSnapshot: true)
+        #expect(fixture.read(hasInitSnapshot: true) == nil)
+    }
 
-        #expect(recovery.previousSessionCrashed == false)
-        #expect(recovery.restore == nil)
+    @Test("a fresh or init launch after a clean exit still claims the lock")
+    func skippedRecoveryStillClaimsTheLock() throws {
+        // Intent: launching with `--fresh`, and launching with an `--init` snapshot, each
+        //   from a recovery directory holding no lock, offers no restore and reports no
+        //   crash -- and still leaves this launch's lock on disk.
+        // Why it exists: the lock read used to sit inside the skipped checkpoint load, so
+        //   a skipped launch claimed nothing and a crash during that run went undetected.
+        //   The other skip-rule tests all start with a lock already present, so they pass
+        //   even against an implementation that skips the claim too.
+        // Scenario: spec-first `--fresh` and `--init` launches after a clean exit.
+        for hasInitSnapshot in [false, true] {
+            let fixture = RecoveryFixture()
+            defer { fixture.remove() }
+            fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
+
+            let handshake = fixture.handshake()
+            let restore = fixture.read(
+                startup: hasInitSnapshot ? .promptForRecovery : .fresh,
+                hasInitSnapshot: hasInitSnapshot
+            )
+
+            #expect(restore == nil)
+            #expect(handshake.previousSessionCrashed == false)
+            #expect(fixture.lockExists,
+                "a launch that skips recovery still claims its lock")
+        }
     }
 
     @Test("one paths value carries a crashed session from the writers to the launch read")
@@ -259,12 +360,12 @@ private struct RecoveryFixture {
         )
         _ = update(&model, .createTabInSelectedGroup())
         fixture.writeLight(try checkpointBytes(model))
-        writeSessionLockFile(paths: fixture.instance.paths)
+        try writeSessionLockFile(paths: fixture.instance.paths)
 
-        let recovery = fixture.read()
-        let restore = try #require(recovery.restore)
+        let handshake = fixture.handshake()
+        let restore = try #require(fixture.read())
 
-        #expect(recovery.previousSessionCrashed)
+        #expect(handshake.previousSessionCrashed)
         #expect(restore.model.groups[0].tabs.count == 2)
         #expect(scrollbackTexts(restore) == [enrichedScrollback])
     }

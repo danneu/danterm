@@ -1386,6 +1386,21 @@ class AppRuntime {
         presentConfigError(error)
     }
 
+    /// Tells the user that this launch could not claim its session lock, so a crash on
+    /// this run will not be detected next time. Called once the window exists; the claim
+    /// itself happened long before, in `claimSessionLock`.
+    func reportSessionLockClaimFailure(_ error: Error) {
+        send(.noticeReported(.message(
+            title: "Crash Detection Unavailable",
+            message: """
+                DanTerm could not write its session lock, so an unclean exit on this run \
+                will not be detected the next time it starts.
+
+                \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+                """
+        )))
+    }
+
     private func presentConfigError(_ error: Error) {
         send(.noticeReported(.message(
             title: "DanTerm Config Error",

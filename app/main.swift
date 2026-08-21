@@ -29,6 +29,12 @@ do {
 // the IPC server -- is handed this value instead of deriving a path of its own.
 let launchInstancePaths = resolveLaunchInstancePaths()
 
+// Launch's first fallible step, deliberately ahead of the `--init` file, the
+// checkpoints, and every line of AppKit construction below: it reads the lock the
+// previous launch may have left and claims this launch's own. Anything that crashes
+// after this point leaves the lock behind for the next launch to find.
+let sessionLock = claimSessionLock(paths: launchInstancePaths)
+
 #if DANTERM_TERMINAL_CHARACTERIZATION || DANTERM_TERMINAL_BENCHMARK
 /// Publish the app process's resolved filesystem paths before terminal creation,
 /// allowing the real-backend harness to reject any escape from its isolated run.
@@ -92,10 +98,10 @@ do {
     initSnapshot = nil
 }
 
-// Session recovery: detect the previous session's crash and load its checkpoints.
-// The restore comes back decoded and validated, so the recovered structure is
-// validated exactly once, at launch, and not again at bootstrap.
-let launchRecovery = readLaunchRecovery(
+// Session recovery: load the previous session's checkpoints. The restore comes back
+// decoded and validated, so the recovered structure is validated exactly once, at
+// launch, and not again at bootstrap.
+let launchRestore = loadLaunchCheckpoints(
     paths: launchInstancePaths,
     startup: launchPolicy.startup,
     hasInitSnapshot: initSnapshot != nil
@@ -107,8 +113,9 @@ app.setActivationPolicy(.regular)
 let delegate = MainActor.assumeIsolated { () -> AppDelegate in
     let delegate = AppDelegate(instancePaths: launchInstancePaths)
     delegate.initSnapshot = initSnapshot
-    delegate.lastSessionSnapshot = launchRecovery.restore
-    delegate.previousSessionCrashed = launchRecovery.previousSessionCrashed
+    delegate.lastSessionSnapshot = launchRestore
+    delegate.previousSessionCrashed = sessionLock.previousSessionCrashed
+    delegate.sessionLockClaimFailure = sessionLock.claimFailure
     delegate.launchPolicy = launchPolicy
     NSApp.delegate = delegate
     return delegate

@@ -25,7 +25,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     var launchPolicy = AppLaunchPolicy(arguments: [])
     // Session recovery state set by main.swift before app launch.
     var lastSessionSnapshot: ValidatedAppRestore?  // merged + validated from Recovery/last-light.json + last-enriched.json
-    var previousSessionCrashed: Bool = false     // true if session.json lock was still present
+    var previousSessionCrashed: Bool = false     // true unless the session.json lock was confirmed absent
+    // Set by main.swift when the launch-time lock claim failed. Held until the runtime
+    // has a window to present through, then reported once as a notice.
+    var sessionLockClaimFailure: Error?
     #if DANTERM_TERMINAL_BENCHMARK
     private var benchmarkGeometryController: TerminalBenchmarkGeometryController?
     // AppPresentationLifecycle forwards occlusion into benchmark validity recording.
@@ -152,11 +155,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.contentArea = contentArea
         runtime.chromeView = chromeView
         runtime.presentPendingConfigError()
-
-        // Write session lock (crash detection for next launch). Atomically
-        // overwrites any stale lock from a previous crash, so there's no window
-        // where a startup crash would lose the lock.
-        writeSessionLockFile(paths: instancePaths)
+        // The lock itself was claimed in main.swift before any of this existed; only
+        // telling the user about a failed claim had to wait for the window.
+        if let failure = sessionLockClaimFailure {
+            sessionLockClaimFailure = nil
+            runtime.reportSessionLockClaimFailure(failure)
+        }
 
         // Clean up stale replay files from prior sessions
         runtime.cleanupStaleReplayDirectory()

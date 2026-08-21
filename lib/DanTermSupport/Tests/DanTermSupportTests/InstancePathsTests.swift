@@ -82,7 +82,7 @@ private func makeTemporaryRoot() -> URL {
 
         writer.write(to: paths.lightCheckpointFile, async: false, encode: { Data("light".utf8) })
         writer.write(to: paths.enrichedCheckpointFile, async: false, encode: { Data("enriched".utf8) })
-        writeSessionLockFile(paths: paths)
+        try writeSessionLockFile(paths: paths)
         try IpcAuditLogWriter(directory: paths.ipcAuditDirectory).prepare()
 
         let contents = try FileManager.default.contentsOfDirectory(
@@ -94,7 +94,7 @@ private func makeTemporaryRoot() -> URL {
             "session.json",
             "ipc-audit.jsonl",
         ]), "recovery directory held \(contents)")
-        #expect(readSessionLockFile(paths: paths) != nil)
+        #expect(sessionLockIsPresent(paths: paths))
     }
 
     @Test("scrollback replay cleanup removes only this identity's directory")

@@ -59,6 +59,31 @@ struct AppRuntimeDialogSurfaceTests {
         #expect(surfaces.notice.applied == [cached], "the cache advanced only with a matching apply")
     }
 
+    @Test("a failed session-lock claim reaches the user as a notice")
+    func sessionLockClaimFailurePresentsANotice() throws {
+        // Intent: a launch whose lock claim failed says so through the notice surface,
+        //   and the runtime keeps working afterwards.
+        // Why it exists: the write used to swallow every error, so a lock that was never
+        //   created disabled crash detection for the whole run with no signal at all.
+        // Scenario: a launch whose recovery directory could not be created, reported once
+        //   the window exists.
+        let surfaces = RecordingDialogSurfaces()
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts(), dialogSurfaces: surfaces)
+        defer { runtime.shutdown() }
+
+        runtime.reportSessionLockClaimFailure(POSIXError(.EACCES))
+
+        let notice = try #require(surfaces.notice.applied.last)
+        #expect(surfaces.notice.applied.count == 1)
+        #expect(notice.title.text == "Crash Detection Unavailable")
+
+        runtime.send(.noticeAnswered(id: notice.id, answer: .dismiss))
+        runtime.send(.createTabInSelectedGroup())
+
+        #expect(runtime.caches.notice == nil)
+        #expect(runtime.model.groups[0].tabs.count == 1, "the runtime is still usable")
+    }
+
     @Test("answering a notice hides it and clears the cache")
     func answeringNoticeHidesIt() throws {
         // Intent: a dialog is on screen exactly when its projection is non-nil.

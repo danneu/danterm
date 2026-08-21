@@ -1,4 +1,4 @@
-// Recovery-store side effects: the session-lock read/write/delete I/O against the
+// Recovery-store side effects: the session-lock write/presence/delete I/O against the
 // paths DanTermInstancePaths names. This is the FileManager/Data boundary that the
 // pure snapshot/merge/validation policy in DanTermCore deliberately does NOT own --
 // core decides what to persist (toSnapshot, mergeCheckpoints, the codec), this layer
@@ -11,47 +11,57 @@
 import DanTermProtocol
 import Foundation
 
-/// Written to ~/Library/Application Support/<bundle-id>/Recovery/session.json at launch
-/// and deleted on clean exit. If this file exists at next launch, the previous exit
-/// was unclean (crash or kill -9) and we prompt before restoring.
-struct SessionLock: Codable {
+/// The payload of the session lock file, written at launch and never read back.
+///
+/// Diagnostics only: it answers "which process, and when" for a human inspecting a
+/// crashed instance's recovery directory. Nothing in production decodes it, and
+/// nothing may start -- the crash decision belongs to the file's existence
+/// (`sessionLockIsPresent`), so no change to this shape can make a crashed launch
+/// look clean on the next start.
+struct SessionLock: Encodable {
     let pid: Int32
     let startedAt: Date
 }
 
 // MARK: - Session Lock I/O
 //
-// All session lock serialization goes through these three helpers so the
-// JSON encoder/decoder date strategy (.iso8601) is configured in one place.
-// The paths value says where the lock lives; the defaulted now/pid seams let a
-// test freeze the clock and the process id. Those defaults drop the former
-// `env: CoreEnv` parameter -- a CoreEnv dependency would pull DanTermCore into
-// this layer, the support->core edge the split forbids.
+// The lock's contract is "present at launch means the previous exit was unclean", so
+// the three helpers below deal in the file's existence, never its contents. The paths
+// value says where the lock lives; the defaulted now/pid seams let a test freeze the
+// clock and the process id. Those defaults drop the former `env: CoreEnv` parameter --
+// a CoreEnv dependency would pull DanTermCore into this layer, the support->core edge
+// the split forbids.
 
 /// Write a session lock file at launch. Its presence at next launch means the
 /// previous exit was unclean -- no PID liveness check needed.
+///
+/// Throws instead of swallowing an I/O error: a lock that was never created disables
+/// crash detection for the whole run, so the caller has to be able to say so.
 func writeSessionLockFile(
     paths: DanTermInstancePaths,
     now: Date = Date(),
     pid: Int32 = ProcessInfo.processInfo.processIdentifier
-) {
-    let lock = SessionLock(pid: pid, startedAt: now)
+) throws {
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
-    guard let data = try? encoder.encode(lock) else { return }
-    try? FileManager.default.createDirectory(
+    let data = try encoder.encode(SessionLock(pid: pid, startedAt: now))
+    try FileManager.default.createDirectory(
         at: paths.recoveryDirectory,
         withIntermediateDirectories: true
     )
-    try? data.write(to: paths.sessionLockFile, options: .atomic)
+    try data.write(to: paths.sessionLockFile, options: .atomic)
 }
 
-/// Read the session lock if it exists (non-nil = previous exit was unclean).
-func readSessionLockFile(paths: DanTermInstancePaths) -> SessionLock? {
-    guard let data = try? Data(contentsOf: paths.sessionLockFile) else { return nil }
-    let decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
-    return try? decoder.decode(SessionLock.self, from: data)
+/// Whether a session lock is on disk (true = the previous exit was unclean).
+///
+/// Only a confirmed "no such file" answers false. Every other lookup failure -- an
+/// unsearchable or unreadable recovery directory, a regular file where that directory
+/// belongs -- answers true, because a location we cannot inspect may well hold a lock,
+/// and reporting a crash costs a prompt while missing one costs the session.
+func sessionLockIsPresent(paths: DanTermInstancePaths) -> Bool {
+    var info = stat()
+    if lstat(paths.sessionLockFile.path, &info) == 0 { return true }
+    return errno != ENOENT
 }
 
 /// Delete the session lock on clean termination.
