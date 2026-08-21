@@ -54,7 +54,7 @@ struct DanTermRecordingFixtureTests {
         }
     }
 
-    @Test("DanTerm Kitty input recording replays mode-aware bytes without input mutation")
+    @Test("DanTerm Kitty input recording replays mode-aware bytes")
     func kittyInputRecording() throws {
         let url = try #require(Bundle.module.url(
             forResource: "keyboard-kitty",
@@ -83,15 +83,16 @@ struct DanTermRecordingFixtureTests {
                 emitted.append(contentsOf: encodeTerminalPaste(text, modes: terminal.inputModes))
                 #expect(terminal == before)
             case .focus(let focused):
-                let before = terminal
-                emitted.append(contentsOf: encodeTerminalFocus(focused: focused, modes: terminal.inputModes))
-                #expect(terminal == before)
+                // Focus is the one input the terminal retains, so this arm changes state.
+                emitted.append(contentsOf: terminal.setFocused(focused))
             case .write, .mouse, .resize, .viewport, .checkpoint:
                 break
             }
         }
 
-        #expect(emitted == Array("\u{1B}[?1u\u{1B}[97;5u\u{1B}[13;2u\u{1B}[200~safe\ntext\u{1B}[201~\u{1B}[I".utf8))
+        // The `\u{1B}[O` sits where the recording enables mode 1004: the terminal answers the
+        // enable with the focus it retains, which is unfocused until the later focus event.
+        #expect(emitted == Array("\u{1B}[?1u\u{1B}[97;5u\u{1B}[13;2u\u{1B}[O\u{1B}[200~safe\ntext\u{1B}[201~\u{1B}[I".utf8))
     }
 
     @Test("captured Milestone 4 workflow is provenance-valid and chunk-invariant")

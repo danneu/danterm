@@ -1,4 +1,4 @@
-// Verifies safe paste and focus bytes as pure functions of authoritative terminal modes.
+// Verifies safe paste bytes as a pure function of authoritative terminal modes.
 import Testing
 
 @testable import TerminalCore
@@ -24,20 +24,5 @@ struct TerminalPastePolicyTests {
     @Test("empty sanitized paste emits neither body nor bracket markers")
     func emptyPaste() {
         #expect(encodeTerminalPaste("\u{0000}\u{001B}\u{007F}\u{0080}", modes: TerminalInputModes(bracketedPaste: true)).isEmpty)
-    }
-
-    @Test("focus reports are gated without mutating terminal state")
-    func focusGating() throws {
-        let off = TerminalInputModes.default
-        let on = TerminalInputModes(focusReporting: true)
-        #expect(encodeTerminalFocus(focused: true, modes: off).isEmpty)
-        #expect(encodeTerminalFocus(focused: true, modes: on) == Array("\u{1B}[I".utf8))
-        #expect(encodeTerminalFocus(focused: false, modes: on) == Array("\u{1B}[O".utf8))
-
-        var terminal = try #require(Terminal(columns: 8, rows: 3))
-        terminal.feed(Array("\u{1B}[?1004h".utf8))
-        let before = terminal
-        _ = encodeTerminalFocus(focused: true, modes: terminal.inputModes)
-        #expect(terminal == before)
     }
 }

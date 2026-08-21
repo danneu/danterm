@@ -482,11 +482,11 @@ final class TerminalPaneSessionController {
     func clearSearch() { clearSearchRequests += 1 }
     func sendFocus(_ focused: Bool, origin: UInt64?) {
         focusChanges.append(focused)
-        let bytes = encodeTerminalFocus(focused: focused, modes: inputModes)
-        if bytes.isEmpty == false {
-            inputBytes.append(bytes)
-            inputOrigins.append(origin)
-        }
+        // The real owner asks its terminal, which retains focus and gates the report on mode
+        // 1004; the shim fabricates the same bytes because it owns no terminal.
+        guard inputModes.focusReporting else { return }
+        inputBytes.append(Array((focused ? "\u{1B}[I" : "\u{1B}[O").utf8))
+        inputOrigins.append(origin)
     }
     // `origin` is accepted and dropped: this shim records wheel and pointer input as events
     // rather than as bytes, and only the byte-producing paths above assert on their stamps.

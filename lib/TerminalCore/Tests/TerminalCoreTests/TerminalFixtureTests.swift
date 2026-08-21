@@ -643,7 +643,7 @@ struct TerminalFixtureTests {
             case .paste(let text):
                 inputBytes.append(contentsOf: encodeTerminalPaste(text, modes: terminal.inputModes))
             case .focus(let focused):
-                inputBytes.append(contentsOf: encodeTerminalFocus(focused: focused, modes: terminal.inputModes))
+                inputBytes.append(contentsOf: terminal.setFocused(focused))
             case .mouse(let mouse):
                 inputBytes.append(contentsOf: applyNeutralTerminalMouse(
                     mouse,

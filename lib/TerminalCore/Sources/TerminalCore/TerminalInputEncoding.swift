@@ -1,4 +1,6 @@
-// Pure normalized-input policy for terminal keys, paste safety, focus, and mouse reporting.
+// Pure normalized-input policy for terminal keys, paste safety, and mouse reporting.
+// Focus reports are not here: they depend on focus the terminal retains, so `Terminal` owns
+// both the state and the bytes.
 
 /// Child-selected mouse tracking behavior, represented as one exclusive mode.
 public enum TerminalMouseTrackingMode: Equatable, Sendable {
@@ -192,12 +194,6 @@ public func encodeTerminalPaste(_ text: String, modes: TerminalInputModes) -> [U
     let bytes = Array(String(body).utf8)
     guard modes.bracketedPaste else { return bytes }
     return Array("\u{1B}[200~".utf8) + bytes + Array("\u{1B}[201~".utf8)
-}
-
-/// Produces xterm focus reports only when the child has enabled DEC mode 1004.
-public func encodeTerminalFocus(focused: Bool, modes: TerminalInputModes) -> [UInt8] {
-    guard modes.focusReporting else { return [] }
-    return Array((focused ? "\u{1B}[I" : "\u{1B}[O").utf8)
 }
 
 /// Advances explicit mouse state and emits one mode-gated X10 or SGR report.

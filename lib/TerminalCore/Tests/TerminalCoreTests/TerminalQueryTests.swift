@@ -132,9 +132,12 @@ struct TerminalQueryTests {
                 "initial DEC mode \(item.mode)"
             )
             terminal.feed(Array("\u{1B}[?\(item.mode)h\u{1B}[?\(item.mode)$p".utf8))
+            // Mode 1004 answers its own enable with the focus the terminal retains, which
+            // arrives ahead of the DECRQM report.
+            let enableReply = item.mode == 1004 ? Array("\u{1B}[O".utf8) : []
             #expect(
                 terminal.drainReplyBytes()
-                    == Array("\u{1B}[?\(item.mode);\(item.enabled)$y".utf8),
+                    == enableReply + Array("\u{1B}[?\(item.mode);\(item.enabled)$y".utf8),
                 "enabled DEC mode \(item.mode)"
             )
             terminal.feed(Array("\u{1B}[?\(item.mode)l\u{1B}[?\(item.mode)$p".utf8))

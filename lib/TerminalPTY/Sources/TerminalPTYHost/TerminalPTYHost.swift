@@ -1627,7 +1627,7 @@ public actor TerminalPTYHost {
     private func applyFocus(_ focused: Bool, origin: UInt64?) {
         guard teardownFinished == false else { return }
         flightTape.record(.focus(focused))
-        let bytes = encodeTerminalFocus(focused: focused, modes: terminal.inputModes)
+        let bytes = terminal.setFocused(focused)
         guard bytes.isEmpty == false else { return }
         // The pane's own report of a focus change the user never aimed at the child.
         submitInput(bytes, origin: origin, attribution: .pane)

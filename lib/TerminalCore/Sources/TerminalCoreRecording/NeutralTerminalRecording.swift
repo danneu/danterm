@@ -739,8 +739,12 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
                 terminal.feed(bytes)
                 _ = terminal.drainReplyBytes()
                 _ = terminal.drainPendingClipboardWrite()
-            case .write, .input, .paste, .focus:
+            case .write, .input, .paste:
                 break
+            case .focus(let focused):
+                // Focus is retained terminal state, so a replica that skipped this event
+                // would answer a later mode-1004 enable with focus the pane never had.
+                _ = terminal.setFocused(focused)
             case .mouse(let mouse):
                 _ = applyNeutralTerminalMouse(
                     mouse,

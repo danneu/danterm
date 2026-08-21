@@ -209,6 +209,43 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
+    @Test("a child enabling focus reporting learns the pane's focus at once",
+          .timeLimit(.minutes(1)))
+    func focusReportingEnableAnswersRetainedFocus() async throws {
+        // Intent: a pane that never received a focus callback answers `CSI ?1004h` with
+        //   `CSI O`, and a later focus gain crosses the PTY while the child says nothing.
+        // Why it exists: `tab new --cmd` starts its pane in the background, so an
+        //   application that enables focus reporting there used to keep its optimistic
+        //   "I am focused" assumption for the life of the pane and suppress the
+        //   notifications it owed the user.
+        // Scenario: a childless pane, never focused, sees the child enable mode 1004 and
+        //   then gains focus. The waits are hang guards.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        let submission = host.fencedFlightRecordingOriginFromNow().cursor
+
+        #expect(await pane.writeFromChild("\u{1B}[?1004h"))
+        #expect(await host.settledPendingInputByteCount() == 0)
+        host.sendFocus(true)
+        #expect(await host.settledPendingInputByteCount() == 0)
+
+        let writes = host.fencedFlightRecording(from: submission).events
+            .filter { writtenBytes($0) != nil }
+        #expect(writes.compactMap(writtenBytes) == [
+            Array("\u{1B}[O".utf8),
+            Array("\u{1B}[I".utf8),
+        ])
+        // The enable is answered like any other query; the change is the pane's own business.
+        #expect(writes.map(\.writeAttribution) == [.reply, .pane])
+        #expect(host.drainedUserInputEvents().isEmpty)
+
+        let expected = Array("\u{1B}[O\u{1B}[I".utf8)
+        #expect(await pollUntil({
+            pane.channel.bytesReceivedFromHost().suffix(expected.count) == expected[...]
+        }, within: .seconds(20)))
+        await host.close()
+    }
+
     @Test("input submitted before spawn completes after crossing the PTY", .timeLimit(.minutes(1)))
     func preSpawnInputCompletesAfterDelivery() async throws {
         // Intent: pre-spawn input stays pending, then completes only after its last byte writes.
@@ -1117,7 +1154,7 @@ struct TerminalPTYHostTests {
         let host = pane.host
         #expect(await pane.writeFromChild("\u{1B}[?1h\u{1B}[?2004h\u{1B}[?1004h"))
         let baseline = host.inputWrites().count
-        let snapshotBeforeFocus = await host.snapshot()
+        #expect(await host.snapshot().isFocused == false)
 
         host.sendKey(.up, modifiers: [])
         host.sendPaste("one\ntwo")
@@ -1129,7 +1166,9 @@ struct TerminalPTYHostTests {
             Array("\u{1B}[200~one\ntwo\u{1B}[201~".utf8),
             Array("\u{1B}[I".utf8),
         ])
-        #expect(await host.snapshot() == snapshotBeforeFocus)
+        // Focus is the one semantic input the terminal retains, and the owner's terminal is
+        // where it lands -- the mode mirror this test guards against would lose it.
+        #expect(await host.snapshot().isFocused)
         await host.close()
     }
 

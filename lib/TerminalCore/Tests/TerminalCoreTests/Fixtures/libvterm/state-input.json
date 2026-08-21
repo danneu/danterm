@@ -8,7 +8,8 @@
     "license": "MIT",
     "licenseNotice": "LICENSE.libvterm.txt",
     "recordedDeviations": [
-      "DanTerm emits strict xterm legacy encodings where pinned libvterm emits unsolicited fixterms CSI-u for modified letters, Space, and Tab."
+      "DanTerm emits strict xterm legacy encodings where pinned libvterm emits unsolicited fixterms CSI-u for modified letters, Space, and Tab.",
+      "DanTerm retains host focus while mode 1004 is disabled and answers every enable with the state it holds, as foot does; pinned libvterm reports only transitions that happen while the mode is enabled."
     ]
   },
   "initial": { "columns": 8, "rows": 3 },
@@ -54,8 +55,10 @@
     { "type": "focus", "focused": true },
     { "type": "expect", "expect": { "inputBytes": [] } },
     { "type": "feed", "text": "\u001b[?1004h" },
+    { "type": "expect", "expect": { "replyBytes": [27, 91, 73] } },
     { "type": "focus", "focused": true },
+    { "type": "expect", "expect": { "inputBytes": [] } },
     { "type": "focus", "focused": false },
-    { "type": "expect", "expect": { "inputBytes": [27, 91, 73, 27, 91, 79] } }
+    { "type": "expect", "expect": { "inputBytes": [27, 91, 79] } }
   ]
 }
