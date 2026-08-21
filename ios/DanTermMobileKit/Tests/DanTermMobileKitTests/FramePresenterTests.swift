@@ -354,7 +354,8 @@ struct FramePresenterTests {
                     columns: self.columns,
                     rows: self.rows,
                     pinned: false,
-                    droppedHistoryRows: 0
+                    droppedHistoryRows: 0,
+                    focused: false
                 ),
                 cursor: PaneTapeCursor(
                     recorderLifetimeId: Self.lifetimeId,

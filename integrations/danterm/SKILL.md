@@ -595,7 +595,7 @@ with `end`. Every line is independently valid JSON; one state transfer can use
 several lines.
 
 - `start` opens every stream:
-  `{"kind":"start","version":5,"capture":"dump"|"follow"|"snapshot",`
+  `{"kind":"start","version":6,"capture":"dump"|"follow"|"snapshot",`
   `"format":"replay"|"inspect","reconstructible":true|false,`
   `"provenance":{...},"initial":{"columns":N,"rows":N,"pinned":true|false},`
   `"cursor":{...}}`.
@@ -613,13 +613,18 @@ several lines.
   A geometry event is
   `{"type":"resize","columns":N,"rows":N,"pinned":true|false}`.
 - `sync` carries synthesized terminal bytes in ordered parts. The first part
-  carries current geometry and the count of scrollback rows the budget left out.
-  The final part carries the continuation cursor:
+  carries current geometry, the count of scrollback rows the budget left out,
+  and the pane's effective terminal focus. The final part carries the
+  continuation cursor:
   `{"kind":"sync","part":1,"parts":N,"base64":"...",`
-  `"initial":{"columns":N,"rows":N,"pinned":true|false},"droppedHistoryRows":N}`.
+  `"initial":{"columns":N,"rows":N,"pinned":true|false},"droppedHistoryRows":N,`
+  `"focused":true|false}`.
   `droppedHistoryRows` is `0` when the sync carries the whole retained history,
-  and the oldest line it does carry is always a complete logical line. Buffer
-  every part and apply the bytes only after the final part arrives.
+  and the oldest line it does carry is always a complete logical line.
+  `focused` is retained terminal state the bytes do not restate: apply it before
+  the bytes, so a payload that enables focus reporting (`DECSET 1004`) answers
+  for the focus the pane held. Buffer every part and apply the bytes only after
+  the final part arrives.
 - `end` states why the producer stopped:
   `{"kind":"end","reason":"dump-complete"|"snapshot-complete"|"pane-closed"|"stream-failed"}`.
 

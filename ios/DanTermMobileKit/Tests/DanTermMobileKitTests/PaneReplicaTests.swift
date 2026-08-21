@@ -29,7 +29,8 @@ func completeSyncIsAtomic() throws {
             columns: 8,
             rows: 2,
             pinned: false,
-            droppedHistoryRows: 0
+            droppedHistoryRows: 0,
+            focused: false
         ),
         cursor: nil
     )))
@@ -67,7 +68,8 @@ func gapFreezesReplicaUntilRepair() throws {
             columns: 8,
             rows: 2,
             pinned: false,
-            droppedHistoryRows: 0
+            droppedHistoryRows: 0,
+            focused: false
         ),
         cursor: nil
     )))
@@ -127,9 +129,10 @@ func eventsAdvanceCursorWithoutOriginatingBytes() throws {
     ))
     #expect(replica.terminal == unchanged)
     for event in [
+        // Focus is not here: it is retained terminal state the replica applies, and
+        // `focusEventsApplyLocally` covers it.
         NeutralTerminalRecordingEvent.input(key: .returnKey, modifiers: []),
         .paste("paste"),
-        .focus(true),
         .checkpoint,
     ] {
         let sequence = replica.cursor!.nextSequence
@@ -163,6 +166,62 @@ func syncRestoresModesAndHistory() throws {
     #expect(replica.terminal?.inputModes.applicationCursorKeys == true)
     #expect(replica.terminal?.inputModes.bracketedPaste == true)
     #expect((replica.terminal?.scrollbackRowCount ?? 0) > 0)
+}
+
+// Intent: a sync applies the effective focus it states before its state bytes, so a payload
+//   that enables mode 1004 answers for the pane's focus, and the answer never leaves the
+//   replica.
+// Why it exists: focus is retained terminal state and the payload restates none of it. A
+//   replica that seeded focus after the bytes -- or not at all -- would rebuild a terminal
+//   that reports the wrong state to the next `DECSET 1004` the stream replays.
+// Scenario: a phone repairs a gap on a focused pane whose child had focus reporting on.
+@Test("A sync seeds its stated focus before rebuilding state, and reports nothing")
+func syncSeedsFocusBeforeState() throws {
+    var replica = try synchronizedReplica(
+        bytes: Data("\u{1B}[?1004h".utf8),
+        cursor: testCursor(sequence: 1),
+        focused: true
+    )
+    #expect(replica.terminal?.isFocused == true)
+    #expect(replica.terminal?.inputModes.focusReporting == true)
+    // The enable inside the payload answered for the seeded focus, and that answer stayed
+    // inside the replica rather than becoming a byte the phone owes anyone.
+    #expect(replica.terminal?.pendingReplyBytes.isEmpty == true)
+
+    // A focus change after the sync keeps the rebuilt terminal in step with the pane, and
+    // the report it earns is the pane's to write, not the replica's.
+    try replica.apply(eventRecord(sequence: 1, event: .focus(false)))
+    #expect(replica.terminal?.isFocused == false)
+    #expect(replica.terminal?.pendingReplyBytes.isEmpty == true)
+    #expect(replica.state == .exact)
+
+    let unfocused = try synchronizedReplica(
+        bytes: Data("\u{1B}[?1004h".utf8),
+        cursor: testCursor(sequence: 1)
+    )
+    #expect(unfocused.terminal?.isFocused == false)
+}
+
+// Intent: a replayed focus event moves the replica's retained focus, so mode traffic after it
+//   answers for the same state the live pane answered for, and the replica writes nothing.
+// Why it exists: the replica used to ignore `.focus` entirely. Now that the terminal retains
+//   focus and answers every mode enable, an ignored event would make the replica disagree with
+//   the pane from the next enable onward.
+// Scenario: a followed pane gains focus, then its child turns focus reporting on.
+@Test("A replayed focus event moves retained focus without emitting bytes")
+func focusEventsApplyLocally() throws {
+    var replica = try synchronizedReplica(
+        bytes: Data(),
+        cursor: testCursor(sequence: 1)
+    )
+    try replica.apply(eventRecord(sequence: 1, event: .focus(true)))
+    #expect(replica.terminal?.isFocused == true)
+    #expect(replica.terminal?.pendingReplyBytes.isEmpty == true)
+    #expect(replica.state == .exact)
+
+    try replica.apply(eventRecord(sequence: 2, event: .focus(false)))
+    #expect(replica.terminal?.isFocused == false)
+    #expect(replica.terminal?.pendingReplyBytes.isEmpty == true)
 }
 
 @Test("Recorded mouse events mutate local replica interaction without emitting bytes")
@@ -244,7 +303,8 @@ func pinnednessTracksStreamGeometry() throws {
             columns: 10,
             rows: 3,
             pinned: false,
-            droppedHistoryRows: 0
+            droppedHistoryRows: 0,
+            focused: false
         ),
         cursor: testCursor(sequence: 9)
     )))
@@ -391,7 +451,8 @@ func reconnectResumeAndTotalLoss() throws {
             columns: 8,
             rows: 2,
             pinned: false,
-            droppedHistoryRows: 0
+            droppedHistoryRows: 0,
+            focused: false
         ),
         cursor: replacement
     )))
@@ -560,7 +621,8 @@ private func synchronizedReplica(
     cursor: PaneTapeCursor,
     columns: Int = 8,
     rows: Int = 2,
-    pinned: Bool = false
+    pinned: Bool = false,
+    focused: Bool = false
 ) throws -> PaneReplica {
     var replica = PaneReplica()
     try replica.apply(.sync(PaneTapeSyncRecord(
@@ -571,7 +633,8 @@ private func synchronizedReplica(
             columns: columns,
             rows: rows,
             pinned: pinned,
-            droppedHistoryRows: 0
+            droppedHistoryRows: 0,
+            focused: focused
         ),
         cursor: cursor
     )))

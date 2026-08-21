@@ -38,6 +38,7 @@ public enum PaneTapeRecordKey {
     public static let parts = "parts"
     public static let base64 = "base64"
     public static let droppedHistoryRows = "droppedHistoryRows"
+    public static let focused = "focused"
     public static let reason = "reason"
     /// The three keys inside the geometry object a start record and a sync's first part share.
     public static let columns = "columns"
@@ -220,7 +221,7 @@ public struct PaneTapeGapRecord: Equatable, Sendable {
 public struct PaneTapeSyncRecord: Equatable, Sendable {
     /// What the whole transfer states about itself, carried by its first part alone.
     ///
-    /// The four facts are one value rather than four optional fields so "all four or none"
+    /// The facts are one value rather than several optional fields so "all of them or none"
     /// holds by construction: a record cannot state the geometry without the history count,
     /// and no encoder, decoder, or assembler has to check that it did not.
     public struct Transfer: Equatable, Sendable {
@@ -233,13 +234,25 @@ public struct PaneTapeSyncRecord: Equatable, Sendable {
         /// States how many of the source's retained history rows this transfer leaves out,
         /// oldest first. The bytes look the same either way, so only the producer can say it.
         public let droppedHistoryRows: Int
+        /// States the effective terminal focus the source held at the fence. The state bytes
+        /// cannot carry it -- focus is retained terminal state no sequence restates -- so a
+        /// replica that rebuilt from the bytes alone would answer a later `DECSET 1004` with
+        /// focus the pane never held.
+        public let focused: Bool
 
         /// Creates the whole-transfer facts one first part publishes.
-        public init(columns: Int, rows: Int, pinned: Bool, droppedHistoryRows: Int) {
+        public init(
+            columns: Int,
+            rows: Int,
+            pinned: Bool,
+            droppedHistoryRows: Int,
+            focused: Bool
+        ) {
             self.columns = columns
             self.rows = rows
             self.pinned = pinned
             self.droppedHistoryRows = droppedHistoryRows
+            self.focused = focused
         }
     }
 
@@ -375,6 +388,7 @@ private struct RecordKey: CodingKey {
     static let parts = RecordKey(PaneTapeRecordKey.parts)
     static let base64 = RecordKey(PaneTapeRecordKey.base64)
     static let droppedHistoryRows = RecordKey(PaneTapeRecordKey.droppedHistoryRows)
+    static let focused = RecordKey(PaneTapeRecordKey.focused)
     static let reason = RecordKey(PaneTapeRecordKey.reason)
     static let columns = RecordKey(PaneTapeRecordKey.columns)
     static let rows = RecordKey(PaneTapeRecordKey.rows)
@@ -450,6 +464,7 @@ extension PaneTapeOutgoingRecord: Encodable where Event: Encodable {
                     into: &container
                 )
                 try container.encode(transfer.droppedHistoryRows, forKey: .droppedHistoryRows)
+                try container.encode(transfer.focused, forKey: .focused)
             }
             if let cursor = sync.cursor {
                 try container.encode(paneTapeCursorJSON(cursor), forKey: .cursor)
@@ -577,18 +592,25 @@ public func decodePaneTapeRecord(_ value: JSONValue) -> PaneTapeRecord<JSONValue
         }
         let droppedHistoryRows = value[PaneTapeRecordKey.droppedHistoryRows]?
             .asNumber.flatMap(nonnegativeInt)
+        let focused: Bool?
+        if case .bool(let value)? = value[PaneTapeRecordKey.focused] {
+            focused = value
+        } else {
+            focused = nil
+        }
         // The whole-transfer facts arrive together or not at all, so a record carrying some of
         // them is malformed rather than a part that states a subset.
         let transfer: PaneTapeSyncRecord.Transfer?
-        switch (columns, rows, pinned, droppedHistoryRows) {
-        case (nil, nil, nil, nil):
+        switch (columns, rows, pinned, droppedHistoryRows, focused) {
+        case (nil, nil, nil, nil, nil):
             transfer = nil
-        case (let columns?, let rows?, let pinned?, let droppedHistoryRows?):
+        case (let columns?, let rows?, let pinned?, let droppedHistoryRows?, let focused?):
             transfer = PaneTapeSyncRecord.Transfer(
                 columns: columns,
                 rows: rows,
                 pinned: pinned,
-                droppedHistoryRows: droppedHistoryRows
+                droppedHistoryRows: droppedHistoryRows,
+                focused: focused
             )
         default:
             return nil

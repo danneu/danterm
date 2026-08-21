@@ -181,6 +181,12 @@ public struct PaneReplica: Sendable {
                 rows: synchronization.rows
             )
         }
+        // Seeded before the bytes, not after: the payload may enable mode 1004, and the
+        // enable answers with the focus the terminal holds at that moment. Seeding afterwards
+        // would answer for a fresh terminal's unfocused default and then move focus silently.
+        // The report the reconstruction produces is the replica's own and goes nowhere --
+        // `discardAuthority` drops it, along with every other reply the payload provoked.
+        _ = replacement.setFocused(synchronization.focused)
         // Fed through the buffer the assembler already holds: the engine takes no Foundation
         // type, and materializing an array here would duplicate the whole payload.
         synchronization.bytes.withUnsafeBytes { raw in
@@ -233,7 +239,13 @@ public struct PaneReplica: Sendable {
             case .toTopRow(let row): terminal.scroll(toTopRow: row)
             case .toBottom: terminal.scrollToBottom()
             }
-        case .write, .input, .paste, .focus, .checkpoint:
+        case .focus(let focused):
+            // Focus is retained terminal state, so a replica that skipped this event would
+            // answer a later mode-1004 enable with focus the pane never had. The report the
+            // live pane wrote arrives as its own `.write` event; the copy this call returns
+            // is the replica's own and is dropped here.
+            _ = terminal.setFocused(focused)
+        case .write, .input, .paste, .checkpoint:
             break
         }
 

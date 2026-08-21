@@ -279,7 +279,8 @@ struct PaneReplicaCheckpointTests {
                 columns: 8,
                 rows: 2,
                 pinned: false,
-                droppedHistoryRows: 0
+                droppedHistoryRows: 0,
+                focused: false
             ),
             cursor: nil
         )))
@@ -471,7 +472,8 @@ struct PaneReplicaCheckpointTests {
                 columns: 8,
                 rows: 2,
                 pinned: false,
-                droppedHistoryRows: 0
+                droppedHistoryRows: 0,
+                focused: false
             ),
             cursor: foreign
         )))
@@ -497,7 +499,8 @@ private func checkpointReplica(
             columns: columns,
             rows: rows,
             pinned: pinned,
-            droppedHistoryRows: 0
+            droppedHistoryRows: 0,
+            focused: false
         ),
         cursor: cursor
     )))

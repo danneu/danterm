@@ -43,7 +43,13 @@ struct PaneTapeStreamStateTests {
             part: 1,
             parts: 1,
             bytes: Data("state".utf8),
-            transfer: .init(columns: 100, rows: 30, pinned: false, droppedHistoryRows: 0),
+            transfer: .init(
+                columns: 100,
+                rows: 30,
+                pinned: false,
+                droppedHistoryRows: 0,
+                focused: false
+            ),
             cursor: cursor(sequence: 6, feed: 6)
         ))])
         #expect(opening.nextCursor.nextSequence == 6)
@@ -291,7 +297,13 @@ struct PaneTapeStreamStateTests {
         #expect(fromNow.start.record.rows == 30)
         #expect(fromNow.start.record.pinned)
         #expect(part(fromNow.records.first)?.transfer
-                == .init(columns: 100, rows: 30, pinned: true, droppedHistoryRows: 0))
+                == .init(
+                    columns: 100,
+                    rows: 30,
+                    pinned: true,
+                    droppedHistoryRows: 0,
+                    focused: false
+                ))
     }
 
     @Test("a placed resume opens with birth geometry and replays the later transition")
@@ -342,6 +354,7 @@ struct PaneTapeStreamStateTests {
             bytes: Data("state".utf8),
             dimensions: .init(columns: 100, rows: 30, pinned: false),
             droppedHistoryRows: 0,
+            focused: false,
             cursor: evicted.nextCursor
         )
 
@@ -365,7 +378,13 @@ struct PaneTapeStreamStateTests {
             part: 1,
             parts: 1,
             bytes: Data("state".utf8),
-            transfer: .init(columns: 100, rows: 30, pinned: false, droppedHistoryRows: 0),
+            transfer: .init(
+                columns: 100,
+                rows: 30,
+                pinned: false,
+                droppedHistoryRows: 0,
+                focused: false
+            ),
             cursor: cursor(sequence: 6, feed: 6)
         ))])
         #expect(reconstructible.nextCursor == synchronization.cursor)
@@ -473,6 +492,7 @@ struct PaneTapeStreamStateTests {
             bytes: Data("state".utf8),
             dimensions: .init(columns: 100, rows: 30, pinned: false),
             droppedHistoryRows: 9,
+            focused: false,
             cursor: cursor(sequence: 7, feed: 7)
         )
 
@@ -511,6 +531,7 @@ struct PaneTapeStreamStateTests {
             bytes: Data("state".utf8),
             dimensions: .init(columns: 100, rows: 30, pinned: false),
             droppedHistoryRows: 9,
+            focused: false,
             cursor: cursor(sequence: 6, feed: 6)
         )
 
@@ -527,6 +548,7 @@ struct PaneTapeStreamStateTests {
             bytes: Data("state".utf8),
             dimensions: .init(columns: 100, rows: 30, pinned: false),
             droppedHistoryRows: 0,
+            focused: false,
             cursor: cursor(sequence: 7, feed: 7)
         )
         let restored = continueStream(
@@ -573,6 +595,34 @@ struct PaneTapeStreamStateTests {
             pane: pane(retainedSequences: [])
         ).records
         #expect(part(whole.first)?.transfer?.droppedHistoryRows == 0)
+    }
+
+    // Intent: a sync transfer states the effective focus it was captured with, once, on the
+    //   same first part that carries geometry, and never on a later part.
+    // Why it exists: focus is retained terminal state, and the serialized payload restates
+    //   none of it. A transfer that omitted the bit would leave the replica answering a later
+    //   `DECSET 1004` with focus the pane never held.
+    // Scenario: spec-first contract for a sync captured on a focused pane.
+    @Test("a sync transfer states its effective focus once, beside its geometry")
+    func syncStatesFocusOnItsFirstPart() {
+        let records = openStream(
+            request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
+            pane: pane(
+                retainedSequences: [],
+                focused: true,
+                syncBytes: Data(repeating: 0x41, count: IpcLineFramer.maxLineBytes + 1)
+            )
+        ).records
+
+        #expect(records.count > 1)
+        #expect(part(records.first)?.transfer?.focused == true)
+        #expect(records.dropFirst().allSatisfy { part($0)?.transfer == nil })
+
+        let unfocused = openStream(
+            request: .init(capture: .follow, policy: reconstructiblePolicy, position: .now),
+            pane: pane(retainedSequences: [])
+        ).records
+        #expect(part(unfocused.first)?.transfer?.focused == false)
     }
 
     // Intent: a budget changes what a sync carries, never whether one is sent -- a request
@@ -647,6 +697,7 @@ struct PaneTapeStreamStateTests {
             bytes: Data("state".utf8),
             dimensions: .init(columns: 100, rows: 30, pinned: false),
             droppedHistoryRows: 9,
+            focused: false,
             cursor: cursor(sequence: 9, feed: 9)
         )
 
@@ -736,6 +787,7 @@ struct PaneTapeStreamStateTests {
         retainedSequences: [UInt64],
         droppedEventCount: UInt64 = 0,
         droppedHistoryRows: Int = 0,
+        focused: Bool = false,
         requested: PaneTapeCursorPlacement<JSONValue>? = nil,
         initial: PaneTapeDimensions = .init(columns: 80, rows: 24, pinned: false),
         syncBytes: Data = Data("state".utf8),
@@ -760,6 +812,7 @@ struct PaneTapeStreamStateTests {
                 bytes: syncBytes,
                 dimensions: syncDimensions,
                 droppedHistoryRows: droppedHistoryRows,
+                focused: focused,
                 cursor: retained.nextCursor
             )
         )

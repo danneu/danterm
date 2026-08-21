@@ -116,7 +116,8 @@ private let roundTripCases: [(PaneTapeOutgoingRecord<JSONValue>, PaneTapeRecord<
             columns: 80,
             rows: 24,
             pinned: false,
-            droppedHistoryRows: 512
+            droppedHistoryRows: 512,
+            focused: true
         ),
         cursor: nil
     )

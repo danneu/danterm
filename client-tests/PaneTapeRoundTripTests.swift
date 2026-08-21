@@ -261,6 +261,7 @@ struct PaneTapeRoundTripTests {
                     bytes: Data("state".utf8),
                     dimensions: .init(columns: 62, rows: 19, pinned: pinned),
                     droppedHistoryRows: 0,
+                    focused: false,
                     cursor: evicted.nextCursor
                 )
             ).batch
@@ -325,6 +326,7 @@ struct PaneTapeRoundTripTests {
                 bytes: bytes,
                 dimensions: .init(columns: 62, rows: 19, pinned: false),
                 droppedHistoryRows: 3141,
+                focused: false,
                 cursor: evicted.nextCursor
             )
         ).batch
@@ -343,6 +345,51 @@ struct PaneTapeRoundTripTests {
         #expect(assembled?.droppedHistoryRows == 3141)
     }
 
+    // Intent: the effective focus a sync was captured with survives the whole producer-to-
+    //   reader path -- stated by the Mac host layer, chunked across records, reassembled by
+    //   the client.
+    // Why it exists: focus is retained terminal state, and the serialized payload restates
+    //   none of it. A hop that dropped the bit would leave a repaired replica answering a
+    //   later `DECSET 1004` with focus the pane never held -- the exact wrong report this
+    //   whole contract exists to prevent.
+    // Scenario: a followed stream on a focused pane repairs a gap with a sync.
+    @Test("a state sync round-trips the effective focus it was captured with")
+    func syncRoundTripsFocus() throws {
+        let evicted = PaneTapeSnapshot<JSONValue>(
+            events: [],
+            droppedEventCount: 2,
+            droppedFeedBytes: 3,
+            droppedWriteBytes: 0,
+            nextCursor: PaneTapeCursor(
+                recorderLifetimeId: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!,
+                nextSequence: 9,
+                feedBytesBeforeNextSequence: 3,
+                writeBytesBeforeNextSequence: 0
+            )
+        )
+        for focused in [true, false] {
+            let batch = repairedContinuation(
+                snapshot: evicted,
+                synchronization: .init(
+                    bytes: Data("state".utf8),
+                    dimensions: .init(columns: 62, rows: 19, pinned: false),
+                    droppedHistoryRows: 0,
+                    focused: focused,
+                    cursor: evicted.nextCursor
+                )
+            ).batch
+
+            var assembler = PaneTapeSyncAssembler()
+            var assembled: DanTermClient.PaneTapeStateSynchronization?
+            for record in batch.records {
+                guard case .sync(let part)? = try decodedFromWire(record) else { continue }
+                assembled = assembler.ingest(part) ?? assembled
+            }
+
+            #expect(assembled?.focused == focused)
+        }
+    }
+
     @Test("the tape stream version moved with the sync record's shape")
     func streamVersionStatesTheSyncShape() {
         // Intent: the version a start record publishes is the one whose sync records state
@@ -352,7 +399,7 @@ struct PaneTapeRoundTripTests {
         //   whose shape it does not know, and the protocol number's refusal is the only other
         //   guard.
         // Scenario: a reader deciding whether it understands the stream it just opened.
-        #expect(paneTapeStreamVersion == 5)
+        #expect(paneTapeStreamVersion == 6)
     }
 
     /// Builds the prefix a raw follow ships from one start position, over a fence whose

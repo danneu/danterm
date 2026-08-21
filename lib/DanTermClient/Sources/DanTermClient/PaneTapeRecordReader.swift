@@ -21,6 +21,9 @@ public struct PaneTapeStateSynchronization: Equatable, Sendable {
     /// `0` when it carries the whole retained history. A replica reads it to know whether its
     /// own history is complete.
     public let droppedHistoryRows: Int
+    /// The effective terminal focus the source held at the fence. A replica seeds it before
+    /// applying `bytes`, because focus is retained terminal state the bytes cannot restate.
+    public let focused: Bool
     /// Names the first recorder event after this state.
     public let cursor: PaneTapeCursor
 
@@ -31,6 +34,7 @@ public struct PaneTapeStateSynchronization: Equatable, Sendable {
         rows: Int,
         pinned: Bool,
         droppedHistoryRows: Int,
+        focused: Bool,
         cursor: PaneTapeCursor
     ) {
         self.bytes = bytes
@@ -38,6 +42,7 @@ public struct PaneTapeStateSynchronization: Equatable, Sendable {
         self.rows = rows
         self.pinned = pinned
         self.droppedHistoryRows = droppedHistoryRows
+        self.focused = focused
         self.cursor = cursor
     }
 }
@@ -87,6 +92,7 @@ public struct PaneTapeSyncAssembler: Sendable {
             rows: transfer.rows,
             pinned: transfer.pinned,
             droppedHistoryRows: transfer.droppedHistoryRows,
+            focused: transfer.focused,
             cursor: cursor
         )
         reset()

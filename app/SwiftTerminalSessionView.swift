@@ -144,6 +144,7 @@ func paneTapeStateSynchronization(
         bytes: Data(synchronization.state.bytes),
         dimensions: paneTapeDimensions(synchronization.geometry),
         droppedHistoryRows: synchronization.state.droppedHistoryRows,
+        focused: synchronization.focused,
         cursor: paneTapeCursor(synchronization.cursor)
     )
 }

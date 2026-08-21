@@ -129,7 +129,7 @@ The immediate report matches `references/foot/csi.c#decset_decrst`.
 
 - [x] 1. terminal: retain effective focus and report mode 1004 state
 - [x] 2. app: derive terminal focus from pane and application state
-- [ ] 3. tape: preserve effective focus across synchronization
+- [x] 3. tape: preserve effective focus across synchronization
 
 ## Implementation notes
 
@@ -156,3 +156,23 @@ The immediate report matches `references/foot/csi.c#decset_decrst`.
   from the live model before the swap -- disagreeing with the model.
 - Application activation is pushed to live sessions from `model.isAppActive` after
   the lifecycle message reduces, so the runtime keeps no second copy of the fact.
+- Focus rides the sync record's whole-transfer facts, beside geometry and the dropped-history
+  count, rather than inside the `initial` geometry object. It is not geometry, and the
+  all-or-none decode rule already covers the group, so a fifth fact needed no new mechanism.
+- Commit 3 bumps `paneTapeStreamVersion` to 6, which forced two matching bumps outside Swift:
+  the pinned `STREAM_VERSION` in `scripts/terminal-tape-to-fixture.py` and the committed
+  `scripts/tests/fixtures/pane-tape-follow.jsonl` sample. The converter reads raw streams only
+  and refuses a sync record outright, so none of its record-shape key sets changed.
+- `PaneReplica` now applies `.focus` events instead of ignoring them, which is the same reason
+  the recording replay had to: an ignored event would make the replica answer a later
+  mode-1004 enable with focus the pane never had. The existing replica test that listed
+  `.focus` among the events leaving the terminal unchanged lost that entry, because the
+  behavior it pinned is what this commit changes.
+
+## Follow Up
+
+- `PaneReplicaCheckpoint` (`ios/DanTermMobileKit/Sources/DanTermMobileKit/PaneReplica.swift`)
+  carries state bytes, geometry, pinnedness, and a cursor, but no focus, so
+  `PaneReplica.init(checkpoint:)` rebuilds an unfocused terminal. A phone that resumes from a
+  checkpoint on a focused pane answers the next `DECSET 1004` with `CSI O`. The sync wire and
+  the checkpoint wire have the same gap; only the sync one is in this plan's scope.

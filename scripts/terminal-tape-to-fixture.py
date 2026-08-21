@@ -80,7 +80,10 @@ def local_identifiers() -> list:
 # accept whatever the app currently emits, which is the opposite of what a shape check is
 # for. Bumping it means reading the version's changes and updating the key sets, the way
 # `pinned` was added to the start geometry and to every resize event.
-STREAM_VERSION = 5
+#
+# Version 6 added `focused` to a sync record's whole-transfer facts. This converter reads
+# raw streams only, and refuses a sync record outright, so no key set below changed.
+STREAM_VERSION = 6
 START_KEYS = {
     "kind", "version", "capture", "format", "reconstructible", "provenance",
     "initial", "cursor",

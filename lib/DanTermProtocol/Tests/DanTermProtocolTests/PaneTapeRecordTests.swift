@@ -50,6 +50,7 @@ struct PaneTapeRecordTests {
                     "rows": .number(24),
                     "pinned": .bool(false),
                 ]),
+                "focused": .bool(false),
                 "cursor": .object([
                     "recorderLifetimeId": .string("11111111-1111-4111-8111-111111111111"),
                     "sequence": .number(41),
@@ -83,6 +84,57 @@ struct PaneTapeRecordTests {
         }
         countOnly.removeValue(forKey: "initial")
         #expect(decodePaneTapeRecord(.object(countOnly)) == nil)
+    }
+
+    // Intent: the effective focus a sync was captured with decodes beside the geometry and
+    //   the history count, and a first part missing it is malformed.
+    // Why it exists: focus is retained terminal state that the serialized bytes cannot
+    //   restate. A reader that defaulted it would rebuild a replica whose answer to a later
+    //   `DECSET 1004` names focus the pane never held.
+    // Scenario: spec-first contract for the sync record's whole-transfer facts.
+    @Test("a sync record decodes its effective focus, or fails to decode without it")
+    func syncRecordDecodesFocus() {
+        func record(_ extra: [String: JSONValue]) -> JSONValue {
+            var object: [String: JSONValue] = [
+                "kind": .string("sync"),
+                "part": .number(1),
+                "parts": .number(1),
+                "base64": .string(Data("state".utf8).base64EncodedString()),
+                "initial": .object([
+                    "columns": .number(80),
+                    "rows": .number(24),
+                    "pinned": .bool(false),
+                ]),
+                "droppedHistoryRows": .number(0),
+                "cursor": .object([
+                    "recorderLifetimeId": .string("11111111-1111-4111-8111-111111111111"),
+                    "sequence": .number(41),
+                    "feedByteOffset": .number(100),
+                    "writeByteOffset": .number(7),
+                ]),
+            ]
+            object.merge(extra) { _, new in new }
+            return .object(object)
+        }
+
+        guard case .sync(let sync)? = decodePaneTapeRecord(record(["focused": .bool(true)]))
+        else {
+            Issue.record("sync record did not decode")
+            return
+        }
+        #expect(sync.transfer?.focused == true)
+
+        guard case .sync(let unfocused)? = decodePaneTapeRecord(record(["focused": .bool(false)]))
+        else {
+            Issue.record("sync record did not decode")
+            return
+        }
+        #expect(unfocused.transfer?.focused == false)
+
+        // The whole-transfer facts travel as one, so a record stating the rest without focus
+        // is malformed rather than a transfer whose focus a reader may choose.
+        #expect(decodePaneTapeRecord(record([:])) == nil)
+        #expect(decodePaneTapeRecord(record(["focused": .number(1)])) == nil)
     }
 
     @Test("a record kind this build does not know decodes as unknown, not as a failure")

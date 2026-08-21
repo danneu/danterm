@@ -40,6 +40,9 @@ struct PaneTapeStateSynchronization: Equatable, Sendable {
     /// derive it -- the bytes look the same whether the source had more history or not -- so
     /// the record has to state it.
     let droppedHistoryRows: Int
+    /// The effective terminal focus the fenced terminal held. It rides beside the bytes
+    /// because no serialized sequence restates retained focus.
+    let focused: Bool
     let cursor: PaneTapeCursor
 }
 
@@ -452,7 +455,8 @@ private func makePaneTapeSynchronizationRecords<Event>(
                     columns: synchronization.dimensions.columns,
                     rows: synchronization.dimensions.rows,
                     pinned: synchronization.dimensions.pinned,
-                    droppedHistoryRows: synchronization.droppedHistoryRows
+                    droppedHistoryRows: synchronization.droppedHistoryRows,
+                    focused: synchronization.focused
                 )
                 : nil,
             cursor: isLast ? synchronization.cursor : nil

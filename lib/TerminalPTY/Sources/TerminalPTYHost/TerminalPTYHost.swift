@@ -235,16 +235,23 @@ public struct TerminalFlightRecordingStateSynchronization: Equatable, Sendable {
     /// whole geometry fact rather than leave pinnedness to the events around it.
     public let geometry: NeutralTerminalGeometry
 
+    /// The effective terminal focus the paired terminal held at the fence. Focus is retained
+    /// terminal state and `state.bytes` restates none of it, so a consumer that rebuilt from
+    /// the bytes alone would answer a later `DECSET 1004` with focus the pane never held.
+    public let focused: Bool
+
     /// Recorder position taken in the same owner turn as `state`.
     public let cursor: TerminalFlightRecordingCursor
 
     fileprivate init(
         state: TerminalStateSynchronization,
         pinned: Bool,
+        focused: Bool,
         cursor: TerminalFlightRecordingCursor
     ) {
         self.state = state
         geometry = .init(columns: state.columns, rows: state.rows, pinned: pinned)
+        self.focused = focused
         self.cursor = cursor
     }
 }
@@ -281,6 +288,7 @@ public struct TerminalFlightRecordingStatePairing: Sendable {
         TerminalFlightRecordingStateSynchronization(
             state: terminal.stateSynchronization(historyBudgetBytes: historyBudgetBytes),
             pinned: pinned,
+            focused: terminal.isFocused,
             cursor: cursor
         )
     }
