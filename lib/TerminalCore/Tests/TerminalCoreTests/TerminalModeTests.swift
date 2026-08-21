@@ -59,6 +59,32 @@ struct TerminalModeTests {
         expectValidGrid(terminal)
     }
 
+    @Test("IRM preserves a wide wrap gap while shifting the follower")
+    func insertModePreservesWideWrapGap() throws {
+        // Intent: a wide print that wraps in insert mode has the same projected gap as the
+        //   ordinary print path, while existing content on the follower moves two columns.
+        // Why it exists: the old stored spacer was retired by the insert shift that followed
+        //   the wrap, so IRM projected one extra content blank before the wide glyph.
+        // Scenario: the successor starts with two narrow cells before a wide glyph wraps from
+        //   the row above and inserts ahead of them.
+        var inserted = try #require(Terminal(columns: 4, rows: 2))
+        inserted.moveCursor(row: 1, column: 0)
+        inserted.feed(Array("AB".utf8))
+        inserted.feed(Array("\u{1B}[4h\u{1B}[1;4H\u{754C}".utf8))
+
+        var control = try #require(Terminal(columns: 4, rows: 2))
+        control.moveCursor(row: 1, column: 2)
+        control.feed(Array("AB".utf8))
+        control.feed(Array("\u{1B}[1;4H\u{754C}".utf8))
+
+        #expect(inserted.rowStructure[0].marginCellKind == .spacerHead)
+        #expect(inserted.screenText == "    \n\u{754C}AB")
+        #expect(inserted.screenText == control.screenText)
+        #expect(inserted.cell(row: 1, column: 2)?.scalars.first == "A")
+        #expect(inserted.cell(row: 1, column: 3)?.scalars.first == "B")
+        expectValidGrid(inserted)
+    }
+
     @Test("LNM gives LF VT and FF carriage-return behavior but leaves IND unchanged")
     func lineFeedNewLineMode() throws {
         for control in ["\n", "\u{000B}", "\u{000C}"] {

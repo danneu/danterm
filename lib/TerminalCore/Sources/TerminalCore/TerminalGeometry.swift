@@ -124,11 +124,10 @@ public struct TerminalRowStructure: Equatable, Sendable {
     /// the caller having to source the pane width separately.
     public let width: Int
 
-    /// The last column's cell kind, which refines the wrap invariant for wide glyphs: a wide
-    /// glyph that cannot fit the last column leaves a `.spacerHead` there and wraps early, so
-    /// `isSoftWrapped` with `contentEnd == width - 1` and a `.spacerHead` margin is a
-    /// legitimate print outcome rather than a stale claim. `.padding` when the row stores
-    /// nothing at that column.
+    /// The projected last-column kind. A wide glyph that cannot fit there leaves a stored blank
+    /// and wraps early; while its wide head still follows, readers derive `.spacerHead` from
+    /// those facts. Therefore `isSoftWrapped` with `contentEnd == width - 1` and a
+    /// `.spacerHead` margin is a legitimate print outcome rather than a stale claim.
     public let marginCellKind: TerminalCellKind
 
     /// True while the row carries a wrap claim an erase left unwitnessed

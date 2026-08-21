@@ -219,6 +219,7 @@ public struct Terminal: Equatable, Sendable {
     enum MarginProvenance: Equatable, Sendable {
         case content
         case erase
+        case wideWrap
     }
 
     /// Moves row-level wrap and semantic-prompt identity with cells during scrolling.
@@ -266,7 +267,8 @@ public struct Terminal: Equatable, Sendable {
             let projectedMargin = Terminal.projectedMarginCell(
                 stored: storedMargin,
                 follower: follower,
-                fillsMissingWrapSpacer: fillsMissingWrapSpacer,
+                fillsMissingWrapSpacer: fillsMissingWrapSpacer
+                    || (row.logicallyContinues && row.marginProvenance == .wideWrap),
                 missingWrapMargin: missingWrapMargin
             )
             if row.cells.indices.contains(margin), projectedMargin != storedMargin {
@@ -2728,7 +2730,10 @@ public struct Terminal: Equatable, Sendable {
 
     /// Vacates one row on the shell's repaint promise, including its obsolete wrap claim.
     private mutating func clearPromptCells(in row: Int) {
-        invalidateInspection(inViewportRows: row..<(row + 1))
+        invalidateInspection(
+            inViewportRows: row..<(row + 1),
+            affectsPreviousProjection: true
+        )
         let blank = GridCell(styleId: backgroundEraseStyleId())
         let columns = columnCount
         withRowCells(row) { cells in
@@ -4004,9 +4009,10 @@ public struct Terminal: Equatable, Sendable {
         return Self.projectedMarginCell(
             stored: row.cells.indices.contains(column) ? row.cells[column] : nil,
             follower: projectionFollower(after: streamRow),
-            fillsMissingWrapSpacer: streamRow == historyRowCount - 1
+            fillsMissingWrapSpacer: (streamRow == historyRowCount - 1
                 && isAlternateScreenActive == false
-                && history.store.openTailPendingMarginCell != nil,
+                && history.store.openTailPendingMarginCell != nil)
+                || (row.logicallyContinues && row.marginProvenance == .wideWrap),
             missingWrapMargin: history.store.openTailPendingMarginCell
         )
     }
@@ -4025,16 +4031,6 @@ public struct Terminal: Equatable, Sendable {
             : nil
     }
 
-    /// Whether the last retained display row's final column is the seam's derived spacer.
-    ///
-    /// Read where a live write can invalidate that column without touching a retained byte: the
-    /// spacer is a function of the live grid's first cell, so overwriting it changes what the
-    /// row above displays.
-    private var seamRowIsShortOfItsSpacer: Bool {
-        guard historyRowCount > 0, history.store.hasOpenTailRecord else { return false }
-        return history.store.paintedDisplayRow(at: historyRowCount - 1)?.cells.count == columnCount - 1
-    }
-
     /// The `.spacerHead` the open tail's final display row is missing, when it is missing one.
     ///
     /// History never stores a spacer -- where one sits is a function of the width, which `31/I1`
@@ -4049,7 +4045,9 @@ public struct Terminal: Equatable, Sendable {
         fillsMissingWrapSpacer: Bool,
         missingWrapMargin: GridCell? = nil
     ) -> GridCell {
-        if let stored, stored.kind != .spacerHead { return stored }
+        if let stored, stored.kind != .spacerHead, fillsMissingWrapSpacer == false {
+            return stored
+        }
         guard stored?.kind == .spacerHead || fillsMissingWrapSpacer else {
             return GridCell()
         }
@@ -4625,14 +4623,30 @@ public struct Terminal: Equatable, Sendable {
         viewportState = .following
     }
 
-    private mutating func invalidateInspection(inViewportRows range: Range<Int>) {
+    private mutating func invalidateInspection(
+        inViewportRows range: Range<Int>,
+        affectsPreviousProjection: Bool = false
+    ) {
         guard range.isEmpty == false else { return }
+        var affected = range
+        if affectsPreviousProjection {
+            if affected.lowerBound > 0,
+               screen.rows[affected.lowerBound - 1].marginProvenance == .wideWrap
+            {
+                affected = (affected.lowerBound - 1)..<affected.upperBound
+            } else if affected.lowerBound == 0,
+                      isAlternateScreenActive == false,
+                      history.store.openTailPendingMarginCell != nil
+            {
+                invalidateInspection(inScrollbackRow: historyRowCount - 1)
+            }
+        }
         if viewportState == .following {
-            recordDamage(rows: range)
+            recordDamage(rows: affected)
         } else {
             recordFullDamage()
         }
-        invalidateInspectionState(inViewportRows: range)
+        invalidateInspectionState(inViewportRows: affected)
     }
 
     /// The state half of `invalidateInspection(inViewportRows:)` alone, for the
@@ -5134,7 +5148,10 @@ public struct Terminal: Equatable, Sendable {
         lower = max(0, lower)
         upper = min(upper, columnCount)
 
-        invalidateInspection(inViewportRows: row..<(row + 1))
+        invalidateInspection(
+            inViewportRows: row..<(row + 1),
+            affectsPreviousProjection: lower == 0
+        )
 
         let survivors = selective ? protectedMask(row: row, columns: lower..<upper) : nil
 
@@ -5162,14 +5179,6 @@ public struct Terminal: Equatable, Sendable {
         if upper == columnCount, survivors?[columnCount - 1 - lower] != true {
             screen.rows[row].marginProvenance = .erase
         }
-        // Loop-invariant: the repair is a no-op above column 1, so it runs once
-        // for the range rather than once per erased cell. It is idempotent, so
-        // the old per-cell calls at columns 0 and 1 did the work of this one.
-        // The spacer above is retired by the wide head below it going away, so a
-        // protected head that survives keeps its spacer.
-        if lower <= 1, survivors?[0] != true {
-            clearPreviousSpacer(beforeRow: row, column: lower, replacementStyleId: styleId)
-        }
         clusterContext = nil
         return survivors?.contains(true) != true
     }
@@ -5184,7 +5193,7 @@ public struct Terminal: Equatable, Sendable {
         readingRowCells(row) { cells in
             for column in columns {
                 let cell = cells[column]
-                guard cell.kind != .spacerHead, style(for: cell.styleId).protected else { continue }
+                guard style(for: cell.styleId).protected else { continue }
                 mask[column - columns.lowerBound] = true
                 let partner = cell.kind == .wideHead
                     ? column + 1
@@ -5226,19 +5235,19 @@ public struct Terminal: Equatable, Sendable {
                 && rowIndex + 1 < rows
             let clearsRowWrap = clearsSoftWrap
                 || (source.isSoftWrapped && keepsContinuation == false)
-            let preservesSpacer = clearsRowWrap == false
-                && keepsContinuation
-                && sourceRows[rowIndex + 1].cells.first?.kind == .wideHead
-            repairClippedCells(&cells, clearsSpacers: preservesSpacer == false)
+            repairClippedCells(&cells)
             return GridRow(
                 cells: cells,
                 isSoftWrapped: clearsRowWrap ? false : source.isSoftWrapped,
+                marginProvenance: columns == source.cells.count
+                    ? source.marginProvenance
+                    : .content,
                 semanticPrompt: source.semanticPrompt
             )
         }
     }
 
-    private mutating func repairClippedCells(_ cells: inout [GridCell], clearsSpacers: Bool) {
+    private mutating func repairClippedCells(_ cells: inout [GridCell]) {
         var invalidColumns: [Int] = []
         for column in cells.indices {
             switch cells[column].kind {
@@ -5250,11 +5259,7 @@ public struct Terminal: Equatable, Sendable {
                 if column == 0 || cells[column - 1].kind != .wideHead {
                     invalidColumns.append(column)
                 }
-            case .spacerHead:
-                if clearsSpacers {
-                    invalidColumns.append(column)
-                }
-            case .padding, .narrow:
+            case .padding, .narrow, .spacerHead:
                 break
             }
         }
@@ -5364,7 +5369,7 @@ public struct Terminal: Equatable, Sendable {
         let lastLiveContentRow = screen.rows.lastIndex(where: Self.rowContainsContent) ?? 0
         let lastSourceRow = max(screen.cursor.row, lastLiveContentRow)
         let trailingBlankRowCount = screen.rows.count - lastSourceRow - 1
-        let sourceRows = Array(screen.rows[...lastSourceRow])
+        let sourceRows = projectedLiveRows(Array(screen.rows[...lastSourceRow]))
         // Order is the contract with `placed` below: the live cursor first, because it alone
         // decides the resulting layout, then the saved slot as its passenger.
         let liveCursorIndex = 0
@@ -5696,9 +5701,25 @@ public struct Terminal: Equatable, Sendable {
         var start = row
         while start > 0, screen.rows[start - 1].logicallyContinues { start -= 1 }
         for index in start..<row {
-            offset += logicalCellCount(in: screen.rows[index], upTo: columnCount)
+            offset += logicalCellCount(
+                in: screen.rows[index].projected(
+                    columns: columnCount,
+                    follower: screen.rows.indices.contains(index + 1)
+                        ? screen.rows[index + 1].cells.first
+                        : nil
+                ),
+                upTo: columnCount
+            )
         }
-        return offset + logicalCellCount(in: screen.rows[row], upTo: column)
+        return offset + logicalCellCount(
+            in: screen.rows[row].projected(
+                columns: columnCount,
+                follower: screen.rows.indices.contains(row + 1)
+                    ? screen.rows[row + 1].cells.first
+                    : nil
+            ),
+            upTo: column
+        )
     }
 
     /// Counts the cells `reconstructLogicalLines` would emit for one row's leading columns.
@@ -5973,12 +5994,10 @@ public struct Terminal: Equatable, Sendable {
             }
             if unit.cells.count == 2, columns - column == 1 {
                 packedRows[row].cells[column] = GridCell(
-                    kind: .spacerHead,
-                    styleId: unit.cells[0].styleId,
-                    hyperlinkId: unit.cells[0].hyperlinkId,
-                    contentIdentity: unit.cells[0].contentIdentity
+                    styleId: unit.cells[0].styleId
                 )
                 packedRows[row].isSoftWrapped = true
+                packedRows[row].marginProvenance = .wideWrap
                 packedRows.append(makeBlankRow(columns: columns))
                 row += 1
                 column = 0
@@ -6702,8 +6721,7 @@ public struct Terminal: Equatable, Sendable {
     /// of row 0 -- a surviving prefix is a real continuation, and severing would split one
     /// logical line in two. The funnel is a no-op on the alternate screen.
     private mutating func severHistoryWrapClaimForRowZeroErase() {
-        let styleId = backgroundEraseStyleId()
-        severWrapClaim(before: 0, replacementStyleId: styleId)
+        severWrapClaim(before: 0)
     }
 
     /// A row that keeps a protected cell was not cleared, so its line structure still stands.
@@ -7067,8 +7085,7 @@ public struct Terminal: Equatable, Sendable {
         screen.semanticContentClearsAtEndOfLine = false
         promptRedrawMode = .full
 
-        let styleId = backgroundEraseStyleId()
-        severWrapClaim(before: 0, replacementStyleId: styleId)
+        severWrapClaim(before: 0)
         for row in screen.rows.indices {
             eraseEntireRow(row)
         }
@@ -7233,8 +7250,8 @@ public struct Terminal: Equatable, Sendable {
     /// Writes a prefix of the run into one row in a single pass, or returns 0 to decline it.
     ///
     /// Everything `print`/`printNarrow` pay per character -- the Unicode classification, the
-    /// cluster-join attempt, `invalidateInspection`, the style-id read, the wrap-spacer repair,
-    /// and `rememberOpenCluster` -- is paid once here for the whole prefix. Two facts make that
+    /// cluster-join attempt, `invalidateInspection`, the style-id reads, and
+    /// `rememberOpenCluster` -- is paid once here for the whole prefix. Two facts make that
     /// sound, and both are pinned by `TerminalASCIIRunTests`: each supplier yields a scalar whose
     /// classification is narrow, grapheme-break-`.other`, and free of emoji flags, so no character
     /// of a run can be wide or be joined by the next one; and Prepend is the only class an `.other`
@@ -7264,8 +7281,8 @@ public struct Terminal: Equatable, Sendable {
         if let context = clusterContext, context.previousClass == .prepend { return 0 }
 
         // Cut at the right margin, then before the first cell an overwrite cannot simply replace:
-        // a wide pair blanks its other half and a wrap spacer retires the wrap it stands for,
-        // which is `prepareDestination`'s job and not this one's.
+        // a wide pair blanks its other half, which is `prepareDestination`'s job and not this
+        // one's.
         let available = min(runCount, columnCount - column)
         let count = readingRowCells(row) { cells -> Int in
             var count = 0
@@ -7277,6 +7294,10 @@ public struct Terminal: Equatable, Sendable {
             return count
         }
         guard count > 0 else { return 0 }
+
+        // The scalar path asks for this style before it prepares each destination. Keep the lazy
+        // cache state equal when the bulk path proves that no destination needs preparation.
+        _ = backgroundEraseStyleId()
 
         // The per-character path issues one identity per cell and resets the counter when it hands
         // out `ContentIdentity.max`. A run that would straddle that reset is declined so the reset
@@ -7292,19 +7313,10 @@ public struct Terminal: Equatable, Sendable {
             nextContentIdentity = baseIdentity + ContentIdentity(count)
         }
 
-        invalidateInspection(inViewportRows: row..<(row + 1))
-        let replacementStyleId = backgroundEraseStyleId()
-        // The run's own destination preparation: the boundary halves `prepareDestination` looks
-        // for cannot be here, because the cut above already stopped at the first wide cell, so the
-        // spacer retirement is all that is left of it. Columns above 1 never had a spacer.
-        if column <= 1 {
-            clearPreviousSpacer(
-                beforeRow: row,
-                column: column,
-                replacementStyleId: replacementStyleId
-            )
-        }
-
+        invalidateInspection(
+            inViewportRows: row..<(row + 1),
+            affectsPreviousProjection: column == 0
+        )
         writeNarrowCells(
             row: row,
             column: column,
@@ -7451,7 +7463,10 @@ public struct Terminal: Equatable, Sendable {
             clusterContext = context
             return true
         }
-        invalidateInspection(inViewportRows: target.row..<(target.row + 1))
+        invalidateInspection(
+            inViewportRows: target.row..<(target.row + 1),
+            affectsPreviousProjection: target.column == 0
+        )
         switch desiredClusterWidth(
             for: scalar,
             classification: classification,
@@ -7514,13 +7529,10 @@ public struct Terminal: Equatable, Sendable {
                     replacementStyleId: replacementStyleId
                 )
                 screen.rows[target.row].cells[target.column] = GridCell(
-                    kind: .spacerHead,
-                    styleId: styleId,
-                    hyperlinkId: hyperlinkId,
-                    contentIdentity: contentIdentity
+                    styleId: styleId
                 )
                 screen.rows[target.row].isSoftWrapped = true
-                screen.rows[target.row].marginProvenance = .content
+                screen.rows[target.row].marginProvenance = .wideWrap
                 screen.cursor = target
                 let advanced = advanceToNextRow(preservingWrapClaim: true)
                 if advanced == false {
@@ -7528,21 +7540,23 @@ public struct Terminal: Equatable, Sendable {
                         styleId: replacementStyleId
                     )
                     screen.rows[target.row].isSoftWrapped = false
+                    screen.rows[target.row].marginProvenance = .content
                 }
                 screen.cursor.column = 0
                 destination = screen.cursor
-                invalidateInspection(inViewportRows: destination.row..<(destination.row + 1))
+                invalidateInspection(
+                    inViewportRows: destination.row..<(destination.row + 1),
+                    affectsPreviousProjection: true
+                )
                 clearCellAndPair(
                     row: destination.row,
                     column: 0,
-                    replacementStyleId: replacementStyleId,
-                    clearsPreviousSpacer: advanced == false
+                    replacementStyleId: replacementStyleId
                 )
                 clearCellAndPair(
                     row: destination.row,
                     column: 1,
-                    replacementStyleId: replacementStyleId,
-                    clearsPreviousSpacer: advanced == false
+                    replacementStyleId: replacementStyleId
                 )
             } else {
                 destination.column = columnCount - 2
@@ -7595,14 +7609,6 @@ public struct Terminal: Equatable, Sendable {
         screen.rows[target.row].cells[target.column].kind = .narrow
         screen.rows[target.row].cells[target.column + 1] = GridCell(styleId: replacementStyleId)
 
-        if target.column == 0 {
-            clearPreviousSpacer(
-                beforeRow: target.row,
-                column: target.column,
-                replacementStyleId: replacementStyleId
-            )
-        }
-
         if screen.cursor.column == columnCount - 1 {
             screen.isPendingWrap = false
         } else {
@@ -7636,7 +7642,10 @@ public struct Terminal: Equatable, Sendable {
     ) {
         let contentIdentity = allocateContentIdentity()
         let replacementStyleId = backgroundEraseStyleId()
-        invalidateInspection(inViewportRows: screen.cursor.row..<(screen.cursor.row + 1))
+        invalidateInspection(
+            inViewportRows: screen.cursor.row..<(screen.cursor.row + 1),
+            affectsPreviousProjection: screen.cursor.column <= 1
+        )
         if modes.isInsertMode {
             moveAndFillCells(
                 in: screen.cursor.column..<columnCount,
@@ -7664,8 +7673,10 @@ public struct Terminal: Equatable, Sendable {
     ) {
         let contentIdentity = allocateContentIdentity()
         let replacementStyleId = backgroundEraseStyleId()
-        invalidateInspection(inViewportRows: screen.cursor.row..<(screen.cursor.row + 1))
-        var preservesWrappedSpacer = false
+        invalidateInspection(
+            inViewportRows: screen.cursor.row..<(screen.cursor.row + 1),
+            affectsPreviousProjection: screen.cursor.column <= 1
+        )
         if screen.cursor.column == columnCount - 1 {
             if modes.isAutoWrapMode {
                 prepareDestination(
@@ -7674,13 +7685,10 @@ public struct Terminal: Equatable, Sendable {
                     replacementStyleId: replacementStyleId
                 )
                 screen.rows[screen.cursor.row].cells[screen.cursor.column] = GridCell(
-                    kind: .spacerHead,
-                    styleId: currentStyleId(),
-                    hyperlinkId: hyperlinkPen,
-                    contentIdentity: contentIdentity
+                    styleId: currentStyleId()
                 )
                 screen.rows[screen.cursor.row].isSoftWrapped = true
-                screen.rows[screen.cursor.row].marginProvenance = .content
+                screen.rows[screen.cursor.row].marginProvenance = .wideWrap
                 let gap = screen.cursor
                 let advanced = advanceToNextRow(preservingWrapClaim: true)
                 if advanced == false {
@@ -7688,15 +7696,18 @@ public struct Terminal: Equatable, Sendable {
                         styleId: replacementStyleId
                     )
                     screen.rows[gap.row].isSoftWrapped = false
+                    screen.rows[gap.row].marginProvenance = .content
                 }
                 screen.cursor.column = 0
-                preservesWrappedSpacer = advanced
             } else {
                 screen.cursor.column = columnCount - 2
             }
         }
 
-        invalidateInspection(inViewportRows: screen.cursor.row..<(screen.cursor.row + 1))
+        invalidateInspection(
+            inViewportRows: screen.cursor.row..<(screen.cursor.row + 1),
+            affectsPreviousProjection: screen.cursor.column == 0
+        )
 
         if modes.isInsertMode {
             moveAndFillCells(
@@ -7709,8 +7720,7 @@ public struct Terminal: Equatable, Sendable {
         prepareDestination(
             row: screen.cursor.row,
             columns: screen.cursor.column..<(screen.cursor.column + 2),
-            replacementStyleId: replacementStyleId,
-            clearsPreviousSpacer: preservesWrappedSpacer == false
+            replacementStyleId: replacementStyleId
         )
         let styleId = currentStyleId()
         screen.rows[screen.cursor.row].cells[screen.cursor.column] = GridCell(
@@ -8042,7 +8052,7 @@ public struct Terminal: Equatable, Sendable {
             // `self.rows` would be an overlapping access to `self`.
             appendToScrollback(Array(screen.rows[range.lowerBound..<(range.lowerBound + amount)]))
         } else {
-            severWrapClaim(before: range.lowerBound, replacementStyleId: styleId)
+            severWrapClaim(before: range.lowerBound)
         }
 
         Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
@@ -8059,7 +8069,7 @@ public struct Terminal: Equatable, Sendable {
             let lastSurvivor = delta < 0
                 ? range.lowerBound + survivingCount - 1
                 : range.upperBound - 1
-            severWrapClaim(at: lastSurvivor, replacementStyleId: styleId)
+            severWrapClaim(at: lastSurvivor)
         }
         if delta < 0, pushesToScrollback {
             enforceScrollbackBudget()
@@ -8074,7 +8084,10 @@ public struct Terminal: Equatable, Sendable {
         by delta: Int
     ) {
         guard range.isEmpty == false, delta != 0 else { return }
-        invalidateInspection(inViewportRows: row..<(row + 1))
+        invalidateInspection(
+            inViewportRows: row..<(row + 1),
+            affectsPreviousProjection: range.lowerBound <= 1
+        )
         let amount = min(abs(delta), range.count)
         let styleId = backgroundEraseStyleId()
 
@@ -8089,12 +8102,7 @@ public struct Terminal: Equatable, Sendable {
             }
         }
 
-        severWrapClaim(at: row, replacementStyleId: styleId)
-        clearPreviousSpacer(
-            beforeRow: row,
-            column: range.lowerBound,
-            replacementStyleId: styleId
-        )
+        severWrapClaim(at: row)
         repairHorizontalMove(in: row, replacementStyleId: styleId)
     }
 
@@ -8117,9 +8125,7 @@ public struct Terminal: Equatable, Sendable {
                     if column == 0 || cells[column - 1].kind != .wideHead {
                         invalidColumns.append(column)
                     }
-                case .spacerHead:
-                    invalidColumns.append(column)
-                case .padding, .narrow:
+                case .padding, .narrow, .spacerHead:
                     break
                 }
             }
@@ -8134,36 +8140,26 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func severWrapClaim(
-        before row: Int,
-        replacementStyleId: StyleId
-    ) {
+    private mutating func severWrapClaim(before row: Int) {
         if row > 0 {
-            severWrapClaim(at: row - 1, replacementStyleId: replacementStyleId)
+            severWrapClaim(at: row - 1)
         } else if isAlternateScreenActive == false {
-            severScrollbackWrapClaim(replacementStyleId: replacementStyleId)
+            severScrollbackWrapClaim()
         }
     }
 
-    private mutating func severWrapClaim(
-        at row: Int,
-        replacementStyleId: StyleId
-    ) {
+    private mutating func severWrapClaim(at row: Int) {
         guard screen.rows.indices.contains(row) else { return }
-        guard screen.rows[row].isSoftWrapped
-            || screen.rows[row].cells[columnCount - 1].kind == .spacerHead
-        else { return }
+        guard screen.rows[row].isSoftWrapped else { return }
         invalidateInspection(inViewportRows: row..<(row + 1))
         screen.rows[row].isSoftWrapped = false
-        if screen.rows[row].cells[columnCount - 1].kind == .spacerHead {
-            screen.rows[row].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
-        }
+        screen.rows[row].marginProvenance = .content
     }
 
     /// Ends the logical line history is still printing, which is `research/31/D2` operation 2.
     ///
     /// The store resolves any skipped margin from its wrap-time paint before closing the line.
-    private mutating func severScrollbackWrapClaim(replacementStyleId: StyleId) {
+    private mutating func severScrollbackWrapClaim() {
         guard history.store.hasOpenTailRecord else { return }
         invalidateInspection(inScrollbackRow: historyRowCount - 1)
         mutateHistory { $0.closeOpenRecord() }
@@ -8195,14 +8191,10 @@ public struct Terminal: Equatable, Sendable {
     /// the range are left untouched because the caller is about to store every one of them, so
     /// each printed cell is written exactly once.
     ///
-    /// Pass `clearsPreviousSpacer: false` from the caller that wrote that spacer itself: a wide
-    /// glyph which wrapped off the right margin must preserve the spacer standing for its own
-    /// wrap while it prepares columns 0 and 1.
     private mutating func prepareDestination(
         row: Int,
         columns: Range<Int>,
-        replacementStyleId: StyleId,
-        clearsPreviousSpacer: Bool = true
+        replacementStyleId: StyleId
     ) {
         // Checking the two boundary columns is enough only because wide pairs are consistent -- a
         // `.wideHead` is always followed by its `.wideTail` -- so a partner the range severs can
@@ -8215,14 +8207,6 @@ public struct Terminal: Equatable, Sendable {
         if after < columnCount, screen.rows[row].cells[after].kind == .wideTail {
             screen.rows[row].cells[after] = GridCell(styleId: replacementStyleId)
         }
-
-        if clearsPreviousSpacer {
-            clearPreviousSpacer(
-                beforeRow: row,
-                column: columns.lowerBound,
-                replacementStyleId: replacementStyleId
-            )
-        }
     }
 
     /// Blanks one cell whose blank is load-bearing, severing the partner it may claim.
@@ -8234,35 +8218,15 @@ public struct Terminal: Equatable, Sendable {
     private mutating func clearCellAndPair(
         row: Int,
         column: Int,
-        replacementStyleId: StyleId,
-        clearsPreviousSpacer: Bool = true
+        replacementStyleId: StyleId
     ) {
         guard screen.rows.indices.contains(row), screen.rows[row].cells.indices.contains(column) else { return }
         prepareDestination(
             row: row,
             columns: column..<(column + 1),
-            replacementStyleId: replacementStyleId,
-            clearsPreviousSpacer: clearsPreviousSpacer
+            replacementStyleId: replacementStyleId
         )
         screen.rows[row].cells[column] = GridCell(styleId: replacementStyleId)
-    }
-
-    private mutating func clearPreviousSpacer(
-        beforeRow row: Int,
-        column: Int,
-        replacementStyleId: StyleId = Terminal.defaultStyleId
-    ) {
-        guard column <= 1 else { return }
-        if row > 0, screen.rows[row - 1].cells[columnCount - 1].kind == .spacerHead {
-            invalidateInspection(inViewportRows: (row - 1)..<row)
-            screen.rows[row - 1].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
-        } else if row == 0, isAlternateScreenActive == false, historyRowCount > 0 {
-            // This write changes whether the seam projects a spacer or the store's remembered
-            // wrap-time blank, without mutating the row above it.
-            if seamRowIsShortOfItsSpacer {
-                invalidateInspection(inScrollbackRow: historyRowCount - 1)
-            }
-        }
     }
 
 }

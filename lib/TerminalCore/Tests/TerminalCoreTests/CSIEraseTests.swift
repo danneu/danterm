@@ -652,22 +652,27 @@ struct CSIEraseTests {
         expectValidGrid(selective)
     }
 
-    @Test("a selective erase blanks a wrap spacer standing in its region")
+    @Test("a selective erase preserves a protected wide wrap gap in its region")
     func selectiveEraseBlanksAWrapSpacer() throws {
-        // Intent: the spacer head a wrapped wide character leaves at the margin is blanked by
-        //   a selective erase whatever the pen's protection was when the character printed.
-        // Why it exists: the spacer is a wrap artifact, not a character the program wrote. If
-        //   it could survive a selective erase, DECSEL could produce a spacer on a row that no
-        //   longer wraps -- a grid shape ED/EL cannot make.
+        // Intent: the derived gap above a protected wide glyph survives a selective erase.
+        // Why it exists: the gap projects the follower's protection. Treating the stored margin
+        //   blank as unprotected would erase the evidence for a gap the protected glyph still
+        //   needs.
         // Scenario: a protected wide glyph is printed at the right margin, so it wraps and
         //   leaves a spacer behind, and the row it left is then selectively erased.
         var terminal = try #require(Terminal(columns: 4, rows: 2))
         terminal.feed(Array("\u{1B}[1;4H\u{1B}[1\"q\u{754C}".utf8))
         #expect(terminal.cell(row: 0, column: 3)?.kind == .spacerHead)
 
+        terminal.feed(Array("\u{1B}[1;4H\u{1B}[?1K".utf8))
+
+        #expect(terminal.cell(row: 0, column: 3)?.kind == .spacerHead)
+        expectValidGrid(terminal)
+
         terminal.feed(Array("\u{1B}[1;4H\u{1B}[?K".utf8))
 
         #expect(terminal.cell(row: 0, column: 3)?.kind == .padding)
+        #expect(terminal.geometry.rows[0].isSoftWrapped == false)
         expectValidGrid(terminal)
     }
 
@@ -721,11 +726,10 @@ struct CSIEraseTests {
 
     @Test("a spacer is retired by the wide head below it going away, not by the erase itself")
     func selectiveEraseKeepsTheSpacerAboveAProtectedHead() throws {
-        // Intent: the spacer repair fires only when the column-0 wide head it heads was blanked,
-        //   both for a spacer on the live row above and for one at the history seam.
-        // Why it exists: the repair's region is the head's row, not the spacer's. Retiring a
-        //   spacer whose head survived would leave the wide character with no room at the margin
-        //   above it -- the inverse of the corruption the repair was written to prevent.
+        // Intent: the projected spacer survives while its protected column-0 wide head survives,
+        //   both for a live row above it and for one at the history seam.
+        // Why it exists: the spacer derives from the wide head. Erasing unrelated cells in the
+        //   follower row must not remove a gap that the protected glyph still needs.
         // Scenario: a protected wide glyph wrapped off the right margin, and the row it landed
         //   on is selectively erased.
         var live = try #require(Terminal(columns: 4, rows: 2))

@@ -697,15 +697,15 @@ extension Terminal {
         /// "Soft-wrapped" here is `logicallyContinues`, not the raw claim: a claim whose margin
         /// an erase blanked (`GridRow.marginProvenance`) measures as a hard end, or the erased
         /// leftovers would be admitted as line content and fuse separately printed lines.
-        /// and the `.spacerHead` a wrap left in the last column is dropped, because where a
-        /// spacer sits is a function of the width and `31/I1` forbids storing one. A hard-ended
+        /// and the blank a wide wrap left in the last column is dropped, because whether that
+        /// blank projects as a spacer is a function of its follower. A hard-ended
         /// row whose tail past the content is painted by a background erase contributes that
         /// paint as the record's **trailing fill style**, not as cells.
         mutating func admit(_ row: Terminal.GridRow) {
             resolvePendingMargin(before: row.cells.first)
             let admission = admissionExtent(row)
             let leavesPendingMargin = row.logicallyContinues
-                && row.cell(at: width - 1).kind == .spacerHead
+                && row.marginProvenance == .wideWrap
             let pendingMarginCapacity = leavesPendingMargin ? 1 : 0
 
             // A budget too small to hold one display row of this width retains nothing rather
@@ -828,7 +828,7 @@ extension Terminal {
                     end = start
                 }
             }
-            if end > 0, row.cell(at: end - 1).kind == .spacerHead {
+            if end > 0, row.logicallyContinues, row.marginProvenance == .wideWrap {
                 end -= 1
             }
             return (max(0, end), fillStyle)
@@ -1139,7 +1139,7 @@ extension Terminal {
             guard count > 0 else { return [] }
 
             // Folded first, cut after -- and that order is the whole of it. A display row's
-            // trailing `.spacerHead` is re-derived from the wide head that *follows* it, so
+            // trailing spacer is re-derived from the wide head that *follows* it, so
             // folding a row once the row below it has already been cut away loses the column
             // the spacer occupied. Cutting from the back one row at a time and folding as it
             // went dropped exactly that cell on a height grow.
@@ -1154,15 +1154,10 @@ extension Terminal {
                     row.cells.count == width - 1,
                     "a pending margin must complete the open tail's short final row"
                 )
-                let margin = follower?.kind == .wideHead
-                    ? Terminal.GridCell(
-                        kind: .spacerHead,
-                        styleId: follower?.styleId ?? styleId,
-                        hyperlinkId: follower?.hyperlinkId,
-                        contentIdentity: follower?.contentIdentity
-                    )
-                    : Terminal.GridCell(kind: .padding, styleId: styleId)
-                row.cells.append(margin)
+                row.cells.append(Terminal.GridCell(kind: .padding, styleId: styleId))
+                if follower?.kind == .wideHead {
+                    row.marginProvenance = .wideWrap
+                }
                 handedBack[handedBack.count - 1] = row
                 pendingMarginStyleId = nil
             } else if let head = follower,
@@ -1171,12 +1166,8 @@ extension Terminal {
                       row.isSoftWrapped,
                       row.cells.count == width - 1
             {
-                row.cells.append(Terminal.GridCell(
-                    kind: .spacerHead,
-                    styleId: head.styleId,
-                    hyperlinkId: head.hyperlinkId,
-                    contentIdentity: head.contentIdentity
-                ))
+                row.cells.append(Terminal.GridCell(kind: .padding, styleId: head.styleId))
+                row.marginProvenance = .wideWrap
                 handedBack[handedBack.count - 1] = row
             }
             for _ in 0..<count {
@@ -1209,8 +1200,8 @@ extension Terminal {
 
         /// The cell range and row count of a record's last display row at the current width.
         ///
-        /// One derivation for the three callers that need it -- the spacer repair, tail
-        /// truncation and the width-change pull-back -- so the fold's last-row semantics have a
+        /// One derivation for the callers that need it -- pending-margin resolution, tail
+        /// truncation, and the width-change pull-back -- so the fold's last-row semantics have a
         /// single place to change. `enumerateRows` always fires at least once (`research/31/DD15`'s
         /// one-row floor), so the seeded defaults never survive.
         private func lastRowRange(

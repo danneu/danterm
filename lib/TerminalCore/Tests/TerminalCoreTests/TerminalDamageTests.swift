@@ -114,6 +114,36 @@ struct TerminalDamageTests {
         #expect(terminal.drainDamage() == TerminalDamage(rows: [2]))
     }
 
+    @Test("changing a wide-wrap follower damages the derived gap row")
+    func wideWrapFollowerDamage() throws {
+        // Intent: a first-cell write damages both its own row and the preceding row whose
+        //   projected margin reads that cell.
+        // Why it exists: the frame planner reuses every row absent from incremental damage, so
+        //   follower-only damage would leave a stale spacer style or spacer kind on screen.
+        // Scenario: redraw a wrapped wide head under a new pen, then replace it with a narrow
+        //   cell while the gap row itself remains physically unchanged.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("\u{1B}[1;4H\u{754C}".utf8))
+        _ = terminal.drainDamage()
+
+        terminal.feed(Array("\u{1B}[2;1H\u{1B}[31m\u{754C}".utf8))
+        #expect(terminal.drainDamage() == TerminalDamage(rows: [0, 1]))
+        #expect(terminal.cell(row: 0, column: 3)?.kind == .spacerHead)
+        #expect(terminal.cell(row: 0, column: 3)?.style.foreground == .indexed(1))
+
+        terminal.feed(Array("\u{1B}[2;1HX".utf8))
+        #expect(terminal.drainDamage() == TerminalDamage(rows: [0, 1]))
+        #expect(terminal.cell(row: 0, column: 3)?.kind == .padding)
+
+        var tailWrite = try #require(Terminal(columns: 4, rows: 2))
+        tailWrite.feed(Array("\u{1B}[1;4H\u{754C}".utf8))
+        _ = tailWrite.drainDamage()
+
+        tailWrite.feed(Array("\u{1B}[2;2HX".utf8))
+        #expect(tailWrite.drainDamage() == TerminalDamage(rows: [0, 1]))
+        #expect(tailWrite.cell(row: 0, column: 3)?.kind == .padding)
+    }
+
     @Test("selection changes damage the old and new selected row spans")
     func selectionDamage() throws {
         var terminal = try #require(Terminal(columns: 6, rows: 4))

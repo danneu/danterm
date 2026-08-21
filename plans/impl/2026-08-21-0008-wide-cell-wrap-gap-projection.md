@@ -376,4 +376,4 @@ Green, independently reviewable commits; order is load-bearing where noted.
 - [x] 3. refactor(terminal): record the margin's last writer as row provenance
 - [x] 4. refactor(terminal): route every line-structure reader through one spacer projection
 - [x] 5. feat(terminal): let the open tail's follower resolve its pending margin
-- [ ] 6. refactor(terminal): derive the wrap spacer instead of storing it
+- [x] 6. refactor(terminal): derive the wrap spacer instead of storing it

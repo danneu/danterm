@@ -44,6 +44,7 @@ struct TerminalLogicalLineFoldTests {
         //   simplification argument is only collectable if it does.
         for content in RetainedContent.allCases {
             let retained = try liveDisplayRows(content.stimulus, columns: content.columns)
+            let projected = projectedRows(retained, columns: content.columns)
             try #require(retained.count > 4, "\(content) displayed too little to compare")
 
             var store = Terminal.LogicalLineStore(
@@ -64,12 +65,12 @@ struct TerminalLogicalLineFoldTests {
                 assertSameRow(
                     painted: painted,
                     content: contentOnly,
-                    reference: retained[index],
+                    reference: projected[index],
                     width: content.columns,
                     label: "\(content) row \(index)"
                 )
             }
-            try assertOpenTailSeam(store, retained, width: content.columns, label: "\(content)")
+            try assertOpenTailSeam(store, projected, width: content.columns, label: "\(content)")
         }
     }
 
@@ -97,6 +98,7 @@ struct TerminalLogicalLineFoldTests {
                 // transcript stays in the live grid, so neither retained storage nor a resize
                 // fold is shared with the store under test.
                 let referenceRows = try liveDisplayRows(content.stimulus, columns: newWidth)
+                let projectedReference = projectedRows(referenceRows, columns: newWidth)
                 #expect(
                     store.grandDisplayRowTotal == referenceRows.count,
                     "\(content) at width \(newWidth): folded \(store.grandDisplayRowTotal) rows against \(referenceRows.count)"
@@ -107,14 +109,14 @@ struct TerminalLogicalLineFoldTests {
                     assertSameRow(
                         painted: painted,
                         content: contentOnly,
-                        reference: referenceRows[offset],
+                        reference: projectedReference[offset],
                         width: newWidth,
                         label: "\(content) at width \(newWidth), row \(offset)"
                     )
                 }
                 try assertOpenTailSeam(
                     store,
-                    referenceRows,
+                    projectedReference,
                     width: newWidth,
                     label: "\(content) at width \(newWidth)"
                 )
@@ -207,8 +209,8 @@ struct TerminalLogicalLineFoldTests {
 
     @Test("A dropped spacer is re-derived rather than stored")
     func spacerIsNeverStored() {
-        // Intent: admitting a display row whose last column is a `.spacerHead` stores the
-        //   content cells only, and the spacer reappears at read.
+        // Intent: admitting a display row whose margin provenance names a wide-wrap gap stores
+        //   the content cells only, and the spacer reappears at read.
         // Why it exists: `31/I1` -- a spacer's *position* is a function of the width, so
         //   storing one would be width-dependent data in history, which is `research/31/D1`'s no-go
         //   trigger.
@@ -216,9 +218,10 @@ struct TerminalLogicalLineFoldTests {
         var wrapped = Terminal.GridRow(cells: [
             Terminal.GridCell(scalars: TerminalScalars("a" as Unicode.Scalar), kind: .narrow),
             Terminal.GridCell(scalars: TerminalScalars("b" as Unicode.Scalar), kind: .narrow),
-            Terminal.GridCell(scalars: .empty, kind: .spacerHead),
+            Terminal.GridCell(),
         ])
         wrapped.isSoftWrapped = true
+        wrapped.marginProvenance = .wideWrap
         store.admit(wrapped)
         #expect(store.recordSummary(at: 0)!.cellCount == 2)
 
@@ -254,9 +257,10 @@ struct TerminalLogicalLineFoldTests {
         var wrapped = Terminal.GridRow(cells: [
             Terminal.GridCell(scalars: TerminalScalars("a" as Unicode.Scalar), kind: .narrow),
             Terminal.GridCell(scalars: TerminalScalars("b" as Unicode.Scalar), kind: .narrow),
-            Terminal.GridCell(scalars: .empty, kind: .spacerHead),
+            Terminal.GridCell(),
         ])
         wrapped.isSoftWrapped = true
+        wrapped.marginProvenance = .wideWrap
         store.admit(wrapped)
         #expect(store.recordSummary(at: 0)!.cellCount == 2)
 
@@ -574,8 +578,9 @@ struct TerminalLogicalLineFoldTests {
         heightGrow.admit(gap)
         let pulled = heightGrow.truncateTail(displayRows: 1, follower: head)
         let row = try #require(pulled.first)
-        #expect(row.cell(at: 2).kind == .spacerHead)
-        #expect(row.cell(at: 2).styleId == 7)
+        #expect(row.cell(at: 2).kind == .padding)
+        #expect(row.cell(at: 2).styleId == 5)
+        #expect(row.marginProvenance == .wideWrap)
     }
 
     @Test("The borrowing walks emit exactly the painted row's columns, on every content class")
@@ -720,6 +725,19 @@ struct TerminalLogicalLineFoldTests {
         return rows
     }
 
+    /// Applies the public row stream's derived-spacer rule to the independent live-grid oracle.
+    private func projectedRows(
+        _ rows: [Terminal.GridRow],
+        columns: Int
+    ) -> [Terminal.GridRow] {
+        rows.indices.map { index in
+            rows[index].projected(
+                columns: columns,
+                follower: rows.indices.contains(index + 1) ? rows[index + 1].cells.first : nil
+            )
+        }
+    }
+
     /// The one resize-driven reference, used only to show today's live-grid erase-tail loss.
     private func resizedLiveDisplayRows(
         _ stimulus: String,
@@ -791,7 +809,7 @@ struct TerminalLogicalLineFoldTests {
         #expect(folded.isSoftWrapped == reference.isSoftWrapped, "\(label) seam row: soft wrap")
     }
 
-    /// Builds the stored-spacer form the store still admits while live rows hold that marker.
+    /// Builds the live wide-wrap-gap form admitted by the store.
     private static func gapRow(width: Int, styleId: Terminal.StyleId) -> Terminal.GridRow {
         var cells = (0..<(width - 1)).map { offset in
             Terminal.GridCell(
@@ -799,9 +817,10 @@ struct TerminalLogicalLineFoldTests {
                 kind: .narrow
             )
         }
-        cells.append(Terminal.GridCell(kind: .spacerHead, styleId: styleId))
+        cells.append(Terminal.GridCell(kind: .padding, styleId: styleId))
         var row = Terminal.GridRow(cells: cells)
         row.isSoftWrapped = true
+        row.marginProvenance = .wideWrap
         return row
     }
 

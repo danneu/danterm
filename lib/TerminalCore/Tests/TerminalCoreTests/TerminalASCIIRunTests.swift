@@ -141,13 +141,12 @@ struct TerminalASCIIRunTests {
         expectValidGrid(onTail)
     }
 
-    @Test("a run in the first columns clears the previous row's wrap spacer")
+    @Test("a run in the first columns retires the previous row's projected wrap spacer")
     func runClearsPrecedingWrapSpacer() throws {
-        // Intent: printing over columns 0 and 1 of a row whose predecessor ends in a wrap spacer
-        //   retires that spacer and the soft wrap it stands for.
-        // Why it exists: the bulk path calls the spacer repair once for the whole run where the
-        //   character path calls it per cell. Once is enough only because the repair is
-        //   idempotent, and this is what says so in behavior rather than by reading it.
+        // Intent: printing over columns 0 and 1 removes the wide head that made the preceding
+        //   row project a wrap spacer.
+        // Why it exists: the bulk path must invalidate the same adjacent-row projection as the
+        //   character path even though it writes the run in one pass.
         var terminal = try #require(Terminal(columns: 4, rows: 3))
         terminal.moveCursor(row: 0, column: 3)
         terminal.feed(Array("\u{754C}".utf8))
