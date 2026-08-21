@@ -92,7 +92,7 @@ struct TerminalSavedCursorTests {
         #expect(terminal.geometry.cursor?.row == 0)
     }
 
-    @Test("restore reclamps saved state and re-arms pending wrap only at an active edge")
+    @Test("restore reclamps saved state and re-arms last-column state at an active edge")
     func restoreClampAndPendingTripleGate() throws {
         var terminal = try #require(Terminal(columns: 5, rows: 6))
         terminal.feed(Array("\u{1B}[2;5r\u{1B}[?6h\u{1B}[4;5HA\u{1B}7".utf8))
@@ -101,7 +101,7 @@ struct TerminalSavedCursorTests {
         #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 4, isPendingWrap: true))
 
         terminal.feed(Array("\u{1B}[?7l\u{1B}8".utf8))
-        #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 4, isPendingWrap: false))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 4, isPendingWrap: true))
 
         terminal.feed(Array("\u{1B}[?7h".utf8))
         // A width change carries the saved slot with its text: the save sat one past the 'A' with

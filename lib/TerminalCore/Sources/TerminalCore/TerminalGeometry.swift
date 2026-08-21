@@ -226,7 +226,7 @@ public struct TerminalScrollProjection: Equatable, Sendable {
     }
 }
 
-/// Describes a cursor position together with VT100 deferred-wrap state.
+/// Describes a cursor position together with VT last-column state.
 public struct TerminalCursor: Equatable, Sendable {
     /// Zero-based viewport row.
     public let row: Int
@@ -234,7 +234,7 @@ public struct TerminalCursor: Equatable, Sendable {
     /// Zero-based viewport column.
     public let column: Int
 
-    /// Records that the next positive-width print must soft-wrap first.
+    /// Records a margin write; a later positive-width print wraps first only when DECAWM is on.
     public let isPendingWrap: Bool
 
     /// Creates an inspection value suitable for deterministic state assertions.

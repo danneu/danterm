@@ -2708,6 +2708,10 @@ public struct Terminal: Equatable, Sendable {
                 rows: rows,
                 clearsSoftWrap: columns != oldColumnCount
             )
+            if columns != oldColumnCount {
+                alternate.isPendingWrap = false
+                alternate.savedCursor.isPendingWrap = false
+            }
             clampScreenCursorState(&alternate)
             inactiveScreen = alternate
         }
@@ -6505,14 +6509,9 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func applyANSIModes(_ parameters: CSIParameters, enabled: Bool) {
-        var recognized = false
         for parameter in parameters {
             guard let keyPath = Self.modeKeyPath(parameter, namespace: .ansi) else { continue }
             modes[keyPath: keyPath] = enabled
-            recognized = true
-        }
-        if recognized {
-            clearPendingMotionState()
         }
     }
 
@@ -6525,8 +6524,6 @@ public struct Terminal: Equatable, Sendable {
             switch parameter {
             case 6:
                 screen.cursor = CellPosition(row: positioningOriginRow, column: 0)
-                shouldClearPendingMotion = true
-            case 7:
                 shouldClearPendingMotion = true
             case 1000:
                 modes.mouseTrackingMode = enabled ? .click : .off
@@ -7002,7 +6999,6 @@ public struct Terminal: Equatable, Sendable {
             reverseIndex()
         case 0x48:
             tabStops.insert(screen.cursor.column)
-            clearPendingMotionState()
         case 0x63:
             hardReset()
         case 0x6E:
@@ -7128,7 +7124,6 @@ public struct Terminal: Equatable, Sendable {
         default:
             return
         }
-        clearPendingMotionState()
     }
 
     private mutating func saveCursor() {
@@ -7151,7 +7146,9 @@ public struct Terminal: Equatable, Sendable {
             row: min(max(screen.savedCursor.position.row, rowRange.lowerBound), rowRange.upperBound - 1),
             column: min(max(screen.savedCursor.position.column, 0), columnCount - 1)
         )
-        movePositionOffWideTail(&screen.cursor, in: screen.rows)
+        if screen.savedCursor.isPendingWrap == false || screen.cursor.column != columnCount - 1 {
+            movePositionOffWideTail(&screen.cursor, in: screen.rows)
+        }
         currentStyle = screen.savedCursor.style
         modes.isCursorVisible = screen.savedCursor.isCursorVisible
         modes.cursorShape = screen.savedCursor.cursorShape
@@ -7159,7 +7156,6 @@ public struct Terminal: Equatable, Sendable {
         charsets = screen.savedCursor.charsets
         clusterContext = nil
         screen.isPendingWrap = screen.savedCursor.isPendingWrap
-            && modes.isAutoWrapMode
             && screen.cursor.column == columnCount - 1
     }
 
@@ -7211,16 +7207,28 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func clampScreenCursorState(_ screen: inout ScreenState) {
-        clampPosition(&screen.cursor, in: screen.rows)
-        clampPosition(&screen.savedCursor.position, in: screen.rows)
+        clampPosition(&screen.cursor, isPendingWrap: screen.isPendingWrap, in: screen.rows)
+        clampPosition(
+            &screen.savedCursor.position,
+            isPendingWrap: screen.savedCursor.isPendingWrap,
+            in: screen.rows
+        )
         screen.isPendingWrap = screen.isPendingWrap
-            && modes.isAutoWrapMode
             && screen.cursor.column == columnCount - 1
+        screen.savedCursor.isPendingWrap = screen.savedCursor.isPendingWrap
+            && screen.savedCursor.position.column == columnCount - 1
     }
 
-    private func clampPosition(_ position: inout CellPosition, in grid: [GridRow]) {
+    private func clampPosition(
+        _ position: inout CellPosition,
+        isPendingWrap: Bool,
+        in grid: [GridRow]
+    ) {
         position.row = min(max(position.row, 0), rowCount - 1)
         position.column = min(max(position.column, 0), columnCount - 1)
+        if isPendingWrap, position.column == columnCount - 1 {
+            return
+        }
         movePositionOffWideTail(&position, in: grid)
     }
 
@@ -7234,13 +7242,19 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func repeatLastPrintedCluster(_ parameters: CSIParameters) {
         guard parameters.count <= 1,
-              let cluster = lastPrintedCluster,
-              screen.isPendingWrap == false
+              let cluster = lastPrintedCluster
         else { return }
 
         let requestedCount = max(Int(parameters.first ?? 1), 1)
-        let availableColumns = columnCount - screen.cursor.column
-        let repeatCount = min(requestedCount, availableColumns / cluster.cellWidth)
+        let repeatCount: Int
+        if screen.isPendingWrap {
+            repeatCount = modes.isAutoWrapMode
+                ? min(requestedCount, columnCount / cluster.cellWidth)
+                : 1
+        } else {
+            let availableColumns = columnCount - screen.cursor.column
+            repeatCount = min(requestedCount, availableColumns / cluster.cellWidth)
+        }
         guard repeatCount > 0 else { return }
 
         for _ in 0..<repeatCount {
@@ -7572,7 +7586,7 @@ public struct Terminal: Equatable, Sendable {
         if column + count == columnCount {
             screen.rows[row].marginProvenance = .content
             screen.cursor.column = columnCount - 1
-            screen.isPendingWrap = modes.isAutoWrapMode
+            screen.isPendingWrap = true
         } else {
             screen.cursor.column = column + count
         }
@@ -7593,7 +7607,7 @@ public struct Terminal: Equatable, Sendable {
         // A mark that joined the open cluster returned above and leaves the shift armed.
         charsets.pendingSingleShift = nil
 
-        if screen.isPendingWrap {
+        if screen.isPendingWrap, modes.isAutoWrapMode {
             invalidateInspection(inViewportRows: screen.cursor.row..<(screen.cursor.row + 1))
             softWrap()
         }
@@ -7943,11 +7957,6 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func advanceCursorPastWideCell(at head: CellPosition) {
-        if modes.isAutoWrapMode == false, head.column + 1 == columnCount - 1 {
-            screen.cursor = CellPosition(row: head.row, column: head.column + 1)
-            screen.isPendingWrap = false
-            return
-        }
         screen.cursor = CellPosition(row: head.row, column: head.column + 1)
         if screen.cursor.column == columnCount - 1 {
             screen.isPendingWrap = true

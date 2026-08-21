@@ -30,7 +30,7 @@ struct TerminalTabStopTests {
         #expect(terminal.geometry.rows[0].cells.allSatisfy { $0.kind == .padding })
     }
 
-    @Test("invalid TBC forms are bit-identical while valid forms clear pending state")
+    @Test("HTS and valid TBC forms preserve pending wrap")
     func tabClearNormalizationAndSideState() throws {
         for sequence in ["\u{1B}[1g", "\u{1B}[5g", "\u{1B}[0;3g"] {
             var terminal = try #require(Terminal(columns: 2, rows: 2))
@@ -44,7 +44,13 @@ struct TerminalTabStopTests {
             var terminal = try #require(Terminal(columns: 2, rows: 2))
             terminal.feed(Array("AB".utf8))
             terminal.feed(Array(sequence.utf8))
-            #expect(terminal.geometry.cursor?.isPendingWrap == false)
+            #expect(terminal.geometry.cursor?.isPendingWrap == true)
+            terminal.feed(Array("C".utf8))
+            #expect(terminal.screenText == "AB\nC ")
+
+            var cluster = try #require(Terminal(columns: 3, rows: 1))
+            cluster.feed(Array("A\u{200D}\(sequence)\u{0301}".utf8))
+            #expect(cluster.cell(row: 0, column: 0)?.scalars == ["A", "\u{200D}", "\u{0301}"])
         }
     }
 

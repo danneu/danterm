@@ -9,6 +9,24 @@ import Testing
 /// Pins the saved cursor as a passenger through resize: the live cursor decides the layout, and
 /// the saved slot is mapped through the displacement or the reflow that layout produced.
 struct TerminalSavedCursorResizeTests {
+    @Test("height-only resize preserves a pending wide-tail live cursor and saved slot")
+    func heightResizePreservesPendingWideTail() throws {
+        // Intent: keep both pending cursors on the margin tail of a wide cell when width is stable.
+        // Why it exists: generic cursor normalization used to demote a wide tail to its head.
+        // Scenario: DECAWM is off while a wide row is saved, the height grows, then DECRC and a
+        //   later DECAWM enable reveal whether the saved last-column state survived.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("\u{1B}[?7l\u{754C}\u{754C}\u{1B}7".utf8))
+        terminal.resize(columns: 4, rows: 3)
+
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: true))
+        terminal.feed(Array("\r\u{1B}8".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: true))
+        terminal.feed(Array("\u{1B}[?7hA".utf8))
+        #expect(terminal.screenText == "\u{754C}\u{754C}\nA   \n    ")
+        expectValidGrid(terminal)
+    }
+
     /// Six rows of one character each, a marker saved on row 4, and the live cursor parked on the
     /// last row so no trailing-blank trim runs.
     private func markerColumnTerminal() throws -> Terminal {

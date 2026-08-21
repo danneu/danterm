@@ -20,7 +20,7 @@
     { "type": "feed", "text": "\u001b[78GBBBCC" },
     { "type": "expect", "expect": { "softWraps": [true, true, false], "cursor": { "row": 2, "column": 2, "pendingWrap": false } } },
     { "type": "feed", "text": "\u001bc\u001b[?7l\u001b[75GDDDDDDD" },
-    { "type": "expect", "expect": { "cursor": { "row": 0, "column": 79, "pendingWrap": false } } },
+    { "type": "expect", "expect": { "cursor": { "row": 0, "column": 79, "pendingWrap": true } } },
     { "type": "feed", "text": "\u001b[?7h" }
   ]
 }

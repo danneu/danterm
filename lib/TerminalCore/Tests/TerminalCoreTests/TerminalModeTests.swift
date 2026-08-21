@@ -160,9 +160,9 @@ struct TerminalModeTests {
         expectValidGrid(terminal)
     }
 
-    @Test("DECAWM off pins narrow and wide output at the right edge")
+    @Test("DECAWM off records last-column state without consuming it")
     func autoWrapModeControlsRightEdge() throws {
-        // Intent: prove disabled autowrap never arms or consumes the phantom,
+        // Intent: prove disabled autowrap records but does not consume the last-column flag,
         //   including wide cluster starts and width upgrades at the last column.
         // Why it exists: all three print routes previously wrapped unconditionally.
         // Scenario: a terminal status line repeatedly overwrites its final cell
@@ -170,15 +170,15 @@ struct TerminalModeTests {
         var narrow = try #require(Terminal(columns: 3, rows: 2))
         narrow.feed(Array("\u{1B}[?7lABCD".utf8))
         #expect(narrow.screenText == "ABD\n   ")
-        #expect(narrow.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: false))
+        #expect(narrow.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: true))
 
         var disarmed = try #require(Terminal(columns: 3, rows: 2))
         disarmed.feed(Array("ABC\u{1B}[?7lD".utf8))
         #expect(disarmed.screenText == "ABD\n   ")
-        #expect(disarmed.geometry.cursor?.isPendingWrap == false)
+        #expect(disarmed.geometry.cursor?.isPendingWrap == true)
 
         narrow.feed(Array("\u{1B}[?7hEF".utf8))
-        #expect(narrow.screenText == "ABE\nF  ")
+        #expect(narrow.screenText == "ABD\nEF ")
         #expect(narrow.geometry.rows[0].isSoftWrapped)
 
         var wide = try #require(Terminal(columns: 4, rows: 1))
@@ -187,7 +187,7 @@ struct TerminalModeTests {
             .padding, .padding, .padding, .narrow,
         ])
         #expect(wide.cell(row: 0, column: 3)?.scalars == ["A"])
-        #expect(wide.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
+        #expect(wide.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: true))
         #expect(wide.geometry.rows[0].isSoftWrapped == false)
         expectValidGrid(wide)
 
@@ -195,7 +195,7 @@ struct TerminalModeTests {
         upgraded.moveCursor(row: 0, column: 3)
         upgraded.feed(Array("\u{1B}[?7l\u{00A9}\u{FE0F}".utf8))
         #expect(upgraded.cell(row: 0, column: 2)?.scalars == ["\u{00A9}", "\u{FE0F}"])
-        #expect(upgraded.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
+        #expect(upgraded.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: true))
         #expect(upgraded.geometry.rows[0].isSoftWrapped == false)
         expectValidGrid(upgraded)
     }
@@ -223,13 +223,22 @@ struct TerminalModeTests {
             #expect(terminal == expected)
         }
 
-        var pending = try #require(Terminal(columns: 2, rows: 2))
-        pending.feed(Array("AB\u{1B}[4;99;20h".utf8))
-        #expect(pending.geometry.cursor?.isPendingWrap == false)
+        for sequence in ["\u{1B}[4h", "\u{1B}[4l", "\u{1B}[20h", "\u{1B}[20l", "\u{1B}[?7h", "\u{1B}[?7l"] {
+            var pending = try #require(Terminal(columns: 2, rows: 2))
+            pending.feed(Array("AB\(sequence)".utf8))
+            #expect(pending.geometry.cursor?.isPendingWrap == true)
 
-        var cluster = try #require(Terminal(columns: 3, rows: 1))
-        cluster.feed(Array("A\u{200D}\u{1B}[?7h\u{0301}".utf8))
-        #expect(cluster.cell(row: 0, column: 0)?.scalars == ["A", "\u{200D}"])
+            var cluster = try #require(Terminal(columns: 3, rows: 1))
+            cluster.feed(Array("A\u{200D}\(sequence)\u{0301}".utf8))
+            #expect(cluster.cell(row: 0, column: 0)?.scalars == ["A", "\u{200D}", "\u{0301}"])
+        }
+
+        for sequence in ["\u{1B}[?6h", "\u{1B}[?6l"] {
+            var terminal = try #require(Terminal(columns: 2, rows: 2))
+            terminal.feed(Array("AB\u{200D}\(sequence)\u{0301}".utf8))
+            #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
+            #expect(terminal.cell(row: 0, column: 1)?.scalars == ["B", "\u{200D}"])
+        }
 
         var oneChunk = try #require(Terminal(columns: 5, rows: 5))
         oneChunk.feed(Array("\u{1B}[2;4r\u{1B}[4;20h\u{1B}[?6;7h".utf8))

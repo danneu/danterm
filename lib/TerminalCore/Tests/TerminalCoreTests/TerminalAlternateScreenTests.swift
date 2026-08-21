@@ -5,6 +5,19 @@ import Testing
 
 /// Pins the alternate screen as transient grid state over shared terminal control state.
 struct TerminalAlternateScreenTests {
+    @Test("alternate width changes clear clipped live and saved last-column state")
+    func widthChangeClearsClippedLastColumnState() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("\u{1B}[?1047h\u{1B}[?7lABCD\u{1B}7".utf8))
+
+        terminal.resize(columns: 3, rows: 2)
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: false))
+
+        terminal.feed(Array("\r\u{1B}8".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: false))
+        expectValidGrid(terminal)
+    }
+
     @Test("1047 switches grids, clears on every entry, and carries the live cursor on exit")
     func mode1047SwitchesAndClears() throws {
         var terminal = try #require(Terminal(columns: 5, rows: 2))

@@ -107,7 +107,7 @@ struct TerminalASCIIRunTests {
         // is soft-wrapped.
         #expect(terminal.screenText.hasPrefix("abcdej"))
         #expect(terminal.geometry.rows[0].isSoftWrapped == false)
-        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 5, isPendingWrap: false))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 5, isPendingWrap: true))
         expectValidGrid(terminal)
     }
 

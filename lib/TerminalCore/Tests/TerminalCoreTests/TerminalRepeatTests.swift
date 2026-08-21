@@ -47,7 +47,7 @@ struct TerminalRepeatTests {
         expectValidGrid(upgraded)
     }
 
-    @Test("REP does nothing when no cluster exists or pending wrap is already armed")
+    @Test("REP does nothing when no cluster exists and consumes armed wrap like ordinary print")
     func inertWithoutAvailableCluster() throws {
         var fresh = try #require(Terminal(columns: 3, rows: 2))
         let freshExpected = fresh
@@ -56,9 +56,9 @@ struct TerminalRepeatTests {
 
         var pending = try #require(Terminal(columns: 2, rows: 2))
         pending.feed(Array("AB".utf8))
-        let pendingExpected = pending
         pending.feed(Array("\u{1B}[1000b".utf8))
-        #expect(pending == pendingExpected)
+        #expect(pending.screenText == "AB\nBB")
+        #expect(pending.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: true))
 
         var excessParameters = try #require(Terminal(columns: 4, rows: 1))
         excessParameters.feed(Array("A".utf8))
@@ -72,14 +72,20 @@ struct TerminalRepeatTests {
         var narrow = try #require(Terminal(columns: 4, rows: 2))
         narrow.feed(Array("\u{1B}[?7la\u{1B}[1000b".utf8))
         #expect(narrow.screenText == "aaaa\n    ")
-        #expect(narrow.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
+        #expect(narrow.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: true))
 
         var wide = try #require(Terminal(columns: 5, rows: 2))
         wide.feed(Array("\u{1B}[?7l\u{754C}\u{1B}[1000b".utf8))
         #expect(wide.screenText == "\u{754C}\u{754C} \n     ")
         #expect(wide.geometry.cursor == TerminalCursor(row: 0, column: 4, isPendingWrap: false))
+
+        var armedWide = try #require(Terminal(columns: 4, rows: 2))
+        armedWide.feed(Array("\u{1B}[?7l\u{754C}\u{754C}\u{1B}[1000b".utf8))
+        #expect(armedWide.screenText == "\u{754C}\u{754C}\n    ")
+        #expect(armedWide.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: true))
         expectValidGrid(narrow)
         expectValidGrid(wide)
+        expectValidGrid(armedWide)
     }
 
     @Test("REP honors insert mode and leaves the final repeat open for combining")

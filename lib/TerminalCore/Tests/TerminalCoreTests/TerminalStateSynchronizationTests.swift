@@ -5,6 +5,44 @@ import Testing
 
 /// Proves that a reset terminal can resume from one complete engine state fence.
 struct TerminalStateSynchronizationTests {
+    @Test("state bytes preserve DECAWM-off live and saved last-column state")
+    func reconstructsModeIndependentLastColumnState() throws {
+        // Intent: synchronize both last-column flags while DECAWM is disabled, then prove the
+        //   source and replica make the same later wrapping decision.
+        // Why it exists: reconstruction used to gate both flags on the active DECAWM value.
+        // Scenario: a pane saves one full row, fills another, reconnects, and then enables wrap.
+        var source = try #require(Terminal(columns: 4, rows: 3))
+        source.feed(Array("\u{1B}[?7lABCD\u{1B}7\rWXYZ".utf8))
+
+        let synchronization = source.stateSynchronization
+        var replica = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        replica.feed(synchronization.bytes)
+        #expect(replica.geometry.cursor?.isPendingWrap == true)
+
+        let continuation = Array("\u{1B}8\u{1B}[?7hQ".utf8)
+        source.feed(continuation)
+        replica.feed(continuation)
+        expectObservableState(replica, equals: source, phase: "last-column continuation")
+        #expect(replica.screenText == "WXYZ\nQ   \n    ")
+
+        var wideSource = try #require(Terminal(columns: 4, rows: 3))
+        wideSource.feed(Array("\u{1B}[?7l\u{754C}\u{754C}\u{1B}7\r\u{754C}\u{754C}".utf8))
+        let wideSynchronization = wideSource.stateSynchronization
+        var wideReplica = try #require(Terminal(
+            columns: wideSynchronization.columns,
+            rows: wideSynchronization.rows
+        ))
+        wideReplica.feed(wideSynchronization.bytes)
+
+        wideSource.feed(continuation)
+        wideReplica.feed(continuation)
+        expectObservableState(wideReplica, equals: wideSource, phase: "wide last-column continuation")
+        #expect(wideReplica.screenText == "\u{754C}\u{754C}\nQ   \n    ")
+    }
+
     @Test("state bytes reconstruct retained and active terminal state")
     func reconstructsTerminalState() throws {
         // Intent: preserve the complete observable primary state and control modes.
