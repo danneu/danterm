@@ -107,4 +107,30 @@ struct TerminalStaleWrapClaimTests {
         #expect(terminal.geometry.rows[2].isSoftWrapped == false, "the wrap never touched row 2")
         #expect(terminal.geometry.rows[2].cells.allSatisfy { $0.kind == .padding })
     }
+
+    @Test("A declined wide wrap records no gap or claim")
+    func pinnedFooterWideWrapRecordsNoGapOrClaim() throws {
+        // Intent: a wide glyph that cannot advance from below the scroll region leaves no wrap
+        //   claim or spacer behind.
+        // Why it exists: the wide print path wrote both before learning that row advance was
+        //   declined, which made the row claim itself as its follower.
+        // Scenario: region rows 1-2 of a 4-row screen, wide wrap on the bottom row.
+        var terminal = try #require(Terminal(columns: 10, rows: 4))
+        terminal.feed(Array("\u{1B}[1;2r\u{1B}[4;10H\u{754C}".utf8))
+
+        #expect(terminal.geometry.rows[3].isSoftWrapped == false)
+        #expect(terminal.geometry.rows[3].cells[9].kind == .padding)
+        #expect(terminal.geometry.rows[3].cells[0].kind == .wideHead)
+        #expect(terminal.geometry.rows[3].cells[1].kind == .wideTail)
+        expectValidGrid(terminal)
+
+        var upgraded = try #require(Terminal(columns: 10, rows: 4))
+        upgraded.feed(Array("\u{1B}[1;2r\u{1B}[4;10H\u{00A9}\u{FE0F}".utf8))
+
+        #expect(upgraded.geometry.rows[3].isSoftWrapped == false)
+        #expect(upgraded.geometry.rows[3].cells[9].kind == .padding)
+        #expect(upgraded.geometry.rows[3].cells[0].kind == .wideHead)
+        #expect(upgraded.geometry.rows[3].cells[1].kind == .wideTail)
+        expectValidGrid(upgraded)
+    }
 }

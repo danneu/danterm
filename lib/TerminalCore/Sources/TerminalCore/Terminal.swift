@@ -7382,7 +7382,13 @@ public struct Terminal: Equatable, Sendable {
                 screen.rows[target.row].isSoftWrapped = true
                 screen.rows[target.row].marginErased = false
                 screen.cursor = target
-                advanceToNextRow(preservingWrapClaim: true)
+                let advanced = advanceToNextRow(preservingWrapClaim: true)
+                if advanced == false {
+                    screen.rows[target.row].cells[target.column] = GridCell(
+                        styleId: replacementStyleId
+                    )
+                    screen.rows[target.row].isSoftWrapped = false
+                }
                 screen.cursor.column = 0
                 destination = screen.cursor
                 invalidateInspection(inViewportRows: destination.row..<(destination.row + 1))
@@ -7390,13 +7396,13 @@ public struct Terminal: Equatable, Sendable {
                     row: destination.row,
                     column: 0,
                     replacementStyleId: replacementStyleId,
-                    clearsPreviousSpacer: false
+                    clearsPreviousSpacer: advanced == false
                 )
                 clearCellAndPair(
                     row: destination.row,
                     column: 1,
                     replacementStyleId: replacementStyleId,
-                    clearsPreviousSpacer: false
+                    clearsPreviousSpacer: advanced == false
                 )
             } else {
                 destination.column = columnCount - 2
@@ -7535,9 +7541,16 @@ public struct Terminal: Equatable, Sendable {
                 )
                 screen.rows[screen.cursor.row].isSoftWrapped = true
                 screen.rows[screen.cursor.row].marginErased = false
-                advanceToNextRow(preservingWrapClaim: true)
+                let gap = screen.cursor
+                let advanced = advanceToNextRow(preservingWrapClaim: true)
+                if advanced == false {
+                    screen.rows[gap.row].cells[gap.column] = GridCell(
+                        styleId: replacementStyleId
+                    )
+                    screen.rows[gap.row].isSoftWrapped = false
+                }
                 screen.cursor.column = 0
-                preservesWrappedSpacer = true
+                preservesWrappedSpacer = advanced
             } else {
                 screen.cursor.column = columnCount - 2
             }
@@ -7586,7 +7599,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func advanceCursorPastWideCell(at head: CellPosition) {
         if modes.isAutoWrapMode == false, head.column + 1 == columnCount - 1 {
-            screen.cursor = head
+            screen.cursor = CellPosition(row: head.row, column: head.column + 1)
             screen.isPendingWrap = false
             return
         }
@@ -7622,7 +7635,8 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func advanceToNextRow(preservingWrapClaim: Bool = false) {
+    @discardableResult
+    private mutating func advanceToNextRow(preservingWrapClaim: Bool = false) -> Bool {
         let region = activeScrollRegion
         // The advance can be declined outright: a cursor on the last screen row *below* the
         // region's bottom matches neither branch. Restoring a wrap claim then would stamp
@@ -7648,6 +7662,7 @@ public struct Terminal: Equatable, Sendable {
         if preservingWrapClaim, advanced {
             restoreWrapClaimBeforeCursor()
         }
+        return advanced
     }
 
     private var activeScrollRegion: Range<Int> {

@@ -155,13 +155,13 @@ struct TerminalModeTests {
         #expect(narrow.screenText == "ABE\nF  ")
         #expect(narrow.geometry.rows[0].isSoftWrapped)
 
-        var wide = try #require(Terminal(columns: 4, rows: 2))
-        wide.moveCursor(row: 0, column: 3)
-        wide.feed(Array("\u{1B}[?7l\u{754C}".utf8))
+        var wide = try #require(Terminal(columns: 4, rows: 1))
+        wide.feed(Array("\u{1B}[?7l\u{1B}[3G\u{754C}A".utf8))
         #expect(wide.geometry.rows[0].cells.map(\.kind) == [
-            .padding, .padding, .wideHead, .wideTail,
+            .padding, .padding, .padding, .narrow,
         ])
-        #expect(wide.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: false))
+        #expect(wide.cell(row: 0, column: 3)?.scalars == ["A"])
+        #expect(wide.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
         #expect(wide.geometry.rows[0].isSoftWrapped == false)
         expectValidGrid(wide)
 
@@ -169,7 +169,7 @@ struct TerminalModeTests {
         upgraded.moveCursor(row: 0, column: 3)
         upgraded.feed(Array("\u{1B}[?7l\u{00A9}\u{FE0F}".utf8))
         #expect(upgraded.cell(row: 0, column: 2)?.scalars == ["\u{00A9}", "\u{FE0F}"])
-        #expect(upgraded.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: false))
+        #expect(upgraded.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
         #expect(upgraded.geometry.rows[0].isSoftWrapped == false)
         expectValidGrid(upgraded)
     }
