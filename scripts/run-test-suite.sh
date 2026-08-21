@@ -33,6 +33,23 @@ BUDGET=$(( NCPU - 2 ))
 # downstream of here ever sees it.
 WIDE_MARKER='wide: '
 
+# How many tokens a `wide: ` step asks for. The ask is opportunistic, but a token a wide
+# step wins is held until that step ends -- so this number is really a cap on how many
+# long poles can compile beside each other, and asking for the whole budget means one
+# pole runs while every other worker blocks. The gate has about a dozen wide steps and
+# only a handful of cores, so serializing them is the worst arrangement available.
+#
+# Measured on this 10-core host, interleaved A/B, three runs per arm plus earlier
+# samples: an ask of BUDGET gave {141, 159, 160, 233}s and an ask of 2 gave
+# {89, 90, 90, 117, 120}s. The arms do not overlap. An ask of 1 (marker off) measured
+# 124s and an ask of 3 measured 127s, so 2 is not merely "less than BUDGET" -- it is the
+# floor of the curve, where four poles compile at -j2 instead of one at -j8.
+#
+# DANTERM_GATE_WIDE_ASK overrides it, which is how the arms above were measured.
+WIDE_ASK="${DANTERM_GATE_WIDE_ASK:-2}"
+(( WIDE_ASK > BUDGET )) && WIDE_ASK=$BUDGET
+(( WIDE_ASK < 1 )) && WIDE_ASK=1
+
 # Ordered longest-measured-first. With a bounded pool this is list scheduling: putting
 # the long poles in front keeps the tail from being one slow step finishing alone.
 #
@@ -40,11 +57,10 @@ WIDE_MARKER='wide: '
 # so a `$` inside one stays single-quoted on purpose.
 #
 # A `wide: ` prefix declares a long pole: a step whose measured time is mostly one
-# SwiftPM build, which at the default one token compiles at -j1. A wide step asks for the
-# whole budget and takes only what is free at that instant, so it can never starve the
-# rest of the gate -- it widens where the pool is already idle. Keep the marker for steps
-# measured in tens of seconds of compiling; a lint that finishes in a second gains
-# nothing from it and only adds noise here.
+# SwiftPM build, which at the default one token compiles at -j1. A wide step asks for
+# WIDE_ASK tokens rather than one; see the note on WIDE_ASK below for why that number is
+# small. Keep the marker for steps measured in tens of seconds of compiling; a lint that
+# finishes in a second gains nothing from it and only adds noise here.
 # shellcheck disable=SC2016
 STEPS=(
     # The cold-build lane. Every other step builds into a warm per-purpose scratch --
@@ -278,13 +294,14 @@ queued_note() {
 # than interleaved with whatever else was running at the same instant.
 if [[ "${1:-}" == "--worker" ]]; then
     step="$2"
-    # A declared long pole asks for the whole budget. The ask is opportunistic -- the
-    # supervisor claims one token firmly and sweeps for the rest without ever waiting --
-    # so a wide step still holds only tokens that stand behind work it is doing.
+    # A declared long pole asks for WIDE_ASK tokens instead of one. The ask is
+    # opportunistic -- the supervisor claims one token firmly and sweeps for the rest
+    # without ever waiting -- but the tokens it does win are held for the whole step,
+    # so the size of the ask decides how many poles can run beside each other.
     ask="${DANTERM_GATE_ASK:-1}"
     if [[ "$step" == "$WIDE_MARKER"* ]]; then
         step="${step#"$WIDE_MARKER"}"
-        (( ask < BUDGET )) && ask=$BUDGET
+        (( ask < WIDE_ASK )) && ask=$WIDE_ASK
     fi
     # Worker pid disambiguates the rare case of two identical step strings; the hash
     # keeps the filename traceable back to a step while debugging.
@@ -339,12 +356,17 @@ fi
 # toward -j1 instead of blocking for the whole pool.
 #
 # The default ASK of 1 is right for the sixty-odd lint steps that finish in under two
-# seconds, and wrong for the handful of steps that are one whole SwiftPM build: a cold
-# build of lib/DanTermCore measured 104s at -j1 against 35s at -j8. Those steps carry the
-# `wide: ` marker in the list above and ask for the whole budget instead. The marker rides
-# on the step string, so it stays attached to the step it describes rather than drifting
-# in a second list, and because the ask is still opportunistic a wide step waits for
-# nothing and holds nothing that is not standing behind its own compile.
+# seconds, and wrong for the handful of steps that are one whole SwiftPM build. Those
+# steps carry the `wide: ` marker in the list above and ask for WIDE_ASK tokens instead.
+# The marker rides on the step string, so it stays attached to the step it describes
+# rather than drifting in a second list.
+#
+# What a wide step must not do is ask for the whole budget. A single build does speed up
+# with width -- a cold lib/DanTermCore measured 104s at -j1 against 35s at -j8 -- but a
+# token a wide step wins is held until that step ends, so a pole asking for BUDGET runs
+# alone while the other workers block. With a dozen wide steps that trades a little
+# per-build latency for serializing all of them, and it measured much worse end to end.
+# See the note on WIDE_ASK at the top of this file for the numbers.
 #
 # NCPU and BUDGET are computed at the top of this file, because a worker needs the pool
 # size too.
