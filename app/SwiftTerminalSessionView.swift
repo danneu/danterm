@@ -237,6 +237,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// and a retry cannot stack two timers for one pending plan.
     private var isPresentationRetryArmed = false
     private var lastEmittedState: TerminalSessionState?
+    /// The two inputs reported terminal focus is derived from, retained separately so
+    /// neither can overwrite the other: a terminal view keeps pane focus while DanTerm is
+    /// inactive, and a pane created in a background tab never gains pane focus at all.
+    private var paneFocused = false
+    private var applicationActive: Bool
     private var lastForwardedFocus = false
     private var isTornDown = false
     /// Non-nil only when `DANTERM_FRAME_RATE_LOG` asked for live publish/draw rates.
@@ -366,12 +371,14 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         fontSize: Double = DanTermConfig.default.resolvedFontSize,
         fontFamily: String? = nil,
         gridOverride: PaneGridOverride? = nil,
+        applicationActive: Bool = true,
         resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
         onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
     ) {
         self.controller = controller
         self.fontSize = CGFloat(fontSize)
         self.fontFamily = fontFamily
+        self.applicationActive = applicationActive
         // Supplied at construction, not pushed after mount: the pane's first
         // presentation pass already submits a grid, and for a restored claimed
         // pane that grid has to be the claim itself.
@@ -743,13 +750,13 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         // Presentation only. A responder gain is not a model fact: the pane-focus
         // pass moves the responder here itself, so a report would be a Msg out of a
         // reconcile sweep. The click that asks for focus reports it in `mouseDown`.
-        if result { forwardFocusIfChanged(true) }
+        if result { setPaneFocused(true) }
         return result
     }
 
     override func resignFirstResponder() -> Bool {
         let result = super.resignFirstResponder()
-        if result { forwardFocusIfChanged(false) }
+        if result { setPaneFocused(false) }
         return result
     }
 
@@ -1171,7 +1178,12 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     func setFocused(_ focused: Bool) {
-        forwardFocusIfChanged(focused)
+        setPaneFocused(focused)
+    }
+
+    func setApplicationActive(_ active: Bool) {
+        applicationActive = active
+        forwardEffectiveFocus()
     }
 
     func setVisible(_ visible: Bool) {
@@ -1710,7 +1722,16 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         present(plan: frame.plan, damage: frame.damage, metrics: metrics)
     }
 
-    private func forwardFocusIfChanged(_ focused: Bool) {
+    private func setPaneFocused(_ focused: Bool) {
+        paneFocused = focused
+        forwardEffectiveFocus()
+    }
+
+    /// Sends the conjunction of the two retained inputs, and only when it moves. The
+    /// terminal retains what it is told whether or not the child asked for reports, so a
+    /// value it already holds must not be sent again.
+    private func forwardEffectiveFocus() {
+        let focused = paneFocused && applicationActive
         guard isTornDown == false, focused != lastForwardedFocus else { return }
         lastForwardedFocus = focused
         // Responder changes reach here from several AppKit callbacks with no event in hand, so

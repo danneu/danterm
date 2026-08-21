@@ -2248,6 +2248,38 @@ func swiftTerminalSessionViewTests() {
                      "focus reports were not owner-gated: \(controller.inputBytes)")
     }
 
+    uiTest("terminal focus is pane focus and application activation together") {
+        // Intent: the pane reports its terminal focused only while it owns pane focus and
+        //   DanTerm is active, and it retains each input independently of the other.
+        // Why it exists: a terminal view stays its window's first responder while DanTerm
+        //   is inactive, so pane focus alone would tell a mode-1004 child it is focused
+        //   while the user is in another app.
+        // Scenario: a pane created during an inactive launch takes pane focus, DanTerm
+        //   activates and deactivates, and the pane keeps pane focus throughout.
+        let controller = TerminalPaneSessionController()
+        controller.inputModes.focusReporting = true
+        let pane = SwiftTerminalSessionView(controller: controller, applicationActive: false)
+
+        pane.setFocused(true)
+        try uiExpect(controller.focusChanges.isEmpty,
+                     "pane focus alone reported focus while inactive: \(controller.focusChanges)")
+
+        pane.setApplicationActive(true)
+        pane.setApplicationActive(true)
+        pane.setApplicationActive(false)
+        pane.setApplicationActive(true)
+
+        try uiExpect(controller.focusChanges == [true, false, true],
+                     "derived focus was not deduplicated: \(controller.focusChanges)")
+
+        // Pane focus survived both activation swings, so dropping it now is a real change.
+        pane.setFocused(false)
+        pane.setApplicationActive(false)
+
+        try uiExpect(controller.focusChanges == [true, false, true, false],
+                     "activation overwrote retained pane focus: \(controller.focusChanges)")
+    }
+
     uiTest("a released pane is unreachable by every controller callback") {
         // Intent: deallocating the AppKit view while the controller still holds its
         //   callbacks releases the view and leaves no callback able to touch it.

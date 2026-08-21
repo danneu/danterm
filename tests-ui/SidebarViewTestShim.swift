@@ -125,6 +125,7 @@ class TerminalView: NSView, TerminalSession {
         waitGeneration: AgentWaitGeneration?
     ) {}
     func setFocused(_ focused: Bool) {}
+    func setApplicationActive(_ active: Bool) {}
     func setVisible(_ visible: Bool) {
         if visible, visibility.last == false {
             revealCount += 1

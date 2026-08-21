@@ -240,13 +240,14 @@ class AppRuntime {
         configStore: DanTermConfigStore = DanTermConfigStore(),
         initialModel: AppModel? = nil,
         startsApplicationServices: Bool = true,
-        tailnetOptIn: Bool = false
+        tailnetOptIn: Bool = false,
+        applicationActive: Bool
     ) {
         self.ports = ports
         self.dialogSurfaces = dialogSurfaces
         self.instancePaths = instancePaths
         self.configStore = configStore
-        let startingModel: AppModel
+        var startingModel: AppModel
         if let initialModel {
             startingModel = initialModel
         } else {
@@ -267,6 +268,11 @@ class AppRuntime {
             launchModel.resolvedFontFamily = resolveConfiguredFontFamily(launchConfig)
             startingModel = launchModel
         }
+        // Given, never defaulted: a detached or background launch reaches
+        // `applicationDidFinishLaunching` with no activation callback ahead of it, and
+        // `AppModel.isAppActive` defaults to true. Every pane created before the first
+        // real callback derives its reported terminal focus from this value.
+        startingModel.isAppActive = applicationActive
         self.modelStore = AppModelStore(startingModel)
         self.lightCheckpointBaseline = LightCheckpointProjection(snapshot: toSnapshot(model))
         self.rosterBaseline = paneRoster(in: model)
@@ -464,6 +470,17 @@ class AppRuntime {
             break
         }
         scheduleLightCheckpointIfNeeded()
+
+        // Application activation is one of the two inputs each session derives its
+        // reported terminal focus from, and the session retains it. Pushed from the
+        // model rather than from a second copy here, so there is one activation fact.
+        switch msg {
+        case .appBecameActive, .appResignedActive:
+            let active = model.isAppActive
+            for host in paneHosts.values { host.session.setApplicationActive(active) }
+        default:
+            break
+        }
 
         // Defensive backstop: cancel drag on app resign, in case the coordinator's
         // notification observer fires out of order.
@@ -1644,6 +1661,7 @@ class AppRuntime {
             themeName: themeName,
             fontSize: fontSize,
             fontFamily: fontFamily,
+            applicationActive: model.isAppActive,
             gridOverride: gridOverride,
             onLaunchInputCompletion: onLaunchInputCompletion
         )

@@ -122,6 +122,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     /// The wait stamped on each input submission, in submission order.
     var submittedWaitGenerations: [AgentWaitGeneration?] = []
     var focusedValues: [Bool] = []
+    var applicationActiveValues: [Bool] = []
     var visibleValues: [Bool] = []
     var renderingAvailableValues: [Bool] = []
     var searchNeedles: [String] = []
@@ -151,6 +152,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
         submittedWaitGenerations.append(waitGeneration)
     }
     func setFocused(_ focused: Bool) { focusedValues.append(focused) }
+    func setApplicationActive(_ active: Bool) { applicationActiveValues.append(active) }
     func setVisible(_ visible: Bool) { visibleValues.append(visible) }
     func setRenderingAvailable(_ available: Bool) {
         renderingAvailableValues.append(available)
@@ -235,7 +237,8 @@ func makeCommandTestRuntime(
     _ fixture: RecordingAppRuntimePorts,
     configStore: DanTermConfigStore? = nil,
     dialogSurfaces: RecordingDialogSurfaces = RecordingDialogSurfaces(),
-    initialModel: AppModel? = nil
+    initialModel: AppModel? = nil,
+    applicationActive: Bool = true
 ) -> AppRuntime {
     let instance = TemporaryInstancePaths()
     return AppRuntime(
@@ -244,7 +247,8 @@ func makeCommandTestRuntime(
         instancePaths: instance.paths,
         configStore: configStore ?? DanTermConfigStore(url: instance.absentConfigURL),
         initialModel: initialModel,
-        startsApplicationServices: false
+        startsApplicationServices: false,
+        applicationActive: applicationActive
     )
 }
 

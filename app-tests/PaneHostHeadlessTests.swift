@@ -15,7 +15,8 @@ import Testing
             dialogSurfaces: RecordingDialogSurfaces().value,
             instancePaths: instance.paths,
             configStore: DanTermConfigStore(url: instance.absentConfigURL),
-            startsApplicationServices: false
+            startsApplicationServices: false,
+            applicationActive: true
         )
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
@@ -55,6 +56,7 @@ private final class HeadlessPaneHostSession: NSView, TerminalSession {
         waitGeneration: AgentWaitGeneration?
     ) {}
     func setFocused(_ focused: Bool) {}
+    func setApplicationActive(_ active: Bool) {}
     func setVisible(_ visible: Bool) {}
     func setRenderingAvailable(_ available: Bool) {}
     func refreshPresentation() {}

@@ -916,6 +916,10 @@ func update(
 
     case .restoreSession(var restored):
         restored.noticeQueue = model.noticeQueue
+        // Ephemeral and never snapshotted, so the staged model always claims the
+        // default "active". The live flag is the only one that describes reality,
+        // and every pane derives its reported terminal focus from it.
+        restored.isAppActive = model.isAppActive
         model = restored
         return [.installStagedRestoreSession]
 

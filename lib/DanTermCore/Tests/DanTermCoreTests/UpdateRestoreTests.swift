@@ -48,4 +48,26 @@ import Testing
             return
         }
     }
+
+    // Intent: restore keeps the live application-activation flag instead of the
+    //   staged model's.
+    // Why it exists: `isAppActive` is ephemeral and never snapshotted, so a model
+    //   decoded from a checkpoint always claims the default "active". A restore that
+    //   installed that value would tell every pane its terminal is focused right
+    //   after a background launch, which is the state mode-1004 clients read.
+    // Scenario: DanTerm launches without activating, then restores a checkpoint.
+    //   Spec-first -- no incident to cite, and none should be invented.
+    @Test("restore preserves the live application-activation flag")
+    func restorePreservesApplicationActivation() {
+        var restored = makeModel()
+        createTab(&restored)
+        restored.isAppActive = true
+
+        var live = makeModel()
+        live.isAppActive = false
+
+        _ = update(&live, .restoreSession(restored))
+
+        #expect(live.isAppActive == false, "restore installed the staged activation flag")
+    }
 }

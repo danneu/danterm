@@ -100,6 +100,7 @@ final class SwiftTerminalBackend {
             fontSize: request.fontSize,
             fontFamily: request.fontFamily,
             gridOverride: request.gridOverride,
+            applicationActive: request.applicationActive,
             onSessionEnded: { [weak self, weak controller] result in
                 guard case .exited = result, let self, let controller else { return }
                 self.writeRecording(from: controller, id: id)
@@ -110,7 +111,8 @@ final class SwiftTerminalBackend {
             controller: controller,
             fontSize: request.fontSize,
             fontFamily: request.fontFamily,
-            gridOverride: request.gridOverride
+            gridOverride: request.gridOverride,
+            applicationActive: request.applicationActive
         )
         #endif
     }

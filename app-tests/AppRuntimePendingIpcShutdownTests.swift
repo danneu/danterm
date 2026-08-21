@@ -50,7 +50,8 @@ struct AppRuntimePendingIpcShutdownTests {
             instancePaths: instance.paths,
             configStore: DanTermConfigStore(url: instance.absentConfigURL),
             initialModel: initialModel,
-            startsApplicationServices: false
+            startsApplicationServices: false,
+            applicationActive: true
         )
         creation.connection.rememberRequest(reqId: creationRequestId, rpcId: .number(1))
         input.connection.rememberRequest(reqId: inputRequestId, rpcId: .number(2))

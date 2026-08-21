@@ -61,7 +61,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             ),
             dialogSurfaces: .live(),
             instancePaths: instancePaths,
-            tailnetOptIn: launchPolicy.tailnetOptIn
+            tailnetOptIn: launchPolicy.tailnetOptIn,
+            // The real launch state. A detached launch finishes launching without ever
+            // activating, and `applicationDidBecomeActive` supplies every later change.
+            applicationActive: NSApp.isActive
         )
         installWorkspaceLifecycleObserver()
 

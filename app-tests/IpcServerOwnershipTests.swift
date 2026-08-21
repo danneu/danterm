@@ -49,7 +49,8 @@ struct IpcServerOwnershipTests {
             dialogSurfaces: RecordingDialogSurfaces().value,
             instancePaths: fixture.paths,
             configStore: DanTermConfigStore(url: fixture.absentConfigURL),
-            startsApplicationServices: true
+            startsApplicationServices: true,
+            applicationActive: true
         )
         defer { runtime.shutdown() }
 
@@ -84,7 +85,8 @@ struct IpcServerOwnershipTests {
             dialogSurfaces: RecordingDialogSurfaces().value,
             instancePaths: fixture.paths,
             configStore: DanTermConfigStore(url: fixture.absentConfigURL),
-            startsApplicationServices: true
+            startsApplicationServices: true,
+            applicationActive: true
         )
         defer { runtime.shutdown() }
         let peer = try connectToIpcServer(at: fixture.socketURL)
@@ -130,7 +132,8 @@ struct IpcServerOwnershipTests {
             dialogSurfaces: RecordingDialogSurfaces().value,
             instancePaths: socket.paths,
             configStore: DanTermConfigStore(url: socket.absentConfigURL),
-            startsApplicationServices: true
+            startsApplicationServices: true,
+            applicationActive: true
         )
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
@@ -173,7 +176,8 @@ struct IpcServerOwnershipTests {
             dialogSurfaces: RecordingDialogSurfaces().value,
             instancePaths: socket.paths,
             configStore: DanTermConfigStore(url: socket.absentConfigURL),
-            startsApplicationServices: true
+            startsApplicationServices: true,
+            applicationActive: true
         )
         defer { runtime.shutdown() }
         let recoveredPaneId = PaneId(rawValue: UUID())
@@ -218,7 +222,8 @@ struct IpcServerOwnershipTests {
             dialogSurfaces: RecordingDialogSurfaces().value,
             instancePaths: socket.paths,
             configStore: DanTermConfigStore(url: socket.absentConfigURL),
-            startsApplicationServices: true
+            startsApplicationServices: true,
+            applicationActive: true
         )
         defer { runtime.shutdown() }
         let restore = try ownershipValidatedRestore(

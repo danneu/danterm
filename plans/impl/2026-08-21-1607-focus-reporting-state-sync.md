@@ -128,7 +128,7 @@ The immediate report matches `references/foot/csi.c#decset_decrst`.
 ## Commit progress
 
 - [x] 1. terminal: retain effective focus and report mode 1004 state
-- [ ] 2. app: derive terminal focus from pane and application state
+- [x] 2. app: derive terminal focus from pane and application state
 - [ ] 3. tape: preserve effective focus across synchronization
 
 ## Implementation notes
@@ -146,3 +146,13 @@ The immediate report matches `references/foot/csi.c#decset_decrst`.
 - The ported libvterm `state-input` fixture gained a recorded deviation: pinned
   libvterm reports only transitions that happen while mode 1004 is enabled,
   while DanTerm retains focus and answers every enable.
+- Commit 2 gives `AppRuntime.init` a required `applicationActive` argument rather
+  than one defaulting to true. The invariant is that the launch state is chosen,
+  not inherited, and a default would let a new call site inherit it silently.
+- The restore reducer now preserves the live `isAppActive` the way it already
+  preserves the notice queue. `isAppActive` is ephemeral and never snapshotted, so
+  a staged model always claims "active"; installing it would undo the launch seed
+  at exactly the launch a restore happens on, and would leave sessions -- created
+  from the live model before the swap -- disagreeing with the model.
+- Application activation is pushed to live sessions from `model.isAppActive` after
+  the lifecycle message reduces, so the runtime keeps no second copy of the fact.

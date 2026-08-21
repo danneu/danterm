@@ -362,7 +362,8 @@ struct AppRuntimeSessionCommandTests {
             dialogSurfaces: RecordingDialogSurfaces().value,
             instancePaths: instance.paths,
             configStore: DanTermConfigStore(url: instance.absentConfigURL),
-            startsApplicationServices: false
+            startsApplicationServices: false,
+            applicationActive: true
         )
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
