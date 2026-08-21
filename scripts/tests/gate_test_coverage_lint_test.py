@@ -21,6 +21,11 @@ is proved in milliseconds rather than by running the real gate. The cases:
      subset. This is the dead `--filter` on the protocol step.
   9. A target whose `path:` is not a string literal fails rather than being guessed
      at.
+ 10. A display-bound test target -- one declaring DANTERM_REQUIRES_WINDOWSERVER --
+     must be skipped by name, because the gate is headless and a lane that merely
+     fails to reach it says nothing.
+ 11. Skipping a display-bound target still leaves the rest of the estate covered,
+     so the lane beside it is a whole-estate lane and not a subset.
 """
 
 from __future__ import annotations
@@ -47,11 +52,24 @@ let package = Package(
 TEST_TARGET = """        .testTarget(name: "{name}", dependencies: [], path: "Tests/{name}"),
 """
 
+DISPLAY_BOUND_TEST_TARGET = """        .testTarget(
+            name: "{name}",
+            dependencies: [],
+            path: "Tests/{name}",
+            swiftSettings: [.define("DANTERM_REQUIRES_WINDOWSERVER")]
+        ),
+"""
+
 
 def write_package(root: Path, name: str, tests: list[str]) -> None:
     package = root / "lib" / name
     package.mkdir(parents=True, exist_ok=True)
-    blocks = "".join(TEST_TARGET.format(name=test) for test in tests)
+    blocks = "".join(
+        (DISPLAY_BOUND_TEST_TARGET if test.endswith("!") else TEST_TARGET).format(
+            name=test.rstrip("!")
+        )
+        for test in tests
+    )
     (package / "Package.swift").write_text(
         MANIFEST.format(name=name, test_targets=blocks)
     )
@@ -238,3 +256,22 @@ with tempfile.TemporaryDirectory() as raw:
         fail("empty discovery: expected a clear failure", result)
 
 print("gate_test_coverage_lint_test: ok")
+
+
+# 10. A display-bound target the gate does not skip: the gate is headless, so a lane
+#     that happens not to reach it is not the same as saying it must not run.
+case(
+    "display-bound target not skipped",
+    ["swift test --package-path lib/Alpha"],
+    {"Alpha": ["AlphaTests", "AlphaUITests!"]},
+    expect_ok=False,
+    expect_text="carries DANTERM_REQUIRES_WINDOWSERVER",
+)
+
+# 11. Skipping only the display-bound target leaves a whole-estate lane behind it.
+case(
+    "display-bound target skipped by name",
+    ["swift test --package-path lib/Alpha --skip AlphaUITests"],
+    {"Alpha": ["AlphaTests", "AlphaUITests!"]},
+    expect_ok=True,
+)

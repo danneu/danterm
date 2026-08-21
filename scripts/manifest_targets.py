@@ -50,6 +50,13 @@ def first_party_manifests(root: Path) -> list[Path]:
     return manifests
 
 
+#: A target carrying this define in its swiftSettings declares that it cannot run
+#: without a WindowServer connection. The manifest that owns the target is the one
+#: place this is said; every check reads it from there rather than keeping a list of
+#: names of its own.
+DISPLAY_BOUND_DEFINE = "DANTERM_REQUIRES_WINDOWSERVER"
+
+
 @dataclass(frozen=True)
 class TargetDeclaration:
     """One target a manifest declares: its kind, its name, and the path it claims.
@@ -62,6 +69,11 @@ class TargetDeclaration:
     kind: str
     name: str
     path: str | None
+    #: True when the target declares that it cannot run without a WindowServer
+    #: connection, by carrying DISPLAY_BOUND_DEFINE in its swiftSettings. This is the
+    #: one place a target says so; the gate's coverage check reads it and nothing
+    #: keeps a second list of names.
+    requires_display: bool = False
 
     def declared_path(self) -> str:
         """The path this target claims, filling in SwiftPM's default when none was written."""
@@ -146,7 +158,16 @@ def declared_targets(manifest: Path) -> list[TargetDeclaration]:
                 raise LintError(f"{manifest}: a target declares an unreadable `path:`.")
             path = literal.group(1)
         declarations.append(
-            TargetDeclaration(kind=match.group(1), name=name_match.group(1), path=path)
+            TargetDeclaration(
+                kind=match.group(1),
+                name=name_match.group(1),
+                path=path,
+                requires_display=bool(
+                    re.search(
+                        r'\.define\s*\(\s*"%s"' % re.escape(DISPLAY_BOUND_DEFINE), body
+                    )
+                ),
+            )
         )
     return declarations
 

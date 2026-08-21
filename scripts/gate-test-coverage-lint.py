@@ -24,6 +24,11 @@ What counts as a lane, and why the definition is this strict:
     process to itself.
   * Two unrestricted lanes over one package fail for the opposite reason -- the
     estate runs twice, and the gate pays for it twice.
+  * A test target that declares it needs a WindowServer connection is the one kind
+    that must NOT run: the gate is headless. Its package's lane has to `--skip` it
+    by name, so the exclusion is visible in the step list rather than implied by a
+    lane that happens not to reach it. The declaration lives in the manifest that
+    owns the target, so this check keeps no list of excluded names.
 
 The check reads text only; it never imports or executes a manifest. A `path:` that
 is not a string literal is therefore rejected rather than guessed at, so a computed
@@ -42,6 +47,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from manifest_targets import (  # noqa: E402
+    DISPLAY_BOUND_DEFINE,
     LintError,
     balanced_span,
     declared_targets,
@@ -256,8 +262,27 @@ def lanes_for(package_rel: str, steps: list[str]) -> list[Lane]:
     return found
 
 
-def verdict(package_rel: str, estate: list[str], lanes: list[Lane]) -> str | None:
+def verdict(
+    package_rel: str,
+    estate: list[str],
+    lanes: list[Lane],
+    display_bound: list[str] | None = None,
+) -> str | None:
     """The coverage complaint for one package, or None when its estate runs exactly once."""
+    display_bound = display_bound or []
+    for name in display_bound:
+        skipped = any(
+            lane.selector_flag == "--skip" and re.search(lane.selector or "", name)
+            for lane in lanes
+        )
+        if lanes and not skipped:
+            return (
+                f"{package_rel} declares {name}, which carries {DISPLAY_BOUND_DEFINE} and so "
+                "cannot run in a headless gate, but no gate lane skips it. Add "
+                f"`--skip {name}` to the lane that runs this package."
+            )
+    if not estate:
+        return None
     if not lanes:
         return (
             f"{package_rel} declares {', '.join(estate)} and no gate lane runs them. "
@@ -269,7 +294,14 @@ def verdict(package_rel: str, estate: list[str], lanes: list[Lane]) -> str | Non
         if lane.selector_flag is None:
             return True
         if lane.selector_flag == "--skip":
-            return False
+            # A skip that names only display-bound targets still runs the whole runnable
+            # estate: it removes what must not run, which the check above already
+            # required. Any other skip carves the estate down and does not.
+            hits_display_bound = any(
+                re.search(lane.selector or "", name) for name in display_bound
+            )
+            hits_estate = any(re.search(lane.selector or "", name) for name in estate)
+            return hits_display_bound and not hits_estate
         return all(re.search(lane.selector or "", name) for name in estate)
 
     whole = [lane for lane in lanes if covers_estate(lane)]
@@ -304,16 +336,18 @@ def main() -> int:
         complaints: list[str] = []
         checked = 0
         for manifest in manifests:
-            estate = [
-                target.name
-                for target in declared_targets(manifest)
-                if target.kind == "testTarget"
+            tests = [
+                target for target in declared_targets(manifest) if target.kind == "testTarget"
             ]
-            if not estate:
+            display_bound = [target.name for target in tests if target.requires_display]
+            estate = [target.name for target in tests if not target.requires_display]
+            if not tests:
                 continue
             checked += 1
             package_rel = manifest.parent.relative_to(REPO_ROOT).as_posix()
-            complaint = verdict(package_rel, estate, lanes_for(package_rel, steps))
+            complaint = verdict(
+                package_rel, estate, lanes_for(package_rel, steps), display_bound
+            )
             if complaint:
                 complaints.append(complaint)
     except LintError as error:
