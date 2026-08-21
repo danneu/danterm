@@ -221,6 +221,30 @@ struct TerminalHyperlinkTests {
         expectValidGrid(terminal)
     }
 
+    @Test("an OSC 8 run resolves from both sides of a wide-wrap gap")
+    func explicitLinkCrossesWideWrapGap() throws {
+        // Intent: the projected gap and its following wide head activate one OSC 8 run.
+        // Why it exists: the gap stores no hyperlink; activation must consume the same
+        //   follower-derived cell that geometry and rendering expose.
+        // Scenario: a linked wide glyph wraps early from the last column, and the user points
+        //   first at the gap above it and then at the glyph below it.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array(
+            "\u{1B}]8;id=gap;https://gap.test\u{7}\u{1B}[1;4H\u{754C}\u{1B}]8;;\u{7}".utf8
+        ))
+
+        let gap = try #require(terminal.activatableLink(at: .init(row: 0, column: 3)))
+        let head = try #require(terminal.activatableLink(at: .init(row: 1, column: 0)))
+        #expect(gap.hyperlink.uri == "https://gap.test")
+        #expect(gap.hyperlink.explicitId == "gap")
+        #expect(gap == head)
+        #expect(gap.matchesActivation(head))
+        #expect(gap.range == TerminalTextRange(
+            start: .init(row: 0, column: 3),
+            end: .init(row: 1, column: 2)
+        ))
+    }
+
     @Test("links keep working after far more distinct targets than the id space holds at once")
     func linksSurviveIdSpaceExhaustion() {
         // Intent: a session that emits more distinct OSC 8 targets than the identifier space can

@@ -191,6 +191,48 @@ struct TerminalStateSynchronizationTests {
         expectObservableState(resumed, equals: source, phase: "wrapped")
     }
 
+    @Test("state bytes preserve one linked derived wide-wrap gap")
+    func reconstructsDerivedWideWrapGap() throws {
+        // Intent: synchronization carries the visible spacer projection and its following wide
+        //   glyph once, with the follower's current style, hyperlink, and run identity intact.
+        // Why it exists: the source stores a plain wrap-time blank at the margin, so serializing
+        //   stored rows would lose the projected cell or emit the wide head twice to restyle it.
+        // Scenario: a blue linked glyph wraps early, its live head is redrawn red, and a fresh
+        //   terminal resumes from the resulting state fence.
+        var source = try #require(Terminal(columns: 4, rows: 2))
+        source.feed(Array(
+            "\u{1B}[44m\u{1B}]8;id=sync-gap;https://gap.test\u{7}"
+                .appending("\u{1B}[1;4H\u{754C}\u{1B}[2;1H\u{1B}[41m\u{754C}\u{1B}]8;;\u{7}")
+                .utf8
+        ))
+        #expect(source.cell(row: 0, column: 3)?.kind == .spacerHead)
+        #expect(source.cell(row: 0, column: 3)?.style.background == .indexed(1))
+
+        let synchronization = source.stateSynchronization
+        let wideBytes = Array("\u{754C}".utf8)
+        let wideEmissionCount = synchronization.bytes.indices.reduce(into: 0) { count, index in
+            guard index + wideBytes.count <= synchronization.bytes.count else { return }
+            if Array(synchronization.bytes[index..<(index + wideBytes.count)]) == wideBytes {
+                count += 1
+            }
+        }
+        #expect(wideEmissionCount == 1)
+
+        var resumed = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        resumed.feed(synchronization.bytes)
+
+        expectObservableState(resumed, equals: source, phase: "derived wide-wrap gap")
+        let sourceGap = try #require(source.activatableLink(at: .init(row: 0, column: 3)))
+        let resumedGap = try #require(resumed.activatableLink(at: .init(row: 0, column: 3)))
+        let resumedHead = try #require(resumed.activatableLink(at: .init(row: 1, column: 0)))
+        #expect(resumedGap == sourceGap)
+        #expect(resumedGap == resumedHead)
+        #expect(resumedGap.matchesActivation(resumedHead))
+    }
+
     @Test("state bytes preserve a stale wrap claim")
     func reconstructsStaleWrapClaim() throws {
         // Intent: retain the raw wrap transient that line-structure readers deliberately gate.

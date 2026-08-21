@@ -273,6 +273,84 @@ struct PaneFramePlanningTests {
         #expect(reused.decorationRuns.allSatisfy { $0.row == 0 })
     }
 
+    @Test("Derived wrap gaps stay current in reused live frames and browsed seam frames")
+    func derivedWrapGapFramesMatchFromScratch() throws {
+        // Intent: frame planning always paints a derived gap from its current follower while
+        //   preserving the stored wrap-time paint after that follower disappears.
+        // Why it exists: the planner reuses undamaged rows, but a follower write changes the
+        //   projected margin above it without changing that row's stored cells.
+        // Scenario: a live follower and then a follower below the retained/live seam are
+        //   restyled and replaced while the same planner carries its prior frame forward.
+        var live = try #require(Terminal(columns: 4, rows: 2))
+        feed("\u{1B}[44m\u{1B}[1;4H\u{754C}", to: &live)
+        _ = live.drainDamage()
+        var livePlanner = PaneFramePlanner()
+        _ = livePlanner.planFrame(for: live, presentation: blockCursor, damage: .full)
+
+        feed("\u{1B}[2;1H\u{1B}[41m\u{754C}", to: &live)
+        let restyleDamage = live.drainDamage()
+        #expect(restyleDamage.rowIndices == [0, 1])
+        let restyled = livePlanner.planFrame(
+            for: live,
+            presentation: blockCursor,
+            damage: restyleDamage
+        )
+        #expect(restyled == planFrame(for: live, presentation: blockCursor))
+        #expect(restyled.backgroundRuns.contains {
+            $0.row == 0 && $0.startColumn <= 3 && 3 < $0.startColumn + $0.columnCount
+                && $0.color == RenderTheme.dark.ansiColors[1]
+        })
+
+        feed("\u{1B}[2;1HX", to: &live)
+        let retireDamage = live.drainDamage()
+        #expect(retireDamage.rowIndices == [0, 1])
+        let retired = livePlanner.planFrame(
+            for: live,
+            presentation: blockCursor,
+            damage: retireDamage
+        )
+        #expect(retired == planFrame(for: live, presentation: blockCursor))
+        #expect(retired.backgroundRuns.contains {
+            $0.row == 0 && $0.startColumn <= 3 && 3 < $0.startColumn + $0.columnCount
+                && $0.color == RenderTheme.dark.ansiColors[4]
+        })
+
+        var seam = try #require(Terminal(columns: 4, rows: 1))
+        feed("\u{1B}[44m\u{1B}[1;4H\u{754C}", to: &seam)
+        seam.scroll(toTopRow: 0)
+        _ = seam.drainDamage()
+        var seamPlanner = PaneFramePlanner()
+        _ = seamPlanner.planFrame(for: seam, presentation: blockCursor, damage: .full)
+
+        feed("\u{1B}[1;1H\u{1B}[41m\u{754C}", to: &seam)
+        let seamDamage = seam.drainDamage()
+        try #require(seamDamage.isFull)
+        let seamRestyled = seamPlanner.planFrame(
+            for: seam,
+            presentation: blockCursor,
+            damage: seamDamage
+        )
+        #expect(seamRestyled == planFrame(for: seam, presentation: blockCursor))
+        #expect(seamRestyled.backgroundRuns.contains {
+            $0.row == 0 && $0.startColumn <= 3 && 3 < $0.startColumn + $0.columnCount
+                && $0.color == RenderTheme.dark.ansiColors[1]
+        })
+
+        feed("\u{1B}[1;1HX", to: &seam)
+        let seamRetireDamage = seam.drainDamage()
+        try #require(seamRetireDamage.isFull)
+        let seamRetired = seamPlanner.planFrame(
+            for: seam,
+            presentation: blockCursor,
+            damage: seamRetireDamage
+        )
+        #expect(seamRetired == planFrame(for: seam, presentation: blockCursor))
+        #expect(seamRetired.backgroundRuns.contains {
+            $0.row == 0 && $0.startColumn <= 3 && 3 < $0.startColumn + $0.columnCount
+                && $0.color == RenderTheme.dark.ansiColors[4]
+        })
+    }
+
     private var blockCursor: RenderPresentation {
         RenderPresentation(theme: .dark, isCursorVisible: true, cursorShape: .block)
     }
