@@ -24,9 +24,9 @@ public enum PaneReplicaCheckpointError: Error, Equatable, Sendable {
 public struct PaneReplicaCheckpoint: Equatable, Sendable {
     /// Rejects private checkpoint formats from any other app version without a migration.
     ///
-    /// Version 2 added pinnedness. A version-1 record cannot say whether its grid was an
-    /// override, so it is discarded rather than restored with a guessed claim.
-    public static let currentFormatVersion = 2
+    /// Version 2 added pinnedness and version 3 added focus. A record that cannot state one
+    /// of those facts is discarded rather than restored with a guessed value.
+    public static let currentFormatVersion = 3
 
     /// Identifies the private on-disk format.
     public let formatVersion: Int
@@ -39,6 +39,10 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
     /// States whether that grid was pinned, so a resumed replica restores the whole
     /// geometry fact instead of inferring a claim from the grid it happens to hold.
     public let pinned: Bool
+    /// States the pane's effective terminal focus, which is retained terminal state: a
+    /// restored replica that guessed it would answer the next mode-1004 enable with focus
+    /// the pane never had.
+    public let focused: Bool
     /// Prevents one last-subscribed pane's state from restoring into another pane.
     public let paneId: PaneId
     /// Names the first recorder event needed after this state.
@@ -51,6 +55,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
         columns: Int,
         rows: Int,
         pinned: Bool,
+        focused: Bool,
         paneId: PaneId,
         cursor: PaneTapeCursor,
         formatVersion: Int = currentFormatVersion
@@ -60,6 +65,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
         self.columns = columns
         self.rows = rows
         self.pinned = pinned
+        self.focused = focused
         self.paneId = paneId
         self.cursor = cursor
         integrity = Self.digest(
@@ -68,6 +74,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
             columns: columns,
             rows: rows,
             pinned: pinned,
+            focused: focused,
             paneId: paneId,
             cursor: cursor
         )
@@ -79,6 +86,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
         columns = envelope.columns
         rows = envelope.rows
         pinned = envelope.pinned
+        focused = envelope.focused
         paneId = PaneId(rawValue: envelope.paneId)
         cursor = PaneTapeCursor(
             recorderLifetimeId: envelope.recorderLifetimeId,
@@ -136,6 +144,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
             columns: columns,
             rows: rows,
             pinned: pinned,
+            focused: focused,
             paneId: paneId,
             cursor: cursor
         )
@@ -150,6 +159,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
         columns: Int,
         rows: Int,
         pinned: Bool,
+        focused: Bool,
         paneId: PaneId,
         cursor: PaneTapeCursor
     ) -> [UInt8] {
@@ -160,6 +170,7 @@ public struct PaneReplicaCheckpoint: Equatable, Sendable {
         appendInteger(Int64(columns), to: &input)
         appendInteger(Int64(rows), to: &input)
         appendInteger(Int64(pinned ? 1 : 0), to: &input)
+        appendInteger(Int64(focused ? 1 : 0), to: &input)
         appendUUID(paneId.rawValue, to: &input)
         appendUUID(cursor.recorderLifetimeId, to: &input)
         appendInteger(cursor.nextSequence, to: &input)
@@ -224,6 +235,7 @@ private struct Envelope: Codable {
     let columns: Int
     let rows: Int
     let pinned: Bool
+    let focused: Bool
     let paneId: UUID
     let recorderLifetimeId: UUID
     let nextSequence: UInt64
@@ -237,6 +249,7 @@ private struct Envelope: Codable {
         columns = checkpoint.columns
         rows = checkpoint.rows
         pinned = checkpoint.pinned
+        focused = checkpoint.focused
         paneId = checkpoint.paneId.rawValue
         recorderLifetimeId = checkpoint.cursor.recorderLifetimeId
         nextSequence = checkpoint.cursor.nextSequence

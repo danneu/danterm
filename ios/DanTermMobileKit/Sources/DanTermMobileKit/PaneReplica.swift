@@ -81,6 +81,11 @@ public struct PaneReplica: Sendable {
                 rows: checkpoint.rows
             )
         }
+        // Seeded before the bytes for the same reason the synchronization path seeds first:
+        // the state stream may enable mode 1004, and that enable answers with the focus the
+        // terminal holds at that moment. The report it produces is the replica's own and
+        // `discardAuthority` drops it.
+        _ = terminal.setFocused(checkpoint.focused)
         terminal.feed(checkpoint.stateBytes)
         discardAuthority(from: &terminal)
         self.terminal = terminal
@@ -98,6 +103,7 @@ public struct PaneReplica: Sendable {
             columns: synchronization.columns,
             rows: synchronization.rows,
             pinned: heldPinned,
+            focused: terminal.isFocused,
             paneId: paneId,
             cursor: cursor
         )

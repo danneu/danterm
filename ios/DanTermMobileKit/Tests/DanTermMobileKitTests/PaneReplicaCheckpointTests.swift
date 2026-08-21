@@ -73,6 +73,33 @@ struct PaneReplicaCheckpointTests {
         #expect(restoredTerminal.viewportText == source.viewportText)
     }
 
+    // Intent: a checkpoint carries the pane's effective focus, so a replica resumed from it
+    //   answers a later mode-1004 enable with the focus the pane actually had.
+    // Why it exists: focus is retained terminal state and reaches a replica over the
+    //   synchronization wire, but the checkpoint envelope is a second reconstruction path.
+    //   Without focus in it, a phone that resumes a focused pane answers `CSI O` where the
+    //   live pane answers `CSI I`, and the child suppresses notifications it should send.
+    // Scenario: a pane is checkpointed, restored after a relaunch, and its child then
+    //   enables focus reporting.
+    @Test("a restored checkpoint answers mode 1004 with the focus the pane held", arguments: [
+        true, false,
+    ])
+    func checkpointRestoresEffectiveFocus(focused: Bool) throws {
+        let replica = try checkpointReplica(
+            bytes: Data(),
+            cursor: checkpointCursor(sequence: 1),
+            focused: focused
+        )
+        let checkpoint = try #require(replica.checkpoint(for: paneId))
+        let restored = try PaneReplica(checkpoint: checkpoint, for: paneId)
+        var restoredTerminal = try #require(restored.terminal)
+
+        restoredTerminal.feed(Array("\u{1B}[?1004h".utf8))
+
+        let report = focused ? "\u{1B}[I" : "\u{1B}[O"
+        #expect(restoredTerminal.drainReplyBytes() == Array(report.utf8))
+    }
+
     @Test("checkpoint size plateaus under continuing grapheme churn")
     func checkpointSizeStopsGrowingWithDroppedScalars() throws {
         // Intent: carry TerminalCore's grapheme bound through replica checkpoint synthesis.
@@ -347,7 +374,7 @@ struct PaneReplicaCheckpointTests {
     }
 
     @Test("every still-decodable envelope-field mutation fails integrity", arguments: [
-        "stateBytes", "columns", "rows", "pinned", "paneId", "recorderLifetimeId",
+        "stateBytes", "columns", "rows", "pinned", "focused", "paneId", "recorderLifetimeId",
         "nextSequence", "feedBytesBeforeNextSequence", "writeBytesBeforeNextSequence",
         "formatVersion", "integrity",
     ])
@@ -373,6 +400,7 @@ struct PaneReplicaCheckpointTests {
             columns: 8,
             rows: 2,
             pinned: false,
+            focused: false,
             paneId: paneId,
             cursor: cursor,
             formatVersion: PaneReplicaCheckpoint.currentFormatVersion + 1
@@ -389,6 +417,7 @@ struct PaneReplicaCheckpointTests {
             columns: 8,
             rows: 2,
             pinned: false,
+            focused: false,
             paneId: paneId,
             cursor: cursor
         )
@@ -401,6 +430,7 @@ struct PaneReplicaCheckpointTests {
             columns: 1,
             rows: 0,
             pinned: false,
+            focused: false,
             paneId: paneId,
             cursor: cursor
         )
@@ -413,6 +443,7 @@ struct PaneReplicaCheckpointTests {
             columns: 8,
             rows: 2,
             pinned: false,
+            focused: false,
             paneId: paneId,
             cursor: checkpointCursor(sequence: 1, feed: -1)
         )
@@ -429,6 +460,7 @@ struct PaneReplicaCheckpointTests {
             columns: 80,
             rows: 24,
             pinned: false,
+            focused: false,
             paneId: paneId,
             cursor: checkpointCursor(sequence: 1, feed: state.count)
         )
@@ -488,7 +520,8 @@ private func checkpointReplica(
     cursor: PaneTapeCursor,
     columns: Int = 8,
     rows: Int = 2,
-    pinned: Bool = false
+    pinned: Bool = false,
+    focused: Bool = false
 ) throws -> PaneReplica {
     var replica = PaneReplica()
     try replica.apply(.sync(.init(
@@ -500,7 +533,7 @@ private func checkpointReplica(
             rows: rows,
             pinned: pinned,
             droppedHistoryRows: 0,
-            focused: false
+            focused: focused
         ),
         cursor: cursor
     )))
@@ -547,7 +580,7 @@ private func mutateCheckpointField(in data: Data, key: String) throws -> Data {
     case "stateBytes", "integrity": envelope[key] = Data("unsafe".utf8)
     case "paneId", "recorderLifetimeId": envelope[key] = UUID().uuidString
     // Flip in place: an integer here would fail decoding instead of integrity.
-    case "pinned": envelope[key] = try #require(envelope[key] as? Bool) == false
+    case "pinned", "focused": envelope[key] = try #require(envelope[key] as? Bool) == false
     default:
         let value = try #require(envelope[key] as? NSNumber)
         envelope[key] = NSNumber(value: value.int64Value + 1)
