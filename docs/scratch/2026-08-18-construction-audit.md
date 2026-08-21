@@ -69,11 +69,22 @@ correction, the correction wins over the prose above it.
 
 ### Select and launch the next wave
 
-When asked to pick a wave, check the tree, history, checklist, dependencies, and
-file ownership. Select only unfinished tasks that separate cleanly across
-worktrees; do not combine dependent or substantially overlapping work. Prefer
-current defects, then high-confidence work that unblocks later tasks. Report
-each task's category, reason, ownership, and merge risk.
+When asked for the next wave, distinguish landed work from claimed work. A
+checked item is landed; an unchecked item may already be under verification or
+implementation. Check the current tree, recent history, checklist, active
+worktrees and their diffs, `plans/wip`, and live DanTerm tabs. Code and history
+override a stale checkbox. Exclude landed or claimed items. Ask the user about
+prior verifier-only tasks if they left no durable trace.
+
+Choose lanes that can later be implemented in separate worktrees without
+substantial production-file overlap. The verifier tabs themselves run
+read-only on `master`. Prefer unpinned current defects, then high-confidence
+work that unlocks later tasks. If findings describe one coherent change,
+combine them into one lane; otherwise do not select overlapping findings
+together. Report each lane's category, reason, ownership, and merge risk.
+
+Repeat this preflight immediately before launch because work can land after the
+wave is selected.
 
 Launch only when asked. For each task, create a unique temporary prompt file,
 then open a background DanTerm tab in the explicit target group. Run every
