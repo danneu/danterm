@@ -153,6 +153,9 @@ struct AppRuntimeRosterPushTests {
 
         let restored = try requireRoster(wire.readNotification())
         #expect(restored.panes.map(\.paneId) == [paneId])
+        let tabId = try #require(runtime.model.selectedTabId)
+        runtime.send(.addTodo(owner: .tab(tabId), text: "no roster change"))
+        #expect(wire.hasReadableData() == false, "restore must push its changed roster once")
     }
 
     @Test("a closed connection retires only its own subscription")

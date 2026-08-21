@@ -86,6 +86,22 @@ private struct RosterSubscriber {
     let shutdownToken: AppRuntimeSchedulingToken
 }
 
+/// Owns the application model so every mutation after initialization passes through update().
+@MainActor
+private final class AppModelStore {
+    private var storedModel: AppModel
+
+    init(_ model: AppModel) {
+        storedModel = model
+    }
+
+    var value: AppModel { storedModel }
+
+    func dispatch(_ msg: Msg) -> [Command] {
+        return update(&storedModel, msg)
+    }
+}
+
 // App runtime owns the mutable app model, performs the commands emitted by the
 // pure update function, and bridges model changes into AppKit objects and live sessions.
 @MainActor
@@ -97,7 +113,8 @@ class AppRuntime {
         let hosts: [PaneId: PaneHost]
     }
 
-    var model: AppModel
+    private let modelStore: AppModelStore
+    var model: AppModel { modelStore.value }
     private let configStore: DanTermConfigStore
     private let ports: AppRuntimePorts
     // Every identity-keyed path this runtime reads or writes -- the control socket,
@@ -196,6 +213,10 @@ class AppRuntime {
     private var ipcServerStartToken: AppRuntimeSchedulingToken?
     // Recovery data stays inert until the projected launch notice resolves to Restore.
     private var pendingLaunchRestore: ValidatedAppRestore?
+    // Staging authors this table before the reducer asks the command interpreter
+    // to swap it into the live session. The command stays payload-free, so no
+    // AppKit-owned value crosses into the pure core.
+    private var stagedRestoreHosts: [PaneId: PaneHost]?
     let schedulingLifecycle = AppRuntimeSchedulingLifecycle()
     private lazy var paneTapeBroker = PaneTapeBroker(
         schedulingLifecycle: schedulingLifecycle
@@ -217,6 +238,7 @@ class AppRuntime {
         dialogSurfaces: DialogSurfaces,
         instancePaths: DanTermInstancePaths,
         configStore: DanTermConfigStore = DanTermConfigStore(),
+        initialModel: AppModel? = nil,
         startsApplicationServices: Bool = true,
         tailnetOptIn: Bool = false
     ) {
@@ -224,22 +246,28 @@ class AppRuntime {
         self.dialogSurfaces = dialogSurfaces
         self.instancePaths = instancePaths
         self.configStore = configStore
-        // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
-        self.model = AppModel(
-            groups: [GroupModel(id: GroupId(rawValue: CoreEnv.live.newId()), name: "General")]
-        )
-        // Load DanTerm config before any tabs are created. This is the one apply
-        // path that cannot go through send() -- the Elm loop is not running yet --
-        // so it assigns the same pair configLoaded does, via the same resolver.
-        let launchConfig: DanTermConfig
-        do {
-            launchConfig = try configStore.load()
-        } catch {
-            launchConfig = .default
-            self.pendingConfigError = error
+        let startingModel: AppModel
+        if let initialModel {
+            startingModel = initialModel
+        } else {
+            // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
+            var launchModel = AppModel(
+                groups: [GroupModel(id: GroupId(rawValue: CoreEnv.live.newId()), name: "General")]
+            )
+            // Load DanTerm config before any tabs are created. The store does not exist
+            // yet, so assemble the launch value before giving it its sole mutation owner.
+            let launchConfig: DanTermConfig
+            do {
+                launchConfig = try configStore.load()
+            } catch {
+                launchConfig = .default
+                self.pendingConfigError = error
+            }
+            launchModel.config = launchConfig
+            launchModel.resolvedFontFamily = resolveConfiguredFontFamily(launchConfig)
+            startingModel = launchModel
         }
-        self.model.config = launchConfig
-        self.model.resolvedFontFamily = resolveConfiguredFontFamily(launchConfig)
+        self.modelStore = AppModelStore(startingModel)
         self.lightCheckpointBaseline = LightCheckpointProjection(snapshot: toSnapshot(model))
         self.rosterBaseline = paneRoster(in: model)
         paneTapeBroker.setSessionLookup { [weak self] paneId in
@@ -269,17 +297,14 @@ class AppRuntime {
             do {
                 let server = try IpcServer(
                     socketPath: instancePaths.controlSocket,
-                    tailnetConfig: launchConfig.tailnet,
+                    tailnetConfig: model.config.tailnet,
                     identity: instancePaths.identity,
                     tailnetOptIn: tailnetOptIn,
                     auditWriter: IpcAuditLogWriter(directory: instancePaths.ipcAuditDirectory),
                     runtimeDispatch: makeIpcDispatch()
                 )
                 self.ipcServer.arm { _ in server }
-                // Assigned rather than sent, like the config above: the Elm loop is not
-                // running yet, and a preferences pane opened before the first transition
-                // must not read a default as if it were this instance's verdict.
-                self.model.tailnetStatus = server.initialTailnetStatus
+                _ = self.modelStore.dispatch(.tailnetStatusChanged(server.initialTailnetStatus))
                 self.ipcServerStartToken = schedulingLifecycle.arm(.deferredCallback, cancel: {})
             } catch {
                 print("Failed to start DanTerm IPC server: \(error)")
@@ -421,7 +446,7 @@ class AppRuntime {
     /// The body of one send frame. Split out so the frame bracket reads as one
     /// line; it has no other caller.
     private func dispatchInFrame(_ msg: Msg) {
-        let commands = update(&model, msg)
+        let commands = modelStore.dispatch(msg)
         for command in commands {
             perform(command)
         }
@@ -604,7 +629,12 @@ class AppRuntime {
             serve: { [weak self] connection, reqId, audit, message in
                 guard let self else { return }
                 self.registerIpcConnection(connection, for: reqId, audit: audit)
-                self.send(message)
+                switch message {
+                case .request(let caller, let request):
+                    self.send(.ipcRequest(reqId: reqId, caller: caller, request: request))
+                case .decodeFailed(let error):
+                    self.send(.ipcRequestDecodeFailed(reqId: reqId, error: error))
+                }
             },
             connectionClosed: { [weak self] connectionId in
                 self?.ipcConnectionClosed(connectionId)
@@ -668,7 +698,7 @@ class AppRuntime {
     func shutdown() {
         guard schedulingLifecycle.isActive else { return }
 
-        for command in update(&model, .runtimeWillShutdown) {
+        for command in modelStore.dispatch(.runtimeWillShutdown) {
             perform(command)
         }
 
@@ -701,6 +731,16 @@ class AppRuntime {
 
     func perform(_ command: Command) {
         switch command {
+        case .installStagedRestoreSession:
+            guard let hosts = stagedRestoreHosts else {
+                assertionFailure("restore command requires a staged pane-host table")
+                break
+            }
+            stagedRestoreHosts = nil
+            tearDownCurrentSession()
+            // Teardown emptied the table, so the finished staged records become live whole.
+            paneHosts = hosts
+
         case .createSession(let sessionId, let paneId, let cwd, let command, let launchCommand):
             let envVars = terminalLaunchEnvironment(
                 ipcSocketPath: ipcSocketPath?.path,
@@ -1504,7 +1544,6 @@ class AppRuntime {
         cancelPaneDrag()
         dismissTodoPopoverSilently()
         dismissAlertsPopoverSilently()
-        model.todoPopover = nil  // session teardown bypasses the reconciler; clear directly
         themeBrowserView?.removeFromSuperview()
         themeBrowserView = nil
 
@@ -1528,26 +1567,11 @@ class AppRuntime {
         sidebarReconcileDriver = SidebarReconcileDriver()
     }
 
-    /// Swap a fully staged restore into the live runtime and refresh derived UI state.
+    /// Give the staged hosts to the command interpreter and install the model through update().
     private func commitRestoreSession(_ staged: StagedRestoreSession) {
-        tearDownCurrentSession()
-        model = staged.model
-        // tearDownCurrentSession emptied the table, so the staged one becomes the live one
-        // whole. The records were finished at staging; nothing is rebuilt here.
-        paneHosts = staged.hosts
-        lightCheckpointBaseline = currentLightCheckpointProjection()
-        cancelCoalescedReconcile()
-
-        // Restore bypasses update(); reconcile tab state here so the first
-        // cmd-shift-i after a restore sees a populated mruOrder.
-        reconcileTabState(&model)
-
-        // Drive the entire post-restore UI through reconcile() (clean build:
-        // tearDownCurrentSession reset the caches). reconcileContainers builds every
-        // tab's container eagerly from the nil containerShape cache -- selected visible,
-        // the rest mounted+hidden -- and the chrome/sidebar/window passes build from
-        // scratch. reconcileSessionExistence is a no-op (staged sessions match allPaneIds).
-        sweepAndDispatchFollowUps()
+        precondition(stagedRestoreHosts == nil, "only one restore may be staged for commit")
+        stagedRestoreHosts = staged.hosts
+        send(.restoreSession(staged.model))
     }
 
     /// Dispose of a staged restore after a failed build so no temp state leaks into the live

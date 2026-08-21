@@ -11,9 +11,6 @@ struct AppRuntimeAutosplitTests {
     @Test("autosplit measures the named hidden tab and ignores zoom")
     func autosplitMeasuresNamedHiddenTabIgnoringZoom() throws {
         let ports = RecordingAppRuntimePorts()
-        let runtime = makeCommandTestRuntime(ports)
-        defer { runtime.shutdown() }
-
         var model = AppModel(groups: [GroupModel(id: GroupId(rawValue: UUID()), name: "General")])
         _ = update(&model, .createTabInSelectedGroup())
         let targetTabId = try #require(selectedTab(in: model)?.id)
@@ -26,7 +23,8 @@ struct AppRuntimeAutosplitTests {
         _ = update(&model, .toggleZoomPane(paneId: targetPaneId))
         _ = update(&model, .createTabInSelectedGroup())
         let visibleTabId = try #require(selectedTab(in: model)?.id)
-        runtime.model = model
+        let runtime = makeCommandTestRuntime(ports, initialModel: model)
+        defer { runtime.shutdown() }
 
         let targetContainer = SplitContainerView(
             rootNode: try #require(tabById(targetTabId, in: model)?.paneTree.root),

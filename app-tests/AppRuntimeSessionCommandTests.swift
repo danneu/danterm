@@ -337,6 +337,44 @@ struct AppRuntimeSessionCommandTests {
         #expect(fixture.session.searchNeedles.isEmpty)
     }
 
+    @Test("restore seeds MRU state before the first cycle step")
+    func restoreSeedsMruBeforeFirstCycle() throws {
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+
+        runtime.bootstrapFromSnapshot(
+            makeCommandSnapshot(paneId: PaneId(rawValue: UUID()))
+        )
+        runtime.send(.mruCycleStepped(direction: .older))
+
+        #expect(runtime.model.mruOrder == [runtime.model.selectedTabId].compactMap { $0 })
+        #expect(desiredSwitcher(in: runtime.model) != nil)
+    }
+
+    @Test("restore writes its changed state to the light checkpoint")
+    func restoreSchedulesLightCheckpoint() throws {
+        let fixture = RecordingAppRuntimePorts()
+        let instance = TemporaryInstancePaths()
+        defer { instance.remove() }
+        let runtime = AppRuntime(
+            ports: fixture.value,
+            dialogSurfaces: RecordingDialogSurfaces().value,
+            instancePaths: instance.paths,
+            configStore: DanTermConfigStore(url: instance.absentConfigURL),
+            startsApplicationServices: false
+        )
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        runtime.flushPendingCheckpoint()
+
+        let data = try Data(contentsOf: instance.paths.lightCheckpointFile)
+        let checkpoint = try loadValidatedInitFile(from: data)
+        #expect(checkpoint.model.allPaneIds == [paneId])
+    }
+
     // Intent: search work exists only for a pane that exists.
     // Why it exists: the debouncer and its scheduling token used to live in runtime
     // tables keyed by pane id, so a needle addressed to no live pane armed an owner
@@ -426,6 +464,9 @@ struct AppRuntimeSessionCommandTests {
         try await Task.sleep(for: .milliseconds(200))
 
         // One more session, so the restore stages its first pane and then fails on its second.
+        let modelBeforeFailure = runtime.model
+        let paneIdsBeforeFailure = Set(runtime.paneHosts.keys)
+        let censusBeforeFailure = runtime.schedulingLifecycle.captureOwnerCensus()
         let stagedRequestIndex = fixture.sessionRequests.count
         fixture.sessionsBeforeFailure = stagedRequestIndex + 1
         runtime.bootstrapFromSnapshot(makeCommandSnapshot(
@@ -441,6 +482,9 @@ struct AppRuntimeSessionCommandTests {
         )
         #expect(stagedSession.tearDownCount == 1, "the staged record must be destroyed")
         #expect(FileManager.default.fileExists(atPath: stagedReplayPath) == false)
+        #expect(runtime.model == modelBeforeFailure)
+        #expect(Set(runtime.paneHosts.keys) == paneIdsBeforeFailure)
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus() == censusBeforeFailure)
         #expect(runtime.paneHosts[paneId]?.session === live)
         runtime.perform(.sendText(paneId: paneId, text: "still usable"))
         #expect(live.sentText == ["still usable"])

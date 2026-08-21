@@ -94,7 +94,10 @@ struct AppRuntimeAmbientCommandTests {
         }?.1)
         #expect(FileManager.default.fileExists(atPath: replayPath))
         fixture.session.onPrimaryHistoryMutation?()
-        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.timer] == 1)
+        #expect(
+            runtime.schedulingLifecycle.captureOwnerCensus()[.timer] == 2,
+            "restore checkpointing and enriched history each own one timer"
+        )
 
         runtime.perform(.terminate)
 

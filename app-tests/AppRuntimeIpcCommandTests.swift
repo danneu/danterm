@@ -249,9 +249,16 @@ struct AppRuntimeIpcCommandTests {
         let store = DanTermConfigStore(url: url, writeData: { _, _ in
             throw POSIXError(.EROFS)
         })
-        let runtime = makeCommandTestRuntime(ports, configStore: store)
+        var initialModel = AppModel(
+            groups: [GroupModel(id: GroupId(rawValue: UUID()), name: "General")]
+        )
+        initialModel.resolvedFontFamily = "stale family"
+        let runtime = makeCommandTestRuntime(
+            ports,
+            configStore: store,
+            initialModel: initialModel
+        )
         defer { runtime.shutdown() }
-        runtime.model.resolvedFontFamily = "stale family"
         runtime.send(.preferencesOpened())
         runtime.send(.prefSet(.fontFamily("DanTerm Missing Font \(UUID().uuidString)")))
         runtime.send(.prefSave)
@@ -265,8 +272,6 @@ struct AppRuntimeIpcCommandTests {
     @Test("input rejection re-enters update and writes the pending reply")
     func inputRejectionWritesPendingErrorBeforeReturn() throws {
         let ports = RecordingAppRuntimePorts()
-        let runtime = makeCommandTestRuntime(ports)
-        defer { runtime.shutdown() }
         let wire = try CommandIpcConnectionFixture()
         defer {
             wire.connection.close()
@@ -274,12 +279,17 @@ struct AppRuntimeIpcCommandTests {
         }
         let requestId = UUID()
         let submissionId = InputSubmissionId(rawValue: UUID())
-        wire.remember(reqId: requestId, rpcId: .number(9))
-        runtime.registerIpcConnection(wire.connection, for: requestId)
-        runtime.model.pendingInputSubmissions[submissionId] = PendingInputSubmission(
+        var initialModel = AppModel(
+            groups: [GroupModel(id: GroupId(rawValue: UUID()), name: "General")]
+        )
+        initialModel.pendingInputSubmissions[submissionId] = PendingInputSubmission(
             requestId: requestId,
             paneId: PaneId(rawValue: UUID())
         )
+        let runtime = makeCommandTestRuntime(ports, initialModel: initialModel)
+        defer { runtime.shutdown() }
+        wire.remember(reqId: requestId, rpcId: .number(9))
+        runtime.registerIpcConnection(wire.connection, for: requestId)
 
         runtime.perform(.sendText(
             paneId: PaneId(rawValue: UUID()),
@@ -301,8 +311,6 @@ struct AppRuntimeIpcCommandTests {
         //   may leave the caller waiting after the pane owner handled it.
         // Scenario: an installed session accepts one wheel-up event at a viewport cell.
         let ports = RecordingAppRuntimePorts()
-        let runtime = makeCommandTestRuntime(ports)
-        defer { runtime.shutdown() }
         let wire = try CommandIpcConnectionFixture()
         defer {
             wire.connection.close()
@@ -311,14 +319,18 @@ struct AppRuntimeIpcCommandTests {
         let paneId = PaneId(rawValue: UUID())
         let requestId = UUID()
         let submissionId = InputSubmissionId(rawValue: UUID())
-        runtime.installTerminalSession(ports.session, paneId: paneId)
-        wire.remember(reqId: requestId, rpcId: .number(10))
-        runtime.registerIpcConnection(wire.connection, for: requestId)
-        runtime.model.pendingInputSubmissions[submissionId] = PendingInputSubmission(
+        var initialModel = AppModel(
+            groups: [GroupModel(id: GroupId(rawValue: UUID()), name: "General")]
+        )
+        initialModel.pendingInputSubmissions[submissionId] = PendingInputSubmission(
             requestId: requestId,
             paneId: paneId
         )
-
+        let runtime = makeCommandTestRuntime(ports, initialModel: initialModel)
+        defer { runtime.shutdown() }
+        runtime.installTerminalSession(ports.session, paneId: paneId)
+        wire.remember(reqId: requestId, rpcId: .number(10))
+        runtime.registerIpcConnection(wire.connection, for: requestId)
         runtime.perform(.sendInputWheel(
             paneId: paneId,
             direction: .up,
@@ -343,8 +355,6 @@ struct AppRuntimeIpcCommandTests {
         //   on the frame stream. That reading is sound only while the server replies
         //   before it reconciles; this pins the ordering premise.
         let ports = RecordingAppRuntimePorts()
-        let runtime = makeCommandTestRuntime(ports)
-        defer { runtime.shutdown() }
         let wire = try CommandIpcConnectionFixture()
         defer {
             wire.connection.close()
@@ -352,7 +362,7 @@ struct AppRuntimeIpcCommandTests {
         }
         let paneId = PaneId(rawValue: UUID())
         let tabId = TabId(rawValue: UUID())
-        runtime.model = AppModel(
+        let initialModel = AppModel(
             groups: [GroupModel(
                 id: GroupId(rawValue: UUID()),
                 name: "General",
@@ -363,6 +373,8 @@ struct AppRuntimeIpcCommandTests {
             )],
             selectedTabId: tabId
         )
+        let runtime = makeCommandTestRuntime(ports, initialModel: initialModel)
+        defer { runtime.shutdown() }
         runtime.installTerminalSession(ports.session, paneId: paneId)
         let requestId = UUID()
         wire.remember(reqId: requestId, rpcId: .number(7))
@@ -398,8 +410,6 @@ struct AppRuntimeIpcCommandTests {
     @Test("one send orders a notification port before its IPC reply")
     func sendPreservesCommandOrderAcrossPortAndWire() throws {
         let ports = RecordingAppRuntimePorts()
-        let runtime = makeCommandTestRuntime(ports)
-        defer { runtime.shutdown() }
         let wire = try CommandIpcConnectionFixture()
         defer {
             wire.connection.close()
@@ -407,7 +417,6 @@ struct AppRuntimeIpcCommandTests {
         }
         let requestId = UUID()
         wire.remember(reqId: requestId, rpcId: .number(42))
-        runtime.registerIpcConnection(wire.connection, for: requestId)
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         let selectedPaneId = PaneId(rawValue: UUID())
         let targetPaneId = PaneId(rawValue: UUID())
@@ -415,7 +424,7 @@ struct AppRuntimeIpcCommandTests {
         let targetTabId = TabId(rawValue: UUID())
         var targetSession = SessionModel(id: SessionId(rawValue: UUID()))
         targetSession.agent = .attached(session: agent, activity: nil)
-        runtime.model = AppModel(
+        let initialModel = AppModel(
             groups: [GroupModel(
                 id: GroupId(rawValue: UUID()),
                 name: "General",
@@ -435,6 +444,9 @@ struct AppRuntimeIpcCommandTests {
             )],
             selectedTabId: selectedTabId
         )
+        let runtime = makeCommandTestRuntime(ports, initialModel: initialModel)
+        defer { runtime.shutdown() }
+        runtime.registerIpcConnection(wire.connection, for: requestId)
         ports.onNotification = {
             wire.connection.writeNotification(method: "test.notification", params: JSONValue.null)
         }

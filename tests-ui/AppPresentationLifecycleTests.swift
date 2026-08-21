@@ -32,17 +32,16 @@ func appPresentationLifecycleTests() {
     }
 
     uiTest("window occlusion reaches session visibility and reveals once") {
-        let runtime = AppRuntime()
         let paneId = PaneId()
         let tabId = TabId()
         let groupId = GroupId()
         let session = TerminalView()
         let pane = PaneModel(id: paneId)
         let tab = TabModel(id: tabId, customTitle: nil, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
-        runtime.model = AppModel(
-            groups: [GroupModel(id: groupId, name: "General", tabs: [tab])]
-        )
-        runtime.model.selectedTabId = tabId
+        let runtime = AppRuntime(model: AppModel(
+            groups: [GroupModel(id: groupId, name: "General", tabs: [tab])],
+            selectedTabId: tabId
+        ))
         runtime.installTerminalSession(session, paneId: paneId)
         let window = PresentationLifecycleTestWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),

@@ -914,6 +914,11 @@ func update(
         model.noticeQueue.removeFirst()
         return commands
 
+    case .restoreSession(var restored):
+        restored.noticeQueue = model.noticeQueue
+        model = restored
+        return [.installStagedRestoreSession]
+
     case .terminate:
         return [.terminate]
 

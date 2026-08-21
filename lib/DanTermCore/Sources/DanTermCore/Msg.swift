@@ -123,6 +123,9 @@ enum Msg {
     case noticeReported(NoticeSubject)
     case noticeAnswered(id: NoticeId, answer: NoticeAnswer)
 
+    // Whole-model restore still enters through the reducer so every normalizer applies.
+    case restoreSession(AppModel)
+
     // Export
     case exportState
 

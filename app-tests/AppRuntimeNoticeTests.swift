@@ -62,6 +62,22 @@ struct AppRuntimeNoticeTests {
         #expect(runtime.paneHosts.keys.contains(recoveredPaneId) == false)
         #expect(runtime.model.allPaneIds.count == 1)
     }
+
+    @Test("a notice queued before restore remains projected after commit")
+    func queuedNoticeSurvivesRestore() throws {
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        runtime.send(.noticeReported(.message(title: "Queued", message: "Keep me")))
+        let notice = try #require(desiredNotice(in: runtime.model))
+
+        runtime.bootstrapFromSnapshot(
+            makeCommandSnapshot(paneId: PaneId(rawValue: UUID()))
+        )
+
+        #expect(runtime.model.noticeQueue.first?.id == notice.id)
+        #expect(desiredNotice(in: runtime.model) == notice)
+    }
 }
 
 private func validatedRestore(_ snapshot: AppModelSnapshot) throws -> ValidatedAppRestore {

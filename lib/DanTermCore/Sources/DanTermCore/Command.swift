@@ -111,6 +111,8 @@ enum Command {
     case activateApp
     /// Resolves the launch recovery decision outside the answering send frame.
     case resolveLaunchRestore(restore: Bool)
+    /// Replaces the live pane-host table with the table staged before restore dispatch.
+    case installStagedRestoreSession
     // The dock + toolbar-bell unread badges are derived by reconcileWindowChrome (Stage 6).
 
     // Config persistence

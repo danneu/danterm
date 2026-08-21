@@ -205,14 +205,16 @@ struct AppRuntimeDialogSurfaceTests {
         //   re-apply.
         // Scenario: two steps of a cycle over three tabs, then Escape.
         let surfaces = RecordingDialogSurfaces()
-        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts(), dialogSurfaces: surfaces)
-        defer { runtime.shutdown() }
-
         var model = AppModel(groups: [GroupModel(id: GroupId(rawValue: UUID()), name: "General")])
         for _ in 0..<3 {
             _ = update(&model, .createTabInSelectedGroup())
         }
-        runtime.model = model
+        let runtime = makeCommandTestRuntime(
+            RecordingAppRuntimePorts(),
+            dialogSurfaces: surfaces,
+            initialModel: model
+        )
+        defer { runtime.shutdown() }
 
         runtime.send(.mruCycleStepped(direction: .older))
         runtime.send(.mruCycleStepped(direction: .older))

@@ -234,7 +234,8 @@ final class RecordingTerminalSession: NSView, TerminalSession {
 func makeCommandTestRuntime(
     _ fixture: RecordingAppRuntimePorts,
     configStore: DanTermConfigStore? = nil,
-    dialogSurfaces: RecordingDialogSurfaces = RecordingDialogSurfaces()
+    dialogSurfaces: RecordingDialogSurfaces = RecordingDialogSurfaces(),
+    initialModel: AppModel? = nil
 ) -> AppRuntime {
     let instance = TemporaryInstancePaths()
     return AppRuntime(
@@ -242,6 +243,7 @@ func makeCommandTestRuntime(
         dialogSurfaces: dialogSurfaces.value,
         instancePaths: instance.paths,
         configStore: configStore ?? DanTermConfigStore(url: instance.absentConfigURL),
+        initialModel: initialModel,
         startsApplicationServices: false
     )
 }

@@ -24,13 +24,6 @@ struct AppRuntimePendingIpcShutdownTests {
         // Scenario: one creation and one input remain in flight when application teardown starts.
         let instance = TemporaryInstancePaths()
         defer { instance.remove() }
-        let runtime = AppRuntime(
-            ports: .live(terminalBackend: SwiftTerminalBackend()),
-            dialogSurfaces: RecordingDialogSurfaces().value,
-            instancePaths: instance.paths,
-            configStore: DanTermConfigStore(url: instance.absentConfigURL),
-            startsApplicationServices: false
-        )
         let creation = try ShutdownConnectionFixture()
         let input = try ShutdownConnectionFixture()
         defer {
@@ -39,20 +32,30 @@ struct AppRuntimePendingIpcShutdownTests {
         }
         let creationRequestId = UUID()
         let inputRequestId = UUID()
-        creation.connection.rememberRequest(reqId: creationRequestId, rpcId: .number(1))
-        input.connection.rememberRequest(reqId: inputRequestId, rpcId: .number(2))
-        runtime.registerIpcConnection(creation.connection, for: creationRequestId)
-        runtime.registerIpcConnection(input.connection, for: inputRequestId)
-        runtime.model.pendingSessionCreations[SessionId(rawValue: UUID())] = PendingSessionCreation(
+        var initialModel = AppModel(
+            groups: [GroupModel(id: GroupId(rawValue: UUID()), name: "General")]
+        )
+        initialModel.pendingSessionCreations[SessionId(rawValue: UUID())] = PendingSessionCreation(
             requestId: creationRequestId,
             result: .null
         )
         let submissionId = InputSubmissionId(rawValue: UUID())
-        runtime.model.pendingInputSubmissions[submissionId] = PendingInputSubmission(
+        initialModel.pendingInputSubmissions[submissionId] = PendingInputSubmission(
             requestId: inputRequestId,
             paneId: PaneId(rawValue: UUID())
         )
-
+        let runtime = AppRuntime(
+            ports: .live(terminalBackend: SwiftTerminalBackend()),
+            dialogSurfaces: RecordingDialogSurfaces().value,
+            instancePaths: instance.paths,
+            configStore: DanTermConfigStore(url: instance.absentConfigURL),
+            initialModel: initialModel,
+            startsApplicationServices: false
+        )
+        creation.connection.rememberRequest(reqId: creationRequestId, rpcId: .number(1))
+        input.connection.rememberRequest(reqId: inputRequestId, rpcId: .number(2))
+        runtime.registerIpcConnection(creation.connection, for: creationRequestId)
+        runtime.registerIpcConnection(input.connection, for: inputRequestId)
         runtime.shutdown()
         creation.connection.close()
         input.connection.close()

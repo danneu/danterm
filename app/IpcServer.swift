@@ -57,12 +57,23 @@ struct IpcRequestTransport: Sendable {
 struct AppRuntimeIpcDispatch: Sendable {
     /// Registers this request's transport and sends its message in one main-actor body, so
     /// nothing can run between them and get ahead of a connection's own ordering.
-    let serve: @MainActor @Sendable (IpcConnection, UUID, IpcRequestAudit?, Msg) -> Void
+    let serve: @MainActor @Sendable (
+        IpcConnection,
+        UUID,
+        IpcRequestAudit?,
+        IpcServerRuntimeMessage
+    ) -> Void
     /// Retires the runtime state owned by a connection that has gone.
     let connectionClosed: @MainActor @Sendable (UUID) -> Void
     /// Publishes each tailnet listener transition into the model, so every surface that
     /// reports the listener reports the value the server authored.
     let tailnetStatusChanged: @MainActor @Sendable (DanTermTailnetStatus) -> Void
+}
+
+/// Carries only the sendable IPC cases across the server-to-main-actor boundary.
+enum IpcServerRuntimeMessage: Sendable {
+    case request(caller: IpcCallerIdentity, request: IpcRequest)
+    case decodeFailed(IpcRequestDecodeError)
 }
 
 /// Keeps remote-cap accounting synchronous at accept time and independent of actor scheduling.
@@ -559,7 +570,7 @@ actor IpcServer {
             ))
             connection.rememberRequest(reqId: reqId, rpcId: rpcId)
             await dispatchToRuntime(
-                .ipcRequestDecodeFailed(reqId: reqId, error: error),
+                .decodeFailed(error),
                 connection: connection,
                 reqId: reqId,
                 audit: nil
@@ -573,7 +584,7 @@ actor IpcServer {
             ))
             connection.rememberRequest(reqId: reqId, rpcId: rpcId)
             await dispatchToRuntime(
-                .ipcRequestDecodeFailed(reqId: reqId, error: .internalError),
+                .decodeFailed(.internalError),
                 connection: connection,
                 reqId: reqId,
                 audit: nil
@@ -611,7 +622,7 @@ actor IpcServer {
         }
         connection.rememberRequest(reqId: reqId, rpcId: rpcId)
         await dispatchToRuntime(
-            .ipcRequest(reqId: reqId, caller: state.caller, request: typedRequest),
+            .request(caller: state.caller, request: typedRequest),
             connection: connection,
             reqId: reqId,
             audit: audit
@@ -619,7 +630,7 @@ actor IpcServer {
     }
 
     private func dispatchToRuntime(
-        _ message: Msg,
+        _ message: IpcServerRuntimeMessage,
         connection: IpcConnection,
         reqId: UUID,
         audit: IpcRequestAudit?
