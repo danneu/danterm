@@ -348,6 +348,104 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
+    @Test("backpressured submissions keep their own bytes and attribution", .timeLimit(.minutes(1)))
+    func backpressuredSubmissionsStayDistinct() async throws {
+        // Intent: later input can queue behind a stalled submission, then both cross in order
+        //   with their own bytes, origin, completion, and pending-byte accounting intact.
+        // Why it exists: the pending-input representation must not merge submission ownership
+        //   when a partial head write leaves later submissions waiting behind it.
+        // Scenario: nobody reads a childless channel while two distinct payloads queue, then
+        //   the test drains the child end until both submissions complete.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        let recordingStart = host.fencedFlightRecordingOriginFromNow().cursor
+        let first = [UInt8](repeating: UInt8(ascii: "A"), count: 2 * 1024 * 1024)
+        let second = [UInt8](repeating: UInt8(ascii: "B"), count: 512 * 1024)
+        let firstOrigin = DispatchTime.now().uptimeNanoseconds
+        let secondOrigin = firstOrigin + 1
+        let completions = InputCompletionRecorder(expecting: 2)
+
+        host.send(first, origin: firstOrigin) { completions.signal($0) }
+        #expect(await host.settledPendingInputByteCount() > 0)
+        host.send(second, origin: secondOrigin) { completions.signal($0) }
+
+        let stalledPending = await host.settledPendingInputByteCount()
+        let stalledEvents = host.fencedFlightRecording(from: recordingStart).events
+            .filter { writtenBytes($0) != nil }
+        let stalledWrittenCount = stalledEvents.compactMap(writtenBytes).reduce(0) { $0 + $1.count }
+        #expect(stalledPending == first.count + second.count - stalledWrittenCount)
+        #expect(completions.results.isEmpty)
+
+        #expect(pane.channel.discardBytesReceivedFromHost(count: first.count + second.count))
+        #expect(completions.waitForAll(within: .seconds(30)))
+        #expect(completions.results == [.delivered, .delivered])
+        #expect(await host.resourceSnapshot().pendingInputByteCount == 0)
+
+        let events = host.fencedFlightRecording(from: recordingStart).events
+            .filter { writtenBytes($0) != nil }
+        let bytes = events.compactMap(writtenBytes).flatMap { $0 }
+        expectBytes(bytes, equal: first + second, "queued submission bytes")
+        let firstOrigins = Set(events.compactMap { event in
+            writtenBytes(event)?.first == UInt8(ascii: "A") ? event.originElapsedNanoseconds : nil
+        })
+        let secondOrigins = Set(events.compactMap { event in
+            writtenBytes(event)?.first == UInt8(ascii: "B") ? event.originElapsedNanoseconds : nil
+        })
+        #expect(firstOrigins.count == 1)
+        #expect(secondOrigins.count == 1)
+        #expect(firstOrigins != secondOrigins)
+
+        await host.close()
+    }
+
+    @Test("running input limit follows unwritten bytes", .timeLimit(.minutes(1)))
+    func runningInputLimitTracksUnwrittenBytes() async throws {
+        // Intent: bytes that cross a running host immediately release queue capacity, while
+        //   every byte still pending counts against the same whole-submission admission limit.
+        // Why it exists: the host's running byte total is separate from pre-spawn buffering
+        //   and must stay exact across partial writes, rejection, draining, and reuse.
+        // Scenario: a stalled first submission crosses only a prefix; a second fills the
+        //   remaining capacity, one extra byte is rejected, then draining restores capacity.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        let first = [UInt8](
+            repeating: UInt8(ascii: "A"),
+            count: PaneProcessLifecycleReducer.pendingInputByteLimit
+        )
+        let admitted = InputCompletionRecorder(expecting: 2)
+        let rejected = InputCompletionRecorder(expecting: 1)
+
+        host.send(first) { admitted.signal($0) }
+        let firstPending = await host.settledPendingInputByteCount()
+        #expect(firstPending > 0)
+        #expect(firstPending < PaneProcessLifecycleReducer.pendingInputByteLimit)
+        let releasedCapacity = PaneProcessLifecycleReducer.pendingInputByteLimit - firstPending
+        host.send([UInt8](repeating: UInt8(ascii: "B"), count: releasedCapacity)) {
+            admitted.signal($0)
+        }
+        host.send([UInt8(ascii: "C")]) { rejected.signal($0) }
+
+        #expect(rejected.waitForAll(within: .seconds(20)))
+        #expect(rejected.results == [.rejected(.bufferLimitExceeded)])
+        #expect(await host.settledPendingInputByteCount()
+            == PaneProcessLifecycleReducer.pendingInputByteLimit)
+
+        #expect(pane.channel.discardBytesReceivedFromHost(
+            count: first.count + releasedCapacity
+        ))
+        #expect(admitted.waitForAll(within: .seconds(30)))
+        #expect(admitted.results == [.delivered, .delivered])
+        #expect(await host.resourceSnapshot().pendingInputByteCount == 0)
+
+        let fresh = InputCompletionRecorder(expecting: 1)
+        host.send(Array("fresh".utf8)) { fresh.signal($0) }
+        #expect(pane.channel.discardBytesReceivedFromHost(count: Array("fresh".utf8).count))
+        #expect(fresh.waitForAll(within: .seconds(20)))
+        #expect(fresh.results == [.delivered])
+
+        await host.close()
+    }
+
     @Test("Cmd link interaction publishes hover and opens once without PTY input", .timeLimit(.minutes(1)))
     func linkInteractionEffectsStayLocal() async throws {
         // Intent: prove the serialized owner applies hover/open effects without child bytes.
@@ -2013,6 +2111,46 @@ struct TerminalPTYHostChildProcessTests {
         #expect(probe.results == [.delivered])
         #expect(await host.waitForResult() == .exited(.exited(0)))
         #expect(String(decoding: host.outputBytes(), as: UTF8.self).contains("__CANONICAL_INPUT__=probe"))
+    }
+
+    @Test("canonical timeout preserves an already queued short line", .timeLimit(.minutes(1)))
+    func canonicalTimeoutPreservesQueuedShortLine() async throws {
+        // Intent: rejecting an oversized head submission releases only its unwritten bytes
+        //   and leaves a later short line queued for ordinary delivery.
+        // Why it exists: head rejection must not rebase, discard, or misattribute the records
+        //   behind the canonical hold.
+        // Scenario: both submissions enter before the intended 50 ms timeout; the oversized
+        //   one is rejected, then the queued probe reaches the canonical child and exits.
+        let oversizedBytes = [UInt8](
+            repeating: UInt8(ascii: "a"),
+            count: CanonicalInputDeliveryGate.capacity
+        )
+        let probeBytes = Array("probe\n".utf8)
+        let host = try makeHost(canonicalInputWait: .milliseconds(50))
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) canonical-hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__CANONICAL_READY__".utf8)))
+        let writeBaseline = host.inputWrites().count
+        let oversized = InputCompletionRecorder(expecting: 1)
+        let probe = InputCompletionRecorder(expecting: 1)
+
+        host.send(oversizedBytes) { oversized.signal($0) }
+        host.send(probeBytes) { probe.signal($0) }
+        #expect(await waitForSnapshot(of: host) {
+            $0.pendingInputByteCount == oversizedBytes.count + probeBytes.count
+        })
+
+        #expect(oversized.waitForAll(within: .seconds(20)))
+        #expect(oversized.results == [.rejected(.canonicalModeTimeout)])
+        #expect(probe.waitForAll(within: .seconds(20)))
+        #expect(probe.results == [.delivered])
+        #expect(host.inputWrites().count == writeBaseline + 1)
+        #expect(await host.resourceSnapshot().pendingInputByteCount == 0)
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+        #expect(String(decoding: host.outputBytes(), as: UTF8.self).contains(
+            "__CANONICAL_INPUT__=probe"
+        ))
     }
 
     @Test("canonical input translation cannot disguise an oversized run", .timeLimit(.minutes(1)))

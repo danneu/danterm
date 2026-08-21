@@ -176,6 +176,34 @@ package final class ChildlessPTYChannel: TerminalPTYSpawning {
         return ends.withLock { $0.receivedFromHost }
     }
 
+    /// Drains an exact host-input byte count without retaining it when a test cares about
+    /// delivery rather than the full payload. The bound is a hang guard, not a speed claim.
+    package func discardBytesReceivedFromHost(
+        count expectedCount: Int,
+        within limit: Duration = .seconds(30)
+    ) -> Bool {
+        let child = ends.withLock { $0.child }
+        guard child >= 0 else { return false }
+        var buffer = [UInt8](repeating: 0, count: 16 * 1024)
+        var received = 0
+        let deadline = ContinuousClock.now + limit
+        while received < expectedCount {
+            let result = buffer.withUnsafeMutableBytes {
+                Darwin.read(child, $0.baseAddress, min($0.count, expectedCount - received))
+            }
+            if result > 0 {
+                received += result
+                continue
+            }
+            if result < 0, errno == EINTR { continue }
+            guard result < 0, errno == EAGAIN, ContinuousClock.now < deadline else {
+                return false
+            }
+            usleep(1000)
+        }
+        return true
+    }
+
     /// The window size the host last pushed to the descriptor, read at the child end.
     package func childWindowSize() -> winsize? {
         let child = ends.withLock { $0.child }

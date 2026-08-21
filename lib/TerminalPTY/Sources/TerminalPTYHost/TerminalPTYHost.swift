@@ -310,10 +310,9 @@ public actor TerminalPTYHost {
         let slot: SourceSlot
     }
 
-    /// One submission's bytes inside the shared pending-input buffer, paired with where they
-    /// came from. `endOffset` is one past its last byte, so consecutive spans tile the buffer.
-    private struct PendingInputSpan {
-        let endOffset: Int
+    /// One pending submission owns its bytes and the facts needed when a later write crosses.
+    private struct PendingInputRecord {
+        let bytes: [UInt8]
         let origin: UInt64?
         let submissionId: PaneInputSubmissionId?
         /// Who chose these bytes, decided where they were submitted and carried to the tape,
@@ -429,12 +428,11 @@ public actor TerminalPTYHost {
     /// stop it. Cleared as soon as its outcome lands.
     private var inFlightLaunch: InFlightLaunch?
 
-    private var pendingInput: [UInt8] = []
-    private var pendingInputOffset = 0
-    /// One entry per submission still short of the PTY, oldest first, each ending where the
-    /// next begins. This is what keeps a submission's origin attached to its own bytes while
-    /// backpressure holds them, so the write that finally transmits them can be attributed.
-    private var pendingInputSpans: Deque<PendingInputSpan> = []
+    /// One entry per submission still short of the PTY, oldest first. Each record owns its
+    /// payload, so advancing or rejecting the head never rebases the submissions behind it.
+    private var pendingInputRecords: Deque<PendingInputRecord> = []
+    private var pendingInputHeadOffset = 0
+    private var pendingInputByteCount = 0
     private var nextInputSubmissionRawValue: UInt64 = 1
     private var inputSubmissions: [PaneInputSubmissionId: PendingInputSubmission] = [:]
     /// Semantics the owner itself produced, waiting for the drain that carries the
@@ -1436,7 +1434,7 @@ public actor TerminalPTYHost {
             hasPendingSpawnAdoption: pendingSpawnAdoption,
             hasLeader: leaderPID != nil,
             hasSession: sessionID != nil,
-            pendingInputByteCount: max(pendingInput.count - pendingInputOffset, 0),
+            pendingInputByteCount: pendingInputByteCount,
             census: TerminalPTYLifecycleCensus(
                 callbacksAfterTeardown: callbacksAfterTeardown,
                 forcedQuiescenceCount: forcedQuiescenceCount,
@@ -1867,21 +1865,19 @@ public actor TerminalPTYHost {
             }
             return
         }
-        compactPendingInputIfNeeded()
-        let pendingByteCount = pendingInput.count - pendingInputOffset
-        guard bytes.count <= PaneProcessLifecycleReducer.pendingInputByteLimit - pendingByteCount else {
+        guard bytes.count <= PaneProcessLifecycleReducer.pendingInputByteLimit - pendingInputByteCount else {
             if let submissionId {
                 completeInput(submissionId, with: .rejected(.bufferLimitExceeded))
             }
             return
         }
-        pendingInput.append(contentsOf: bytes)
-        pendingInputSpans.append(.init(
-            endOffset: pendingInput.count,
+        pendingInputRecords.append(.init(
+            bytes: bytes,
             origin: origin,
             submissionId: submissionId,
             attribution: attribution
         ))
+        pendingInputByteCount += bytes.count
         flushInput()
     }
 
@@ -1893,24 +1889,18 @@ public actor TerminalPTYHost {
         }
         let turnLimit = 64 * 1024
         var writtenThisTurn = 0
-        while pendingInputOffset < pendingInput.count, writtenThisTurn < turnLimit {
-            guard prepareCurrentInputSpanForWrite() else { return }
-            guard let span = pendingInputSpans.first else {
-                assertionFailure("pending input has no submission span")
-                rejectPendingInput(because: .writeFailed(EIO))
-                return
-            }
-            let result = pendingInput.withUnsafeBytes { rawBuffer -> Int in
+        while let record = pendingInputRecords.first, writtenThisTurn < turnLimit {
+            guard prepareCurrentInputRecordForWrite() else { return }
+            let result = record.bytes.withUnsafeBytes { rawBuffer -> Int in
                 guard let base = rawBuffer.baseAddress else { return 0 }
                 let remaining = min(
-                    span.endOffset - pendingInputOffset,
+                    record.bytes.count - pendingInputHeadOffset,
                     turnLimit - writtenThisTurn
                 )
-                return Darwin.write(masterFD, base.advanced(by: pendingInputOffset), remaining)
+                return Darwin.write(masterFD, base.advanced(by: pendingInputHeadOffset), remaining)
             }
             if result > 0 {
                 recordWrittenInput(count: result)
-                pendingInputOffset += result
                 writtenThisTurn += result
                 continue
             }
@@ -1920,7 +1910,7 @@ public actor TerminalPTYHost {
             rejectPendingInput(because: .writeFailed(code))
             return
         }
-        if pendingInputOffset == pendingInput.count {
+        if pendingInputRecords.isEmpty {
             clearPendingInput()
             cancelWriteSource()
         } else {
@@ -1929,8 +1919,8 @@ public actor TerminalPTYHost {
     }
 
     /// Re-evaluates the current whole submission before any of its pending bytes cross.
-    private func prepareCurrentInputSpanForWrite() -> Bool {
-        guard let span = pendingInputSpans.first else { return true }
+    private func prepareCurrentInputRecordForWrite() -> Bool {
+        guard let record = pendingInputRecords.first else { return true }
         var attributes = termios()
         guard tcgetattr(masterFD, &attributes) == 0 else {
             let code = errno
@@ -1942,7 +1932,7 @@ public actor TerminalPTYHost {
             return true
         }
         let isOversized = CanonicalInputDeliveryGate.isOversized(
-            pendingInput[pendingInputOffset..<span.endOffset],
+            record.bytes[pendingInputHeadOffset...],
             inputFlags: attributes.c_iflag
         )
         guard isOversized else {
@@ -1957,91 +1947,60 @@ public actor TerminalPTYHost {
             installCanonicalInputRetryIfNeeded()
         }
         guard let deadline = canonicalInputDeadline, now < deadline else {
-            rejectCurrentInputSpan(because: .canonicalModeTimeout)
-            if pendingInputOffset < pendingInput.count { flushInput() }
+            rejectCurrentInputRecord(because: .canonicalModeTimeout)
+            if pendingInputRecords.isEmpty == false { flushInput() }
             return false
         }
         return false
     }
 
     /// Drops only the blocked head submission so later deliverable input can still proceed.
-    private func rejectCurrentInputSpan(because failure: PaneInputSubmissionFailure) {
-        guard let span = pendingInputSpans.popFirst() else { return }
-        let removedCount = span.endOffset - pendingInputOffset
-        pendingInput.removeSubrange(pendingInputOffset..<span.endOffset)
-        pendingInputSpans = Deque(pendingInputSpans.map {
-            PendingInputSpan(
-                endOffset: $0.endOffset - removedCount,
-                origin: $0.origin,
-                submissionId: $0.submissionId,
-                attribution: $0.attribution
-            )
-        })
+    private func rejectCurrentInputRecord(because failure: PaneInputSubmissionFailure) {
+        guard let record = pendingInputRecords.popFirst() else { return }
+        pendingInputByteCount -= record.bytes.count - pendingInputHeadOffset
+        pendingInputHeadOffset = 0
         cancelCanonicalInputHold()
-        if let submissionId = span.submissionId {
+        if let submissionId = record.submissionId {
             completeInput(submissionId, with: .rejected(failure))
         }
-        if pendingInputOffset == pendingInput.count { clearPendingInput() }
+        if pendingInputRecords.isEmpty { clearPendingInput() }
     }
 
-    /// Records the bytes one successful write transmitted, split at the boundaries of the
-    /// submissions they came from so each event reports the origin and chooser of its own
-    /// bytes.
+    /// Records one successful write against the head submission and advances its cursor.
     private func recordWrittenInput(count: Int) {
-        var start = pendingInputOffset
-        let end = pendingInputOffset + count
-        while start < end, let span = pendingInputSpans.first {
-            let spanEnd = min(span.endOffset, end)
-            guard spanEnd > start else {
-                assertionFailure("pending input span ends before the bytes it covers")
-                return
+        guard let record = pendingInputRecords.first else { return }
+        let end = pendingInputHeadOffset + count
+        flightTape.recordWrite(
+            Array(record.bytes[pendingInputHeadOffset..<end]),
+            origin: record.origin,
+            attribution: record.attribution
+        )
+        pendingInputHeadOffset = end
+        pendingInputByteCount -= count
+        if pendingInputHeadOffset == record.bytes.count {
+            pendingInputRecords.removeFirst()
+            pendingInputHeadOffset = 0
+            if let submissionId = record.submissionId {
+                completeInput(submissionId, with: .delivered)
             }
-            flightTape.recordWrite(
-                Array(pendingInput[start..<spanEnd]),
-                origin: span.origin,
-                attribution: span.attribution
-            )
-            if spanEnd == span.endOffset {
-                pendingInputSpans.removeFirst()
-                if let submissionId = span.submissionId {
-                    completeInput(submissionId, with: .delivered)
-                }
-            }
-            start = spanEnd
         }
-        assert(start == end, "written pending input outran its origin spans")
     }
 
     /// Releases pending input without recording it: these bytes never crossed the boundary,
     /// so the tape must not claim they did.
     private func clearPendingInput() {
         cancelCanonicalInputHold()
-        pendingInput.removeAll(keepingCapacity: false)
-        pendingInputOffset = 0
-        pendingInputSpans.removeAll(keepingCapacity: false)
+        pendingInputRecords.removeAll(keepingCapacity: false)
+        pendingInputHeadOffset = 0
+        pendingInputByteCount = 0
     }
 
     private func rejectPendingInput(because failure: PaneInputSubmissionFailure) {
-        let submissionIds = pendingInputSpans.compactMap(\.submissionId)
+        let submissionIds = pendingInputRecords.compactMap(\.submissionId)
         clearPendingInput()
         for submissionId in submissionIds {
             completeInput(submissionId, with: .rejected(failure))
         }
-    }
-
-    private func compactPendingInputIfNeeded() {
-        guard pendingInputOffset > 0 else { return }
-        let consumed = pendingInputOffset
-        pendingInput = Array(pendingInput.dropFirst(consumed))
-        pendingInputOffset = 0
-        pendingInputSpans = Deque(pendingInputSpans.map {
-            PendingInputSpan(
-                endOffset: $0.endOffset - consumed,
-                origin: $0.origin,
-                submissionId: $0.submissionId,
-                attribution: $0.attribution
-            )
-        })
     }
 
     private func completeInput(
@@ -2312,7 +2271,7 @@ public actor TerminalPTYHost {
         if replies.isEmpty == false {
             enqueueInput(replies, origin: nil, submissionId: nil, attribution: .reply)
         }
-        if pendingInputOffset < pendingInput.count { flushInput() }
+        if pendingInputRecords.isEmpty == false { flushInput() }
         if terminal.hasPendingConsumerWork,
            consumerWorkWasSignaled == false
             || terminal.pendingConsumerWorkGeneration != previousConsumerWorkGeneration
