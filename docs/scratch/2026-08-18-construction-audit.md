@@ -186,10 +186,10 @@ references are the requirement.
 | 3 | [BUG-21](#bug-21) | CSI 0 K (EL 0) at column 0 of row 0, and CSI | **done** `bf8b6ea6` | Sever history's incoming wrap claim for every erase that blanks all of row 0, not just ED |
 | 2 | [BUG-22](#bug-22) | ESC Z (DECID, obsolete form of CSI c / DA1) | unpinned | Reply to ESC Z (DECID) with the primary device attributes string |
 | 2 | [BUG-23](#bug-23) | Legacy Escape key with the Alt modifier | **done** `9440fa34` | Prefix Alt+Escape with ESC in legacy mode |
-| 2 | [BUG-24](#bug-24) | ESC H (HTS) and CSI Ps g (TBC) | unpinned | Stop HTS and TBC from cancelling the pending-wrap flag |
+| 2 | [BUG-24](#bug-24) | ESC H (HTS) and CSI Ps g (TBC) | **done** `51609b1e` | Stop HTS and TBC from cancelling the pending-wrap flag |
 | 2 | [BUG-25](#bug-25) | CSI ? 2027 $ p (DECRQM for the grapheme-clus | unpinned | Report DECRQM ?2027 as permanently set instead of unrecognized |
 | 2 | [BUG-26](#bug-26) | A C1 control as a UTF-8 code point, e.g. U+0 | unpinned | Stop printing a cell for C1 code points decoded from UTF-8 |
-| 2 | [BUG-27](#bug-27) | CSI ? 7 h / CSI ? 7 l (DECAWM), CSI 4 h / CS | unpinned | Stop clearing the pending-wrap flag when a mode is set or reset |
+| 2 | [BUG-27](#bug-27) | CSI ? 7 h / CSI ? 7 l (DECAWM), CSI 4 h / CS | **done** `51609b1e` | Stop clearing the pending-wrap flag when a mode is set or reset |
 | 2 | [BUG-28](#bug-28) | Keypad Enter with kitty keyboard flag 1 (dis | **done** `bf3e3841` | Report unmodified keypad Enter as CSI 57414u under the kitty keyboard protocol |
 | 2 | [BUG-29](#bug-29) | OSC 10 ; ? ; ? ST (multi-parameter dynamic c | **pinned by a test** | Answer every ? in a dynamic colour request, advancing the colour index per parameter |
 | 2 | [BUG-30](#bug-30) | CSI 2 K (EL 2) on a soft-wrapped row of the  | unpinned | Preserve the stale-wrap-claim bit when the alternate screen is resized by height alone |
@@ -841,6 +841,10 @@ ESC ESC, and a test pins it apart from plain Escape.
 
 `ESC H (HTS) and CSI Ps g (TBC)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 5
 
+**Done** in `51609b1e`. Tab-stop edits now preserve last-column state,
+and regression tests pin HTS and both valid TBC forms across wrap and
+grapheme continuation behavior.
+
 **Problem.** Setting or clearing a tab stop is not cursor motion, but DanTerm treats it as such and clears the deferred-wrap flag. A character written to the last column, followed by a tab-stop edit, followed by another character, overwrites the last column instead of wrapping to the next row.
 
 **What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#dispatchEscape(_ final: UInt8) case 0x48 calls `tabStops.insert(...)` and then `clearPendingMotionState()`, which sets `screen.isPendingWrap = false`. #clearTabStop does the same after editing the stop set.
@@ -912,6 +916,10 @@ ESC ESC, and a test pins it apart from plain Escape.
 ### BUG-27. Stop clearing the pending-wrap flag when a mode is set or reset
 
 `CSI ? 7 h / CSI ? 7 l (DECAWM), CSI 4 h / CSI 4 l (IRM), CSI 20 h / CSI 20 l (LNM)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4
+
+**Done** in `51609b1e`. Mode changes now preserve mode-independent
+last-column state, while DECOM still clears it through its cursor move.
+Regression tests cover DECAWM, IRM, LNM, and DECOM.
 
 **Problem.** Setting or resetting a recognized mode clears the deferred-wrap flag. No reference touches the wrap flag when a mode changes: in xterm the flag lives in `screen->do_wrap` and the mode handlers only bit-twiddle `xw->flags`, and in ghostty `modes.set` has no side effect on `cursor.pending_wrap`. The consequence is that a mode change issued while the cursor is parked at the right margin swallows a character's worth of wrap: the next printable overwrites the last column instead of starting the next row. Note this is narrower than it looks -- DECOM (mode 6) genuinely must clear it, since it homes the cursor, and mode 25 already does not trigger the clear -- so the fix is to stop the blanket clear and keep it only on the DECOM arm.
 
