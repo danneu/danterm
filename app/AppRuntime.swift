@@ -281,8 +281,11 @@ class AppRuntime {
         }
 
         // Weak on purpose: the runtime owns the outbox, and a drain scheduled on
-        // the main queue must be inert once the runtime is gone.
-        outbox.setDispatcher { [weak self] msg in self?.dispatch(msg) }
+        // the main queue must be inert once the runtime is gone. Routed through
+        // `send`, not straight to `dispatch`, so a reported fact and a direct send
+        // enter the runtime at the same point; the two are the same call here, and
+        // the UI suite substitutes that point to observe what a view reported.
+        outbox.setDispatcher { [weak self] msg in self?.send(msg) }
 
         // Here, inside init, so no message can reach a dialog pass before its
         // surface can build a window. A pass that applied to an unbound surface
@@ -435,6 +438,10 @@ class AppRuntime {
         send(.jumpModeActivated(visibleTabs: visibleTabs))
     }
 
+    /// The runtime's one message entry point: a direct send and a fact drained from
+    /// the outbox both arrive here. Overridable on purpose -- the UI suite subclasses
+    /// the runtime and substitutes this method to observe what a view reported, so a
+    /// second route into `dispatch` would make a whole class of reports invisible.
     func send(_ msg: Msg) {
         dispatch(msg)
     }
