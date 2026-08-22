@@ -91,7 +91,7 @@ struct SidebarItemStore {
                 inParent: nil,
                 groupCollapseState: SidebarGroupCollapseState(
                     item: item,
-                    collapsed: group.isCollapsed))
+                    collapsed: group.rendered.isCollapsed))
 
         case .removeGroup(let index):
             guard !projection.isSingleGroupMode,
@@ -119,7 +119,7 @@ struct SidebarItemStore {
         case .setGroupCollapsed(let id, let collapsed):
             guard !projection.isSingleGroupMode,
                   let group = projection.group(id),
-                  group.isCollapsed == collapsed,
+                  group.rendered.isCollapsed == collapsed,
                   let item = updateGroupItem(groupId: id, projection: projection)
             else { return rebuildMutation(projection: projection) }
             return .setGroupCollapsed(item: item, collapsed: collapsed)
@@ -285,7 +285,7 @@ struct SidebarItemStore {
         rebuildAllRows(projection: projection)
         let collapseStates = rootItems.compactMap { item -> SidebarGroupCollapseState? in
             guard case .group(let group) = item.kind else { return nil }
-            return SidebarGroupCollapseState(item: item, collapsed: group.isCollapsed)
+            return SidebarGroupCollapseState(item: item, collapsed: group.rendered.isCollapsed)
         }
         return .reloadAll(groupCollapseStates: collapseStates)
     }

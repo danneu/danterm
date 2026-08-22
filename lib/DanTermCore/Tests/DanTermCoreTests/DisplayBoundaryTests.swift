@@ -84,7 +84,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
             expectFlat(chrome.contentTitle, "windowChrome.contentTitle", input: hostile)
 
             for group in desiredSidebar(in: model).groups {
-                expectFlat(group.name, "sidebar group name", input: hostile)
+                expectFlat(group.rendered.name, "sidebar group name", input: hostile)
                 for tab in group.tabs {
                     expectFlat(tab.displayTitle, "sidebar tab title", input: hostile)
                 }

@@ -59,11 +59,14 @@ func badgeLabelTests() async {
             tabs: Int
         ) -> SidebarGroupProjection {
             SidebarGroupProjection(
-                id: groupId, isCollapsed: collapsed, name: DisplayLine(name),
-                unreadAlertCount: alerts, tabCount: tabs, isFirst: true, tabs: [])
+                id: groupId,
+                rendered: SidebarGroupProjection.Rendered(
+                    isCollapsed: collapsed, name: DisplayLine(name),
+                    unreadAlertCount: alerts, tabCount: tabs, isFirst: true),
+                tabs: [])
         }
 
-        cell.apply(projection(name: "Short", collapsed: true, alerts: 0, tabs: 2),
+        cell.apply(projection(name: "Short", collapsed: true, alerts: 0, tabs: 2).rendered,
                    isEditingTitle: false)
         cell.layoutSubtreeIfNeeded()
         let oneDigitWidth = cell.tabCountBadge.frame.width
@@ -73,7 +76,7 @@ func badgeLabelTests() async {
 
         cell.apply(projection(
             name: String(repeating: "Long title ", count: 20),
-            collapsed: true, alerts: 12, tabs: 123), isEditingTitle: false)
+            collapsed: true, alerts: 12, tabs: 123).rendered, isEditingTitle: false)
         cell.layoutSubtreeIfNeeded()
         try uiExpect(cell.tabCountBadge.frame.width > oneDigitWidth,
             "a multi-digit group count should widen the pill")
@@ -82,13 +85,13 @@ func badgeLabelTests() async {
         try uiExpect(!cell.alertBadge.isHidden && cell.alertBadge.frame.width < 32,
             "a visible alert badge should stay compact")
 
-        cell.apply(projection(name: "Expanded", collapsed: false, alerts: 12, tabs: 123),
+        cell.apply(projection(name: "Expanded", collapsed: false, alerts: 12, tabs: 123).rendered,
                    isEditingTitle: false)
         cell.layoutSubtreeIfNeeded()
         try uiExpect(cell.alertBadge.isHidden && cell.tabCountBadge.isHidden,
             "expansion should hide both collapsed-group badges")
 
-        cell.apply(projection(name: "Recycled", collapsed: true, alerts: 1, tabs: 2),
+        cell.apply(projection(name: "Recycled", collapsed: true, alerts: 1, tabs: 2).rendered,
                    isEditingTitle: false)
         cell.layoutSubtreeIfNeeded()
         try uiExpect(cell.tabCountBadge.frame.width == oneDigitWidth,

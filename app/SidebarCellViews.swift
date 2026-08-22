@@ -208,7 +208,7 @@ final class SidebarGroupCellView: NSTableCellView {
     }
 
     /// Repaints the row while leaving an actively edited title untouched.
-    func apply(_ group: SidebarGroupProjection, isEditingTitle: Bool) {
+    func apply(_ group: SidebarGroupProjection.Rendered, isEditingTitle: Bool) {
         if !isEditingTitle {
             titleField.stringValue = group.name.text
         }

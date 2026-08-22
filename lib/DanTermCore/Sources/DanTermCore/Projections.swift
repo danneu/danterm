@@ -823,17 +823,19 @@ struct SidebarTabProjection: Equatable {
   var paneChips: [TabPaneChip] = []
 }
 
-/// One sidebar group row. `isCollapsed` drives the structural `setGroupCollapsed`
-/// op (expand/collapse + caret); the reload-attrs (name/bell/tabCount/isFirst -- the
-/// rest of what `configureGroupCell` draws) drive a `reloadGroup` op. `tabs` is the
-/// ordered child list this group owns.
+/// One sidebar group row, split between row identity, rendered state, and child tabs.
 struct SidebarGroupProjection: Equatable {
+  /// Every value the group cell paints, kept together for diff and cache retention.
+  struct Rendered: Equatable {
+    var isCollapsed: Bool
+    var name: DisplayLine
+    var unreadAlertCount: Int
+    var tabCount: Int
+    var isFirst: Bool
+  }
+
   let id: GroupId
-  var isCollapsed: Bool
-  var name: DisplayLine
-  var unreadAlertCount: Int
-  var tabCount: Int
-  var isFirst: Bool        // first group draws no top separator
+  var rendered: Rendered
   var tabs: [SidebarTabProjection]
 }
 
@@ -883,11 +885,12 @@ func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProje
   let groups = model.groups.map { group in
     SidebarGroupProjection(
       id: group.id,
-      isCollapsed: group.isCollapsed,
-      name: DisplayLine(group.name),
-      unreadAlertCount: tally.byGroup[group.id] ?? 0,
-      tabCount: group.tabs.count,
-      isFirst: group.id == firstGroupId,
+      rendered: SidebarGroupProjection.Rendered(
+        isCollapsed: group.isCollapsed,
+        name: DisplayLine(group.name),
+        unreadAlertCount: tally.byGroup[group.id] ?? 0,
+        tabCount: group.tabs.count,
+        isFirst: group.id == firstGroupId),
       tabs: group.tabs.map { tab in
         SidebarTabProjection(
           id: tab.id,
@@ -1001,13 +1004,15 @@ func computeSidebarRowOps(old: SidebarProjection?, new: SidebarProjection) -> [S
       remove: { idx in .removeTab(groupId: newGroup.id, index: idx) })
   }
 
-  // Group reload-attrs (everything configureGroupCell draws except collapse, which the
-  // setGroupCollapsed op drives, and the tab list). Single-group mode has no group row.
+  // A collapse change uses the structural op because it also changes child visibility.
+  // Every other rendered change uses the repaint-only op.
   if !new.isSingleGroupMode {
     for newGroup in new.groups {
       guard let oldGroup = oldGroupById[newGroup.id] else { continue }
-      if (oldGroup.name, oldGroup.unreadAlertCount, oldGroup.tabCount, oldGroup.isFirst)
-         != (newGroup.name, newGroup.unreadAlertCount, newGroup.tabCount, newGroup.isFirst) {
+      if oldGroup.rendered.isCollapsed != newGroup.rendered.isCollapsed {
+        ops.append(.setGroupCollapsed(
+          id: newGroup.id, collapsed: newGroup.rendered.isCollapsed))
+      } else if oldGroup.rendered != newGroup.rendered {
         ops.append(.reloadGroup(id: newGroup.id))
       }
     }
@@ -1027,11 +1032,9 @@ func computeSidebarRowOps(old: SidebarProjection?, new: SidebarProjection) -> [S
   // op if it should start collapsed.
   if !new.isSingleGroupMode {
     for newGroup in new.groups {
-      if let oldGroup = oldGroupById[newGroup.id] {
-        if oldGroup.isCollapsed != newGroup.isCollapsed {
-          ops.append(.setGroupCollapsed(id: newGroup.id, collapsed: newGroup.isCollapsed))
-        }
-      } else if newGroup.isCollapsed {
+      if oldGroupById[newGroup.id] != nil {
+        // Existing groups were handled with the complete rendered-value diff above.
+      } else if newGroup.rendered.isCollapsed {
         ops.append(.setGroupCollapsed(id: newGroup.id, collapsed: true))
       }
     }
@@ -1093,18 +1096,15 @@ func guardSidebarRenameOps(
   return (out, clearRename)
 }
 
-/// Advance the reconcileSidebar cache to `new` after applying ops -- but if a row's
-/// reload was suppressed because it is the live-editing row (`suppressedRenameTarget`
-/// non-nil after the guard ran), or a visible row reload could not fetch its cell,
-/// retain that row's *prior* projection so the deferred attribute update re-fires the
-/// next time the row diffs. Without this the cache would claim unapplied attrs were
-/// painted and silently drift.
+/// Advances the sidebar cache from executor-reported group paints and retained tab rows.
+/// A surviving group with no reported paint keeps its prior complete rendered value;
+/// new and single-mode groups take the new value because no group row is displayed.
 func advanceSidebarCache(
   old: SidebarProjection?,
   new: SidebarProjection,
   suppressedRenameTarget: RenameTarget?,
   unappliedTabIds: Set<TabId> = [],
-  unappliedGroupIds: Set<GroupId> = []
+  appliedGroupRenders: [GroupId: SidebarGroupProjection.Rendered]? = nil
 ) -> SidebarProjection {
   guard let old = old else { return new }
   var merged = new
@@ -1119,14 +1119,10 @@ func advanceSidebarCache(
     }
   }
 
-  func retainGroupReloadAttrs(_ id: GroupId) {
+  func retainGroupRenderedValue(_ id: GroupId) {
     guard let oldGroup = old.groups.first(where: { $0.id == id }),
           let gi = merged.groups.firstIndex(where: { $0.id == id }) else { return }
-    // Retain only the reload-attrs (collapse + tab list are structural, already applied).
-    merged.groups[gi].name = oldGroup.name
-    merged.groups[gi].unreadAlertCount = oldGroup.unreadAlertCount
-    merged.groups[gi].tabCount = oldGroup.tabCount
-    merged.groups[gi].isFirst = oldGroup.isFirst
+    merged.groups[gi].rendered = oldGroup.rendered
   }
 
   if let target = suppressedRenameTarget {
@@ -1134,15 +1130,22 @@ func advanceSidebarCache(
     case .tab(let id):
       retainTabProjection(id)
     case .group(let id):
-      retainGroupReloadAttrs(id)
+      retainGroupRenderedValue(id)
     }
   }
 
   for id in unappliedTabIds {
     retainTabProjection(id)
   }
-  for id in unappliedGroupIds {
-    retainGroupReloadAttrs(id)
+  if let appliedGroupRenders, !new.isSingleGroupMode {
+    for gi in merged.groups.indices {
+      let id = merged.groups[gi].id
+      if let applied = appliedGroupRenders[id] {
+        merged.groups[gi].rendered = applied
+      } else if old.groups.contains(where: { $0.id == id }) {
+        retainGroupRenderedValue(id)
+      }
+    }
   }
 
   return merged

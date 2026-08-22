@@ -247,7 +247,7 @@ import Testing
         #expect(desiredWindowChrome(in: model, tally: tally).unreadCount == 99)
 
         let sidebar = desiredSidebar(in: model, tally: tally)
-        #expect(sidebar.groups[0].unreadAlertCount == 13)
+        #expect(sidebar.groups[0].rendered.unreadAlertCount == 13)
         #expect(sidebar.groups[0].tabs[0].unreadAlertCount == 11)
 
         let switcher = try #require(desiredSwitcher(in: model, tally: tally))
@@ -1001,18 +1001,18 @@ import Testing
         #expect(proj.groups.map(\.id) == [g1, g2], "groups in model order")
 
         let work = proj.groups[0]
-        #expect(work.name == "Work")
-        #expect(work.isCollapsed, "collapse projected from the model")
-        #expect(work.isFirst, "first group flagged")
-        #expect(work.tabCount == 2)
-        #expect(work.unreadAlertCount == 1, "group bell rolls up its tabs' unread alerts")
+        #expect(work.rendered.name == "Work")
+        #expect(work.rendered.isCollapsed, "collapse projected from the model")
+        #expect(work.rendered.isFirst, "first group flagged")
+        #expect(work.rendered.tabCount == 2)
+        #expect(work.rendered.unreadAlertCount == 1, "group bell rolls up its tabs' unread alerts")
         #expect(work.tabs.map(\.id) == [tA, tB], "tabs in group order")
         #expect(work.tabs[0].displayTitle == "Edited")
         #expect(work.tabs[0].color == .blue)
         #expect(work.tabs[0].unreadAlertCount == 1)
         #expect(work.tabs[0].jumpKey == nil, "tab A has no jump key")
         #expect(work.tabs[1].jumpKey == "j", "jump badge from model.jumpMode.keyMap")
-        #expect(!proj.groups[1].isFirst, "second group not first")
+        #expect(!proj.groups[1].rendered.isFirst, "second group not first")
     }
 
     @Test("desiredSidebar: interaction facts follow the model")

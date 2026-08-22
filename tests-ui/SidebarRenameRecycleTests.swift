@@ -1199,7 +1199,7 @@ func sidebarRenameRecycleTests() async {
         }
         replacedCell.removeFromSuperview()
         oldCell.removeFromSuperview()
-        oldCell.apply(groupBProjection, isEditingTitle: false)
+        oldCell.apply(groupBProjection.rendered, isEditingTitle: false)
         rowView.addSubview(oldCell)
         oldCell.frame = rowView.bounds
         oldCell.caretButton.performClick(nil)

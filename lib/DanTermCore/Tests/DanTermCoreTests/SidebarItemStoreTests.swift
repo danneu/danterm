@@ -42,7 +42,7 @@ import Testing
             Issue.record("reloadGroup should return a group item")
             return
         }
-        #expect(updatedGroup.name == DisplayLine("Renamed"))
+        #expect(updatedGroup.rendered.name == DisplayLine("Renamed"))
 
         let setCollapsed = store.apply(
             .setGroupCollapsed(id: groupA, collapsed: true),

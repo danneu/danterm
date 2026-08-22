@@ -453,16 +453,8 @@ import Testing
 
         let groupSuppressed = advanceSidebarCache(old: old, new: new, suppressedRenameTarget: .group(g1))
         let mergedGroup = groupSuppressed.groups[0]
-        #expect(mergedGroup.name == old.groups[0].name,
-            "suppressed group keeps its old name")
-        #expect(mergedGroup.unreadAlertCount == old.groups[0].unreadAlertCount,
-            "suppressed group keeps its old unread badge")
-        #expect(mergedGroup.tabCount == old.groups[0].tabCount,
-            "suppressed group keeps its old tab-count badge")
-        #expect(mergedGroup.isFirst == old.groups[0].isFirst,
-            "suppressed group keeps its old first-row attrs")
-        #expect(mergedGroup.isCollapsed == new.groups[0].isCollapsed,
-            "suppressed group applies the new collapse structure")
+        #expect(mergedGroup.rendered == old.groups[0].rendered,
+            "a suppressed group paint keeps its complete old rendered value")
         #expect(mergedGroup.tabs == new.groups[0].tabs,
             "suppressed group applies the new tab structure")
 
@@ -515,22 +507,38 @@ import Testing
             "fully advanced attrs do not churn reloadTab")
 
         let groupRetained = advanceSidebarCache(
-            old: old, new: new, suppressedRenameTarget: nil, unappliedGroupIds: [g1])
+            old: old, new: new, suppressedRenameTarget: nil, appliedGroupRenders: [:])
         let retainedGroup = try #require(groupRetained.groups.first { $0.id == g1 })
-        #expect(retainedGroup.name == old.groups[0].name,
-            "unapplied group keeps its old reload attrs")
-        #expect(retainedGroup.unreadAlertCount == old.groups[0].unreadAlertCount,
-            "unapplied group keeps its old unread badge")
-        #expect(retainedGroup.tabCount == old.groups[0].tabCount,
-            "unapplied group keeps its old tab-count badge")
-        #expect(retainedGroup.isFirst == old.groups[0].isFirst,
-            "unapplied group keeps its old first-row attr")
-        #expect(retainedGroup.isCollapsed == new.groups[0].isCollapsed,
-            "unapplied group still applies collapse structure")
+        #expect(retainedGroup.rendered == old.groups[0].rendered,
+            "an unpainted group keeps its complete old rendered value")
         #expect(retainedGroup.tabs == new.groups[0].tabs,
             "unapplied group still applies tab structure")
-        #expect(computeSidebarRowOps(old: groupRetained, new: new).contains(.reloadGroup(id: g1)),
-            "retained group attrs re-emit reloadGroup")
+        #expect(computeSidebarRowOps(old: groupRetained, new: new).contains(
+            .setGroupCollapsed(id: g1, collapsed: true)),
+            "a retained collapse repaint re-emits the structural collapse operation")
+
+        let appliedCollapse = advanceSidebarCache(
+            old: old,
+            new: new,
+            suppressedRenameTarget: nil,
+            appliedGroupRenders: [g1: new.groups[0].rendered])
+        #expect(appliedCollapse.groups[0].rendered == new.groups[0].rendered,
+            "an executor-reported collapse paint advances the complete rendered value")
+
+        var liveRenameRender = new.groups[0].rendered
+        liveRenameRender.name = DisplayLine("draft owned by the field editor")
+        let renamedCollapse = advanceSidebarCache(
+            old: old,
+            new: new,
+            suppressedRenameTarget: .group(g1),
+            appliedGroupRenders: [g1: liveRenameRender])
+        let nextOps = computeSidebarRowOps(old: renamedCollapse, new: new)
+        #expect(!nextOps.contains(.setGroupCollapsed(id: g1, collapsed: true)),
+            "an applied collapse is not repeated while the live editor preserves its title")
+        #expect(!guardSidebarRenameOps(
+            ops: nextOps, renameTarget: .group(g1), new: new
+        ).ops.contains(.reloadGroup(id: g1)),
+            "the live rename suppresses the remaining title repaint")
 
         let composed = advanceSidebarCache(
             old: old, new: new, suppressedRenameTarget: .tab(b), unappliedTabIds: [a])
@@ -975,8 +983,15 @@ private func sbTabFull(_ id: TabId, _ title: String, bell: Int) -> SidebarTabPro
     SidebarTabProjection(id: id, displayTitle: DisplayLine(title), unreadAlertCount: bell, jumpKey: nil, color: nil)
 }
 private func sbGroup(_ id: GroupId, _ name: String, collapsed: Bool = false, first: Bool = false, _ tabs: [SidebarTabProjection]) -> SidebarGroupProjection {
-    SidebarGroupProjection(id: id, isCollapsed: collapsed, name: DisplayLine(name),
-        unreadAlertCount: tabs.reduce(0) { $0 + $1.unreadAlertCount }, tabCount: tabs.count, isFirst: first, tabs: tabs)
+    SidebarGroupProjection(
+        id: id,
+        rendered: SidebarGroupProjection.Rendered(
+            isCollapsed: collapsed,
+            name: DisplayLine(name),
+            unreadAlertCount: tabs.reduce(0) { $0 + $1.unreadAlertCount },
+            tabCount: tabs.count,
+            isFirst: first),
+        tabs: tabs)
 }
 private func sbProj(_ single: Bool, _ groups: [SidebarGroupProjection]) -> SidebarProjection {
     SidebarProjection(isSingleGroupMode: single, groups: groups)
@@ -1004,18 +1019,16 @@ private func applySidebarRowOps(_ ops: [SidebarRowOp], to old: SidebarProjection
             work = new
         case .insertGroup(let id, let index):
             var g = newGroup(id)
-            g.isCollapsed = false
+            g.rendered.isCollapsed = false
             work.groups.insert(g, at: index)
         case .removeGroup(let index):
             work.groups.remove(at: index)
         case .reloadGroup(let id):
             let gi = groupIndex(id); let src = newGroup(id)
-            work.groups[gi].name = src.name
-            work.groups[gi].unreadAlertCount = src.unreadAlertCount
-            work.groups[gi].tabCount = src.tabCount
-            work.groups[gi].isFirst = src.isFirst
+            work.groups[gi].rendered = src.rendered
         case .setGroupCollapsed(let id, let collapsed):
-            work.groups[groupIndex(id)].isCollapsed = collapsed
+            work.groups[groupIndex(id)].rendered = newGroup(id).rendered
+            work.groups[groupIndex(id)].rendered.isCollapsed = collapsed
         case .insertTab(let id, let groupId, let index):
             work.groups[groupIndex(groupId)].tabs.insert(newTab(id), at: index)
         case .removeTab(let groupId, let index):

@@ -375,7 +375,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         _ ops: [SidebarRowOp],
         projection: SidebarProjection,
         renameTargetToEnd: RenameTarget?
-    ) -> (tabs: Set<TabId>, groups: Set<GroupId>) {
+    ) -> (
+        tabs: Set<TabId>,
+        groups: Set<GroupId>,
+        groupRenders: [GroupId: SidebarGroupProjection.Rendered]
+    ) {
         isReloading = true
         defer { isReloading = false }
         let priorFocusedTabId = appliedProjection?.selectedTabId
@@ -383,6 +387,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         appliedProjection = projection
         var unappliedTabIds = Set<TabId>()
         var unappliedGroupIds = Set<GroupId>()
+        var appliedGroupRenders: [GroupId: SidebarGroupProjection.Rendered] = [:]
 
         // End an orphaned inline edit before its row is removed or moved. The view
         // clears its session first, so a resign-triggered delegate callback is a no-op.
@@ -400,7 +405,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 op,
                 projection: projection,
                 unappliedTabIds: &unappliedTabIds,
-                unappliedGroupIds: &unappliedGroupIds)
+                unappliedGroupIds: &unappliedGroupIds,
+                appliedGroupRenders: &appliedGroupRenders)
             if !shouldContinue { break }
         }
 
@@ -415,7 +421,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             selectedTabId: projection.selectedTabId,
             projection: projection,
             unappliedTabIds: &unappliedTabIds,
-            unappliedGroupIds: &unappliedGroupIds)
+            unappliedGroupIds: &unappliedGroupIds,
+            appliedGroupRenders: &appliedGroupRenders)
         // Empty-op cosmetic sweeps can leave already-visible row emphasis alone.
         // New/reused rows get their flag when NSOutlineView asks for a row view.
         if !ops.isEmpty || priorFocusedTabId != projection.selectedTabId {
@@ -438,7 +445,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
            !activeRename.isSession(request.id) {
             beginRenaming(request)
         }
-        return (unappliedTabIds, unappliedGroupIds)
+        return (unappliedTabIds, unappliedGroupIds, appliedGroupRenders)
     }
 
     /// Apply one ordered op and return whether the current script remains valid.
@@ -446,7 +453,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         _ op: SidebarRowOp,
         projection: SidebarProjection,
         unappliedTabIds: inout Set<TabId>,
-        unappliedGroupIds: inout Set<GroupId>
+        unappliedGroupIds: inout Set<GroupId>,
+        appliedGroupRenders: inout [GroupId: SidebarGroupProjection.Rendered]
     ) -> Bool {
         switch store.apply(op, projection: projection) {
         case .reloadAll(let collapseStates):
@@ -454,6 +462,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 endActiveRename(target)
             }
             rebuildAllRows(groupCollapseStates: collapseStates)
+            for group in projection.groups where !projection.isSingleGroupMode {
+                appliedGroupRenders[group.id] = group.rendered
+            }
             return false
 
         case .insert(_, let index, let parent, let collapseState):
@@ -467,6 +478,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 } else {
                     outlineView.expandItem(collapseState.item)
                 }
+                if case .group(let group) = collapseState.item.kind {
+                    appliedGroupRenders[group.id] = group.rendered
+                }
             }
             return true
 
@@ -479,9 +493,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         case .setGroupCollapsed(let item, let collapsed):
             if collapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
-            if case .group(let group) = item.kind,
-               updateGroupRow(item) {
-                unappliedGroupIds.insert(group.id)
+            if case .group(let group) = item.kind {
+                if let applied = updateGroupRow(item) {
+                    appliedGroupRenders[group.id] = applied
+                } else {
+                    unappliedGroupIds.insert(group.id)
+                }
             }
             return true
 
@@ -490,7 +507,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             case .tab(let tab):
                 if updateTabRow(item) { unappliedTabIds.insert(tab.id) }
             case .group(let group):
-                if updateGroupRow(item) { unappliedGroupIds.insert(group.id) }
+                if let applied = updateGroupRow(item) {
+                    appliedGroupRenders[group.id] = applied
+                } else {
+                    unappliedGroupIds.insert(group.id)
+                }
             }
             return true
         }
@@ -568,7 +589,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         selectedTabId: TabId?,
         projection: SidebarProjection,
         unappliedTabIds: inout Set<TabId>,
-        unappliedGroupIds: inout Set<GroupId>
+        unappliedGroupIds: inout Set<GroupId>,
+        appliedGroupRenders: inout [GroupId: SidebarGroupProjection.Rendered]
     ) {
         var nonFocusRows = IndexSet()
         var focusRow: Int? = nil
@@ -612,9 +634,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                         unappliedTabIds.insert(id)
                     }
                 case .group(let id):
-                    if let item = store.updateGroupItem(groupId: id, projection: projection),
-                       updateGroupRow(item) {
-                        unappliedGroupIds.insert(id)
+                    if let item = store.updateGroupItem(groupId: id, projection: projection) {
+                        if let applied = updateGroupRow(item) {
+                            appliedGroupRenders[id] = applied
+                        } else {
+                            unappliedGroupIds.insert(id)
+                        }
                     }
                 }
             }
@@ -731,18 +756,22 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         return false
     }
 
-    /// In-place group row update. Returns true only when an on-screen row could
-    /// not fetch its cell, so the caller should retain and retry the reload attrs.
-    func updateGroupRow(_ item: SidebarItem) -> Bool {
-        guard case .group(let group) = item.kind else { return false }
+    /// Paints a group row and returns the effective value stored for later mounting.
+    /// A visible row with no materialized cell returns nil so the caller retries it.
+    func updateGroupRow(_ item: SidebarItem) -> SidebarGroupProjection.Rendered? {
+        guard case .group(var group) = item.kind else { return nil }
         let row = outlineView.row(forItem: item)
-        guard row >= 0 else { return false }
+        guard row >= 0 else { return group.rendered }
         let isVisible = outlineView.visibleRect.intersects(outlineView.rect(ofRow: row))
         guard let cell = materializedCell(row) as? SidebarGroupCellView
-        else { return isVisible }
+        else { return isVisible ? nil : group.rendered }
         let isEditing = cell.titleField.currentEditor() != nil
-        cell.apply(group, isEditingTitle: isEditing)
-        return false
+        if isEditing {
+            group.rendered.name = DisplayLine(cell.titleField.stringValue)
+            item.kind = .group(group)
+        }
+        cell.apply(group.rendered, isEditingTitle: isEditing)
+        return group.rendered
     }
 
     // MARK: - NSOutlineViewDataSource
@@ -1202,7 +1231,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             owner: nil) as? SidebarGroupCellView
         {
             resetRecycledRenameState(existing)
-            existing.apply(group, isEditingTitle: false)
+            existing.apply(group.rendered, isEditingTitle: false)
             return existing
         }
 
@@ -1210,7 +1239,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             textFieldDelegate: self,
             caretTarget: self,
             caretAction: #selector(caretClicked(_:)))
-        cell.apply(group, isEditingTitle: false)
+        cell.apply(group.rendered, isEditingTitle: false)
         return cell
     }
 
@@ -1267,7 +1296,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                     atColumn: 0, row: row,
                     makeIfNecessary: false) as? SidebarGroupCellView,
                   case .group(let group) = item.kind else { return }
-            cell.apply(group, isEditingTitle: false)
+            cell.apply(group.rendered, isEditingTitle: false)
         }
     }
 

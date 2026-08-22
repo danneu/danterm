@@ -41,7 +41,7 @@ final class SidebarReconcileDriver {
             new: newProjection,
             suppressedRenameTarget: sidebarView.activeRenameTarget,
             unappliedTabIds: unapplied.tabs,
-            unappliedGroupIds: unapplied.groups)
+            appliedGroupRenders: unapplied.groupRenders)
         appliedProjection = advancedProjection
         return SidebarReconcileResult(
             appliedProjection: advancedProjection,
