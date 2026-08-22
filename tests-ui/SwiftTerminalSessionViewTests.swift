@@ -1,6 +1,7 @@
 // UI-harness coverage for native pointer, wheel, copy, and scrollbar routing in the Swift pane.
 import Cocoa
 import CoreGraphics
+import Darwin
 import PaneProcessLifecycle
 import ChipArtwork
 import TerminalCore
@@ -2113,36 +2114,92 @@ func swiftTerminalSessionViewTests() async {
         )
     }
 
-    await uiTest("a refused submission names its reason and reaches the app boundary rejected") {
-        // Intent: when lifecycle policy refuses a submission, the reason stays attached to
-        //   the terminal result, and the pane reports the refusal to the app as a rejection.
-        // Why it exists: an input that never crossed the descriptor must not read as
-        //   delivered anywhere. The harness used to model the result as a payload-free
-        //   `rejected`, so no UI test could tell one refusal from another -- or check that
-        //   a refusal leaves the delivered-input record untouched.
-        // Scenario: spec-first -- the pane's pending-input bound is already full when the
-        //   user pastes, and then the child's shell fails to launch at all.
+    await uiTest("pane input preserves every meaning, result, and captured wait") {
+        // Intent: the one TerminalSession submission requirement preserves paste, raw text,
+        //   key, and wheel payloads with one captured wait, and returns the controller result.
+        // Why it exists: parallel session entry points could disagree on safety semantics,
+        //   payload fields, wait forwarding, or whether a terminal rejection reached the model.
+        // Scenario: IPC submits all four meanings successfully, then the terminal refuses
+        //   one item of each meaning with a distinct typed reason.
         let controller = FakeTerminalPaneSessionController()
-        controller.submissionFailure = .bufferLimitExceeded
         let pane = makeTestPane(controller: controller)
+        controller.inputModes.bracketedPaste = true
+        let wait = AgentWaitGeneration(rawValue: 7)
+        let payload = "one\u{1B}[201~\ntwo"
         var results: [TerminalInputSubmissionResult] = []
-        pane.sendInputText("ls", waitGeneration: nil) { results.append($0) }
-        controller.submissionFailure = .launchFailed(.noUsableShell)
-        pane.sendInputText("pwd", waitGeneration: nil) { results.append($0) }
 
-        await pumpRunLoop(untilTrue: { results.count == 2 })
+        pane.submitInput(.paste(payload), waitGeneration: wait) { results.append($0) }
+        pane.submitInput(.text(payload), waitGeneration: wait) { results.append($0) }
+        pane.submitInput(
+            .key(.character("c"), modifiers: [.ctrl, .shift]),
+            waitGeneration: wait
+        ) { results.append($0) }
+        pane.submitInput(.wheel(.up, column: 4, row: 2), waitGeneration: wait) {
+            results.append($0)
+        }
+        let rejectedInputs: [(PaneInputItem, PaneInputSubmissionFailure)] = [
+            (.paste("refused paste"), .bufferLimitExceeded),
+            (.text("refused text"), .canonicalModeTimeout),
+            (.key(.named(.escape), modifiers: []), .processEnded),
+            (.wheel(.down, column: 6, row: 3), .writeFailed(EIO)),
+        ]
+        for (input, failure) in rejectedInputs {
+            controller.submissionFailure = failure
+            pane.submitInput(input, waitGeneration: wait) { results.append($0) }
+        }
+
+        await pumpRunLoop(untilTrue: { results.count == 8 })
 
         try uiExpect(
-            controller.completedResults == [
-                .rejected(.bufferLimitExceeded),
-                .rejected(.launchFailed(.noUsableShell)),
+            controller.inputBytes == [
+                Array("\u{1B}[200~one[201~\ntwo\u{1B}[201~".utf8),
+                encodeTerminalKey(.character("c"), modifiers: [.control, .shift], modes: controller.inputModes),
+                Array("\u{1B}[200~refused paste\u{1B}[201~".utf8),
+                encodeTerminalKey(.escape, modifiers: [], modes: controller.inputModes),
             ],
-            "a refused submission lost the reason it was refused: \(controller.completedResults)"
+            "paste or key submission changed meaning: \(controller.inputBytes)"
         )
-        try uiExpect(results == [.rejected(.bufferLimitExceeded), .rejected(.launchFailed)],
-                     "a refused submission did not reach the app as a rejection: \(results)")
-        try uiExpect(controller.deliveredTextInputs.isEmpty,
-                     "a refused submission was recorded as delivered: \(controller.deliveredTextInputs)")
+        try uiExpect(controller.textInputs == [payload, "refused text"],
+                     "raw text payload changed: \(controller.textInputs)")
+        try uiExpect(
+            controller.wheelEvents == [
+                TerminalWheelEvent(rowDelta: -1, column: 4, row: 2),
+                TerminalWheelEvent(rowDelta: 1, column: 6, row: 3),
+            ],
+            "wheel payload changed: \(controller.wheelEvents)"
+        )
+        try uiExpect(
+            controller.submittedWaitGenerations == Array(
+                repeating: PaneInputWaitGeneration(rawValue: 7),
+                count: 8
+            ),
+            "captured wait changed: \(controller.submittedWaitGenerations)"
+        )
+        try uiExpect(
+            results == [
+                .delivered,
+                .delivered,
+                .delivered,
+                .delivered,
+                .rejected(.bufferLimitExceeded),
+                .rejected(.canonicalModeTimeout),
+                .rejected(.processEnded),
+                .rejected(.writeFailed(EIO)),
+            ],
+            "terminal results changed: \(results)"
+        )
+        try uiExpect(controller.deliveredTextInputs == [payload],
+                     "rejected text was recorded as delivered: \(controller.deliveredTextInputs)")
+        try uiExpect(
+            controller.deliveredInputBytes.count == 2,
+            "rejected paste or key was recorded as delivered: \(controller.deliveredInputBytes)"
+        )
+        try uiExpect(
+            controller.deliveredWheelEvents == [
+                TerminalWheelEvent(rowDelta: -1, column: 4, row: 2),
+            ],
+            "rejected wheel was recorded as delivered: \(controller.deliveredWheelEvents)"
+        )
     }
 
     await uiTest("the pane forwards a session result carrying what ended the child") {
@@ -2178,8 +2235,8 @@ func swiftTerminalSessionViewTests() async {
         let pane = makeTestPane(controller: controller)
 
         let before = DispatchTime.now().uptimeNanoseconds
-        pane.sendInputText("ls", waitGeneration: nil)
-        pane.sendInputKey(.named(.enter), modifiers: [], waitGeneration: nil)
+        pane.submitInput(.text("ls"), waitGeneration: nil) { _ in }
+        pane.submitInput(.key(.named(.enter), modifiers: []), waitGeneration: nil) { _ in }
         let after = DispatchTime.now().uptimeNanoseconds
 
         try uiExpect(controller.inputOrigins.count == 2,
@@ -2267,7 +2324,7 @@ func swiftTerminalSessionViewTests() async {
     }
 
     await uiTest("IPC text pastes while structured input text stays raw") {
-        // Intent: `Command.sendText` reaches the pane as a paste, and `Command.sendInputText`
+        // Intent: paste input reaches the pane as a paste, and text input
         //   reaches it as raw committed text.
         // Why it exists: the two commands are only meaningfully different at this adapter, and
         //   the IPC `text` field is documented as the paste path -- sanitized and bracketed --
@@ -2279,8 +2336,8 @@ func swiftTerminalSessionViewTests() async {
         let pane = makeTestPane(controller: controller)
         let payload = "one\u{1B}[201~\ntwo"
 
-        pane.sendText(payload, waitGeneration: nil)
-        pane.sendInputText(payload, waitGeneration: nil)
+        pane.submitInput(.paste(payload), waitGeneration: nil) { _ in }
+        pane.submitInput(.text(payload), waitGeneration: nil) { _ in }
 
         try uiExpect(controller.inputBytes == [Array("\u{1B}[200~one[201~\ntwo\u{1B}[201~".utf8)],
                      "IPC text lost paste semantics: \(controller.inputBytes)")

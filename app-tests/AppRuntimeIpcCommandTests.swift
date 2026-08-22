@@ -291,9 +291,9 @@ struct AppRuntimeIpcCommandTests {
         wire.remember(reqId: requestId, rpcId: .number(9))
         runtime.registerIpcConnection(wire.connection, for: requestId)
 
-        runtime.perform(.sendText(
+        runtime.perform(.submitPaneInput(
             paneId: PaneId(rawValue: UUID()),
-            text: "unroutable",
+            input: .paste("unroutable"),
             submissionId: submissionId
         ))
 
@@ -331,11 +331,9 @@ struct AppRuntimeIpcCommandTests {
         runtime.installTerminalSession(ports.session, paneId: paneId)
         wire.remember(reqId: requestId, rpcId: .number(10))
         runtime.registerIpcConnection(wire.connection, for: requestId)
-        runtime.perform(.sendInputWheel(
+        runtime.perform(.submitPaneInput(
             paneId: paneId,
-            direction: .up,
-            column: 4,
-            row: 2,
+            input: .wheel(.up, column: 4, row: 2),
             submissionId: submissionId
         ))
 

@@ -10,7 +10,6 @@ func inputSubmissionFailureReason(_ failure: InputSubmissionFailure) -> String {
     case .launchFailed: "launchFailed"
     case .processEnded: "processEnded"
     case .writeFailed: "writeFailed"
-    case .encodingFailed: "encodingFailed"
     }
 }
 
@@ -27,8 +26,6 @@ func inputSubmissionFailureMessage(_ failure: InputSubmissionFailure) -> String 
         "pane input was not delivered because the pane process ended"
     case .writeFailed(let code):
         "pane input failed to write to the PTY (errno \(code))"
-    case .encodingFailed:
-        "pane input could not be encoded for the terminal"
     }
 }
 

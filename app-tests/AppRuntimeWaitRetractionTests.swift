@@ -102,10 +102,9 @@ struct AppRuntimeWaitRetractionTests {
         let pane = try makeWaitingPane(runtime)
         let live = try #require(waitGeneration(runtime, pane.paneId))
 
-        runtime.perform(.sendInputKey(
+        runtime.perform(.submitPaneInput(
             paneId: pane.paneId,
-            key: .named(.escape),
-            mods: KeyMods(),
+            input: .key(.named(.escape), modifiers: KeyMods()),
             submissionId: InputSubmissionId(rawValue: UUID()),
             waitGeneration: live
         ))

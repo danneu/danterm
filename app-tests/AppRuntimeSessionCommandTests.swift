@@ -124,18 +124,25 @@ struct AppRuntimeSessionCommandTests {
         let paneId = PaneId(rawValue: UUID())
         runtime.installTerminalSession(fixture.session, paneId: paneId)
 
-        runtime.perform(.sendText(paneId: paneId, text: "pasted"))
-        runtime.perform(.sendInputText(paneId: paneId, text: "typed"))
-        runtime.perform(.sendInputKey(
+        runtime.perform(.submitPaneInput(
             paneId: paneId,
-            key: .named(.up),
-            mods: [.ctrl, .shift]
+            input: .paste("pasted"),
+            submissionId: InputSubmissionId(rawValue: UUID())
         ))
-        runtime.perform(.sendInputWheel(
+        runtime.perform(.submitPaneInput(
             paneId: paneId,
-            direction: .up,
-            column: 4,
-            row: 2
+            input: .text("typed"),
+            submissionId: InputSubmissionId(rawValue: UUID())
+        ))
+        runtime.perform(.submitPaneInput(
+            paneId: paneId,
+            input: .key(.named(.up), modifiers: [.ctrl, .shift]),
+            submissionId: InputSubmissionId(rawValue: UUID())
+        ))
+        runtime.perform(.submitPaneInput(
+            paneId: paneId,
+            input: .wheel(.up, column: 4, row: 2),
+            submissionId: InputSubmissionId(rawValue: UUID())
         ))
         runtime.perform(.focusSession(paneId: paneId, focused: true))
         runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "find"))
@@ -487,7 +494,11 @@ struct AppRuntimeSessionCommandTests {
         #expect(Set(runtime.paneHosts.keys) == paneIdsBeforeFailure)
         #expect(runtime.schedulingLifecycle.captureOwnerCensus() == censusBeforeFailure)
         #expect(runtime.paneHosts[paneId]?.session === live)
-        runtime.perform(.sendText(paneId: paneId, text: "still usable"))
+        runtime.perform(.submitPaneInput(
+            paneId: paneId,
+            input: .paste("still usable"),
+            submissionId: InputSubmissionId(rawValue: UUID())
+        ))
         #expect(live.sentText == ["still usable"])
         #expect(
             follow.hasReadableData() == false,

@@ -57,7 +57,6 @@ enum InputSubmissionFailure: Equatable {
     case launchFailed
     case processEnded
     case writeFailed(Int32)
-    case encodingFailed
 }
 
 /// Restates one PTY submission's exactly-once terminal result in the pure model.

@@ -48,7 +48,6 @@ enum TerminalInputSubmissionFailure: Equatable {
     case launchFailed
     case processEnded
     case writeFailed(Int32)
-    case encodingFailed
 }
 
 /// Restates one app-submitted input item's terminal PTY result.
@@ -175,35 +174,9 @@ protocol TerminalSession: AnyObject {
     var benchmarkGeometry: TerminalBenchmarkGeometry? { get }
     #endif
 
-    func sendText(_ text: String, waitGeneration: AgentWaitGeneration?)
-    func sendInputText(_ text: String, waitGeneration: AgentWaitGeneration?)
-    func sendInputKey(_ key: KeyName, modifiers: KeyMods, waitGeneration: AgentWaitGeneration?)
-    func sendInputWheel(
-        _ direction: InputWheelDirection,
-        column: Int,
-        row: Int,
-        waitGeneration: AgentWaitGeneration?
-    )
-    func sendText(
-        _ text: String,
-        waitGeneration: AgentWaitGeneration?,
-        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
-    )
-    func sendInputText(
-        _ text: String,
-        waitGeneration: AgentWaitGeneration?,
-        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
-    )
-    func sendInputKey(
-        _ key: KeyName,
-        modifiers: KeyMods,
-        waitGeneration: AgentWaitGeneration?,
-        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
-    )
-    func sendInputWheel(
-        _ direction: InputWheelDirection,
-        column: Int,
-        row: Int,
+    /// Submits one runtime-originated input and reports the terminal's real delivery result.
+    func submitInput(
+        _ input: PaneInputItem,
         waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     )
@@ -277,53 +250,6 @@ protocol TerminalSession: AnyObject {
 /// Every terminal pane records, so these defaults exist only for a session with no terminal
 /// behind it -- the UI-test shim. A live terminal pane always overrides them with a real tape.
 extension TerminalSession {
-    func sendText(
-        _ text: String,
-        waitGeneration: AgentWaitGeneration?,
-        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
-    ) {
-        sendText(text, waitGeneration: waitGeneration)
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated { onCompletion(.delivered) }
-        }
-    }
-
-    func sendInputText(
-        _ text: String,
-        waitGeneration: AgentWaitGeneration?,
-        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
-    ) {
-        sendInputText(text, waitGeneration: waitGeneration)
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated { onCompletion(.delivered) }
-        }
-    }
-
-    func sendInputKey(
-        _ key: KeyName,
-        modifiers: KeyMods,
-        waitGeneration: AgentWaitGeneration?,
-        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
-    ) {
-        sendInputKey(key, modifiers: modifiers, waitGeneration: waitGeneration)
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated { onCompletion(.delivered) }
-        }
-    }
-
-    func sendInputWheel(
-        _ direction: InputWheelDirection,
-        column: Int,
-        row: Int,
-        waitGeneration: AgentWaitGeneration?,
-        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
-    ) {
-        sendInputWheel(direction, column: column, row: row, waitGeneration: waitGeneration)
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated { onCompletion(.delivered) }
-        }
-    }
-
     func paneTapeOpening(
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,

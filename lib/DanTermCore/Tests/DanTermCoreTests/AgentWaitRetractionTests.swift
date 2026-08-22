@@ -353,7 +353,7 @@ struct AgentWaitRetractionTests {
 
         var stamps: [AgentWaitGeneration?] = []
         for command in commands {
-            if case .sendInputKey(_, _, _, _, let waitGeneration) = command {
+            if case .submitPaneInput(_, .key, _, let waitGeneration) = command {
                 stamps.append(waitGeneration)
             }
         }
@@ -386,7 +386,7 @@ struct AgentWaitRetractionTests {
 
         var stamps: [AgentWaitGeneration?] = []
         for command in commands {
-            if case .sendText(_, _, _, let waitGeneration) = command {
+            if case .submitPaneInput(_, .paste, _, let waitGeneration) = command {
                 stamps.append(waitGeneration)
             }
         }

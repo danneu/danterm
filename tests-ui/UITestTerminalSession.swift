@@ -68,6 +68,7 @@ final class FakeTerminalPaneSessionController: TerminalPaneSessionControlling {
     private(set) var focusChanges: [Bool] = []
     private(set) var pointerEvents: [TerminalPointerEvent] = []
     private(set) var wheelEvents: [TerminalWheelEvent] = []
+    private(set) var deliveredWheelEvents: [TerminalWheelEvent] = []
     private(set) var searchQueries: [String] = []
     private(set) var searchNextRequests = 0
     private(set) var searchPreviousRequests = 0
@@ -217,7 +218,14 @@ final class FakeTerminalPaneSessionController: TerminalPaneSessionControlling {
     ) {
         wheelEvents.append(event)
         submittedWaitGenerations.append(waitGeneration)
-        complete(onCompletion, with: submissionFailure.map { .rejected($0) } ?? .delivered)
+        let result: PaneInputSubmissionResult
+        if let submissionFailure {
+            result = .rejected(submissionFailure)
+        } else {
+            deliveredWheelEvents.append(event)
+            result = .delivered
+        }
+        complete(onCompletion, with: result)
     }
     func sendPointer(
         _ event: TerminalPointerEvent,

@@ -46,15 +46,11 @@ private final class HeadlessPaneHostSession: NSView, TerminalSession {
     var onPrimaryHistoryMutation: (() -> Void)?
     var hasSelection = false
 
-    func sendText(_ text: String, waitGeneration: AgentWaitGeneration?) {}
-    func sendInputText(_ text: String, waitGeneration: AgentWaitGeneration?) {}
-    func sendInputKey(_ key: KeyName, modifiers: KeyMods, waitGeneration: AgentWaitGeneration?) {}
-    func sendInputWheel(
-        _ direction: InputWheelDirection,
-        column: Int,
-        row: Int,
-        waitGeneration: AgentWaitGeneration?
-    ) {}
+    func submitInput(
+        _ input: PaneInputItem,
+        waitGeneration: AgentWaitGeneration?,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
+    ) { onCompletion(.delivered) }
     func setFocused(_ focused: Bool) {}
     func setApplicationActive(_ active: Bool) {}
     func setVisible(_ visible: Bool) {}

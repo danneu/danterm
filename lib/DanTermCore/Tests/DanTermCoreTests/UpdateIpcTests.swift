@@ -2553,10 +2553,9 @@ import DanTermProtocol
         #expect(error.code == -32602)
     }
 
-    @Test("pane.input emits text command for context pane")
+    @Test("pane.input emits paste input for context pane")
     func paneInputEmitsTextCommandForContextPane() {
-        // Intent: pane.input { text } emits sendText addressed to the
-        //   context pane.
+        // Intent: pane.input { text } emits paste input addressed to the context pane.
         // Why it exists: pins the text branch of pane.input.
         // Scenario: spec-first text input.
         var model = makeModel()
@@ -2569,9 +2568,11 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(hasEffect(commands) {
-            if case .sendText(let pid, let text, _, _) = $0 { return pid == paneId && text == "echo hi" }
+            if case .submitPaneInput(let pid, .paste(let text), _, _) = $0 {
+                return pid == paneId && text == "echo hi"
+            }
             return false
-        }, "expected sendText command")
+        }, "expected paste input command")
     }
 
     @Test("pane.input defers success until every submission is delivered")
@@ -2593,10 +2594,8 @@ import DanTermProtocol
 
         let commands = update(&model, .ipcRequest(reqId: requestId, caller: .local, request: request))
         let submissions = commands.compactMap { command -> InputSubmissionId? in
-            switch command {
-            case .sendInputText(_, _, let id, _), .sendInputKey(_, _, _, let id, _): id
-            default: nil
-            }
+            if case .submitPaneInput(_, _, let id, _) = command { return id }
+            return nil
         }
         #expect(submissions.count == 2)
         #expect(commands.contains { if case .ipcReply = $0 { true } else { false } } == false)
@@ -2754,7 +2753,7 @@ import DanTermProtocol
         )
         let commands = update(&model, .ipcRequest(reqId: requestId, caller: .local, request: request))
         let submissions = commands.compactMap { command -> InputSubmissionId? in
-            if case .sendInputText(_, _, let id, _) = command { return id }
+            if case .submitPaneInput(_, .text, let id, _) = command { return id }
             return nil
         }
 
@@ -2811,7 +2810,7 @@ import DanTermProtocol
                 .ipcRequest(reqId: requestId, caller: .local, request: request)
             )
             let submissionId = try #require(commands.compactMap { command -> InputSubmissionId? in
-                guard case .sendText(_, _, let id, _) = command else { return nil }
+                guard case .submitPaneInput(_, .paste, let id, _) = command else { return nil }
                 return id
             }.first)
 
@@ -2869,10 +2868,10 @@ import DanTermProtocol
         ]))
     }
 
-    @Test("pane.input input array emits ordered Effects via the key path")
+    @Test("pane.input input array emits ordered typed input commands")
     func paneInputInputArrayEmitsOrderedEffects() {
-        // Intent: pane.input { input: [...] } emits sendInputText +
-        //   sendInputKey in order, then ipcReply; no sendText leaks.
+        // Intent: pane.input { input: [...] } emits raw text and key input in order,
+        //   without replying early or leaking into the paste path.
         // Why it exists: pins the input-array path against text-path
         //   fallback.
         // Scenario: spec-first input array.
@@ -2891,14 +2890,19 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(commands.count == 2)
-        guard case .sendInputText(let p0, let t0, _, _) = commands[0] else {
-            Issue.record("expected first command = sendInputText")
+        guard case .submitPaneInput(let p0, .text(let t0), _, _) = commands[0] else {
+            Issue.record("expected first command = text input")
             return
         }
         #expect(p0 == paneId)
         #expect(t0 == "ls")
-        guard case .sendInputKey(let p1, let key1, let mods1, _, _) = commands[1] else {
-            Issue.record("expected second command = sendInputKey")
+        guard case .submitPaneInput(
+            let p1,
+            .key(let key1, modifiers: let mods1),
+            _,
+            _
+        ) = commands[1] else {
+            Issue.record("expected second command = key input")
             return
         }
         #expect(p1 == paneId)
@@ -2906,9 +2910,9 @@ import DanTermProtocol
         #expect(mods1 == KeyMods())
         #expect(commands.contains { if case .ipcReply = $0 { true } else { false } } == false)
         #expect(!hasEffect(commands) {
-            if case .sendText = $0 { return true }
+            if case .submitPaneInput(_, .paste, _, _) = $0 { return true }
             return false
-        }, "input path must not emit .sendText")
+        }, "structured input must not emit paste input")
     }
 
     @Test("pane.input explicit empty mods equals omitted mods")
@@ -2933,11 +2937,11 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(hasEffect(commands) {
-            if case .sendInputKey(let p, let k, let m, _, _) = $0 {
+            if case .submitPaneInput(let p, .key(let k, modifiers: let m), _, _) = $0 {
                 return p == paneId && k == .named(.enter) && m == KeyMods()
             }
             return false
-        }, "expected sendInputKey with empty mods")
+        }, "expected key input with empty mods")
     }
 
     @Test("pane.input non-array mods is invalid params")
@@ -2968,9 +2972,9 @@ import DanTermProtocol
             "message should describe non-array mods, got: \(error.message)")
     }
 
-    @Test("pane.input key with ctrl mod emits sendInputKey")
+    @Test("pane.input key with ctrl mod emits typed key input")
     func paneInputKeyWithCtrlModEmitsSendInputKey() {
-        // Intent: ctrl-c emits sendInputKey(.character("c"), .ctrl).
+        // Intent: ctrl-c emits typed key input carrying .character("c") and .ctrl.
         // Why it exists: pins the ctrl modifier mapping.
         // Scenario: spec-first ctrl-c.
         var model = makeModel()
@@ -2990,11 +2994,11 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(hasEffect(commands) {
-            if case .sendInputKey(let p, let k, let m, _, _) = $0 {
+            if case .submitPaneInput(let p, .key(let k, modifiers: let m), _, _) = $0 {
                 return p == paneId && k == .character("c") && m == [.ctrl]
             }
             return false
-        }, "expected sendInputKey for C-c")
+        }, "expected typed key input for C-c")
     }
 
     @Test("pane.input wheel event emits owner-side wheel command")
@@ -3020,13 +3024,11 @@ import DanTermProtocol
         )
 
         #expect(commands.contains { command in
-            if case .sendInputWheel(
+            if case .submitPaneInput(
                 let target,
-                direction: .up,
-                column: 4,
-                row: 2,
-                submissionId: _,
-                waitGeneration: _
+                .wheel(.up, column: 4, row: 2),
+                _,
+                _
             ) = command {
                 return target == paneId
             }
@@ -3121,8 +3123,7 @@ import DanTermProtocol
 
     @Test("pane.input unknown key name is rejected before any Command")
     func paneInputUnknownKeyRejectedBeforeAnyCommand() throws {
-        // Intent: a wire-level unknown key name returns -32602 BEFORE
-        //   any sendInputKey is emitted.
+        // Intent: a wire-level unknown key name returns -32602 before any key input command.
         // Why it exists: pins the load-bearing assertion that unknown
         //   keys never make it past the IPC handler.
         // Scenario: spec-first unknown key.
@@ -3144,9 +3145,9 @@ import DanTermProtocol
         #expect(error.message.contains("unknown key Bogus"),
             "message should mention unknown key Bogus, got: \(error.message)")
         #expect(!hasEffect(commands) {
-            if case .sendInputKey = $0 { return true }
+            if case .submitPaneInput(_, .key, _, _) = $0 { return true }
             return false
-        }, "no .sendInputKey should be emitted")
+        }, "no key input should be emitted")
     }
 
     @Test("pane.input non-string key value is invalid params")
@@ -3218,7 +3219,12 @@ import DanTermProtocol
             pane: paneId
         )
         #expect(commands.contains { command in
-            if case .sendInputKey(let target, .named(.tab), let modifiers, _, _) = command {
+            if case .submitPaneInput(
+                let target,
+                .key(.named(.tab), modifiers: let modifiers),
+                _,
+                _
+            ) = command {
                 return target == paneId && modifiers == [.shift]
             }
             return false
@@ -3245,7 +3251,7 @@ import DanTermProtocol
             pane: foregroundPaneId
         )
         #expect(hasEffect(commands) {
-            if case .sendInputText(let p, let t, _, _) = $0 {
+            if case .submitPaneInput(let p, .text(let t), _, _) = $0 {
                 return p == backgroundPaneId && t == "hi"
             }
             return false
@@ -3616,7 +3622,7 @@ private func dispatchPendingInput(
     )
     let commands = update(&model, .ipcRequest(reqId: requestId, caller: .local, request: request))
     let submissions = commands.compactMap { command -> InputSubmissionId? in
-        if case .sendInputText(_, _, let id, _) = command { return id }
+        if case .submitPaneInput(_, .text, let id, _) = command { return id }
         return nil
     }
     #expect(submissions.count == items)

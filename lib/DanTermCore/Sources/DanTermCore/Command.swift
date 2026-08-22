@@ -10,53 +10,28 @@
 import Foundation
 import DanTermProtocol
 
+/// Preserves the terminal meaning of one input item across pure dispatch and AppKit routing.
+enum PaneInputItem: Equatable {
+    case paste(String)
+    case text(String)
+    case key(KeyName, modifiers: KeyMods)
+    case wheel(InputWheelDirection, column: Int, row: Int)
+}
+
 enum Command {
     // Session
     case createSession(sessionId: SessionId, paneId: PaneId, cwd: String?, command: String?, launchCommand: String? = nil)
     // Session *destruction* is a projection (reconcileSessionExistence tears down sessions
     // for panes gone from model.allPaneIds), so there is no destroy-session command.
-    // The paste path, taken by IPC's top-level `text` field. Delivered through the
-    // same safe-paste policy as the clipboard: control bytes stripped, bracketed-paste
-    // markers applied when the child asked for them. Deliberately distinct from
-    // sendInputText -- an untrusted blob must not be able to fake keystrokes.
-    //
     // Every input command carries `waitGeneration`: the agent wait the pane's session
     // held when `update()` dispatched the command, or nil when it held none. Scripted
     // input ends a wait exactly the way typing does, and the snapshot is taken here --
     // in the same pure dispatch that read the model -- so the value cannot age between
     // the read and the write.
-    case sendText(
+    case submitPaneInput(
         paneId: PaneId,
-        text: String,
-        submissionId: InputSubmissionId? = nil,
-        waitGeneration: AgentWaitGeneration? = nil
-    )
-    // The structured-input path, taken by IPC's `input` array alongside sendInputKey.
-    // Delivered raw, with no stripping and no paste brackets, because the caller is
-    // scripting a keyboard: vim and htop must see the characters as if typed.
-    case sendInputText(
-        paneId: PaneId,
-        text: String,
-        submissionId: InputSubmissionId? = nil,
-        waitGeneration: AgentWaitGeneration? = nil
-    )
-    // One named/letter key with modifiers, encoded by the terminal's key encoder so
-    // arrows, F-keys, C-c, and Esc reach the PTY as real escape sequences.
-    case sendInputKey(
-        paneId: PaneId,
-        key: KeyName,
-        mods: KeyMods,
-        submissionId: InputSubmissionId? = nil,
-        waitGeneration: AgentWaitGeneration? = nil
-    )
-    // One vertical wheel step, routed by the terminal owner against its current mouse and
-    // screen modes so a remote writer follows the same policy as the AppKit wheel path.
-    case sendInputWheel(
-        paneId: PaneId,
-        direction: InputWheelDirection,
-        column: Int,
-        row: Int,
-        submissionId: InputSubmissionId? = nil,
+        input: PaneInputItem,
+        submissionId: InputSubmissionId,
         waitGeneration: AgentWaitGeneration? = nil
     )
 

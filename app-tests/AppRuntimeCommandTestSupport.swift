@@ -130,26 +130,22 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var endSearchCount = 0
     var tearDownCount = 0
 
-    func sendText(_ text: String, waitGeneration: AgentWaitGeneration?) {
-        sentText.append(text)
-        submittedWaitGenerations.append(waitGeneration)
-    }
-    func sendInputText(_ text: String, waitGeneration: AgentWaitGeneration?) {
-        sentInputText.append(text)
-        submittedWaitGenerations.append(waitGeneration)
-    }
-    func sendInputKey(_ key: KeyName, modifiers: KeyMods, waitGeneration: AgentWaitGeneration?) {
-        sentInputKeys.append((key, modifiers))
-        submittedWaitGenerations.append(waitGeneration)
-    }
-    func sendInputWheel(
-        _ direction: InputWheelDirection,
-        column: Int,
-        row: Int,
-        waitGeneration: AgentWaitGeneration?
+    func submitInput(
+        _ input: PaneInputItem,
+        waitGeneration: AgentWaitGeneration?,
+        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) {
-        sentInputWheels.append((direction, column, row))
+        switch input {
+        case .paste(let text): sentText.append(text)
+        case .text(let text): sentInputText.append(text)
+        case .key(let key, let modifiers): sentInputKeys.append((key, modifiers))
+        case .wheel(let direction, let column, let row):
+            sentInputWheels.append((direction, column, row))
+        }
         submittedWaitGenerations.append(waitGeneration)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { onCompletion(.delivered) }
+        }
     }
     func setFocused(_ focused: Bool) { focusedValues.append(focused) }
     func setApplicationActive(_ active: Bool) { applicationActiveValues.append(active) }

@@ -330,9 +330,9 @@ private func dispatchIpc(
         case .text(let text):
             let submissionId = InputSubmissionId(rawValue: env.newId())
             submissionIds.append(submissionId)
-            commands.append(.sendText(
+            commands.append(.submitPaneInput(
                 paneId: paneId,
-                text: text,
+                input: .paste(text),
                 submissionId: submissionId,
                 waitGeneration: waitGeneration
             ))
@@ -343,26 +343,23 @@ private func dispatchIpc(
                 submissionIds.append(submissionId)
                 switch event {
                 case .text(let text):
-                    commands.append(.sendInputText(
+                    commands.append(.submitPaneInput(
                         paneId: paneId,
-                        text: text,
+                        input: .text(text),
                         submissionId: submissionId,
                         waitGeneration: waitGeneration
                     ))
                 case .key(let key, let mods):
-                    commands.append(.sendInputKey(
+                    commands.append(.submitPaneInput(
                         paneId: paneId,
-                        key: key,
-                        mods: mods,
+                        input: .key(key, modifiers: mods),
                         submissionId: submissionId,
                         waitGeneration: waitGeneration
                     ))
                 case .wheel(let direction, let column, let row):
-                    commands.append(.sendInputWheel(
+                    commands.append(.submitPaneInput(
                         paneId: paneId,
-                        direction: direction,
-                        column: column,
-                        row: row,
+                        input: .wheel(direction, column: column, row: row),
                         submissionId: submissionId,
                         waitGeneration: waitGeneration
                     ))

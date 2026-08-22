@@ -800,11 +800,7 @@ class AppRuntime {
             }
             installPane(host, paneId: paneId)
 
-        case .sendText(let paneId, let text, let submissionId, let waitGeneration):
-            guard let submissionId else {
-                paneSession(for: paneId)?.sendText(text, waitGeneration: waitGeneration)
-                break
-            }
+        case .submitPaneInput(let paneId, let input, let submissionId, let waitGeneration):
             guard let session = paneSession(for: paneId) else {
                 send(.inputSubmissionCompleted(
                     id: submissionId,
@@ -812,89 +808,7 @@ class AppRuntime {
                 ))
                 break
             }
-            session.sendText(text, waitGeneration: waitGeneration) { [weak self] result in
-                self?.send(.inputSubmissionCompleted(
-                    id: submissionId,
-                    result: Self.inputSubmissionResult(result)
-                ))
-            }
-
-        case .sendInputText(let paneId, let text, let submissionId, let waitGeneration):
-            guard let submissionId else {
-                paneSession(for: paneId)?.sendInputText(text, waitGeneration: waitGeneration)
-                break
-            }
-            guard let session = paneSession(for: paneId) else {
-                send(.inputSubmissionCompleted(
-                    id: submissionId,
-                    result: .rejected(.processEnded)
-                ))
-                break
-            }
-            session.sendInputText(text, waitGeneration: waitGeneration) { [weak self] result in
-                self?.send(.inputSubmissionCompleted(
-                    id: submissionId,
-                    result: Self.inputSubmissionResult(result)
-                ))
-            }
-
-        case .sendInputKey(let paneId, let key, let mods, let submissionId, let waitGeneration):
-            guard let submissionId else {
-                paneSession(for: paneId)?.sendInputKey(
-                    key,
-                    modifiers: mods,
-                    waitGeneration: waitGeneration
-                )
-                break
-            }
-            guard let session = paneSession(for: paneId) else {
-                send(.inputSubmissionCompleted(
-                    id: submissionId,
-                    result: .rejected(.processEnded)
-                ))
-                break
-            }
-            session.sendInputKey(
-                key,
-                modifiers: mods,
-                waitGeneration: waitGeneration
-            ) { [weak self] result in
-                self?.send(.inputSubmissionCompleted(
-                    id: submissionId,
-                    result: Self.inputSubmissionResult(result)
-                ))
-            }
-
-        case .sendInputWheel(
-            let paneId,
-            let direction,
-            let column,
-            let row,
-            let submissionId,
-            let waitGeneration
-        ):
-            guard let submissionId else {
-                paneSession(for: paneId)?.sendInputWheel(
-                    direction,
-                    column: column,
-                    row: row,
-                    waitGeneration: waitGeneration
-                )
-                break
-            }
-            guard let session = paneSession(for: paneId) else {
-                send(.inputSubmissionCompleted(
-                    id: submissionId,
-                    result: .rejected(.processEnded)
-                ))
-                break
-            }
-            session.sendInputWheel(
-                direction,
-                column: column,
-                row: row,
-                waitGeneration: waitGeneration
-            ) { [weak self] result in
+            session.submitInput(input, waitGeneration: waitGeneration) { [weak self] result in
                 self?.send(.inputSubmissionCompleted(
                     id: submissionId,
                     result: Self.inputSubmissionResult(result)
@@ -1627,7 +1541,6 @@ class AppRuntime {
         case .rejected(.launchFailed): .rejected(.launchFailed)
         case .rejected(.processEnded): .rejected(.processEnded)
         case .rejected(.writeFailed(let code)): .rejected(.writeFailed(code))
-        case .rejected(.encodingFailed): .rejected(.encodingFailed)
         }
     }
 

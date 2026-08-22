@@ -1012,113 +1012,48 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         // Fixed terminal keys are encoded after interpretKeyEvents returns.
     }
 
-    // TerminalSessionView: `Command.sendText`, the IPC top-level `text` field. Contractually the
-    // paste path, so it goes through owner-side safe-paste policy (control stripping, bracket
-    // markers) exactly like the clipboard entry points.
-    func sendText(_ text: String, waitGeneration: AgentWaitGeneration?) {
-        controller.sendPaste(
-            text,
-            origin: PaneInputOrigin.appEntry(),
-            waitGeneration: Self.paneWaitGeneration(waitGeneration)
-        )
-    }
-
-    func sendText(
-        _ text: String,
+    // TerminalSession: the one runtime input seam keeps paste safety distinct from raw text,
+    // then routes each meaning through the matching engine operation.
+    func submitInput(
+        _ input: PaneInputItem,
         waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) {
-        controller.sendPaste(
-            text,
-            origin: PaneInputOrigin.appEntry(),
-            waitGeneration: Self.paneWaitGeneration(waitGeneration)
-        ) {
+        let origin = PaneInputOrigin.appEntry()
+        let waitGeneration = Self.paneWaitGeneration(waitGeneration)
+        let completion: @MainActor @Sendable (PaneInputSubmissionResult) -> Void = {
             onCompletion(Self.inputResult($0))
         }
-    }
-
-    // TerminalSessionView: `Command.sendInputText`, structured `input` text. Deliberately raw --
-    // vim and htop must see the characters as if typed, so paste semantics must not apply.
-    func sendInputText(_ text: String, waitGeneration: AgentWaitGeneration?) {
-        controller.sendText(
-            text,
-            origin: PaneInputOrigin.appEntry(),
-            waitGeneration: Self.paneWaitGeneration(waitGeneration)
-        )
-    }
-
-    func sendInputText(
-        _ text: String,
-        waitGeneration: AgentWaitGeneration?,
-        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
-    ) {
-        controller.sendText(
-            text,
-            origin: PaneInputOrigin.appEntry(),
-            waitGeneration: Self.paneWaitGeneration(waitGeneration)
-        ) {
-            onCompletion(Self.inputResult($0))
-        }
-    }
-
-    func sendInputKey(_ key: KeyName, modifiers: KeyMods, waitGeneration: AgentWaitGeneration?) {
-        guard let key = Self.terminalKey(for: key) else { return }
-        controller.sendKey(
-            key,
-            modifiers: Self.terminalModifiers(modifiers),
-            origin: PaneInputOrigin.appEntry(),
-            waitGeneration: Self.paneWaitGeneration(waitGeneration)
-        )
-    }
-
-    func sendInputKey(
-        _ key: KeyName,
-        modifiers: KeyMods,
-        waitGeneration: AgentWaitGeneration?,
-        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
-    ) {
-        guard let key = Self.terminalKey(for: key) else {
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { onCompletion(.rejected(.encodingFailed)) }
-            }
-            return
-        }
-        controller.sendKey(
-            key,
-            modifiers: Self.terminalModifiers(modifiers),
-            origin: PaneInputOrigin.appEntry(),
-            waitGeneration: Self.paneWaitGeneration(waitGeneration)
-        ) {
-            onCompletion(Self.inputResult($0))
-        }
-    }
-
-    func sendInputWheel(
-        _ direction: InputWheelDirection,
-        column: Int,
-        row: Int,
-        waitGeneration: AgentWaitGeneration?
-    ) {
-        controller.sendWheel(
-            Self.terminalWheelEvent(direction, column: column, row: row),
-            origin: PaneInputOrigin.appEntry(),
-            waitGeneration: Self.paneWaitGeneration(waitGeneration)
-        )
-    }
-
-    func sendInputWheel(
-        _ direction: InputWheelDirection,
-        column: Int,
-        row: Int,
-        waitGeneration: AgentWaitGeneration?,
-        onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
-    ) {
-        controller.sendWheel(
-            Self.terminalWheelEvent(direction, column: column, row: row),
-            origin: PaneInputOrigin.appEntry(),
-            waitGeneration: Self.paneWaitGeneration(waitGeneration)
-        ) { result in
-            onCompletion(Self.inputResult(result))
+        switch input {
+        case .paste(let text):
+            controller.sendPaste(
+                text,
+                origin: origin,
+                waitGeneration: waitGeneration,
+                onCompletion: completion
+            )
+        case .text(let text):
+            controller.sendText(
+                text,
+                origin: origin,
+                waitGeneration: waitGeneration,
+                onCompletion: completion
+            )
+        case .key(let key, let modifiers):
+            controller.sendKey(
+                Self.terminalKey(for: key),
+                modifiers: Self.terminalModifiers(modifiers),
+                origin: origin,
+                waitGeneration: waitGeneration,
+                onCompletion: completion
+            )
+        case .wheel(let direction, let column, let row):
+            controller.sendWheel(
+                Self.terminalWheelEvent(direction, column: column, row: row),
+                origin: origin,
+                waitGeneration: waitGeneration,
+                onCompletion: completion
+            )
         }
     }
 
@@ -1978,11 +1913,10 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         }
     }
 
-    private static func terminalKey(for key: KeyName) -> TerminalInputKey? {
+    private static func terminalKey(for key: KeyName) -> TerminalInputKey {
         switch key {
         case .character(let character):
-            guard let scalar = character.lowercased().unicodeScalars.first else { return nil }
-            return .character(scalar)
+            return .character(character.unicodeScalars[character.unicodeScalars.startIndex])
         case .named(let name):
             switch name {
             case .enter: return .returnKey
