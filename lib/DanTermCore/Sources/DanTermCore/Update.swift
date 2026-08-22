@@ -584,10 +584,16 @@ func update(
             // see, so a report that repeats an already-visible wait raises none.
             if case .attached(_, .waiting) = priorAgent { return [] }
             guard selectedTab(in: model)?.paneTree.focusedPaneId != mutation.paneId else { return [] }
-            return desktopAlertCommands(
+            let presentation = alertPresentation(
+                senderTitle: "",
+                paneId: mutation.paneId,
+                in: model
+            )
+            return paneAlertCommands(
                 model: &model,
                 paneId: mutation.paneId,
-                senderTitle: "",
+                kind: .desktopNotification,
+                presentation: presentation,
                 body: "Waiting for input",
                 env: env
             )
@@ -707,44 +713,27 @@ func update(
 
     case .sessionBell(let sessionId):
         guard let paneId = model.pane(owning: sessionId)?.id else { return [] }
-        // No alert for the focused pane while the app is active; when inactive,
-        // the focused pane is unseen and should follow the normal alert path.
-        if model.isAppActive, let tab = selectedTab(in: model), tab.paneTree.focusedPaneId == paneId {
-            return []
-        }
-
-        guard tabForPane(paneId, in: model) != nil else { return [] }
         let paneTitle = model.pane(paneId)?.session?.title ?? "Terminal"
-
-        // Hack: ack previous alerts so each pane has at most 1 unread alert.
-        // This keeps pane badges boolean and tab badges count panes-with-alerts
-        // rather than total alert volume. May replace with a better system later.
-        markAlertsReadForPane(paneId, in: &model)
-
-        let now = env.now()
-        let alert = AlertModel(
-            id: AlertId(rawValue: env.newId()), kind: .bell, paneId: paneId,
-            title: "DanTerm", body: paneTitle, createdAt: now, isUnread: true
+        return paneAlertCommands(
+            model: &model,
+            paneId: paneId,
+            kind: .bell,
+            presentation: AlertPresentation(title: "DanTerm", subtitle: nil),
+            body: paneTitle,
+            env: env
         )
-        model.alerts.insert(alert, at: 0)
-        if model.alerts.count > 100 { model.alerts.removeLast() }
-
-        // The tab/group bell badges now ride reconcileSidebar (the projection counts
-        // unread alerts per tab and per collapsed group); only the notification remains.
-        var commands: [Command] = []
-
-        commands.append(contentsOf: throttledNotification(
-            alertId: alert.id, kind: .bell, paneId: paneId,
-            title: "DanTerm", subtitle: nil, body: paneTitle, model: &model, now: now
-        ))
-        return commands
 
     case .sessionNotification(let sessionId, let title, let body):
         guard let paneId = model.pane(owning: sessionId)?.id else { return [] }
-        return desktopAlertCommands(
+        guard title.fitsTerminalMetadataValueLimit,
+              body.fitsTerminalMetadataValueLimit
+        else { return [] }
+        let presentation = alertPresentation(senderTitle: title, paneId: paneId, in: model)
+        return paneAlertCommands(
             model: &model,
             paneId: paneId,
-            senderTitle: title,
+            kind: .desktopNotification,
+            presentation: presentation,
             body: body,
             env: env
         )
@@ -2082,33 +2071,31 @@ private func rejectPendingIpcWork(
 /// policy's value.
 let notificationThrottleInterval: TimeInterval = 1
 
-/// Raises one pane alert through the shared stored-alert and macOS notification
-/// path after resolving its semantic title tiers.
-private func desktopAlertCommands(
+/// The maximum number of stored alerts, stated beside the only insertion path.
+private let paneAlertHistoryLimit = 100
+
+/// Applies the shared admission, storage, unread, history, and notification
+/// policy for every pane alert after its source resolves presentation.
+private func paneAlertCommands(
     model: inout AppModel,
     paneId: PaneId,
-    senderTitle: String,
+    kind: AlertKind,
+    presentation: AlertPresentation,
     body: String,
     env: CoreEnv
 ) -> [Command] {
-    guard senderTitle.fitsTerminalMetadataValueLimit,
-          body.fitsTerminalMetadataValueLimit
-    else { return [] }
+    guard model.pane(paneId) != nil, tabForPane(paneId, in: model) != nil else { return [] }
     if model.isAppActive, let tab = selectedTab(in: model), tab.paneTree.focusedPaneId == paneId {
         return []
     }
-    guard tabForPane(paneId, in: model) != nil else { return [] }
 
+    // Keep pane badges boolean and tab badges counted by panes with alerts, not
+    // by the total volume of alerts from one pane.
     markAlertsReadForPane(paneId, in: &model)
-    let presentation = alertPresentation(
-        senderTitle: senderTitle,
-        paneId: paneId,
-        in: model
-    )
     let now = env.now()
     let alert = AlertModel(
         id: AlertId(rawValue: env.newId()),
-        kind: .desktopNotification,
+        kind: kind,
         paneId: paneId,
         title: presentation.title,
         body: body,
@@ -2116,11 +2103,11 @@ private func desktopAlertCommands(
         isUnread: true
     )
     model.alerts.insert(alert, at: 0)
-    if model.alerts.count > 100 { model.alerts.removeLast() }
+    if model.alerts.count > paneAlertHistoryLimit { model.alerts.removeLast() }
 
     return throttledNotification(
         alertId: alert.id,
-        kind: .desktopNotification,
+        kind: kind,
         paneId: paneId,
         title: presentation.title,
         subtitle: presentation.subtitle,

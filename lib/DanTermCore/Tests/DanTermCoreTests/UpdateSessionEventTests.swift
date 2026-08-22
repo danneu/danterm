@@ -195,6 +195,34 @@ import DanTermProtocol
         }, "should emit sendNotification for inactive focused-pane bell")
     }
 
+    @Test("rapid bells stay in history while notification delivery is throttled")
+    func rapidBellsKeepNewestUnreadAndThrottleDelivery() {
+        // Intent: rapid same-kind alerts remain stored while only the newest is
+        //   unread and only the first emits a macOS notification.
+        // Why it exists: pins storage and unread policy independently from the
+        //   notification throttle that handles the same alert.
+        // Scenario: two bells arrive for one unseen pane at the same instant.
+        let clock = TestClock()
+        let env = makeTestEnv(clock: clock, idSequence: Self.throttleIds)
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        createTab(&model)
+        let sessionId = sessionId(for: paneId, in: model)
+
+        let firstCommands = update(&model, .sessionBell(sessionId: sessionId), env: env)
+        let firstAlertId = model.alerts[0].id
+        let secondCommands = update(&model, .sessionBell(sessionId: sessionId), env: env)
+
+        #expect(model.alerts.count == 2)
+        #expect(model.alerts[0].id != firstAlertId)
+        #expect(model.alerts[0].isUnread)
+        #expect(model.alerts[1].id == firstAlertId)
+        #expect(model.alerts[1].isUnread == false)
+        #expect(firstCommands.contains { if case .sendNotification = $0 { true } else { false } })
+        #expect(secondCommands.contains { if case .sendNotification = $0 { true } else { false } } == false)
+    }
+
     @Test("testSessionCreationFailedCleansUp")
     func testSessionCreationFailedCleansUp() {
         // Intent: sessionCreationFailed on the only pane removes the pane +
@@ -768,6 +796,85 @@ import DanTermProtocol
                t == "Hello", b == "World" { return true }
             return false
         }, "should send notification with OSC 777 title/body")
+    }
+
+    @Test("desktop notification insertion keeps the newest 100 alerts")
+    func desktopNotificationHistoryIsBounded() {
+        // Intent: terminal notifications use the same bounded alert history as
+        //   bells and retain the newly inserted alert.
+        // Why it exists: the shared insertion path must own the cap for every
+        //   alert source rather than leave one source unbounded.
+        // Scenario: a terminal notification arrives when history already has
+        //   100 alerts and displaces the oldest one.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        createTab(&model)
+        let oldestId = AlertId()
+        model.alerts = (0..<100).map { index in
+            AlertModel(
+                id: index == 99 ? oldestId : AlertId(),
+                kind: .bell,
+                paneId: paneId,
+                title: "DanTerm",
+                body: "alert \(index)",
+                createdAt: testEpoch,
+                isUnread: false
+            )
+        }
+
+        _ = update(&model, .sessionNotification(
+            sessionId: sessionId(for: paneId, in: model),
+            title: "Done",
+            body: "Task finished"
+        ))
+
+        #expect(model.alerts.count == 100)
+        #expect(model.alerts.first?.kind == .desktopNotification)
+        #expect(model.alerts.contains { $0.id == oldestId } == false)
+    }
+
+    @Test("agent wait and terminal notifications share one pane throttle bucket")
+    func agentWaitAndTerminalNotificationShareThrottle() throws {
+        // Intent: agent-wait and terminal notifications share the desktop-
+        //   notification throttle kind while both alerts remain in history.
+        // Why it exists: source-specific presentation must not split the shared
+        //   per-pane notification policy.
+        // Scenario: an agent wait and terminal notification arrive for one pane
+        //   at the same instant.
+        let clock = TestClock()
+        let env = makeTestEnv(clock: clock, idSequence: Self.throttleIds)
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        createTab(&model)
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
+        _ = update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)), env: env)
+
+        let waitCommands = update(
+            &model,
+            .sessionReport(
+                sessionId: sessionId,
+                report: .agentActivityChanged(session: agent, activity: .waiting)
+            ),
+            env: env
+        )
+        let terminalCommands = update(
+            &model,
+            .sessionNotification(sessionId: sessionId, title: "Done", body: "Task finished"),
+            env: env
+        )
+
+        #expect(model.alerts.count == 2)
+        #expect(model.alerts[0].title == "Codex thread-1")
+        #expect(model.alerts[0].body == "Task finished")
+        #expect(model.alerts[0].isUnread)
+        #expect(model.alerts[1].title == "Codex thread-1")
+        #expect(model.alerts[1].body == "Waiting for input")
+        #expect(model.alerts[1].isUnread == false)
+        #expect(waitCommands.contains { if case .sendNotification = $0 { true } else { false } })
+        #expect(terminalCommands.contains { if case .sendNotification = $0 { true } else { false } } == false)
     }
 
     @Test("testDesktopNotificationThrottlesIndependentlyFromBell")

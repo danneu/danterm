@@ -317,11 +317,11 @@ import Testing
         }
     }
 
-    @Test("both alert clock sites write the injected now into createdAt and lastNotificationTime")
+    @Test("both alert sources write the injected now into createdAt and lastNotificationTime")
     func alertClockSitesWriteTheInjectedNow() throws {
-        // Intent: the two env.now() reads in the core -- the sessionBell arm and
-        //   desktopAlertCommands -- write the injected instant into the alert's
-        //   createdAt and into the pane's live throttle state.
+        // Intent: the bell and desktop-notification sources write the shared
+        //   pane-alert path's injected instant into the alert's createdAt and
+        //   into the pane's live throttle state.
         // Why it exists: no other test in the suite asserts a createdAt against an
         //   injected clock, and the retired golden reached only the bell site.
         // Scenario: spec-first. One replay under a frozen clock raises a bell alert
