@@ -73,7 +73,7 @@ class SplitContainerView: NSView {
     }
 
     private func reconcilePanes(with layout: PaneLayout) {
-        let desiredPaneIds = Set(allPaneIds(rootNode))
+        let desiredPaneIds = layout.placements.keys
         let mountedWrappers = Dictionary(uniqueKeysWithValues: subviews.compactMap { view in
             (view as? PaneWrapperView).map { ($0.paneId, $0) }
         })
@@ -81,15 +81,19 @@ class SplitContainerView: NSView {
             wrapper.removeFromSuperview()
         }
 
-        for paneId in desiredPaneIds {
+        for (paneId, placement) in layout.placements {
             guard let view = mountedWrappers[paneId] ?? wrapperLookup(paneId) else { continue }
 
-            let shouldHide = layout.hiddenPaneIds.contains(paneId)
-            if view.isHidden != shouldHide {
-                view.isHidden = shouldHide
-            }
-            if let rect = layout.paneFrames[paneId] {
+            switch placement {
+            case .visible(let rect):
+                if view.isHidden {
+                    view.isHidden = false
+                }
                 setFrameIfNeeded(NSRect(rect), on: view)
+            case .hidden:
+                if view.isHidden == false {
+                    view.isHidden = true
+                }
             }
             if view.superview !== self {
                 view.translatesAutoresizingMaskIntoConstraints = true

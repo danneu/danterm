@@ -50,7 +50,7 @@ class PaneDragCoordinator {
         )
         resolvedDrop = drop
 
-        guard let drop, let rect = layout.paneFrames[drop.target] else {
+        guard let drop, let rect = layout.placements[drop.target]?.visibleFrame else {
             overlayView.clear()
             return
         }

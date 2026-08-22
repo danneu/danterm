@@ -42,7 +42,7 @@ func splitContainerViewTests() async {
             zoomedPaneId: nil
         )
         for wrapper in wrappers {
-            let expectedFrame = expected.paneFrames[wrapper.paneId]!
+            let expectedFrame = expected.placements[wrapper.paneId]!.visibleFrame!
             try uiExpect(wrapper.frame == NSRect(
                 x: expectedFrame.x, y: expectedFrame.y,
                 width: expectedFrame.width, height: expectedFrame.height),
@@ -92,15 +92,15 @@ func splitContainerViewTests() async {
         let wrapperB = try requireWrapper(runtime, paneB)
         let split = paneLayout(
             in: PaneLayoutRect(container.bounds), tree: splitRoot, zoomedPaneId: nil)
-        try uiExpect(wrapperA.frame == NSRect(split.paneFrames[paneA]!)
-            && wrapperB.frame == NSRect(split.paneFrames[paneB]!),
+        try uiExpect(wrapperA.frame == NSRect(split.placements[paneA]!.visibleFrame!)
+            && wrapperB.frame == NSRect(split.placements[paneB]!.visibleFrame!),
             "a background split left a wrapper off its model frame")
 
         container.setZoomedPane(paneA)
 
         let zoomed = paneLayout(
             in: PaneLayoutRect(container.bounds), tree: splitRoot, zoomedPaneId: paneA)
-        try uiExpect(wrapperA.frame == NSRect(zoomed.paneFrames[paneA]!),
+        try uiExpect(wrapperA.frame == NSRect(zoomed.placements[paneA]!.visibleFrame!),
             "a background zoom left the zoomed wrapper off its model frame")
         // The container itself is hidden, so ask the wrapper's own flag: the zoom
         // op, not the container's visibility, has to hide the unzoomed sibling.
@@ -145,7 +145,7 @@ func splitContainerViewTests() async {
             "hiding a container laid its panes out: \(wrapperA.frame) vs \(frameBeforeSwitch)")
         let revealed = paneLayout(
             in: PaneLayoutRect(background.bounds), tree: rootB, zoomedPaneId: nil)
-        try uiExpect(wrapperB.frame == NSRect(revealed.paneFrames[paneB]!),
+        try uiExpect(wrapperB.frame == NSRect(revealed.placements[paneB]!.visibleFrame!),
             "the revealed container did not land its pane at the model frame")
     }
 
@@ -375,7 +375,7 @@ func splitContainerViewTests() async {
 
         try uiExpect(wrapper.superview === container,
             "a later layout did not retry the missing wrapper")
-        try uiExpect(wrapper.frame == NSRect(expected.paneFrames[paneId]!),
+        try uiExpect(wrapper.frame == NSRect(expected.placements[paneId]!.visibleFrame!),
             "the recovered wrapper did not receive its model frame")
     }
 

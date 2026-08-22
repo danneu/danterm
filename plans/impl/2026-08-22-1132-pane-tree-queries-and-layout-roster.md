@@ -86,10 +86,18 @@ benchmark-visible speedup.
 
 - [x] 1. Add direct pane-tree queries and migrate narrow callers
 - [x] 2. Replace parallel layout fields with exhaustive placements
-- [ ] 3. Reconcile AppKit from placements and update UI coverage and ADR
+- [x] 3. Reconcile AppKit from placements and update UI coverage and ADR
 
 ## Implementation notes
 
 - Commit 2 keeps temporary read-only `paneFrames` and `hiddenPaneIds`
   projections so the AppKit target remains buildable between slices. Commit 3
   removes them after it migrates the remaining AppKit consumers to placements.
+
+## Follow Up
+
+- Restore the iOS portability gate by passing the required `searchReadout`
+  argument to `PaneFramePlanner.planFrame` in
+  `ios/DanTermMobileKit/Sources/DanTermMobileKit/MobileFramePresenter.swift:135`.
+- Repair the `PreferencesPanelTests.swift:65` keybinding-table assertion that
+  `just test-ui` reports as failed even though the recipe exits successfully.

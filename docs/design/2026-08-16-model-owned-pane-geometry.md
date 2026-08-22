@@ -28,15 +28,18 @@ frames are positive.
 
 D1. **The model tree and container bounds have one pure geometry projection.**
 
-`paneLayout(in:tree:zoomedPaneId:)` in `DanTermCore` returns every pane frame,
-every divider placement, and the set of hidden panes. It recursively partitions
-each split's own parent rectangle. Zoom is another input to this function, not
-a separate detach-and-pin presentation path.
+`paneLayout(in:tree:zoomedPaneId:)` in `DanTermCore` returns one exhaustive
+placement for every pane and every divider placement. A pane placement is
+either visible with a frame or hidden, so it cannot have both states or neither.
+The layout recursively partitions each split's own parent rectangle. Zoom is
+another input to this function, not a separate detach-and-pin presentation path.
 
 `SplitContainerView` is a flat `NSView`. Pane wrappers and divider strips are
-its direct children. It applies the pure result and assigns a pane frame only
-when that frame changed. No nested AppKit layout object can produce an
-intermediate pane frame, and hidden and visible tabs use the same layout path.
+its direct children. It uses the placement-map keys as the complete pane roster,
+applies each placement, and assigns a pane frame only when that frame changed.
+It does not flatten its stored tree to derive a second roster. No nested AppKit
+layout object can produce an intermediate pane frame, and hidden and visible
+tabs use the same layout path.
 
 D2. **Pane geometry flows from the model to AppKit.**
 
@@ -100,6 +103,8 @@ re-enters the ordinary pane-split dispatch with the original request id.
 
 - Pane geometry and divider drag clamping are deterministic core behavior with
   tests in the normal local gate.
+- Every layout names each tree pane exactly once. AppKit reconciles membership,
+  visibility, and geometry from that one exhaustive placement map.
 - Structural reconciliation sends each surviving tab its current model root.
   It preserves wrapper identity without a keyed view-tree patch because a flat
   container never reparents a wrapper within a tab.

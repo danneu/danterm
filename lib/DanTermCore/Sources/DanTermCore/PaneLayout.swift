@@ -51,17 +51,6 @@ enum PanePlacement: Equatable {
 struct PaneLayout: Equatable {
     let placements: [PaneId: PanePlacement]
     let dividers: [SplitId: PaneDividerPlacement]
-
-    // Commit 3 migrates the AppKit consumers before removing these projections.
-    var paneFrames: [PaneId: PaneLayoutRect] {
-        placements.compactMapValues(\.visibleFrame)
-    }
-
-    var hiddenPaneIds: Set<PaneId> {
-        Set(placements.compactMap { paneId, placement in
-            placement == .hidden ? paneId : nil
-        })
-    }
 }
 
 /// Names the pane and axis selected from one arranged tab layout.
